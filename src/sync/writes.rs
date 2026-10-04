@@ -26,6 +26,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use std::sync::Arc;
 
 use crate::db::{
@@ -33,8 +34,8 @@ use crate::db::{
     UsageCap,
 };
 use crate::models::{
-    Epic, EpicId, LearningId, LearningVerdict, NotificationWrite, RetrievalSource, StopOutcome,
-    SubStatus, SubagentDrain, TaskId, TaskStatus, UserPromptOutcome,
+    Epic, EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource,
+    StopOutcome, SubStatus, SubagentDrain, TaskId, TaskStatus, UserPromptOutcome,
 };
 use crate::spacetime::bindings;
 
@@ -118,7 +119,7 @@ pub trait ReducerCaller: Send + Sync {
     async fn set_task_epic(
         &self,
         id: TaskId,
-        epic_id: i64,
+        epic_id: Option<EpicId>,
         owner: String,
     ) -> Result<ReducerOutcome>;
 
@@ -126,32 +127,44 @@ pub trait ReducerCaller: Send + Sync {
     async fn release_backlog_claim(&self, id: TaskId) -> Result<ReducerOutcome>;
 
     /// Insert an epic and answer with the id the store generated.
-    async fn create_epic(&self, row: bindings::Epic) -> Result<i64>;
-    async fn patch_epic(&self, id: i64, patch: bindings::EpicPatch) -> Result<ReducerOutcome>;
-    async fn delete_epic(&self, id: i64) -> Result<ReducerOutcome>;
-    async fn recalculate_epic_status(&self, id: i64) -> Result<ReducerOutcome>;
+    async fn create_epic(&self, row: bindings::Epic) -> Result<EpicId>;
+    async fn patch_epic(&self, id: EpicId, patch: bindings::EpicPatch) -> Result<ReducerOutcome>;
+    async fn delete_epic(&self, id: EpicId) -> Result<ReducerOutcome>;
+    async fn recalculate_epic_status(&self, id: EpicId) -> Result<ReducerOutcome>;
 
     /// `tasks.allium: BatchDelete`'s atomic call — see
-    /// `spacetime/module/src/lib.rs::batch_delete`'s doc comment for why this
+    /// `spacetime/module/src/tasks_epics.rs::batch_delete`'s doc comment for why this
     /// is one reducer invocation over the whole selection rather than
     /// `delete_task`/`delete_epic` called once per item.
-    async fn batch_delete(&self, task_ids: Vec<i64>, epic_ids: Vec<i64>) -> Result<ReducerOutcome>;
+    async fn batch_delete(
+        &self,
+        task_ids: Vec<TaskId>,
+        epic_ids: Vec<EpicId>,
+    ) -> Result<ReducerOutcome>;
 
-    async fn save_repo_path(&self, path: String, last_used: String) -> Result<ReducerOutcome>;
+    async fn save_repo_path(
+        &self,
+        path: String,
+        last_used: DateTime<Utc>,
+    ) -> Result<ReducerOutcome>;
     async fn delete_repo_path(&self, path: String) -> Result<ReducerOutcome>;
     async fn set_verify_command(&self, path: String, command: String) -> Result<ReducerOutcome>;
     async fn record_base_branch(
         &self,
         repo_path: String,
         branch: String,
-        last_used: String,
+        last_used: DateTime<Utc>,
     ) -> Result<ReducerOutcome>;
 
-    async fn subscribe_to_epic(&self, subscriber: String, epic_id: i64) -> Result<ReducerOutcome>;
+    async fn subscribe_to_epic(
+        &self,
+        subscriber: String,
+        epic_id: EpicId,
+    ) -> Result<ReducerOutcome>;
     async fn unsubscribe_from_epic(
         &self,
         subscriber: String,
-        epic_id: i64,
+        epic_id: EpicId,
     ) -> Result<ReducerOutcome>;
 
     // -- Settings (Phase 9) ---------------------------------------------------
@@ -180,22 +193,22 @@ pub trait ReducerCaller: Send + Sync {
     async fn create_learning(&self, row: bindings::Learning) -> Result<LearningId>;
     async fn patch_learning(
         &self,
-        id: i64,
+        id: LearningId,
         patch: bindings::LearningPatch,
     ) -> Result<ReducerOutcome>;
-    async fn delete_learning(&self, id: i64) -> Result<ReducerOutcome>;
-    async fn rescope_epic_learnings(&self, from: i64, to: i64) -> Result<ReducerOutcome>;
+    async fn delete_learning(&self, id: LearningId) -> Result<ReducerOutcome>;
+    async fn rescope_epic_learnings(&self, from: EpicId, to: EpicId) -> Result<ReducerOutcome>;
     async fn record_learning_retrieval(
         &self,
-        task_id: i64,
-        learning_id: i64,
-        source: String,
+        task_id: TaskId,
+        learning_id: LearningId,
+        source: RetrievalSource,
     ) -> Result<ReducerOutcome>;
     async fn apply_learning_verdicts(
         &self,
-        verdicts: Vec<bindings::LearningVerdictInput>,
+        verdicts: Vec<(LearningId, LearningVerdict)>,
     ) -> Result<ReducerOutcome>;
-    async fn archive_stale_learnings(&self, cutoff: String) -> Result<ReducerOutcome>;
+    async fn archive_stale_learnings(&self, cutoff: DateTime<Utc>) -> Result<ReducerOutcome>;
 
     // -- Usage events (Phase 11, task #4915) ----------------------------------
     //
@@ -220,43 +233,52 @@ pub trait ReducerCaller: Send + Sync {
     // `ReducerOutcome` below, same as every earlier reducer.
     async fn subagent_start(
         &self,
-        task_id: i64,
+        task_id: TaskId,
         agent_id: String,
         session_id: String,
-        started_at: String,
+        started_at: DateTime<Utc>,
     ) -> Result<i64>;
     async fn subagent_stop(
         &self,
-        task_id: i64,
+        task_id: TaskId,
         agent_id: String,
         session_id: String,
     ) -> Result<DrainReadBack>;
-    async fn subagent_clear(&self, task_id: i64) -> Result<DrainReadBack>;
-    async fn subagent_clear_and_void_pending_stop(&self, task_id: i64) -> Result<ReducerOutcome>;
+    async fn subagent_clear(&self, task_id: TaskId) -> Result<DrainReadBack>;
+    async fn subagent_clear_and_void_pending_stop(&self, task_id: TaskId)
+        -> Result<ReducerOutcome>;
     /// `None` for a refusal (the task was not `Running`) — this task's
     /// `StopOutcome::NoOp`. `Some(true)`/`Some(false)` is `Flipped`/`Deferred`,
     /// unambiguous once accepted (see `try_record_stop`'s doc comment in the
     /// module).
-    async fn try_record_stop(&self, id: i64, stop_pending_at: String) -> Result<Option<bool>>;
+    async fn try_record_stop(
+        &self,
+        id: TaskId,
+        stop_pending_at: DateTime<Utc>,
+    ) -> Result<Option<bool>>;
     async fn record_pre_tool_use(
         &self,
-        id: i64,
-        sub_status: String,
-        at: String,
+        id: TaskId,
+        sub_status: SubStatus,
+        at: DateTime<Utc>,
     ) -> Result<ReducerOutcome>;
     async fn record_notification(
         &self,
-        id: i64,
-        mode: String,
-        at: String,
+        id: TaskId,
+        mode: NotificationWrite,
+        at: DateTime<Utc>,
     ) -> Result<ReducerOutcome>;
     async fn record_user_prompt_submit(
         &self,
-        id: i64,
-        activity_at: String,
-        prompt_at: String,
+        id: TaskId,
+        activity_at: DateTime<Utc>,
+        prompt_at: DateTime<Utc>,
     ) -> Result<ReducerOutcome>;
-    async fn mark_pr_learnings_gate_shown(&self, id: i64, at: String) -> Result<ReducerOutcome>;
+    async fn mark_pr_learnings_gate_shown(
+        &self,
+        id: TaskId,
+        at: DateTime<Utc>,
+    ) -> Result<ReducerOutcome>;
 
     // -- Feed ingestion (Phase 6c) --------------------------------------------
     //
@@ -267,19 +289,19 @@ pub trait ReducerCaller: Send + Sync {
     // applied-or-refused calls.
     async fn upsert_feed_tasks(
         &self,
-        epic_id: i64,
+        epic_id: EpicId,
         items: Vec<bindings::FeedTaskUpsertItem>,
         created_by: String,
     ) -> Result<ReducerOutcome>;
     async fn upsert_feed_tasks_additive(
         &self,
-        epic_id: i64,
+        epic_id: EpicId,
         items: Vec<bindings::FeedTaskUpsertItem>,
         created_by: String,
     ) -> Result<ReducerOutcome>;
     async fn delete_stale_subtree_feed_tasks(
         &self,
-        parent_id: i64,
+        parent_id: EpicId,
         keep_external_ids: Vec<String>,
     ) -> Result<ReducerOutcome>;
 
@@ -292,7 +314,7 @@ pub trait ReducerCaller: Send + Sync {
     // never through a standalone call.
     async fn drop_closed_retired_feed_items(
         &self,
-        feed_epic_id: i64,
+        feed_epic_id: EpicId,
         keep_external_ids: Vec<String>,
     ) -> Result<ReducerOutcome>;
 
@@ -302,60 +324,54 @@ pub trait ReducerCaller: Send + Sync {
     /// of this task's plan doc).
     async fn create_repo_group_sub_epic(
         &self,
-        parent_id: i64,
+        parent_id: EpicId,
         title: String,
         created_by: String,
-    ) -> Result<i64>;
+    ) -> Result<EpicId>;
     /// Find-or-create keyed on `(parent_epic_id, role)`, on the same terms as
     /// [`Self::create_repo_group_sub_epic`].
     async fn create_managed_role_epic(
         &self,
         title: String,
-        parent_epic_id: i64,
+        parent_epic_id: Option<EpicId>,
         role: String,
         feed_command: String,
         feed_interval_secs: i64,
         created_by: String,
-    ) -> Result<i64>;
+    ) -> Result<EpicId>;
 
     // -- Task watchers ---------------------------------------------------------
     async fn create_task_watcher(
         &self,
-        watcher_task_id: i64,
-        target_task_id: i64,
+        watcher_task_id: TaskId,
+        target_task_id: TaskId,
     ) -> Result<ReducerOutcome>;
     async fn delete_task_watcher(
         &self,
-        watcher_task_id: i64,
-        target_task_id: i64,
+        watcher_task_id: TaskId,
+        target_task_id: TaskId,
     ) -> Result<ReducerOutcome>;
-    async fn delete_watches_of_target(&self, target_task_id: i64) -> Result<ReducerOutcome>;
-    async fn delete_watches_by_watcher(&self, watcher_task_id: i64) -> Result<ReducerOutcome>;
+    async fn delete_watches_of_target(&self, target_task_id: TaskId) -> Result<ReducerOutcome>;
+    async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<ReducerOutcome>;
 
     // -- Poll ownership (Phase 7) -----------------------------------------------
-    async fn claim_poll_owner(
-        &self,
-        scope: String,
-        scope_id: i64,
-        host: String,
-    ) -> Result<ReducerOutcome>;
+    async fn claim_poll_owner(&self, target: PollScopeId, host: String) -> Result<ReducerOutcome>;
     async fn override_poll_owner(
         &self,
-        scope: String,
-        scope_id: i64,
+        target: PollScopeId,
         host: String,
     ) -> Result<ReducerOutcome>;
 
     // -- Stragglers ------------------------------------------------------------
     async fn batch_patch_sub_status(
         &self,
-        updates: Vec<bindings::SubStatusUpdate>,
+        updates: Vec<(TaskId, SubStatus)>,
     ) -> Result<ReducerOutcome>;
     /// Insert the successor and read its generated id back — the same
     /// content-matched read-back [`Self::create_task`] uses.
     async fn respawn_phoenix_successor(
         &self,
-        predecessor: i64,
+        predecessor: TaskId,
         successor: bindings::Task,
     ) -> Result<TaskId>;
 
@@ -578,6 +594,12 @@ impl ReducerWriter {
         encode::stamp(self.clock.now())
     }
 
+    /// [`Self::now`] before it is spelled for the wire, for the calls whose
+    /// transport takes a typed instant.
+    fn now_at(&self) -> DateTime<Utc> {
+        self.clock.now()
+    }
+
     /// This connection's own proven identity, or a refusal naming what could
     /// not happen without one.
     ///
@@ -681,12 +703,12 @@ impl ReducerWriter {
 
         if delete_absent {
             self.caller
-                .upsert_feed_tasks(epic_id.0, wire_items, created_by)
+                .upsert_feed_tasks(epic_id, wire_items, created_by)
                 .await?
                 .applied()?;
         } else {
             self.caller
-                .upsert_feed_tasks_additive(epic_id.0, wire_items, created_by)
+                .upsert_feed_tasks_additive(epic_id, wire_items, created_by)
                 .await?
                 .applied()?;
         }
@@ -782,7 +804,7 @@ impl SharedWriter for ReducerWriter {
             }
         };
         self.caller
-            .set_task_epic(task_id, epic_id.map(|e| e.0).unwrap_or(0), owner)
+            .set_task_epic(task_id, epic_id, owner)
             .await?
             .applied()
     }
@@ -890,28 +912,28 @@ impl SharedWriter for ReducerWriter {
         // exactly one thing. Re-reading would also mean waiting for the
         // subscription to deliver a row this board may not even be subscribed
         // to.
-        crate::sync::decode::epic(&bindings::Epic { id, ..row })
+        crate::sync::decode::epic(&bindings::Epic { id: id.0, ..row })
             .map_err(|e| anyhow::anyhow!("the created epic could not be read back: {e}"))
     }
 
     async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()> {
         self.caller
-            .patch_epic(id.0, encode::epic_patch(patch))
+            .patch_epic(id, encode::epic_patch(patch))
             .await?
             .applied()
     }
 
     async fn delete_epic(&self, id: EpicId) -> Result<()> {
-        self.caller.delete_epic(id.0).await?.applied()
+        self.caller.delete_epic(id).await?.applied()
     }
 
     async fn recalculate_epic_status(&self, id: EpicId) -> Result<()> {
-        self.caller.recalculate_epic_status(id.0).await?.applied()
+        self.caller.recalculate_epic_status(id).await?.applied()
     }
 
     async fn batch_delete(&self, task_ids: &[TaskId], epic_ids: &[EpicId]) -> Result<()> {
-        let task_ids = task_ids.iter().map(|id| id.0).collect();
-        let epic_ids = epic_ids.iter().map(|id| id.0).collect();
+        let task_ids = task_ids.to_vec();
+        let epic_ids = epic_ids.to_vec();
         self.caller
             .batch_delete(task_ids, epic_ids)
             .await?
@@ -920,7 +942,7 @@ impl SharedWriter for ReducerWriter {
 
     async fn save_repo_path(&self, path: &str) -> Result<()> {
         self.caller
-            .save_repo_path(path.to_string(), self.now())
+            .save_repo_path(path.to_string(), self.now_at())
             .await?
             .applied()
     }
@@ -943,14 +965,14 @@ impl SharedWriter for ReducerWriter {
 
     async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()> {
         self.caller
-            .record_base_branch(repo_path.to_string(), branch.to_string(), self.now())
+            .record_base_branch(repo_path.to_string(), branch.to_string(), self.now_at())
             .await?
             .applied()
     }
 
     async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()> {
         self.caller
-            .subscribe_to_epic(subscriber.to_string(), epic_id)
+            .subscribe_to_epic(subscriber.to_string(), EpicId(epic_id))
             .await?
             .applied()
     }
@@ -963,7 +985,7 @@ impl SharedWriter for ReducerWriter {
     async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool> {
         Ok(self
             .caller
-            .unsubscribe_from_epic(subscriber.to_string(), epic_id)
+            .unsubscribe_from_epic(subscriber.to_string(), EpicId(epic_id))
             .await?
             .won())
     }
@@ -991,7 +1013,7 @@ impl SharedWriter for ReducerWriter {
 
     async fn patch_learning(&self, id: LearningId, patch: &LearningPatch<'_>) -> Result<()> {
         self.caller
-            .patch_learning(id.0, encode::learning_patch(patch))
+            .patch_learning(id, encode::learning_patch(patch))
             .await?
             .applied()
     }
@@ -1002,12 +1024,12 @@ impl SharedWriter for ReducerWriter {
     /// than as an error, exactly as the SQLite version does, so the service
     /// layer's not-found mapping stays backend-agnostic.
     async fn delete_learning(&self, id: LearningId) -> Result<bool> {
-        Ok(self.caller.delete_learning(id.0).await?.won())
+        Ok(self.caller.delete_learning(id).await?.won())
     }
 
     async fn rescope_epic_learnings(&self, from: EpicId, to: EpicId) -> Result<()> {
         self.caller
-            .rescope_epic_learnings(from.0, to.0)
+            .rescope_epic_learnings(from, to)
             .await?
             .applied()
     }
@@ -1019,7 +1041,7 @@ impl SharedWriter for ReducerWriter {
         source: RetrievalSource,
     ) -> Result<()> {
         self.caller
-            .record_learning_retrieval(task_id.0, learning_id.0, source.as_str().to_string())
+            .record_learning_retrieval(task_id, learning_id, source)
             .await?
             .applied()
     }
@@ -1028,15 +1050,8 @@ impl SharedWriter for ReducerWriter {
         &self,
         verdicts: &[(LearningId, LearningVerdict)],
     ) -> Result<()> {
-        let verdicts = verdicts
-            .iter()
-            .map(|(id, verdict)| bindings::LearningVerdictInput {
-                learning_id: id.0,
-                verdict: verdict.as_str().to_string(),
-            })
-            .collect();
         self.caller
-            .apply_learning_verdicts(verdicts)
+            .apply_learning_verdicts(verdicts.to_vec())
             .await?
             .applied()
     }
@@ -1045,7 +1060,7 @@ impl SharedWriter for ReducerWriter {
     /// comment for why the count is not worth a read-back.
     async fn archive_stale_learnings(&self, cutoff: chrono::DateTime<chrono::Utc>) -> Result<u64> {
         self.caller
-            .archive_stale_learnings(encode::stamp(cutoff))
+            .archive_stale_learnings(cutoff)
             .await?
             .applied()?;
         Ok(0)
@@ -1082,16 +1097,8 @@ impl SharedWriter for ReducerWriter {
         session_id: &str,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<i64> {
-        // RFC 3339, matching `subagents.rs::subagent_start`'s
-        // `now.to_rfc3339()` — this column is never compared across rows, so
-        // it carries no format requirement `encode::stamp`'s callers rely on.
         self.caller
-            .subagent_start(
-                id.0,
-                agent_id.to_string(),
-                session_id.to_string(),
-                now.to_rfc3339(),
-            )
+            .subagent_start(id, agent_id.to_string(), session_id.to_string(), now)
             .await
     }
 
@@ -1104,20 +1111,20 @@ impl SharedWriter for ReducerWriter {
         let prior_running = self.prior_status_was(id, TaskStatus::Running).await;
         let read = self
             .caller
-            .subagent_stop(id.0, agent_id.to_string(), session_id.to_string())
+            .subagent_stop(id, agent_id.to_string(), session_id.to_string())
             .await?;
         Ok(Self::drain_outcome(prior_running, read))
     }
 
     async fn subagent_clear(&self, id: TaskId) -> Result<SubagentDrain> {
         let prior_running = self.prior_status_was(id, TaskStatus::Running).await;
-        let read = self.caller.subagent_clear(id.0).await?;
+        let read = self.caller.subagent_clear(id).await?;
         Ok(Self::drain_outcome(prior_running, read))
     }
 
     async fn subagent_clear_and_void_pending_stop(&self, id: TaskId) -> Result<()> {
         self.caller
-            .subagent_clear_and_void_pending_stop(id.0)
+            .subagent_clear_and_void_pending_stop(id)
             .await?
             .applied()
     }
@@ -1130,17 +1137,11 @@ impl SharedWriter for ReducerWriter {
         id: TaskId,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<StopOutcome> {
-        Ok(
-            match self
-                .caller
-                .try_record_stop(id.0, encode::stamp(now))
-                .await?
-            {
-                None => StopOutcome::NoOp,
-                Some(true) => StopOutcome::Flipped,
-                Some(false) => StopOutcome::Deferred,
-            },
-        )
+        Ok(match self.caller.try_record_stop(id, now).await? {
+            None => StopOutcome::NoOp,
+            Some(true) => StopOutcome::Flipped,
+            Some(false) => StopOutcome::Deferred,
+        })
     }
 
     async fn record_pre_tool_use(
@@ -1150,7 +1151,7 @@ impl SharedWriter for ReducerWriter {
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
         self.caller
-            .record_pre_tool_use(id.0, sub_status.as_str().to_string(), encode::stamp(now))
+            .record_pre_tool_use(id, sub_status, now)
             .await?
             .applied()
     }
@@ -1164,14 +1165,11 @@ impl SharedWriter for ReducerWriter {
         // Ignore never reaches the store — matches the SQL path's early
         // `return Ok(())`, and saves a round trip for the commonest kind
         // (`auth_success`).
-        let mode = match write {
-            NotificationWrite::Ignore => return Ok(()),
-            NotificationWrite::Clear => "clear",
-            NotificationWrite::Raise => "raise",
-            NotificationWrite::RaiseIfNoOwnWorkLive => "raise_if_no_own_work_live",
-        };
+        if write == NotificationWrite::Ignore {
+            return Ok(());
+        }
         self.caller
-            .record_notification(id.0, mode.to_string(), encode::stamp(now))
+            .record_notification(id, write, now)
             .await?
             .applied()
     }
@@ -1196,12 +1194,7 @@ impl SharedWriter for ReducerWriter {
         // it formats twice (seconds for `last_pre_tool_use_at`, millis for
         // the void-comparison); the store side uses the millis format for
         // both, since parsing tolerates the extra precision either way.
-        let stamp = encode::stamp(now);
-        match self
-            .caller
-            .record_user_prompt_submit(id.0, stamp.clone(), stamp)
-            .await?
-        {
+        match self.caller.record_user_prompt_submit(id, now, now).await? {
             ReducerOutcome::Refused(_) => Ok(UserPromptOutcome::NoOp),
             ReducerOutcome::Applied(_) => Ok(if prior_review {
                 UserPromptOutcome::Resumed
@@ -1217,7 +1210,7 @@ impl SharedWriter for ReducerWriter {
     async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool> {
         Ok(self
             .caller
-            .mark_pr_learnings_gate_shown(id.0, self.now())
+            .mark_pr_learnings_gate_shown(id, self.now_at())
             .await?
             .won())
     }
@@ -1281,7 +1274,7 @@ impl SharedWriter for ReducerWriter {
             .collect();
 
         self.caller
-            .delete_stale_subtree_feed_tasks(parent_id.0, keep_external_ids.to_vec())
+            .delete_stale_subtree_feed_tasks(parent_id, keep_external_ids.to_vec())
             .await?
             .applied()?;
 
@@ -1294,7 +1287,7 @@ impl SharedWriter for ReducerWriter {
         keep_external_ids: &[String],
     ) -> Result<()> {
         self.caller
-            .drop_closed_retired_feed_items(feed_epic_id.0, keep_external_ids.to_vec())
+            .drop_closed_retired_feed_items(feed_epic_id, keep_external_ids.to_vec())
             .await?
             .applied()
     }
@@ -1310,9 +1303,9 @@ impl SharedWriter for ReducerWriter {
             .await?;
         let id = self
             .caller
-            .create_repo_group_sub_epic(parent_id.0, title.to_string(), identity)
+            .create_repo_group_sub_epic(parent_id, title.to_string(), identity)
             .await?;
-        Ok(EpicId(id))
+        Ok(id)
     }
 
     async fn create_managed_role_epic(
@@ -1332,14 +1325,14 @@ impl SharedWriter for ReducerWriter {
             .caller
             .create_managed_role_epic(
                 title.to_string(),
-                parent_epic_id.map(|e| e.0).unwrap_or(0),
+                parent_epic_id,
                 role.as_str().to_string(),
                 feed_command.unwrap_or_default().to_string(),
                 feed_interval_secs.unwrap_or(0),
                 identity,
             )
             .await?;
-        Ok(EpicId(id))
+        Ok(id)
     }
 
     // -- Stragglers ------------------------------------------------------------
@@ -1348,14 +1341,10 @@ impl SharedWriter for ReducerWriter {
         if updates.is_empty() {
             return Ok(());
         }
-        let wire = updates
-            .iter()
-            .map(|(id, sub_status)| bindings::SubStatusUpdate {
-                task_id: id.0,
-                sub_status: sub_status.as_str().to_string(),
-            })
-            .collect();
-        self.caller.batch_patch_sub_status(wire).await?.applied()
+        self.caller
+            .batch_patch_sub_status(updates.to_vec())
+            .await?
+            .applied()
     }
 
     async fn respawn_phoenix_successor(
@@ -1377,7 +1366,7 @@ impl SharedWriter for ReducerWriter {
         let mut row = encode::create_task_row(&req, owner, &identity, &self.now());
         row.labels = serde_json::to_string(labels).unwrap_or_else(|_| "[]".to_string());
         self.caller
-            .respawn_phoenix_successor(predecessor.0, row)
+            .respawn_phoenix_successor(predecessor, row)
             .await
     }
 
@@ -1389,7 +1378,7 @@ impl SharedWriter for ReducerWriter {
         target_task_id: TaskId,
     ) -> Result<()> {
         self.caller
-            .create_task_watcher(watcher_task_id.0, target_task_id.0)
+            .create_task_watcher(watcher_task_id, target_task_id)
             .await?
             .applied()
     }
@@ -1400,21 +1389,21 @@ impl SharedWriter for ReducerWriter {
         target_task_id: TaskId,
     ) -> Result<()> {
         self.caller
-            .delete_task_watcher(watcher_task_id.0, target_task_id.0)
+            .delete_task_watcher(watcher_task_id, target_task_id)
             .await?
             .applied()
     }
 
     async fn delete_watches_of_target(&self, target_task_id: TaskId) -> Result<()> {
         self.caller
-            .delete_watches_of_target(target_task_id.0)
+            .delete_watches_of_target(target_task_id)
             .await?
             .applied()
     }
 
     async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<()> {
         self.caller
-            .delete_watches_by_watcher(watcher_task_id.0)
+            .delete_watches_by_watcher(watcher_task_id)
             .await?
             .applied()
     }
@@ -1422,17 +1411,15 @@ impl SharedWriter for ReducerWriter {
     // -- Poll ownership (Phase 7) ---------------------------------------------
 
     async fn claim_poll_owner(&self, target: crate::models::PollScopeId) -> Result<()> {
-        let (scope, scope_id) = target.wire();
         self.caller
-            .claim_poll_owner(scope.to_string(), scope_id, self.host.clone())
+            .claim_poll_owner(target, self.host.clone())
             .await?
             .applied()
     }
 
     async fn override_poll_owner(&self, target: crate::models::PollScopeId) -> Result<()> {
-        let (scope, scope_id) = target.wire();
         self.caller
-            .override_poll_owner(scope.to_string(), scope_id, self.host.clone())
+            .override_poll_owner(target, self.host.clone())
             .await?
             .applied()
     }

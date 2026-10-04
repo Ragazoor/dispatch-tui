@@ -67,6 +67,57 @@ pub(super) fn stamp(at: chrono::DateTime<chrono::Utc>) -> String {
     at.format("%Y-%m-%d %H:%M:%S%.3f").to_string()
 }
 
+/// The `started_at` a subagent row carries: RFC 3339, matching
+/// `src/db/queries/subagents.rs::subagent_start`. That column is never compared across rows,
+/// so it has no need of [`stamp`]'s sortable format.
+pub(super) fn subagent_started_at(at: chrono::DateTime<chrono::Utc>) -> String {
+    at.to_rfc3339()
+}
+
+/// The `LearningVerdictInput` batch the `apply_learning_verdicts` reducer takes.
+pub(super) fn verdict_inputs(
+    verdicts: &[(crate::models::LearningId, crate::models::LearningVerdict)],
+) -> Vec<bindings::LearningVerdictInput> {
+    verdicts
+        .iter()
+        .map(|(id, verdict)| bindings::LearningVerdictInput {
+            learning_id: id.0,
+            verdict: verdict.as_str().to_string(),
+        })
+        .collect()
+}
+
+/// The module's `record_notification` mode string for a write that reaches
+/// the store; `None` for [`NotificationWrite::Ignore`], which never does.
+pub(super) fn notification_mode(write: crate::models::NotificationWrite) -> Option<&'static str> {
+    use crate::models::NotificationWrite as W;
+    match write {
+        W::Ignore => None,
+        W::Clear => Some("clear"),
+        W::Raise => Some("raise"),
+        W::RaiseIfNoOwnWorkLive => Some("raise_if_no_own_work_live"),
+    }
+}
+
+/// The module's spelling of "no epic": zero.
+pub(super) fn epic_ref(epic: Option<crate::models::EpicId>) -> i64 {
+    epic.map_or(0, |e| e.0)
+}
+
+/// The batch the `batch_patch_sub_status` reducer takes: one wire update per
+/// `(task, sub-status)` pair.
+pub(super) fn sub_status_updates(
+    updates: &[(crate::models::TaskId, crate::models::SubStatus)],
+) -> Vec<bindings::SubStatusUpdate> {
+    updates
+        .iter()
+        .map(|(id, sub_status)| bindings::SubStatusUpdate {
+            task_id: id.0,
+            sub_status: sub_status.as_str().to_string(),
+        })
+        .collect()
+}
+
 /// Build the row a `create_task` reducer inserts.
 ///
 /// `id` is zero, which is how `#[auto_inc]` is asked to generate one. Every

@@ -30,7 +30,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use crate::models::{Epic, EpicId, Task, TaskId};
+use crate::models::{Epic, EpicId, PollScopeId, Task, TaskId};
 
 use super::SharedRows;
 
@@ -46,10 +46,10 @@ pub trait BoardReads: Send + Sync {
     async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>>;
 
     /// The `Host.id` allowed to run recurring background polling for
-    /// `(scope, scope_id)`, or `None` if unclaimed (`core.allium: PollOwner`).
-    /// `scope` is `"task"` or `"epic"` — see `pr-workflow.allium: PollPrStatus`
-    /// and `feeds.allium: FeedTick`, the two callers.
-    async fn poll_owner(&self, scope: &str, scope_id: i64) -> Result<Option<String>>;
+    /// `target`, or `None` if unclaimed (`core.allium: PollOwner`). See
+    /// `pr-workflow.allium: PollPrStatus` and `feeds.allium: FeedTick`, the two
+    /// callers.
+    async fn poll_owner(&self, target: PollScopeId) -> Result<Option<String>>;
 
     /// A number that changes when the rows do.
     ///
@@ -114,7 +114,7 @@ impl BoardReads for LocalBoardReads {
     /// `PollOwner` has no SQLite counterpart at all (`core.allium: PollOwner`):
     /// a single-machine install has no other host to contend a claim with,
     /// so every scope reads as unclaimed.
-    async fn poll_owner(&self, _scope: &str, _scope_id: i64) -> Result<Option<String>> {
+    async fn poll_owner(&self, _target: PollScopeId) -> Result<Option<String>> {
         Ok(None)
     }
 
@@ -171,8 +171,8 @@ impl BoardReads for SubscriptionBoardReads {
         Ok(self.rows.base_branches())
     }
 
-    async fn poll_owner(&self, scope: &str, scope_id: i64) -> Result<Option<String>> {
-        Ok(self.rows.poll_owner(scope, scope_id).map(|row| row.host))
+    async fn poll_owner(&self, target: PollScopeId) -> Result<Option<String>> {
+        Ok(self.rows.poll_owner(target).map(|row| row.host))
     }
 
     async fn revision(&self) -> Option<u64> {

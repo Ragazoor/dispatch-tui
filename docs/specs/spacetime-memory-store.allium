@@ -102,7 +102,7 @@ enum ReducerDomain {
 ------------------------------------------------------------
 
 -- The native in-process stand-in for a real SpacetimeDB reducer call. Lives
--- at src/sync/memory_caller.rs, beside the production adapter
+-- at src/sync/memory_caller/mod.rs, beside the production adapter
 -- (src/sync/sdk_connector.rs) that implements the same ReducerCaller trait
 -- against a real server. Never runs inside SpacetimeDB and never uses a
 -- ReducerContext — it is an independent reimplementation, not the module
@@ -117,17 +117,10 @@ entity MemoryReducerCaller {
     -- already-"complete" store would read as complete without covering the
     -- new one; this spec does not derive that the two stay in step — it is a
     -- review obligation from this file's own point of view. The Rust
-    -- implementation happens to go further than this spec requires: its
-    -- enum and its ALL/TOTAL_DOMAINS are generated from one macro invocation
-    -- (reducer_domains! in src/sync/memory_caller.rs) naming each domain
-    -- exactly once, so there is no second, independently-maintained list for
-    -- the two to drift apart from — not (as an earlier draft of this
-    -- comment claimed) a match that is merely exhaustive over the enum type,
-    -- which forces handling a new variant but not listing it anywhere in
-    -- particular. That hardening is this file's obligation being met by
-    -- construction in one implementation, not a guarantee this spec itself
-    -- makes — a different implementation could satisfy this same rule with
-    -- a bare literal and a code-review habit.
+    -- implementation carries no ReducerDomain enum, covered-domain list or
+    -- is_complete function: every domain is covered, so they were dead
+    -- scaffolding and were deleted. This entity stays as the record of how
+    -- coverage grew.
     is_complete: covered_domains.count = config.total_domains
 
     @invariant CoverageOnlyGrows

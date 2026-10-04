@@ -206,15 +206,12 @@ pub const STORE_SERVER_ENV: &str = "DISPATCH_SPACETIME_SERVER";
 /// shell idiom for "unset", and a connect attempt against an empty address
 /// would fail later with a worse message.
 pub fn store_server_or_managed(server: Option<String>) -> String {
-    server
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| {
-            format!(
-                "http://{}",
-                crate::spacetime::managed_store::MANAGED_STORE_ADDRESS
-            )
-        })
+    crate::spacetime::managed_store::normalize_server(server).unwrap_or_else(|| {
+        format!(
+            "http://{}",
+            crate::spacetime::managed_store::MANAGED_STORE_ADDRESS
+        )
+    })
 }
 
 impl StartupAbort {

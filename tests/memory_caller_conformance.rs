@@ -48,16 +48,27 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::{DateTime, NaiveDateTime, Utc};
 use common::spacetime_instance::{
     column, describe, module_path, spacetime_available_or_skip, Instance,
 };
-use dispatch_tui::models::{EpicId, LearningId, TaskId, TaskStatus};
+use dispatch_tui::models::{
+    EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource,
+    SubStatus, TaskId, TaskStatus,
+};
 use dispatch_tui::service::{Clock, SystemClock};
 use dispatch_tui::spacetime::bindings;
 use dispatch_tui::sync::{
     MemoryReducerCaller, ReducerCaller, SdkReducerCaller, SettledIdentity, SharedRows,
     SpacetimeSdkConnector, StoreConnector, SubscriptionRequest,
 };
+
+/// A wire-format timestamp (`encode::stamp`'s spelling) as an instant.
+fn ts(s: &str) -> DateTime<Utc> {
+    NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.3f")
+        .unwrap()
+        .and_utc()
+}
 
 // ---------------------------------------------------------------------------
 // Row fixtures — one `bindings::Task`/`bindings::Epic`/`bindings::TaskPatch`
@@ -497,15 +508,15 @@ fn memory_caller_matches_the_real_reducers() {
         };
 
         // -- create_epic (two: the task's home, and a destination to move it to) --
-        let epic_id_real = real.create_epic(blank_epic()).await.unwrap();
+        let epic_id_real = real.create_epic(blank_epic()).await.unwrap().0;
         wait_for!(rows_real.epic(EpicId(epic_id_real)).is_some());
-        let epic_id_mem = mem.create_epic(blank_epic()).await.unwrap();
+        let epic_id_mem = mem.create_epic(blank_epic()).await.unwrap().0;
         assert_eq!(epic_id_real, epic_id_mem, "generated epic id");
         compare_epic(epic_id_real);
 
-        let epic2_id_real = real.create_epic(blank_epic()).await.unwrap();
+        let epic2_id_real = real.create_epic(blank_epic()).await.unwrap().0;
         wait_for!(rows_real.epic(EpicId(epic2_id_real)).is_some());
-        let epic2_id_mem = mem.create_epic(blank_epic()).await.unwrap();
+        let epic2_id_mem = mem.create_epic(blank_epic()).await.unwrap().0;
         assert_eq!(epic2_id_real, epic2_id_mem, "generated second epic id");
         compare_epic(epic2_id_real);
 
@@ -593,7 +604,7 @@ fn memory_caller_matches_the_real_reducers() {
 
         // -- patch_epic -------------------------------------------------------------
         real.patch_epic(
-            epic_id_real,
+            EpicId(epic_id_real),
             bindings::EpicPatch {
                 title: Some("renamed conformance epic".into()),
                 ..blank_epic_patch()
@@ -605,7 +616,7 @@ fn memory_caller_matches_the_real_reducers() {
             .epic(EpicId(epic_id_real))
             .is_some_and(|e| e.title == "renamed conformance epic"));
         mem.patch_epic(
-            epic_id_mem,
+            EpicId(epic_id_mem),
             bindings::EpicPatch {
                 title: Some("renamed conformance epic".into()),
                 ..blank_epic_patch()
@@ -616,13 +627,13 @@ fn memory_caller_matches_the_real_reducers() {
         compare_epic(epic_id_real);
 
         // -- set_task_epic: move the (backlog) task to the second epic --------------
-        real.set_task_epic(task_id_real, epic2_id_real, String::new())
+        real.set_task_epic(task_id_real, Some(EpicId(epic2_id_real)), String::new())
             .await
             .unwrap();
         wait_for!(rows_real
             .task(task_id_real)
             .is_some_and(|t| t.epic_id == Some(EpicId(epic2_id_real))));
-        mem.set_task_epic(task_id_mem, epic2_id_mem, String::new())
+        mem.set_task_epic(task_id_mem, Some(EpicId(epic2_id_mem)), String::new())
             .await
             .unwrap();
         compare_task(task_id_real.0);
@@ -631,19 +642,23 @@ fn memory_caller_matches_the_real_reducers() {
         compare_owner(task_id_real.0);
 
         // -- recalculate_epic_status is idempotent when nothing changed -------------
-        real.recalculate_epic_status(epic2_id_real).await.unwrap();
-        mem.recalculate_epic_status(epic2_id_mem).await.unwrap();
+        real.recalculate_epic_status(EpicId(epic2_id_real))
+            .await
+            .unwrap();
+        mem.recalculate_epic_status(EpicId(epic2_id_mem))
+            .await
+            .unwrap();
         compare_epic(epic2_id_real);
 
         // Move it back, so the delete section below only has one epic's worth
         // of tasks to clean up.
-        real.set_task_epic(task_id_real, epic_id_real, String::new())
+        real.set_task_epic(task_id_real, Some(EpicId(epic_id_real)), String::new())
             .await
             .unwrap();
         wait_for!(rows_real
             .task(task_id_real)
             .is_some_and(|t| t.epic_id == Some(EpicId(epic_id_real))));
-        mem.set_task_epic(task_id_mem, epic_id_mem, String::new())
+        mem.set_task_epic(task_id_mem, Some(EpicId(epic_id_mem)), String::new())
             .await
             .unwrap();
         compare_task(task_id_real.0);
@@ -652,11 +667,11 @@ fn memory_caller_matches_the_real_reducers() {
         compare_owner(task_id_real.0);
 
         // -- repo configuration ---------------------------------------------------
-        real.save_repo_path("/repo".into(), "2026-01-01 00:00:00.000".into())
+        real.save_repo_path("/repo".into(), ts("2026-01-01 00:00:00.000"))
             .await
             .unwrap();
         wait_for!(!rows_real.repo_paths().is_empty());
-        mem.save_repo_path("/repo".into(), "2026-01-01 00:00:00.000".into())
+        mem.save_repo_path("/repo".into(), ts("2026-01-01 00:00:00.000"))
             .await
             .unwrap();
         assert_eq!(rows_real.repo_paths(), rows_mem.repo_paths(), "repo_paths");
@@ -674,21 +689,13 @@ fn memory_caller_matches_the_real_reducers() {
             "verify_command"
         );
 
-        real.record_base_branch(
-            "/repo".into(),
-            "main".into(),
-            "2026-01-01 00:00:00.000".into(),
-        )
-        .await
-        .unwrap();
+        real.record_base_branch("/repo".into(), "main".into(), ts("2026-01-01 00:00:00.000"))
+            .await
+            .unwrap();
         wait_for!(!rows_real.base_branches().is_empty());
-        mem.record_base_branch(
-            "/repo".into(),
-            "main".into(),
-            "2026-01-01 00:00:00.000".into(),
-        )
-        .await
-        .unwrap();
+        mem.record_base_branch("/repo".into(), "main".into(), ts("2026-01-01 00:00:00.000"))
+            .await
+            .unwrap();
         assert_eq!(
             rows_real.base_branches(),
             rows_mem.base_branches(),
@@ -706,11 +713,11 @@ fn memory_caller_matches_the_real_reducers() {
         // '{accepted.identity}'` (`subscription_queries`), so a row filed
         // under any other subscriber would never arrive here to compare.
         let subscriber = accepted.identity.as_str();
-        real.subscribe_to_epic(subscriber.into(), epic_id_real)
+        real.subscribe_to_epic(subscriber.into(), EpicId(epic_id_real))
             .await
             .unwrap();
         wait_for!(rows_real.subscribed_epics(subscriber) == vec![epic_id_real]);
-        mem.subscribe_to_epic(subscriber.into(), epic_id_mem)
+        mem.subscribe_to_epic(subscriber.into(), EpicId(epic_id_mem))
             .await
             .unwrap();
         assert_eq!(
@@ -719,11 +726,11 @@ fn memory_caller_matches_the_real_reducers() {
             "subscribed_epics after subscribe"
         );
 
-        real.unsubscribe_from_epic(subscriber.into(), epic_id_real)
+        real.unsubscribe_from_epic(subscriber.into(), EpicId(epic_id_real))
             .await
             .unwrap();
         wait_for!(rows_real.subscribed_epics(subscriber).is_empty());
-        mem.unsubscribe_from_epic(subscriber.into(), epic_id_mem)
+        mem.unsubscribe_from_epic(subscriber.into(), EpicId(epic_id_mem))
             .await
             .unwrap();
         assert_eq!(
@@ -903,18 +910,18 @@ fn memory_caller_matches_the_real_reducers() {
             summary: Some("revised".into()),
             embedding: None,
         };
-        real.patch_learning(helped_real.0, revise()).await.unwrap();
+        real.patch_learning(helped_real, revise()).await.unwrap();
         wait_for!(rows_real
             .learning(helped_real)
             .is_some_and(|l| l.summary == "revised"));
-        mem.patch_learning(helped_mem.0, revise()).await.unwrap();
+        mem.patch_learning(helped_mem, revise()).await.unwrap();
         compare_learning(helped_real);
 
-        real.record_learning_retrieval(task_id_real.0, helped_real.0, "query_learnings".into())
+        real.record_learning_retrieval(task_id_real, helped_real, RetrievalSource::QueryLearnings)
             .await
             .unwrap();
         wait_for!(!rows_real.retrievals_for_task(task_id_real).is_empty());
-        mem.record_learning_retrieval(task_id_mem.0, helped_mem.0, "query_learnings".into())
+        mem.record_learning_retrieval(task_id_mem, helped_mem, RetrievalSource::QueryLearnings)
             .await
             .unwrap();
         assert_eq!(
@@ -923,66 +930,26 @@ fn memory_caller_matches_the_real_reducers() {
             "retrievals after record_learning_retrieval"
         );
 
-        let verdicts = |helped_id: i64, wrong_id: i64| {
+        let verdicts = |helped_id: LearningId, wrong_id: LearningId| {
             vec![
-                bindings::LearningVerdictInput {
-                    learning_id: helped_id,
-                    verdict: "helped".into(),
-                },
-                bindings::LearningVerdictInput {
-                    learning_id: wrong_id,
-                    verdict: "wrong".into(),
-                },
+                (helped_id, LearningVerdict::Helped),
+                (wrong_id, LearningVerdict::Wrong),
             ]
         };
-        real.apply_learning_verdicts(verdicts(helped_real.0, wrong_real.0))
+        real.apply_learning_verdicts(verdicts(helped_real, wrong_real))
             .await
             .unwrap();
         wait_for!(rows_real
             .learning(helped_real)
             .is_some_and(|l| l.upvote_count == 1));
-        mem.apply_learning_verdicts(verdicts(helped_mem.0, wrong_mem.0))
+        mem.apply_learning_verdicts(verdicts(helped_mem, wrong_mem))
             .await
             .unwrap();
         compare_learning(helped_real);
         compare_learning(wrong_real);
 
-        // A real reducer's `Err` rolls back the WHOLE transaction: an unknown
-        // verdict must refuse the batch atomically, not apply the entries
-        // before it.
-        let bad_verdict = |learning_id: i64| {
-            vec![bindings::LearningVerdictInput {
-                learning_id,
-                verdict: "unused".into(),
-            }]
-        };
-        let refused_real = real
-            .apply_learning_verdicts(bad_verdict(helped_real.0))
-            .await
-            .unwrap();
-        let refused_mem = mem
-            .apply_learning_verdicts(bad_verdict(helped_mem.0))
-            .await
-            .unwrap();
-        assert_eq!(refused_real.won(), refused_mem.won(), "unknown verdict");
-        compare_learning(helped_real);
-
-        // Existence is checked BEFORE the verdict string, per entry: an
-        // unknown verdict tied to a MISSING learning id never reaches the
-        // check that refuses the batch — it is a silent no-op, same as any
-        // other missing id, not something that aborts the rest of the batch.
-        let missing_and_bad = bad_verdict(999_999);
-        let applied_real = real
-            .apply_learning_verdicts(missing_and_bad.clone())
-            .await
-            .unwrap();
-        let applied_mem = mem.apply_learning_verdicts(missing_and_bad).await.unwrap();
-        assert_eq!(
-            applied_real.won(),
-            applied_mem.won(),
-            "unknown verdict for a missing learning"
-        );
-        assert!(applied_real.won(), "must not refuse the whole batch");
+        // (An unknown verdict string is unrepresentable through the typed
+        // `LearningVerdict`; the module's own tests cover that refusal.)
 
         // -- rescope_epic_learnings ---------------------------------------------------
         let epic_scoped_real = real
@@ -1006,13 +973,13 @@ fn memory_caller_matches_the_real_reducers() {
             epic_scoped_real, epic_scoped_mem,
             "generated epic-scoped learning id"
         );
-        real.rescope_epic_learnings(epic_id_real, epic2_id_real)
+        real.rescope_epic_learnings(EpicId(epic_id_real), EpicId(epic2_id_real))
             .await
             .unwrap();
         wait_for!(rows_real
             .learning(epic_scoped_real)
             .is_some_and(|l| l.scope_ref == Some(epic2_id_real.to_string())));
-        mem.rescope_epic_learnings(epic_id_mem, epic2_id_mem)
+        mem.rescope_epic_learnings(EpicId(epic_id_mem), EpicId(epic2_id_mem))
             .await
             .unwrap();
         compare_learning(epic_scoped_real);
@@ -1024,26 +991,26 @@ fn memory_caller_matches_the_real_reducers() {
         wait_for!(rows_real.learning(stale_real).is_some());
         let stale_mem = mem.create_learning(blank_learning()).await.unwrap();
         assert_eq!(stale_real, stale_mem, "generated stale learning id");
-        real.archive_stale_learnings("2025-01-01 00:00:00.000".into())
+        real.archive_stale_learnings(ts("2025-01-01 00:00:00.000"))
             .await
             .unwrap();
         wait_for!(rows_real
             .learning(stale_real)
             .is_some_and(|l| l.status == dispatch_tui::models::LearningStatus::Archived));
-        mem.archive_stale_learnings("2025-01-01 00:00:00.000".into())
+        mem.archive_stale_learnings(ts("2025-01-01 00:00:00.000"))
             .await
             .unwrap();
         compare_learning(stale_real);
 
         // -- delete_learning + its retrieval cascade ---------------------------------
-        real.delete_learning(wrong_real.0).await.unwrap();
+        real.delete_learning(wrong_real).await.unwrap();
         wait_for!(rows_real.learning(wrong_real).is_none());
-        mem.delete_learning(wrong_mem.0).await.unwrap();
+        mem.delete_learning(wrong_mem).await.unwrap();
         assert!(rows_mem.learning(wrong_mem).is_none());
 
         // A missing id is REFUSED, unlike most reducers' silent no-op.
-        let missing_real = real.delete_learning(wrong_real.0).await.unwrap();
-        let missing_mem = mem.delete_learning(wrong_mem.0).await.unwrap();
+        let missing_real = real.delete_learning(wrong_real).await.unwrap();
+        let missing_mem = mem.delete_learning(wrong_mem).await.unwrap();
         assert_eq!(missing_real.won(), missing_mem.won(), "double delete");
 
         // -- agent session state: subagents + hooks (agent_state) -------------------
@@ -1060,10 +1027,10 @@ fn memory_caller_matches_the_real_reducers() {
 
         let real_live = real
             .subagent_start(
-                task_id_real.0,
+                task_id_real,
                 "agent-a".into(),
                 "session-1".into(),
-                "2026-01-01 00:00:00.000".into(),
+                ts("2026-01-01 00:00:00.000"),
             )
             .await
             .unwrap();
@@ -1072,10 +1039,10 @@ fn memory_caller_matches_the_real_reducers() {
             .is_some_and(|t| t.live_subagents == real_live));
         let mem_live = mem
             .subagent_start(
-                task_id_mem.0,
+                task_id_mem,
                 "agent-a".into(),
                 "session-1".into(),
-                "2026-01-01 00:00:00.000".into(),
+                ts("2026-01-01 00:00:00.000"),
             )
             .await
             .unwrap();
@@ -1083,9 +1050,9 @@ fn memory_caller_matches_the_real_reducers() {
         compare_task(task_id_real.0);
 
         real.record_pre_tool_use(
-            task_id_real.0,
-            "active".into(),
-            "2026-01-01 00:00:01.000".into(),
+            task_id_real,
+            SubStatus::Active,
+            ts("2026-01-01 00:00:01.000"),
         )
         .await
         .unwrap();
@@ -1093,18 +1060,18 @@ fn memory_caller_matches_the_real_reducers() {
             .task(task_id_real)
             .is_some_and(|t| t.last_pre_tool_use_at.is_some()));
         mem.record_pre_tool_use(
-            task_id_mem.0,
-            "active".into(),
-            "2026-01-01 00:00:01.000".into(),
+            task_id_mem,
+            SubStatus::Active,
+            ts("2026-01-01 00:00:01.000"),
         )
         .await
         .unwrap();
         compare_task(task_id_real.0);
 
         real.record_notification(
-            task_id_real.0,
-            "raise".into(),
-            "2026-01-01 00:00:02.000".into(),
+            task_id_real,
+            NotificationWrite::Raise,
+            ts("2026-01-01 00:00:02.000"),
         )
         .await
         .unwrap();
@@ -1112,9 +1079,9 @@ fn memory_caller_matches_the_real_reducers() {
             .task(task_id_real)
             .is_some_and(|t| t.sub_status == dispatch_tui::models::SubStatus::NeedsInput));
         mem.record_notification(
-            task_id_mem.0,
-            "raise".into(),
-            "2026-01-01 00:00:02.000".into(),
+            task_id_mem,
+            NotificationWrite::Raise,
+            ts("2026-01-01 00:00:02.000"),
         )
         .await
         .unwrap();
@@ -1122,12 +1089,12 @@ fn memory_caller_matches_the_real_reducers() {
 
         // A Stop while a subagent is live defers rather than flips.
         let real_deferred = real
-            .try_record_stop(task_id_real.0, "2026-01-01 00:00:03.000".into())
+            .try_record_stop(task_id_real, ts("2026-01-01 00:00:03.000"))
             .await
             .unwrap();
         wait_for!(rows_real.task(task_id_real).is_some_and(|t| t.stop_pending));
         let mem_deferred = mem
-            .try_record_stop(task_id_mem.0, "2026-01-01 00:00:03.000".into())
+            .try_record_stop(task_id_mem, ts("2026-01-01 00:00:03.000"))
             .await
             .unwrap();
         assert_eq!(
@@ -1137,9 +1104,9 @@ fn memory_caller_matches_the_real_reducers() {
         compare_task(task_id_real.0);
 
         real.record_user_prompt_submit(
-            task_id_real.0,
-            "2026-01-01 00:00:04.000".into(),
-            "2026-01-01 00:00:04.500".into(),
+            task_id_real,
+            ts("2026-01-01 00:00:04.000"),
+            ts("2026-01-01 00:00:04.500"),
         )
         .await
         .unwrap();
@@ -1147,23 +1114,23 @@ fn memory_caller_matches_the_real_reducers() {
             .task(task_id_real)
             .is_some_and(|t| !t.stop_pending));
         mem.record_user_prompt_submit(
-            task_id_mem.0,
-            "2026-01-01 00:00:04.000".into(),
-            "2026-01-01 00:00:04.500".into(),
+            task_id_mem,
+            ts("2026-01-01 00:00:04.000"),
+            ts("2026-01-01 00:00:04.500"),
         )
         .await
         .unwrap();
         compare_task(task_id_real.0);
 
         let real_stop = real
-            .subagent_stop(task_id_real.0, "agent-a".into(), "session-1".into())
+            .subagent_stop(task_id_real, "agent-a".into(), "session-1".into())
             .await
             .unwrap();
         wait_for!(rows_real
             .task(task_id_real)
             .is_some_and(|t| t.live_subagents == 0));
         let mem_stop = mem
-            .subagent_stop(task_id_mem.0, "agent-a".into(), "session-1".into())
+            .subagent_stop(task_id_mem, "agent-a".into(), "session-1".into())
             .await
             .unwrap();
         assert_eq!(real_stop.live, mem_stop.live, "subagent_stop live count");
@@ -1176,10 +1143,10 @@ fn memory_caller_matches_the_real_reducers() {
         // subagent_clear / subagent_clear_and_void_pending_stop, over a fresh
         // subagent so there is something live to drain.
         real.subagent_start(
-            task_id_real.0,
+            task_id_real,
             "agent-b".into(),
             "session-2".into(),
-            "2026-01-01 00:00:05.000".into(),
+            ts("2026-01-01 00:00:05.000"),
         )
         .await
         .unwrap();
@@ -1187,30 +1154,30 @@ fn memory_caller_matches_the_real_reducers() {
             .task(task_id_real)
             .is_some_and(|t| t.live_subagents == 1));
         mem.subagent_start(
-            task_id_mem.0,
+            task_id_mem,
             "agent-b".into(),
             "session-2".into(),
-            "2026-01-01 00:00:05.000".into(),
+            ts("2026-01-01 00:00:05.000"),
         )
         .await
         .unwrap();
         compare_task(task_id_real.0);
 
-        let real_cleared = real.subagent_clear(task_id_real.0).await.unwrap();
+        let real_cleared = real.subagent_clear(task_id_real).await.unwrap();
         wait_for!(rows_real
             .task(task_id_real)
             .is_some_and(|t| t.live_subagents == 0));
-        let mem_cleared = mem.subagent_clear(task_id_mem.0).await.unwrap();
+        let mem_cleared = mem.subagent_clear(task_id_mem).await.unwrap();
         assert_eq!(
             real_cleared.live, mem_cleared.live,
             "subagent_clear live count"
         );
         compare_task(task_id_real.0);
 
-        real.subagent_clear_and_void_pending_stop(task_id_real.0)
+        real.subagent_clear_and_void_pending_stop(task_id_real)
             .await
             .unwrap();
-        mem.subagent_clear_and_void_pending_stop(task_id_mem.0)
+        mem.subagent_clear_and_void_pending_stop(task_id_mem)
             .await
             .unwrap();
         compare_task(task_id_real.0);
@@ -1218,18 +1185,18 @@ fn memory_caller_matches_the_real_reducers() {
         // mark_pr_learnings_gate_shown: no board-visible field (bindings-only,
         // per `TaskShape`'s doc comment), so only the outcome parity matters —
         // the write itself is already committed by the time `.await` returns.
-        real.mark_pr_learnings_gate_shown(task_id_real.0, "2026-01-01 00:00:06.000".into())
+        real.mark_pr_learnings_gate_shown(task_id_real, ts("2026-01-01 00:00:06.000"))
             .await
             .unwrap();
         let real_gate_repeat = real
-            .mark_pr_learnings_gate_shown(task_id_real.0, "2026-01-01 00:00:07.000".into())
+            .mark_pr_learnings_gate_shown(task_id_real, ts("2026-01-01 00:00:07.000"))
             .await
             .unwrap();
-        mem.mark_pr_learnings_gate_shown(task_id_mem.0, "2026-01-01 00:00:06.000".into())
+        mem.mark_pr_learnings_gate_shown(task_id_mem, ts("2026-01-01 00:00:06.000"))
             .await
             .unwrap();
         let mem_gate_repeat = mem
-            .mark_pr_learnings_gate_shown(task_id_mem.0, "2026-01-01 00:00:07.000".into())
+            .mark_pr_learnings_gate_shown(task_id_mem, ts("2026-01-01 00:00:07.000"))
             .await
             .unwrap();
         assert_eq!(
@@ -1239,25 +1206,19 @@ fn memory_caller_matches_the_real_reducers() {
         );
 
         // batch_patch_sub_status: no recalculation, ignores a missing id.
-        let updates = |task_id: i64| {
+        let updates = |task_id: TaskId| {
             vec![
-                bindings::SubStatusUpdate {
-                    task_id,
-                    sub_status: "stale".into(),
-                },
-                bindings::SubStatusUpdate {
-                    task_id: 999_999,
-                    sub_status: "active".into(),
-                },
+                (task_id, SubStatus::Stale),
+                (TaskId(999_999), SubStatus::Active),
             ]
         };
-        real.batch_patch_sub_status(updates(task_id_real.0))
+        real.batch_patch_sub_status(updates(task_id_real))
             .await
             .unwrap();
         wait_for!(rows_real
             .task(task_id_real)
             .is_some_and(|t| t.sub_status == dispatch_tui::models::SubStatus::Stale));
-        mem.batch_patch_sub_status(updates(task_id_mem.0))
+        mem.batch_patch_sub_status(updates(task_id_mem))
             .await
             .unwrap();
         compare_task(task_id_real.0);
@@ -1285,11 +1246,11 @@ fn memory_caller_matches_the_real_reducers() {
             .unwrap();
         assert_eq!(watcher_target_real, watcher_target_mem, "watcher target id");
 
-        real.create_task_watcher(task_id_real.0, watcher_target_real.0)
+        real.create_task_watcher(task_id_real, watcher_target_real)
             .await
             .unwrap();
         wait_for!(rows_real.watchers_of(watcher_target_real) == vec![task_id_real]);
-        mem.create_task_watcher(task_id_mem.0, watcher_target_mem.0)
+        mem.create_task_watcher(task_id_mem, watcher_target_mem)
             .await
             .unwrap();
         assert_eq!(
@@ -1298,99 +1259,85 @@ fn memory_caller_matches_the_real_reducers() {
             "watchers_of after create"
         );
 
-        real.delete_task_watcher(task_id_real.0, watcher_target_real.0)
+        real.delete_task_watcher(task_id_real, watcher_target_real)
             .await
             .unwrap();
         wait_for!(rows_real.watchers_of(watcher_target_real).is_empty());
-        mem.delete_task_watcher(task_id_mem.0, watcher_target_mem.0)
+        mem.delete_task_watcher(task_id_mem, watcher_target_mem)
             .await
             .unwrap();
         assert!(rows_mem.watchers_of(watcher_target_mem).is_empty());
 
-        real.create_task_watcher(task_id_real.0, watcher_target_real.0)
+        real.create_task_watcher(task_id_real, watcher_target_real)
             .await
             .unwrap();
         wait_for!(!rows_real.watchers_of(watcher_target_real).is_empty());
-        mem.create_task_watcher(task_id_mem.0, watcher_target_mem.0)
+        mem.create_task_watcher(task_id_mem, watcher_target_mem)
             .await
             .unwrap();
-        real.delete_watches_of_target(watcher_target_real.0)
+        real.delete_watches_of_target(watcher_target_real)
             .await
             .unwrap();
         wait_for!(rows_real.watchers_of(watcher_target_real).is_empty());
-        mem.delete_watches_of_target(watcher_target_mem.0)
+        mem.delete_watches_of_target(watcher_target_mem)
             .await
             .unwrap();
         assert!(rows_mem.watchers_of(watcher_target_mem).is_empty());
 
-        real.create_task_watcher(task_id_real.0, watcher_target_real.0)
+        real.create_task_watcher(task_id_real, watcher_target_real)
             .await
             .unwrap();
         wait_for!(!rows_real.watchers_of(watcher_target_real).is_empty());
-        mem.create_task_watcher(task_id_mem.0, watcher_target_mem.0)
+        mem.create_task_watcher(task_id_mem, watcher_target_mem)
             .await
             .unwrap();
-        real.delete_watches_by_watcher(task_id_real.0)
-            .await
-            .unwrap();
+        real.delete_watches_by_watcher(task_id_real).await.unwrap();
         wait_for!(rows_real.watchers_of(watcher_target_real).is_empty());
-        mem.delete_watches_by_watcher(task_id_mem.0).await.unwrap();
+        mem.delete_watches_by_watcher(task_id_mem).await.unwrap();
         assert!(rows_mem.watchers_of(watcher_target_mem).is_empty());
 
         // -- poll ownership (agent_state) ----------------------------------------
-        real.claim_poll_owner("task".into(), task_id_real.0, "host-a".into())
+        real.claim_poll_owner(PollScopeId::Task(task_id_real), "host-a".into())
             .await
             .unwrap();
-        wait_for!(rows_real.poll_owner("task", task_id_real.0).is_some());
-        mem.claim_poll_owner("task".into(), task_id_mem.0, "host-a".into())
+        wait_for!(rows_real
+            .poll_owner(PollScopeId::Task(task_id_real))
+            .is_some());
+        mem.claim_poll_owner(PollScopeId::Task(task_id_mem), "host-a".into())
             .await
             .unwrap();
         assert_eq!(
-            rows_real.poll_owner("task", task_id_real.0),
-            rows_mem.poll_owner("task", task_id_mem.0),
+            rows_real.poll_owner(PollScopeId::Task(task_id_real)),
+            rows_mem.poll_owner(PollScopeId::Task(task_id_mem)),
             "poll_owner after claim"
         );
 
         // A second claim leaves the existing owner alone.
-        real.claim_poll_owner("task".into(), task_id_real.0, "host-b".into())
+        real.claim_poll_owner(PollScopeId::Task(task_id_real), "host-b".into())
             .await
             .unwrap();
-        mem.claim_poll_owner("task".into(), task_id_mem.0, "host-b".into())
+        mem.claim_poll_owner(PollScopeId::Task(task_id_mem), "host-b".into())
             .await
             .unwrap();
         assert_eq!(
-            rows_real.poll_owner("task", task_id_real.0),
-            rows_mem.poll_owner("task", task_id_mem.0),
+            rows_real.poll_owner(PollScopeId::Task(task_id_real)),
+            rows_mem.poll_owner(PollScopeId::Task(task_id_mem)),
             "poll_owner unchanged after a second claim"
         );
 
-        real.override_poll_owner("task".into(), task_id_real.0, "host-b".into())
+        real.override_poll_owner(PollScopeId::Task(task_id_real), "host-b".into())
             .await
             .unwrap();
         wait_for!(rows_real
-            .poll_owner("task", task_id_real.0)
+            .poll_owner(PollScopeId::Task(task_id_real))
             .is_some_and(|p| p.host == "host-b"));
-        mem.override_poll_owner("task".into(), task_id_mem.0, "host-b".into())
+        mem.override_poll_owner(PollScopeId::Task(task_id_mem), "host-b".into())
             .await
             .unwrap();
         assert_eq!(
-            rows_real.poll_owner("task", task_id_real.0),
-            rows_mem.poll_owner("task", task_id_mem.0),
+            rows_real.poll_owner(PollScopeId::Task(task_id_real)),
+            rows_mem.poll_owner(PollScopeId::Task(task_id_mem)),
             "poll_owner after override"
-        );
-
-        let real_bad_scope = real
-            .claim_poll_owner("bogus".into(), 1, "host-a".into())
-            .await
-            .unwrap();
-        let mem_bad_scope = mem
-            .claim_poll_owner("bogus".into(), 1, "host-a".into())
-            .await
-            .unwrap();
-        assert_eq!(
-            real_bad_scope.won(),
-            mem_bad_scope.won(),
-            "unknown poll scope"
         );
 
         // -- host registry (agent_state) -----------------------------------------
@@ -1447,9 +1394,9 @@ fn memory_caller_matches_the_real_reducers() {
             created_by: accepted.identity.clone(),
             ..blank_epic()
         };
-        let feed_epic_id_real = real.create_epic(feed_epic(epic_id_real)).await.unwrap();
+        let feed_epic_id_real = real.create_epic(feed_epic(epic_id_real)).await.unwrap().0;
         wait_for!(rows_real.epic(EpicId(feed_epic_id_real)).is_some());
-        let feed_epic_id_mem = mem.create_epic(feed_epic(epic_id_mem)).await.unwrap();
+        let feed_epic_id_mem = mem.create_epic(feed_epic(epic_id_mem)).await.unwrap().0;
         assert_eq!(feed_epic_id_real, feed_epic_id_mem, "feed epic id");
 
         let feed_item = |external_id: &str| bindings::FeedTaskUpsertItem {
@@ -1473,7 +1420,7 @@ fn memory_caller_matches_the_real_reducers() {
         // '{owner}'`) makes the inserted rows arrive on this subscription at
         // all.
         real.upsert_feed_tasks(
-            feed_epic_id_real,
+            EpicId(feed_epic_id_real),
             vec![feed_item("feed-a"), feed_item("feed-b")],
             accepted.identity.clone(),
         )
@@ -1481,7 +1428,7 @@ fn memory_caller_matches_the_real_reducers() {
         .unwrap();
         wait_for!(rows_real.tasks_for_epic(EpicId(feed_epic_id_real)).len() == 2);
         mem.upsert_feed_tasks(
-            feed_epic_id_mem,
+            EpicId(feed_epic_id_mem),
             vec![feed_item("feed-a"), feed_item("feed-b")],
             "conformance".into(),
         )
@@ -1495,14 +1442,14 @@ fn memory_caller_matches_the_real_reducers() {
 
         // Additive: an absent item is left alone.
         real.upsert_feed_tasks_additive(
-            feed_epic_id_real,
+            EpicId(feed_epic_id_real),
             vec![feed_item("feed-a")],
             accepted.identity.clone(),
         )
         .await
         .unwrap();
         mem.upsert_feed_tasks_additive(
-            feed_epic_id_mem,
+            EpicId(feed_epic_id_mem),
             vec![feed_item("feed-a")],
             "conformance".into(),
         )
@@ -1516,7 +1463,7 @@ fn memory_caller_matches_the_real_reducers() {
 
         // Non-additive: absent items are removed.
         real.upsert_feed_tasks(
-            feed_epic_id_real,
+            EpicId(feed_epic_id_real),
             vec![feed_item("feed-a")],
             accepted.identity.clone(),
         )
@@ -1524,7 +1471,7 @@ fn memory_caller_matches_the_real_reducers() {
         .unwrap();
         wait_for!(rows_real.tasks_for_epic(EpicId(feed_epic_id_real)).len() == 1);
         mem.upsert_feed_tasks(
-            feed_epic_id_mem,
+            EpicId(feed_epic_id_mem),
             vec![feed_item("feed-a")],
             "conformance".into(),
         )
@@ -1536,13 +1483,13 @@ fn memory_caller_matches_the_real_reducers() {
             "feed task count after stale-delete"
         );
 
-        real.delete_stale_subtree_feed_tasks(epic_id_real, vec![])
+        real.delete_stale_subtree_feed_tasks(EpicId(epic_id_real), vec![])
             .await
             .unwrap();
         wait_for!(rows_real
             .tasks_for_epic(EpicId(feed_epic_id_real))
             .is_empty());
-        mem.delete_stale_subtree_feed_tasks(epic_id_mem, vec![])
+        mem.delete_stale_subtree_feed_tasks(EpicId(epic_id_mem), vec![])
             .await
             .unwrap();
         assert!(rows_mem.tasks_for_epic(EpicId(feed_epic_id_mem)).is_empty());
@@ -1555,30 +1502,38 @@ fn memory_caller_matches_the_real_reducers() {
         // `own_creations` is what makes them visible for the id read-back.
         let real_repo_group = real
             .create_repo_group_sub_epic(
-                epic_id_real,
+                EpicId(epic_id_real),
                 "repo-group".into(),
                 accepted.identity.clone(),
             )
             .await
             .unwrap();
-        wait_for!(rows_real.epic(EpicId(real_repo_group)).is_some());
+        wait_for!(rows_real.epic(real_repo_group).is_some());
         let mem_repo_group = mem
-            .create_repo_group_sub_epic(epic_id_mem, "repo-group".into(), accepted.identity.clone())
+            .create_repo_group_sub_epic(
+                EpicId(epic_id_mem),
+                "repo-group".into(),
+                accepted.identity.clone(),
+            )
             .await
             .unwrap();
         assert_eq!(real_repo_group, mem_repo_group, "repo-group sub-epic id");
-        compare_epic_ignoring_created_at(real_repo_group);
+        compare_epic_ignoring_created_at(real_repo_group.0);
         // Find-or-create: a repeat resolves to the same id.
         let real_repo_group_again = real
             .create_repo_group_sub_epic(
-                epic_id_real,
+                EpicId(epic_id_real),
                 "repo-group".into(),
                 accepted.identity.clone(),
             )
             .await
             .unwrap();
         let mem_repo_group_again = mem
-            .create_repo_group_sub_epic(epic_id_mem, "repo-group".into(), accepted.identity.clone())
+            .create_repo_group_sub_epic(
+                EpicId(epic_id_mem),
+                "repo-group".into(),
+                accepted.identity.clone(),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -1593,7 +1548,7 @@ fn memory_caller_matches_the_real_reducers() {
         let real_managed = real
             .create_managed_role_epic(
                 "reviewer".into(),
-                epic_id_real,
+                Some(EpicId(epic_id_real)),
                 "review".into(),
                 "cmd".into(),
                 60,
@@ -1601,11 +1556,11 @@ fn memory_caller_matches_the_real_reducers() {
             )
             .await
             .unwrap();
-        wait_for!(rows_real.epic(EpicId(real_managed)).is_some());
+        wait_for!(rows_real.epic(real_managed).is_some());
         let mem_managed = mem
             .create_managed_role_epic(
                 "reviewer".into(),
-                epic_id_mem,
+                Some(EpicId(epic_id_mem)),
                 "review".into(),
                 "cmd".into(),
                 60,
@@ -1614,14 +1569,14 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap();
         assert_eq!(real_managed, mem_managed, "managed-role epic id");
-        compare_epic_ignoring_created_at(real_managed);
+        compare_epic_ignoring_created_at(real_managed.0);
 
         // -- drop_closed_retired_feed_items (agent_state) ------------------------
         // Retirement only fires from the guarded `delete_task`, never from a
         // feed's own stale-reconciliation delete — see the module's own
         // `delete_stale_feed_tasks_in_epic` vs. `delete_task_side_effects`.
         real.upsert_feed_tasks(
-            feed_epic_id_real,
+            EpicId(feed_epic_id_real),
             vec![feed_item("retire-me")],
             accepted.identity.clone(),
         )
@@ -1631,7 +1586,7 @@ fn memory_caller_matches_the_real_reducers() {
             .tasks_for_epic(EpicId(feed_epic_id_real))
             .is_empty());
         mem.upsert_feed_tasks(
-            feed_epic_id_mem,
+            EpicId(feed_epic_id_mem),
             vec![feed_item("retire-me")],
             "conformance".into(),
         )
@@ -1655,13 +1610,13 @@ fn memory_caller_matches_the_real_reducers() {
             "retired_without_task before drop"
         );
 
-        real.drop_closed_retired_feed_items(feed_epic_id_real, vec![])
+        real.drop_closed_retired_feed_items(EpicId(feed_epic_id_real), vec![])
             .await
             .unwrap();
         wait_for!(rows_real
             .retired_without_task(EpicId(feed_epic_id_real), &["retire-me".to_string()])
             .is_empty());
-        mem.drop_closed_retired_feed_items(feed_epic_id_mem, vec![])
+        mem.drop_closed_retired_feed_items(EpicId(feed_epic_id_mem), vec![])
             .await
             .unwrap();
         assert!(rows_mem
@@ -1701,12 +1656,12 @@ fn memory_caller_matches_the_real_reducers() {
             ..blank_task_in_epic(epic_id)
         };
         let real_successor = real
-            .respawn_phoenix_successor(real_predecessor.0, phoenix_successor(epic_id_real))
+            .respawn_phoenix_successor(real_predecessor, phoenix_successor(epic_id_real))
             .await
             .unwrap();
         wait_for!(rows_real.task(real_successor).is_some());
         let mem_successor = mem
-            .respawn_phoenix_successor(mem_predecessor.0, phoenix_successor(epic_id_mem))
+            .respawn_phoenix_successor(mem_predecessor, phoenix_successor(epic_id_mem))
             .await
             .unwrap();
         assert_eq!(real_successor, mem_successor, "phoenix successor id");
@@ -1731,14 +1686,14 @@ fn memory_caller_matches_the_real_reducers() {
             mem.delete_task(mem_id).await.unwrap();
         }
         real.delete_epic(real_repo_group).await.unwrap();
-        wait_for!(rows_real.epic(EpicId(real_repo_group)).is_none());
+        wait_for!(rows_real.epic(real_repo_group).is_none());
         mem.delete_epic(mem_repo_group).await.unwrap();
         real.delete_epic(real_managed).await.unwrap();
-        wait_for!(rows_real.epic(EpicId(real_managed)).is_none());
+        wait_for!(rows_real.epic(real_managed).is_none());
         mem.delete_epic(mem_managed).await.unwrap();
-        real.delete_epic(feed_epic_id_real).await.unwrap();
+        real.delete_epic(EpicId(feed_epic_id_real)).await.unwrap();
         wait_for!(rows_real.epic(EpicId(feed_epic_id_real)).is_none());
-        mem.delete_epic(feed_epic_id_mem).await.unwrap();
+        mem.delete_epic(EpicId(feed_epic_id_mem)).await.unwrap();
 
         // -- delete_task's learnings cascade (learnings, task #5003) ----------------
         // `delete_task_side_effects`'s learnings half: a sourced learning is
@@ -1760,11 +1715,11 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap();
         assert_eq!(sourced_real, sourced_mem, "generated sourced learning id");
-        real.record_learning_retrieval(task_id_real.0, sourced_real.0, "query_learnings".into())
+        real.record_learning_retrieval(task_id_real, sourced_real, RetrievalSource::QueryLearnings)
             .await
             .unwrap();
         wait_for!(!rows_real.retrievals_for_task(task_id_real).is_empty());
-        mem.record_learning_retrieval(task_id_mem.0, sourced_mem.0, "query_learnings".into())
+        mem.record_learning_retrieval(task_id_mem, sourced_mem, RetrievalSource::QueryLearnings)
             .await
             .unwrap();
 
@@ -1794,14 +1749,14 @@ fn memory_caller_matches_the_real_reducers() {
         assert!(rows_real.retrievals_for_task(task_id_real).is_empty());
         assert!(rows_mem.retrievals_for_task(task_id_mem).is_empty());
 
-        real.delete_epic(epic_id_real).await.unwrap();
+        real.delete_epic(EpicId(epic_id_real)).await.unwrap();
         wait_for!(rows_real.epic(EpicId(epic_id_real)).is_none());
-        mem.delete_epic(epic_id_mem).await.unwrap();
+        mem.delete_epic(EpicId(epic_id_mem)).await.unwrap();
         assert!(rows_mem.epic(EpicId(epic_id_mem)).is_none());
 
-        real.delete_epic(epic2_id_real).await.unwrap();
+        real.delete_epic(EpicId(epic2_id_real)).await.unwrap();
         wait_for!(rows_real.epic(EpicId(epic2_id_real)).is_none());
-        mem.delete_epic(epic2_id_mem).await.unwrap();
+        mem.delete_epic(EpicId(epic2_id_mem)).await.unwrap();
         assert!(rows_mem.epic(EpicId(epic2_id_mem)).is_none());
     });
 }

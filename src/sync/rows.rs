@@ -42,7 +42,7 @@ use tokio::sync::watch;
 
 use crate::db::{LearningFilter, UsageQuery};
 use crate::models::{
-    Epic, EpicId, Learning, LearningId, LearningRetrieval, Task, TaskId, UsageSummary,
+    Epic, EpicId, Learning, LearningId, LearningRetrieval, PollScopeId, Task, TaskId, UsageSummary,
 };
 use crate::spacetime::bindings;
 
@@ -584,7 +584,8 @@ impl SharedRows {
 
     /// The `PollOwner` row for `(scope, scope_id)`, or `None` if unclaimed.
     /// `core.allium: PollOwner`.
-    pub fn poll_owner(&self, scope: &str, scope_id: i64) -> Option<PollOwnerRow> {
+    pub fn poll_owner(&self, target: PollScopeId) -> Option<PollOwnerRow> {
+        let (scope, scope_id) = target.wire();
         self.read(|rows| {
             let id = rows
                 .poll_owners_by_scope

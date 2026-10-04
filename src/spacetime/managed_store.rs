@@ -110,6 +110,14 @@ pub struct ManagedStoreReady {
     pub database: String,
 }
 
+/// A named server address, trimmed. Blank is none: a shell that exports
+/// `DISPATCH_SPACETIME_SERVER=` means "unset".
+pub fn normalize_server(server: Option<String>) -> Option<String> {
+    server
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 /// `AbortWhenTheManagedStoreHasNoCli` and the choice between the named and the
 /// managed store. The CLI check is consulted only when no store is named --
 /// a launch that names one is not asked for the CLI. Blank is none: a shell
@@ -118,10 +126,7 @@ pub fn select_store(
     explicit: Option<String>,
     cli_on_path: impl FnOnce() -> bool,
 ) -> Result<StoreSelection, StartupAbort> {
-    match explicit
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    {
+    match normalize_server(explicit) {
         Some(named) => Ok(StoreSelection::Named(named)),
         None if cli_on_path() => Ok(StoreSelection::Managed),
         None => Err(StartupAbort::SpacetimeCliMissing),

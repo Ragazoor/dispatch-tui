@@ -26,17 +26,22 @@
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use spacetimedb_sdk::{
     DbContext, Identity, SubscriptionHandle as _, Table as _, TableWithPrimaryKey as _,
 };
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
+use super::encode;
 use super::{
     Accepted, ConnectError, SharedRows, StoreConnector, SubscriptionRequest, CONNECT_TIMEOUT,
     MUTATION_TIMEOUT,
 };
-use crate::models::{LearningId, TaskId};
+use crate::models::{
+    EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource,
+    SubStatus, TaskId,
+};
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
     apply_learning_verdicts as _, archive_stale_learnings as _, batch_delete as _,
@@ -134,7 +139,12 @@ impl SpacetimeSdkConnector {
     /// [`SharedRows`] is keyed by id and a row's id cannot change.
     fn wire_rows(&self, connection: &DbConnection) {
         let db = connection.db();
+        self.wire_tables(db);
+        self.wire_subtree_walk(db);
+    }
 
+    /// Every table's row callbacks. See [`Self::wire_rows`].
+    fn wire_tables(&self, db: &bindings::RemoteTables) {
         // One table's three callbacks, so "every table gets all three" is
         // structural rather than something a reader verifies by counting.
         //
@@ -234,11 +244,12 @@ impl SpacetimeSdkConnector {
             remove_setting,
             |row: &bindings::Setting| { row.id.clone() }
         );
+    }
 
-        // The sub-epic walk: about the ASK rather than the rows, so beside the
-        // `epics` wiring above rather than in it.
-        // A follow widens the ask, on the initial load and live alike — see
-        // `follow_epic`.
+    /// The sub-epic walk: about the ASK rather than the rows, so apart from
+    /// the table wiring. A follow widens the ask, on the initial load and live
+    /// alike — see `follow_epic`.
+    fn wire_subtree_walk(&self, db: &bindings::RemoteTables) {
         let subtree = Arc::clone(&self.subtree);
         db.subscriptions()
             .on_insert(move |ctx, row| follow_epic(ctx, &subtree, row.epic_id));
@@ -251,6 +262,68 @@ impl SpacetimeSdkConnector {
                 widen_subtree(ctx, &subtree, new);
             }
         });
+    }
+
+    /// Build the SDK connection and hand back the channel its identity will
+    /// arrive on. Everything up to, and not including, advancing it.
+    async fn open_connection(
+        &self,
+        server: &str,
+        token: Option<&str>,
+    ) -> Result<
+        (
+            DbConnection,
+            oneshot::Receiver<Result<(Identity, String), String>>,
+        ),
+        ConnectError,
+    > {
+        let server = server.to_string();
+        let target = format!("{server}/{}", self.database);
+        let database = self.database.clone();
+        let token = token.map(str::to_owned);
+
+        // `on_connect` fires on the SDK's own thread; the oneshot is how the
+        // identity crosses back. `on_connect_error` feeds the same channel, so
+        // exactly one of the two arms always answers and the timeout below is
+        // the only other way out.
+        let (answer, identified) = answer_once::<Result<(Identity, String), String>>();
+        let on_error = answer.clone();
+        let on_drop = Arc::clone(&self.dropped);
+
+        let built = tokio::task::spawn_blocking(move || {
+            DbConnection::builder()
+                .with_uri(server)
+                .with_database_name(database)
+                .with_token(token)
+                .on_connect(move |_conn, identity, token| answer(Ok((identity, token.to_string()))))
+                .on_connect_error(move |_ctx, error| on_error(Err(error.to_string())))
+                // THE ONLY PLACE A LOST CONNECTION IS EVER NOTICED. Without
+                // it the board sits in `connected` through a closed lid, a
+                // tunnel or a restarted server: never retrying, never saying
+                // anything, and still drawing rows nothing refreshes.
+                .on_disconnect(move |_ctx, error| {
+                    let reason = error.map_or_else(
+                        || "the store closed the connection".to_string(),
+                        |e| e.to_string(),
+                    );
+                    #[allow(clippy::unwrap_used)]
+                    let mut slot = on_drop.lock().unwrap_or_else(|e| e.into_inner());
+                    // First writer wins. A reconnect clears the slot, so a
+                    // value already here is this same outage — and the first
+                    // reason is the one that explains it.
+                    slot.get_or_insert(reason);
+                })
+                .build()
+        });
+
+        let connection = match tokio::time::timeout(CONNECT_TIMEOUT, built).await {
+            Ok(Ok(Ok(connection))) => connection,
+            Ok(Ok(Err(error))) => return Err(ConnectError::new(error.to_string())),
+            Ok(Err(join)) => return Err(ConnectError::new(format!("connect task failed: {join}"))),
+            Err(_elapsed) => return Err(ConnectError::timed_out(&target)),
+        };
+
+        Ok((connection, identified))
     }
 
     /// Replace any previous connection, disconnecting it first, and drop what
@@ -338,51 +411,8 @@ impl SpacetimeSdkConnector {
 #[async_trait]
 impl StoreConnector for SpacetimeSdkConnector {
     async fn connect(&self, server: &str, token: Option<&str>) -> Result<Accepted, ConnectError> {
-        let server = server.to_string();
         let target = format!("{server}/{}", self.database);
-        let database = self.database.clone();
-        let token = token.map(str::to_owned);
-
-        // `on_connect` fires on the SDK's own thread; the oneshot is how the
-        // identity crosses back. `on_connect_error` feeds the same channel, so
-        // exactly one of the two arms always answers and the timeout below is
-        // the only other way out.
-        let (answer, identified) = answer_once::<Result<(Identity, String), String>>();
-        let on_error = answer.clone();
-        let on_drop = Arc::clone(&self.dropped);
-
-        let built = tokio::task::spawn_blocking(move || {
-            DbConnection::builder()
-                .with_uri(server)
-                .with_database_name(database)
-                .with_token(token)
-                .on_connect(move |_conn, identity, token| answer(Ok((identity, token.to_string()))))
-                .on_connect_error(move |_ctx, error| on_error(Err(error.to_string())))
-                // THE ONLY PLACE A LOST CONNECTION IS EVER NOTICED. Without
-                // it the board sits in `connected` through a closed lid, a
-                // tunnel or a restarted server: never retrying, never saying
-                // anything, and still drawing rows nothing refreshes.
-                .on_disconnect(move |_ctx, error| {
-                    let reason = error.map_or_else(
-                        || "the store closed the connection".to_string(),
-                        |e| e.to_string(),
-                    );
-                    #[allow(clippy::unwrap_used)]
-                    let mut slot = on_drop.lock().unwrap_or_else(|e| e.into_inner());
-                    // First writer wins. A reconnect clears the slot, so a
-                    // value already here is this same outage — and the first
-                    // reason is the one that explains it.
-                    slot.get_or_insert(reason);
-                })
-                .build()
-        });
-
-        let connection = match tokio::time::timeout(CONNECT_TIMEOUT, built).await {
-            Ok(Ok(Ok(connection))) => connection,
-            Ok(Ok(Err(error))) => return Err(ConnectError::new(error.to_string())),
-            Ok(Err(join)) => return Err(ConnectError::new(format!("connect task failed: {join}"))),
-            Err(_elapsed) => return Err(ConnectError::timed_out(&target)),
-        };
+        let (connection, identified) = self.open_connection(server, token).await?;
 
         // Nothing arrives, and no callback fires, until the connection is being
         // advanced. This is the SDK's explicit requirement rather than an
@@ -601,7 +631,7 @@ fn answer_once<T: Send + 'static>() -> (
         #[allow(clippy::unwrap_used)]
         let sender = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(tx) = sender {
-            let _ = tx.send(value);
+            fire(tx, value);
         }
     };
     (answer, rx)
@@ -796,6 +826,18 @@ impl SdkReducerCaller {
     }
 }
 
+/// Deliver a reducer's answer to the caller waiting on it.
+///
+/// A send fails only when the caller already stopped waiting — it timed out in
+/// [`awaiting_answer`] — so the answer has nowhere to go. Logged rather than
+/// dropped silently: a late answer is the one trace that a write did land
+/// after the caller was told it "may or may not" have.
+fn fire<T>(tx: oneshot::Sender<T>, answer: T) {
+    if tx.send(answer).is_err() {
+        tracing::debug!("a reducer answered after its caller stopped waiting");
+    }
+}
+
 /// Send a reducer call and wait for the store's answer.
 ///
 /// The `*_then` form rather than the fire-and-forget one, and that is the whole
@@ -853,10 +895,42 @@ macro_rules! answered_call {
             connection
                 .reducers
                 .$reducer($($arg,)* move |_, result| {
-                    let _ = tx.send(outcome_of(result));
+                    fire(tx, outcome_of(result));
                 })
         })
         .await
+    }};
+}
+
+/// A create-shaped reducer call: send it, then read the generated id back off
+/// the transaction by matching the row this board just sent.
+///
+/// The sibling of [`answered_call!`] for the calls whose answer is an id. What
+/// varies is the reducer, the table to search and the predicate that picks
+/// out the caller's own row; everything else — the callback, the read-back
+/// and the refusal text of [`generated_id`] — is written once here.
+macro_rules! created_call {
+    ($self:ident, $what:expr, $label:expr, $reducer:ident ( $($arg:expr),* $(,)? ), $table:ident, |$row:ident| $pred:expr) => {{
+        let connection = $self.connection()?;
+        let answer = awaiting_answer($what, move |tx| {
+            connection
+                .reducers
+                .$reducer($($arg,)* move |ctx, result| {
+                    fire(
+                        tx,
+                        outcome_with_ids(result, || {
+                            ctx.db
+                                .$table()
+                                .iter()
+                                .filter(|$row| $pred)
+                                .map(|$row| $row.id)
+                                .collect()
+                        }),
+                    );
+                })
+        })
+        .await?;
+        generated_id(answer, $label)
     }};
 }
 
@@ -879,25 +953,16 @@ impl ReducerCaller for SdkReducerCaller {
     /// made. What it cannot do is return somebody else's row, because the
     /// creator and the creation instant are ours.
     async fn create_task(&self, row: bindings::Task) -> anyhow::Result<TaskId> {
-        let connection = self.connection()?;
         let wanted = row.clone();
-        let answer = awaiting_answer("the new task", move |tx| {
-            connection
-                .reducers
-                .create_task_then(row, move |ctx, result| {
-                    let _ = tx.send(outcome_with_ids(result, || {
-                        ctx.db
-                            .tasks()
-                            .iter()
-                            .filter(|t| matches_create(t, &wanted))
-                            .map(|t| t.id)
-                            .collect()
-                    }));
-                })
-        })
-        .await?;
-
-        generated_id(answer, "task").map(TaskId)
+        created_call!(
+            self,
+            "the new task",
+            "task",
+            create_task_then(row),
+            tasks,
+            |t| matches_create(t, &wanted)
+        )
+        .map(TaskId)
     }
 
     async fn patch_task(
@@ -915,13 +980,13 @@ impl ReducerCaller for SdkReducerCaller {
     async fn set_task_epic(
         &self,
         id: TaskId,
-        epic_id: i64,
+        epic_id: Option<EpicId>,
         owner: String,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the epic move",
-            set_task_epic_then(id.0, epic_id, owner)
+            set_task_epic_then(id.0, encode::epic_ref(epic_id), owner)
         )
     }
 
@@ -934,66 +999,64 @@ impl ReducerCaller for SdkReducerCaller {
     }
 
     /// The epic twin of [`Self::create_task`], matched the same way.
-    async fn create_epic(&self, row: bindings::Epic) -> anyhow::Result<i64> {
-        let connection = self.connection()?;
+    async fn create_epic(&self, row: bindings::Epic) -> anyhow::Result<EpicId> {
         let wanted = row.clone();
-        let answer = awaiting_answer("the new epic", move |tx| {
-            connection
-                .reducers
-                .create_epic_then(row, move |ctx, result| {
-                    let _ = tx.send(outcome_with_ids(result, || {
-                        ctx.db
-                            .epics()
-                            .iter()
-                            .filter(|e| matches_created_epic(e, &wanted))
-                            .map(|e| e.id)
-                            .collect()
-                    }));
-                })
-        })
-        .await?;
-
-        generated_id(answer, "epic")
+        created_call!(
+            self,
+            "the new epic",
+            "epic",
+            create_epic_then(row),
+            epics,
+            |e| matches_created_epic(e, &wanted)
+        )
+        .map(EpicId)
     }
 
     async fn patch_epic(
         &self,
-        id: i64,
+        id: EpicId,
         patch: bindings::EpicPatch,
     ) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(self, "the epic change", patch_epic_then(id, patch))
+        answered_call!(self, "the epic change", patch_epic_then(id.0, patch))
     }
 
-    async fn delete_epic(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(self, "the epic deletion", delete_epic_then(id))
+    async fn delete_epic(&self, id: EpicId) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the epic deletion", delete_epic_then(id.0))
     }
 
     async fn batch_delete(
         &self,
-        task_ids: Vec<i64>,
-        epic_ids: Vec<i64>,
+        task_ids: Vec<TaskId>,
+        epic_ids: Vec<EpicId>,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the batch delete",
-            batch_delete_then(task_ids, epic_ids)
+            batch_delete_then(
+                task_ids.into_iter().map(|id| id.0).collect(),
+                epic_ids.into_iter().map(|id| id.0).collect()
+            )
         )
     }
 
-    async fn recalculate_epic_status(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
+    async fn recalculate_epic_status(&self, id: EpicId) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the epic recalculation",
-            recalculate_epic_status_then(id)
+            recalculate_epic_status_then(id.0)
         )
     }
 
     async fn save_repo_path(
         &self,
         path: String,
-        last_used: String,
+        last_used: DateTime<Utc>,
     ) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(self, "the repo path", save_repo_path_then(path, last_used))
+        answered_call!(
+            self,
+            "the repo path",
+            save_repo_path_then(path, encode::stamp(last_used))
+        )
     }
 
     async fn delete_repo_path(&self, path: String) -> anyhow::Result<ReducerOutcome> {
@@ -1016,36 +1079,36 @@ impl ReducerCaller for SdkReducerCaller {
         &self,
         repo_path: String,
         branch: String,
-        last_used: String,
+        last_used: DateTime<Utc>,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the base branch",
-            record_base_branch_then(repo_path, branch, last_used)
+            record_base_branch_then(repo_path, branch, encode::stamp(last_used))
         )
     }
 
     async fn subscribe_to_epic(
         &self,
         subscriber: String,
-        epic_id: i64,
+        epic_id: EpicId,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the subscription",
-            subscribe_to_epic_then(subscriber, epic_id)
+            subscribe_to_epic_then(subscriber, epic_id.0)
         )
     }
 
     async fn unsubscribe_from_epic(
         &self,
         subscriber: String,
-        epic_id: i64,
+        epic_id: EpicId,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the unsubscribe",
-            unsubscribe_from_epic_then(subscriber, epic_id)
+            unsubscribe_from_epic_then(subscriber, epic_id.0)
         )
     }
 
@@ -1068,76 +1131,78 @@ impl ReducerCaller for SdkReducerCaller {
     /// the same mechanism [`Self::create_task`] uses, matched on content
     /// instead of on identity because a learning is not owned by anyone.
     async fn create_learning(&self, row: bindings::Learning) -> anyhow::Result<LearningId> {
-        let connection = self.connection()?;
         let wanted = row.clone();
-        let answer = awaiting_answer("the new learning", move |tx| {
-            connection
-                .reducers
-                .create_learning_then(row, move |ctx, result| {
-                    let _ = tx.send(outcome_with_ids(result, || {
-                        ctx.db
-                            .learnings()
-                            .iter()
-                            .filter(|l| matches_created_learning(l, &wanted))
-                            .map(|l| l.id)
-                            .collect()
-                    }));
-                })
-        })
-        .await?;
-
-        generated_id(answer, "learning").map(LearningId)
+        created_call!(
+            self,
+            "the new learning",
+            "learning",
+            create_learning_then(row),
+            learnings,
+            |l| matches_created_learning(l, &wanted)
+        )
+        .map(LearningId)
     }
 
     async fn patch_learning(
         &self,
-        id: i64,
+        id: LearningId,
         patch: bindings::LearningPatch,
     ) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(self, "the learning change", patch_learning_then(id, patch))
+        answered_call!(
+            self,
+            "the learning change",
+            patch_learning_then(id.0, patch)
+        )
     }
 
-    async fn delete_learning(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(self, "the learning deletion", delete_learning_then(id))
+    async fn delete_learning(&self, id: LearningId) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the learning deletion", delete_learning_then(id.0))
     }
 
-    async fn rescope_epic_learnings(&self, from: i64, to: i64) -> anyhow::Result<ReducerOutcome> {
+    async fn rescope_epic_learnings(
+        &self,
+        from: EpicId,
+        to: EpicId,
+    ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the learning re-scope",
-            rescope_epic_learnings_then(from, to)
+            rescope_epic_learnings_then(from.0, to.0)
         )
     }
 
     async fn record_learning_retrieval(
         &self,
-        task_id: i64,
-        learning_id: i64,
-        source: String,
+        task_id: TaskId,
+        learning_id: LearningId,
+        source: RetrievalSource,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the learning retrieval",
-            record_learning_retrieval_then(task_id, learning_id, source)
+            record_learning_retrieval_then(task_id.0, learning_id.0, source.as_str().to_string())
         )
     }
 
     async fn apply_learning_verdicts(
         &self,
-        verdicts: Vec<bindings::LearningVerdictInput>,
+        verdicts: Vec<(LearningId, LearningVerdict)>,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the learning verdicts",
-            apply_learning_verdicts_then(verdicts)
+            apply_learning_verdicts_then(encode::verdict_inputs(&verdicts))
         )
     }
 
-    async fn archive_stale_learnings(&self, cutoff: String) -> anyhow::Result<ReducerOutcome> {
+    async fn archive_stale_learnings(
+        &self,
+        cutoff: DateTime<Utc>,
+    ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the stale-learning sweep",
-            archive_stale_learnings_then(cutoff)
+            archive_stale_learnings_then(encode::stamp(cutoff))
         )
     }
 
@@ -1176,12 +1241,13 @@ impl ReducerCaller for SdkReducerCaller {
     /// `src/db/queries/subagents.rs::subagent_start`, which has no precondition.
     async fn subagent_start(
         &self,
-        task_id: i64,
+        task_id: TaskId,
         agent_id: String,
         session_id: String,
-        started_at: String,
+        started_at: DateTime<Utc>,
     ) -> anyhow::Result<i64> {
         let connection = self.connection()?;
+        let (task_id, started_at) = (task_id.0, encode::subagent_started_at(started_at));
         awaiting_answer("the subagent start", move |tx| {
             connection.reducers.subagent_start_then(
                 task_id,
@@ -1189,13 +1255,16 @@ impl ReducerCaller for SdkReducerCaller {
                 session_id,
                 started_at,
                 move |ctx, result| {
-                    let _ = tx.send(value_or_bail(result, "the subagent start", || {
-                        ctx.db
-                            .tasks()
-                            .id()
-                            .find(&task_id)
-                            .map_or(0, |t| t.live_subagents)
-                    }));
+                    fire(
+                        tx,
+                        value_or_bail(result, "the subagent start", || {
+                            ctx.db
+                                .tasks()
+                                .id()
+                                .find(&task_id)
+                                .map_or(0, |t| t.live_subagents)
+                        }),
+                    );
                 },
             )
         })
@@ -1208,20 +1277,24 @@ impl ReducerCaller for SdkReducerCaller {
     /// `agent_id` is a no-op rather than an error.
     async fn subagent_stop(
         &self,
-        task_id: i64,
+        task_id: TaskId,
         agent_id: String,
         session_id: String,
     ) -> anyhow::Result<DrainReadBack> {
         let connection = self.connection()?;
+        let task_id = task_id.0;
         awaiting_answer("the subagent stop", move |tx| {
             connection.reducers.subagent_stop_then(
                 task_id,
                 agent_id,
                 session_id,
                 move |ctx, result| {
-                    let _ = tx.send(value_or_bail(result, "the subagent stop", || {
-                        subagent_drain_read_back(ctx, task_id)
-                    }));
+                    fire(
+                        tx,
+                        value_or_bail(result, "the subagent stop", || {
+                            subagent_drain_read_back(ctx, task_id)
+                        }),
+                    );
                 },
             )
         })
@@ -1230,15 +1303,19 @@ impl ReducerCaller for SdkReducerCaller {
 
     /// Same shape as [`Self::subagent_stop`] — see
     /// `src/db/queries/subagents.rs::subagent_clear`.
-    async fn subagent_clear(&self, task_id: i64) -> anyhow::Result<DrainReadBack> {
+    async fn subagent_clear(&self, task_id: TaskId) -> anyhow::Result<DrainReadBack> {
         let connection = self.connection()?;
+        let task_id = task_id.0;
         awaiting_answer("the subagent clear", move |tx| {
             connection
                 .reducers
                 .subagent_clear_then(task_id, move |ctx, result| {
-                    let _ = tx.send(value_or_bail(result, "the subagent clear", || {
-                        subagent_drain_read_back(ctx, task_id)
-                    }));
+                    fire(
+                        tx,
+                        value_or_bail(result, "the subagent clear", || {
+                            subagent_drain_read_back(ctx, task_id)
+                        }),
+                    );
                 })
         })
         .await?
@@ -1246,12 +1323,12 @@ impl ReducerCaller for SdkReducerCaller {
 
     async fn subagent_clear_and_void_pending_stop(
         &self,
-        task_id: i64,
+        task_id: TaskId,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the subagent clear",
-            subagent_clear_and_void_pending_stop_then(task_id)
+            subagent_clear_and_void_pending_stop_then(task_id.0)
         )
     }
 
@@ -1263,21 +1340,25 @@ impl ReducerCaller for SdkReducerCaller {
     /// unambiguous.
     async fn try_record_stop(
         &self,
-        id: i64,
-        stop_pending_at: String,
+        id: TaskId,
+        stop_pending_at: DateTime<Utc>,
     ) -> anyhow::Result<Option<bool>> {
         let connection = self.connection()?;
+        let (id, stop_pending_at) = (id.0, encode::stamp(stop_pending_at));
         awaiting_answer("the stop", move |tx| {
             connection
                 .reducers
                 .try_record_stop_then(id, stop_pending_at, move |ctx, result| {
-                    let _ = tx.send(flag_or_refused(result, || {
-                        ctx.db
-                            .tasks()
-                            .id()
-                            .find(&id)
-                            .is_some_and(|t| is_review(&t.status))
-                    }));
+                    fire(
+                        tx,
+                        flag_or_refused(result, || {
+                            ctx.db
+                                .tasks()
+                                .id()
+                                .find(&id)
+                                .is_some_and(|t| is_review(&t.status))
+                        }),
+                    );
                 })
         })
         .await
@@ -1285,27 +1366,30 @@ impl ReducerCaller for SdkReducerCaller {
 
     async fn record_pre_tool_use(
         &self,
-        id: i64,
-        sub_status: String,
-        at: String,
+        id: TaskId,
+        sub_status: SubStatus,
+        at: DateTime<Utc>,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the activity stamp",
-            record_pre_tool_use_then(id, sub_status, at)
+            record_pre_tool_use_then(id.0, sub_status.as_str().to_string(), encode::stamp(at))
         )
     }
 
     async fn record_notification(
         &self,
-        id: i64,
-        mode: String,
-        at: String,
+        id: TaskId,
+        mode: NotificationWrite,
+        at: DateTime<Utc>,
     ) -> anyhow::Result<ReducerOutcome> {
+        let Some(mode) = encode::notification_mode(mode) else {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        };
         answered_call!(
             self,
             "the notification",
-            record_notification_then(id, mode, at)
+            record_notification_then(id.0, mode.to_string(), encode::stamp(at))
         )
     }
 
@@ -1314,26 +1398,30 @@ impl ReducerCaller for SdkReducerCaller {
     /// it from a pre-read instead. See its own doc comment.
     async fn record_user_prompt_submit(
         &self,
-        id: i64,
-        activity_at: String,
-        prompt_at: String,
+        id: TaskId,
+        activity_at: DateTime<Utc>,
+        prompt_at: DateTime<Utc>,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the prompt",
-            record_user_prompt_submit_then(id, activity_at, prompt_at)
+            record_user_prompt_submit_then(
+                id.0,
+                encode::stamp(activity_at),
+                encode::stamp(prompt_at)
+            )
         )
     }
 
     async fn mark_pr_learnings_gate_shown(
         &self,
-        id: i64,
-        at: String,
+        id: TaskId,
+        at: DateTime<Utc>,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the PR learnings gate",
-            mark_pr_learnings_gate_shown_then(id, at)
+            mark_pr_learnings_gate_shown_then(id.0, encode::stamp(at))
         )
     }
 
@@ -1345,51 +1433,51 @@ impl ReducerCaller for SdkReducerCaller {
 
     async fn upsert_feed_tasks(
         &self,
-        epic_id: i64,
+        epic_id: EpicId,
         items: Vec<bindings::FeedTaskUpsertItem>,
         created_by: String,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the feed upsert",
-            upsert_feed_tasks_then(epic_id, items, created_by)
+            upsert_feed_tasks_then(epic_id.0, items, created_by)
         )
     }
 
     async fn upsert_feed_tasks_additive(
         &self,
-        epic_id: i64,
+        epic_id: EpicId,
         items: Vec<bindings::FeedTaskUpsertItem>,
         created_by: String,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the additive feed upsert",
-            upsert_feed_tasks_additive_then(epic_id, items, created_by)
+            upsert_feed_tasks_additive_then(epic_id.0, items, created_by)
         )
     }
 
     async fn delete_stale_subtree_feed_tasks(
         &self,
-        parent_id: i64,
+        parent_id: EpicId,
         keep_external_ids: Vec<String>,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the stale feed task cleanup",
-            delete_stale_subtree_feed_tasks_then(parent_id, keep_external_ids)
+            delete_stale_subtree_feed_tasks_then(parent_id.0, keep_external_ids)
         )
     }
 
     async fn drop_closed_retired_feed_items(
         &self,
-        feed_epic_id: i64,
+        feed_epic_id: EpicId,
         keep_external_ids: Vec<String>,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the closed-retirement cleanup",
-            drop_closed_retired_feed_items_then(feed_epic_id, keep_external_ids)
+            drop_closed_retired_feed_items_then(feed_epic_id.0, keep_external_ids)
         )
     }
 
@@ -1400,35 +1488,23 @@ impl ReducerCaller for SdkReducerCaller {
     /// the same way a freshly created one answers with its new one.
     async fn create_repo_group_sub_epic(
         &self,
-        parent_id: i64,
+        parent_id: EpicId,
         title: String,
         created_by: String,
-    ) -> anyhow::Result<i64> {
-        let connection = self.connection()?;
+    ) -> anyhow::Result<EpicId> {
+        let parent_id = parent_id.0;
         let wanted_title = title.clone();
-        let answer = awaiting_answer("the repo-group epic", move |tx| {
-            connection.reducers.create_repo_group_sub_epic_then(
-                parent_id,
-                title,
-                created_by,
-                move |ctx, result| {
-                    let _ = tx.send(outcome_with_ids(result, || {
-                        ctx.db
-                            .epics()
-                            .iter()
-                            .filter(|e| {
-                                e.parent_epic_id == parent_id
-                                    && e.title == wanted_title
-                                    && e.origin == "repo-group"
-                            })
-                            .map(|e| e.id)
-                            .collect()
-                    }));
-                },
-            )
-        })
-        .await?;
-        generated_id(answer, "repo-group epic")
+        created_call!(
+            self,
+            "the repo-group epic",
+            "repo-group epic",
+            create_repo_group_sub_epic_then(parent_id, title, created_by),
+            epics,
+            |e| e.parent_epic_id == parent_id
+                && e.title == wanted_title
+                && e.origin == "repo-group"
+        )
+        .map(EpicId)
     }
 
     /// The managed-role twin, matched on `(parent_epic_id, feed_role)` — the
@@ -1437,111 +1513,103 @@ impl ReducerCaller for SdkReducerCaller {
     async fn create_managed_role_epic(
         &self,
         title: String,
-        parent_epic_id: i64,
+        parent_epic_id: Option<EpicId>,
         role: String,
         feed_command: String,
         feed_interval_secs: i64,
         created_by: String,
-    ) -> anyhow::Result<i64> {
-        let connection = self.connection()?;
+    ) -> anyhow::Result<EpicId> {
+        let parent_epic_id = encode::epic_ref(parent_epic_id);
         let wanted_role = role.clone();
-        let answer = awaiting_answer("the managed-role epic", move |tx| {
-            connection.reducers.create_managed_role_epic_then(
+        created_call!(
+            self,
+            "the managed-role epic",
+            "managed-role epic",
+            create_managed_role_epic_then(
                 title,
                 parent_epic_id,
                 role,
                 feed_command,
                 feed_interval_secs,
-                created_by,
-                move |ctx, result| {
-                    let _ = tx.send(outcome_with_ids(result, || {
-                        ctx.db
-                            .epics()
-                            .iter()
-                            .filter(|e| {
-                                e.parent_epic_id == parent_epic_id && e.feed_role == wanted_role
-                            })
-                            .map(|e| e.id)
-                            .collect()
-                    }));
-                },
-            )
-        })
-        .await?;
-        generated_id(answer, "managed-role epic")
+                created_by
+            ),
+            epics,
+            |e| e.parent_epic_id == parent_epic_id && e.feed_role == wanted_role
+        )
+        .map(EpicId)
     }
 
     // -- Task watchers -----------------------------------------------------------
 
     async fn create_task_watcher(
         &self,
-        watcher_task_id: i64,
-        target_task_id: i64,
+        watcher_task_id: TaskId,
+        target_task_id: TaskId,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the watch",
-            create_task_watcher_then(watcher_task_id, target_task_id)
+            create_task_watcher_then(watcher_task_id.0, target_task_id.0)
         )
     }
 
     async fn delete_task_watcher(
         &self,
-        watcher_task_id: i64,
-        target_task_id: i64,
+        watcher_task_id: TaskId,
+        target_task_id: TaskId,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the watch removal",
-            delete_task_watcher_then(watcher_task_id, target_task_id)
+            delete_task_watcher_then(watcher_task_id.0, target_task_id.0)
         )
     }
 
     async fn delete_watches_of_target(
         &self,
-        target_task_id: i64,
+        target_task_id: TaskId,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the target's watches",
-            delete_watches_of_target_then(target_task_id)
+            delete_watches_of_target_then(target_task_id.0)
         )
     }
 
     async fn delete_watches_by_watcher(
         &self,
-        watcher_task_id: i64,
+        watcher_task_id: TaskId,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the watcher's watches",
-            delete_watches_by_watcher_then(watcher_task_id)
+            delete_watches_by_watcher_then(watcher_task_id.0)
         )
     }
 
     async fn claim_poll_owner(
         &self,
-        scope: String,
-        scope_id: i64,
+        target: PollScopeId,
         host: String,
     ) -> anyhow::Result<ReducerOutcome> {
+        let (scope, scope_id) = target.wire();
         answered_call!(
             self,
             "the poll claim",
-            claim_poll_owner_then(scope, scope_id, host)
+            claim_poll_owner_then(scope.to_string(), scope_id, host)
         )
     }
 
     async fn override_poll_owner(
         &self,
-        scope: String,
-        scope_id: i64,
+        target: PollScopeId,
         host: String,
     ) -> anyhow::Result<ReducerOutcome> {
+        let (scope, scope_id) = target.wire();
         answered_call!(
             self,
             "the poll override",
-            override_poll_owner_then(scope, scope_id, host)
+            override_poll_owner_then(scope.to_string(), scope_id, host)
         )
     }
 
@@ -1549,12 +1617,12 @@ impl ReducerCaller for SdkReducerCaller {
 
     async fn batch_patch_sub_status(
         &self,
-        updates: Vec<bindings::SubStatusUpdate>,
+        updates: Vec<(TaskId, SubStatus)>,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the sub-status batch",
-            batch_patch_sub_status_then(updates)
+            batch_patch_sub_status_then(encode::sub_status_updates(&updates))
         )
     }
 
@@ -1565,29 +1633,20 @@ impl ReducerCaller for SdkReducerCaller {
     /// accepts.
     async fn respawn_phoenix_successor(
         &self,
-        predecessor: i64,
+        predecessor: TaskId,
         successor: bindings::Task,
     ) -> anyhow::Result<TaskId> {
-        let connection = self.connection()?;
+        let predecessor = predecessor.0;
         let wanted = successor.clone();
-        let answer = awaiting_answer("the phoenix successor", move |tx| {
-            connection.reducers.respawn_phoenix_successor_then(
-                predecessor,
-                successor,
-                move |ctx, result| {
-                    let _ = tx.send(outcome_with_ids(result, || {
-                        ctx.db
-                            .tasks()
-                            .iter()
-                            .filter(|t| matches_create(t, &wanted))
-                            .map(|t| t.id)
-                            .collect()
-                    }));
-                },
-            )
-        })
-        .await?;
-        generated_id(answer, "phoenix successor").map(TaskId)
+        created_call!(
+            self,
+            "the phoenix successor",
+            "phoenix successor",
+            respawn_phoenix_successor_then(predecessor, successor),
+            tasks,
+            |t| matches_create(t, &wanted)
+        )
+        .map(TaskId)
     }
 
     // -- Host registry (Phase 6c) -----------------------------------------------

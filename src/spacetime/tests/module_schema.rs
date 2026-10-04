@@ -28,18 +28,28 @@ struct Column {
     nullable: bool,
 }
 
+/// Every `.rs` file of the module, concatenated in name order. The module is
+/// split by domain, so its tables no longer sit in one file.
 fn module_source() -> String {
-    let path: PathBuf = [
-        env!("CARGO_MANIFEST_DIR"),
-        "spacetime",
-        "module",
-        "src",
-        "lib.rs",
-    ]
-    .iter()
-    .collect();
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("cannot read the module source at {}: {e}", path.display()))
+    let dir: PathBuf = [env!("CARGO_MANIFEST_DIR"), "spacetime", "module", "src"]
+        .iter()
+        .collect();
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("cannot read the module source at {}: {e}", dir.display()))
+        .map(|entry| entry.unwrap_or_else(|e| panic!("cannot list {}: {e}", dir.display())))
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+        .collect();
+    files.sort();
+    files
+        .iter()
+        .map(|path| {
+            std::fs::read_to_string(path).unwrap_or_else(|e| {
+                panic!("cannot read the module source at {}: {e}", path.display())
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Every `#[spacetimedb::table(accessor = ..)]` struct, by accessor name, with

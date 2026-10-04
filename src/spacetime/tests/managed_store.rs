@@ -988,3 +988,15 @@ fn the_connection_and_the_managed_store_name_the_same_database() {
     // have every board connect to a database nothing published.
     assert_eq!(crate::sync::SHARED_DATABASE_NAME, MANAGED_DATABASE_NAME);
 }
+
+#[test]
+fn normalize_server_trims_and_treats_blank_as_none() {
+    use crate::spacetime::managed_store::normalize_server;
+    assert_eq!(normalize_server(None), None);
+    assert_eq!(normalize_server(Some(String::new())), None);
+    assert_eq!(normalize_server(Some("  \t".into())), None);
+    assert_eq!(
+        normalize_server(Some(" http://h:1 ".into())),
+        Some("http://h:1".to_string())
+    );
+}

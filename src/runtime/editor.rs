@@ -454,7 +454,11 @@ impl TuiRuntime {
         // edit that leaves feed_command untouched or clears it, or an epic
         // this host already owns.
         if feed_command_changed {
-            match self.board_reads.poll_owner("epic", epic_id.0).await {
+            match self
+                .board_reads
+                .poll_owner(crate::models::PollScopeId::Epic(epic_id))
+                .await
+            {
                 Ok(Some(other_host)) if other_host != self.host_id => {
                     cmds.extend(app.update(Message::Epic(
                         crate::tui::messages::EpicMessage::FeedOwnerTakeoverOffered {
@@ -1267,11 +1271,14 @@ mod epic_edit_tests {
         async fn list_all_base_branches(&self) -> anyhow::Result<Vec<(String, String)>> {
             self.inner.list_all_base_branches().await
         }
-        async fn poll_owner(&self, scope: &str, scope_id: i64) -> anyhow::Result<Option<String>> {
-            if scope == "epic" && scope_id == self.epic_id.0 {
+        async fn poll_owner(
+            &self,
+            target: crate::models::PollScopeId,
+        ) -> anyhow::Result<Option<String>> {
+            if target == crate::models::PollScopeId::Epic(self.epic_id) {
                 Ok(Some(self.owner.clone()))
             } else {
-                self.inner.poll_owner(scope, scope_id).await
+                self.inner.poll_owner(target).await
             }
         }
         async fn revision(&self) -> Option<u64> {

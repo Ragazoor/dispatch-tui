@@ -14,15 +14,17 @@ use std::sync::{Arc, Mutex};
 
 use crate::db::{CreateTaskRequest, SharedWriter, TaskPatch};
 use crate::models::{
-    EpicId, LearningId, NotificationWrite, StopOutcome, SubStatus, SubagentDrain, TaskId,
-    TaskStatus, UserPromptOutcome,
+    EpicId, LearningId, NotificationWrite, PollScopeId, RetrievalSource, StopOutcome, SubStatus,
+    SubagentDrain, TaskId, TaskStatus, UserPromptOutcome,
 };
 use crate::service::{Clock, FixedClock};
 use crate::spacetime::bindings;
+use crate::sync::encode;
 use crate::sync::writes::{
     push_host_registration, DrainReadBack, ReducerCaller, ReducerOutcome, ReducerWriter,
     WriterIdentity,
 };
+use chrono::{DateTime, Utc};
 
 /// A settled identity, without a store behind it.
 struct FixedIdentity(Option<String>);
@@ -244,9 +246,10 @@ impl ReducerCaller for RecordingCaller {
     async fn set_task_epic(
         &self,
         id: TaskId,
-        epic_id: i64,
+        epic_id: Option<EpicId>,
         owner: String,
     ) -> anyhow::Result<ReducerOutcome> {
+        let epic_id = encode::epic_ref(epic_id);
         self.answer(Sent::SetTaskEpic(id, epic_id, owner))
     }
 
@@ -258,40 +261,46 @@ impl ReducerCaller for RecordingCaller {
         self.answer(Sent::Release(id))
     }
 
-    async fn create_epic(&self, row: bindings::Epic) -> anyhow::Result<i64> {
+    async fn create_epic(&self, row: bindings::Epic) -> anyhow::Result<EpicId> {
         self.record(Sent::CreateEpic(Box::new(row)))?;
-        Ok(7)
+        Ok(EpicId(7))
     }
 
     async fn patch_epic(
         &self,
-        id: i64,
+        id: EpicId,
         _patch: bindings::EpicPatch,
     ) -> anyhow::Result<ReducerOutcome> {
+        let id = id.0;
         self.answer(Sent::PatchEpic(id))
     }
 
-    async fn delete_epic(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
+    async fn delete_epic(&self, id: EpicId) -> anyhow::Result<ReducerOutcome> {
+        let id = id.0;
         self.answer(Sent::DeleteEpic(id))
     }
 
     async fn batch_delete(
         &self,
-        task_ids: Vec<i64>,
-        epic_ids: Vec<i64>,
+        task_ids: Vec<TaskId>,
+        epic_ids: Vec<EpicId>,
     ) -> anyhow::Result<ReducerOutcome> {
+        let task_ids: Vec<i64> = task_ids.into_iter().map(|id| id.0).collect();
+        let epic_ids: Vec<i64> = epic_ids.into_iter().map(|id| id.0).collect();
         self.answer(Sent::BatchDelete(task_ids, epic_ids))
     }
 
-    async fn recalculate_epic_status(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
+    async fn recalculate_epic_status(&self, id: EpicId) -> anyhow::Result<ReducerOutcome> {
+        let id = id.0;
         self.answer(Sent::Recalculate(id))
     }
 
     async fn save_repo_path(
         &self,
         path: String,
-        last_used: String,
+        last_used: DateTime<Utc>,
     ) -> anyhow::Result<ReducerOutcome> {
+        let last_used = encode::stamp(last_used);
         self.answer(Sent::SaveRepoPath(path, last_used))
     }
 
@@ -311,24 +320,27 @@ impl ReducerCaller for RecordingCaller {
         &self,
         repo_path: String,
         branch: String,
-        last_used: String,
+        last_used: DateTime<Utc>,
     ) -> anyhow::Result<ReducerOutcome> {
+        let last_used = encode::stamp(last_used);
         self.answer(Sent::RecordBaseBranch(repo_path, branch, last_used))
     }
 
     async fn subscribe_to_epic(
         &self,
         subscriber: String,
-        epic_id: i64,
+        epic_id: EpicId,
     ) -> anyhow::Result<ReducerOutcome> {
+        let epic_id = epic_id.0;
         self.answer(Sent::Subscribe(subscriber, epic_id))
     }
 
     async fn unsubscribe_from_epic(
         &self,
         subscriber: String,
-        epic_id: i64,
+        epic_id: EpicId,
     ) -> anyhow::Result<ReducerOutcome> {
+        let epic_id = epic_id.0;
         self.answer(Sent::Unsubscribe(subscriber, epic_id))
     }
 
@@ -352,37 +364,52 @@ impl ReducerCaller for RecordingCaller {
 
     async fn patch_learning(
         &self,
-        id: i64,
+        id: LearningId,
         patch: bindings::LearningPatch,
     ) -> anyhow::Result<ReducerOutcome> {
+        let id = id.0;
         self.answer(Sent::PatchLearning(id, Box::new(patch)))
     }
 
-    async fn delete_learning(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
+    async fn delete_learning(&self, id: LearningId) -> anyhow::Result<ReducerOutcome> {
+        let id = id.0;
         self.answer(Sent::DeleteLearning(id))
     }
 
-    async fn rescope_epic_learnings(&self, from: i64, to: i64) -> anyhow::Result<ReducerOutcome> {
+    async fn rescope_epic_learnings(
+        &self,
+        from: EpicId,
+        to: EpicId,
+    ) -> anyhow::Result<ReducerOutcome> {
+        let from = from.0;
+        let to = to.0;
         self.answer(Sent::RescopeEpicLearnings(from, to))
     }
 
     async fn record_learning_retrieval(
         &self,
-        task_id: i64,
-        learning_id: i64,
-        source: String,
+        task_id: TaskId,
+        learning_id: LearningId,
+        source: RetrievalSource,
     ) -> anyhow::Result<ReducerOutcome> {
+        let task_id = task_id.0;
+        let learning_id = learning_id.0;
+        let source = source.as_str().to_string();
         self.answer(Sent::RecordLearningRetrieval(task_id, learning_id, source))
     }
 
     async fn apply_learning_verdicts(
         &self,
-        verdicts: Vec<bindings::LearningVerdictInput>,
+        verdicts: Vec<(crate::models::LearningId, crate::models::LearningVerdict)>,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::ApplyLearningVerdicts(verdicts.len()))
     }
 
-    async fn archive_stale_learnings(&self, cutoff: String) -> anyhow::Result<ReducerOutcome> {
+    async fn archive_stale_learnings(
+        &self,
+        cutoff: DateTime<Utc>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        let cutoff = encode::stamp(cutoff);
         self.answer(Sent::ArchiveStaleLearnings(cutoff))
     }
 
@@ -396,11 +423,13 @@ impl ReducerCaller for RecordingCaller {
 
     async fn subagent_start(
         &self,
-        task_id: i64,
+        task_id: TaskId,
         agent_id: String,
         session_id: String,
-        started_at: String,
+        started_at: DateTime<Utc>,
     ) -> anyhow::Result<i64> {
+        let task_id = task_id.0;
+        let started_at = encode::subagent_started_at(started_at);
         self.record(Sent::SubagentStart(
             task_id, agent_id, session_id, started_at,
         ))?;
@@ -409,23 +438,26 @@ impl ReducerCaller for RecordingCaller {
 
     async fn subagent_stop(
         &self,
-        task_id: i64,
+        task_id: TaskId,
         agent_id: String,
         session_id: String,
     ) -> anyhow::Result<DrainReadBack> {
+        let task_id = task_id.0;
         self.record(Sent::SubagentStop(task_id, agent_id, session_id))?;
         Ok(self.drain)
     }
 
-    async fn subagent_clear(&self, task_id: i64) -> anyhow::Result<DrainReadBack> {
+    async fn subagent_clear(&self, task_id: TaskId) -> anyhow::Result<DrainReadBack> {
+        let task_id = task_id.0;
         self.record(Sent::SubagentClear(task_id))?;
         Ok(self.drain)
     }
 
     async fn subagent_clear_and_void_pending_stop(
         &self,
-        task_id: i64,
+        task_id: TaskId,
     ) -> anyhow::Result<ReducerOutcome> {
+        let task_id = task_id.0;
         self.answer(Sent::SubagentClearAndVoidPendingStop(task_id))
     }
 
@@ -434,9 +466,11 @@ impl ReducerCaller for RecordingCaller {
     /// `None` — the refusal `try_record_stop`'s `NoOp` reads.
     async fn try_record_stop(
         &self,
-        id: i64,
-        stop_pending_at: String,
+        id: TaskId,
+        stop_pending_at: DateTime<Utc>,
     ) -> anyhow::Result<Option<bool>> {
+        let id = id.0;
+        let stop_pending_at = encode::stamp(stop_pending_at);
         if let Some(why) = &self.refuses_with {
             anyhow::bail!("{why}");
         }
@@ -452,45 +486,59 @@ impl ReducerCaller for RecordingCaller {
 
     async fn record_pre_tool_use(
         &self,
-        id: i64,
-        sub_status: String,
-        at: String,
+        id: TaskId,
+        sub_status: SubStatus,
+        at: DateTime<Utc>,
     ) -> anyhow::Result<ReducerOutcome> {
+        let id = id.0;
+        let sub_status = sub_status.as_str().to_string();
+        let at = encode::stamp(at);
         self.answer(Sent::RecordPreToolUse(id, sub_status, at))
     }
 
     async fn record_notification(
         &self,
-        id: i64,
-        mode: String,
-        at: String,
+        id: TaskId,
+        mode: crate::models::NotificationWrite,
+        at: DateTime<Utc>,
     ) -> anyhow::Result<ReducerOutcome> {
+        let id = id.0;
+        let at = encode::stamp(at);
+        let mode = encode::notification_mode(mode)
+            .unwrap_or("ignore")
+            .to_string();
         self.answer(Sent::RecordNotification(id, mode, at))
     }
 
     async fn record_user_prompt_submit(
         &self,
-        id: i64,
-        activity_at: String,
-        prompt_at: String,
+        id: TaskId,
+        activity_at: DateTime<Utc>,
+        prompt_at: DateTime<Utc>,
     ) -> anyhow::Result<ReducerOutcome> {
+        let id = id.0;
+        let activity_at = encode::stamp(activity_at);
+        let prompt_at = encode::stamp(prompt_at);
         self.answer(Sent::RecordUserPromptSubmit(id, activity_at, prompt_at))
     }
 
     async fn mark_pr_learnings_gate_shown(
         &self,
-        id: i64,
-        at: String,
+        id: TaskId,
+        at: DateTime<Utc>,
     ) -> anyhow::Result<ReducerOutcome> {
+        let id = id.0;
+        let at = encode::stamp(at);
         self.answer(Sent::MarkPrLearningsGateShown(id, at))
     }
 
     async fn upsert_feed_tasks(
         &self,
-        epic_id: i64,
+        epic_id: EpicId,
         items: Vec<bindings::FeedTaskUpsertItem>,
         created_by: String,
     ) -> anyhow::Result<ReducerOutcome> {
+        let epic_id = epic_id.0;
         let outcome = self.answer(Sent::UpsertFeedTasks(epic_id, items.len(), created_by))?;
         if matches!(outcome, ReducerOutcome::Applied(_)) {
             self.simulate_feed_removal();
@@ -500,10 +548,11 @@ impl ReducerCaller for RecordingCaller {
 
     async fn upsert_feed_tasks_additive(
         &self,
-        epic_id: i64,
+        epic_id: EpicId,
         items: Vec<bindings::FeedTaskUpsertItem>,
         created_by: String,
     ) -> anyhow::Result<ReducerOutcome> {
+        let epic_id = epic_id.0;
         let outcome = self.answer(Sent::UpsertFeedTasksAdditive(
             epic_id,
             items.len(),
@@ -517,9 +566,10 @@ impl ReducerCaller for RecordingCaller {
 
     async fn delete_stale_subtree_feed_tasks(
         &self,
-        parent_id: i64,
+        parent_id: EpicId,
         keep_external_ids: Vec<String>,
     ) -> anyhow::Result<ReducerOutcome> {
+        let parent_id = parent_id.0;
         let outcome = self.answer(Sent::DeleteStaleSubtreeFeedTasks(
             parent_id,
             keep_external_ids,
@@ -532,9 +582,10 @@ impl ReducerCaller for RecordingCaller {
 
     async fn drop_closed_retired_feed_items(
         &self,
-        feed_epic_id: i64,
+        feed_epic_id: EpicId,
         keep_external_ids: Vec<String>,
     ) -> anyhow::Result<ReducerOutcome> {
+        let feed_epic_id = feed_epic_id.0;
         self.answer(Sent::DropClosedRetiredFeedItems(
             feed_epic_id,
             keep_external_ids,
@@ -543,23 +594,25 @@ impl ReducerCaller for RecordingCaller {
 
     async fn create_repo_group_sub_epic(
         &self,
-        parent_id: i64,
+        parent_id: EpicId,
         title: String,
         created_by: String,
-    ) -> anyhow::Result<i64> {
+    ) -> anyhow::Result<EpicId> {
+        let parent_id = parent_id.0;
         self.record(Sent::CreateRepoGroupSubEpic(parent_id, title, created_by))?;
-        Ok(8)
+        Ok(EpicId(8))
     }
 
     async fn create_managed_role_epic(
         &self,
         title: String,
-        parent_epic_id: i64,
+        parent_epic_id: Option<EpicId>,
         role: String,
         feed_command: String,
         feed_interval_secs: i64,
         created_by: String,
-    ) -> anyhow::Result<i64> {
+    ) -> anyhow::Result<EpicId> {
+        let parent_epic_id = encode::epic_ref(parent_epic_id);
         self.record(Sent::CreateManagedRoleEpic(
             title,
             parent_epic_id,
@@ -568,69 +621,78 @@ impl ReducerCaller for RecordingCaller {
             feed_interval_secs,
             created_by,
         ))?;
-        Ok(9)
+        Ok(EpicId(9))
     }
 
     async fn create_task_watcher(
         &self,
-        watcher_task_id: i64,
-        target_task_id: i64,
+        watcher_task_id: TaskId,
+        target_task_id: TaskId,
     ) -> anyhow::Result<ReducerOutcome> {
+        let watcher_task_id = watcher_task_id.0;
+        let target_task_id = target_task_id.0;
         self.answer(Sent::CreateTaskWatcher(watcher_task_id, target_task_id))
     }
 
     async fn delete_task_watcher(
         &self,
-        watcher_task_id: i64,
-        target_task_id: i64,
+        watcher_task_id: TaskId,
+        target_task_id: TaskId,
     ) -> anyhow::Result<ReducerOutcome> {
+        let watcher_task_id = watcher_task_id.0;
+        let target_task_id = target_task_id.0;
         self.answer(Sent::DeleteTaskWatcher(watcher_task_id, target_task_id))
     }
 
     async fn delete_watches_of_target(
         &self,
-        target_task_id: i64,
+        target_task_id: TaskId,
     ) -> anyhow::Result<ReducerOutcome> {
+        let target_task_id = target_task_id.0;
         self.answer(Sent::DeleteWatchesOfTarget(target_task_id))
     }
 
     async fn delete_watches_by_watcher(
         &self,
-        watcher_task_id: i64,
+        watcher_task_id: TaskId,
     ) -> anyhow::Result<ReducerOutcome> {
+        let watcher_task_id = watcher_task_id.0;
         self.answer(Sent::DeleteWatchesByWatcher(watcher_task_id))
     }
 
     async fn claim_poll_owner(
         &self,
-        scope: String,
-        scope_id: i64,
+        target: PollScopeId,
         host: String,
     ) -> anyhow::Result<ReducerOutcome> {
+        let (scope, scope_id) = target.wire();
+        let scope = scope.to_string();
         self.answer(Sent::ClaimPollOwner(scope, scope_id, host))
     }
 
     async fn override_poll_owner(
         &self,
-        scope: String,
-        scope_id: i64,
+        target: PollScopeId,
         host: String,
     ) -> anyhow::Result<ReducerOutcome> {
+        let (scope, scope_id) = target.wire();
+        let scope = scope.to_string();
         self.answer(Sent::OverridePollOwner(scope, scope_id, host))
     }
 
     async fn batch_patch_sub_status(
         &self,
-        updates: Vec<bindings::SubStatusUpdate>,
+        updates: Vec<(TaskId, SubStatus)>,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::BatchPatchSubStatus(updates.len()))
     }
 
     async fn respawn_phoenix_successor(
         &self,
-        predecessor: i64,
+        predecessor: TaskId,
         successor: bindings::Task,
     ) -> anyhow::Result<TaskId> {
+        let predecessor = predecessor.0;
         self.record(Sent::RespawnPhoenixSuccessor(
             predecessor,
             Box::new(successor),

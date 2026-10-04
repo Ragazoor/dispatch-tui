@@ -33,8 +33,25 @@ fn repo_file(parts: &[&str]) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
 }
 
+/// Every `.rs` file of the module, concatenated in name order. The module is
+/// split by domain, so its tables and reducers no longer sit in one file.
 fn module_source() -> String {
-    repo_file(&["spacetime", "module", "src", "lib.rs"])
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("spacetime/module/src");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
+        .map(|entry| entry.unwrap_or_else(|e| panic!("cannot list {}: {e}", dir.display())))
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+        .collect();
+    files.sort();
+    files
+        .iter()
+        .map(|path| {
+            std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn bindings_index() -> String {

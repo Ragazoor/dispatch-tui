@@ -240,7 +240,7 @@ pub trait TaskCrud: TaskRead {
     /// [`Self::delete_task`]/[`EpicCrud::delete_epic`] once per selected item.
     /// Validates every task and epic against the store's TRUE state and
     /// deletes all of them, or none, together — see
-    /// `spacetime/module/src/lib.rs::batch_delete` for the shared-store path,
+    /// `spacetime/module/src/tasks_epics.rs::batch_delete` for the shared-store path,
     /// which is the one that actually needs the joint guard (a stale
     /// subscription view is what "one operation, or nothing at all" has to
     /// hold up against; the local SQLite path has always had a single

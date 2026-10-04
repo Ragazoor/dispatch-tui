@@ -399,7 +399,11 @@ impl FeedRunner {
             // `SerialisedFeedCycle` contention: a non-owning host must not
             // retry every tick just because it lost the ownership check.
             self.last_run.insert(epic.id, now);
-            let owner = match self.board_reads.poll_owner("epic", epic.id.0).await {
+            let owner = match self
+                .board_reads
+                .poll_owner(crate::models::PollScopeId::Epic(epic.id))
+                .await
+            {
                 Ok(owner) => owner,
                 Err(err) => {
                     tracing::debug!(

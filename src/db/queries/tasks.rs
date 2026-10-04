@@ -498,7 +498,7 @@ impl super::super::TaskCrud for Database {
     /// tasks.allium: `BatchDelete`'s atomic counterpart to `delete_task`/
     /// `delete_epic` looped per item. On the shared store this is the ONLY
     /// path that actually needs the joint guard — see
-    /// `spacetime/module/src/lib.rs::batch_delete`'s doc comment. The local
+    /// `spacetime/module/src/tasks_epics.rs::batch_delete`'s doc comment. The local
     /// SQLite fallback below re-validates nothing before deleting, matching
     /// `delete_task`'s and `delete_epic`'s own SQLite shape (neither
     /// re-checks status here either): the single serialized writer has no
