@@ -358,6 +358,57 @@ pub(super) fn prompt_launch_command(claude: &str, launch_flags: &str) -> String 
     )
 }
 
+/// The prompt the agent receives: the preamble, the worktree-scope reminder,
+/// then the variant's own prompt.
+fn full_agent_prompt(head: &str, prompt: &str) -> String {
+    format!(
+        "{head}Always work from this worktree folder — do not `cd` to the parent repo \
+         or other directories.\n\n\
+         {prompt}"
+    )
+}
+
+/// Write the prompt file and start `claude` in the provisioned tmux window,
+/// rolling the provisioning back if either step fails.
+fn launch_agent(
+    task: &Task,
+    repo_path: &str,
+    provision: &super::worktree::ProvisionResult,
+    full_prompt: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<()> {
+    let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
+    let claude = runner.agent_binaries().claude_quoted();
+    let launch_flags = agent_launch_flags(task.id, &provision.worktree_path, runner);
+    let claude_cmd = prompt_launch_command(&claude, &launch_flags);
+
+    // Anything failing here happens after the worktree and tmux window both
+    // exist — a fresh worktree (this attempt's own `git worktree add`) and the
+    // window this same provisioning call just opened must both be rolled back
+    // so a re-dispatch of the same task takes the fresh path again, not the
+    // reuse path with its weaker fetch guarantee. A reused worktree predates
+    // this attempt and is never touched — see rollback_failed_provisioning.
+    let launch: Result<()> = (|| {
+        fs::write(&prompt_file, full_prompt)
+            .with_context(|| format!("failed to write {prompt_file}"))?;
+        tmux::send_keys(&provision.tmux_window, &claude_cmd, runner)
+            .context("failed to send keys to tmux window")?;
+        Ok(())
+    })();
+    if let Err(e) = launch {
+        rollback_failed_provisioning(
+            repo_path,
+            &provision.worktree_path,
+            // Provisioning succeeded, so this attempt owns the window.
+            Some(&provision.tmux_window),
+            provision.reused_worktree,
+            runner,
+        );
+        return Err(e);
+    }
+    Ok(())
+}
+
 /// Provision worktree, build the prompt, write the prompt file, launch Claude
 /// via tmux.
 ///
@@ -417,41 +468,8 @@ fn dispatch_with_prompt(
     );
     let head = compose_prompt_head(&preamble, provision.fetch_warning.as_deref());
 
-    let prompt = make_prompt();
-    let full_prompt = format!(
-        "{head}Always work from this worktree folder — do not `cd` to the parent repo \
-         or other directories.\n\n\
-         {prompt}"
-    );
-    let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
-    let claude = runner.agent_binaries().claude_quoted();
-    let launch_flags = agent_launch_flags(task.id, &provision.worktree_path, runner);
-    let claude_cmd = prompt_launch_command(&claude, &launch_flags);
-
-    // Anything failing here happens after the worktree and tmux window both
-    // exist — a fresh worktree (this attempt's own `git worktree add`) and the
-    // window this same provisioning call just opened must both be rolled back
-    // so a re-dispatch of the same task takes the fresh path again, not the
-    // reuse path with its weaker fetch guarantee. A reused worktree predates
-    // this attempt and is never touched — see rollback_failed_provisioning.
-    let launch: Result<()> = (|| {
-        fs::write(&prompt_file, &full_prompt)
-            .with_context(|| format!("failed to write {prompt_file}"))?;
-        tmux::send_keys(&provision.tmux_window, &claude_cmd, runner)
-            .context("failed to send keys to tmux window")?;
-        Ok(())
-    })();
-    if let Err(e) = launch {
-        rollback_failed_provisioning(
-            &repo_path,
-            &provision.worktree_path,
-            // Provisioning succeeded, so this attempt owns the window.
-            Some(&provision.tmux_window),
-            provision.reused_worktree,
-            runner,
-        );
-        return Err(e);
-    }
+    let full_prompt = full_agent_prompt(&head, &make_prompt());
+    launch_agent(task, &repo_path, &provision, &full_prompt, runner)?;
 
     spawn_agent_tree_pane(
         &provision.tmux_window,
