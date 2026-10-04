@@ -594,6 +594,62 @@ fn worktree_is_reusable(path: &std::path::Path) -> Result<bool> {
     }
 }
 
+/// Create the `.worktrees` root and run `git worktree add` for a worktree that
+/// does not exist yet.
+fn add_worktree(
+    runner: &dyn ProcessRunner,
+    repo_path: &str,
+    worktree_path: &str,
+    worktree_name: &str,
+    start_ref: Option<&str>,
+    timeout: Duration,
+) -> Result<()> {
+    // Deliberately below the fetch and inside this branch: the directory
+    // exists only to hold the worktree `git worktree add` is about to
+    // create, so a provisioning attempt that gives up before that point
+    // leaves nothing behind. Hoisting it back above the fetch reintroduces
+    // an empty `.worktrees/` on every aborted dispatch.
+    fs::create_dir_all(worktrees_root(repo_path))
+        .context("failed to create .worktrees directory")?;
+
+    // A `.git/worktrees/<name>` record whose directory is gone still
+    // claims the branch, and makes the add below fail with "'<branch>' is
+    // already used by worktree at ...". Teardown prunes the records it
+    // witnessed, but a record left by an operator's `rm -rf`, a crashed
+    // dispatch, or a husk deleted by hand has no teardown behind it — so
+    // the repair belongs here, on the path that actually suffers. Repo-wide
+    // is safe: prune drops only records whose directory is missing, so it
+    // cannot reach a live worktree, a sibling task's included.
+    //
+    // Best-effort: the add is the step whose success decides the dispatch,
+    // and its error is the one worth reporting. See
+    // `StaleAdminRecordIsPrunedBeforeWorktreeAdd` in docs/specs/dispatch.allium.
+    let _ = runner.run_with_timeout("git", &["-C", repo_path, "worktree", "prune"], timeout);
+
+    let mut args = vec![
+        "-C",
+        &repo_path,
+        "worktree",
+        "add",
+        &worktree_path,
+        "-B",
+        &worktree_name,
+    ];
+    if let Some(sp) = start_ref {
+        args.push(sp);
+    }
+    let output = runner
+        .run_with_timeout("git", &args, timeout)
+        .context("failed to run git worktree add")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "git worktree add failed: {}",
+        stderr_str(&output)
+    );
+
+    Ok(())
+}
+
 /// Create a git worktree and open a tmux window.
 /// Shared by `dispatch_agent`, `research_agent`, and `quick_dispatch_agent`,
 /// all of which reach it via `dispatch_with_prompt`.
@@ -633,48 +689,14 @@ pub(super) fn provision_worktree(
     if reused_worktree {
         tracing::info!(task_id = task.id.0, %worktree_path, "worktree already exists, reusing");
     } else {
-        // Deliberately below the fetch and inside this branch: the directory
-        // exists only to hold the worktree `git worktree add` is about to
-        // create, so a provisioning attempt that gives up before that point
-        // leaves nothing behind. Hoisting it back above the fetch reintroduces
-        // an empty `.worktrees/` on every aborted dispatch.
-        fs::create_dir_all(worktrees_root(&repo_path))
-            .context("failed to create .worktrees directory")?;
-
-        // A `.git/worktrees/<name>` record whose directory is gone still
-        // claims the branch, and makes the add below fail with "'<branch>' is
-        // already used by worktree at ...". Teardown prunes the records it
-        // witnessed, but a record left by an operator's `rm -rf`, a crashed
-        // dispatch, or a husk deleted by hand has no teardown behind it — so
-        // the repair belongs here, on the path that actually suffers. Repo-wide
-        // is safe: prune drops only records whose directory is missing, so it
-        // cannot reach a live worktree, a sibling task's included.
-        //
-        // Best-effort: the add is the step whose success decides the dispatch,
-        // and its error is the one worth reporting. See
-        // `StaleAdminRecordIsPrunedBeforeWorktreeAdd` in docs/specs/dispatch.allium.
-        let _ = runner.run_with_timeout("git", &["-C", &repo_path, "worktree", "prune"], timeout);
-
-        let mut args = vec![
-            "-C",
+        add_worktree(
+            runner,
             &repo_path,
-            "worktree",
-            "add",
             &worktree_path,
-            "-B",
             &worktree_name,
-        ];
-        if let Some(sp) = start_ref.as_deref() {
-            args.push(sp);
-        }
-        let output = runner
-            .run_with_timeout("git", &args, timeout)
-            .context("failed to run git worktree add")?;
-        anyhow::ensure!(
-            output.status.success(),
-            "git worktree add failed: {}",
-            stderr_str(&output)
-        );
+            start_ref.as_deref(),
+            timeout,
+        )?;
     }
 
     // Outside the steps below so each rollback passes a constant rather than a
