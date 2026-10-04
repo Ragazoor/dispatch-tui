@@ -729,6 +729,36 @@ pub(super) fn run_uninstall_in(
     yes: bool,
     purge: bool,
 ) -> Result<()> {
+    print_uninstall_plan(paths, purge);
+
+    if !yes && !confirmer.confirm("\nContinue?")? {
+        println!("Aborted.");
+        return Ok(());
+    }
+
+    let mut any_removed = remove_installed_files(paths);
+
+    // Note: ~/.claude/settings.json is intentionally not touched. Dispatch no
+    // longer manages permissions in that file — it is user-owned config. Users
+    // who ran an older `dispatch setup` may have stale mcp__dispatch__* entries
+    // in settings.json; those are inert once the MCP server is removed and can
+    // be cleaned up manually.
+
+    if purge {
+        any_removed |= purge_database(&paths.db_path, confirmer)?;
+    }
+
+    if any_removed {
+        println!("Uninstall complete.");
+    } else {
+        println!("Nothing to remove.");
+    }
+
+    Ok(())
+}
+
+/// Tell the user what `run_uninstall_in` is about to remove.
+fn print_uninstall_plan(paths: &UninstallPaths, purge: bool) {
     let UninstallPaths {
         mcp_path,
         legacy_mcp_path,
@@ -752,12 +782,19 @@ pub(super) fn run_uninstall_in(
     if purge {
         eprintln!("  Database:    {}", db_path.display());
     }
+}
 
-    if !yes && !confirmer.confirm("\nContinue?")? {
-        println!("Aborted.");
-        return Ok(());
-    }
-
+/// Remove the plugin, the MCP entries and the status line file. Each is
+/// best-effort: a failure warns and the rest still run. Returns whether
+/// anything was removed.
+fn remove_installed_files(paths: &UninstallPaths) -> bool {
+    let UninstallPaths {
+        mcp_path,
+        legacy_mcp_path,
+        plugin_path,
+        statusline_path,
+        db_path: _,
+    } = paths;
     let mut any_removed = false;
 
     match remove_plugin(plugin_path) {
@@ -806,40 +843,32 @@ pub(super) fn run_uninstall_in(
         Err(e) => eprintln!("Warning: failed to remove status line settings file: {e}"),
     }
 
-    // Note: ~/.claude/settings.json is intentionally not touched. Dispatch no
-    // longer manages permissions in that file — it is user-owned config. Users
-    // who ran an older `dispatch setup` may have stale mcp__dispatch__* entries
-    // in settings.json; those are inert once the MCP server is removed and can
-    // be cleaned up manually.
+    any_removed
+}
 
-    if purge {
-        if db_path.exists() {
-            let task_count = count_tasks(db_path).unwrap_or(0);
-            eprintln!("\n  Database contains {task_count} task(s). This cannot be undone.");
-            if confirmer.confirm_dangerous("Delete database?")? {
-                match remove_database(db_path) {
-                    Ok(true) => {
-                        println!("Removed database");
-                        any_removed = true;
-                    }
-                    Ok(false) => println!("Database not found, skipping"),
-                    Err(e) => eprintln!("Warning: failed to remove database: {e}"),
+/// The `--purge` step: delete the database only if the user confirms the
+/// dangerous prompt. Returns whether it was removed.
+fn purge_database(db_path: &Path, confirmer: &dyn Confirmer) -> Result<bool> {
+    let mut removed = false;
+    if db_path.exists() {
+        let task_count = count_tasks(db_path).unwrap_or(0);
+        eprintln!("\n  Database contains {task_count} task(s). This cannot be undone.");
+        if confirmer.confirm_dangerous("Delete database?")? {
+            match remove_database(db_path) {
+                Ok(true) => {
+                    println!("Removed database");
+                    removed = true;
                 }
-            } else {
-                println!("Kept database.");
+                Ok(false) => println!("Database not found, skipping"),
+                Err(e) => eprintln!("Warning: failed to remove database: {e}"),
             }
         } else {
-            println!("Database not found, skipping");
+            println!("Kept database.");
         }
-    }
-
-    if any_removed {
-        println!("Uninstall complete.");
     } else {
-        println!("Nothing to remove.");
+        println!("Database not found, skipping");
     }
-
-    Ok(())
+    Ok(removed)
 }
 
 // ---------------------------------------------------------------------------
