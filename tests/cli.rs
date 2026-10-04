@@ -80,6 +80,77 @@ fn store_backed_commands_fail_cleanly_when_the_store_is_unreachable() {
     }
 }
 
+/// An `http://` address nothing listens on: claimed from the OS, then released.
+fn dead_store_address() -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    format!("http://{}", listener.local_addr().unwrap())
+}
+
+/// Task #4982, cli.allium: CliCommandsReachTheStoreWithoutManagingIt. With
+/// nothing named, a command reaches the address a board on the same `--db`
+/// recorded beside it (`store-server`, startup.allium: StoreAddressRecord) --
+/// and when that board has gone without removing it, the command fails naming
+/// THAT address rather than falling back to the managed one.
+///
+/// Only `repo list`, which is read-only: on a machine running its own store on
+/// 127.0.0.1:3000, a command that ignored the record would reach that real
+/// store, and this test must never write to it.
+#[test]
+fn a_command_with_nothing_named_reaches_the_store_recorded_beside_its_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("dispatch.db");
+    let recorded = dead_store_address();
+    std::fs::write(dir.path().join("store-server"), format!("{recorded}\n")).unwrap();
+
+    let out = binary()
+        .env_remove("DISPATCH_SPACETIME_SERVER")
+        .args(["--db", db.to_str().unwrap(), "repo", "list"])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "the recorded store is unreachable, so the command must fail, got stderr: {stderr}"
+    );
+    let port = recorded.rsplit(':').next().unwrap();
+    assert!(
+        stderr.contains(port),
+        "the failure must name the recorded address ({recorded}), got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("127.0.0.1:3000"),
+        "a stale record must not fall back to the managed address, got: {stderr}"
+    );
+}
+
+/// The environment comes before the record: a command started inside the
+/// board's own tmux session follows the session's address.
+#[test]
+fn the_environment_wins_over_the_recorded_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("dispatch.db");
+    let recorded = dead_store_address();
+    let from_env = dead_store_address();
+    std::fs::write(dir.path().join("store-server"), format!("{recorded}\n")).unwrap();
+
+    let out = binary()
+        .env("DISPATCH_SPACETIME_SERVER", &from_env)
+        .args(["--db", db.to_str().unwrap(), "repo", "list"])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "stderr: {stderr}");
+    let env_port = from_env.rsplit(':').next().unwrap();
+    let recorded_port = recorded.rsplit(':').next().unwrap();
+    assert!(
+        stderr.contains(env_port) && !stderr.contains(recorded_port),
+        "the environment's address ({from_env}) must be the one tried, not the \
+         record's ({recorded}), got: {stderr}"
+    );
+}
+
 fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_dispatch"))
 }

@@ -13,7 +13,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::models::{Task, TaskId, TmuxWindow};
+use crate::models::{TaskId, TmuxWindow};
 
 /// The most rows the section takes from the pane — the spec's
 /// `config.agent_tree_agents_max_rows`.
@@ -27,24 +27,6 @@ pub struct AgentRow {
     pub window: TmuxWindow,
     /// Whether this is the pane's own task — marked, dimmed, and not jumpable.
     pub is_own: bool,
-}
-
-/// Every live agent in `tasks`, ordered by task id, with `own` marked.
-pub fn live_agents(tasks: &[Task], own: TaskId) -> Vec<AgentRow> {
-    let mut rows: Vec<AgentRow> = tasks
-        .iter()
-        .filter(|task| task.is_live_agent())
-        .filter_map(|task| {
-            Some(AgentRow {
-                id: task.id,
-                title: task.title.clone(),
-                window: task.tmux_window.clone()?,
-                is_own: task.id == own,
-            })
-        })
-        .collect();
-    rows.sort_by_key(|row| row.id.0);
-    rows
 }
 
 /// The section's rows and its own cursor. Kept apart from the tree's cursor so
@@ -212,26 +194,12 @@ pub fn render_agents(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{test_tmux_window, TaskStatus};
+    use crate::models::test_tmux_window;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
-    fn task(id: i64, status: TaskStatus, window: bool) -> Task {
-        Task {
-            id: TaskId(id),
-            title: format!("task {id}"),
-            status,
-            tmux_window: window.then(|| test_tmux_window(&format!("task-{id}"))),
-            ..Default::default()
-        }
-    }
-
     fn row(id: i64, own: bool) -> AgentRow {
         test_row(id, own)
-    }
-
-    fn ids(rows: &[AgentRow]) -> Vec<i64> {
-        rows.iter().map(|row| row.id.0).collect()
     }
 
     fn rendered(section: &mut AgentsSection, focused: bool, height: u16) -> String {
@@ -240,50 +208,6 @@ mod tests {
             .draw(|frame| render_agents(frame, frame.area(), section, focused, false))
             .expect("draw");
         crate::cli::buffer_to_string(terminal.backend().buffer())
-    }
-
-    // ---- RefreshAgentTreeAgentList: which tasks are live -----------------
-
-    #[test]
-    fn running_and_review_tasks_with_a_window_are_listed() {
-        let tasks = [
-            task(1, TaskStatus::Running, true),
-            task(2, TaskStatus::Review, true),
-        ];
-        assert_eq!(ids(&live_agents(&tasks, TaskId(99))), vec![1, 2]);
-    }
-
-    #[test]
-    fn tasks_without_a_window_or_outside_running_and_review_are_not_listed() {
-        let tasks = [
-            task(1, TaskStatus::Running, false),
-            task(2, TaskStatus::Backlog, true),
-            task(3, TaskStatus::Done, true),
-            task(5, TaskStatus::Review, false),
-        ];
-        assert!(live_agents(&tasks, TaskId(99)).is_empty());
-    }
-
-    #[test]
-    fn listed_agents_are_ordered_by_task_id() {
-        let tasks = [
-            task(30, TaskStatus::Running, true),
-            task(4, TaskStatus::Review, true),
-            task(12, TaskStatus::Running, true),
-        ];
-        assert_eq!(ids(&live_agents(&tasks, TaskId(99))), vec![4, 12, 30]);
-    }
-
-    #[test]
-    fn the_panes_own_task_is_listed_and_marked() {
-        let tasks = [
-            task(1, TaskStatus::Running, true),
-            task(2, TaskStatus::Running, true),
-        ];
-        let rows = live_agents(&tasks, TaskId(2));
-        assert_eq!(ids(&rows), vec![1, 2]);
-        assert!(!rows[0].is_own);
-        assert!(rows[1].is_own);
     }
 
     // ---- cursor ----------------------------------------------------------

@@ -46,14 +46,17 @@
 -- which git cannot supply. See AgentTreeIsGitDerived.
 --
 -- The pane remains a standalone process inside the agent's own tmux window. It
--- does not touch the board TUI's state, its DB refresh cycle, or the kanban
--- App — the whole feature is invisible to the board process.
+-- does not touch the board TUI's state, its refresh cycle, or the kanban App.
+-- What it needs from the shared rows — its task, and the live agents — it ASKS
+-- the running board for, read-only (BoardPaneView); it never opens the store
+-- itself (PanesReadThroughTheBoard). The board answers from rows it already
+-- holds, so to the board the feature is a reader and nothing more.
 --
 -- The AGENTS SECTION is the one thing the pane reads that git does not
--- supply. It reads the board's task list, read-only, on its own timer, and
--- never writes to it. That does not bend the git rule: the rule is about what
--- the pane says about FILES, and the agents section says nothing about files.
--- See AgentsSectionListsLiveAgents.
+-- supply. It reads the board's live-agent list, read-only, on its own timer,
+-- and never writes to it. That does not bend the git rule: the rule is about
+-- what the pane says about FILES, and the agents section says nothing about
+-- files. See AgentsSectionListsLiveAgents.
 
 use "./core.allium" as core
 
@@ -216,6 +219,56 @@ value AgentTreeNode {
     diff_open: Boolean
 }
 
+-- What the board tells a companion pane's renderer about its task. Null in
+-- PaneView.task until the board's rows hold the task, which is how "not
+-- arrived yet" and "arrived without a worktree" stay two different answers.
+value PaneTask {
+    worktree: String?     -- the directory the tree is rooted at; null when the task has none
+    base_branch: String   -- the NAME the baseline is resolved from (AgentTreeBaselineIsTaskBaseBranch)
+}
+
+-- One answer from the board to a pane: its task, when the board's rows hold
+-- it, and the tasks with a live agent window (is_live_agent), across every
+-- repo and epic, as RefreshAgentTreeAgentList lists them.
+value PaneView {
+    task: PaneTask?
+    live_agents: [core/Task]
+}
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- The read a companion pane's renderer makes of the running board, in place of
+-- a store connection of its own. The board is found the way a hook finds it
+-- (agent-health.allium: HookDelivery). Stated as a contract because the board
+-- is another process: it can be down, mid-restart, or a different version.
+contract BoardPaneView {
+    -- The board's answer for task `task_id`. A board that could not be
+    -- reached, refused, or answered in a form this renderer cannot read
+    -- gives no PaneView at all: that is a failed read, never an empty view,
+    -- so "no agents are running" and "the board did not answer" cannot read
+    -- the same.
+    pane_view: (task_id: Integer) -> PaneView
+
+    @invariant AskingChangesNothing
+        -- Answering writes nothing — not to the store, not to the board's
+        -- own rows, not to its display. A pane can ask once a second for as
+        -- long as it is shown and the board is exactly as it would have been.
+
+    @invariant AnsweredFromTheBoardsRows
+        -- The board answers from the shared rows it already holds, at the
+        -- moment it is asked. It opens no connection to answer and does not
+        -- wait for a row it does not have yet: a task whose row has not
+        -- arrived is answered with PaneView.task = null, and the pane does
+        -- the waiting ("Companion Pane Startup").
+
+    @invariant LiveIsTheBoardsOwnDefinition
+        -- live_agents holds exactly the tasks is_live_agent holds for in the
+        -- board's rows — the Running or Review column with a tmux window
+        -- recorded — and no others. The pane does not re-derive it.
+}
+
 ------------------------------------------------------------
 -- Entities and Variants
 ------------------------------------------------------------
@@ -331,11 +384,11 @@ entity AgentTreePane {
 
     -- The agents section's own redraw stamp. Separate from last_rendered_at
     -- because a git query that overran its timeout must not also delay the
-    -- task list, nor a slow database read delay the tree.
+    -- task list, nor a slow answer from the board delay the tree.
     last_agents_listed_at: Timestamp
 
-    -- Whether the tree's renderer has read its task back from the shared
-    -- store yet. pane.task is what the pane is FOR; this is whether the
+    -- Whether the tree's renderer has read its task back from the board
+    -- yet. pane.task is what the pane is FOR; this is whether the
     -- process drawing it has found out. A renderer starts waiting, and
     -- everything else it does — git, the agents section, every key but the
     -- exit key — waits with it. See "Companion Pane Startup" below for why a
@@ -363,15 +416,16 @@ entity AgentTreePane {
     diff_startup_failure: String when diff_task_resolution = unresolved
 
     -- The task row has become readable while a renderer is waiting for it.
-    -- shared_store_task(task) is the renderer's own read of the task from the
-    -- shared store: null until the row has arrived, the row once it has.
+    -- board_task(task) is the renderer's own read of the task from the board
+    -- (BoardPaneView): null until the row has arrived in the board's rows,
+    -- and null while the board cannot be reached; the task once it has.
     -- The waiting term is part of the condition, not only a guard on the
     -- rules that use it, so a renderer that starts waiting on a row already
     -- present makes the condition turn true afresh. The diff form also
     -- requires a diff pane, since no diff renderer is waiting until one has
     -- been split; its appearance is what turns the condition true.
-    task_arrived: task_resolution = waiting and shared_store_task(task) != null
-    diff_task_arrived: diff_pane != null and diff_task_resolution = waiting and shared_store_task(task) != null
+    task_arrived: task_resolution = waiting and board_task(task) != null
+    diff_task_arrived: diff_pane != null and diff_task_resolution = waiting and board_task(task) != null
 
     -- A renderer either finds its task or gives up; a new renderer (a show,
     -- a re-split) starts waiting again whatever the last one reached.
@@ -478,11 +532,11 @@ config {
     -- board.
     agent_tree_agents_max_rows: Integer = 8
 
-    -- How long a pane's renderer waits, at startup, for its task's row to
-    -- become readable in the shared store before giving up and saying so.
-    -- The row normally lands well under a second after the connection is up
-    -- (see "Companion Pane Startup"); ten seconds covers a slow store without
-    -- leaving a user staring at a waiting line for long when the task
+    -- How long a pane's renderer waits, at startup, for the board to answer
+    -- with its task's row before giving up and saying so. The row normally
+    -- reaches the board well under a second after dispatch (see "Companion
+    -- Pane Startup"); ten seconds covers a slow store, or a board mid-restart,
+    -- without leaving a user staring at a waiting line for long when the task
     -- really is not there.
     agent_tree_startup_wait: Duration = 10.seconds
 }
@@ -911,26 +965,30 @@ rule DiscardAgentTreePaneOnWindowCleared {
 --
 -- Each pane's renderer (`dispatch agent-tree <task_id>` for the tree,
 -- `dispatch agent-diff <task_id>` for the diff pane) is handed only a task id.
--- Before it can run git it has to read that task back from the shared store,
--- for the two things only the task knows: its worktree and its base branch.
+-- Before it can run git it has to read that task back, for the two things only
+-- the task knows: its worktree and its base branch. It asks the running board
+-- (BoardPaneView), never the store (PanesReadThroughTheBoard).
 --
 -- THE RACE. The renderer starts within moments of the task being dispatched,
--- and reads the task straight after its connection to the shared store is up.
--- Being connected does not mean holding the rows: they arrive a short while
--- AFTER the connection. A renderer that read once and treated "no such task"
--- as final exited on the spot, and since tmux closes a pane whose command
--- exits, the pane vanished the instant it opened, taking its error message
--- with it. Nothing on screen said what had happened.
+-- and the board's rows may not hold the task yet: a dispatch made on another
+-- board, or a row the store has not yet delivered back, arrives a short while
+-- later. A renderer that read once and treated "no such task" as final exited
+-- on the spot, and since tmux closes a pane whose command exits, the pane
+-- vanished the instant it opened, taking its error message with it. Nothing
+-- on screen said what had happened.
 --
--- So a renderer waits for its task instead of reading it once: until the row
--- is present, for at most config.agent_tree_startup_wait, with a line saying
--- what it is waiting for. And a renderer that cannot resolve its task — the
--- wait ran out, or the task has no worktree to root a tree at — stays open
--- and says so, rather than exiting. The one thing that closes a pane is still
--- the user's exit key (ExitAgentTreeRenderer, ExitAgentTreeDiffRenderer).
+-- So a renderer waits for its task instead of reading it once: until the
+-- board answers with the row, for at most config.agent_tree_startup_wait,
+-- with a line saying what it is waiting for. A board that cannot be reached
+-- is waited out the same way — it is most often a board mid-restart, back
+-- within the wait. And a renderer that cannot resolve its task — the wait
+-- ran out, or the task has no worktree to root a tree at — stays open and
+-- says so, rather than exiting. The one thing that closes a pane is still the
+-- user's exit key (ExitAgentTreeRenderer, ExitAgentTreeDiffRenderer).
 --
 -- The tree and the diff pane follow the same three rules, separately: each is
--- its own process with its own connection, and neither waits on the other.
+-- its own process asking the board on its own, and neither waits on the
+-- other.
 
 rule AgentTreePaneResolvesItsTask {
     -- The task row became readable while the tree's renderer was waiting for
@@ -938,7 +996,7 @@ rule AgentTreePaneResolvesItsTask {
     -- refresh tick after this is the first git query (RefreshAgentTree).
     when: pane: AgentTreePane.task_arrived
 
-    requires: shared_store_task(pane.task).worktree != null
+    requires: board_task(pane.task).worktree != null
 
     ensures: pane.task_resolution = resolved
 
@@ -959,7 +1017,7 @@ rule AgentTreePaneTaskHasNoWorktree {
     -- without spending the rest of the wait.
     when: pane: AgentTreePane.task_arrived
 
-    requires: shared_store_task(pane.task).worktree = null
+    requires: board_task(pane.task).worktree = null
 
     ensures: pane.task_resolution = unresolved
     ensures: pane.startup_failure = task_without_worktree_reason(pane.task)
@@ -967,8 +1025,9 @@ rule AgentTreePaneTaskHasNoWorktree {
 }
 
 rule AgentTreePaneTaskNeverArrives {
-    -- The wait ran out and the row never became readable. The pane says the
-    -- task was not found, and stays open saying it.
+    -- The wait ran out and the board never answered with the row. The pane
+    -- says why — the task was not found, or the board could not be reached
+    -- — and stays open saying it.
     when: pane: AgentTreePane.renderer_started_at + config.agent_tree_startup_wait <= now
 
     requires: pane.task_resolution = waiting
@@ -990,11 +1049,15 @@ rule AgentTreePaneTaskNeverArrives {
         -- renderer with a fresh wait for anyone who wants another go.
         --
         -- == Black boxes ==
-        -- shared_store_task(task) is the renderer's read of the task from the
-        -- shared store — null while the row has not arrived. The two reason
-        -- functions name the task by id: task_not_found_reason reads
-        -- "task <id> not found", task_without_worktree_reason reads
-        -- "task <id> has no worktree".
+        -- board_task(task) is BoardPaneView's pane_view(task.id).task — null
+        -- while the row has not arrived in the board's rows, and null while
+        -- the board cannot be reached. The two reason functions name the task
+        -- by id: task_without_worktree_reason reads "task <id> has no
+        -- worktree"; task_not_found_reason reads "task <id> not found" when
+        -- the board answered without the task, and, when the renderer's last
+        -- attempt could not reach the board, says that instead, naming the
+        -- address it tried — "not found" would send the user looking for a
+        -- task that may well exist.
 }
 
 rule AgentTreeDiffPaneResolvesItsTask {
@@ -1002,7 +1065,7 @@ rule AgentTreeDiffPaneResolvesItsTask {
     -- git read follows on its own timer (RefreshAgentTreeDiff).
     when: pane: AgentTreePane.diff_task_arrived
 
-    requires: shared_store_task(pane.task).worktree != null
+    requires: board_task(pane.task).worktree != null
 
     ensures: pane.diff_task_resolution = resolved
 }
@@ -1011,7 +1074,7 @@ rule AgentTreeDiffPaneTaskHasNoWorktree {
     -- The diff pane's counterpart of AgentTreePaneTaskHasNoWorktree.
     when: pane: AgentTreePane.diff_task_arrived
 
-    requires: shared_store_task(pane.task).worktree = null
+    requires: board_task(pane.task).worktree = null
 
     ensures: pane.diff_task_resolution = unresolved
     ensures: pane.diff_startup_failure = task_without_worktree_reason(pane.task)
@@ -1764,9 +1827,13 @@ rule RefreshAgentTreeAgentList {
         -- agent in another repo is as reachable as one in this.
         --
         -- == Read-only ==
-        -- board_tasks() is a read of the board's task list. The pane never
-        -- writes to the board, which is what keeps the rest of this spec's
-        -- claim true that the feature is invisible to the board process.
+        -- board_tasks() is BoardPaneView's pane_view(pane.task.id).live_agents
+        -- — the board's own answer, already filtered by the same definition
+        -- (LiveIsTheBoardsOwnDefinition), so the filter above restates it
+        -- rather than narrowing it. Not ok when the board could not be
+        -- reached or its answer could not be read. The pane never writes to
+        -- the board (AskingChangesNothing) and never opens the store
+        -- (PanesReadThroughTheBoard).
         --
         -- == Order ==
         -- sorted_by_id orders by task id, ascending. The order therefore never
@@ -1780,20 +1847,21 @@ rule RefreshAgentTreeAgentList {
         --
         -- == Latency ==
         -- The read runs beside the renderer, not inside its key loop, so a
-        -- slow database never delays a keypress. The price is that a new list
+        -- slow board never delays a keypress. The price is that a new list
         -- can take up to about twice the interval to reach the screen. That
         -- is fine for a list that changes on the scale of minutes.
 }
 
 rule AgentTreeAgentListFailureKeepsLastList {
-    -- The same tick, when the task list could not be read.
+    -- The same tick, when the board could not be reached or its answer
+    -- could not be read.
     when: pane: AgentTreePane.last_agents_listed_at + config.agent_tree_agents_refresh_interval <= now
 
     requires: pane.status = shown
     requires: pane.task_resolution = resolved
     requires: not board_tasks().ok
 
-    -- Stamped anyway, so a broken database does not spin.
+    -- Stamped anyway, so an absent board does not spin.
     ensures: pane.last_agents_listed_at = now
     ensures: pane.listed_agents = old(pane.listed_agents)
     ensures: pane.error_notice = board_tasks_failure_reason()
@@ -2070,6 +2138,9 @@ surface AgentTreeCompanionPane {
         pane.task_resolution
         pane.startup_failure when pane.task_resolution = unresolved
 
+    contracts:
+        demands BoardPaneView
+
     provides:
         -- The global tmux binding (prefix + config.agent_tree_toggle_key).
         -- Acts on the pane belonging to the currently focused window. See
@@ -2136,10 +2207,34 @@ surface AgentTreeCompanionPane {
         SwitchAgentTreeFocus(user, pane)                  -- Tab
         JumpToAgentWindow(user, pane, target)             -- Space, Enter (agents focus)
 
+    @guarantee PanesReadThroughTheBoard
+        -- A pane's renderer reads its task and the live agents from the
+        -- running board (BoardPaneView) and from nowhere else. It never opens
+        -- a connection to the shared store, and never opens the store's
+        -- local database for shared rows: the board is the single reader of
+        -- shared rows on a machine, as it is the single writer of hook events
+        -- (agent-health.allium: HooksWriteThroughTheBoard). Two panes per
+        -- agent window, each with a store connection of its own, was a
+        -- subscription per pane — and each connection re-delivered every row
+        -- the board already held, to show one task and one list.
+        --
+        -- Read-only, in both directions: the pane asks, the board answers,
+        -- and neither the board's rows nor the store change because a pane is
+        -- shown (AskingChangesNothing). It does not bend AgentTreeIsGitDerived
+        -- either: what the pane says about files still comes from git alone.
+        --
+        -- A board that cannot be reached is a failed read, handled where every
+        -- failed read already is: while the task is awaited, it is waited out
+        -- and then named (AgentTreePaneTaskNeverArrives); once the pane is up,
+        -- the agents section keeps its last list and says so
+        -- (AgentTreeAgentListFailureKeepsLastList). The pane never closes
+        -- itself over it. The diff pane holds to the same guarantee
+        -- (AgentTreeDiffPaneSaysWhatItIsWaitingFor).
+
     @guarantee AgentTreePaneSaysWhatItIsWaitingFor
         -- Until its task resolves, the pane draws one line in place of the
         -- tree and the agents section: `waiting for task <id>`. It is never
-        -- blank, so a slow store reads as a wait rather than as a broken or
+        -- blank, so a slow store or a restarting board reads as a wait rather than as a broken or
         -- empty pane. In the common case the task resolves at once and the
         -- line is never seen (AgentTreePaneResolvesItsTask).
         --
@@ -2550,6 +2645,9 @@ surface AgentTreeDiffPane {
         pane.diff_task_resolution
         pane.diff_startup_failure when pane.diff_task_resolution = unresolved
 
+    contracts:
+        demands BoardPaneView
+
     provides:
         -- Keys handled by the diff renderer itself, unprefixed, while the diff
         -- pane has tmux focus. Deliberately the same vocabulary the tree uses
@@ -2573,6 +2671,10 @@ surface AgentTreeDiffPane {
         -- Its wait is its own. A tree that resolved long ago does not make a
         -- freshly split diff pane skip the wait, and a diff pane that gives
         -- up leaves the tree above it untouched.
+        --
+        -- Its read is the board's too: it asks the running board for its
+        -- task and opens no store connection, exactly as the tree does
+        -- (AgentTreeCompanionPane: PanesReadThroughTheBoard).
 
     @guarantee DiffPaneHasNoToggleOfItsOwn
         -- The diff pane cannot open or close a file's diff. Space, Enter and

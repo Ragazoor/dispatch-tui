@@ -97,6 +97,15 @@ async fn send(port: u16, request: &HookRequest) -> Result<HookResponse> {
 }
 
 async fn exchange(port: u16, request: &HookRequest) -> Result<HookResponse> {
+    post_json(port, HOOK_PATH, request).await
+}
+
+/// POST `request` as JSON to `path` on the board and decode the answer.
+async fn post_json<Req, Resp>(port: u16, path: &str, request: &Req) -> Result<Resp>
+where
+    Req: serde::Serialize,
+    Resp: serde::de::DeserializeOwned,
+{
     let stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
         .await
         .with_context(|| format!("connecting to 127.0.0.1:{port}"))?;
@@ -111,7 +120,7 @@ async fn exchange(port: u16, request: &HookRequest) -> Result<HookResponse> {
     let body = serde_json::to_vec(request)?;
     let http_request = hyper::Request::builder()
         .method(hyper::Method::POST)
-        .uri(HOOK_PATH)
+        .uri(path)
         .header(hyper::header::HOST, "127.0.0.1")
         .header(hyper::header::CONTENT_TYPE, "application/json")
         .body(http_body_util::Full::new(hyper::body::Bytes::from(body)))?;
@@ -232,6 +241,21 @@ pub async fn run_peer_message(port: u16, id: i64, target: String, body: String) 
         },
     )
     .await
+}
+
+/// Ask the running board on `port` for task `task_id`'s [`wire::PaneView`]
+/// (agent-tree.allium: BoardPaneView). Every failure -- unreachable, too slow,
+/// refused, an answer this version cannot read -- is an `Err` naming the
+/// address tried, never an empty view.
+pub async fn fetch_pane_view(port: u16, task_id: i64) -> Result<wire::PaneView> {
+    let request = wire::PaneViewRequest { task_id };
+    tokio::time::timeout(
+        DELIVERY_TIMEOUT,
+        post_json(port, wire::PANE_VIEW_PATH, &request),
+    )
+    .await
+    .unwrap_or_else(|_| Err(anyhow::anyhow!("no answer within {DELIVERY_TIMEOUT:?}")))
+    .with_context(|| format!("could not reach the dispatch board on 127.0.0.1:{port}"))
 }
 
 /// What the PR gate decided. Returned rather than acted on, so the exit code

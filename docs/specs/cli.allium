@@ -9,7 +9,9 @@
 --           exit-code contract (success, failure, usage error, and the one
 --           code that blocks a gated tool call); the three process classes a
 --           subcommand runs in; how one-shot commands open the store
---           (CliCommandsReachTheStoreWithoutManagingIt); the operator-facing
+--           (CliCommandsReachTheStoreWithoutManagingIt), including the
+--           store address a board leaves beside its database; the
+--           operator-facing
 --           output of `repo set-verify`, `repo clear-verify`, `repo list`,
 --           `prune-repo-paths`, `plan`, `spacetime dump|dump-server|restore|seed`
 --           and `store import`; the plan file check that precedes the store;
@@ -92,7 +94,9 @@ enum ProcessClass {
 entity CliInvocation {
     subcommand: String
     process_class: ProcessClass
-    named_store: String?          -- --spacetime-server / DISPATCH_SPACETIME_SERVER
+    named_store: String?          -- --spacetime-server, else DISPATCH_SPACETIME_SERVER; blank counts as absent
+    recorded_store: String?       -- the address a board on this --db recorded beside it
+                                  -- (startup.allium: StoreAddressRecord); blank counts as absent
     exit: ProcessExit?            -- null while the process is still running
 }
 
@@ -131,13 +135,19 @@ config {
 ------------------------------------------------------------
 
 rule CliCommandsReachTheStoreWithoutManagingIt {
-    -- Every subcommand that reads or writes shared rows — repo, prune-repo-
-    -- paths, plan, agent-tree, agent-diff, spacetime seed, store import —
-    -- opens the store the same way.
+    -- Every subcommand that reads or writes shared rows itself — repo,
+    -- prune-repo-paths, plan — opens the store the same way. `spacetime seed`
+    -- and `store import` connect the same way once their target is chosen,
+    -- but choose it as spacetime-snapshot.allium's
+    -- SeedTargetsTheNamedStoreOrTheManagedAddress and
+    -- ImportTargetsTheNamedStoreOrBringsUpTheManagedOne say (see the open
+    -- question on whether they read the recorded address). The companion
+    -- panes do not open the store at all (PaneRenderersAskTheBoard, below).
     when: CliStoreRequested(invocation)
 
     let address =
         if invocation.named_store != null: invocation.named_store
+        else if invocation.recorded_store != null: invocation.recorded_store
         else: config.default_store_address
 
     ensures: CliConnectedTo(invocation: invocation, server: address)
@@ -148,7 +158,21 @@ rule CliCommandsReachTheStoreWithoutManagingIt {
         -- connected and the identity settled, and the first subscription
         -- applied. A store that cannot be reached ends the command with
         -- failure, naming the reason (startup.allium:
-        -- AbortWhenTheStoreCannotBeReached).
+        -- AbortWhenTheStoreCannotBeReached). That includes a recorded address
+        -- whose board has gone without removing it: the command fails naming
+        -- that address, and does not fall back to the managed address.
+        --
+        -- WHERE THE ADDRESS COMES FROM, first answer wins: the flag, the
+        -- environment variable, the address a board on the same --db recorded
+        -- beside it (startup.allium: RecordTheNamedStoreOnceItAnswers), and
+        -- last the managed store's address. The environment reaches the
+        -- processes started inside the board's own tmux session, where the
+        -- board sets it for a named store; the record reaches everything else,
+        -- such as a plain terminal. A board on the managed store records
+        -- nothing and clears any stale record
+        -- (ForgetAStaleStoreRecordOnAManagedLaunch), so with it running the
+        -- answer falls through to the managed address, where its store is.
+        -- The record is read, never written, by these commands.
         --
         -- WHAT IT DOES NOT DO. A short-lived command is not a board: it does
         -- not start, adopt or stop the managed store (only `dispatch tui` and
@@ -373,9 +397,45 @@ rule PaneRendererGivesTheTerminalBack {
         -- The error, if there was one, is still reported, after the restore:
         -- the process ends with failure.
         --
-        -- Each renderer is given only a task id. It reaches the store through
-        -- CliCommandsReachTheStoreWithoutManagingIt, then waits for its task
-        -- as agent-tree.allium's "Companion Pane Startup" describes.
+        -- Each renderer is given only a task id. It reads its task through
+        -- the running board (PaneRenderersAskTheBoard), then waits for it as
+        -- agent-tree.allium's "Companion Pane Startup" describes.
+}
+
+rule PaneRenderersAskTheBoard {
+    -- `agent-tree` and `agent-diff` take what they need from the store —
+    -- their task, and the live-agent list — from the running board, not
+    -- from a connection of their own.
+    when: CliPaneRendererStarted(invocation, task_id)
+
+    ensures: CliReadsThroughTheBoard(invocation: invocation)
+
+    @guidance
+        -- The board is found the way a hook finds it (agent-health.allium:
+        -- HookDelivery): the port named on the command line, else the port
+        -- the agent's session was launched with, else the default port. The
+        -- panes are not Claude Code processes, so they do not see the port a
+        -- hook is handed in the session's settings; instead the board
+        -- publishes its port on its own tmux session, beside the store
+        -- address it publishes there (startup.allium:
+        -- RecordTheNamedStoreOnceItAnswers), and every pane split in one of
+        -- its agent windows inherits it. Unlike the store address it is
+        -- published whichever store the board runs on, managed or named,
+        -- because a board on a non-default port is otherwise unreachable
+        -- from its own panes. A board that could not publish it (no session
+        -- to publish on) leaves its panes asking the default port, best-effort
+        -- like the store address. Being found is not a precondition of
+        -- starting: a renderer that cannot reach the board draws in its pane
+        -- like one whose task has not arrived, and says so, rather than
+        -- ending (agent-tree.allium: AgentTreePaneTaskNeverArrives,
+        -- AgentTreeAgentListFailureKeepsLastList).
+        --
+        -- No store address is resolved for them, so
+        -- CliCommandsReachTheStoreWithoutManagingIt's resolution order does
+        -- not apply: the board has already resolved it. What they read and
+        -- how is agent-tree.allium: BoardPaneView, and the guarantee that
+        -- they never touch the store is agent-tree.allium's
+        -- PanesReadThroughTheBoard.
 }
 
 ------------------------------------------------------------
@@ -480,6 +540,6 @@ surface DispatchCommandLine {
 
 open question "An unparseable argument list exits 2 before any command body runs, and exit 2 is also Claude Code's 'block this tool call' signal. A `pr-gate` invocation that fails to parse (an id that is not a number, a renamed flag after an upgrade) therefore BLOCKS the gated `gh pr create`, contradicting the gate's fail-open stance (pr-workflow.allium: PrLearningsGate). Is a parse failure meant to block, or should pr-gate map usage errors to a non-blocking code?"
 
-open question "`agent-tree` and `agent-diff` open the store before they take the terminal, so a store that cannot be reached ends the process with failure, and tmux closes the pane at once, taking the message with it. That is the exact failure agent-tree.allium's Companion Pane Startup exists to prevent for a missing task ('the pane never closes itself'). Should an unreachable store also be drawn in the pane and wait for the exit key?"
+open question "Task #4982: CliCommandsReachTheStoreWithoutManagingIt now falls back to the address a named-store board recorded beside the --db database before the managed address. `spacetime seed` resolves its store through the same helper today (startup::store_server_or_managed), and `store import` with nothing named brings up the managed store. Should `seed` also read the recorded address (so a seed run in a plain terminal targets the store the board is using), and should `import` — which would then write into a store some board is running on rather than bring the managed one up — read it too, or ignore it?"
 
 open question "`prune-repo-paths` judges existence on the local filesystem, but saved repo paths are shared rows in the store (core/SavedRepoPath has no host). Run on one machine, it forgets every repo path that exists only on a teammate's machine. Is pruning meant to be per-host, or is the shared table meant to hold only paths valid everywhere?"

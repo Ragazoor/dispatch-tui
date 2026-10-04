@@ -296,6 +296,12 @@ pub fn router_with_bg_done(
         // Claude Code hooks deliver here rather than opening the database
         // themselves — see `HookDelivery` in `docs/specs/agent-health.allium`.
         .route(crate::hooks::wire::HOOK_PATH, post(handlers::handle_hook))
+        // The companion panes read here instead of opening the store
+        // themselves -- `PanesReadThroughTheBoard` in `docs/specs/agent-tree.allium`.
+        .route(
+            crate::hooks::wire::PANE_VIEW_PATH,
+            post(handlers::handle_pane_view),
+        )
         .layer(axum::middleware::from_fn(
             middleware::extract_caller_identity,
         ))

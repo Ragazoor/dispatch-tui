@@ -113,6 +113,20 @@ fn publish_store_server(session: &str, server: &str, runner: &dyn ProcessRunner)
     }
 }
 
+/// Publish the port the board serves on, beside the store address, so the
+/// companion panes it starts ask this board rather than the default port
+/// (`PaneRenderersAskTheBoard`). Best-effort, like the store address.
+fn publish_board_port(session: &str, port: u16, runner: &dyn ProcessRunner) {
+    if session.is_empty() {
+        return;
+    }
+    if let Err(e) =
+        tmux::set_session_environment(session, "DISPATCH_PORT", &port.to_string(), runner)
+    {
+        tracing::warn!("could not publish the board port on the tmux session: {e:#}");
+    }
+}
+
 /// [`publish_store_server`] for a named store only.
 ///
 /// A managed board publishes nothing: a store address on the session would make
@@ -354,7 +368,14 @@ pub struct CliStore {
 /// shared rows (`repo`, `plan`, the agent-tree and diff panes): with the store
 /// mandatory, the local database no longer holds them.
 pub async fn open_cli_store(db_path: &Path, server: Option<String>) -> Result<CliStore> {
-    let server = crate::startup::store_server_or_managed(server);
+    // Flag, then environment, then the record a board left beside this
+    // database, then the managed address (`CliCommandsReachTheStoreWithoutManagingIt`).
+    // The environment is read here too, so a blank flag falls through to it.
+    let server = crate::startup::cli_store_server(
+        server,
+        std::env::var(crate::startup::STORE_SERVER_ENV).ok(),
+        db_path,
+    );
     let (database, host_id, _label) = open_with_host_identity(db_path).await?;
     let parts = StoreParts::build(database, &host_id);
     // No host-registry push: a short-lived command is not a board, and the
@@ -414,6 +435,10 @@ enum StoreTarget {
 }
 
 impl StoreTarget {
+    fn is_named(&self) -> bool {
+        matches!(self, Self::Named(_))
+    }
+
     fn managed(&self) -> Option<&Arc<crate::spacetime::managed_store::ManagedStore>> {
         match self {
             Self::Named(_) => None,
@@ -430,6 +455,42 @@ impl Drop for ManagedStoreGuard {
     fn drop(&mut self) {
         if let Some(store) = &self.0 {
             store.stop_on_exit();
+        }
+    }
+}
+
+/// `RecordTheNamedStoreOnceItAnswers`: record `server` beside `db_path` for a
+/// named store; a managed board records nothing. True when a record was kept.
+/// Best-effort: a board that cannot write it still runs.
+fn record_store_server_for(target: &StoreTarget, db_path: &Path, server: &str) -> bool {
+    target.is_named() && crate::startup::record_store_server(db_path, server)
+}
+
+/// `ForgetAStaleStoreRecordOnAManagedLaunch`: a managed launch clears any
+/// record beside `db_path`; a named launch leaves it for its own record to
+/// replace.
+fn forget_stale_store_record_for(target: &StoreTarget, db_path: &Path) {
+    if matches!(target, StoreTarget::Managed(_)) {
+        crate::startup::forget_store_server(db_path);
+    }
+}
+
+/// `ForgetTheStoreRecordWhenTheBoardExits`: removes a named board's record
+/// when dropped, so every way out of `run_tui` -- a quit, an abort, an
+/// unwinding panic -- takes the record with it. A managed board's guard does
+/// nothing.
+struct StoreRecordGuard(Option<std::path::PathBuf>);
+
+impl StoreRecordGuard {
+    fn for_target(target: &StoreTarget, db_path: &Path) -> Self {
+        Self(target.is_named().then(|| db_path.to_path_buf()))
+    }
+}
+
+impl Drop for StoreRecordGuard {
+    fn drop(&mut self) {
+        if let Some(db_path) = &self.0 {
+            crate::startup::forget_store_server(db_path);
         }
     }
 }
@@ -454,8 +515,12 @@ fn abort_managed_startup(
 /// A board that is signalled -- SIGHUP is what tmux sends when a later launch
 /// retires this board's window (`kill-window`), SIGTERM what `kill` sends --
 /// would otherwise die on the default disposition without running its exit,
-/// and leave its managed store behind. Catch both, stop the store, and go.
-fn stop_store_on_termination(store: Arc<crate::spacetime::managed_store::ManagedStore>) {
+/// and leave its managed store, or a named board's store record, behind. Catch
+/// both, stop the store or forget the record, and go.
+fn clean_up_on_termination(
+    store: Option<Arc<crate::spacetime::managed_store::ManagedStore>>,
+    record_db: Option<std::path::PathBuf>,
+) {
     use tokio::signal::unix::{signal, SignalKind};
     let (Ok(mut hangup), Ok(mut terminate)) = (
         signal(SignalKind::hangup()),
@@ -471,7 +536,12 @@ fn stop_store_on_termination(store: Arc<crate::spacetime::managed_store::Managed
             _ = hangup.recv() => {}
             _ = terminate.recv() => {}
         }
-        let _ = tokio::task::spawn_blocking(move || store.stop_on_exit()).await;
+        if let Some(store) = store {
+            let _ = tokio::task::spawn_blocking(move || store.stop_on_exit()).await;
+        }
+        if let Some(db_path) = record_db {
+            crate::startup::forget_store_server(&db_path);
+        }
         let _ = disable_raw_mode();
         std::process::exit(0);
     });
@@ -531,9 +601,14 @@ pub async fn run_tui(
     // panic unwinding -- drops this, which stops a managed store this board
     // holds (`StopTheManagedStoreWhenTheBoardExits`).
     let _store_guard = ManagedStoreGuard(target.managed().cloned());
-    if let Some(store) = target.managed() {
-        stop_store_on_termination(store.clone());
-    }
+    // A record left by an earlier named board must not outlive this managed
+    // launch, and a named board's own record goes when this function does.
+    forget_stale_store_record_for(&target, db_path);
+    let _record_guard = StoreRecordGuard::for_target(&target, db_path);
+    clean_up_on_termination(
+        target.managed().cloned(),
+        target.is_named().then(|| db_path.to_path_buf()),
+    );
     let bootstrapped = TuiRuntime::bootstrap_for(db_path, port, paths, target.clone()).await;
     let Bootstrap {
         store_server: server,
@@ -569,6 +644,7 @@ pub async fn run_tui(
     let session = here.as_ref().map_or("", |c| c.session_name.as_str());
     setup_tmux_for_tui(session, self_pane.as_deref(), &*tmux_runner);
     publish_store_server_for(&target, session, &server, &*tmux_runner);
+    publish_board_port(session, port, &*tmux_runner);
 
     // Create two channels:
     //    - key_rx: raw crossterm KeyEvents from the blocking poll thread
@@ -1007,6 +1083,9 @@ impl TuiRuntime {
             }
         };
         let session = connect_first(server.clone(), &parts, Some(&*parts.reducer_caller)).await?;
+        // Only an address that answered is worth recording; failing to write
+        // it is a warning, not an abort.
+        record_store_server_for(&target, db_path, &server);
         let store_server = server;
         let sync_store: Arc<dyn crate::sync::SyncStore> = database.clone();
 

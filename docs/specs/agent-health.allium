@@ -859,6 +859,11 @@ surface HookDelivery {
         -- maintain under concurrent hooks: a read and its dependent
         -- write are serialised by the board, not racing across process
         -- boundaries. See SubagentCountIsDerivedNotIncremented.
+        --
+        -- Its read-side counterpart is agent-tree.allium's
+        -- PanesReadThroughTheBoard: the companion panes in the same agent
+        -- windows find the board the same way and read their task and the
+        -- live agents from it, never from the store.
 
     @guarantee HookEventsPushALiveRefresh
         -- An event the board applies successfully pushes a refresh of that

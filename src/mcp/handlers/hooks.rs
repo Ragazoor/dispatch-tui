@@ -8,10 +8,11 @@
 
 use std::sync::Arc;
 
-use axum::{extract::State, Json};
+use axum::{extract::State, http::StatusCode, Json};
 
 use crate::hooks::wire::{
-    Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, Question,
+    Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, PaneAgent, PaneTask,
+    PaneView, PaneViewRequest, Question,
 };
 use crate::mcp::{trajectory, BackgroundWrite, McpState};
 use crate::models::TaskId;
@@ -38,6 +39,41 @@ pub async fn handle_hook(
         HookRequest::Observe(event) => HookResponse::Observed(observe(&state, event).await),
         HookRequest::Ask(question) => HookResponse::Answer(answer(&state, question).await),
     })
+}
+
+/// `BoardPaneView` (`docs/specs/agent-tree.allium`): the companion panes' read.
+/// Answered from the board's own rows, changes nothing and notifies nobody. A
+/// row the board does not hold yet is an answer with no task, not an error; an
+/// unreadable row is one.
+pub async fn handle_pane_view(
+    State(state): State<Arc<McpState>>,
+    Json(request): Json<PaneViewRequest>,
+) -> Result<Json<PaneView>, (StatusCode, String)> {
+    let failed = |e: anyhow::Error| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"));
+    let task = state
+        .db
+        .get_task(TaskId(request.task_id))
+        .await
+        .map_err(failed)?
+        .map(|task| PaneTask {
+            worktree: task.worktree,
+            base_branch: task.base_branch,
+        });
+    let live_agents = state
+        .db
+        .list_live_agent_tasks()
+        .await
+        .map_err(failed)?
+        .into_iter()
+        .filter_map(|task| {
+            Some(PaneAgent {
+                id: task.id.0,
+                title: task.title,
+                tmux_window: task.tmux_window?.as_str().to_string(),
+            })
+        })
+        .collect();
+    Ok(Json(PaneView { task, live_agents }))
 }
 
 async fn observe(state: &McpState, event: ObservedEvent) -> ObserveOutcome {

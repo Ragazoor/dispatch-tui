@@ -1407,32 +1407,62 @@ fn refresh(
 /// — not part of the board TUI's `App`/message loop (see the module-level
 /// doc comment). Resolves the task's worktree and base branch from the DB once,
 /// then re-queries git on a 1-second timer.
-pub async fn run(db_path: &Path, store_server: Option<String>, task_id: i64) -> Result<()> {
-    // The task and the live-agent list are shared rows, so the pane reads
-    // them through its own store connection, held for the pane's lifetime.
-    let store = crate::runtime::open_cli_store(db_path, store_server).await?;
-    let (agent_reads, poller) = spawn_agent_list_poller(store.database.clone(), TaskId(task_id));
+pub async fn run(db_path: &Path, board_port: u16, task_id: i64) -> Result<()> {
+    // The task and the live-agent list come from the running board, which
+    // already holds them (`PanesReadThroughTheBoard`).
+    let source = std::sync::Arc::new(crate::cli::BoardPaneSource { port: board_port });
+    let (agent_reads, poller) = spawn_agent_list_poller(source.clone(), TaskId(task_id));
 
-    let result =
-        crate::cli::with_pane_task(&*store.database, task_id, |terminal, root, base_branch| {
-            // Start from a clean slate. The open set is view state, like the cursor and
-            // the manual expansions, and a set left behind by a killed renderer
-            // describes nothing — see the AgentTreeCompanionPane surface's guidance.
-            let _ = crate::agent_tree_open_set::clear_open_set(&root.to_string_lossy());
-            run_loop(
-                terminal,
-                &base_branch,
-                &DiffPaneContext {
-                    root: &root,
-                    db_path,
-                    task_id,
-                },
-                &agent_reads,
-                &RealProcessRunner::default(),
-            )
-        });
+    let result = crate::cli::with_pane_task(&*source, task_id, |terminal, root, base_branch| {
+        // Start from a clean slate. The open set is view state, like the cursor and
+        // the manual expansions, and a set left behind by a killed renderer
+        // describes nothing — see the AgentTreeCompanionPane surface's guidance.
+        let _ = crate::agent_tree_open_set::clear_open_set(&root.to_string_lossy());
+        run_loop(
+            terminal,
+            &base_branch,
+            &DiffPaneContext {
+                root: &root,
+                db_path,
+                task_id,
+            },
+            &agent_reads,
+            &RealProcessRunner::default(),
+        )
+    });
     poller.abort();
     result
+}
+
+/// One read of the agents section, from the running board
+/// (agent-tree.allium: RefreshAgentTreeAgentList, `board_tasks()` =
+/// BoardPaneView's `live_agents`). `Err` carries the notice to show -- naming
+/// the board -- and the loop keeps its last list
+/// (AgentTreeAgentListFailureKeepsLastList).
+pub(crate) async fn read_agent_rows(
+    source: &dyn crate::cli::PaneViewSource,
+    own: TaskId,
+) -> Result<Vec<AgentRow>, String> {
+    let view = source.pane_view(own.0).await.map_err(|e| {
+        format!(
+            "could not read the agent list from the board at {}: {e:#}",
+            source.board_address()
+        )
+    })?;
+    let mut rows: Vec<AgentRow> = view
+        .live_agents
+        .into_iter()
+        .filter_map(|agent| {
+            Some(AgentRow {
+                id: TaskId(agent.id),
+                title: agent.title,
+                window: TmuxWindow::parse(&agent.tmux_window)?,
+                is_own: agent.id == own.0,
+            })
+        })
+        .collect();
+    rows.sort_by_key(|row| row.id.0);
+    Ok(rows)
 }
 
 /// Read the board's task list on its own timer and send each read, reduced to
@@ -1440,13 +1470,12 @@ pub async fn run(db_path: &Path, store_server: Option<String>, task_id: i64) -> 
 /// writes to the board (`RefreshAgentTreeAgentList`).
 ///
 /// A task rather than an inline read because the render loop is synchronous
-/// and the database is not; the loop runs on the runtime's calling thread, so
+/// and the board read is not; the loop runs on the runtime's calling thread, so
 /// this runs on a worker beside it.
 fn spawn_agent_list_poller(
-    database: std::sync::Arc<crate::db::Database>,
+    source: std::sync::Arc<dyn crate::cli::PaneViewSource>,
     own: TaskId,
 ) -> (AgentReads, tokio::task::JoinHandle<()>) {
-    use crate::db::TaskRead;
     let (tx, rx) = std::sync::mpsc::channel();
     let handle = tokio::spawn(async move {
         // Only news is sent: in steady state the list does not change, and
@@ -1459,11 +1488,7 @@ fn spawn_agent_list_poller(
         let mut ticker = tokio::time::interval(AGENTS_REFRESH_INTERVAL);
         loop {
             ticker.tick().await;
-            let read = database
-                .list_live_agent_tasks()
-                .await
-                .map(|tasks| crate::cli::agent_tree_agents::live_agents(&tasks, own))
-                .map_err(|e| format!("{e:#}"));
+            let read = read_agent_rows(&*source, own).await;
             let news = match &read {
                 Ok(rows) => last_sent.as_ref() != Some(rows),
                 Err(_) => true,

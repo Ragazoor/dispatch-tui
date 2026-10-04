@@ -17,4 +17,4 @@ mod tests;
 
 pub use dispatch::handle_mcp;
 pub use dispatch::TOOL_NAMES;
-pub use hooks::handle_hook;
+pub use hooks::{handle_hook, handle_pane_view};

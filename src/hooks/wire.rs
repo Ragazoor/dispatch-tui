@@ -134,6 +134,50 @@ pub enum ObserveOutcome {
     Failed { reason: String },
 }
 
+// ---------------------------------------------------------------------------
+// BoardPaneView (agent-tree.allium): what the board answers a companion pane.
+// ---------------------------------------------------------------------------
+
+/// The path the board answers a companion pane's read on, beside `/mcp` and
+/// [`HOOK_PATH`]. POST, with a [`PaneViewRequest`] body; the answer is a
+/// [`PaneView`].
+pub const PANE_VIEW_PATH: &str = "/pane-view";
+
+/// A pane renderer's question: what does the board hold for this task?
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneViewRequest {
+    pub task_id: i64,
+}
+
+/// `agent-tree.allium`'s `PaneView`: the pane's task, when the board's rows
+/// hold it, and every task with a live agent window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneView {
+    /// Null until the board's rows hold the task -- "not arrived yet", which
+    /// is not the same answer as "arrived without a worktree".
+    pub task: Option<PaneTask>,
+    /// Exactly the tasks `Task::is_live_agent` holds for in the board's rows,
+    /// across every repo and epic (`LiveIsTheBoardsOwnDefinition`).
+    pub live_agents: Vec<PaneAgent>,
+}
+
+/// `agent-tree.allium`'s `PaneTask`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneTask {
+    pub worktree: Option<String>,
+    pub base_branch: String,
+}
+
+/// One live agent, as much of the task as the agents section draws and jumps
+/// to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneAgent {
+    pub id: i64,
+    pub title: String,
+    /// The task's recorded tmux window (always present: a live agent has one).
+    pub tmux_window: String,
+}
+
 /// The board's answer to a [`Question`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "answer", rename_all = "snake_case")]

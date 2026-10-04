@@ -852,6 +852,70 @@ mod bootstrap {
         }
     }
 
+    /// The record a board leaves beside its database (task #4982,
+    /// startup.allium: StoreAddressRecord).
+    fn store_record(db_path: &std::path::Path) -> std::path::PathBuf {
+        db_path.parent().unwrap().join("store-server")
+    }
+
+    /// startup.allium: RecordTheNamedStoreOnceItAnswers. A board on a named
+    /// store leaves the address beside its database once the first connection
+    /// has succeeded, so a command in a plain terminal reaches the same store.
+    #[tokio::test]
+    async fn bootstrap_records_a_named_store_beside_the_database_once_it_answers() {
+        let (_dir, db_path, paths) = fixture().await;
+
+        let _bootstrap =
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
+                .await
+                .expect("bootstrap must succeed against a reachable named store");
+
+        let recorded = std::fs::read_to_string(store_record(&db_path))
+            .expect("a board on a named store must record its address beside the database");
+        assert_eq!(recorded.trim(), TEST_STORE);
+    }
+
+    /// startup.allium: RecordTheNamedStoreOnceItAnswers, "ONLY ONCE THE FIRST
+    /// CONNECTION HAS SUCCEEDED": a typo on the command line must not become
+    /// what every later command reaches for.
+    #[tokio::test]
+    async fn bootstrap_records_nothing_when_the_named_store_cannot_be_reached() {
+        let (_dir, db_path, paths) = fixture().await;
+
+        let result =
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), unreachable_store)
+                .await;
+
+        assert!(result.is_err(), "an unreachable store must abort startup");
+        assert!(
+            !store_record(&db_path).exists(),
+            "an address that never answered must not be recorded"
+        );
+    }
+
+    /// startup.allium: RecordTheNamedStoreOnceItAnswers -- a record that
+    /// cannot be written does not stop the launch. The record path is made a
+    /// directory, so no write can land there. Paired with the success test
+    /// above, which proves bootstrap attempts the write at all.
+    #[tokio::test]
+    async fn bootstrap_starts_even_when_the_store_record_cannot_be_written() {
+        let (_dir, db_path, paths) = fixture().await;
+        std::fs::create_dir(store_record(&db_path)).unwrap();
+
+        let result =
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store).await;
+
+        assert!(
+            result.is_ok(),
+            "an unwritable store record must not abort the launch: {:?}",
+            result.err()
+        );
+        assert!(
+            store_record(&db_path).is_dir(),
+            "the unwritable path is left as it was"
+        );
+    }
+
     /// Temp-backed `StartupPaths` plus a database path, the fixture every
     /// test here needs. A bootstrap test must never be handed the operator's
     /// real locations — see docs/specs/observability.allium: StatusLineDecorator,
@@ -1236,5 +1300,125 @@ mod store_address_publication {
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].1[0], "set-environment");
+    }
+}
+
+/// Task #4982, startup.allium: StoreAddressRecord and the three rules that
+/// write and remove it. The bootstrap half (recorded once the first
+/// connection succeeds, never for an unreachable store, a write failure is not
+/// fatal) is in `mod bootstrap`; this is the target-dependent half.
+mod store_address_record {
+    use super::*;
+
+    fn managed_target(dir: &std::path::Path) -> StoreTarget {
+        StoreTarget::Managed(Arc::new(
+            crate::spacetime::managed_store::ManagedStore::for_launch(dir.to_path_buf(), dir),
+        ))
+    }
+
+    fn named_target() -> StoreTarget {
+        StoreTarget::Named("http://store.example:3000".into())
+    }
+
+    /// A database path in a fresh temp directory, with a record already
+    /// beside it -- the stale one a board that could not run its exit leaves.
+    fn db_with_record(dir: &tempfile::TempDir, address: &str) -> std::path::PathBuf {
+        let db_path = dir.path().join("dispatch.db");
+        std::fs::write(record_path(&db_path), format!("{address}\n")).unwrap();
+        db_path
+    }
+
+    fn record_path(db_path: &std::path::Path) -> std::path::PathBuf {
+        db_path.parent().unwrap().join("store-server")
+    }
+
+    #[test]
+    fn a_named_store_is_recorded_beside_the_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("dispatch.db");
+
+        let kept = record_store_server_for(&named_target(), &db_path, "http://store.example:3000");
+
+        assert!(kept);
+        assert_eq!(
+            crate::startup::recorded_store_server(&db_path),
+            Some("http://store.example:3000".to_string())
+        );
+    }
+
+    /// RecordTheNamedStoreOnceItAnswers requires a named store: a managed
+    /// board's store is already where a command with nothing named looks.
+    #[test]
+    fn a_managed_board_records_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("dispatch.db");
+
+        let kept = record_store_server_for(
+            &managed_target(dir.path()),
+            &db_path,
+            "http://127.0.0.1:3000",
+        );
+
+        assert!(!kept);
+        assert!(!record_path(&db_path).exists());
+    }
+
+    /// ForgetAStaleStoreRecordOnAManagedLaunch: from then on a command with
+    /// nothing named reaches the managed address, where this board's store is.
+    #[test]
+    fn a_managed_launch_forgets_a_stale_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = db_with_record(&dir, "http://gone:3000");
+
+        forget_stale_store_record_for(&managed_target(dir.path()), &db_path);
+
+        assert!(
+            !record_path(&db_path).exists(),
+            "a managed launch must clear a record a named board left behind"
+        );
+    }
+
+    /// The forget rule requires `explicit_store_server() = null`. A named
+    /// launch replaces the record once its store answers instead; clearing it
+    /// first would open a window where commands reach the managed address.
+    #[test]
+    fn a_named_launch_leaves_the_record_for_its_own_to_replace() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = db_with_record(&dir, "http://earlier:3000");
+
+        forget_stale_store_record_for(&named_target(), &db_path);
+
+        assert!(record_path(&db_path).exists());
+    }
+
+    /// ForgetTheStoreRecordWhenTheBoardExits: the record says "a board on this
+    /// database is using this store", so it goes when the board does. The
+    /// guard's drop is every exit at once -- a quit, a startup abort, a panic.
+    #[test]
+    fn a_named_boards_exit_forgets_its_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = db_with_record(&dir, "http://store.example:3000");
+
+        drop(StoreRecordGuard::for_target(&named_target(), &db_path));
+
+        assert!(
+            !record_path(&db_path).exists(),
+            "a named board's exit must remove the record it left"
+        );
+    }
+
+    /// The exit rule requires a named store: a managed board recorded nothing,
+    /// so there is nothing of its own to remove.
+    #[test]
+    fn a_managed_boards_exit_leaves_any_record_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = db_with_record(&dir, "http://other-board:3000");
+
+        drop(StoreRecordGuard::for_target(
+            &managed_target(dir.path()),
+            &db_path,
+        ));
+
+        assert!(record_path(&db_path).exists());
     }
 }

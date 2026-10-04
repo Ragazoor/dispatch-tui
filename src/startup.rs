@@ -214,6 +214,72 @@ pub fn store_server_or_managed(server: Option<String>) -> String {
     })
 }
 
+// ---------------------------------------------------------------------------
+// StoreAddressRecord (startup.allium)
+//
+// A board on a named store keeps that address in a small file beside its
+// database, so a command run from a plain terminal reaches the same store
+// without the flag or the environment variable.
+// ---------------------------------------------------------------------------
+
+/// The record's file name, in the same folder as the database file.
+const STORE_RECORD_FILE: &str = "store-server";
+
+fn store_record_path(db_path: &std::path::Path) -> std::path::PathBuf {
+    db_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join(STORE_RECORD_FILE)
+}
+
+/// The address a board on `db_path` recorded beside it, else `None`. Blank is
+/// `None`. `startup.allium`: `StoreAddressRecord.recorded_store_server`.
+pub fn recorded_store_server(db_path: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(store_record_path(db_path)).ok()?;
+    crate::spacetime::managed_store::normalize_server(Some(text))
+}
+
+/// Record `address` beside `db_path`, replacing whatever was there. True when
+/// the record was kept. `startup.allium`: `StoreAddressRecord.record_store_server`.
+pub fn record_store_server(db_path: &std::path::Path, address: &str) -> bool {
+    match std::fs::write(store_record_path(db_path), format!("{}\n", address.trim())) {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!("could not record the store address beside the database: {e}");
+            false
+        }
+    }
+}
+
+/// Remove the record beside `db_path`. A record that is not there is not a
+/// failure. `startup.allium`: `StoreAddressRecord.forget_store_server`.
+pub fn forget_store_server(db_path: &std::path::Path) -> bool {
+    match std::fs::remove_file(store_record_path(db_path)) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+        Err(e) => {
+            tracing::warn!("could not remove the store address record: {e}");
+            false
+        }
+    }
+}
+
+/// The store a short-lived subcommand connects to, first answer wins: the
+/// flag, the environment variable, the record beside `db_path`, the managed
+/// address. Blank counts as absent at every step. `cli.allium`:
+/// `CliCommandsReachTheStoreWithoutManagingIt`.
+pub fn cli_store_server(
+    flag: Option<String>,
+    env: Option<String>,
+    db_path: &std::path::Path,
+) -> String {
+    use crate::spacetime::managed_store::normalize_server;
+    let named = normalize_server(flag)
+        .or_else(|| normalize_server(env))
+        .or_else(|| recorded_store_server(db_path));
+    store_server_or_managed(named)
+}
+
 impl StartupAbort {
     /// The operator-facing message. Each names the next action, because that is
     /// what differs between them — install tmux, look at the server, move
@@ -1016,3 +1082,6 @@ mod tests;
 /// subcommand falls back to when none is named.
 #[cfg(test)]
 mod store_server_tests;
+
+#[cfg(test)]
+mod store_record_tests;

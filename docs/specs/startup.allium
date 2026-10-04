@@ -402,6 +402,13 @@ contract ManagedStoreHost {
     -- "unset". Null is not an error any more; it is what selects the managed
     -- store.
     --
+    -- Never the address recorded beside the database (StoreAddressRecord).
+    -- That record is what a board leaves behind for the short-lived commands
+    -- run outside its session; a board that read it back would treat a store
+    -- an earlier board once connected to as one the operator named on this
+    -- launch, and so would neither start nor stop the managed store
+    -- (ANamedStoreIsNeverManaged).
+    --
     -- configured_store_server() — the address sync.allium's OpenBoardConnection
     -- connects to — is this value when it is non-null, and otherwise the
     -- managed store's config.managed_store_address and
@@ -485,6 +492,40 @@ contract ManagedStoreHost {
         -- a migration go through. A change the store refuses to migrate
         -- automatically comes back as needs_manual_migration, and what the
         -- operator's database holds is left exactly as it was.
+}
+
+-- The record of which NAMED store the board on this database is using, kept
+-- for the short-lived commands that are not started inside the board's own
+-- tmux session (cli.allium: CliCommandsReachTheStoreWithoutManagingIt). Stated
+-- as a contract because it is a file on disk, which can be unwritable,
+-- missing, or left behind by a board that could not run its exit.
+contract StoreAddressRecord {
+    -- The address recorded beside this launch's --db database file, else
+    -- null. A blank record is null too, for the same reason a blank
+    -- DISPATCH_SPACETIME_SERVER is.
+    recorded_store_server: () -> String?
+
+    -- Record `address` — the store's address as the board normalised it to
+    -- connect, one line — beside the --db database file, replacing whatever
+    -- was there. True when the record was kept.
+    record_store_server: (address: String) -> Boolean
+
+    -- Remove the record, if there is one. Removing a record that is not there
+    -- is not a failure.
+    forget_store_server: () -> Boolean
+
+    @invariant TheRecordBelongsToItsDatabase
+        -- The record sits in the same folder as the database file the board
+        -- was started with, so a board on a throwaway --db records nothing
+        -- next to the operator's real one, and a command run with that same
+        -- --db finds the throwaway board's store and no other.
+
+    @invariant TheRecordIsLocal
+        -- The record is this install's own configuration, like the database
+        -- file beside it — one of the things that stays local (sync.allium:
+        -- BoardWritesThroughTheStore). It is never a shared row: which store a
+        -- machine's board is using is not something a teammate's board may
+        -- tell it.
 }
 
 ------------------------------------------------------------
@@ -1623,6 +1664,94 @@ rule StopTheManagedStoreWhenStartupAborts {
         -- was held yet.
 }
 
+rule RecordTheNamedStoreOnceItAnswers {
+    when: StoreReachedAtStartup(operator)
+    requires: explicit_store_server() != null
+
+    ensures: StoreAddressRecorded(operator, kept: record_store_server(explicit_store_server()))
+
+    @guidance
+        -- A BOARD ON A NAMED STORE LEAVES ITS ADDRESS BESIDE ITS DATABASE, so
+        -- that a `dispatch repo …` or `dispatch plan …` typed in a plain
+        -- terminal reaches the store the board is using without being told
+        -- (cli.allium: CliCommandsReachTheStoreWithoutManagingIt). Before it,
+        -- such a command found a named store only through
+        -- DISPATCH_SPACETIME_SERVER, which the board sets on its own tmux
+        -- session and nowhere else; outside that session it fell back to the
+        -- managed address, which on a named-store machine is nobody's store.
+        --
+        -- THE SESSION ENVIRONMENT STAYS. A board on a named store still sets
+        -- DISPATCH_SPACETIME_SERVER on its own tmux session, and that is how
+        -- the agent windows and the commands run in them find it. The record
+        -- is the fallback for processes outside the session, and the
+        -- environment, where it is set, comes before it.
+        --
+        -- ONLY ONCE THE FIRST CONNECTION HAS SUCCEEDED. An address that never
+        -- answered is not recorded: a typo on the command line must not become
+        -- what every later command reaches for. StoreReachedAtStartup is the
+        -- point the first connection has been applied (sync.allium:
+        -- FirstConnectionLetsTheBoardDraw).
+        --
+        -- A record that cannot be written does not stop the launch: the board
+        -- itself does not read it, and the only cost is that a command outside
+        -- the session must name the store itself, as it had to before. See the
+        -- open question.
+        --
+        -- A MANAGED BOARD RECORDS NOTHING (ForgetAStaleStoreRecordOnAManagedLaunch):
+        -- its store is already on the address a command with nothing named
+        -- falls back to.
+}
+
+rule ForgetAStaleStoreRecordOnAManagedLaunch {
+    when: LaunchBoard(operator)
+    requires: explicit_store_server() = null
+
+    ensures: StoreAddressForgotten(operator, done: forget_store_server())
+
+    @guidance
+        -- A record left by a named-store board that could not run its exit —
+        -- see the open question on uncatchable exits — would otherwise send
+        -- every command outside the session to that store while this board
+        -- runs on the managed one. The managed launch clears it as soon as
+        -- the process that draws the board has chosen the managed store —
+        -- once AbortWhenTheManagedStoreHasNoCli has let it through, and
+        -- before the host label is checked or the store brought up
+        -- (BringUpTheManagedStoreOnceTheHostIsNamed) — so from then on a
+        -- command with nothing named reaches the managed address. A managed
+        -- launch that later aborts has still cleared it; that costs nothing,
+        -- since no named board on this database is running once this launch
+        -- has retired it.
+        --
+        -- The board itself never reads the record (ManagedStoreHost:
+        -- explicit_store_server), so a stale one cannot make this launch
+        -- read as having named a store; clearing it is for the commands.
+}
+
+rule ForgetTheStoreRecordWhenTheBoardExits {
+    when: BoardExited(operator) or StartupAborted(reason)
+    requires: explicit_store_server() != null
+
+    ensures: StoreAddressForgotten(operator, done: forget_store_server())
+
+    @guidance
+        -- The record says "a board on this database is using this store", so
+        -- it goes when the board does: a confirmed quit, being retired by a
+        -- later launch (the retiring launch waits until the board is gone,
+        -- RetiredMeansGoneNotSignalled, so the old board's removal comes
+        -- before the new board's record), and every startup abort, which is
+        -- an exit like any other (StopTheManagedStoreWhenStartupAborts).
+        --
+        -- A STALE RECORD IS ACCEPTED, NOT REPAIRED. A board that could not
+        -- run its exit leaves the record behind. A command that then reads it
+        -- connects to that address and, when nothing answers, fails as any
+        -- unreachable store does — naming the address it tried
+        -- (AbortWhenTheStoreCannotBeReached). It does NOT fall back to the
+        -- managed address: the operator's last board was on the recorded
+        -- store, and quietly writing to a different one would be worse than
+        -- saying it could not reach the right one. The next board on this
+        -- database replaces or clears the record.
+}
+
 rule AbortWhenTheStoreCannotBeReached {
     when: StoreUnreachableAtStartup(operator, reason)
 
@@ -1845,6 +1974,17 @@ rule AbortWhenTheAgentPortIsTaken {
 -- a store — even the managed address itself, spelled out — is how the operator
 -- opts out of management.
 
+-- TheStoreRecordNamesAStoreABoardReached: the address recorded beside a
+-- database (StoreAddressRecord) is only ever one a board on that database
+-- named and reached on its first connection (RecordTheNamedStoreOnceItAnswers),
+-- and every exit that board can run removes it again
+-- (ForgetTheStoreRecordWhenTheBoardExits). A managed launch clears any record
+-- it finds (ForgetAStaleStoreRecordOnAManagedLaunch) and writes none. So a
+-- record is either the store of the board running on that database now, or
+-- left by a board that could not run its exit — never an address no board
+-- reached, and never one a managed board is not using. Not expressible as a
+-- state assertion: it constrains which transitions may write the record.
+
 -- TheManagedStoreStopsWithItsBoard: every exit this board can run —
 -- a confirmed quit, being retired by a later launch, and every startup abort
 -- after ManagedStoreRequested — stops a managed store this board holds. The
@@ -1883,6 +2023,7 @@ surface BoardLaunchCommand {
         demands ConfigDriftEngine
         demands SessionLauncher
         demands ManagedStoreHost
+        demands StoreAddressRecord
 
     provides:
         LaunchBoard(operator)
@@ -2029,5 +2170,7 @@ surface HostLabelPrompt {
 open question "ACCEPTED (task #12296) as an edge, not built against: what becomes of the managed store when the board cannot run its exit — a crash, a panic that aborts the process, SIGKILL, the machine losing power, or the tmux server being killed with the board in it? StopTheManagedStoreWhenTheBoardExits cannot fire, so the detached store keeps running until something stops it. The next launch adopts it (AdoptAStoreAlreadyOnTheManagedAddress) and its exit stops it, so nothing is lost and nothing duplicates — but between the two, a store nobody owns runs on loopback. Is that acceptable, or should something (a pidfile checked at launch, a parent-death signal, a watchdog in the store's launcher) bound how long an orphaned store can outlive its board?"
 
 open question "ACCEPTED (task #12296) as an edge the operator reaches only on purpose: two boards on one machine in two tmux sessions (reachable on purpose — see config.board_window_name) on two agent ports both run managed: the second adopts the store the first started, and whichever exits first stops the store under the other, which then shows an outage it cannot recover from until relaunched. Should an exit stop the managed store only when no other board still holds it, should a second managed board on one machine be refused, or is this accepted as an edge the operator reaches only on purpose?"
+
+open question "Task #4982: RecordTheNamedStoreOnceItAnswers treats a store record that cannot be written (or removed, in the two forget rules) as a logged, non-fatal failure — the board does not read the record, and the cost is only that commands outside the session must name the store, as before. That mirrors record_module_hash's best-effort and the session-environment publication's. Is best-effort the intended answer, or should an unwritable record be reported to the operator (or abort, given the database folder beside it is the board's own substrate)?"
 
 open question "STILL PLACEHOLDERS (task #12296 measured nothing beyond a near-empty data directory, where a start-and-publish took well under a second): config.managed_store_start_timeout (15 seconds) and config.managed_store_stop_timeout (5 seconds) are placeholders, not measured values. What does a cold `spacetime start` over a large data directory actually take, and how long may a quit be held up waiting for the store to stop?"

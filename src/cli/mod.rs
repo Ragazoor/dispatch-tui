@@ -16,8 +16,6 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use crate::models::TaskId;
-
 pub mod agent_diff;
 pub mod agent_tree;
 pub mod agent_tree_agents;
@@ -62,6 +60,63 @@ pub(crate) enum TaskLookup {
         root: PathBuf,
         base_branch: String,
     },
+    /// The board could not be reached, or answered something unreadable
+    /// (agent-tree.allium: BoardPaneView, a failed read). Waited out like
+    /// `NotYet`, and named -- with the address tried -- when the wait ends.
+    BoardUnreachable {
+        address: String,
+    },
+}
+
+/// Where a pane renderer reads its task and the live agents from: the running
+/// board, never the store (agent-tree.allium: PanesReadThroughTheBoard).
+/// A trait so the pane's read paths can be driven by a fake board in tests;
+/// production implements it over `crate::hooks::fetch_pane_view`.
+#[async_trait::async_trait]
+pub(crate) trait PaneViewSource: Send + Sync {
+    /// One read of the board (BoardPaneView's `pane_view`). `Err` is a failed
+    /// read, never an empty view.
+    async fn pane_view(&self, task_id: i64) -> Result<crate::hooks::wire::PaneView>;
+    /// The board address this source asks, for the failure text.
+    fn board_address(&self) -> String;
+}
+
+/// The running board, asked over its port the way a hook asks it
+/// (`crate::hooks::fetch_pane_view`).
+pub(crate) struct BoardPaneSource {
+    pub port: u16,
+}
+
+#[async_trait::async_trait]
+impl PaneViewSource for BoardPaneSource {
+    async fn pane_view(&self, task_id: i64) -> Result<crate::hooks::wire::PaneView> {
+        crate::hooks::fetch_pane_view(self.port, task_id).await
+    }
+    fn board_address(&self) -> String {
+        format!("127.0.0.1:{}", self.port)
+    }
+}
+
+/// One read of the board, reduced to what the startup wait decides on.
+pub(crate) async fn lookup_from_board(source: &dyn PaneViewSource, task_id: i64) -> TaskLookup {
+    match source.pane_view(task_id).await {
+        Err(e) => {
+            tracing::warn!(task_id, "pane read of the board failed: {e:#}");
+            TaskLookup::BoardUnreachable {
+                address: source.board_address(),
+            }
+        }
+        Ok(view) => match view.task {
+            None => TaskLookup::NotYet,
+            Some(task) => match task.worktree {
+                None => TaskLookup::NoWorktree,
+                Some(worktree) => TaskLookup::Found {
+                    root: PathBuf::from(worktree),
+                    base_branch: task.base_branch,
+                },
+            },
+        },
+    }
 }
 
 /// What a pane does next while it resolves its task.
@@ -80,7 +135,7 @@ pub(crate) enum StartupStep {
 /// (`agent-tree.allium`: `config.agent_tree_startup_wait`).
 pub(crate) const STARTUP_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// How often the wait re-reads the store and redraws.
+/// How often the wait re-reads the board and redraws.
 const STARTUP_POLL: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Decide the next step from one read. Arrival wins over the limit: a row that
@@ -99,6 +154,11 @@ pub(crate) fn startup_step(
         TaskLookup::NoWorktree => StartupStep::Fail(format!("task {task_id} has no worktree")),
         TaskLookup::NotYet if elapsed < limit => StartupStep::Wait,
         TaskLookup::NotYet => StartupStep::Fail(format!("task {task_id} not found")),
+        TaskLookup::BoardUnreachable { .. } if elapsed < limit => StartupStep::Wait,
+        TaskLookup::BoardUnreachable { address } => StartupStep::Fail(format!(
+            "could not reach the dispatch board at {address}; is it running? \
+             (a board started with --port needs DISPATCH_PORT or --port here)"
+        )),
     }
 }
 
@@ -120,19 +180,6 @@ pub(crate) fn render_startup_notice(
     );
 }
 
-async fn read_task_lookup(database: &dyn crate::db::TaskRead, task_id: i64) -> Result<TaskLookup> {
-    Ok(match database.get_task(TaskId(task_id)).await? {
-        None => TaskLookup::NotYet,
-        Some(task) => match task.worktree {
-            None => TaskLookup::NoWorktree,
-            Some(worktree) => TaskLookup::Found {
-                root: PathBuf::from(worktree),
-                base_branch: task.base_branch,
-            },
-        },
-    })
-}
-
 fn is_quit_key(key: &crossterm::event::KeyEvent) -> bool {
     use crossterm::event::{KeyCode, KeyModifiers};
     key.code == KeyCode::Char('q')
@@ -147,14 +194,14 @@ fn is_quit_key(key: &crossterm::event::KeyEvent) -> bool {
 /// Runs on the runtime's calling thread, like the render loops it precedes.
 fn wait_for_pane_task(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    database: &dyn crate::db::TaskRead,
+    source: &dyn PaneViewSource,
     task_id: i64,
 ) -> Result<Option<(PathBuf, String)>> {
     let handle = tokio::runtime::Handle::current();
     let started = std::time::Instant::now();
     let failure = loop {
         let lookup =
-            tokio::task::block_in_place(|| handle.block_on(read_task_lookup(database, task_id)))?;
+            tokio::task::block_in_place(|| handle.block_on(lookup_from_board(source, task_id)));
         match startup_step(task_id, &lookup, started.elapsed(), STARTUP_WAIT) {
             StartupStep::Proceed { root, base_branch } => return Ok(Some((root, base_branch))),
             StartupStep::Fail(reason) => break StartupStep::Fail(reason),
@@ -190,12 +237,12 @@ fn quit_requested(timeout: std::time::Duration) -> Result<bool> {
 /// task, then hands `body` its worktree and base branch. Closing the pane from
 /// the wait screen returns `Ok(())` without running `body`.
 pub(crate) fn with_pane_task(
-    database: &dyn crate::db::TaskRead,
+    source: &dyn PaneViewSource,
     task_id: i64,
     body: impl FnOnce(&mut Terminal<CrosstermBackend<io::Stdout>>, PathBuf, String) -> Result<()>,
 ) -> Result<()> {
     with_pane_terminal(
-        |terminal| match wait_for_pane_task(terminal, database, task_id)? {
+        |terminal| match wait_for_pane_task(terminal, source, task_id)? {
             Some((root, base_branch)) => body(terminal, root, base_branch),
             None => Ok(()),
         },
@@ -295,5 +342,109 @@ mod startup_tests {
     fn the_pane_draws_the_failure_text() {
         let out = drawn(&StartupStep::Fail("task 7 not found".into()));
         assert!(out.contains("task 7 not found"), "{out}");
+    }
+
+    // -- PanesReadThroughTheBoard (task #4982) -------------------------------
+
+    use crate::hooks::wire::{PaneTask, PaneView};
+
+    const BOARD: &str = "127.0.0.1:8899";
+
+    fn unreachable() -> TaskLookup {
+        TaskLookup::BoardUnreachable {
+            address: BOARD.into(),
+        }
+    }
+
+    /// A board that is mid-restart is waited out like a row that has not
+    /// arrived: it is most often back within the wait
+    /// (agent-tree.allium: "Companion Pane Startup").
+    #[test]
+    fn an_unreachable_board_is_waited_out_inside_the_limit() {
+        let step = startup_step(7, &unreachable(), Duration::from_secs(3), LIMIT);
+        assert_eq!(step, StartupStep::Wait);
+    }
+
+    /// AgentTreePaneTaskNeverArrives: when the last attempt could not reach
+    /// the board, the pane says THAT, naming the address it tried -- "not
+    /// found" would send the user looking for a task that may well exist.
+    #[test]
+    fn an_unreachable_board_at_the_limit_is_named_not_reported_as_a_missing_task() {
+        let StartupStep::Fail(reason) = startup_step(7, &unreachable(), LIMIT, LIMIT) else {
+            panic!("an unreachable board at the limit must end the wait");
+        };
+        assert!(
+            reason.contains(BOARD),
+            "must name the board address: {reason}"
+        );
+        assert!(
+            !reason.contains("not found"),
+            "an unreachable board is not a missing task: {reason}"
+        );
+    }
+
+    /// One scripted answer per read. `Err` stands for a board that could not
+    /// be reached or answered something unreadable.
+    struct FakeBoard {
+        answer: std::result::Result<PaneView, String>,
+    }
+
+    #[async_trait::async_trait]
+    impl PaneViewSource for FakeBoard {
+        async fn pane_view(&self, _task_id: i64) -> Result<PaneView> {
+            self.answer.clone().map_err(|e| anyhow::anyhow!(e))
+        }
+        fn board_address(&self) -> String {
+            BOARD.into()
+        }
+    }
+
+    fn view(task: Option<PaneTask>) -> FakeBoard {
+        FakeBoard {
+            answer: Ok(PaneView {
+                task,
+                live_agents: vec![],
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_task_the_board_holds_with_a_worktree_is_found() {
+        let board = view(Some(PaneTask {
+            worktree: Some("/wt/7".into()),
+            base_branch: "develop".into(),
+        }));
+        assert_eq!(
+            lookup_from_board(&board, 7).await,
+            TaskLookup::Found {
+                root: PathBuf::from("/wt/7"),
+                base_branch: "develop".into()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_task_the_board_holds_without_a_worktree_has_none() {
+        let board = view(Some(PaneTask {
+            worktree: None,
+            base_branch: "main".into(),
+        }));
+        assert_eq!(lookup_from_board(&board, 7).await, TaskLookup::NoWorktree);
+    }
+
+    /// PaneView.task = null: the row has not reached the board's rows yet.
+    #[tokio::test]
+    async fn a_task_the_board_does_not_hold_yet_is_not_yet() {
+        assert_eq!(lookup_from_board(&view(None), 7).await, TaskLookup::NotYet);
+    }
+
+    /// A failed read is its own answer, carrying the address -- never read as
+    /// "no such task".
+    #[tokio::test]
+    async fn a_board_that_does_not_answer_is_unreachable_not_missing() {
+        let board = FakeBoard {
+            answer: Err("connection refused".into()),
+        };
+        assert_eq!(lookup_from_board(&board, 7).await, unreachable());
     }
 }

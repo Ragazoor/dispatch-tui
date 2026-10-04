@@ -2284,3 +2284,56 @@ fn the_agents_section_shows_with_no_agents() {
     let out = render_pane_to_string(&mut state, &tree, 12);
     assert!(out.contains("Agents"), "{out}");
 }
+
+// ---- PanesReadThroughTheBoard: the agents section's read (task #4982)
+
+struct FakeBoard(std::result::Result<crate::hooks::wire::PaneView, String>);
+
+#[async_trait::async_trait]
+impl crate::cli::PaneViewSource for FakeBoard {
+    async fn pane_view(&self, _task_id: i64) -> anyhow::Result<crate::hooks::wire::PaneView> {
+        self.0.clone().map_err(|e| anyhow::anyhow!(e))
+    }
+    fn board_address(&self) -> String {
+        "127.0.0.1:8899".into()
+    }
+}
+
+fn pane_agent(id: i64) -> crate::hooks::wire::PaneAgent {
+    crate::hooks::wire::PaneAgent {
+        id,
+        title: format!("task {id}"),
+        tmux_window: format!("task-{id}"),
+    }
+}
+
+/// The board's live agents become the section's rows: ordered by id, the
+/// pane's own task marked. The board already filtered them
+/// (LiveIsTheBoardsOwnDefinition), so nothing it sends is dropped.
+#[tokio::test]
+async fn the_agent_list_is_the_boards_live_agents_by_id_with_own_marked() {
+    let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
+        task: None,
+        live_agents: vec![pane_agent(9), pane_agent(4), pane_agent(7)],
+    }));
+
+    let rows = read_agent_rows(&board, TaskId(7)).await;
+
+    assert_eq!(
+        rows,
+        Ok(vec![agent(4, false), agent(7, true), agent(9, false)])
+    );
+}
+
+/// A board that cannot be reached is a failed read with a reason naming
+/// the board, never an empty list: "no agents are running" and "the board
+/// did not answer" must not read the same (BoardPaneView).
+#[tokio::test]
+async fn an_unreachable_board_is_a_failed_agent_read_naming_the_board() {
+    let board = FakeBoard(Err("connection refused".into()));
+
+    let read = read_agent_rows(&board, TaskId(7)).await;
+
+    let reason = read.expect_err("an unreachable board must not read as an empty list");
+    assert!(reason.contains("127.0.0.1:8899"), "{reason}");
+}

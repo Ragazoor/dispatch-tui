@@ -137,6 +137,8 @@ enum Commands {
     AgentTree {
         /// Task ID whose worktree to render
         task_id: i64,
+        #[command(flatten)]
+        board: dispatch_tui::hooks::BoardAddress,
     },
     /// Render the diffs of whatever that task's agent-tree pane currently has
     /// open (see docs/specs/agent-tree.allium's AgentTreeDiffPane surface).
@@ -149,6 +151,8 @@ enum Commands {
     AgentDiff {
         /// Task ID whose open diffs to render
         task_id: i64,
+        #[command(flatten)]
+        board: dispatch_tui::hooks::BoardAddress,
     },
     /// statusLine decorator for Claude Code: record the subscription
     /// rate-limit windows from the hook payload on stdin, then run the
@@ -431,11 +435,7 @@ async fn cmd_tui(db: &std::path::Path, port: u16, spacetime_server: Option<Strin
     runtime::run_tui(db, port, &paths, spacetime_server).await
 }
 
-async fn cmd_agent_tree(
-    db: &std::path::Path,
-    store_server: Option<String>,
-    task_id: i64,
-) -> Result<()> {
+async fn cmd_agent_tree(db: &std::path::Path, board_port: u16, task_id: i64) -> Result<()> {
     // The renderer owns the alternate screen, so its warnings cannot go to
     // stderr — they go to `app.log` next to the database, like the board's.
     // Without this every `tracing::warn!` in the renderer went nowhere, which
@@ -443,19 +443,15 @@ async fn cmd_agent_tree(
     // Best-effort: a renderer that cannot open the log still renders.
     let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
     let _ = init_app_log_subscriber(data_dir);
-    dispatch_tui::cli::agent_tree::run(db, store_server, task_id).await
+    dispatch_tui::cli::agent_tree::run(db, board_port, task_id).await
 }
 
 /// The diff pane beneath the tree. Same alternate-screen constraint as
 /// [`cmd_agent_tree`], so the same best-effort log redirection.
-async fn cmd_agent_diff(
-    db: &std::path::Path,
-    store_server: Option<String>,
-    task_id: i64,
-) -> Result<()> {
+async fn cmd_agent_diff(db: &std::path::Path, board_port: u16, task_id: i64) -> Result<()> {
     let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
     let _ = init_app_log_subscriber(data_dir);
-    dispatch_tui::cli::agent_diff::run(db, store_server, task_id).await
+    dispatch_tui::cli::agent_diff::run(board_port, task_id).await
 }
 
 /// Initialise a `tracing_subscriber` writing to **stderr**, for `verify-feed`.
@@ -882,8 +878,8 @@ async fn run_async(
             body,
             board,
         } => hooks::run_peer_message(board.port, id, target, body).await?,
-        Commands::AgentTree { task_id } => cmd_agent_tree(db, store_server, task_id).await?,
-        Commands::AgentDiff { task_id } => cmd_agent_diff(db, store_server, task_id).await?,
+        Commands::AgentTree { task_id, board } => cmd_agent_tree(db, board.port, task_id).await?,
+        Commands::AgentDiff { task_id, board } => cmd_agent_diff(db, board.port, task_id).await?,
         // Like the hook arms above, the gate reaches the board, not `db`.
         // The verdict comes back rather than being acted on there: choosing
         // the process's exit code is this layer's job, and `BLOCK_TOOL_CALL`
