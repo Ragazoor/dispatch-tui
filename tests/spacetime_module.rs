@@ -72,27 +72,42 @@ fn scratch_target_dir() -> PathBuf {
 fn committed_module(into: &Path) -> PathBuf {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     std::fs::create_dir_all(into.join("src")).expect("scratch module dir");
-    for (tracked, dest) in [
-        ("spacetime/module/Cargo.toml", "Cargo.toml"),
-        ("spacetime/module/src/lib.rs", "src/lib.rs"),
-    ] {
-        // `git -C <dir>` rather than a cwd on the child: it is the form the rest
-        // of the repo uses (`src/git.rs`, `src/repo_sync.rs`), and
+    let git = |args: &[&str]| {
+        let mut argv = vec!["-C".to_string(), repo_root.display().to_string()];
+        argv.extend(args.iter().map(|a| a.to_string()));
+        let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
+        // `git -C <dir>` rather than a cwd on the child: it is the form the
+        // rest of the repo uses (`src/git.rs`, `src/repo_sync.rs`), and
         // `run_with_timeout` has no argument for a working directory.
         let out = RealProcessRunner::default()
-            .run_with_timeout(
-                "git",
-                &[
-                    "-C",
-                    &repo_root.display().to_string(),
-                    "show",
-                    &format!("HEAD:{tracked}"),
-                ],
-                PUBLISH_TIMEOUT,
-            )
-            .expect("git show");
+            .run_with_timeout("git", &argv, PUBLISH_TIMEOUT)
+            .expect("git");
         assert!(out.status.success(), "{}", describe(&out));
-        std::fs::write(into.join(dest), &out.stdout).expect("write scratch module file");
+        out.stdout
+    };
+    // Every tracked source file, not just `lib.rs`: the module is split by
+    // domain, so the committed shape is a directory.
+    let listing = git(&[
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "HEAD",
+        "spacetime/module/src",
+    ]);
+    let mut tracked: Vec<(String, String)> = String::from_utf8_lossy(&listing)
+        .lines()
+        .map(|path| {
+            let rel = path.trim_start_matches("spacetime/module/");
+            (path.to_string(), rel.to_string())
+        })
+        .collect();
+    tracked.push((
+        "spacetime/module/Cargo.toml".to_string(),
+        "Cargo.toml".to_string(),
+    ));
+    for (tracked, dest) in tracked {
+        let bytes = git(&["show", &format!("HEAD:{tracked}")]);
+        std::fs::write(into.join(dest), bytes).expect("write scratch module file");
     }
     into.to_path_buf()
 }
