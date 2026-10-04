@@ -125,11 +125,9 @@ impl EpicContext {
     pub(super) fn prompt_section(&self) -> String {
         format!(
             "\n\nThis task is part of epic #{}: {}\n\
-            To find other tasks in this epic, call list_tasks with epic_id={}.\n\
-            To ask questions or send updates to a sibling agent, use ListAgents to find its \
-            session (named task-<id>, matching that task's own id) and message it directly \
-            with SendMessage.",
-            self.epic_id, self.epic_title, self.epic_id
+            Sibling agents run as sessions named task-<id>, matching that task's own id. \
+            Find one with ListAgents and message it with SendMessage.",
+            self.epic_id, self.epic_title
         )
     }
 }

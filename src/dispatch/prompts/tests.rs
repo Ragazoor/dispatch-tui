@@ -182,6 +182,34 @@ tool — its own description carries what the prose would say, got: {text}"
     }
 }
 
+/// The epic section states the epic and how to reach siblings, and names no
+/// dispatch MCP tool: `list_tasks` has its own schema, so naming it restates it.
+/// See `ThePromptNamesNoToolMerelyToSayItExists` in
+/// `docs/specs/dispatch-prompt.allium`.
+#[test]
+fn epic_section_names_no_mcp_tool() {
+    let epic = EpicContext {
+        epic_id: EpicId(7),
+        epic_title: "My Epic".to_string(),
+        under_cve_feed: false,
+    };
+    let text = epic.prompt_section();
+    assert!(
+        text.contains("#7") && text.contains("My Epic"),
+        "got: {text}"
+    );
+    assert!(
+        text.contains("ListAgents") && text.contains("task-<id>"),
+        "got: {text}"
+    );
+    for tool in crate::mcp::handlers::TOOL_NAMES {
+        assert!(
+            !text.contains(tool),
+            "the epic section must not name the {tool} tool, got: {text}"
+        );
+    }
+}
+
 #[test]
 fn research_prompt_names_forbidden_wrap_up_tool() {
     let text = build_research_prompt(

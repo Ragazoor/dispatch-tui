@@ -142,38 +142,18 @@ Dispatched agents always work from their worktree folder. Every prompt includes 
 
 ## Documentation
 
-This file is intentionally slim — it is loaded into every agent's context. Read these on demand:
+This file is intentionally slim — it is loaded into every agent's context. Seams where code that compiles and passes tests can still be wrong. Each has a paragraph in [docs/invariants.md](docs/invariants.md) — read the one that matches what you are touching:
 
-> **`FieldUpdate`/`TaskPatch`** (nullable field mutations) is the most-touched pattern here — read [docs/conventions.md](docs/conventions.md) before writing an update handler; it also covers the `OwnedTaskPatch` parity hazard, now compiler-enforced via exhaustive destructuring.
+- **`FieldUpdate`/`TaskPatch`** nullable mutations — also read [docs/conventions.md](docs/conventions.md) before writing an update handler.
+- **Mutation boundary** — task/epic writes go through `TaskServiceApi`/`EpicServiceApi`, never `state.db`.
+- **Dispatch seam** — launching an agent is `TaskService::dispatch`; extend it, never re-derive it.
+- **Layout-cache coherence**, **board read source**, **one store with routed ports**, **DB connection model** — the TUI and storage seams.
+- **Render-panic policy**, **unsafe policy**, **tag system**, **read-side layering**, **`#[cfg(test)]` gating**, **workhorse macros**, **timing constants**.
+- Bare `unwrap()`/`expect()` outside tests only hard-fail under `cargo clippy --all-targets -- -D warnings` (the pre-push hook).
 
-> Bare `unwrap()`/`expect()` outside tests are clippy-warned but only hard-fail via `-D warnings` (the pre-push hook's `cargo clippy --all-targets -- -D warnings`) — a plain local `cargo build`/`cargo clippy` won't catch it. See the soft-fail-decoding section of `docs/conventions.md` for the fallback pattern.
+Read these on demand:
 
-> **Mutation boundary** (compiler-enforced): reads via `state.db` are fine, but task/epic mutations go through `TaskServiceApi`/`EpicServiceApi`, never the DB directly — `state.db` is typed `Arc<dyn db::TaskReadStore>`, so `state.db.patch_task(...)` from a handler is a compile error. `TaskReadStore` only seals task/epic writes; settings/learning/usage writes stay reachable through it. Sanctioned direct-mutation exceptions (own write handle, own invariants): `FeedRunner`, `TuiRuntime::feed_db`, and startup/CLI paths (`runtime::bootstrap`, `src/setup/`, `src/main.rs`) — but CLI handlers still route through `TaskService` (e.g. `cmd_plan` → `TaskService::attach_plan`). See "Sanctioned direct-mutation consumers" and `recalculate_epic_status` in `docs/conventions.md`.
-
-> **Dispatch seam**: launching an agent is `TaskService::dispatch` (`src/service/tasks/dispatch.rs`) — claim → prologue → `DispatchMode` match → blocking provision → record worktree/tmux → release the claim on failure. A new entry point extends it (a `DispatchClaim` variant, a `DispatchMode` variant) rather than re-deriving the sequence: `DispatchClaimExclusive` is the most safety-critical rule in the system, and a second copy is one that can drift. Skipping it also silently skips the claim's stale-counter clear and epic recalculation. See `docs/module-map.md` and the module's own doc comment.
-
-> **Layout-cache coherence** (self-healing, not compiler-enforced): `App.layout` (`LayoutCache`) derives from `board.tasks`/`board.epics` **and** the three board-wide filters. Call `invalidate_layout_cache()` after a mutation as a perf optimization, but `cached_epic_stats()` fingerprints both on every call and self-heals on mismatch. **The self-heal belongs to the accessor, not to the field**: it protects a reader that calls `cached_epic_stats()`, and a `&self` reader that touches `layout.*_cache` directly is served whatever was there. Add the fingerprint check to your accessor, as `cached_placements()` does. See `docs/architecture.md`.
-
-> **The board's read source is a seam, not the database handle.** `TuiRuntime` holds `board_reads` beside `database`, and every read that puts a card on screen goes through the first. A new board read belongs there too: `board_reads` is what the row-change pump and the tick's revision guard watch, so a card drawn from a `database` read instead is not redrawn when a teammate's change arrives. `src/sync/rows.rs` is emphatically **not** a cache: there is no read-through and no fallback to disk, which is the point rather than a gap. See `docs/specs/sync.allium`.
-
-> **One store, routed ports**: `TaskStore` is the one complete store and SpacetimeDB is mandatory. Where a call goes is `Database`'s routing: `SharedWriter` plus the `SharedReader`/`SharedLearningReader`/`SharedUsageReader`/`SharedRetiredFeedItemReader` ports, each guarded by `if let Some(port)`. The SQLite body after a guard serves only the test suite's in-memory database. A new shared method with only an SQLite body compiles and passes tests but reads a table nothing writes on a real board. See "The store seam" in `docs/conventions.md`.
-
-> **DB connection model**: one writer `tokio_rusqlite::Connection` (`src/db/mod.rs`) — mutations serialize through it via `db_call` — plus a read-only pool via `db_call_read`, so concurrent reads don't queue behind the writer. See "DB access" in `docs/conventions.md`. **`Database::open_in_memory` is not WAL** — memdb silently settles for a rollback journal, where a read waits for an overlapping write, so a concurrency test written against it tests locking rules no board runs under. Use a file-backed board (`populated_board_on_disk`, `spawn_board`) for anything that overlaps a read with a write. See `docs/specs/storage.allium`.
-
-> **Render-panic policy**: a guarded `unreachable!()` in a render match arm is fine when an upstream filter/type already rules that arm out (e.g. `ColumnItem` variants stripped before the match in `src/tui/ui/kanban/columns.rs`) — but MCP handlers and `src/tui/input.rs` must never panic, guarded or not. See "Rendering purity" in `docs/conventions.md`.
-
-> **Workhorse macros**: `patch_struct!` (`src/db/mod.rs::patch_struct`) generates `TaskPatch`/`EpicPatch`; `mcp_tools!` (`src/mcp/handlers/dispatch.rs::mcp_tools`) generates the MCP tool registry; the `service_api!` family in `src/service/api.rs` (`task_service_api!`/`epic_service_api!`/`learning_service_api!`) generates each `*ServiceApi` trait, impl, and test stub. Read the module doc comment before adding a patch field, an MCP tool, or a service-seam method by hand.
-
-> **Unsafe policy**: any `unsafe` block requires a `// SAFETY:` comment justifying why the invariant holds, plus reviewer sign-off. Full policy in `docs/conventions.md`.
-
-> **Tag system**: `TaskTag` is a kanban label with exactly two behavioural readers (`DispatchMode::for_task` and `TaskTag::is_review`). See "Tag system" in `docs/conventions.md` before assuming a tag does anything.
-
-> **Read-side layering** (convention, not compiler-enforced): zero `tui → db`, `tui → tmux`, `mcp → tui`, or `service → tui` references; `models` is a true leaf. Keep new read paths on the same seam the rest of the layer uses.
-
-> **`#[cfg(test)]` gating**: test-only scaffolding is gated behind `#[cfg(test)]`, except `MockProcessRunner` in `src/process.rs` (plus `window_name_in_lookup` in `src/tmux.rs`, which exists solely to serve it) and `test_tmux_window` in `src/models/tmux_window.rs` — `tests/` targets depend on both and can't see `cfg(test)` items. Gated instead behind `#[cfg(any(test, feature = "test-support"))]`: the `test-support` cargo feature, off by default, turned on for `tests/` targets via a self dev-dependency in `Cargo.toml` (`dispatch-tui = { path = ".", features = ["test-support"] }`) so it stays out of the release binary.
-
-> **Timing constants**: tick interval, DB refresh, status TTL, PR poll, message flash, the gg-chord timeout, and the dispatch watchdog are documented in "Timing Constants" in `docs/reference.md`.
-
+- [docs/invariants.md](docs/invariants.md) — the seams and policies listed above, one paragraph each
 - [docs/testing.md](docs/testing.md) — running tests, snapshot workflow, where a new test goes, the no-sleep rule, coverage
 - [docs/architecture.md](docs/architecture.md) — Message→Command, ProcessRunner, command queue draining, editor session invariant, layout-cache coherence, render dirty flag, error handling, quick dispatch
 - [docs/conventions.md](docs/conventions.md) — the full convention set: `FieldUpdate`/`TaskPatch` double-Option, DB/service trait narrowing, the `run_bounded` primitive, keybinding telemetry, Clippy/visibility rules, tag system, and more

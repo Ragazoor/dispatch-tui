@@ -265,7 +265,13 @@ rule ComposeAgentPrompt {
         --     Title: ...
         --     Description: ...
         --     EpicId: ...                  (only if task.epic != null)
-        --   {epic sibling-communication}   (only if task.epic != null)
+        --   {epic sibling-communication}   (only if task.epic != null —
+        --                                    the epic id and title, and that
+        --                                    sibling agents are reachable
+        --                                    with ListAgents/SendMessage
+        --                                    under session name task-<id>.
+        --                                    Names no MCP tool; see
+        --                                    ThePromptNamesNoToolMerelyToSayItExists)
         --   <blank>
         --   {validated_knowledge}          (tiered learnings; see
         --                                    AugmentDispatchPromptWithLearnings)
@@ -352,8 +358,20 @@ rule ComposeAgentPrompt {
         -- schema to shadow — skills under-trigger, and a skill listing carries
         -- a description, not a nudge to invoke it.
         --
+        -- {epic sibling-communication} falls under the same rule. It used to
+        -- tell the agent to call list_tasks with the epic id to find its
+        -- siblings — a sentence that restates list_tasks' epic_id filter, which
+        -- the schema already carries. The section keeps only what no schema
+        -- does: the epic's id and title, and that a sibling agent is reachable
+        -- with ListAgents/SendMessage under the session name task-<id>,
+        -- matching that task's own id. The session naming is dispatch's
+        -- convention, not the harness's, so it is a fact only the prompt can
+        -- state.
+        --
         -- Gated by prompt_trailing_lines_name_no_mcp_tool, which fails on any
-        -- mcp__dispatch__* tool name appearing in the shared trailing lines.
+        -- mcp__dispatch__* tool name appearing in the shared trailing lines,
+        -- and by epic_section_names_no_mcp_tool, which fails on any
+        -- mcp__dispatch__* tool name appearing in the epic section.
 
     @guidance
         -- == The variants ==
