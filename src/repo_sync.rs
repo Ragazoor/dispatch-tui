@@ -210,34 +210,7 @@ pub fn sync_repo(
 ) -> Result<SyncOutcome, SyncError> {
     let repo = expand_tilde(repo_path);
 
-    // --- Preconditions, all before any write ---
-
-    // 1. An origin remote must exist. Both a probe that cannot be run and one
-    //    that reports no origin mean the same thing here — nothing to sync
-    //    against — so both report NoRemote rather than splitting the first into
-    //    Other. Spec: PreconditionsPrecedeEveryWrite's stated carve-out.
-    if !crate::git::has_origin_remote(&repo, runner).unwrap_or(false) {
-        return Err(SyncError::NoRemote);
-    }
-
-    // 2. The checkout must be on the base branch — the merge and the push both
-    //    act on whatever is checked out.
-    let current = crate::git::current_branch(&repo, runner).map_err(SyncError::Other)?;
-    if current != base_branch {
-        return Err(SyncError::NotOnBaseBranch {
-            current,
-            expected: base_branch.to_string(),
-        });
-    }
-
-    // 3. The checkout must be clean — merging into a dirty tree loses work.
-    let dirty = crate::git::dirty_files(&repo, runner).map_err(SyncError::Other)?;
-    if !dirty.is_empty() {
-        return Err(SyncError::DirtyPrimaryWorktree {
-            path: repo.clone(),
-            files: dirty,
-        });
-    }
+    check_preconditions(&repo, base_branch, runner)?;
 
     // --- Fetch, unconditionally, then count against the refreshed refs ---
 
@@ -255,44 +228,7 @@ pub fn sync_repo(
 
     let mut ahead = counts.ahead;
     if counts.behind > 0 {
-        let output = runner
-            .run_with_timeout(
-                "git",
-                &[
-                    "-C",
-                    &repo,
-                    "merge",
-                    "--no-edit",
-                    &crate::git::origin_ref(base_branch),
-                ],
-                SUBPROCESS_TIMEOUT,
-            )
-            .map_err(|e| SyncError::Other(format!("Failed to run git merge: {e}")))?;
-        if !output.status.success() {
-            // Read the conflicted paths from the repo's own status *before*
-            // aborting — the abort clears them
-            // (`ConflictFilesCapturedBeforeAbort`).
-            let conflicted = runner
-                .run_with_timeout(
-                    "git",
-                    &["-C", &repo, "status", "--porcelain"],
-                    SUBPROCESS_TIMEOUT,
-                )
-                .map(|o| crate::git::parse_unmerged_files(&o))
-                .unwrap_or_default();
-            let _ = runner.run_with_timeout(
-                "git",
-                &["-C", &repo, "merge", "--abort"],
-                SUBPROCESS_TIMEOUT,
-            );
-            if !conflicted.is_empty() {
-                return Err(SyncError::MergeConflict { files: conflicted });
-            }
-            return Err(SyncError::Other(format!(
-                "Merge of origin/{base_branch} failed: {}",
-                stderr_str(&output)
-            )));
-        }
+        merge_origin_base(&repo, base_branch, runner)?;
         // A merge commit is itself something to publish, so the ahead count is
         // re-read rather than reused. Unmeasurable after the merge means no
         // push: refusing to guess beats pushing a count we cannot justify.
@@ -304,24 +240,108 @@ pub fn sync_repo(
     // --- Push whatever local base is ahead by ---
 
     if ahead > 0 {
-        let output = runner
-            .run_with_timeout(
-                "git",
-                &["-C", &repo, "push", "origin", base_branch],
-                SUBPROCESS_TIMEOUT,
-            )
-            .map_err(|e| SyncError::Other(format!("Failed to run git push: {e}")))?;
-        if !output.status.success() {
-            return Err(SyncError::PushRejected {
-                stderr: stderr_str(&output),
-            });
-        }
+        push_base(&repo, base_branch, runner)?;
     }
 
     Ok(SyncOutcome::Synced {
         pulled: counts.behind,
         pushed: ahead,
     })
+}
+
+/// The preconditions of `sync_repo`, all checked before any write.
+fn check_preconditions(
+    repo: &str,
+    base_branch: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<(), SyncError> {
+    // 1. An origin remote must exist. Both a probe that cannot be run and one
+    //    that reports no origin mean the same thing here — nothing to sync
+    //    against — so both report NoRemote rather than splitting the first into
+    //    Other. Spec: PreconditionsPrecedeEveryWrite's stated carve-out.
+    if !crate::git::has_origin_remote(repo, runner).unwrap_or(false) {
+        return Err(SyncError::NoRemote);
+    }
+
+    // 2. The checkout must be on the base branch — the merge and the push both
+    //    act on whatever is checked out.
+    let current = crate::git::current_branch(repo, runner).map_err(SyncError::Other)?;
+    if current != base_branch {
+        return Err(SyncError::NotOnBaseBranch {
+            current,
+            expected: base_branch.to_string(),
+        });
+    }
+
+    // 3. The checkout must be clean — merging into a dirty tree loses work.
+    let dirty = crate::git::dirty_files(repo, runner).map_err(SyncError::Other)?;
+    if !dirty.is_empty() {
+        return Err(SyncError::DirtyPrimaryWorktree {
+            path: repo.to_string(),
+            files: dirty,
+        });
+    }
+    Ok(())
+}
+
+/// Merge `origin/<base_branch>` into the checked-out base. On failure the merge
+/// is aborted, so the checkout is left as it was found.
+fn merge_origin_base(
+    repo: &str,
+    base_branch: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<(), SyncError> {
+    let output = runner
+        .run_with_timeout(
+            "git",
+            &[
+                "-C",
+                repo,
+                "merge",
+                "--no-edit",
+                &crate::git::origin_ref(base_branch),
+            ],
+            SUBPROCESS_TIMEOUT,
+        )
+        .map_err(|e| SyncError::Other(format!("Failed to run git merge: {e}")))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    // Read the conflicted paths from the repo's own status *before*
+    // aborting — the abort clears them (`ConflictFilesCapturedBeforeAbort`).
+    let conflicted = runner
+        .run_with_timeout(
+            "git",
+            &["-C", repo, "status", "--porcelain"],
+            SUBPROCESS_TIMEOUT,
+        )
+        .map(|o| crate::git::parse_unmerged_files(&o))
+        .unwrap_or_default();
+    let _ = runner.run_with_timeout("git", &["-C", repo, "merge", "--abort"], SUBPROCESS_TIMEOUT);
+    if !conflicted.is_empty() {
+        return Err(SyncError::MergeConflict { files: conflicted });
+    }
+    Err(SyncError::Other(format!(
+        "Merge of origin/{base_branch} failed: {}",
+        stderr_str(&output)
+    )))
+}
+
+/// Push the checked-out base to `origin`.
+fn push_base(repo: &str, base_branch: &str, runner: &dyn ProcessRunner) -> Result<(), SyncError> {
+    let output = runner
+        .run_with_timeout(
+            "git",
+            &["-C", repo, "push", "origin", base_branch],
+            SUBPROCESS_TIMEOUT,
+        )
+        .map_err(|e| SyncError::Other(format!("Failed to run git push: {e}")))?;
+    if !output.status.success() {
+        return Err(SyncError::PushRejected {
+            stderr: stderr_str(&output),
+        });
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
