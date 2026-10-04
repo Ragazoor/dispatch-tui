@@ -182,7 +182,7 @@ async fn update_task_to_done_logs_and_drops_dead_watcher() {
 async fn delete_task_notifies_watchers_of_deletion() {
     let tmp = tempfile::tempdir().unwrap();
     let worktree = tmp.path().to_str().unwrap().to_string();
-    let db = test_db().await;
+    let db = test_db_unattached().await;
     let mock = Arc::new(crate::process::MockProcessRunner::new(vec![
         crate::process::MockProcessRunner::ok_with_stdout(READY_PANE_STDOUT),
         crate::process::MockProcessRunner::ok(),
@@ -298,7 +298,7 @@ async fn delete_task_does_not_notify_watcher_when_target_already_finished_via_by
 
 #[tokio::test]
 async fn delete_task_cleans_up_rows_where_it_was_the_watcher() {
-    let db = test_db().await;
+    let db = test_db_unattached().await;
     let runner: Arc<dyn crate::process::ProcessRunner> =
         crate::process::MockProcessRunner::unused();
     let svc = task_svc_with_runner(&db, runner);

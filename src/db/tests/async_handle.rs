@@ -22,7 +22,7 @@ async fn db_call_returns_closure_result() {
 /// the shared-cache memory URI setup in [`Database::open_in_memory`].
 #[tokio::test]
 async fn async_connection_sees_sync_writes() {
-    let db = in_memory_db().await;
+    let db = super::unattached_db().await;
     db.save_repo_path("/tmp/example-repo").await.unwrap();
 
     let count: i64 = db

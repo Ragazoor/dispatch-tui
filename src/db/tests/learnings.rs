@@ -507,7 +507,7 @@ async fn patch_learning_can_set_embedding() {
 async fn get_learning_errors_on_unknown_kind() {
     use crate::db::CreateLearningRow;
     use crate::models::{LearningKind, LearningScope};
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let id = db
         .create_learning(CreateLearningRow {
             kind: LearningKind::Convention,
@@ -598,7 +598,7 @@ async fn force_status(db: &crate::db::Database, id: crate::models::LearningId, s
 #[tokio::test]
 async fn archive_stale_learnings_archives_approved_zero_upvote_stale() {
     use crate::models::LearningStatus;
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let id = seed_learning_with_score_and_updated(&db, 0, "2000-01-01 00:00:00").await;
 
     let count = db
@@ -614,7 +614,7 @@ async fn archive_stale_learnings_archives_approved_zero_upvote_stale() {
 #[tokio::test]
 async fn archive_stale_learnings_skips_upvoted() {
     use crate::models::LearningStatus;
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let id = seed_learning_with_score_and_updated(&db, 2, "2000-01-01 00:00:00").await;
 
     let count = db
@@ -648,7 +648,7 @@ async fn archive_stale_learnings_skips_recent() {
 #[tokio::test]
 async fn archive_stale_learnings_skips_non_approved() {
     use crate::models::LearningStatus;
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let id = seed_learning_with_score_and_updated(&db, 0, "2000-01-01 00:00:00").await;
     // A rejected entry with an old updated_at and zero score must be untouched.
     force_status(&db, id, "rejected").await;
@@ -665,7 +665,7 @@ async fn archive_stale_learnings_skips_non_approved() {
 
 #[tokio::test]
 async fn archive_stale_learnings_is_idempotent() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     seed_learning_with_score_and_updated(&db, 0, "2000-01-01 00:00:00").await;
 
     let first = db
@@ -684,7 +684,7 @@ async fn archive_stale_learnings_is_idempotent() {
 #[tokio::test]
 async fn archive_stale_learnings_archives_negative_score() {
     use crate::models::LearningStatus;
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     // upvote_count = -1 is <= 0, so a stale approved entry is still eligible.
     let id = seed_learning_with_score_and_updated(&db, -1, "2000-01-01 00:00:00").await;
 

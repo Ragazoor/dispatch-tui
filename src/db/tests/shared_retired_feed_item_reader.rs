@@ -62,7 +62,7 @@ fn a_feed_item(external_id: &str) -> crate::models::FeedItem {
 /// survivor-less.
 #[tokio::test]
 async fn with_no_reader_a_retired_without_task_read_goes_to_sqlite() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let feed_epic = db.create_epic("Feed", "", None).await.unwrap().id;
     db.patch_epic(feed_epic, &EpicPatch::new().feed_command(Some("echo []")))
         .await

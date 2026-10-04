@@ -137,7 +137,7 @@ async fn subagent_rows(db: &Database, task_id: i64) -> Vec<String> {
 
 #[tokio::test]
 async fn subagent_start_rolls_back_the_insert_when_the_count_write_fails() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let task = make_task(&db, "t").await;
     let now = Utc::now();
 
@@ -156,7 +156,7 @@ async fn subagent_start_rolls_back_the_insert_when_the_count_write_fails() {
 
 #[tokio::test]
 async fn subagent_start_rolls_back_the_session_fence_when_the_count_write_fails() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let task = make_task(&db, "t").await;
     let now = Utc::now();
 
@@ -178,7 +178,7 @@ async fn subagent_start_rolls_back_the_session_fence_when_the_count_write_fails(
 
 #[tokio::test]
 async fn subagent_stop_rolls_back_the_delete_when_the_count_write_fails() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let task = make_task(&db, "t").await;
     let now = Utc::now();
 
@@ -196,7 +196,7 @@ async fn subagent_stop_rolls_back_the_delete_when_the_count_write_fails() {
 
 #[tokio::test]
 async fn subagent_clear_rolls_back_the_delete_when_the_count_write_fails() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let task = make_task(&db, "t").await;
     let now = Utc::now();
 
@@ -271,7 +271,7 @@ async fn the_draining_clear_leaves_stop_pending_alone_on_a_non_running_task() {
 
 #[tokio::test]
 async fn clear_and_void_pending_stop_rolls_back_both_writes_when_the_count_write_fails() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let task = make_task(&db, "t").await;
     let now = Utc::now();
 
@@ -292,7 +292,7 @@ async fn clear_and_void_pending_stop_rolls_back_both_writes_when_the_count_write
 
 #[tokio::test]
 async fn live_subagents_matches_the_table_after_interleaved_operations() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let a = make_task(&db, "a").await;
     let b = make_task(&db, "b").await;
     let now = Utc::now();
@@ -504,7 +504,7 @@ async fn subagent_clear_also_applies_a_deferred_stop() {
 /// `Running + stop_pending + live_subagents = 0` with no hook left to fix it.
 #[tokio::test]
 async fn a_failed_drain_rolls_back_the_count_and_the_flip_together() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let task = task_with_a_live_subagent_and_a_deferred_stop(&db).await;
 
     arm_sync_count_abort(&db).await;
@@ -660,7 +660,7 @@ async fn task_with_a_stop_deferred_at(db: &Database, at: chrono::DateTime<Utc>) 
 /// write order.
 #[tokio::test]
 async fn record_stop_stamps_the_time_the_deferred_stop_fired() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let at = Utc::now();
     let task = task_with_a_stop_deferred_at(&db, at).await;
 
@@ -674,7 +674,7 @@ async fn record_stop_stamps_the_time_the_deferred_stop_fired() {
 /// The immediate flip has no deferred Stop to time, so it records nothing.
 #[tokio::test]
 async fn record_stop_records_no_defer_time_when_it_flips() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let task = make_task(&db, "t").await;
     set_running(&db, &task).await;
 
@@ -757,7 +757,7 @@ async fn user_prompt_submit_preserves_a_stop_deferred_at_the_same_instant() {
 /// those rows were written under did.
 #[tokio::test]
 async fn user_prompt_submit_voids_a_pending_stop_with_no_recorded_defer_time() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let task = make_task(&db, "t").await;
     set_running_with_pending_stop(&db, &task).await;
     assert_eq!(stop_pending_at(&db, task.id).await, None);

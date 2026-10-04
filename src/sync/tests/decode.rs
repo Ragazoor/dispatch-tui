@@ -160,7 +160,7 @@ pub(super) fn rows(snapshot: &Snapshot, table: SharedTable) -> Vec<Row> {
 /// on one of them and left unset on another, so both arms of every sentinel are
 /// exercised in one pass.
 pub(super) async fn populated_board() -> Database {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Database::open_in_memory_unattached().await.unwrap();
     db.adopt_user_identity("c200e1f4bcae4a1b9f0e7d2a3c5b8e60")
         .await
         .unwrap();

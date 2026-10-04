@@ -30,6 +30,12 @@ use crate::spacetime::{dump_from_sqlite, SharedTable, Snapshot, TableExtract};
 /// above the rest. Both are what a real board looks like after months of
 /// deletions, and both are what a restore that renumbers would silently
 /// "tidy up".
+pub(super) async fn populated_board_unattached() -> Database {
+    let db = Database::open_in_memory_unattached().await.unwrap();
+    seed_board(&db).await;
+    db
+}
+
 pub(super) async fn populated_board() -> Database {
     let db = Database::open_in_memory().await.unwrap();
     seed_board(&db).await;

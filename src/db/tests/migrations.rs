@@ -394,7 +394,7 @@ async fn migration_104_is_idempotent_without_filter_presets() {
 /// conditional, so re-running it here against seeded rows is a faithful test.
 #[tokio::test]
 async fn migration_82_resolves_a_stranded_pending_stop() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let task = create_task_returning(&db, "t", "d", "/r", None, TaskStatus::Backlog)
         .await
         .unwrap();
@@ -424,7 +424,7 @@ async fn migration_82_resolves_a_stranded_pending_stop() {
 
 #[tokio::test]
 async fn migration_82_leaves_tasks_that_are_not_stranded_alone() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     // A deferred Stop with a subagent still live is legitimately waiting.
     let waiting = create_task_returning(&db, "waiting", "d", "/r", None, TaskStatus::Backlog)
         .await
@@ -2506,7 +2506,7 @@ async fn migration_v33_adds_auto_dispatch_to_epics() {
 
 #[tokio::test]
 async fn v65_adds_feed_role_column_and_unique_index() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
 
     // Column present, defaults to 'none'.
     let epic = db.create_epic("E", "", None).await.unwrap();
@@ -3641,7 +3641,7 @@ async fn migration_v63_adds_idx_tasks_status_and_epic_id() {
 
 #[tokio::test]
 async fn v69_adds_origin_column_and_repo_group_index() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
 
     // Verify the origin column exists.
     let has_origin: bool = db
@@ -5545,7 +5545,7 @@ async fn archived_status_migration_phase_5_rebuilds_the_status_checks_without_ar
 /// schema, not only from migrated rows.
 #[tokio::test]
 async fn a_fresh_db_refuses_the_archived_status() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let task_id = make_task(&db, "t").await.id.0;
     let res = db
         .db_call(move |conn| {

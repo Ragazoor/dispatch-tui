@@ -763,6 +763,7 @@ async fn wrap_up_without_verdicts_still_succeeds() {
 async fn wrap_up_success_includes_verify_reminder_when_configured() {
     let (state, db) = make_state_with_runner(rebase_ok_runner()).await;
     let task_id = create_wrappable_task(&db).await;
+    db.save_repo_path("/repo").await.unwrap();
     db.set_verify_command("/repo", Some("cargo test"))
         .await
         .unwrap();
@@ -853,6 +854,7 @@ async fn wrap_up_pr_success_includes_verify_reminder_when_configured() {
         )
         .await
         .unwrap();
+    state.db_write().save_repo_path("/repo").await.unwrap();
     state
         .db_write()
         .set_verify_command("/repo", Some("cargo test"))
@@ -885,6 +887,7 @@ async fn wrap_up_pr_success_includes_verify_reminder_when_configured() {
 async fn wrap_up_done_success_includes_verify_reminder_when_configured() {
     let (state, db) = make_state_with_runner(rebase_ok_runner()).await;
     let task_id = create_wrappable_task(&db).await;
+    db.save_repo_path("/repo").await.unwrap();
     db.set_verify_command("/repo", Some("cargo test"))
         .await
         .unwrap();

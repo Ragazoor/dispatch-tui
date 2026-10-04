@@ -1819,7 +1819,46 @@ impl Database {
         })
     }
 
+    /// An in-memory database attached to a fresh memory store, which covers
+    /// every reducer domain (spec:
+    /// `spacetime-memory-store.allium`, `OpenInMemoryAttachesStoreOnceComplete`),
+    /// so tests exercise the shared store rather than raw SQLite.
     pub async fn open_in_memory() -> Result<Self> {
+        let db = Self::open_in_memory_unattached().await?;
+        Ok(db.with_shared_store(Self::memory_store_ports()))
+    }
+
+    /// Ports over a fresh, private in-process store: one `SharedRows` and one
+    /// `MemoryReducerCaller` over it, with every reader and the writer over
+    /// those same rows. The writer settles as a fixed test user and host.
+    fn memory_store_ports() -> SharedStorePorts {
+        use crate::sync as s;
+        let rows = Arc::new(s::SharedRows::new());
+        let clock: Arc<dyn crate::service::Clock> = Arc::new(crate::service::SystemClock);
+        let caller: Arc<dyn s::ReducerCaller> = Arc::new(
+            s::memory_caller::MemoryReducerCaller::new(rows.clone(), clock.clone()),
+        );
+        let identity = Arc::new(s::SettledIdentity::default());
+        identity.settle("test-user");
+        let board_reads = Arc::new(s::SubscriptionBoardReads::new(rows.clone()));
+        SharedStorePorts {
+            writer: Arc::new(s::ReducerWriter::new(
+                caller,
+                identity,
+                clock,
+                "test-host".to_string(),
+                board_reads.clone(),
+            )),
+            reader: board_reads,
+            learning_reader: Arc::new(s::SubscriptionLearningReads::new(rows.clone())),
+            usage_reader: Arc::new(s::SubscriptionUsageReads::new(rows.clone())),
+            retired_feed_item_reader: Arc::new(s::SubscriptionRetiredFeedItemReads::new(rows)),
+        }
+    }
+
+    /// The pre-cutover in-memory handle: SQLite only, no shared store. For
+    /// tests of the SQLite fallback branch itself.
+    pub async fn open_in_memory_unattached() -> Result<Self> {
         let id = NEXT_MEMDB_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // A plain `:memory:` connection is private to itself; the read pool
         // needs the writer and every reader to share the same in-memory

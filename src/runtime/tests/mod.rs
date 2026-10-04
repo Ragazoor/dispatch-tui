@@ -168,6 +168,13 @@ pub(super) async fn test_db() -> Arc<Database> {
     Arc::new(Database::open_in_memory().await.unwrap())
 }
 
+/// A SQLite-only handle, for a test whose subject is a SQLite-side behaviour
+/// the shared store does not share (a patch on a missing id errors here and is
+/// a silent no-op there; a store refuses to delete a task that is not done).
+pub(super) async fn test_db_unattached() -> Arc<Database> {
+    Arc::new(Database::open_in_memory_unattached().await.unwrap())
+}
+
 /// Persist `cmd` as `epic_id`'s feed command.
 ///
 /// The manual trigger reads the command (and feed_role, and group_by_repo) from
@@ -272,7 +279,15 @@ pub(super) async fn make_runtime(
 }
 
 async fn test_runtime() -> (TuiRuntime, App) {
-    let db = test_db().await;
+    test_runtime_over(test_db().await).await
+}
+
+/// [`test_runtime`] over a SQLite-only handle; see [`test_db_unattached`].
+async fn test_runtime_unattached() -> (TuiRuntime, App) {
+    test_runtime_over(test_db_unattached().await).await
+}
+
+async fn test_runtime_over(db: Arc<Database>) -> (TuiRuntime, App) {
     let (tx, _rx) = mpsc::unbounded_channel();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let rt = make_runtime(db.clone(), tx, runner).await;

@@ -456,7 +456,7 @@ async fn patch_task_sets_labels() {
 
 #[tokio::test]
 async fn patch_task_clears_labels_to_empty() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "t",
@@ -637,7 +637,7 @@ async fn patch_task_none_preserves_labels() {
 
 #[tokio::test]
 async fn list_all_errors_on_corrupt_labels_json() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "t",
@@ -894,7 +894,7 @@ async fn task_patch_status_and_sub_status_independent() {
 #[tokio::test]
 async fn patch_task_status_change_resets_sub_status_in_db() {
     // End-to-end: after a status-only patch, sub_status in DB reflects the new default
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Database::open_in_memory_unattached().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -1282,7 +1282,7 @@ async fn check_constraint_accepts_review_with_awaiting_review() {
 
 #[tokio::test]
 async fn delete_task_removes_task() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "Doomed",
@@ -1308,7 +1308,7 @@ async fn delete_task_removes_task() {
 
 #[tokio::test]
 async fn delete_task_nonexistent_errors() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let result = db.delete_task(TaskId(9999));
     assert!(result.await.is_err());
 }
@@ -1385,7 +1385,7 @@ async fn batch_delete_accepts_an_epic_and_its_own_sub_epic_in_either_order() {
 /// than one.
 #[tokio::test]
 async fn batch_delete_rolls_back_entirely_when_one_id_is_missing() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let survivor = create_task_returning(
         &db,
         "should survive",
@@ -1412,7 +1412,7 @@ async fn batch_delete_rolls_back_entirely_when_one_id_is_missing() {
 
 #[tokio::test]
 async fn task_exists_tracks_creation_and_deletion() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     assert!(
         !db.task_exists(TaskId(9999)).await.unwrap(),
         "an id that was never created must not exist"
@@ -1807,7 +1807,7 @@ async fn delete_task_moved_out_of_its_feed_retires_nothing_for_that_feed() {
 /// deleting it must still simply remove the row.
 #[tokio::test]
 async fn delete_task_without_external_id_under_a_feed_epic_just_removes_the_row() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let epic = feed_epic(&db, "Feed").await;
     let manual = make_task(&db, "manual").await;
     db.set_task_epic_id(manual.id, Some(epic.id)).await.unwrap();
@@ -2143,7 +2143,7 @@ async fn create_role_sub_epic(db: &Database) -> EpicId {
 /// external_id) row, not a genuine cross-epic duplicate.
 #[tokio::test]
 async fn upsert_feed_tasks_reupsert_into_role_sub_epic_does_not_error() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let epic_id = create_role_sub_epic(&db).await;
     let items = vec![make_feed_item("ext-1", "Task One")];
     let repo_paths = vec!["/repo".to_string()];
@@ -2166,7 +2166,7 @@ async fn upsert_feed_tasks_reupsert_into_role_sub_epic_does_not_error() {
 /// drop the new item alongside it.
 #[tokio::test]
 async fn upsert_feed_tasks_mixed_batch_existing_and_new_item_in_role_sub_epic_succeeds() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let epic_id = create_role_sub_epic(&db).await;
 
     db.upsert_feed_tasks(
@@ -2244,7 +2244,7 @@ async fn upsert_feed_tasks_removes_stale_items() {
 /// state-carrying row would let a truncated `RETURNING` drain pass.
 #[tokio::test]
 async fn delete_stale_subtree_feed_tasks_returns_removed_rows_with_state() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     let sub = db
         .create_epic("My Reviews", "", Some(parent.id))
@@ -2328,7 +2328,7 @@ async fn delete_stale_subtree_feed_tasks_returns_removed_rows_with_state() {
 /// `upsert_feed_tasks` (`feeds.allium`: `UpsertFeedTasks`).
 #[tokio::test]
 async fn upsert_feed_tasks_returns_removed_rows_with_state() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let epic = db.create_epic("CVE Feed", "", None).await.unwrap();
 
     db.upsert_feed_tasks(
@@ -3869,7 +3869,7 @@ async fn patch_auto_run_plan_true() {
 
 #[tokio::test]
 async fn get_task_errors_on_unknown_tag() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "t",
@@ -3907,7 +3907,7 @@ async fn get_task_errors_on_unknown_tag() {
 
 #[tokio::test]
 async fn get_task_errors_on_unknown_wrap_up_mode_while_list_all_skips_it() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "t",
@@ -3997,7 +3997,7 @@ async fn get_task_errors_on_corrupt_sort_order_type() {
     // Regression: row.get::<_, Option<i64>>("sort_order").unwrap_or(None) silently
     // returned None when the column held a non-integer value. Now uses `?` so
     // schema drift surfaces immediately.
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "t",
@@ -4562,7 +4562,7 @@ async fn try_claim_backlog_task_allows_a_task_with_no_host() {
 
 #[tokio::test]
 async fn try_claim_backlog_task_allows_a_task_owned_by_this_host() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = subtask(&db, epic.id, "target", TaskStatus::Backlog, Some(1)).await;
     let (local_host_id, _label) = db.ensure_host_identity().await.unwrap();
@@ -4764,7 +4764,7 @@ async fn batch_patch_sub_status_empty_is_no_op() {
 
 #[tokio::test]
 async fn get_total_changes_increases_after_write() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let v1 = db.get_total_changes().await.unwrap();
     db.create_task(CreateTaskRequest {
         title: "T",
@@ -4914,7 +4914,7 @@ async fn delete_watches_by_watcher_removes_only_that_watchers_rows() {
 /// Plant an undecodable task row (unrecognised `status`) alongside a healthy
 /// one and return the healthy task's id.
 async fn db_with_undecodable_status_row() -> (Database, TaskId) {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let good = create_task_returning(&db, "healthy", "", "/repo", None, TaskStatus::Backlog)
         .await
         .unwrap();
@@ -4960,7 +4960,7 @@ async fn list_all_skips_row_with_unrecognised_status() {
 #[tokio::test]
 async fn malformed_stored_tmux_window_decodes_to_none() {
     for stored in ["%3", ""] {
-        let db = in_memory_db().await;
+        let db = unattached_db().await;
         let task = create_task_returning(&db, "windowed", "", "/repo", None, TaskStatus::Running)
             .await
             .unwrap();
@@ -4996,7 +4996,7 @@ async fn malformed_stored_tmux_window_decodes_to_none() {
 /// names, so an unfamiliar-but-valid name is preserved verbatim.
 #[tokio::test]
 async fn unfamiliar_stored_tmux_window_round_trips() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let task = create_task_returning(&db, "windowed", "", "/repo", None, TaskStatus::Running)
         .await
         .unwrap();
@@ -5037,7 +5037,7 @@ async fn get_task_errors_on_unrecognised_status() {
 /// application can never write, but which a partially-applied migration could
 /// leave behind.
 async fn db_with_inconsistent_url_row() -> (Database, TaskId, TaskId) {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let good = create_task_returning(&db, "healthy", "", "/repo", None, TaskStatus::Backlog)
         .await
         .unwrap();
@@ -5082,7 +5082,7 @@ async fn get_task_errors_on_inconsistent_url_pair() {
 
 #[tokio::test]
 async fn find_task_by_plan_errors_on_undecodable_row() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     write_corrupt_row(
         &db,
         "INSERT INTO tasks (id, title, description, repo_path, status, sub_status,

@@ -125,7 +125,7 @@ async fn get_epic_nonexistent() {
 
 #[tokio::test]
 async fn delete_epic_cascades_subtasks() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let epic = db.create_epic("Epic", "desc", None).await.unwrap();
     db.create_task(CreateTaskRequest {
         title: "Sub 1",
@@ -176,7 +176,7 @@ async fn delete_epic_cascades_subtasks() {
 
 #[tokio::test]
 async fn delete_epic_with_sub_epics_succeeds() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let parent = db.create_epic("Parent", "", None).await.unwrap();
     let child = db.create_epic("Child", "", Some(parent.id)).await.unwrap();
     let task_id = db
@@ -749,7 +749,7 @@ async fn update_task_with_substatus_keeps_task_running_and_epic_in_backlog() {
 
 #[tokio::test]
 async fn patch_epic_nonexistent_errors() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let result = db
         .patch_epic(EpicId(9999), &EpicPatch::new().title("x"))
         .await;
@@ -788,7 +788,7 @@ async fn patch_epic_sort_order() {
 
 #[tokio::test]
 async fn delete_epic_nonexistent_errors() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let result = db.delete_epic(EpicId(9999)).await;
     assert!(result.is_err());
 }
@@ -1138,7 +1138,7 @@ async fn recalculate_epic_status_terminates_on_cycle() {
 
 #[tokio::test]
 async fn self_referential_epic_is_rejected() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let eid = epic.id.0;
     let rejected = db
@@ -1189,7 +1189,7 @@ async fn get_epic_errors_on_corrupt_auto_dispatch_type() {
     // Regression: row.get::<_, bool>("auto_dispatch").unwrap_or(true) silently
     // returned true when the column held a non-boolean value. Now uses `?` so
     // schema drift surfaces immediately.
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let epic = db.create_epic("E", "D", None).await.unwrap();
     let epic_id = epic.id.0;
     db.db_call(move |conn| {
@@ -1216,7 +1216,7 @@ async fn get_epic_errors_on_corrupt_auto_dispatch_type() {
 
 /// Plant an epic row with an unrecognised `status` alongside a healthy one.
 async fn db_with_undecodable_epic_row() -> (Database, EpicId) {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let good = db.create_epic("healthy", "", None).await.unwrap();
     write_corrupt_row(
         &db,

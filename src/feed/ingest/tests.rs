@@ -1280,7 +1280,7 @@ async fn role_routed_group_by_repo_off_rehomes_repo_tasks_no_duplicate() {
 /// before the fix), the next feed cycle must re-home them without duplicating.
 #[tokio::test]
 async fn role_routed_orphaned_repo_tasks_rehosted_on_next_sync() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Database::open_in_memory_unattached().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,

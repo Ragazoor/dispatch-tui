@@ -10,7 +10,7 @@ use crate::sync::{ConnectionStatus, StepOutcome, SyncSession, RECONNECT_BACKOFF_
 use std::time::{Duration, Instant};
 
 async fn store() -> Database {
-    Database::open_in_memory().await.unwrap()
+    Database::open_in_memory_unattached().await.unwrap()
 }
 
 /// The happy path, stated so the outage tests below have something to differ

@@ -7,6 +7,7 @@ mod hooks;
 mod journal_mode;
 mod learnings;
 mod migrations;
+mod open_in_memory_store;
 mod read_pool;
 mod schema_template;
 mod settings;
@@ -21,6 +22,12 @@ mod usage;
 
 pub(super) async fn in_memory_db() -> Database {
     Database::open_in_memory().await.unwrap()
+}
+
+/// A SQLite-only handle, for tests of the SQLite branch itself (corrupt rows,
+/// rollbacks, migrations) that the shared store cannot express.
+pub(super) async fn unattached_db() -> Database {
+    Database::open_in_memory_unattached().await.unwrap()
 }
 
 /// Run `sql` on the writer connection with CHECK constraints disabled, so a

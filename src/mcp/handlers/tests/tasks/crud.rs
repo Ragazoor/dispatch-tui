@@ -2198,7 +2198,7 @@ async fn get_task_shows_sub_status() {
 
 #[tokio::test]
 async fn update_task_nonexistent_task_returns_error() {
-    let state = test_state().await;
+    let state = test_state_unattached().await;
     let resp = call(
         &state,
         "tools/call",
@@ -4112,6 +4112,7 @@ async fn get_task_shows_wrap_up_mode_when_set() {
 async fn get_task_shows_verify_command_when_configured() {
     let state = test_state().await;
     let task_id = create_task_fixture(&state).await;
+    state.db_write().save_repo_path("/repo").await.unwrap();
     state
         .db_write()
         .set_verify_command("/repo", Some("cargo test"))

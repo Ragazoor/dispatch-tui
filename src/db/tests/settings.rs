@@ -166,7 +166,7 @@ async fn verify_command_round_trip() {
 
 #[tokio::test]
 async fn verify_command_empty_clears() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     db.save_repo_path("/r").await.unwrap();
     db.set_verify_command("/r", Some("cargo test"))
         .await
@@ -181,7 +181,7 @@ async fn verify_command_empty_clears() {
 
 #[tokio::test]
 async fn verify_command_rejects_newline() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     db.save_repo_path("/r").await.unwrap();
     let err = db.set_verify_command("/r", Some("a\nb")).await.unwrap_err();
     assert!(
@@ -197,7 +197,7 @@ async fn verify_command_rejects_newline() {
 
 #[tokio::test]
 async fn verify_command_set_some_creates_row() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     db.set_verify_command("/new/path", Some("cargo test"))
         .await
         .unwrap();
@@ -215,7 +215,7 @@ async fn verify_command_set_some_creates_row() {
 
 #[tokio::test]
 async fn verify_command_set_none_on_unknown_path_is_noop() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     db.set_verify_command("/unknown", None).await.unwrap();
     assert!(!db
         .list_repo_paths()
@@ -330,7 +330,7 @@ async fn record_base_branch_inserts_new_row() {
 
 #[tokio::test]
 async fn record_base_branch_upserts_and_bumps_last_used() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     db.record_base_branch("/repo/a", "main").await.unwrap();
     set_base_branch_last_used(&db, "/repo/a", "main", "2000-01-01 00:00:00").await;
     db.record_base_branch("/repo/a", "develop").await.unwrap();
@@ -351,7 +351,7 @@ async fn record_base_branch_upserts_and_bumps_last_used() {
 
 #[tokio::test]
 async fn record_base_branch_prunes_to_ten_most_recently_used_per_repo() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     for i in 0..10 {
         let branch = format!("branch-{i}");
         db.record_base_branch("/repo/a", &branch).await.unwrap();
@@ -407,7 +407,7 @@ async fn record_base_branch_pruning_is_scoped_per_repo() {
 
 #[tokio::test]
 async fn list_all_base_branches_orders_by_last_used_desc_across_repos() {
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     db.record_base_branch("/repo/a", "main").await.unwrap();
     set_base_branch_last_used(&db, "/repo/a", "main", "2000-01-01 00:00:00").await;
     db.record_base_branch("/repo/b", "develop").await.unwrap();

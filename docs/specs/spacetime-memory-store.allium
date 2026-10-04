@@ -195,14 +195,11 @@ config {
 -- landing last is what makes the_store.is_complete true for the first time
 -- (below) — every ReducerDomain now has a landed work package.
 --
--- is_complete becoming true does NOT, by itself, flip
--- OpenInMemoryAttachesStoreOnceComplete or perform the ~342-call-site
--- cutover: as of #5002, Database::open_in_memory() (src/db/mod.rs) still does
--- not check is_complete() at all, so every existing test handle stays
--- unattached regardless of this flag. That wiring is deliberately deferred to
--- its own follow-up (task #8277) rather than folded into #5002, since it is a
--- distinct risk surface from adding a domain: a real behavioural cutover for
--- roughly 342 existing call sites, not a spec-bookkeeping update.
+-- is_complete becoming true did not, by itself, flip
+-- OpenInMemoryAttachesStoreOnceComplete: #5002 left that wiring to its own
+-- follow-up, task #8277, since it is a distinct risk surface from adding a
+-- domain (a behavioural cutover for roughly 342 call sites). #8277 wired
+-- Database::open_in_memory() to check is_complete() and attach the store.
 default MemoryReducerCaller the_store = {
     covered_domains: { tasks_and_epics, repo_config, subscriptions, settings, learnings, usage, agent_state }
 }
@@ -262,6 +259,14 @@ rule OpenInMemoryAttachesStoreOnceComplete {
         -- every handle is unattached and every existing test keeps
         -- exercising SQLite. Nothing before the final work package changes
         -- what this rule produces.
+        --
+        -- The store is complete (task #8277; the Rust carries no
+        -- is_complete check, so the attach is unconditional), so the attached handle is built from one
+        -- fresh SharedRows and one MemoryReducerCaller over it, with every
+        -- port (writer and all readers) over those same rows. The writer
+        -- settles as a fixed test user and a fixed test host id, and stamps
+        -- with the system clock — the same clock SQLite used. Each handle
+        -- gets its own store; two handles never share rows.
 }
 
 ------------------------------------------------------------

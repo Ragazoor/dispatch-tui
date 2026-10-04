@@ -64,27 +64,18 @@ async fn full_epic_lifecycle() {
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(epic.status, TaskStatus::Running);
 
-    // 5. Move all subtasks to Done, advance epic to Review
+    // 5. Move all subtasks to Done. The shared store derives the epic's
+    // status from its subtasks, so the epic follows them to Done on its own.
     db.patch_task(sub1, &TaskPatch::new().status(TaskStatus::Done))
         .await
         .unwrap();
     db.patch_task(sub2, &TaskPatch::new().status(TaskStatus::Done))
         .await
         .unwrap();
-    db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
-        .await
-        .unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Review);
-
-    // 6. Mark epic as done
-    db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Done))
-        .await
-        .unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(epic.status, TaskStatus::Done);
 
-    // 7. Delete epic cascades
+    // 6. Delete epic cascades
     db.delete_epic(epic.id).await.unwrap();
     assert!(db.get_epic(epic.id).await.unwrap().is_none());
     assert!(db.get_task(sub1).await.unwrap().is_none());

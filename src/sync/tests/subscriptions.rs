@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 async fn store() -> Database {
-    Database::open_in_memory().await.unwrap()
+    Database::open_in_memory_unattached().await.unwrap()
 }
 
 /// A session connected as "user-a" against whatever `db` already holds — the

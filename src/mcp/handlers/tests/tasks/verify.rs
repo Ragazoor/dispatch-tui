@@ -4,6 +4,7 @@ use super::*;
 #[tokio::test]
 async fn set_verify_command_stores_and_returns_confirmation() {
     let state = test_state().await;
+    state.db_write().save_repo_path("/my/repo").await.unwrap();
 
     let resp = call(
         &state,
@@ -45,6 +46,7 @@ async fn set_verify_command_rejects_multiline_command() {
 #[tokio::test]
 async fn set_verify_command_clears_when_command_omitted() {
     let state = test_state().await;
+    state.db_write().save_repo_path("/my/repo").await.unwrap();
     state
         .db
         .set_verify_command("/my/repo", Some("old-cmd"))

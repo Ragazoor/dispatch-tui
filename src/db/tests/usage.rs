@@ -70,7 +70,7 @@ async fn test_usage_cap_enforcement() {
     use crate::db::{UsageCap, UsageStore};
     use crate::models::{UsageActor, UsageCategory, UsageEvent};
 
-    let db = in_memory_db().await;
+    let db = unattached_db().await;
     let small_cap = UsageCap::new(3);
 
     for i in 0..5u32 {

@@ -21,7 +21,7 @@ async fn db_call_read_returns_closure_result() {
 /// consistency property the design doc calls out as load-bearing.
 #[tokio::test]
 async fn read_pool_sees_writer_commits() {
-    let db = in_memory_db().await;
+    let db = super::unattached_db().await;
     db.save_repo_path("/only-via-writer").await.unwrap();
 
     let count: i64 = db

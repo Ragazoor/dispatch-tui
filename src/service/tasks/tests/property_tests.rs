@@ -127,7 +127,7 @@ proptest! {
             .build()
             .unwrap();
         let actual = rt.block_on(async {
-            let db = test_db().await;
+            let db = test_db_unattached().await;
             let epic = db.create_epic("E", "", None).await.unwrap();
             // Seed the baseline status the recalc pivots on.
             db.patch_epic(epic.id, &EpicPatch::new().status(baseline))

@@ -53,6 +53,18 @@ async fn test_state_with_overrides_and_bg_done(
     bg_write_done_tx: Option<mpsc::UnboundedSender<BackgroundWrite>>,
 ) -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    state_over(db, runner, notify_tx, task_svc, bg_write_done_tx)
+}
+
+/// Build the `McpState` over `db`. Split from the constructor above so a test
+/// can bring a SQLite-only handle.
+fn state_over(
+    db: Arc<dyn db::TaskStore>,
+    runner: Arc<dyn ProcessRunner>,
+    notify_tx: Option<mpsc::UnboundedSender<crate::mcp::McpEvent>>,
+    task_svc: Option<Arc<dyn crate::service::TaskServiceApi>>,
+    bg_write_done_tx: Option<mpsc::UnboundedSender<BackgroundWrite>>,
+) -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
     let mut state = McpState::new(
         McpDeps {
             db: db.clone(),
@@ -67,6 +79,21 @@ async fn test_state_with_overrides_and_bg_done(
     }
     state.test_hooks.bg_write_done_tx = bg_write_done_tx;
     (Arc::new(state), db)
+}
+
+/// [`test_state`] over a SQLite-only handle, for a test of a behaviour the
+/// shared store does not share (a patch on a missing id errors on SQLite and
+/// is a silent no-op in the store).
+async fn test_state_unattached() -> Arc<McpState> {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory_unattached().await.unwrap());
+    state_over(
+        db,
+        Arc::new(MockProcessRunner::new(vec![])),
+        None,
+        None,
+        None,
+    )
+    .0
 }
 
 async fn test_state() -> Arc<McpState> {

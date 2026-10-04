@@ -123,7 +123,7 @@ async fn the_assembled_host_row_carries_every_column_it_declares() {
 async fn subscriptions_are_dumped_rather_than_assumed_empty() {
     use crate::db::{HostStore, IdentityCredentialStore, SubscriptionStore};
 
-    let db = super::populated_board().await;
+    let db = super::populated_board_unattached().await;
     db.set_user_identity_token("token-a").await.unwrap();
     db.adopt_user_identity("user-a").await.unwrap();
     db.subscribe_to_epic("user-a", 7).await.unwrap();

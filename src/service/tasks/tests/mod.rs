@@ -13,6 +13,13 @@ async fn test_db() -> Arc<dyn db::TaskStore> {
     Arc::new(Database::open_in_memory().await.unwrap())
 }
 
+/// A SQLite-only handle, for a test whose subject is a behaviour the shared
+/// store does not share (it refuses to delete a task that is not done, and
+/// treats a patch on a missing id as a no-op).
+async fn test_db_unattached() -> Arc<dyn db::TaskStore> {
+    Arc::new(Database::open_in_memory_unattached().await.unwrap())
+}
+
 fn task_svc(db: &Arc<dyn db::TaskStore>) -> TaskService {
     task_svc_with_runner(db, crate::process::MockProcessRunner::unused())
 }

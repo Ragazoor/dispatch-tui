@@ -1130,7 +1130,7 @@ mod tests {
     #[tokio::test]
     async fn tick_skips_an_epic_whose_stored_interval_is_below_the_floor() {
         for bad in [0, MIN_FEED_INTERVAL_SECS - 1] {
-            let db = Arc::new(Database::open_in_memory().await.unwrap());
+            let db = Arc::new(Database::open_in_memory_unattached().await.unwrap());
             let epic = db.create_epic("Too Fast", "", None).await.unwrap();
             db.patch_epic(
                 epic.id,

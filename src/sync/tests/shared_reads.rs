@@ -105,7 +105,7 @@ async fn board() -> Database {
 
 /// A store-backed handle over nothing but what `snapshot` delivered.
 async fn store_backed(snapshot: &Snapshot) -> Database {
-    Database::open_in_memory()
+    Database::open_in_memory_unattached()
         .await
         .unwrap()
         .with_shared_reader(Arc::new(SubscriptionBoardReads::new(deliver(snapshot))))
@@ -219,7 +219,7 @@ async fn a_store_backed_board_reads_back_what_the_store_holds() {
 /// writes any more must not leak back onto a board that reads from the store.
 #[tokio::test]
 async fn a_store_backed_board_never_reads_its_own_sqlite_file() {
-    let snapshot = dump_from_sqlite(&Database::open_in_memory().await.unwrap())
+    let snapshot = dump_from_sqlite(&Database::open_in_memory_unattached().await.unwrap())
         .await
         .unwrap();
     let local = board().await;

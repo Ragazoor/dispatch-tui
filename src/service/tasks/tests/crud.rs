@@ -1678,7 +1678,7 @@ async fn create_task_returning_sets_all_optional_fields_atomically() {
 
 #[tokio::test]
 async fn delete_task_removes_it() {
-    let db = test_db().await;
+    let db = test_db_unattached().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -3856,7 +3856,7 @@ async fn update_task_propagates_db_error_on_prior_task_read() {
     // When update_task needs to read the prior task state (epic_id is set, so
     // needs_prior=true) and the DB returns an error when reading the task back,
     // the error should propagate rather than being silently swallowed as None.
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Database::open_in_memory_unattached().await.unwrap());
     let svc = TaskService::new(db.clone(), crate::process::MockProcessRunner::unused());
 
     // Create a task that we'll corrupt so get_task fails

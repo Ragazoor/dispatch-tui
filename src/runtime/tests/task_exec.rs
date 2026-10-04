@@ -152,7 +152,7 @@ async fn exec_refresh_from_db_syncs_external_changes() {
 
 #[tokio::test]
 async fn exec_refresh_from_db_returns_commands_from_refresh() {
-    let (rt, mut app) = test_runtime().await;
+    let (rt, mut app) = test_runtime_unattached().await;
     // Insert a task directly into DB as Running
     rt.db_write()
         .create_task(CreateTaskRequest {
@@ -1489,7 +1489,7 @@ async fn exec_patch_sub_status_updates_db() {
 
 #[tokio::test]
 async fn exec_patch_sub_status_shows_error_for_missing_task() {
-    let (rt, mut app) = test_runtime().await;
+    let (rt, mut app) = test_runtime_unattached().await;
     rt.exec_patch_sub_status(&mut app, TaskId(999), models::SubStatus::Active)
         .await;
     assert!(app.error_popup().is_some());
