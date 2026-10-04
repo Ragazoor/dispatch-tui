@@ -187,3 +187,22 @@ CI's `coverage` job runs `cargo tarpaulin --engine llvm --out xml --out stdout -
 The floor is 88, deliberately ~2 points below the measured figure (91.56%, 2026-08-28). It is a regression tripwire, not a target: raise it by hand when a step-change in coverage makes the headroom pointless, never automatically to whatever the last run scored. Don't chase 100% on render-heavy code or `src/setup/`'s OS-interaction branches (hooks, filesystem writes) — a single file below the average is not by itself a problem.
 
 Coverage is not in the pre-push hook; every *other* CI gate is, and `tests/ci_gates.rs` asserts the hook's script list and the workflow's stay in sync.
+
+## SpacetimeDB module and CI details
+
+**`spacetime/module/` is outside the workspace.** `cargo test` and `cargo clippy --all-targets` stop at the root package. The module is its own crate for wasm32. `./scripts/check-spacetime-module.sh` builds it and runs its unit tests. The pre-push hook and CI both run that script. It needs `sudo dnf install rust-std-static-wasm32-unknown-unknown`.
+
+Two root-level tests watch the module from outside:
+
+- `src/spacetime/tests/module_schema.rs` compares the SHARED columns to SQLite by position. Module-only columns are checked by presence, because SpacetimeDB only appends columns.
+- `tests/spacetime_module.rs` publishes the module into a throwaway instance when `spacetime` is on `PATH`.
+
+**The board embeds a committed prebuilt `src/spacetime/module.wasm`.** After any module change, run `./scripts/build-managed-module.sh`. The hook, CI and `cargo test` check a source-hash stamp beside the wasm, not the wasm bytes, which differ per machine.
+
+**That check fails spuriously mid-merge.** It publishes the committed module and automigrates the working tree's over it. With a merge resolved but not committed, it reports every difference the merge brought in. Commit the merge, then re-run. See `spacetime/module/README.md`.
+
+**Changing the module means regenerating the client bindings.** Run `./scripts/regenerate-spacetime-bindings.sh` and commit the result. CI never runs it, because it needs the `spacetime` CLI. `src/spacetime/tests/bindings_parity.rs` fails when a table or reducer exists on one side only. Absence in the module is a sentinel (`""`, `0`), not a null, because SpacetimeDB SQL cannot filter on an optional column. `SharedTable::sentinel_columns` holds the list and the reasoning.
+
+**Tarpaulin fails if `spacetime` is on your `PATH`.** Its instrumentation breaks the `spacetime publish` that `tests/spacetime_module.rs` and `tests/memory_caller_conformance.rs` run, so every test in both files fails. This is not a regression in your branch. CI is unaffected: the Coverage job installs no `spacetime`, so both files skip there.
+
+**CI jobs.** `.github/workflows/ci.yml` runs Test, Clippy, Format, Coverage and Gate scripts. Gate scripts mirrors every `scripts/*.sh` check in the pre-push hook, in the same order; `tests/ci_gates.rs` fails if the hook gains a script CI does not run. The Test job installs a pinned `spacetime` CLI and hard-fails if it lands at another version, so the two spacetime test files run for real.
