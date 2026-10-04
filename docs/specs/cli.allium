@@ -1,0 +1,485 @@
+-- allium: 3
+-- cli.allium
+--
+-- Scope: The `dispatch` command line as a whole — which subcommands exist,
+--        how a process run as one of them ends (its exit code), how the
+--        one-shot commands reach the shared store, and what the commands that
+--        no other spec owns read and print.
+-- Includes: The subcommand inventory and where each is specified; the
+--           exit-code contract (success, failure, usage error, and the one
+--           code that blocks a gated tool call); the three process classes a
+--           subcommand runs in; how one-shot commands open the store
+--           (CliCommandsReachTheStoreWithoutManagingIt); the operator-facing
+--           output of `repo set-verify`, `repo clear-verify`, `repo list`,
+--           `prune-repo-paths`, `plan`, `spacetime dump|dump-server|restore|seed`
+--           and `store import`; the plan file check that precedes the store;
+--           and the terminal hand-back every companion-pane renderer owes
+--           its shell.
+-- Excludes: `dispatch tui` and everything a launch does before the board
+--           draws (see startup.allium); the caller identity headers and
+--           `dispatch caller-headers`' one answer (see mcp-task-tools.allium:
+--           TheHelperAnswersSessionUnconditionally, and dispatch.allium:
+--           AgentCarriesItsOwnCallerIdentity); the `hook`, `hook-subagent` and
+--           `hook-peer-message` subcommands (see agent-health.allium:
+--           HookDelivery); `pr-gate`'s verdict and fail-open (see
+--           pr-workflow.allium: PrLearningsGate); `statusline` (see
+--           observability.allium: StatusLineDecorator); `verify-feed` (see
+--           feeds.allium: VerifyFeed); what `agent-tree`, `agent-diff` and
+--           `toggle-agent-tree-pane` show and how they wait for their task
+--           (see agent-tree.allium, "Companion Pane Startup"); what
+--           `repo status` and `repo sync` measure and do (see repo-sync.allium:
+--           RepoStatusCli, RepoSyncCli); what the snapshot commands and the
+--           import write into a store and when they refuse (see
+--           spacetime-seed.allium: SnapshotCommandLine, SeedSharedStore,
+--           ImportOldStore; startup.allium: ImportBringsUpTheManagedStore);
+--           the plan attachment itself (see mcp-task-tools.allium:
+--           AttachPlanViaCli); `uninstall` (see mcp-task-tools.allium, "Other
+--           CLI subcommands"); where a one-shot command's log lines go (see
+--           observability.allium).
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- How a `dispatch` process ends, as seen by whatever ran it.
+--
+-- success: exit 0. The command did what it was asked, or (for the commands
+--   whose contract is never to fail — statusline, caller-headers,
+--   toggle-agent-tree-pane) it ran at all.
+-- failure: exit 1. The command reported an error on stderr, naming what went
+--   wrong. Every error a subcommand returns ends this way.
+-- usage_error: exit 2, before the command body runs. The arguments did not
+--   parse — an unknown subcommand, a missing argument, a value of the wrong
+--   kind. The usage text goes to stderr.
+-- block_tool_call: exit 2, from `pr-gate` only. Claude Code reads exit 2
+--   from a PreToolUse hook as "block this tool call", and every other
+--   non-zero code as "report and allow"; see pr-workflow.allium:
+--   PrLearningsGate.
+enum ProcessExit {
+    success
+    failure
+    usage_error
+    block_tool_call
+}
+
+-- What machinery a subcommand's process starts before its body runs. Chosen
+-- by the subcommand alone, before anything else happens.
+--
+-- synchronous: no asynchronous runtime at all. statusline, caller-headers,
+--   verify-feed, uninstall and toggle-agent-tree-pane. The first two run at a
+--   rate (several times a second per session; every MCP session start) where
+--   setting up machinery they cannot use is pure waste — see
+--   observability.allium: StatusLineDecorator's StartsNoAsyncRuntime.
+-- hook: a single-threaded runtime with I/O and timers only. hook,
+--   hook-subagent, hook-peer-message and pr-gate: the commands Claude Code
+--   runs once per tool call of every live session, whose whole body is one
+--   round trip to the running board (agent-health.allium: HookDelivery).
+-- general: the full multi-threaded runtime. Everything else, including any
+--   subcommand added later — correct by default, merely unoptimised.
+enum ProcessClass {
+    synchronous
+    hook
+    general
+}
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- One run of the `dispatch` binary as a subcommand.
+entity CliInvocation {
+    subcommand: String
+    process_class: ProcessClass
+    named_store: String?          -- --spacetime-server / DISPATCH_SPACETIME_SERVER
+    exit: ProcessExit?            -- null while the process is still running
+}
+
+-- A companion-pane renderer (`agent-tree` or `agent-diff`) and the terminal
+-- it borrows from its tmux pane.
+entity PaneRenderer {
+    invocation: CliInvocation
+    task_id: Integer              -- the only argument it is given
+    terminal_taken: Boolean       -- raw mode and the alternate screen are on
+    status: running | ended
+
+    transitions status {
+        running -> ended
+        terminal: ended
+    }
+
+    -- A renderer that has ended has handed its terminal back, whichever way
+    -- its process then exits.
+    invariant EndedRendererHoldsNoTerminal {
+        status = ended implies not terminal_taken
+    }
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- The address one-shot commands reach when no store is named. Same value
+    -- as startup.allium's config.managed_store_address.
+    default_store_address: String = "http://127.0.0.1:3000"
+}
+
+------------------------------------------------------------
+-- Rules: reaching the store
+------------------------------------------------------------
+
+rule CliCommandsReachTheStoreWithoutManagingIt {
+    -- Every subcommand that reads or writes shared rows — repo, prune-repo-
+    -- paths, plan, agent-tree, agent-diff, spacetime seed, store import —
+    -- opens the store the same way.
+    when: CliStoreRequested(invocation)
+
+    let address =
+        if invocation.named_store != null: invocation.named_store
+        else: config.default_store_address
+
+    ensures: CliConnectedTo(invocation: invocation, server: address)
+
+    @guidance
+        -- The connection is the board's first-connection path: the local
+        -- database is opened for this install's host identity, the store is
+        -- connected and the identity settled, and the first subscription
+        -- applied. A store that cannot be reached ends the command with
+        -- failure, naming the reason (startup.allium:
+        -- AbortWhenTheStoreCannotBeReached).
+        --
+        -- WHAT IT DOES NOT DO. A short-lived command is not a board: it does
+        -- not start, adopt or stop the managed store (only `dispatch tui` and
+        -- `store import` manage one), and it does not register this host in
+        -- the shared host registry — the board already does that on every
+        -- connect (sync.allium: RegisterHostOnConnect). So with no board
+        -- running and no store named, these commands fail rather than bring
+        -- a store up.
+        --
+        -- `spacetime dump`, `dump-server` and `restore` do not come through
+        -- here: dump reads this board's local SQLite directly, and the other
+        -- two talk to the server they are given through the `spacetime` CLI
+        -- (spacetime-seed.allium).
+}
+
+------------------------------------------------------------
+-- Rules: commands no other spec owns the output of
+------------------------------------------------------------
+
+-- The repo-path commands are operator equivalents of the MCP verify-command
+-- tool (mcp-task-tools.allium: "Other CLI subcommands"). What follows is only
+-- what they print. Every path the operator types is tilde-expanded before use,
+-- the same expansion saved repo paths are stored under.
+
+rule SetVerifyCommandViaCli {
+    when: CliSetVerify(path, command)
+
+    ensures: VerifyCommandStored(path: expand_tilde(path), command: command)
+    ensures: CliPrinted(line: "verify_command set for " + expand_tilde(path))
+
+    @guidance
+        -- `dispatch repo set-verify <path> <command>`. Creates the saved path
+        -- when it does not exist yet. A command containing a newline or
+        -- carriage return is refused (core/SavedRepoPath's
+        -- VerifyCommandSingleLine) and the command ends with failure.
+}
+
+rule ClearVerifyCommandViaCli {
+    when: CliClearVerify(path)
+
+    ensures: VerifyCommandStored(path: expand_tilde(path), command: null)
+    ensures: CliPrinted(line: "verify_command cleared for " + expand_tilde(path))
+}
+
+rule ListReposViaCli {
+    when: CliListRepos(operator)
+
+    ensures:
+        if core/SavedRepoPaths.count = 0:
+            CliPrinted(line: "No repo paths configured.")
+        else:
+            for repo in core/SavedRepoPaths:
+                CliPrinted(line: repo_list_row(repo))
+
+    @guidance
+        -- `dispatch repo list`. One line per saved path: the path alone, or
+        -- the path, a tab and `verify: <command>` when it has one. An empty
+        -- list is not an error — the command still succeeds.
+        --
+        -- == Black boxes ==
+        -- repo_list_row(repo) is the line described above.
+}
+
+rule PruneRepoPathsViaCli {
+    when: CliPruneRepoPaths(operator)
+
+    let missing = core/SavedRepoPaths where not path_exists_on_disk(path)
+
+    ensures:
+        for repo in missing:
+            SavedRepoPathForgotten(repo: repo)
+            CliPrinted(line: "removed: " + repo.path)
+    ensures: CliPrinted(line: prune_summary(missing.count, core/SavedRepoPaths.count - missing.count))
+
+    @guidance
+        -- `dispatch prune-repo-paths`. Existence is judged on THIS machine's
+        -- filesystem, after tilde expansion. The summary line reads
+        -- `<removed> path(s) removed, <kept> kept.`
+        --
+        -- == Black boxes ==
+        -- path_exists_on_disk(path) asks the local filesystem;
+        -- prune_summary(removed, kept) is the summary line above.
+}
+
+rule PlanFileIsCheckedBeforeTheStore {
+    -- `dispatch plan <id> <path>`. The file is resolved first; the store is
+    -- opened only once it has been.
+    when: CliAttachPlanRequested(task_id, path)
+
+    requires: path_exists_on_disk(path)
+    requires: canonical_path(path) != null
+
+    ensures: CliStoreRequested(invocation: current_invocation())
+    ensures: CliAttachPlan(task: task_by_id(task_id), path: canonical_path(path))
+
+    @guidance
+        -- A mistyped path fails at once with "Plan file not found: <path>",
+        -- without a store round trip; a path that exists but cannot be
+        -- resolved fails with "Failed to resolve plan path …". Either ends
+        -- with failure.
+        --
+        -- The path recorded on the task is the CANONICAL one, not the one
+        -- typed: absolute and free of symlinks, so it stays valid from the
+        -- agent's worktree, wherever the operator typed it from.
+        --
+        -- The attachment itself is mcp-task-tools.allium: AttachPlanViaCli.
+        -- It goes through the task service, like every other task mutation.
+        -- On success it prints `Plan attached to task #<id>: <path>`; a task
+        -- id with no task ends with failure and `Task <id> not found`.
+        --
+        -- == Black boxes ==
+        -- current_invocation() is the running CliInvocation; task_by_id(id)
+        -- is the task with that id, null when there is none;
+        -- path_exists_on_disk(path) asks the local filesystem; and
+        -- canonical_path(path) is the absolute, symlink-free path, null when
+        -- it cannot be resolved.
+}
+
+rule SnapshotCommandsReportWhatTheyDid {
+    when: CliSnapshotCommandFinished(command, rows, tables, destination)
+
+    ensures:
+        if command = dump_to_file:
+            CliReported(on: stderr, line: "Wrote " + destination)
+        else if command = restore:
+            CliPrinted(line: restored_summary(rows, tables))
+        else if command = seed:
+            CliPrinted(line: seeded_summary(rows, current_operator()))
+
+    @guidance
+        -- The operator-facing lines of spacetime-seed.allium's
+        -- SnapshotCommandLine; what each command writes, and when it refuses,
+        -- is specified there.
+        --
+        -- `dump` and `dump-server` write the snapshot to the file named by
+        -- `--out`, or to stdout for `-` (the default), pretty-printed so that
+        -- two backups diff line by line. Only a file destination prints
+        -- `Wrote <file>`, and it prints it on stderr — stdout may BE the
+        -- snapshot. `restore` reads its file, or stdin for `-`, and prints
+        -- `Restored <rows> rows across <tables> tables.` `seed` prints
+        -- `Seeded <rows> rows into the store as <operator>.`
+        --
+        -- A refusal is reported as the refusal reason itself, not as a crash,
+        -- and ends with failure; by NothingIsWrittenBeforeTheChecksPass the
+        -- store was not written to.
+        --
+        -- == Black boxes ==
+        -- restored_summary, seeded_summary and current_operator() are the
+        -- lines and the identity described above.
+}
+
+rule StoreImportReportsItsCounts {
+    when: ImportReported(imported, kept, dropped, orphaned)
+
+    ensures: CliPrinted(line: import_summary(imported, kept, dropped))
+    ensures: CliPrinted(line: import_detail(imported, kept, dropped, orphaned))
+
+    @guidance
+        -- `dispatch store import --from <old store>`. The first line reads
+        -- `Imported <n> rows into <server>; <k> were already there, <d>
+        -- dropped.`, followed by the per-table detail, which names the
+        -- orphaned tasks' ids (spacetime-seed.allium:
+        -- OrphansLeaveTheirDroppedEpic).
+        --
+        -- WHAT `--from` MEANS. An `http://` or `https://` value is a running
+        -- store's address; anything else is a data folder. A folder that is
+        -- not a directory, or that a running store is serving, is refused
+        -- before anything is copied (spacetime-seed.allium: ImportOldStore).
+        -- The copy is served for at most 30 seconds' worth of startup before
+        -- the import gives up.
+        --
+        -- With no store named, the `spacetime` CLI must be on PATH for the
+        -- managed store to be brought up; without it the command ends with
+        -- failure, saying to install it.
+        --
+        -- == Black boxes ==
+        -- import_summary and import_detail are the two parts above.
+}
+
+------------------------------------------------------------
+-- Rules: the companion-pane renderers
+------------------------------------------------------------
+
+rule PaneRendererTakesTheTerminal {
+    when: CliPaneRendererStarted(invocation, task_id)
+
+    ensures: PaneRenderer.created(
+        invocation: invocation,
+        task_id: task_id,
+        terminal_taken: true,
+        status: running
+    )
+}
+
+rule PaneRendererEnds {
+    -- The user's exit key, or an error from inside the render loop.
+    when: CliPaneRendererStopped(renderer)
+
+    requires: renderer.status = running
+
+    ensures: renderer.status = ended
+}
+
+rule PaneRendererGivesTheTerminalBack {
+    when: renderer: PaneRenderer.status transitions_to ended
+
+    requires: renderer.terminal_taken
+
+    ensures: renderer.terminal_taken = false
+
+    @guidance
+        -- `agent-tree` and `agent-diff` take their pane's terminal (raw mode,
+        -- the alternate screen, the cursor hidden) for as long as they run.
+        -- However the renderer ends — the user's exit key, or an error from
+        -- inside the render loop — the terminal is restored before the
+        -- process exits. A renderer that left raw mode on would drop the
+        -- user into a shell that echoes nothing and shows no cursor, with
+        -- nothing on screen to say why; and the failure is identical in both
+        -- renderers, so they share the one hand-back rather than each
+        -- re-deriving it.
+        --
+        -- The error, if there was one, is still reported, after the restore:
+        -- the process ends with failure.
+        --
+        -- Each renderer is given only a task id. It reaches the store through
+        -- CliCommandsReachTheStoreWithoutManagingIt, then waits for its task
+        -- as agent-tree.allium's "Companion Pane Startup" describes.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant ExitCodeTwoIsReservedForBlockingAndUsage {
+    for invocation in CliInvocations:
+        invocation.exit = block_tool_call implies invocation.subcommand = "pr-gate"
+}
+
+invariant PrGateRunsAsAHook {
+    for invocation in CliInvocations:
+        invocation.subcommand = "pr-gate" implies invocation.process_class = hook
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+actor Operator {
+    identified_by: core/Host where id != ""
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface DispatchCommandLine {
+    facing operator: Operator
+
+    exposes:
+        for invocation in CliInvocations:
+            invocation.subcommand
+            invocation.exit
+
+    provides:
+        CliSetVerify(path, command)
+        CliClearVerify(path)
+        CliListRepos(operator)
+        CliPruneRepoPaths(operator)
+        CliAttachPlanRequested(task_id, path)
+        CliPaneRendererStarted(invocation, task_id)
+        CliPaneRendererStopped(renderer)
+
+    @guarantee EveryFailureNamesItsCause
+        -- A command that cannot do what it was asked ends with a non-zero
+        -- exit and says why on stderr, in terms the operator can act on: the
+        -- path that does not exist, the task id that has no task, the store
+        -- that could not be reached. A script can rely on the exit code; a
+        -- person on the message.
+
+    @guarantee OutputIsLineOriented
+        -- Every listing prints one line per row, its columns separated by
+        -- tabs, with no header (`verify-feed`'s table is the exception, and
+        -- feeds.allium's). They are meant to be read by a person and piped
+        -- through `cut` or `grep` by a script alike.
+
+    @guarantee NoTaskListOrStatusCommand
+        -- There is no subcommand that lists tasks or changes a task's status.
+        -- The board and the MCP tools are the only surfaces for task state
+        -- (mcp-task-tools.allium, "Other CLI subcommands").
+
+    @guidance
+        -- SUBCOMMAND INVENTORY, and where each is specified:
+        --   tui                         startup.allium
+        --   plan <id> <path>            PlanFileIsCheckedBeforeTheStore; mcp-task-tools.allium: AttachPlanViaCli
+        --   uninstall [--yes] [--purge] mcp-task-tools.allium, "Other CLI subcommands"
+        --   hook, hook-subagent,
+        --   hook-peer-message           agent-health.allium: HookDelivery
+        --   pr-gate <id>                pr-workflow.allium: PrLearningsGate
+        --   agent-tree <task_id>        agent-tree.allium; PaneRendererGivesTheTerminalBack
+        --   agent-diff <task_id>        agent-tree.allium; PaneRendererGivesTheTerminalBack
+        --   toggle-agent-tree-pane <w>  agent-tree.allium: ToggleAgentTreePane
+        --   statusline                  observability.allium: StatusLineDecorator
+        --   verify-feed <command>       feeds.allium: VerifyFeed
+        --   caller-headers              mcp-task-tools.allium: TheHelperAnswersSessionUnconditionally
+        --   repo set-verify|clear-verify|list
+        --                               the rules above
+        --   repo status|sync            repo-sync.allium: RepoStatusCli, RepoSyncCli
+        --   prune-repo-paths            PruneRepoPathsViaCli
+        --   spacetime dump|dump-server|restore|seed
+        --                               spacetime-seed.allium: SnapshotCommandLine
+        --   store import --from <src>   spacetime-seed.allium: ImportOldStore
+        --
+        -- Two options are global: `--db` (the local database; also
+        -- DISPATCH_DB) and `--spacetime-server` (the store; also
+        -- DISPATCH_SPACETIME_SERVER). The local database's folder is also
+        -- where a command's log lines go.
+        --
+        -- THE COMMANDS THAT NEVER FAIL. `statusline`, `caller-headers` and
+        -- `toggle-agent-tree-pane` always end with success, because a
+        -- failure from any of them has nowhere useful to go: the first two
+        -- would break Claude Code's status line or MCP connection, and the
+        -- third runs detached from a tmux key binding. They swallow their own
+        -- errors (toggle-agent-tree-pane logs them) rather than return them.
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "An unparseable argument list exits 2 before any command body runs, and exit 2 is also Claude Code's 'block this tool call' signal. A `pr-gate` invocation that fails to parse (an id that is not a number, a renamed flag after an upgrade) therefore BLOCKS the gated `gh pr create`, contradicting the gate's fail-open stance (pr-workflow.allium: PrLearningsGate). Is a parse failure meant to block, or should pr-gate map usage errors to a non-blocking code?"
+
+open question "`agent-tree` and `agent-diff` open the store before they take the terminal, so a store that cannot be reached ends the process with failure, and tmux closes the pane at once, taking the message with it. That is the exact failure agent-tree.allium's Companion Pane Startup exists to prevent for a missing task ('the pane never closes itself'). Should an unreachable store also be drawn in the pane and wait for the exit key?"
+
+open question "`prune-repo-paths` judges existence on the local filesystem, but saved repo paths are shared rows in the store (core/SavedRepoPath has no host). Run on one machine, it forgets every repo path that exists only on a teammate's machine. Is pruning meant to be per-host, or is the shared table meant to hold only paths valid everywhere?"

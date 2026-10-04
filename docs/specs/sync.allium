@@ -419,6 +419,7 @@ rule FirstConnectionLetsTheBoardDraw {
 
 rule FirstConnectionFailureAbortsStartup {
     when: ConnectionAttemptFailed(connection, reason)
+        or InitialSubscriptionRefused(connection, reason)
 
     requires: not connection.board_drawn
 
@@ -430,7 +431,9 @@ rule FirstConnectionFailureAbortsStartup {
         -- (startup.allium: AbortWhenTheStoreCannotBeReached), and
         -- ConnectionAttemptFailed's backoff never starts. Every failure mode
         -- ConnectionAttemptFailed covers lands here the same way, and so does a
-        -- subscription the store refuses on that first connection.
+        -- subscription the store refuses on that first connection
+        -- (InitialSubscriptionRefused; after the board has drawn, the same
+        -- event is ASubscriptionTheStoreRefusesIsAnOutage's).
 }
 
 rule IdentityConflictAtStartupAbortsIt {
@@ -683,6 +686,17 @@ rule AnUnfollowReassertsTheWholeAsk {
         -- redraw. The two rules answer to opposite halves of the same row's
         -- lifecycle for opposite reasons, and nothing here tries to make
         -- shrinking as cheap as growing by treating it as the same problem.
+        --
+        -- A REASSERT THE STORE REFUSES DOES NOT TAKE THE CONNECTION DOWN. Unlike
+        -- the assertion made on connecting (ASubscriptionTheStoreRefusesIsAnOutage),
+        -- this one is asked of a connection that is already up and already
+        -- syncing, so the board stays `connected` and keeps the ask it held
+        -- before — the unfollowed epic's rows go on arriving. The refusal is
+        -- logged, and the shrink is noticed again and the reassert re-sent on
+        -- the board's next connection step, until one is applied or the
+        -- connection goes. Unlike a refused widening, this one IS retried:
+        -- leaving it would keep asking for rows the person has said they no
+        -- longer want, for as long as the connection holds.
 }
 
 rule RegisterHostOnConnect {
@@ -728,6 +742,12 @@ rule RegisterHostOnConnect {
         -- SubscribedRowsArriveUnasked, once this rule has sent a row for it to
         -- arrive from — this rule's job stops at getting the write to the
         -- store the first time.
+        --
+        -- SENT ONCE THE CONNECTION IS ALL THE WAY UP, not at the instant the
+        -- identity settles: after the initial subscription has been applied.
+        -- A connection whose initial subscription is refused
+        -- (ASubscriptionTheStoreRefusesIsAnOutage) sends no registration; the
+        -- next connection that does come up sends it.
 }
 
 rule RegisterHostOnRename {
@@ -961,6 +981,13 @@ rule BoardWritesThroughTheStore {
         -- store has no terminal, no checkout and no git. What reaches the store
         -- is the ROW that records the outcome, and the order matters — the
         -- worktree exists before the row that names it does.
+        --
+        -- WHOSE CLOCK. A time that records when something happened on this
+        -- machine is this board's: a row's creation instant, and the instant
+        -- an agent's hook fired. Every time the store derives as a consequence
+        -- of a write — a last-updated stamp, a completion time — is the
+        -- store's, so that rows written by different boards are ordered by one
+        -- clock rather than by whose laptop runs fast.
 }
 
 rule CreatesRequireASettledIdentity {
@@ -1099,6 +1126,13 @@ rule AWriteWithNoConnectionIsRefused {
         -- The reason is the connection's, because that is the true one. "The
         -- store is unreachable: connection refused" is actionable; "could not
         -- save" is not.
+        --
+        -- WHILE A RETRY IS IN FLIGHT THERE IS NO REASON TO QUOTE. RetryAfterBackoff
+        -- clears last_error on the way into `connecting`, so a write refused
+        -- during that attempt says only that the store is not connected and
+        -- that nothing was changed or queued. It does not repeat the previous
+        -- failure's reason as though it were current, and it does not invent
+        -- one.
 }
 
 rule StoreRejectsAnInvalidMutation {
@@ -1191,6 +1225,44 @@ rule ConnectionDropped {
         -- `attempts` increments here too, so an outage that begins from a
         -- healthy connection backs off exactly like one that begins from a
         -- failed attempt.
+}
+
+rule ASubscriptionTheStoreRefusesIsAnOutage {
+    when: InitialSubscriptionRefused(connection, reason)
+
+    requires: connection.status = connected
+    requires: connection.board_drawn
+
+    ensures:
+        connection.status = disconnected
+        connection.attempts = connection.attempts + 1
+        connection.last_error = reason
+        connection.last_failure_at = now
+        SubscribedRowsDiscarded(connection)
+
+    @guidance
+        -- SUBSCRIBING IS PART OF COMING UP. The store accepted the connection
+        -- and the identity settled, but the ask SubscribeOnceIdentityIsSettled
+        -- sent was refused, or was not applied within config.connect_timeout.
+        -- A connection that syncs nothing is not a working one, so it does not
+        -- sit in `connected`: it becomes the same ordinary outage as a drop,
+        -- with the store's reason as last_error, and RetryAfterBackoff brings
+        -- it back.
+        --
+        -- CLOSED, NOT MERELY MARKED DOWN. The connection the store accepted is
+        -- closed and whatever it had already delivered is discarded, exactly
+        -- as ADisconnectedBoardDrawsNoSharedRows does for a drop. A connection
+        -- left open would go on delivering rows into a board whose status
+        -- says `disconnected`, and on accepting writes the board has just
+        -- told the operator it will refuse.
+        --
+        -- The identity stays settled: the store did say who this is, and
+        -- nothing about a refused ask changes that.
+        --
+        -- ONLY THE ASK MADE ON CONNECTING. A refused widening
+        -- (ASubEpicOfAFollowedEpicIsAskedForToo) and a refused reassert after
+        -- an unfollow (AnUnfollowReassertsTheWholeAsk) leave the connection
+        -- up; see each.
 }
 
 rule RetryAfterBackoff {
@@ -1467,6 +1539,12 @@ surface StoreBoundary {
         -- AnUnfollowReassertsTheWholeAsk.
         SubscriptionRemoved(connection, subscription)
             when connection.status = connected
+        -- The store's answer to the ask SubscribeOnceIdentityIsSettled sends:
+        -- a refusal, or no application within config.connect_timeout. For
+        -- FirstConnectionFailureAbortsStartup and
+        -- ASubscriptionTheStoreRefusesIsAnOutage.
+        InitialSubscriptionRefused(connection, reason)
+            when connection.status = connected
         StoreRejectedMutation(connection, mutation, reason)
             when connection.status = connected
 
@@ -1512,6 +1590,23 @@ surface StoreBoundary {
         --
         -- The rejection carries a reason in terms the operator can act on, for
         -- the same reason EveryFailureNamesItself demands one of the indicator.
+
+    @guarantee AnAcceptanceArrivesAfterItsRows
+        -- By the time this board hears that a mutation was accepted, every row
+        -- that mutation inserted, changed or deleted within this board's
+        -- subscriptions has already been delivered. A caller that reads the
+        -- board's rows after the answer sees its own write.
+        --
+        -- This is what the answer is built from rather than a courtesy. A
+        -- create learns its new row's id by finding that row among the
+        -- delivered ones (own_creations, SubscribeOnceIdentityIsSettled); a
+        -- feed cycle learns which tasks the store removed by finding them gone
+        -- afterwards (feeds.allium). An answer that could overtake its rows
+        -- would make the first report a create as failed when it succeeded,
+        -- and the second miss a teardown.
+        --
+        -- A rejection delivers no rows, because it changed none
+        -- (StoreRejectsAnInvalidMutation).
 
     @guarantee TheStoreEnforcesTheSharedRules
         -- Validation and every derived shared value are the store's, computed
@@ -1625,6 +1720,10 @@ open question "What is a board supposed to do with a change whose fate is unknow
 -- window the question raised — acceptance coming before the identity verdict —
 -- is real for them too, but harmless, because there is nothing in the written
 -- row that could later read as belonging to the wrong person.
+
+open question "Does a store that keeps accepting the connection and refusing its initial subscription ever get backed off? ConnectionAccepted resets `attempts` to 0 on acceptance, and ASubscriptionTheStoreRefusesIsAnOutage then adds one, so every cycle of that failure waits config.reconnect_backoff_base and the wait never grows towards config.reconnect_backoff_max — a refusal that lasts an hour is retried roughly every second for an hour, which is the hot loop the ceiling's own comment says the backoff exists to prevent. Should `attempts` reset only once the initial subscription is applied, rather than on acceptance?"
+
+open question "Is retrying a refused unfollow reassert on every connection step the intended cadence? AnUnfollowReassertsTheWholeAsk's refusal is re-sent on each step of the board's connection loop with no backoff, for as long as the store keeps refusing it. ASubEpicOfAFollowedEpicIsAskedForToo refuses to retry a refused widening precisely so that there is no 'second reconnect loop living inside the first'; this is one. Should a refused reassert back off, wait for the next connection like a refused widening, or keep retrying every step?"
 
 open question "Should the board expose a way to retry NOW, rather than waiting out the backoff? An operator who has just fixed the store knows something the backoff does not. Left out for the moment because config.reconnect_backoff_max is a minute, which is short enough that the button might only exist to be pressed impatiently."
 
