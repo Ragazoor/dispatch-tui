@@ -48,7 +48,7 @@ async fn feed_sync_creates_then_updates_tasks_via_external_id() {
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let proc_runner: Arc<dyn ProcessRunner> = Arc::new(AlwaysFailRunner);
-    let board_reads = Arc::new(dispatch_tui::sync::LocalBoardReads::new(db.clone()));
+    let board_reads = db.board_reads().expect("memory handle has board reads");
     let mut runner = FeedRunner::new(db.clone(), tx, proc_runner, board_reads, "test-host".into());
 
     runner.tick().await;
@@ -77,7 +77,7 @@ async fn feed_sync_creates_then_updates_tasks_via_external_id() {
     // the interval check passes — the persistent state is in the DB only.
     let (tx2, mut rx2) = mpsc::unbounded_channel();
     let proc_runner2: Arc<dyn ProcessRunner> = Arc::new(AlwaysFailRunner);
-    let board_reads2 = Arc::new(dispatch_tui::sync::LocalBoardReads::new(db.clone()));
+    let board_reads2 = db.board_reads().expect("memory handle has board reads");
     let mut runner2 = FeedRunner::new(
         db.clone(),
         tx2,

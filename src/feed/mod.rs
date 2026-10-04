@@ -509,7 +509,7 @@ mod tests {
         runner: Arc<dyn ProcessRunner>,
     ) -> (FeedRunner, mpsc::UnboundedReceiver<McpEvent>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let board_reads = Arc::new(crate::sync::LocalBoardReads::new(db.clone()));
+        let board_reads = crate::sync::tests::sqlite_reads::board_reads_of(&db);
         (
             FeedRunner::new(db, tx, runner, board_reads, "test-host".into()),
             rx,
@@ -1643,9 +1643,7 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let proc_runner: Arc<dyn ProcessRunner> =
             Arc::new(crate::process::MockProcessRunner::new(vec![]));
-        let board_reads = Arc::new(crate::sync::LocalBoardReads::new(
-            Arc::clone(&db) as Arc<dyn crate::db::TaskReadStore>
-        ));
+        let board_reads = db.board_reads().expect("memory handle has board reads");
         let runner = FeedRunner::new(
             Arc::clone(&db) as Arc<dyn crate::db::TaskStore>,
             tx,

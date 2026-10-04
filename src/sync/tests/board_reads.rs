@@ -14,10 +14,11 @@ use std::sync::Arc;
 use super::decode::{
     as_epic, as_host, as_repo_base_branch, as_repo_path, as_task, populated_board, rows,
 };
+use super::sqlite_reads::SqliteBoardReads;
 use crate::db::{Database, RepoConfigStore, TaskCrud, TaskPatch, TaskRead};
 use crate::models::{EpicId, TaskId};
 use crate::spacetime::{dump_from_sqlite, SharedTable, Snapshot};
-use crate::sync::{BoardReads, LocalBoardReads, SharedRows, SubscriptionBoardReads};
+use crate::sync::{BoardReads, SharedRows, SubscriptionBoardReads};
 
 /// Fill a [`SharedRows`] from a dump, exactly as a subscription delivering
 /// every row of every subscribed table would.
@@ -46,8 +47,8 @@ fn deliver(snapshot: &Snapshot) -> Arc<SharedRows> {
     shared
 }
 
-fn local(db: &Arc<Database>) -> LocalBoardReads {
-    LocalBoardReads::new(db.clone())
+fn local(db: &Arc<Database>) -> SqliteBoardReads {
+    SqliteBoardReads::new(db.clone())
 }
 
 /// A board with repos, branches and the task/epic fixture behind it.
@@ -382,4 +383,55 @@ async fn one_bad_row_does_not_take_the_others_with_it() {
         .unwrap();
     assert_eq!(held.len(), 1);
     assert_eq!(held[0].id.0, as_task(&all[1]).id);
+}
+
+// ---------------------------------------------------------------------------
+// 4. The in-memory handle's own board reads
+// ---------------------------------------------------------------------------
+
+/// `spacetime-memory-store.allium: TestBoardReadsShareTheHandlesRows`. A write
+/// through a store-attached handle shows up in the handle's board reads, and
+/// an unattached handle has none.
+#[tokio::test]
+async fn a_memory_handle_serves_board_reads_over_its_own_rows() {
+    use crate::db::{EpicCrud, TaskCrud};
+
+    let db = Database::open_in_memory().await.unwrap();
+    let reads = db
+        .board_reads()
+        .expect("an attached handle has board reads");
+    assert!(reads.list_tasks().await.unwrap().is_empty());
+
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    let before = reads.revision().await;
+    let task = db
+        .create_task(crate::db::CreateTaskRequest {
+            title: "T",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: crate::models::TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+            auto_run_plan: false,
+            phoenix: false,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        reads.get_task(task).await.unwrap().map(|t| t.id),
+        Some(task)
+    );
+    assert_eq!(
+        reads.get_epic(epic.id).await.unwrap().map(|e| e.id),
+        Some(epic.id)
+    );
+    assert_ne!(reads.revision().await, before);
+
+    let unattached = Database::open_in_memory_unattached().await.unwrap();
+    assert!(unattached.board_reads().is_none());
 }

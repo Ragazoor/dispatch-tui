@@ -14,8 +14,8 @@
 //!
 //! [`SubscriptionBoardReads`] reads the live view of this board's
 //! subscriptions, and is what every board runs: the store is mandatory.
-//! [`LocalBoardReads`] reads SQLite and survives only as the test suite's
-//! stand-in until Phase 12b (#4975).
+//! A store-attached in-memory `Database` serves the same type over its own rows
+//! (`Database::board_reads`); there is no SQLite-backed implementation.
 //!
 //! # The revision number
 //!
@@ -64,63 +64,6 @@ pub trait BoardReads: Send + Sync {
     /// subscription backing a saturating conversion it only needed because the
     /// trait had chosen a signed type for an unsigned counter.
     async fn revision(&self) -> Option<u64>;
-}
-
-/// Reads from this machine's SQLite database. The test suite's stand-in for
-/// [`SubscriptionBoardReads`]; no board runs it.
-#[cfg(any(test, feature = "test-support"))]
-pub struct LocalBoardReads {
-    db: Arc<dyn crate::db::TaskReadStore>,
-}
-
-#[cfg(any(test, feature = "test-support"))]
-impl LocalBoardReads {
-    pub fn new(db: Arc<dyn crate::db::TaskReadStore>) -> Self {
-        Self { db }
-    }
-}
-
-#[async_trait]
-#[cfg(any(test, feature = "test-support"))]
-impl BoardReads for LocalBoardReads {
-    async fn list_tasks(&self) -> Result<Vec<Task>> {
-        self.db.list_all().await
-    }
-
-    async fn get_task(&self, id: TaskId) -> Result<Option<Task>> {
-        self.db.get_task(id).await
-    }
-
-    async fn list_tasks_for_epic(&self, epic: EpicId) -> Result<Vec<Task>> {
-        self.db.list_tasks_for_epic(epic).await
-    }
-
-    async fn list_epics(&self) -> Result<Vec<Epic>> {
-        self.db.list_epics().await
-    }
-
-    async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
-        self.db.get_epic(id).await
-    }
-
-    async fn list_repo_paths(&self) -> Result<Vec<String>> {
-        self.db.list_repo_paths().await
-    }
-
-    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>> {
-        self.db.list_all_base_branches().await
-    }
-
-    /// `PollOwner` has no SQLite counterpart at all (`core.allium: PollOwner`):
-    /// a single-machine install has no other host to contend a claim with,
-    /// so every scope reads as unclaimed.
-    async fn poll_owner(&self, _target: PollScopeId) -> Result<Option<String>> {
-        Ok(None)
-    }
-
-    async fn revision(&self) -> Option<u64> {
-        self.db.get_total_changes().await.ok().map(|n| n as u64)
-    }
 }
 
 /// Reads from the live view of this board's subscriptions.

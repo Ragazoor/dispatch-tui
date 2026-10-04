@@ -91,7 +91,7 @@ to look.
 | `src/feed/ingest/stale.rs` | `delete_stale_subtree()` / `clear_parent_stranded_tasks()` — role-routed phase 3: delete absent tasks + clear the parent |
 | `src/process.rs` | `ProcessRunner` trait + `RealProcessRunner` / `MockProcessRunner` for testable shell execution |
 | `src/tmux.rs` | Tmux API: create windows, send keys, capture pane output, kill windows |
-| `src/sync/board_reads.rs` | The board's read seam: `BoardReads`, with `LocalBoardReads` (SQLite) and `SubscriptionBoardReads` (the shared store). `TuiRuntime::board_reads` holds one of them, chosen at bootstrap by whether a store is configured |
+| `src/sync/board_reads.rs` | The board's read seam: `BoardReads`, implemented by `SubscriptionBoardReads` (the shared store; `Database::board_reads` serves it over an in-memory handle's own rows). `TuiRuntime::board_reads` holds one of them, chosen at bootstrap by whether a store is configured |
 | `src/sync/rows.rs` | `SharedRows` — what the subscription has delivered, decoded and ordered exactly as each SQL `ORDER BY` orders it, plus the change signal that redraws the board without polling. Not a cache: no read-through, cleared on disconnect |
 | `src/sync/decode.rs` | One store row → one domain value, undoing the module's sentinels. The twin of `db::queries::row_to_task`; `sync::tests::decode` is what keeps the two from drifting |
 | `src/sync/sdk_connector.rs` | `StoreConnector` over the SpacetimeDB Rust SDK: one connection attempt per call, the subscription SQL, and the row callbacks that feed `SharedRows` |

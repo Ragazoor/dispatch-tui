@@ -232,7 +232,8 @@ pub(super) async fn make_runtime(
 ) -> TuiRuntime {
     let (feed_tx, _) = mpsc::unbounded_channel();
     let store: Arc<dyn db::TaskStore> = db.clone();
-    let feed_board_reads = Arc::new(crate::sync::LocalBoardReads::new(store.clone()));
+    let board_reads = crate::sync::tests::sqlite_reads::board_reads_of(&db);
+    let feed_board_reads = board_reads.clone();
     let feed_runner = crate::feed::FeedRunner::new(
         store.clone(),
         feed_tx,
@@ -259,7 +260,7 @@ pub(super) async fn make_runtime(
         feed_sync_guard,
         learning_svc: Arc::new(crate::service::MockLearningService),
         feed_db: store.clone(),
-        board_reads: Arc::new(crate::sync::LocalBoardReads::new(store.clone())),
+        board_reads,
         host_id: "test-host".into(),
         database: store,
         msg_tx: tx,

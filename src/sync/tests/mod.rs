@@ -14,6 +14,7 @@ mod identity;
 mod queries;
 mod reconnect;
 mod shared_reads;
+pub(crate) mod sqlite_reads;
 mod startup_connect;
 mod subscriptions;
 mod subtree;

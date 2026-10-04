@@ -65,7 +65,6 @@ pub mod writes;
 pub(crate) mod tests;
 
 #[cfg(any(test, feature = "test-support"))]
-pub use board_reads::LocalBoardReads;
 pub use board_reads::{BoardReads, SubscriptionBoardReads};
 pub use connection::{
     backoff, BoardConnection, ConnectionEvent, ConnectionStatus, CONNECT_TIMEOUT, MUTATION_TIMEOUT,

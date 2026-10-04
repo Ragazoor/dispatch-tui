@@ -1674,6 +1674,11 @@ pub struct Database {
     /// store's rows once a writer is attached. See
     /// [`SharedRetiredFeedItemReader`] and [`Database::with_shared_store`].
     shared_retired_feed_item_reader: Option<Arc<dyn SharedRetiredFeedItemReader>>,
+    /// The board's read seam over the in-memory store's own rows. Set only by
+    /// [`Database::open_in_memory`] (spec: `spacetime-memory-store.allium`,
+    /// `TestBoardReadsShareTheHandlesRows`).
+    #[cfg(any(test, feature = "test-support"))]
+    memory_board_reads: Option<Arc<dyn crate::sync::BoardReads>>,
 }
 
 /// Every port a store-backed [`Database`] routes through, attached together
@@ -1816,6 +1821,8 @@ impl Database {
             shared_usage_reader: None,
             shared_reader: None,
             shared_retired_feed_item_reader: None,
+            #[cfg(any(test, feature = "test-support"))]
+            memory_board_reads: None,
         })
     }
 
@@ -1825,13 +1832,23 @@ impl Database {
     /// so tests exercise the shared store rather than raw SQLite.
     pub async fn open_in_memory() -> Result<Self> {
         let db = Self::open_in_memory_unattached().await?;
-        Ok(db.with_shared_store(Self::memory_store_ports()))
+        let (ports, board_reads) = Self::memory_store_ports();
+        let mut db = db.with_shared_store(ports);
+        db.memory_board_reads = Some(board_reads);
+        Ok(db)
+    }
+
+    /// The board's read seam over this handle's own in-memory rows, or `None`
+    /// for a handle with no store attached.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn board_reads(&self) -> Option<Arc<dyn crate::sync::BoardReads>> {
+        self.memory_board_reads.clone()
     }
 
     /// Ports over a fresh, private in-process store: one `SharedRows` and one
     /// `MemoryReducerCaller` over it, with every reader and the writer over
     /// those same rows. The writer settles as a fixed test user and host.
-    fn memory_store_ports() -> SharedStorePorts {
+    fn memory_store_ports() -> (SharedStorePorts, Arc<dyn crate::sync::BoardReads>) {
         use crate::sync as s;
         let rows = Arc::new(s::SharedRows::new());
         let clock: Arc<dyn crate::service::Clock> = Arc::new(crate::service::SystemClock);
@@ -1841,7 +1858,7 @@ impl Database {
         let identity = Arc::new(s::SettledIdentity::default());
         identity.settle("test-user");
         let board_reads = Arc::new(s::SubscriptionBoardReads::new(rows.clone()));
-        SharedStorePorts {
+        let ports = SharedStorePorts {
             writer: Arc::new(s::ReducerWriter::new(
                 caller,
                 identity,
@@ -1849,11 +1866,12 @@ impl Database {
                 "test-host".to_string(),
                 board_reads.clone(),
             )),
-            reader: board_reads,
+            reader: board_reads.clone(),
             learning_reader: Arc::new(s::SubscriptionLearningReads::new(rows.clone())),
             usage_reader: Arc::new(s::SubscriptionUsageReads::new(rows.clone())),
             retired_feed_item_reader: Arc::new(s::SubscriptionRetiredFeedItemReads::new(rows)),
-        }
+        };
+        (ports, board_reads)
     }
 
     /// The pre-cutover in-memory handle: SQLite only, no shared store. For
@@ -1895,6 +1913,8 @@ impl Database {
             shared_usage_reader: None,
             shared_reader: None,
             shared_retired_feed_item_reader: None,
+            #[cfg(any(test, feature = "test-support"))]
+            memory_board_reads: None,
         })
     }
 

@@ -745,7 +745,7 @@ mod tests {
     // finalize-result dispatch. The watcher itself is covered by the pure
     // watch_editor tests above.
 
-    use crate::db::{CreateTaskRequest, Database};
+    use crate::db::{CreateTaskRequest, Database, RepoConfigRead, TaskRead};
     use crate::models::TaskStatus;
     use crate::process::MockProcessRunner;
     use crate::tui::{App, EditKind};
@@ -759,19 +759,18 @@ mod tests {
     /// feed surfaces silently stop serialising against each other. Wiring that
     /// correctly once beats warning about it nine times.
     fn editor_runtime(
-        db: Arc<dyn crate::db::TaskStore>,
+        db: Arc<Database>,
         runner: Arc<dyn ProcessRunner>,
         msg_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::Message>,
     ) -> TuiRuntime {
-        let board_reads = Arc::new(crate::sync::LocalBoardReads::new(db.clone()));
+        let board_reads = db.board_reads().expect("memory handle has board reads");
         editor_runtime_with_board_reads(db, runner, msg_tx, board_reads, "test-host")
     }
 
     /// [`editor_runtime`], with the board-reads seam and host id overridable
     /// — needed by tests that drive `core/PollOwner`-dependent behaviour
-    /// (`epics.allium: EditEpic`'s take-over prompt), where the default
-    /// `LocalBoardReads` always answers "unclaimed" and can never exercise
-    /// the conflicting-owner branch.
+    /// (`epics.allium: EditEpic`'s take-over prompt), where nothing has
+    /// claimed the epic, so the conflicting-owner branch needs a fixed owner.
     pub(super) fn editor_runtime_with_board_reads(
         db: Arc<dyn crate::db::TaskStore>,
         runner: Arc<dyn ProcessRunner>,
@@ -780,7 +779,7 @@ mod tests {
         host_id: &str,
     ) -> TuiRuntime {
         let (feed_tx, _) = unbounded_channel();
-        let feed_board_reads = Arc::new(crate::sync::LocalBoardReads::new(db.clone()));
+        let feed_board_reads = board_reads.clone();
         let feed_runner = crate::feed::FeedRunner::new(
             db.clone(),
             feed_tx,
@@ -815,7 +814,7 @@ mod tests {
     }
 
     async fn runtime_with_runner(runner: Arc<dyn ProcessRunner>) -> (TuiRuntime, App) {
-        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let (tx, _rx) = unbounded_channel();
         let rt = editor_runtime(db, runner.clone(), tx);
         let app = App::new(vec![]);
@@ -921,7 +920,7 @@ mod tests {
     #[tokio::test]
     async fn finalize_task_edit_persists_changes() {
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let task = seed_task(&*db).await;
 
         let (tx, _rx) = unbounded_channel();
@@ -958,7 +957,7 @@ mod tests {
     async fn finalize_task_edit_persists_url() {
         use crate::models::{TaskUrl, UrlType};
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let task = seed_task(&*db).await; // Backlog → no was_pr_finalisation path
         assert!(task.url.is_none());
 
@@ -991,7 +990,7 @@ mod tests {
         use crate::models::{TaskUrl, UrlType};
         use crate::service::{UpdateTaskParams, UrlUpdate};
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let task = seed_task(&*db).await;
 
         let (tx, _rx) = unbounded_channel();
@@ -1030,7 +1029,7 @@ mod tests {
         // DB, not just the in-memory snapshot. The editor expresses "clear"
         // via FieldUpdate::Clear, which must reach the DB patch.
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let task = seed_task(&*db).await; // seeded with plan docs/plan.md
         assert!(task.plan_path.is_some(), "precondition: task has a plan");
 
@@ -1058,7 +1057,7 @@ mod tests {
         // not just the in-memory snapshot.
         use crate::models::TaskTag;
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let task = seed_task(&*db).await;
 
         let (tx, _rx) = unbounded_channel();
@@ -1092,7 +1091,7 @@ mod tests {
         // saved repo_paths list, so sibling feed items (e.g. other
         // Dependabot PRs in the same repo) can be auto-resolved.
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let task = seed_task(&*db).await;
         // Precondition: known repo_paths does not contain the new path.
         assert!(
@@ -1136,7 +1135,7 @@ mod tests {
         // value), we must not re-save it. Avoids spurious writes when
         // editing unrelated fields.
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let task = seed_task(&*db).await;
 
         let (tx, _rx) = unbounded_channel();
@@ -1172,7 +1171,7 @@ mod tests {
     #[tokio::test]
     async fn finalize_task_edit_cancelled_does_not_change_db() {
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let task = seed_task(&*db).await;
 
         let (tx, _rx) = unbounded_channel();
@@ -1227,12 +1226,12 @@ mod epic_edit_tests {
     }
 
     /// A `BoardReads` that answers a fixed `core/PollOwner` owner for one
-    /// epic and delegates everything else to a real `LocalBoardReads` — the
+    /// epic and delegates everything else to the handle's own board reads — the
     /// only way to exercise `finalize_epic_edit`'s conflicting-owner branch,
-    /// since the default `LocalBoardReads` always answers "unclaimed"
+    /// since the default the default board reads answer "unclaimed"
     /// (`epics.allium: EditEpic`'s take-over prompt).
     struct FixedPollOwner {
-        inner: crate::sync::LocalBoardReads,
+        inner: Arc<dyn crate::sync::BoardReads>,
         epic_id: crate::models::EpicId,
         owner: String,
     }
@@ -1353,7 +1352,7 @@ mod epic_edit_tests {
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let (tx, _rx) = mpsc::unbounded_channel();
         let board_reads = Arc::new(FixedPollOwner {
-            inner: crate::sync::LocalBoardReads::new(db.clone()),
+            inner: db.board_reads().expect("memory handle has board reads"),
             epic_id: epic.id,
             owner: "other-host".to_string(),
         });
@@ -1393,7 +1392,7 @@ mod epic_edit_tests {
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let (tx, _rx) = mpsc::unbounded_channel();
         let board_reads = Arc::new(FixedPollOwner {
-            inner: crate::sync::LocalBoardReads::new(db.clone()),
+            inner: db.board_reads().expect("memory handle has board reads"),
             epic_id: epic.id,
             owner: "this-host".to_string(),
         });
@@ -1430,7 +1429,7 @@ mod epic_edit_tests {
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let (tx, _rx) = mpsc::unbounded_channel();
         let board_reads = Arc::new(FixedPollOwner {
-            inner: crate::sync::LocalBoardReads::new(db.clone()),
+            inner: db.board_reads().expect("memory handle has board reads"),
             epic_id: epic.id,
             owner: "other-host".to_string(),
         });
@@ -1468,7 +1467,7 @@ mod epic_edit_tests {
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let (tx, _rx) = mpsc::unbounded_channel();
         let board_reads = Arc::new(FixedPollOwner {
-            inner: crate::sync::LocalBoardReads::new(db.clone()),
+            inner: db.board_reads().expect("memory handle has board reads"),
             epic_id: epic.id,
             owner: "other-host".to_string(),
         });
