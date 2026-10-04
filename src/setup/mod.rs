@@ -870,7 +870,6 @@ pub(crate) struct FakeConfirmer {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 impl FakeConfirmer {
     pub(crate) fn new(confirm: Vec<bool>, dangerous: Vec<bool>) -> Self {
         Self::with_text(confirm, dangerous, vec![])
@@ -908,7 +907,6 @@ impl FakeConfirmer {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 impl Confirmer for FakeConfirmer {
     fn confirm(&self, _prompt: &str) -> Result<bool> {
         *self.confirm_calls.lock().unwrap() += 1;
@@ -943,7 +941,6 @@ impl Confirmer for FakeConfirmer {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::db::Database;
     use crate::process::MockProcessRunner;

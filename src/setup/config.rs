@@ -184,7 +184,6 @@ pub fn remove_mcp_config(mcp_path: &std::path::Path) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::DEFAULT_PORT;
     use serde_json::json;

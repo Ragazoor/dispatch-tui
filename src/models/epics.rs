@@ -346,10 +346,9 @@ pub fn descendant_task_ids(root: EpicId, epics: &[Epic], tasks: &[Task]) -> Hash
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::models::{SubStatus, Task, TaskId, TaskStatus};
+    use crate::models::{SubStatus, Task, TaskBuilder, TaskId, TaskStatus};
     use chrono::Utc;
 
     fn make_epic(
@@ -380,14 +379,11 @@ mod tests {
     }
 
     fn make_task(id: i64, status: TaskStatus, sub_status: SubStatus, epic: Option<i64>) -> Task {
-        Task {
-            id: TaskId(id),
-            title: format!("Task {id}"),
-            status,
-            sub_status,
-            epic_id: epic.map(EpicId),
-            ..Default::default()
-        }
+        TaskBuilder::new(id)
+            .status(status)
+            .sub_status(sub_status)
+            .epic(epic)
+            .build()
     }
 
     #[test]
@@ -651,12 +647,7 @@ mod tests {
     }
 
     fn test_task() -> Task {
-        Task {
-            id: TaskId(1),
-            title: "T".to_string(),
-            repo_path: "/repo".to_string(),
-            ..Default::default()
-        }
+        TaskBuilder::new(1).title("T").build()
     }
 
     #[test]

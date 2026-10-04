@@ -460,7 +460,6 @@ pub(super) fn read_optional_datetime(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

@@ -262,7 +262,6 @@ pub struct LearningRetrieval {
 
 #[cfg(test)]
 mod validation_tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
 
     /// `LearningKind::ALL`/`LearningScope::ALL`/`LearningVerdict::ALL` back

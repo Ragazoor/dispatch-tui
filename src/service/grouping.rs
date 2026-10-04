@@ -158,7 +158,6 @@ async fn delete_if_empty_repo_group(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::db::{
         CreateLearningRow, Database, EpicCrud, EpicRead, LearningFilter, LearningStore, TaskCrud,

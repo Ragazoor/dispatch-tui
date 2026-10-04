@@ -302,7 +302,6 @@ fn append_browse_help_lines<'a>(lines: &mut Vec<Line<'a>>, styles: &HintStyles) 
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

@@ -2,7 +2,6 @@
 //! (docs/specs/repo-sync.allium): the `RepoDriftIndicator` status-bar segment,
 //! the `[o]` action and its `RepoSyncConfirmation`, and the refresh triggers the
 //! board itself owns.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use super::*;
 use crate::models::test_tmux_window;

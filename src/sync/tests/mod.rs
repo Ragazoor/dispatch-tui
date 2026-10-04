@@ -5,7 +5,6 @@
 //! instant it should reason about as an argument, so a twenty-minute outage is
 //! asserted by handing it an instant twenty minutes on rather than by being one
 //! — see `docs/testing.md`'s no-wall-clock-sleep rule.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod board_reads;
 mod connection;

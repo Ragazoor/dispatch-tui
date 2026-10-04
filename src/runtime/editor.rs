@@ -528,7 +528,6 @@ fn clear_session_slot(slot: &Arc<Mutex<Option<EditorSession>>>) {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::models::test_tmux_window;
     use std::cell::Cell;
@@ -1211,7 +1210,6 @@ mod tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod epic_edit_tests {
     use super::*;
     use crate::db::{Database, EpicCrud, EpicRead};

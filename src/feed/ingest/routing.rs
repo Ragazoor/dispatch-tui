@@ -143,17 +143,14 @@ pub(super) async fn route_and_group_entries(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
-    use crate::models::TaskTag;
+    use crate::models::{TaskBuilder, TaskTag};
 
     fn make_task(id: i64, epic_id: Option<i64>) -> Task {
-        Task {
-            id: TaskId(id),
-            epic_id: epic_id.map(EpicId),
-            tag: Some(TaskTag::PrReview),
-            ..Default::default()
-        }
+        TaskBuilder::new(id)
+            .epic(epic_id)
+            .tag(Some(TaskTag::PrReview))
+            .build()
     }
 
     #[test]

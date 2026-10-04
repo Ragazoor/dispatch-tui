@@ -439,23 +439,19 @@ this repo or task? If so, call record_learning with a brief summary."
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use std::collections::HashMap;
 
-    use crate::models::{Task, TaskId};
+    use crate::models::{Task, TaskBuilder};
 
     use super::format_task_detail;
 
     fn make_task(base_branch: &str) -> Task {
-        Task {
-            id: TaskId(1),
-            title: "Test task".to_string(),
-            description: "A description".to_string(),
-            repo_path: "/repo".to_string(),
-            base_branch: base_branch.into(),
-            ..Default::default()
-        }
+        TaskBuilder::new(1)
+            .title("Test task")
+            .description("A description")
+            .base_branch(base_branch)
+            .build()
     }
 
     #[test]

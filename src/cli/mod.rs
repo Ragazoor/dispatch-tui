@@ -228,7 +228,6 @@ pub(crate) fn with_pane_terminal<T>(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod startup_tests {
     use super::*;
     use std::time::Duration;

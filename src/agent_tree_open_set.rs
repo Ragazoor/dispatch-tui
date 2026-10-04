@@ -116,7 +116,6 @@ pub fn clear_open_set(worktree_path: &str) -> Result<()> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     // The one on-disk encoding of a linked worktree, shared with every other

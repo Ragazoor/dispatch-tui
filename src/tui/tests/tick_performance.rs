@@ -3,8 +3,6 @@
 //! - Skip cache invalidation when refresh tasks are unchanged
 //! - Batch sub-status writes (one BatchPatchSubStatus instead of N Persist)
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use super::helpers::{make_app, make_task};
 use crate::models::{test_tmux_window, SubStatus, TaskId, TaskStatus};
 use crate::tui::messages::{SystemMessage, TaskMessage};

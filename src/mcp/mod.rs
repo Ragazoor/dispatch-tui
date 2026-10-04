@@ -332,7 +332,6 @@ pub async fn serve_on(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod port_tests {
     use super::*;
 

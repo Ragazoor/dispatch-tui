@@ -5,8 +5,6 @@
 //! migration stall half-done for 15 variants — the next agent could not tell
 //! which convention was current, because both were present and neither failed.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 /// Every payload-carrying line of the `Command` enum body, as written in the
 /// source — the repo's source-checking idiom (`check-doc-paths.sh`,
 /// `check-doc-symbols.sh`, `board_normal_source_keys` in `rendering.rs`)

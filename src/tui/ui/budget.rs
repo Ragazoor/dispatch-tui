@@ -134,7 +134,6 @@ pub(in crate::tui::ui) fn budget_spans(
 // visibility. So these tests live here, inline, rather than in
 // `src/tui/tests/budget.rs`.
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

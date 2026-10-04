@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use super::prompts::{
     build_prompt, build_quick_dispatch_prompt, build_research_prompt, EpicContext, PromptContext,
 };

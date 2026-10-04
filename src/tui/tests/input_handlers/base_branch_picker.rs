@@ -1,0 +1,1846 @@
+use super::*;
+
+// ---------------------------------------------------------------------------
+// BaseBranchPicker (task #3422) — see docs/specs/dispatch.allium: surface
+// BaseBranchPicker, rule RecordBaseBranch. Mirrors the InputRepoPath /
+// RepoPathPicker tests above.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn submit_repo_path_prefills_base_branch_from_history() {
+    let mut app = App::new(vec![]);
+    app.board.repo_paths = vec!["/tmp".to_string()];
+    app.board.repo_base_branches = std::collections::HashMap::from([(
+        "/tmp".to_string(),
+        vec!["develop".to_string(), "main".to_string()],
+    )]);
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        description: "D".to_string(),
+        ..Default::default()
+    });
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitRepoPath("/tmp".to_string()),
+    ));
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert_eq!(
+        app.input.buffer, "develop",
+        "prefill should be the most-recently-used branch for /tmp (PrefillFromHistory)"
+    );
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn submit_repo_path_no_history_falls_back_to_default() {
+    let mut app = App::new(vec![]);
+    app.board.repo_paths = vec!["/tmp".to_string()];
+    // No entry in repo_base_branches for "/tmp".
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        description: "D".to_string(),
+        ..Default::default()
+    });
+    let cmds = without_branch_probe(app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitRepoPath("/tmp".to_string()),
+    )));
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert_eq!(
+        app.input.buffer, "main",
+        "falls back to the draft default when the repo has no branch history"
+    );
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn typing_in_base_branch_fuzzy_filters_history_and_resets_cursor() {
+    let mut app = App::new(vec![]);
+    app.board.repo_base_branches = std::collections::HashMap::from([(
+        "/tmp".to_string(),
+        vec![
+            "develop".to_string(),
+            "main".to_string(),
+            "release".to_string(),
+        ],
+    )]);
+    app.input.mode = InputMode::InputBaseBranch;
+    app.input.task_draft = Some(TaskDraft {
+        repo_path: "/tmp".to_string(),
+        ..Default::default()
+    });
+    app.input.set_buffer(String::new());
+    app.input.repo_cursor = 2; // simulate a prior cursor position
+
+    app.handle_key(make_key(KeyCode::Char('d')));
+    app.handle_key(make_key(KeyCode::Char('e')));
+    app.handle_key(make_key(KeyCode::Char('v')));
+
+    assert_eq!(app.input.buffer, "dev");
+    assert_eq!(
+        app.input.repo_cursor, 0,
+        "the list cursor resets to 0 on every query-changing keystroke"
+    );
+}
+
+#[test]
+fn arrow_keys_move_base_branch_cursor_with_wraparound() {
+    let mut app = App::new(vec![]);
+    app.board.repo_base_branches = std::collections::HashMap::from([(
+        "/tmp".to_string(),
+        vec!["main".to_string(), "develop".to_string()],
+    )]);
+    app.input.mode = InputMode::InputBaseBranch;
+    app.input.task_draft = Some(TaskDraft {
+        repo_path: "/tmp".to_string(),
+        ..Default::default()
+    });
+    app.input.set_buffer(String::new());
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 1);
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 0, "cursor wraps from last back to 0");
+    app.handle_key(make_key(KeyCode::Up));
+    assert_eq!(
+        app.input.repo_cursor, 1,
+        "cursor wraps from 0 back to the last entry going up"
+    );
+}
+
+#[test]
+fn enter_on_base_branch_list_item_submits_that_branch() {
+    let mut app = App::new(vec![]);
+    app.board.repo_base_branches = std::collections::HashMap::from([(
+        "/tmp".to_string(),
+        vec!["develop".to_string(), "main".to_string()],
+    )]);
+    app.input.mode = InputMode::InputBaseBranch;
+    app.input.task_draft = Some(TaskDraft {
+        repo_path: "/tmp".to_string(),
+        base_branch: "main".into(),
+        ..Default::default()
+    });
+    // "e" fuzzy-matches "develop" but not "main"; cursor 0 highlights "develop".
+    app.input.set_buffer("e".to_string());
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Enter));
+
+    assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().base_branch,
+        "develop",
+        "Enter on the highlighted history item should submit the full branch name, not the raw query"
+    );
+}
+
+#[test]
+fn enter_on_new_base_branch_entry_submits_typed_text() {
+    let mut app = App::new(vec![]);
+    app.board.repo_base_branches =
+        std::collections::HashMap::from([("/tmp".to_string(), vec!["develop".to_string()])]);
+    app.input.mode = InputMode::InputBaseBranch;
+    app.input.task_draft = Some(TaskDraft {
+        repo_path: "/tmp".to_string(),
+        base_branch: "main".into(),
+        ..Default::default()
+    });
+    // "e" fuzzy-matches "develop", so effective = [develop, NewBranch("e")].
+    // Cursor 1 highlights the synthetic new-branch entry, not "develop".
+    app.input.set_buffer("e".to_string());
+    app.input.repo_cursor = 1;
+
+    app.handle_key(make_key(KeyCode::Enter));
+
+    assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().base_branch,
+        "e",
+        "Enter on the synthetic new-branch entry should submit the typed query verbatim"
+    );
+}
+
+#[test]
+fn cancel_retry_returns_to_normal() {
+    let mut app = App::new(vec![]);
+    app.input.mode = InputMode::ConfirmRetry(TaskId(4));
+    app.status.message = Some("Agent stale".to_string());
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::CancelRetry,
+    ));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.status.message.is_none());
+}
+
+#[test]
+fn esc_clears_selection() {
+    let mut app = make_app();
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
+    assert_eq!(app.select.tasks.len(), 2);
+
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(app.select.tasks.is_empty());
+}
+
+#[test]
+fn esc_with_no_selection_is_noop() {
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn x_key_with_done_selection_shows_count_in_confirm() {
+    // Only an all-Done selection deletes — anything short of Done moves
+    // to Done instead.
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Done),
+        make_task(2, TaskStatus::Done),
+    ]);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
+
+    app.handle_key(make_key(KeyCode::Char('x')));
+    assert!(matches!(app.input.mode, InputMode::ConfirmBatchDelete));
+    assert_eq!(app.status.message.as_deref(), Some("Delete 2 items? [y/n]"));
+}
+
+#[test]
+fn x_key_with_selection_shows_count_in_move_to_done_confirm() {
+    let mut app = make_app();
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
+
+    app.handle_key(make_key(KeyCode::Char('x')));
+    assert_eq!(app.input.mode, InputMode::ConfirmDone);
+    assert_eq!(
+        app.status.message.as_deref(),
+        Some("Move 2 tasks to Done? [y/n]")
+    );
+}
+
+#[test]
+fn enter_on_task_opens_task_detail() {
+    // Enter in Normal mode on a task opens the TaskDetail overlay.
+    let mut app = make_app();
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+    app.handle_key(make_key(KeyCode::Enter));
+    // Should open task detail for the first task in Backlog column
+    assert!(
+        matches!(app.board.view_mode, ViewMode::TaskDetail { task_id, .. } if task_id == TaskId(1))
+    );
+}
+
+#[test]
+fn left_arrow_navigates_column() {
+    let mut app = make_app();
+    app.selection_mut().set_column(2);
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.selection().column(), 1);
+}
+
+#[test]
+fn right_arrow_navigates_column() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1);
+    app.handle_key(make_key(KeyCode::Right));
+    assert_eq!(app.selection().column(), 2);
+}
+
+#[test]
+fn down_arrow_navigates_row() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1); // Backlog has 2 tasks
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.selection().row(1), 1);
+}
+
+#[test]
+fn up_arrow_navigates_row() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1);
+    app.handle_key(make_key(KeyCode::Up));
+    assert_eq!(app.selection().row(1), 0);
+}
+
+#[test]
+fn confirm_retry_unrecognized_key_is_noop() {
+    let mut app = App::new(vec![]);
+    app.input.mode = InputMode::ConfirmRetry(TaskId(4));
+    let cmds = app.handle_key(make_key(KeyCode::Char('x')));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.input.mode, InputMode::ConfirmRetry(TaskId(4))));
+}
+
+#[test]
+fn esc_dismisses_help() {
+    let mut app = make_app();
+    app.input.mode = InputMode::Help;
+
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn esc_clears_selection_and_exits_toggle() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert!(app.on_select_all());
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(app.select.tasks.is_empty());
+    assert!(!app.on_select_all());
+}
+
+#[test]
+fn handle_key_dismisses_error_popup() {
+    let mut app = make_app();
+    app.status.error_popup = Some("something went wrong".to_string());
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('q'))));
+    assert!(app.status.error_popup.is_none());
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn handle_key_normal_navigation() {
+    let mut app = make_app();
+    // Start at column 1 (Backlog), row 0
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+
+    // 'l' moves right
+    app.handle_key(make_key(KeyCode::Char('l')));
+    assert_eq!(app.selection().column(), 2);
+
+    // 'h' moves left
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(app.selection().column(), 1);
+
+    // 'j' moves down
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.selection().row(1), 1);
+
+    // 'k' moves up
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.selection().row(1), 0);
+}
+
+#[test]
+fn confirm_quit_y_quits() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmQuit;
+    app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(app.should_quit);
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn confirm_quit_n_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmQuit;
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(!app.should_quit);
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn confirm_quit_esc_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmQuit;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(!app.should_quit);
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn handle_key_normal_new_task() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(*app.mode(), InputMode::InputTitle);
+}
+
+#[test]
+fn handle_key_normal_toggle_help() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('?')));
+    assert_eq!(*app.mode(), InputMode::Help);
+}
+
+#[test]
+fn handle_key_help_dismiss() {
+    let mut app = make_app();
+    app.input.mode = InputMode::Help;
+
+    // '?' toggles help off
+    app.handle_key(make_key(KeyCode::Char('?')));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_help_esc_dismiss() {
+    let mut app = make_app();
+    app.input.mode = InputMode::Help;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_text_input_char_and_backspace() {
+    let mut app = make_app();
+    // Enter title input mode
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(*app.mode(), InputMode::InputTitle);
+
+    // Type characters
+    app.handle_key(make_key(KeyCode::Char('H')));
+    app.handle_key(make_key(KeyCode::Char('i')));
+    assert_eq!(app.input.buffer, "Hi");
+
+    // Backspace removes last char
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.input.buffer, "H");
+}
+
+#[test]
+fn caret_left_right_move_and_clamp() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Char('b')));
+    app.handle_key(make_key(KeyCode::Char('c')));
+    assert_eq!(app.input.caret, 3);
+    // Left moves toward the start
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.input.caret, 2);
+    app.handle_key(make_key(KeyCode::Left));
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.input.caret, 0);
+    // Clamp at 0
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.input.caret, 0);
+    // Right moves back, clamped at len
+    app.handle_key(make_key(KeyCode::Right));
+    assert_eq!(app.input.caret, 1);
+    app.handle_key(make_key(KeyCode::End));
+    assert_eq!(app.input.caret, 3);
+    app.handle_key(make_key(KeyCode::Right));
+    assert_eq!(app.input.caret, 3);
+}
+
+#[test]
+fn caret_insert_and_backspace_mid_buffer() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Char('c')));
+    // Move between a and c, then insert b
+    app.handle_key(make_key(KeyCode::Left));
+    app.handle_key(make_key(KeyCode::Char('b')));
+    assert_eq!(app.input.buffer, "abc");
+    assert_eq!(app.input.caret, 2);
+    // Backspace deletes the char before the caret ('b'), not the last ('c')
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.input.buffer, "ac");
+    assert_eq!(app.input.caret, 1);
+}
+
+#[test]
+fn caret_delete_forward_removes_char_at_caret() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Char('b')));
+    app.handle_key(make_key(KeyCode::Home));
+    assert_eq!(app.input.caret, 0);
+    app.handle_key(make_key(KeyCode::Delete));
+    assert_eq!(app.input.buffer, "b");
+    assert_eq!(app.input.caret, 0);
+}
+
+#[test]
+fn caret_word_jump_ctrl_arrows() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    type_text(&mut app, "foo bar baz");
+    assert_eq!(app.input.caret, 11);
+    // Ctrl+Left jumps to the start of the last word ("baz")
+    app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+    assert_eq!(app.input.caret, 8);
+    app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+    assert_eq!(app.input.caret, 4);
+    // Ctrl+Right jumps forward one word
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL));
+    assert_eq!(app.input.caret, 8);
+}
+
+#[test]
+fn caret_word_jump_alt_bf_fallback() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    type_text(&mut app, "foo bar");
+    assert_eq!(app.input.caret, 7);
+    // Alt+B is the readline word-left fallback (tmux without xterm-keys)
+    app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT));
+    assert_eq!(app.input.caret, 4);
+    // Alt+F word-right
+    app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT));
+    assert_eq!(app.input.caret, 7);
+    // A plain 'b' with no modifier still types into the buffer
+    app.handle_key(make_key(KeyCode::Char('b')));
+    assert_eq!(app.input.buffer, "foo barb");
+}
+
+#[test]
+fn every_handled_key_marks_dirty_including_true_noops() {
+    // handle_key always marks the frame dirty, even for keys that produce no
+    // visible change (e.g. caret already at the boundary). Computing which
+    // fields changed per-handler proved fragile in practice (see
+    // docs/architecture.md's dirty-flag section) — every mutating handler
+    // would need to remember to opt in, and several forgot to. The 16ms
+    // frame-rate cap in `frame_ready` already bounds the cost of redrawing on
+    // a true no-op, so there is no correctness/perf reason to skip it.
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Left)); // caret 0
+    app.dirty = false;
+    app.handle_key(make_key(KeyCode::Right)); // caret 1 -> visible move
+    assert!(app.dirty, "a real caret move must mark the frame dirty");
+
+    // Now a true no-op: Left at caret 0 — still marks dirty.
+    app.handle_key(make_key(KeyCode::Home)); // caret 0
+    app.dirty = false;
+    app.handle_key(make_key(KeyCode::Left)); // stays at 0
+    assert!(
+        app.dirty,
+        "handle_key must mark dirty unconditionally, even for a no-op caret move"
+    );
+}
+
+#[test]
+fn caret_prefilled_buffer_lands_at_end() {
+    let mut app = make_app();
+    app.input.set_buffer("existing".to_string());
+    assert_eq!(app.input.caret, "existing".chars().count());
+}
+
+#[test]
+fn caret_repo_mode_left_right_moves_caret_not_list() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.clear_buffer();
+    // "/" is a subsequence of every saved path, so all three stay in the list.
+    app.handle_key(make_key(KeyCode::Char('/')));
+    assert_eq!(app.input.caret, 1);
+    // Down moves the repo list cursor (list nav, not text caret)
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 1);
+    // Left moves the text caret, not the list cursor
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.input.caret, 0);
+    assert_eq!(app.input.repo_cursor, 1);
+    // Typing resets the list cursor to 0 and inserts at the caret
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert_eq!(app.input.repo_cursor, 0);
+    assert_eq!(app.input.buffer, "a/");
+}
+
+#[test]
+fn handle_key_text_input_esc_cancels() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(*app.mode(), InputMode::InputTitle);
+
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_text_input_enter_advances_to_tag() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    app.handle_key(make_key(KeyCode::Char('T')));
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(*app.mode(), InputMode::InputTag);
+}
+
+#[test]
+fn handle_key_confirm_retry_resume() {
+    let mut app = make_app();
+    let mut task = make_task(10, TaskStatus::Running);
+    task.worktree = Some("/repo/.worktrees/10-test".to_string());
+    task.tmux_window = Some(test_tmux_window("main:10-test"));
+    app.board.tasks.push(task);
+    app.input.mode = InputMode::ConfirmRetry(TaskId(10));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    // Should produce KillTmuxWindow + Resume
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::KillTmuxWindow { .. })
+    )));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Resume { .. })
+    )));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_confirm_retry_fresh() {
+    let mut app = make_app();
+    let mut task = make_task(10, TaskStatus::Running);
+    task.worktree = Some("/repo/.worktrees/10-test".to_string());
+    task.tmux_window = Some(test_tmux_window("main:10-test"));
+    app.board.tasks.push(task);
+    app.input.mode = InputMode::ConfirmRetry(TaskId(10));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('f')));
+    // Should produce Cleanup + Dispatch
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Cleanup { .. })
+    )));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    )));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_confirm_retry_esc_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmRetry(TaskId(10));
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_quick_dispatch_esc_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::QuickDispatch;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_tag_selects_bug() {
+    let mut app = make_app();
+    // Tag comes right after title, before description/repo
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('b'))));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(
+        &cmds[0],
+        Command::Editor(crate::tui::commands::EditorCommand::PopOut(
+            EditKind::Description { is_epic: false }
+        ))
+    ));
+    assert_eq!(*app.mode(), InputMode::InputDescription);
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        Some(TaskTag::Bug)
+    );
+}
+
+#[test]
+fn handle_key_tag_skip_with_enter() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Enter)));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(
+        &cmds[0],
+        Command::Editor(crate::tui::commands::EditorCommand::PopOut(
+            EditKind::Description { is_epic: false }
+        ))
+    ));
+    assert_eq!(*app.mode(), InputMode::InputDescription);
+    assert_eq!(app.input.task_draft.as_ref().unwrap().tag, None);
+}
+
+#[test]
+fn handle_key_tag_esc_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_normal_activate_backlog_task() {
+    let mut app = make_app();
+    // Select task 1 (backlog)
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char(' ')));
+    // The trust check is deferred to a Command (see CheckTrustAndDispatch) —
+    // handle_key must not decide dispatch-vs-confirm-trust synchronously.
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::CheckTrustAndDispatch { .. })
+        )),
+        "expected CheckTrustAndDispatch command, got {cmds:?}"
+    );
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn handle_key_normal_activate_running_task_with_window_jumps() {
+    let mut app = make_app();
+    // Select running task (column 2)
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+    // Give running task a window
+    let task_3 = app
+        .board
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == TaskId(3))
+        .unwrap();
+    task_3.tmux_window = Some(test_tmux_window("main:task-3"));
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));
+    // Space jumps to the live window rather than dispatching.
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "main:task-3"
+        )),
+        "Space on a running task with a window should jump, got {cmds:?}"
+    );
+}
+
+/// `JumpToAgentWindow`'s priority-0 branch (docs/specs/split-pane.allium):
+/// a task another machine owns must refuse every other priority, including
+/// the tmux-window jump — the window name is meaningless on this machine's
+/// tmux server.
+#[test]
+fn handle_key_normal_activate_foreign_owned_task_refuses_the_jump() {
+    let mut app = make_app();
+    app.set_local_host_id("this-machine".to_string());
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+    let task_3 = app
+        .board
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == TaskId(3))
+        .unwrap();
+    task_3.tmux_window = Some(test_tmux_window("main:task-3"));
+    task_3.host = Some("other-machine".to_string());
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));
+
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { .. })
+        )),
+        "must not try to focus a window this tmux server never created, got {cmds:?}"
+    );
+    assert_eq!(
+        app.status_message(),
+        Some("This task's worktree is on another machine")
+    );
+}
+
+#[test]
+fn handle_key_normal_enter_opens_task_detail() {
+    // Enter key on a task opens the TaskDetail overlay.
+    let mut app = make_app();
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(
+        matches!(app.board.view_mode, ViewMode::TaskDetail { task_id, .. } if task_id == TaskId(1))
+    );
+}
+
+#[test]
+fn handle_key_normal_g_starts_pending_chord_without_firing() {
+    // A lone `g` no longer fires jump-to-tmux immediately: it starts the
+    // `gg`-chord pending state and waits for either a second `g` (jump to
+    // top) or a fallback (next key / idle tick) to resolve it.
+    let mut app = make_app();
+    let task = app
+        .board
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == TaskId(3))
+        .unwrap();
+    task.tmux_window = Some(test_tmux_window("main:task-3"));
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
+    assert!(cmds.is_empty(), "lone g must not fire immediately");
+    assert!(
+        app.interaction.pending_g.is_some(),
+        "g must start a pending gg-chord window"
+    );
+}
+
+#[test]
+fn handle_key_normal_g_then_other_key_abandons_chord_and_processes_key() {
+    let mut app = make_app();
+    // Backlog (nav col 1) has two tasks, so `j` has a visible effect.
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+
+    without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('j'))));
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { .. })
+        )),
+        "a lone g with no chord follow-up fires no jump action"
+    );
+    assert_eq!(
+        app.selection().row(1),
+        1,
+        "the abandoned chord's key (j) must still be processed normally"
+    );
+    assert!(
+        app.interaction.pending_g.is_none(),
+        "chord must be cleared once abandoned"
+    );
+}
+
+#[test]
+fn handle_key_normal_gg_jumps_to_top_without_firing_jump_window() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+        make_task(3, TaskStatus::Backlog),
+    ]);
+    app.selection_mut().set_column(1);
+    app.update(Message::NavigateRow(1));
+    app.update(Message::NavigateRow(1));
+    assert_eq!(app.selection().row(1), 2, "precondition: not at top");
+
+    without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
+
+    assert_eq!(app.selection().row(1), 0, "gg should jump to top of column");
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { .. })
+        )),
+        "gg must not also fire the jump-to-window action"
+    );
+    assert!(app.interaction.pending_g.is_none());
+}
+
+#[test]
+fn handle_key_normal_g_idle_backstop_clears_pending_chord() {
+    let mut app = make_app();
+    let task = app
+        .board
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == TaskId(3))
+        .unwrap();
+    task.tmux_window = Some(test_tmux_window("main:task-3"));
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+
+    without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
+    assert!(app.interaction.pending_g.is_some());
+    let cmds = resolve_pending_g_via_idle_tick(&mut app);
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { .. })
+        )),
+        "an abandoned lone g fires no action, even via the idle backstop"
+    );
+    assert!(app.interaction.pending_g.is_none());
+}
+
+#[test]
+fn handle_key_normal_shift_g_jumps_to_last_row() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1); // Backlog: tasks 1, 2
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.selection().row(1), 1, "G should jump to last task");
+}
+
+#[test]
+fn handle_key_normal_shift_g_on_empty_column_is_noop() {
+    let mut app = App::new(vec![]);
+    app.selection_mut().set_column(1); // empty Backlog
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.selection().row(1), 0, "row unchanged on empty column");
+}
+
+#[test]
+fn handle_key_normal_open_pr_url() {
+    let mut app = make_app();
+    let task = app
+        .board
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == TaskId(1))
+        .unwrap();
+    task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/example/repo/pull/42",
+        crate::models::UrlType::Pr,
+    ));
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::System(crate::tui::commands::SystemCommand::OpenInBrowser { url }) if url == "https://github.com/example/repo/pull/42"
+    )));
+}
+
+#[test]
+fn handle_key_normal_open_pr_url_missing() {
+    let mut app = make_app();
+    // task 1 has no pr_url by default
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    assert!(cmds.is_empty());
+    assert!(app.status.message.as_deref().unwrap().contains("No URL"));
+}
+
+#[test]
+fn esc_clears_mixed_selection() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.epics = vec![make_epic(10)];
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::ToggleSelect(EpicId(10)),
+    ));
+
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(app.select.tasks.is_empty());
+    assert!(app.select.epics.is_empty());
+}
+
+#[test]
+fn confirm_detach_tmux_clears_window() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Review)]);
+    app.board.tasks[0].tmux_window = Some(test_tmux_window("task-1"));
+    app.board.tasks[0].sub_status = SubStatus::Stale;
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::DetachTmux(TaskId(1)),
+    ));
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::ConfirmDetachTmux,
+    ));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(
+        app.board.tasks[0].tmux_window.is_none(),
+        "tmux_window should be cleared"
+    );
+    assert_ne!(
+        app.find_task(TaskId(1)).unwrap().sub_status,
+        SubStatus::Stale,
+        "stale tracking should be cleared"
+    );
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::KillTmuxWindow { window }) if window == "task-1")),
+        "should emit KillTmuxWindow for task-1"
+    );
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+        )),
+        "should emit PersistTask"
+    );
+}
+
+#[test]
+fn confirm_detach_tmux_emits_a_draining_subagent_clear() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Review)]);
+    app.board.tasks[0].tmux_window = Some(test_tmux_window("task-1"));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::DetachTmux(TaskId(1)),
+    ));
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::ConfirmDetachTmux,
+    ));
+
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::ClearSubagents {
+                id,
+                mode: crate::models::DrainMode::Drain,
+            }) if *id == TaskId(1)
+        )),
+        "detach must clear subagents via the drain path — a genuinely finished agent's pending Stop should land"
+    );
+}
+
+#[test]
+fn confirm_detach_tmux_y_detaches() {
+    let mut task = make_task(3, TaskStatus::Review);
+    task.tmux_window = Some(test_tmux_window("task-3"));
+    let mut app = App::new(vec![task]);
+    app.input.mode = InputMode::ConfirmDetachTmux(vec![TaskId(3)]);
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    // Should produce KillTmuxWindow + PatchSubStatus commands
+    assert!(!cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn confirm_detach_tmux_n_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDetachTmux(vec![TaskId(3)]);
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// CopyTask skips InputTitle and InputDescription (both copied outright) and
+/// starts at InputTag — the step where phoenix is armed. Without it a copy
+/// would be the one flow with no way to arm the flag (CopyTask in
+/// docs/specs/tasks.allium).
+#[test]
+fn handle_key_normal_copy_task() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+    app.handle_key(make_key(KeyCode::Char('c')));
+    assert_eq!(*app.mode(), InputMode::InputTag);
+    let draft = app.input.task_draft.as_ref().unwrap();
+    assert!(draft.title.contains("Task 1"));
+    assert!(
+        !draft.repo_path.is_empty(),
+        "the source repo_path is carried on the draft, ready for InputRepoPath"
+    );
+}
+
+/// The extra step costs the copy nothing: Enter keeps the seeded tag and hands
+/// straight over to the repo-path step with the source path pre-filled.
+#[test]
+fn copy_task_tag_step_enter_keeps_the_tag_and_advances_to_repo_path() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+    let selected = app.selected_task().expect("a task is selected").id;
+    let source_repo = app
+        .board
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == selected)
+        .map(|t| {
+            t.tag = Some(crate::models::TaskTag::Chore);
+            t.repo_path.clone()
+        })
+        .expect("the selected task exists");
+
+    app.handle_key(make_key(KeyCode::Char('c')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Enter)));
+
+    assert_eq!(*app.mode(), InputMode::InputRepoPath);
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        Some(crate::models::TaskTag::Chore),
+        "Enter keeps the copied tag"
+    );
+    assert_eq!(
+        app.input.buffer, source_repo,
+        "the repo-path step opens pre-filled with the source path"
+    );
+    assert!(
+        cmds.is_empty(),
+        "the copy must not pop the description editor — the description is copied"
+    );
+}
+
+#[test]
+fn a_copy_can_be_armed_as_a_phoenix_at_the_tag_step() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+
+    app.handle_key(make_key(KeyCode::Char('c')));
+    app.handle_key(make_key(KeyCode::Char('p')));
+
+    assert_eq!(*app.mode(), InputMode::InputTag, "the picker re-opens");
+    assert!(app.input.task_draft.as_ref().unwrap().phoenix);
+}
+
+/// `CopyTask` carries tag and wrap_up_mode across but deliberately NOT phoenix:
+/// `c` is a single keypress, and silently starting a second recurring chain
+/// from it is not something a copy key should be able to do (see CopyTask in
+/// docs/specs/tasks.allium). The copy answers the phoenix question fresh at
+/// the tag step.
+#[test]
+fn copying_a_phoenix_task_does_not_carry_the_flag() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+    let selected = app.selected_task().expect("a task is selected").id;
+    if let Some(t) = app.board.tasks.iter_mut().find(|t| t.id == selected) {
+        t.phoenix = true;
+        t.tag = Some(crate::models::TaskTag::Chore);
+    }
+
+    app.handle_key(make_key(KeyCode::Char('c')));
+
+    let draft = app.input.task_draft.as_ref().expect("copy builds a draft");
+    assert!(!draft.phoenix, "the copy is an ordinary task");
+    assert_eq!(
+        draft.tag,
+        Some(crate::models::TaskTag::Chore),
+        "tag still travels, so this is a phoenix-specific omission, not a broken copy"
+    );
+}
+
+#[test]
+fn handle_key_normal_toggle_notifications() {
+    let mut app = make_app();
+    let before = app.notifications_enabled;
+    app.handle_key(make_key(KeyCode::Char('N')));
+    assert_ne!(app.notifications_enabled, before);
+}
+
+#[test]
+fn handle_key_normal_move_forward_via_handle_key() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
+    // Task 1 should move from Backlog to Running
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(1) && t.status == TaskStatus::Running)));
+}
+
+#[test]
+fn handle_key_normal_move_backward_via_handle_key() {
+    let mut app = make_app();
+    // Select running task (column 2)
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
+    // Task 3 should move from Running to Backlog
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(3) && t.status == TaskStatus::Backlog)));
+}
+
+#[test]
+fn handle_key_normal_detach_tmux_review_task() {
+    let mut task = make_task(10, TaskStatus::Review);
+    task.tmux_window = Some(test_tmux_window("main:10-test"));
+    let mut app = App::new(vec![task]);
+    app.selection_mut().set_column(3);
+    app.selection_mut().set_row(3, 0);
+    app.handle_key(make_key(KeyCode::Char('T')));
+    assert!(matches!(*app.mode(), InputMode::ConfirmDetachTmux(_)));
+}
+
+#[test]
+fn handle_key_normal_detach_tmux_no_window_is_noop() {
+    let mut app = make_app();
+    // Task 1 has no tmux window
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('T')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn handle_key_normal_detach_tmux_running_task_with_window_prompts() {
+    // Running tasks with a tmux window should also be detachable via T.
+    let mut task = make_task(20, TaskStatus::Running);
+    task.tmux_window = Some(test_tmux_window("main:20-running"));
+    let mut app = App::new(vec![task]);
+    app.selection_mut().set_column(2); // Running column
+    app.selection_mut().set_row(2, 0);
+    app.handle_key(make_key(KeyCode::Char('T')));
+    assert!(
+        matches!(app.mode(), InputMode::ConfirmDetachTmux(ids) if ids == &[TaskId(20)]),
+        "Expected ConfirmDetachTmux([20]), got {:?}",
+        app.mode()
+    );
+}
+
+#[test]
+fn handle_key_normal_unknown_key_is_noop() {
+    let mut app = make_app();
+    // `Q` is deliberately unbound.
+    let cmds = app.handle_key(make_key(KeyCode::Char('Q')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn handle_key_text_input_repo_j_types_into_buffer() {
+    // j should be a typeable character in the repo path search box
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.buffer.clear();
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.input.buffer, "j");
+    assert_eq!(app.input.repo_cursor, 0); // cursor resets on query change
+}
+
+#[test]
+fn handle_key_text_input_repo_k_types_into_buffer() {
+    // k should be a typeable character in the repo path search box
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.buffer.clear();
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.input.buffer, "k");
+    assert_eq!(app.input.repo_cursor, 0); // cursor resets on query change
+}
+
+#[test]
+fn handle_key_text_input_repo_jk_typed_together() {
+    // Typing "jk" should appear in the search buffer
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/jk-repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.buffer.clear();
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.input.buffer, "jk");
+}
+
+#[test]
+fn handle_key_text_input_repo_arrow_down_navigates() {
+    // Arrow keys should still navigate the list
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.buffer.clear();
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 1);
+}
+
+#[test]
+fn handle_key_text_input_repo_arrow_up_navigates() {
+    // Arrow keys should still navigate the list
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.buffer.clear();
+    app.input.repo_cursor = 1;
+
+    app.handle_key(make_key(KeyCode::Up));
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn handle_key_text_input_repo_enter_selects_cursor_repo() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/tmp".to_string(), "/var".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        description: "desc".to_string(),
+        ..Default::default()
+    });
+    app.input.buffer.clear();
+    app.input.repo_cursor = 1;
+
+    let cmds = without_branch_probe(without_usage(app.handle_key(make_key(KeyCode::Enter))));
+    // Advances to InputBaseBranch; task not created until wrap-up mode selected
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert!(cmds.is_empty());
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
+    ));
+    assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
+    // Wrap-up is the form's last step: answering it creates the task.
+    let cmds3 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
+    ));
+    assert!(cmds3.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
+    )));
+}
+
+#[test]
+fn handle_key_text_input_enter_submits_typed_text() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        description: "desc".to_string(),
+        ..Default::default()
+    });
+    app.input.set_buffer("/tmp".to_string());
+
+    let cmds = without_branch_probe(without_usage(app.handle_key(make_key(KeyCode::Enter))));
+    // Advances to InputBaseBranch; task not created until wrap-up mode selected
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert!(cmds.is_empty());
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
+    ));
+    assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
+    // Wrap-up is the form's last step: answering it creates the task.
+    let cmds3 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
+    ));
+    assert!(cmds3.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
+    )));
+}
+
+// ── QuickDispatch picker: text-input contract (no j/k or digit hijacks) ──
+
+fn quick_dispatch_app(paths: &[&str]) -> App {
+    let mut app = make_app();
+    app.board.repo_paths = paths.iter().map(|s| s.to_string()).collect();
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.repo_cursor = 0;
+    app.input.buffer.clear();
+    app
+}
+
+#[test]
+fn handle_key_quick_dispatch_j_typed_into_buffer() {
+    let mut app = quick_dispatch_app(&["/jkl/repo", "/abc/repo"]);
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.input.buffer, "j");
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn handle_key_quick_dispatch_k_typed_into_buffer() {
+    let mut app = quick_dispatch_app(&["/kong/repo", "/abc/repo"]);
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.input.buffer, "k");
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn handle_key_quick_dispatch_digits_typed_into_buffer() {
+    for c in '0'..='9' {
+        let mut app = quick_dispatch_app(&["/repo-1", "/repo-2", "/repo-3"]);
+        let cmds = app.handle_key(make_key(KeyCode::Char(c)));
+        assert!(
+            !cmds.iter().any(|c| matches!(
+                c,
+                Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { .. })
+            )),
+            "digit '{c}' must not select"
+        );
+        assert_eq!(app.input.buffer, c.to_string(), "digit '{c}'");
+        assert_eq!(app.input.repo_cursor, 0, "digit '{c}'");
+    }
+}
+
+#[test]
+fn handle_key_quick_dispatch_down_arrow_navigates() {
+    let mut app = quick_dispatch_app(&["/a", "/b"]);
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 1);
+    assert!(app.input.buffer.is_empty());
+}
+
+#[test]
+fn handle_key_quick_dispatch_up_arrow_navigates() {
+    let mut app = quick_dispatch_app(&["/a", "/b"]);
+    app.input.repo_cursor = 1;
+    app.handle_key(make_key(KeyCode::Up));
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn handle_key_quick_dispatch_enter_selects_cursor_entry() {
+    let mut app = quick_dispatch_app(&["/a", "/b"]);
+    app.input.repo_cursor = 1;
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { .. })
+    )));
+}
+
+#[test]
+fn handle_key_quick_dispatch_backspace_pops_and_resets_cursor() {
+    let mut app = quick_dispatch_app(&["/repo"]);
+    app.input.set_buffer("abc".to_string());
+    app.input.repo_cursor = 2;
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.input.buffer, "ab");
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn handle_key_quick_dispatch_esc_cancels_and_clears_buffer() {
+    let mut app = quick_dispatch_app(&["/repo"]);
+    app.input.set_buffer("abc".to_string());
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.input.buffer.is_empty());
+}
+
+#[test]
+fn handle_key_quick_dispatch_typing_digit_filters_by_digit() {
+    // Regression: with paths containing digits, typing a digit must
+    // filter (subsequence) rather than instant-select by index.
+    let mut app = quick_dispatch_app(&["/foo-1", "/bar-2"]);
+    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { .. })
+        )),
+        "typing '2' must not select"
+    );
+    assert_eq!(app.input.buffer, "2");
+    let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
+    assert_eq!(filtered, vec!["/bar-2".to_string()]);
+}
+
+#[test]
+fn handle_key_quick_dispatch_typing_j_filters_by_j() {
+    // Regression: typing 'j' must filter, not navigate.
+    let mut app = quick_dispatch_app(&["/jkl/repo", "/abc/repo"]);
+    app.handle_key(make_key(KeyCode::Char('j')));
+    let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
+    assert_eq!(filtered, vec!["/jkl/repo".to_string()]);
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+// ── InputRepoPath digit-filtering regression ──
+
+#[test]
+fn handle_key_input_repo_path_typing_digit_filters_not_selects() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-1".to_string(), "/repo-2".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
+        )),
+        "digit must not submit a repo path; cmds: {cmds:?}"
+    );
+    assert_eq!(app.input.buffer, "2");
+}
+
+#[test]
+fn handle_key_tag_selects_feature() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    app.handle_key(make_key(KeyCode::Char('f')));
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        Some(TaskTag::Feature)
+    );
+}
+
+#[test]
+fn handle_key_tag_selects_chore() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    app.handle_key(make_key(KeyCode::Char('c')));
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        Some(TaskTag::Chore)
+    );
+}
+
+#[test]
+fn handle_key_tag_unknown_key_is_noop() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+    assert_eq!(*app.mode(), InputMode::InputTag);
+}
+
+#[test]
+fn handle_key_confirm_detach_tmux_non_matching_mode_is_noop() {
+    let mut app = make_app();
+    // Mode is Normal but we call handle_key_confirm_detach_tmux indirectly
+    // This shouldn't happen in practice, but confirms guard clause
+    app.input.mode = InputMode::Normal;
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    // In Normal mode, 'y' is unrecognized — noop
+    assert!(cmds.is_empty());
+}
+
+/// In Normal mode on the Board view, known keys produce commands/state changes
+/// and unknown keys produce no commands.
+#[test]
+fn handle_key_normal_board_known_keys_produce_effects() {
+    let mut app = make_app();
+    // 'n' starts new task (switches to InputTitle mode)
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('n'))));
+    assert!(cmds.is_empty()); // inline mutation, no commands
+    assert_eq!(app.input.mode, InputMode::InputTitle);
+}
+
+#[test]
+fn handle_key_normal_board_unknown_key_is_noop() {
+    let mut app = make_app();
+    // `Q` is deliberately unbound.
+    let cmds = app.handle_key(make_key(KeyCode::Char('Q')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// `I` used to open the knowledge-base overlay, removed in
+/// docs/plans/archive/2026-07-31-3809-keybinding-pruning-implementation.md §3. It is now unbound:
+/// no match arm, so it must fall through exactly like any unknown key. Learnings
+/// are curated via MCP only.
+#[test]
+fn handle_key_normal_board_learnings_key_is_unbound() {
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('I')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+}
+
+/// `C` used to open the managed-feed config popup, removed in
+/// docs/plans/archive/2026-07-31-3809-keybinding-pruning-implementation.md §6. It is now unbound:
+/// no match arm, so it must fall through exactly like any unknown key. The four
+/// managed-feed settings are configured via MCP only
+/// (`set_managed_feed_config` / `get_managed_feed_config`).
+#[test]
+fn handle_key_normal_board_feed_config_key_is_unbound() {
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('C')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+}
+
+/// `:` used to open the main session — a task-independent "dispatch-main" tmux
+/// window running an interactive Claude Code session in a directory the user
+/// picked. The feature was removed; `:` is now unbound, so it must fall through
+/// exactly like any unknown key, producing not even a usage event.
+#[test]
+fn handle_key_normal_board_main_session_key_is_unbound() {
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char(':')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+}
+
+/// InputTitle mode routes to the text input handler.
+#[test]
+fn handle_key_input_title_routes_to_text_input() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTitle;
+    // Esc cancels input
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Esc)));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// InputDescription mode routes to the text input handler.
+#[test]
+fn handle_key_input_description_routes_to_text_input() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputDescription;
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Esc)));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// InputRepoPath mode routes to the text input handler.
+#[test]
+fn handle_key_input_repo_path_routes_to_text_input() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputRepoPath;
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Esc)));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmDelete mode routes to the confirm-delete handler.
+#[test]
+fn handle_key_confirm_delete_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDeleteTask(TaskId(1));
+    // 'n' cancels the delete
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('n'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// InputTag mode routes to the tag handler.
+#[test]
+fn handle_key_input_tag_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    // Esc cancels tag input
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Esc)));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// QuickDispatch mode routes to the quick-dispatch handler.
+#[test]
+fn handle_key_quick_dispatch_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::QuickDispatch;
+    // Esc cancels quick dispatch
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Esc)));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmRetry mode routes to the confirm-retry handler.
+#[test]
+fn handle_key_confirm_retry_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmRetry(TaskId(1));
+    // Esc cancels retry
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Esc)));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmDetachTmux mode routes correctly.
+#[test]
+fn handle_key_confirm_detach_tmux_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDetachTmux(vec![TaskId(1)]);
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('n'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// `epics.allium: EditEpic`'s take-over prompt: 'y' emits the override
+/// command and resets the mode.
+#[test]
+fn handle_key_confirm_override_feed_owner_yes_emits_override_command() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmOverrideFeedOwner {
+        epic_id: EpicId(1),
+        other_host: "other-host".into(),
+    };
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('y'))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Epic(crate::tui::commands::EpicCommand::OverrideFeedOwner(
+            EpicId(1)
+        ))
+    )));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// Declining leaves ownership untouched — no command at all.
+#[test]
+fn handle_key_confirm_override_feed_owner_no_emits_nothing() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmOverrideFeedOwner {
+        epic_id: EpicId(1),
+        other_host: "other-host".into(),
+    };
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('n'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// Help mode routes to the help handler.
+#[test]
+fn handle_key_help_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::Help;
+    // Any key exits help
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Esc)));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmQuit mode routes correctly.
+#[test]
+fn handle_key_confirm_quit_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmQuit;
+    // 'n' cancels quit
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('n'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// Error popup dismisses on any key before routing to normal handler.
+#[test]
+fn handle_key_error_popup_dismisses_first() {
+    let mut app = make_app();
+    app.status.error_popup = Some("Some error".to_string());
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('x'))));
+    assert!(cmds.is_empty());
+    assert!(app.status.error_popup.is_none());
+}
+
+#[test]
+fn confirm_quit_without_split_emits_no_extra_commands() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmQuit;
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('y'))));
+
+    assert!(app.should_quit);
+    assert!(cmds.is_empty(), "no commands when split is not active");
+}
+
+#[test]
+fn enter_with_typed_filter_selects_filtered_item() {
+    let mut app = App::new(vec![]);
+    app.board.repo_paths = vec!["/tmp".to_string(), "/var".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    // Type "var" — only /var matches, cursor = 0
+    type_text(&mut app, "var");
+    // Enter selects /var
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert_eq!(app.input.task_draft.as_ref().unwrap().repo_path, "/var");
+}
+
+/// `v`, not `p`: EveryKeyInItsName (CreateTask in docs/specs/tasks.allium)
+/// puts each key inside the label it selects, and `p` belongs to "[p]hoenix",
+/// so PrReview is advertised and selected as "pr-re[v]iew".
+#[test]
+fn handle_key_tag_selects_pr_review() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    app.handle_key(make_key(KeyCode::Char('v')));
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        Some(TaskTag::PrReview)
+    );
+}
+
+/// The key PrReview used to own. It must not select PrReview any more, or the
+/// phoenix arming below would be unreachable.
+#[test]
+fn handle_key_tag_p_no_longer_selects_pr_review() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    app.handle_key(make_key(KeyCode::Char('p')));
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        None,
+        "p arms phoenix; it selects no tag"
+    );
+}
+
+#[test]
+fn handle_key_tag_selects_research() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    app.handle_key(make_key(KeyCode::Char('r')));
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        Some(TaskTag::Research)
+    );
+}
+
+#[test]
+fn handle_key_tag_selects_fix() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    app.handle_key(make_key(KeyCode::Char('x')));
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        Some(TaskTag::Fix)
+    );
+}

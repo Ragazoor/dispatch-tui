@@ -183,7 +183,6 @@ pub(crate) fn parse_unmerged_files(output: &std::process::Output) -> Vec<String>
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::process::MockProcessRunner;

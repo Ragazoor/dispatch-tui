@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
 mod async_handle;
@@ -7,6 +6,10 @@ mod hooks;
 mod journal_mode;
 mod learnings;
 mod migrations;
+mod migrations_archived_status;
+mod migrations_epic_triggers;
+mod migrations_late;
+mod migrations_rebuilds;
 mod open_in_memory_store;
 mod read_pool;
 mod schema_template;
@@ -18,6 +21,9 @@ mod shared_writer;
 mod store_seam;
 mod subagents;
 mod tasks;
+mod tasks_decode;
+mod tasks_feed;
+mod tasks_patch;
 mod usage;
 
 pub(super) async fn in_memory_db() -> Database {

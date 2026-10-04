@@ -6,8 +6,6 @@
 //! need to assert on it. This is the one harness for doing that — don't grow a
 //! second copy alongside the test that needs it.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::sync::{Arc, Mutex};
 
 /// An in-memory sink for a `tracing_subscriber::fmt` writer, so tests can

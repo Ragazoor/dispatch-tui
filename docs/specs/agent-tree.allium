@@ -655,7 +655,7 @@ rule SplitAgentTreePaneOnAgentLaunch {
         -- real-tmux test would assert something no code path can reach. What
         -- remains covered is the toggle: toggle_agent_tree_pane short-circuits
         -- on a name that is not `task-<id>`, asserted at mock level by
-        -- toggle_agent_tree_pane_is_noop_for_non_task_window (src/dispatch/tests.rs)
+        -- toggle_agent_tree_pane_is_noop_for_non_task_window (src/dispatch/tests/agent_launch.rs)
         -- and resync_agent_tree_pane_noop_for_non_task_window
         -- (src/dispatch/agents.rs). A future third window-creation path that
         -- launches an agent would put the real-tmux assertion back in scope.

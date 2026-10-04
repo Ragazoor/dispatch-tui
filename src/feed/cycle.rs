@@ -212,7 +212,6 @@ impl FeedCycle {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use std::path::Path;
 
     use super::super::exec::AlwaysFailRunner;

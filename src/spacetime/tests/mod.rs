@@ -4,7 +4,6 @@
 //! Read that module's header before changing anything here — what it proves,
 //! and what it deliberately does not, is the whole reason this subsystem
 //! exists.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod bindings_parity;
 mod cli_store;

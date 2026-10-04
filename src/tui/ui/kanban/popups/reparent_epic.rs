@@ -171,7 +171,6 @@ fn build_epic_nodes(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::models::TaskStatus;

@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::super::palette::{CURSOR_BORDER, MUTED, PURPLE, SELECT_ALL_HIGHLIGHT_BG};
 use super::super::shared::{render_folded_section_header, render_substatus_header};
 use super::cards::render_epic_header_item;

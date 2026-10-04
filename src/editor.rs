@@ -477,9 +477,8 @@ fn parse_editor_bool(raw: &str) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
-    use crate::models::{EpicId, TaskId, TaskStatus};
+    use crate::models::{EpicId, TaskBuilder, TaskStatus};
     use chrono::Utc;
     use proptest::prelude::*;
 
@@ -602,15 +601,13 @@ mod tests {
         status: TaskStatus,
         plan: Option<&str>,
     ) -> Task {
-        Task {
-            id: TaskId(1),
-            title: title.to_string(),
-            description: description.to_string(),
-            repo_path: repo_path.to_string(),
-            status,
-            plan_path: plan.map(|s| s.to_string()),
-            ..Default::default()
-        }
+        TaskBuilder::new(1)
+            .title(title)
+            .description(description)
+            .repo_path(repo_path)
+            .status(status)
+            .plan(plan)
+            .build()
     }
 
     #[test]

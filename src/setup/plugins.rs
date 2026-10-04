@@ -766,7 +766,6 @@ pub async fn seed_feed_epics(db: &Database, data_dir: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::setup::FakeConfirmer;
     use serde_json::Value;

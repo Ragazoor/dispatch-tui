@@ -48,7 +48,6 @@ pub fn worktree_admin_dir(worktree_path: &str) -> Option<PathBuf> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub(crate) mod tests {
     use super::*;
 

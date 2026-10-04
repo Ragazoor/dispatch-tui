@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use serde_json::json;
 
 // `call`, `test_state`, and `extract_response_text` are module-private helpers

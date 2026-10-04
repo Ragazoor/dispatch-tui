@@ -83,7 +83,7 @@ macro_rules! mcp_args {
             /// checking the generation, not two hand-kept copies.
             // Introspection for the boundary parity tests; nothing in the
             // handler path reads it.
-            #[allow(dead_code)]
+            #[cfg(test)]
             $vis const FIELD_NAMES: &'static [&'static str] = &[$(stringify!($fname)),+];
 
             /// The subset of [`Self::FIELD_NAMES`] declared `[manual]`, i.e. the
@@ -91,7 +91,7 @@ macro_rules! mcp_args {
             /// coverage test derives its exclusions from this rather than
             /// hardcoding names, so adding a `[manual]` field cannot quietly
             /// widen what the test forgives.
-            #[allow(dead_code)]
+            #[cfg(test)]
             $vis fn manual_fields() -> ::std::vec::Vec<&'static str> {
                 [$( mcp_args!(@manual_name $mode, $fname) ),+]
                     .into_iter()

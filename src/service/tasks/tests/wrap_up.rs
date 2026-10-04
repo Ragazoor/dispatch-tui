@@ -10,7 +10,6 @@ use super::*;
 // and `wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error` in
 // `src/mcp/handlers/tests/tasks/dispatch.rs` — and moving that logic behind the
 // seam did not change what they assert, so they are not duplicated here.
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod wrap_up_rebase_seam {
     use super::*;
     use crate::process::MockProcessRunner;

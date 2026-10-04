@@ -134,10 +134,11 @@ rm src/dispatch/snapshots/*.snap.new                 # always clean up
 |---|---|
 | TUI key handling / message flow | `src/tui/tests/` |
 | DB schema, CRUD | `src/db/tests/` |
-| A database migration | `src/db/tests/migrations.rs` — the migration fn must be `pub(super)` to be callable from there. See "Adding a Database Migration" in `docs/how-to.md` for the column-guard rule. |
+| A database migration | `src/db/tests/migrations*.rs` (pick by version range; `migrations_late.rs` is the newest) — the migration fn must be `pub(super)` to be callable from there. See "Adding a Database Migration" in `docs/how-to.md` for the column-guard rule. |
 | Service-layer business rules | inline in `src/service/<domain>/` |
 | MCP JSON-RPC handler behaviour | `src/mcp/handlers/tests/` |
 | Full task/epic lifecycle | `tests/` (integration tests) |
+| A `Task` fixture | `TaskBuilder` (`src/models/task_builder.rs`, gated like `test_tmux_window`) — don't hand-roll another `Task { .. }` literal |
 | Domain-type invariants | inline in the owning module |
 | Agent prompt rendering (all variants) | `src/dispatch/prompts_snapshots.rs` |
 | Agent-facing skill copy (`plugin/skills/*/SKILL.md`) | `mod tests` in `src/setup/plugins.rs` (via `skill_body`) |
@@ -161,7 +162,7 @@ not a line at the end — a panicking assertion in between leaves a directory
 `TempDir` cannot clean — and assert `CI` is unset before skipping, because root
 ignores directory permissions and `eprintln!` is swallowed by the default
 harness, so the skip would report green while covering nothing. See
-`deny_access_or_skip` in `src/dispatch/tests.rs`, and `tmux_available_or_skip`
+`deny_access_or_skip` in `src/dispatch/tests/agent_launch.rs`, and `tmux_available_or_skip`
 in `tests/tmux_harness/mod.rs` for the same CI rule in its original form.
 
 The two tmux rows are a real split, not two spellings of the same thing: a mock proves *which command we sent*, a real tmux server proves *what tmux did with it*. Read the "`MockProcessRunner` vs a real tmux server" section of `docs/conventions.md` before picking one — guessing wrong is how #3781 and #3782 stayed green while broken.

@@ -807,7 +807,6 @@ pub fn exit_code(code: i32) -> std::process::ExitStatus {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 

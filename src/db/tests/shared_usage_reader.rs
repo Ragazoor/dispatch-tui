@@ -9,7 +9,6 @@
 //! answers INSTEAD of SQLite — proven here by making the two disagree and
 //! asserting the reader's answer wins.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::db::{SharedUsageReader, UsageQuery};
 use crate::models::{UsageActor, UsageCategory, UsageEvent, UsageSummary};

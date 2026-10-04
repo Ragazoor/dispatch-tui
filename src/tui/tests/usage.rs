@@ -7,7 +7,6 @@
 //! whole point of the instrumentation is that a future pruning pass can trust
 //! the absence of a count, so an arm silently losing its push has to read as a
 //! regression.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::models::{EpicId, TaskId, TaskStatus, UsageActor, UsageCategory};
 use crate::tui::commands::UsageCommand;

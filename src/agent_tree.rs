@@ -570,7 +570,6 @@ fn compute_expansion(node: &mut TreeNode) -> bool {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

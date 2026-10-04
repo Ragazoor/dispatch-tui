@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use crossterm::event::KeyCode;
 
 use super::super::{App, Command, InputMode, Message};

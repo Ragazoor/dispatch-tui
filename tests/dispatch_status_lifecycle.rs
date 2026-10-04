@@ -5,15 +5,11 @@
 //! breaks the user-facing feedback contract is caught even if the
 //! TUI-internal helpers are refactored.
 
-use dispatch_tui::models::{Task, TaskId, TmuxWindow};
+use dispatch_tui::models::{Task, TaskBuilder, TaskId, TmuxWindow};
 use dispatch_tui::tui::{App, Message};
 
 fn make_task(id: i64, title: &str) -> Task {
-    Task {
-        id: TaskId(id),
-        title: title.to_string(),
-        ..Default::default()
-    }
+    TaskBuilder::new(id).title(title).build()
 }
 
 fn make_app(task: Task) -> App {

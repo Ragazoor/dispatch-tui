@@ -107,7 +107,6 @@ pub fn run_capturing(stdin: &str, snapshot_path: &Path, chain: Option<&str>, now
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::models::budget::BudgetSnapshot;

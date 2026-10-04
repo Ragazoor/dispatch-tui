@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Tests for the move-task-to-epic tree picker (the `m` key on a task card).
 
 use super::*;

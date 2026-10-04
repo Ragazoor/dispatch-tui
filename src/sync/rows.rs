@@ -220,7 +220,6 @@ impl SharedRows {
     /// connect and every disconnect, so on a board with no rows that was a
     /// guaranteed spurious redraw per reconnect.
     fn write(&self, f: impl FnOnce(&mut Rows) -> bool) {
-        #[allow(clippy::unwrap_used)]
         let mut rows = self.rows.write().unwrap_or_else(|e| e.into_inner());
         let moved = f(&mut rows);
         drop(rows);
@@ -230,7 +229,6 @@ impl SharedRows {
     }
 
     fn read<T>(&self, f: impl FnOnce(&Rows) -> T) -> T {
-        #[allow(clippy::unwrap_used)]
         let rows = self.rows.read().unwrap_or_else(|e| e.into_inner());
         f(&rows)
     }

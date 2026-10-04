@@ -12,7 +12,6 @@
 //! a non-Done task) is covered by the `x_key_on_*_enters_confirm_done_*` tests
 //! in `confirm_done.rs`; `x_on_a_mixed_task_selection_deletes_nothing` below adds
 //! the no-delete half of it.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::models::{test_tmux_window, EpicId, TaskId, TaskStatus};
 use crate::tui::commands::{CleanupFollowUp, EpicCommand, TaskCommand};

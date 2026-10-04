@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::models::{test_tmux_window, EpicId, SubStatus, TaskId, TaskStatus};
 use crate::tui::commands::SettingsCommand;

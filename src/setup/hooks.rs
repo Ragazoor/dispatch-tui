@@ -7,7 +7,6 @@
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::super::plugins::PLUGIN_DIR;
     use serde_json::Value;
 

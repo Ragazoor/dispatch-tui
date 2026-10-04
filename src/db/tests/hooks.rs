@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 //! `record_notification` / `record_pre_tool_use` — the two Claude Code hook
 //! writes that carry their own guard.
 //!

@@ -197,7 +197,6 @@ fn truncate_stderr(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,

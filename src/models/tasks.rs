@@ -1594,7 +1594,6 @@ mod activity_tests {
 
 #[cfg(test)]
 mod wrap_up_mode_tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
 
     #[test]
@@ -1632,7 +1631,6 @@ mod wrap_up_mode_tests {
 
 #[cfg(test)]
 mod notification_kind_tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
 
     #[test]
@@ -1716,7 +1714,6 @@ mod notification_kind_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub(in crate::models) mod model_tests {
     use super::*;
     use chrono::Utc;
@@ -2436,7 +2433,6 @@ docs/specs/mcp-task-tools.allium to match"
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod property_tests {
     use super::model_tests::make_task_with;
     use super::*;
@@ -2555,7 +2551,6 @@ mod property_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

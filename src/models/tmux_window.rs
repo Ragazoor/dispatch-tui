@@ -178,7 +178,6 @@ pub fn test_tmux_window(name: &str) -> TmuxWindow {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

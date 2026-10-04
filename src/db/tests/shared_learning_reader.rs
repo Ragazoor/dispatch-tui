@@ -9,7 +9,6 @@
 //! the same way `shared_writer.rs` proves a routed write bypasses SQLite by
 //! asserting the local table stays empty.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::db::{CreateLearningRow, LearningFilter, SharedLearningReader};
 use crate::models::{Learning, LearningId, LearningKind, LearningRetrieval, LearningScope, TaskId};

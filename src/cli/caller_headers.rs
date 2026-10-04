@@ -34,7 +34,6 @@ pub fn resolve_headers() -> (String, i32) {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

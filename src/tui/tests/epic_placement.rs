@@ -2,7 +2,6 @@
 //!
 //! Obligations from `docs/specs/board-layout.allium`, "Epic Card Placement"
 //! and `FlattenedView`.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::models::{ColumnSection, EpicId, SubStatus, TaskId, TaskStatus};
 use crate::tui::types::RepoFilterMode;

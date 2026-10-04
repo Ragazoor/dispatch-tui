@@ -269,7 +269,6 @@ pub async fn run_pr_gate(port: u16, id: i64) -> Result<GateVerdict> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

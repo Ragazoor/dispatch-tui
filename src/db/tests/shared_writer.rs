@@ -19,7 +19,6 @@
 //! The reducer implementation's own behaviour is `src/sync/tests/writes.rs`
 //! and, against a live instance, `tests/spacetime_module.rs`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::db::SharedWriter;
 use std::sync::Mutex;

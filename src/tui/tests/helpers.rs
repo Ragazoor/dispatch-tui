@@ -1,6 +1,5 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
-use crate::models::{Epic, EpicId, SubStatus, TaskId, TaskStatus};
+use crate::models::{Epic, EpicId, SubStatus, TaskBuilder, TaskId, TaskStatus};
 use crate::tui::commands::UsageCommand;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -102,15 +101,13 @@ pub(in crate::tui) fn resolve_pending_g_via_idle_tick(app: &mut App) -> Vec<Comm
 /// fixture `is_unprovisioned` (rendering "⚠ no worktree" on every card). Tests
 /// that want an unprovisioned or detached task clear the fields explicitly.
 pub(in crate::tui) fn make_task(id: i64, status: TaskStatus) -> Task {
-    let provisioned = matches!(status, TaskStatus::Running | TaskStatus::Review);
-    Task {
-        id: TaskId(id),
-        title: format!("Task {id}"),
-        status,
-        worktree: provisioned.then(|| format!("/repo/.worktrees/{id}-task-{id}")),
-        tmux_window: provisioned.then(|| crate::models::TmuxWindow::for_task(TaskId(id))),
-        sub_status: SubStatus::default_for(status),
-        ..Default::default()
+    let builder = TaskBuilder::new(id)
+        .status(status)
+        .sub_status(SubStatus::default_for(status));
+    if matches!(status, TaskStatus::Running | TaskStatus::Review) {
+        builder.provisioned().build()
+    } else {
+        builder.build()
     }
 }
 

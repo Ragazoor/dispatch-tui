@@ -2,8 +2,6 @@
 //! `EpicMessage::Updated`. These splice one row into the in-memory list
 //! instead of rebuilding the whole vector.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use super::helpers::{make_app, make_epic, make_task};
 use crate::models::{EpicId, SubStatus, TaskId, TaskStatus};
 use crate::tui::Message;

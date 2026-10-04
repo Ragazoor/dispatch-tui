@@ -1043,7 +1043,6 @@ pub fn validate_repo_path(path: &str) -> Result<String, String> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod fetch_tests {
     use super::*;
     use crate::process::MockProcessRunner;
@@ -1231,7 +1230,6 @@ mod fetch_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod selection_tests {
     use super::*;
     use crate::process::MockProcessRunner;
@@ -1302,7 +1300,6 @@ mod selection_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod start_point_tests {
     use super::*;
 

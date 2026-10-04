@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use crate::models::test_tmux_window;
 use ratatui::buffer::Buffer;
 

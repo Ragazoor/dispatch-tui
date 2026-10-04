@@ -1411,7 +1411,6 @@ fn failure_stderr(step: Step) -> &'static str {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::dispatch::tests::{make_task, make_test_repo_with_worktree, pr_review_task};

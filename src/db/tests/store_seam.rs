@@ -9,7 +9,6 @@
 //! complete store) is the compile-fail doc tests on `TaskStore` in
 //! `src/db/mod.rs`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
 /// Every shared table is reachable through the one store handle.

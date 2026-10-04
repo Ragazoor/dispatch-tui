@@ -637,7 +637,6 @@ impl App {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tick_tests {
     use super::*;
     use crate::models::{TaskUrl, UrlType};

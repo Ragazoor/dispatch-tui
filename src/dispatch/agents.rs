@@ -706,7 +706,6 @@ pub fn resume_agent(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::models::test_tmux_window;
     use crate::process::{AgentBinaries, MockProcessRunner};

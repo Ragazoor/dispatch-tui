@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use crate::models::budget::{BudgetSnapshot, BudgetWindow};
 use crate::tui::commands::BudgetCommand;
 use crate::tui::tests::helpers::make_app;

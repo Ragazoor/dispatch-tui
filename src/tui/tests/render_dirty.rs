@@ -9,8 +9,6 @@
 //! `frame_ready` already bounds the redraw cost, so always marking dirty is
 //! both correct and cheap.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use super::*;
 use crossterm::event::KeyCode;
 

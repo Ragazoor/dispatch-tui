@@ -76,7 +76,6 @@ pub(super) fn build_task_patch<'a>(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::super::params::UpdateTaskParams;
     use super::build_task_patch;

@@ -29,7 +29,6 @@ pub async fn extract_caller_identity(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use axum::{

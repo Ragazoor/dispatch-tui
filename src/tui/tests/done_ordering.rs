@@ -1,7 +1,6 @@
 //! Ordering of the Done column: newest completion first.
 //!
 //! Obligations from `docs/specs/board-layout.allium`, "Done Column Ordering".
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::models::{EpicId, TaskStatus};
 use chrono::{DateTime, Utc};

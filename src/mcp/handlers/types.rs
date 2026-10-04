@@ -455,7 +455,6 @@ pub(super) fn service_err_to_response(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod status_filter_tests {
     use super::StatusFilter;
     use crate::models::TaskStatus;
@@ -509,7 +508,6 @@ mod status_filter_tests {
 
 #[cfg(test)]
 mod flexible_i64_tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::{deserialize_flexible_i64, deserialize_optional_flexible_i64};
     use proptest::prelude::*;
     use serde::Deserialize;
@@ -592,7 +590,6 @@ mod flexible_i64_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod fetch_caller_task_tests {
     use super::fetch_caller_task;
     use crate::db::{CreateTaskRequest, Database, TaskCrud};
@@ -639,7 +636,6 @@ mod fetch_caller_task_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod error_code_tests {
     /// The named constants are a readability change only — the wire values are
     /// the JSON-RPC 2.0 §5.1 numbers and clients match on them, so pinning them
@@ -655,7 +651,6 @@ mod error_code_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod typed_id_tests {
     use super::{
         deserialize_flexible_id, deserialize_nullable_flexible_id,
@@ -738,7 +733,6 @@ mod typed_id_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod service_err_to_response_tests {
     use super::service_err_to_response;
     use crate::service::ServiceError;

@@ -412,7 +412,6 @@ impl LearningService {
 
 #[cfg(test)]
 mod learning_tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use std::sync::Arc;
 
     use super::{CreateLearningParams, LearningService, QueryLearningsParams};

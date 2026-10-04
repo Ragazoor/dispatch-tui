@@ -1280,7 +1280,7 @@ rule MoveTaskToEpic {
 -- remove. This is deliberate and not a per-path quirk: a task that never had a
 -- worktree never had a branch either, so there is nothing to delete. Step 1 is
 -- independent of both (TeardownIsOwedWheneverThereIsSomethingToRelease). Pinned
--- on the primitive by src/dispatch/tests.rs::teardown_task_kills_window_when_there_is_no_worktree
+-- on the primitive by src/dispatch/tests/agent_launch.rs::teardown_task_kills_window_when_there_is_no_worktree
 -- and teardown_task_with_neither_worktree_nor_window_runs_no_commands, and on the
 -- feed wrapper by src/feed/mod.rs::cleanup_kills_window_only_when_there_is_no_worktree
 -- and cleanup_of_a_stateless_row_runs_no_commands.
@@ -1296,7 +1296,7 @@ rule MoveTaskToEpic {
 -- Coverage of WorktreeIsNeverShared, in two layers.
 --
 -- The PREMISE — that the derived path is injective in the task id — is pinned by
--- src/dispatch/tests.rs::provision_worktree_path_is_unique_per_task_id_even_for_identical_titles.
+-- src/dispatch/tests/pr_review.rs::provision_worktree_path_is_unique_per_task_id_even_for_identical_titles.
 -- That is the load-bearing test: drop the id prefix in provision_worktree and it
 -- is the only one that fails.
 --

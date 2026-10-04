@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
 async fn make_task(state: &Arc<McpState>, title: &str) -> crate::models::TaskId {

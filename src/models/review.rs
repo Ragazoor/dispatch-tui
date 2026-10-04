@@ -72,7 +72,6 @@ pub fn pr_number_from_url(url: &str) -> Option<i64> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

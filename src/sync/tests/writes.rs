@@ -8,8 +8,6 @@
 //! The transport itself — and the reducers on the far side — are
 //! `tests/spacetime_module.rs`, against a live instance.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::sync::{Arc, Mutex};
 
 use crate::db::{CreateTaskRequest, SharedWriter, TaskPatch};

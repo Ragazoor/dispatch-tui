@@ -33,7 +33,6 @@ pub fn parse_feed_items(bytes: &[u8]) -> anyhow::Result<Vec<FeedItem>> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
 
     #[test]

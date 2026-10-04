@@ -306,7 +306,6 @@ impl SpacetimeSdkConnector {
                         || "the store closed the connection".to_string(),
                         |e| e.to_string(),
                     );
-                    #[allow(clippy::unwrap_used)]
                     let mut slot = on_drop.lock().unwrap_or_else(|e| e.into_inner());
                     // First writer wins. A reconnect clears the slot, so a
                     // value already here is this same outage — and the first
@@ -333,7 +332,6 @@ impl SpacetimeSdkConnector {
     /// thread, and on a board that reconnects several times a day that is not a
     /// slow leak.
     fn install(&self, connection: Arc<DbConnection>) {
-        #[allow(clippy::unwrap_used)]
         let mut slot = self.connection.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(previous) = slot.take() {
             let _ = previous.disconnect();
@@ -354,7 +352,6 @@ impl SpacetimeSdkConnector {
     /// Unsubscribing consumes the handle, which is why the previous one has to
     /// be kept rather than dropped — see the field's own comment.
     fn replace_subscription(&self, handle: SubscriptionHandle) {
-        #[allow(clippy::unwrap_used)]
         let previous = self
             .subscription
             .lock()
@@ -372,7 +369,6 @@ impl SpacetimeSdkConnector {
     /// epic callbacks, and they must widen against the new followed set, not
     /// the old one.
     fn reset_subtree(&self, followed: &[i64]) {
-        #[allow(clippy::unwrap_used)]
         let previous = std::mem::replace(
             &mut *self.subtree.lock().unwrap_or_else(|e| e.into_inner()),
             Subtree {
@@ -392,7 +388,6 @@ impl SpacetimeSdkConnector {
     /// clearing a stale one on install and on disconnect — because each was
     /// otherwise four lines with its own `#[allow]`.
     fn take_dropped(&self) -> Option<String> {
-        #[allow(clippy::unwrap_used)]
         self.dropped
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -400,7 +395,6 @@ impl SpacetimeSdkConnector {
     }
 
     fn current(&self) -> Option<Arc<DbConnection>> {
-        #[allow(clippy::unwrap_used)]
         self.connection
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -453,7 +447,6 @@ impl StoreConnector for SpacetimeSdkConnector {
     }
 
     async fn disconnect(&self) {
-        #[allow(clippy::unwrap_used)]
         let previous = self
             .connection
             .lock()
@@ -475,7 +468,6 @@ impl StoreConnector for SpacetimeSdkConnector {
     }
 
     async fn take_drop(&self) -> Option<String> {
-        #[allow(clippy::unwrap_used)]
         self.dropped
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -535,7 +527,6 @@ struct Subtree {
 /// missing until the next connection re-walks the tree (the rule's
 /// "NOT RETRIED" clause).
 fn widen_subtree(ctx: &bindings::EventContext, subtree: &Mutex<Subtree>, row: &bindings::Epic) {
-    #[allow(clippy::unwrap_used)]
     let mut subtree = subtree.lock().unwrap_or_else(|e| e.into_inner());
     // Checked before the cache is gathered: nearly every arrival — the whole
     // initial load included — sits under an uncovered parent or none.
@@ -597,7 +588,6 @@ fn subscribe_widening(
 /// until the next connection starts a fresh walk (`SubtreeCover`'s "only
 /// grows").
 fn follow_epic(ctx: &bindings::EventContext, subtree: &Mutex<Subtree>, epic: i64) {
-    #[allow(clippy::unwrap_used)]
     let mut subtree = subtree.lock().unwrap_or_else(|e| e.into_inner());
     if subtree.cover.covers(epic) {
         return;
@@ -628,7 +618,6 @@ fn answer_once<T: Send + 'static>() -> (
     let (tx, rx) = oneshot::channel();
     let slot = Arc::new(Mutex::new(Some(tx)));
     let answer = move |value: T| {
-        #[allow(clippy::unwrap_used)]
         let sender = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(tx) = sender {
             fire(tx, value);

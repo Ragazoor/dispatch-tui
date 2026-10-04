@@ -188,7 +188,6 @@ impl TmuxWindowUpdate {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod error_tests {
     use super::ServiceError;
     use std::error::Error;

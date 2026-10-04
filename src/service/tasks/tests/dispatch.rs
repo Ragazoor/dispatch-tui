@@ -8,7 +8,6 @@ use super::*;
 // asserted separately — `DispatchClaimExclusive` and the release-on-failure
 // unwind in `docs/specs/dispatch.allium`. They are asserted once here, against
 // the seam every entry point now goes through.
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod dispatch_seam {
     use super::*;
     use crate::dispatch::mock_sequence::{DispatchScript, Step};

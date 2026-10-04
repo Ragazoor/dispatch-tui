@@ -520,7 +520,6 @@ impl TaskService {
         {
             let handle = tokio::spawn(close);
             // test-only bookkeeping — panics on poisoned mutex (programming error)
-            #[allow(clippy::unwrap_used)]
             self.background_pr_closes.lock().unwrap().push(handle);
         }
         #[cfg(not(test))]

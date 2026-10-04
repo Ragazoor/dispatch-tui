@@ -696,7 +696,6 @@ fn untracked_set(paths: &[&str]) -> BTreeSet<PathBuf> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::cli::agent_tree::GIT_TIMEOUT;
@@ -926,7 +925,6 @@ mod tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod document_tests {
     use super::*;
     use crate::process::MockProcessRunner;
@@ -1124,7 +1122,6 @@ mod document_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod view_tests {
     use super::*;
     use ratatui::backend::TestBackend;

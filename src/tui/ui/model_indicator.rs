@@ -65,7 +65,6 @@ pub(in crate::tui::ui) fn top_row_spans(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::models::budget::BudgetWindow;

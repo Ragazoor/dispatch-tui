@@ -72,7 +72,6 @@ async fn write_and_flush<W: AsyncWrite + Unpin>(mut writer: W, line: &[u8]) -> s
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use chrono::Utc;

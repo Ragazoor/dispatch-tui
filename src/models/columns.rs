@@ -239,7 +239,6 @@ pub fn task_column_priority(task: &Task) -> u8 {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod column_section_for_task_tests {
     use super::*;
     use crate::models::tasks::model_tests::make_task_with;
@@ -475,7 +474,6 @@ mod column_section_for_task_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod column_section_tests {
     use super::*;
     use crate::models::EpicSubstatus;
@@ -615,7 +613,6 @@ mod column_section_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod sectioned_columns_tests {
     use super::*;
 

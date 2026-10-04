@@ -62,7 +62,6 @@ pub(crate) fn trust_at(claude_json: &Path, repo_path: &str) -> Result<()> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use tempfile::tempdir;

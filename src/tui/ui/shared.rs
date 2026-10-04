@@ -536,7 +536,6 @@ pub(in crate::tui) fn caret_line(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

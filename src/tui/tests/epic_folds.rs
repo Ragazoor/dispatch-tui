@@ -3,7 +3,6 @@
 //!
 //! See "Epic Folding" in `docs/specs/board-layout.allium` and `ToggleEpicFold`
 //! in `docs/specs/tasks.allium`.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::models::{ColumnSection, EpicId, SubStatus, TaskStatus};
 use crate::tui::types::{ColumnAnchor, EpicFoldRef, EpicFoldState, FoldedEpicHeader};

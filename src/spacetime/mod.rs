@@ -33,7 +33,6 @@
 //! skipped, `tests::sequence_burn`.
 
 #[rustfmt::skip]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub mod bindings;
 mod cli_store;
 mod dump;

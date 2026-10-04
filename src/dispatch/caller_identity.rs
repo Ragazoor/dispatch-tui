@@ -105,7 +105,6 @@ pub(super) fn mcp_config_flag(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::dispatch::tests::claude_json_with_dispatch_entry;

@@ -243,7 +243,6 @@ pub async fn provision_managed_feeds_from_settings(db: &dyn crate::db::TaskStore
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::db::{Database, EpicRead, SettingsStore};

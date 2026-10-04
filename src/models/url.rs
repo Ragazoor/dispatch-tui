@@ -127,7 +127,6 @@ impl TaskUrl {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
 
     /// `UrlType::ALL` backs the update_task MCP schema's url_type enum

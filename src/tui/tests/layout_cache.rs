@@ -10,8 +10,6 @@
 //!   3. Navigation never invalidates a populated cache.
 //!   4. Board mutations always invalidate and repopulate the caches.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::sync::Arc;
 
 use super::*;

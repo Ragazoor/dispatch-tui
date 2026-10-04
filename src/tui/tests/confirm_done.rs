@@ -2,7 +2,6 @@
 //! that is not yet Done always routes to ConfirmDone, never to a delete
 //! confirmation — whatever the selection shape. The delete half (`x` on a
 //! Done task or a qualifying epic) is covered by `delete.rs`.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::models::{test_tmux_window, TaskId, TaskStatus};
 use crossterm::event::KeyCode;

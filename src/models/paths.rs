@@ -90,7 +90,6 @@ pub fn extract_github_repo(url: &str) -> Option<&str> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

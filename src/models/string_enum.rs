@@ -52,7 +52,6 @@ macro_rules! define_str_enum {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Fixture {
