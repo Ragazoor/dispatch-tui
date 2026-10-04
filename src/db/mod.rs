@@ -1830,6 +1830,7 @@ impl Database {
     /// every reducer domain (spec:
     /// `spacetime-memory-store.allium`, `OpenInMemoryAttachesStoreOnceComplete`),
     /// so tests exercise the shared store rather than raw SQLite.
+    #[cfg(any(test, feature = "test-support"))]
     pub async fn open_in_memory() -> Result<Self> {
         let db = Self::open_in_memory_unattached().await?;
         let (ports, board_reads) = Self::memory_store_ports();
@@ -1848,6 +1849,7 @@ impl Database {
     /// Ports over a fresh, private in-process store: one `SharedRows` and one
     /// `MemoryReducerCaller` over it, with every reader and the writer over
     /// those same rows. The writer settles as a fixed test user and host.
+    #[cfg(any(test, feature = "test-support"))]
     fn memory_store_ports() -> (SharedStorePorts, Arc<dyn crate::sync::BoardReads>) {
         use crate::sync as s;
         let rows = Arc::new(s::SharedRows::new());

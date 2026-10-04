@@ -80,21 +80,6 @@ fn state_over(
     (Arc::new(state), db)
 }
 
-/// [`test_state`] over a SQLite-only handle, for a test of a behaviour the
-/// shared store does not share (a patch on a missing id errors on SQLite and
-/// is a silent no-op in the store).
-async fn test_state_unattached() -> Arc<McpState> {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory_unattached().await.unwrap());
-    state_over(
-        db,
-        Arc::new(MockProcessRunner::new(vec![])),
-        None,
-        None,
-        None,
-    )
-    .0
-}
-
 async fn test_state() -> Arc<McpState> {
     test_state_with_db().await.0
 }
