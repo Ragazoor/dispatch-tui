@@ -337,34 +337,9 @@ impl FeedRunner {
     }
 
     pub async fn tick(&mut self) {
-        // Invalidate the cache if an EpicChanged signal arrived since last tick.
-        if self.epic_changed_rx.has_changed().unwrap_or(true) {
-            self.epic_changed_rx.borrow_and_update();
-            self.any_feed_cmds = None;
-        }
-
-        // Skip all DB work when we know no epic has a feed command.
-        if self.any_feed_cmds == Some(false) {
+        let Some(epics) = self.list_epics_for_tick().await else {
             return;
-        }
-
-        let epics = match self.db.list_epics().await {
-            Ok(e) => e,
-            Err(err) => {
-                tracing::warn!("FeedRunner: failed to list epics: {err:#}");
-                return;
-            }
         };
-
-        let active_ids: std::collections::HashSet<EpicId> = epics.iter().map(|e| e.id).collect();
-        self.last_run.retain(|id, _| active_ids.contains(id));
-
-        let has_feed_cmd = epics.iter().any(|e| e.feed_command.is_some());
-        self.any_feed_cmds = Some(has_feed_cmd);
-
-        if !has_feed_cmd {
-            return;
-        }
 
         // Fetch once per tick so N concurrent spawned tasks don't each hit the DB.
         let known_paths = Arc::new(match self.db.list_repo_paths().await {
@@ -399,50 +374,95 @@ impl FeedRunner {
             // `SerialisedFeedCycle` contention: a non-owning host must not
             // retry every tick just because it lost the ownership check.
             self.last_run.insert(epic.id, now);
-            let owner = match self
-                .board_reads
-                .poll_owner(crate::models::PollScopeId::Epic(epic.id))
-                .await
-            {
-                Ok(owner) => owner,
-                Err(err) => {
-                    tracing::debug!(
-                        epic_id = epic.id.0,
-                        "FeedRunner: failed to read poll ownership, skipping this tick: {err:#}"
-                    );
-                    continue;
-                }
-            };
-            match decide_poll_action(owner.as_deref(), &self.host_id) {
-                PollAction::Skip => continue,
-                // Fired without awaiting it: `tick` must not block on a
-                // network round-trip for one epic while others are still
-                // waiting their turn in this loop. This is the same
-                // "proceed optimistically, let the loser's next tick stand
-                // down" tradeoff `exec_check_status_if_owned` makes for the
-                // PR-poll side of the same mechanism (`src/runtime/pr.rs`).
-                PollAction::ClaimAndProceed => {
-                    let db = self.db.clone();
-                    let epic_id = epic.id;
-                    let _claim_handle = tokio::task::spawn(async move {
-                        if let Err(err) = db
-                            .claim_poll_owner(crate::models::PollScopeId::Epic(epic_id))
-                            .await
-                        {
-                            tracing::debug!(
-                                epic_id = epic_id.0,
-                                "FeedRunner: failed to claim poll ownership, running anyway: {err:#}"
-                            );
-                        }
-                    });
-                    #[cfg(test)]
-                    self.spawned.push(_claim_handle);
-                }
-                PollAction::Proceed => {}
+            if !self.this_host_polls(epic.id).await {
+                continue;
             }
 
             self.spawn_epic_cycle(epic.id, epic.title, Arc::clone(&known_paths));
         }
+    }
+
+    /// The epics to consider this tick, or `None` when there is nothing to poll
+    /// (no epic has a feed command, or the epics could not be listed). Keeps the
+    /// "any feed commands" cache and `last_run` in step with the board.
+    async fn list_epics_for_tick(&mut self) -> Option<Vec<crate::models::Epic>> {
+        // Invalidate the cache if an EpicChanged signal arrived since last tick.
+        if self.epic_changed_rx.has_changed().unwrap_or(true) {
+            self.epic_changed_rx.borrow_and_update();
+            self.any_feed_cmds = None;
+        }
+
+        // Skip all DB work when we know no epic has a feed command.
+        if self.any_feed_cmds == Some(false) {
+            return None;
+        }
+
+        let epics = match self.db.list_epics().await {
+            Ok(e) => e,
+            Err(err) => {
+                tracing::warn!("FeedRunner: failed to list epics: {err:#}");
+                return None;
+            }
+        };
+
+        let active_ids: std::collections::HashSet<EpicId> = epics.iter().map(|e| e.id).collect();
+        self.last_run.retain(|id, _| active_ids.contains(id));
+
+        let has_feed_cmd = epics.iter().any(|e| e.feed_command.is_some());
+        self.any_feed_cmds = Some(has_feed_cmd);
+
+        if !has_feed_cmd {
+            return None;
+        }
+        Some(epics)
+    }
+
+    /// Whether this host should run `epic_id`'s cycle this tick, per
+    /// `core/PollOwner`. Claims ownership (without waiting for the answer) when
+    /// no host has it yet.
+    async fn this_host_polls(&mut self, epic_id: EpicId) -> bool {
+        let owner = match self
+            .board_reads
+            .poll_owner(crate::models::PollScopeId::Epic(epic_id))
+            .await
+        {
+            Ok(owner) => owner,
+            Err(err) => {
+                tracing::debug!(
+                    epic_id = epic_id.0,
+                    "FeedRunner: failed to read poll ownership, skipping this tick: {err:#}"
+                );
+                return false;
+            }
+        };
+        match decide_poll_action(owner.as_deref(), &self.host_id) {
+            PollAction::Skip => return false,
+            // Fired without awaiting it: `tick` must not block on a
+            // network round-trip for one epic while others are still
+            // waiting their turn in this loop. This is the same
+            // "proceed optimistically, let the loser's next tick stand
+            // down" tradeoff `exec_check_status_if_owned` makes for the
+            // PR-poll side of the same mechanism (`src/runtime/pr.rs`).
+            PollAction::ClaimAndProceed => {
+                let db = self.db.clone();
+                let epic_id = epic_id;
+                let _claim_handle = tokio::task::spawn(async move {
+                    if let Err(err) = db
+                        .claim_poll_owner(crate::models::PollScopeId::Epic(epic_id))
+                        .await
+                    {
+                        tracing::debug!(
+                            epic_id = epic_id.0,
+                            "FeedRunner: failed to claim poll ownership, running anyway: {err:#}"
+                        );
+                    }
+                });
+                #[cfg(test)]
+                self.spawned.push(_claim_handle);
+            }
+            PollAction::Proceed => {}
+        }
+        true
     }
 
     /// Spawn one epic's feed cycle, so a slow feed command cannot stall the
