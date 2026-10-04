@@ -588,7 +588,7 @@ fn select_store_target(
 /// terminal) and ends when `key_tx` is closed.
 fn spawn_input_thread(
     key_tx: mpsc::UnboundedSender<crossterm::event::KeyEvent>,
-    resize_tx: mpsc::UnboundedSender<Message>,
+    msg_tx: mpsc::UnboundedSender<Message>,
     input_paused: Arc<AtomicBool>,
 ) {
     tokio::task::spawn_blocking(move || loop {
@@ -601,17 +601,17 @@ fn spawn_input_thread(
                 Ok(Event::Key(key)) if key_tx.send(key).is_err() => break,
                 Ok(Event::Key(_)) => {}
                 Ok(Event::Resize(..)) => {
-                    let _ = resize_tx.send(Message::System(
+                    let _ = msg_tx.send(Message::System(
                         crate::tui::messages::SystemMessage::TerminalResized,
                     ));
                 }
                 Ok(Event::FocusGained) => {
-                    let _ = resize_tx.send(Message::System(
+                    let _ = msg_tx.send(Message::System(
                         crate::tui::messages::SystemMessage::FocusChanged(true),
                     ));
                 }
                 Ok(Event::FocusLost) => {
-                    let _ = resize_tx.send(Message::System(
+                    let _ = msg_tx.send(Message::System(
                         crate::tui::messages::SystemMessage::FocusChanged(false),
                     ));
                 }

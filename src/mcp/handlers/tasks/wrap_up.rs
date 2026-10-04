@@ -282,8 +282,7 @@ pub(super) async fn perform_close(
 
 /// Validate the exit token, action, window liveness and the PR link, then
 /// remove the token — all in one write-lock so a concurrent second call can't
-/// observe a half-consumed token. The reflection is the `/retro` skill, run
-/// before `exit_session` is ever called. `Err` is the `INVALID_PARAMS` message.
+/// observe a half-consumed token. `Err` is the `INVALID_PARAMS` message.
 fn consume_exit_token(
     state: &McpState,
     task: &Task,
@@ -336,7 +335,7 @@ fn close_outcome(
         (WrapUpAction::Pr, Some(pr_url)) => crate::service::CloseSessionOutcome::Review {
             pr_url: crate::models::TaskUrl::new(pr_url, crate::models::UrlType::Pr),
         },
-        // The PR link is validated as required above whenever action = Pr, so this
+        // `consume_exit_token` requires the PR link whenever action = Pr, so this
         // (Pr, None) arm is unreachable in practice — Done is a safe, non-panicking
         // fallback rather than asserting an invariant the compiler can't see.
         (WrapUpAction::Pr, None) | (WrapUpAction::Rebase, _) | (WrapUpAction::Done, _) => {
