@@ -324,7 +324,7 @@ async fn get_task_shows_sub_status() {
 
 #[tokio::test]
 async fn update_task_nonexistent_task_returns_error() {
-    let state = test_state_unattached().await;
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",

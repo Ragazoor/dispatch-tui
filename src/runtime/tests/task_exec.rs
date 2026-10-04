@@ -1489,7 +1489,7 @@ async fn exec_patch_sub_status_updates_db() {
 
 #[tokio::test]
 async fn exec_patch_sub_status_shows_error_for_missing_task() {
-    let (rt, mut app) = test_runtime_unattached().await;
+    let (rt, mut app) = test_runtime().await;
     rt.exec_patch_sub_status(&mut app, TaskId(999), models::SubStatus::Active)
         .await;
     assert!(app.error_popup().is_some());

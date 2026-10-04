@@ -261,6 +261,12 @@ impl TaskService {
         }
 
         let task_id = params.task_id;
+        // The shared store's `patch_task` is a deliberate no-op on a missing
+        // id (hooks race with deletes), so the not-found answer is this
+        // service's to give — see `UpdateTaskViaMcp` in mcp-task-tools.allium.
+        if !self.db.task_exists(task_id).await? {
+            return Err(Self::task_not_found(task_id));
+        }
         let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
         let validated_sub_status = self.validate_sub_status(task_id, &params).await?;
 

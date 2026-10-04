@@ -399,6 +399,13 @@ rule MarkTaskDoneViaMcp {
         --      wrap_up then exit_session instead."
         --   3. Unknown task_id → the same NotFound(-32001) every other MCP
         --      task lookup uses ("Task <id> not found").
+        --      The check is the service's own existence read, made before
+        --      any write, on every store. It is NOT left to the store: the
+        --      shared store's patch_task reducer is a deliberate silent no-op
+        --      on a missing id (hooks and watchers race with deletes), so
+        --      without the service check update_task would report success
+        --      for a task that does not exist. The same holds for the TUI's
+        --      sub_status write, which goes through update_task.
         -- A caller could trip both 1 and 2 at once; 1 is checked first, so
         -- that error names the field-combination problem regardless of who
         -- is calling.
