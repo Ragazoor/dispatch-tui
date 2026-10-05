@@ -2166,8 +2166,8 @@ rule RoleRoutedFeedSync {
         -- src/feed/ingest/tests.rs::absent_task_with_worktree_is_reported_as_removed
         -- and src/feed/ingest/tests.rs::flat_sync_reports_removed_task_with_worktree
         -- (the report reaches the outcome on both sync paths);
-        -- src/db/tests/tasks_feed.rs::delete_stale_subtree_feed_tasks_returns_removed_rows_with_state
-        -- and src/db/tests/tasks_feed.rs::upsert_feed_tasks_returns_removed_rows_with_state
+        -- src/db/tests/tasks_feed/additive_and_stale.rs::delete_stale_subtree_feed_tasks_returns_removed_rows_with_state
+        -- and src/db/tests/tasks_feed/additive_and_stale.rs::upsert_feed_tasks_returns_removed_rows_with_state
         -- (the RETURNING contract on both stale-delete statements);
         -- src/feed/mod.rs::tick_removed_task_tears_down_its_worktree
         -- and src/runtime/tests/feeds.rs::exec_trigger_epic_feed_removed_task_tears_down_its_worktree
@@ -2628,7 +2628,7 @@ rule DegradedNonEmptyEmission {
         -- degraded_partial_when_items_present_and_stderr_present (fires),
         -- not_partially_degraded_when_zero_items and
         -- not_partially_degraded_when_no_stderr (both boundaries);
-        -- src/db/tests/tasks_feed.rs::upsert_feed_tasks_additive_upserts_without_deleting_absent_tasks;
+        -- src/db/tests/tasks_feed/additive_and_stale.rs::upsert_feed_tasks_additive_upserts_without_deleting_absent_tasks;
         -- src/feed/ingest/tests.rs, one per removal mechanism:
         -- additive_role_routed_sync_keeps_a_task_absent_from_the_emission,
         -- additive_role_routed_sync_keeps_parent_stranded_tasks,
