@@ -462,7 +462,7 @@ rule DeleteEpicRefused {
         --     and ids. The readable blocker leads because it is the one the
         --     user can act on.
         -- Lowest id is what the store's own delete_epic guard names too
-        -- (spacetime/module/src/tasks_epics.rs: validate_epic_deletable names
+        -- (the spacetime module's validate_epic_deletable in tasks_epics.rs names
         -- the first undone task id), so a refusal from either check points at
         -- the same task.
         --
