@@ -10,6 +10,31 @@ mod tests {
     const NO_EPIC: i64 = 0;
     const NO_OWNER: &str = "";
 
+    /// `spacetime-seed.allium: StoreRefusesUnknownStatus`. The module is the
+    /// one layer no client can bypass, so it names the four statuses it
+    /// holds and refuses the rest, `archived` included.
+    #[test]
+    fn the_four_known_statuses_are_accepted() {
+        for status in ["backlog", "running", "review", "done"] {
+            assert!(validate_status("task", 1, status).is_ok(), "{status}");
+        }
+    }
+
+    #[test]
+    fn the_retired_archived_status_is_refused_naming_status_and_id() {
+        let why = validate_status("epic", 100, "archived").unwrap_err();
+        assert!(why.contains("archived"), "{why}");
+        assert!(why.contains("100"), "{why}");
+        assert!(why.contains("epic"), "{why}");
+    }
+
+    #[test]
+    fn an_empty_or_misspelled_status_is_refused() {
+        for status in ["", "Done", "in_progress", " done"] {
+            assert!(validate_status("task", 1, status).is_err(), "{status:?}");
+        }
+    }
+
     /// A task with no epic sits on somebody's user board, and the row has to
     /// say whose. Nothing else in it can answer.
     #[test]

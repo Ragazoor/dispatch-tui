@@ -18,6 +18,7 @@ use super::*;
 pub(crate) fn write_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
     validate_task_ownership(row.epic_id, &row.owner)
         .map_err(|why| format!("task {}: {why}", row.id))?;
+    validate_status("task", row.id, &row.status)?;
     // A TASK BORN IN DONE IS A COMPLETED TASK. `stamps_completion` covers every
     // TRANSITION into done, but a create is not a transition, and a Done card
     // with no `completed_at` sorts to the bottom of the column forever
@@ -489,6 +490,7 @@ pub struct SubStatusUpdate {
 #[spacetimedb::reducer]
 pub fn create_epic(ctx: &ReducerContext, row: Epic) -> Result<(), String> {
     let parent = row.parent_epic_id;
+    validate_status("epic", row.id, &row.status)?;
     ctx.db.epics().insert(Epic { id: 0, ..row });
     // The new epic is a child of its parent and a parent has no children rule
     // it can break by gaining a backlog one — but the parent may have been
@@ -516,6 +518,7 @@ pub fn patch_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
         row.completed_at = now(ctx);
     }
     row.updated_at = now(ctx);
+    validate_status("epic", row.id, &row.status)?;
     ctx.db.epics().id().update(row);
 
     recalculate_epic_chain(ctx, id);

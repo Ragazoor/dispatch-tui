@@ -8,7 +8,8 @@
 --        had ids written into it does not know what ids it has handed out.
 -- Includes: taking a snapshot; restoring one; the id-sequence burn that must
 --           follow a restore; what makes a second restore of the same snapshot
---           a no-op; the one-time backfills that seeding performs.
+--           a no-op; the one-time backfills that seeding performs; the
+--           store's own refusal of a task or epic row with an unknown status.
 -- Excludes: the shared schema itself and the shape of every row in it (see
 --           core.allium, which owns Task, Epic, Host, SavedRepoPath and the
 --           rest); which store is authoritative and why (see
@@ -606,6 +607,64 @@ rule RefuseArchivedRows {
         -- or RefuseIncompleteSnapshot would have refused for an unrelated
         -- reason. Like every refusal here, it still runs before the burn and
         -- before the first row, so the store stays untouched.
+        --
+        -- THE CLIENT-SIDE EARLY REFUSAL, NOT THE LAST LINE. Since task #16734
+        -- the store itself refuses any task or epic row whose status is not
+        -- one it knows (StoreRefusesUnknownStatus, below), so a snapshot this
+        -- rule missed could still not land an `archived` row. This rule stays
+        -- because it refuses earlier and better: before the burn, for the
+        -- whole snapshot at once, with every offending id in one Refusal an
+        -- operator can act on — where the store's own check would only stop
+        -- the first batch that carried one.
+}
+
+-- == The store's own check ==
+
+rule StoreRefusesUnknownStatus {
+    when: StoreRowsWriteRequested(caller, table, rows)
+
+    requires: table in {tasks, epics}
+    requires: rows.any(r => resulting_status(r) not in {"backlog", "running", "review", "done"})
+
+    ensures: StoreWriteRefused(caller: caller, table: table, detail: unknown_status_detail(rows))
+
+    @guidance
+        -- WHAT "A WRITE" IS. Every reducer that writes a task or epic row:
+        -- create_task, patch_task, create_epic, patch_epic, seed_tasks,
+        -- seed_epics and the feed upserts — any path, present or future, that
+        -- leaves a row in `tasks` or `epics`. The known statuses are exactly
+        -- core/TaskStatus's four (backlog, running, review, done), which is
+        -- the type both core/Task.status and core/Epic.status declare; the
+        -- retired `archived` is unknown like any other string.
+        --
+        -- REFUSED WHOLE, AND NAMED. The reducer returns an error naming the
+        -- offending status and the row's id, and writes nothing. For a
+        -- seed batch that means the whole batch: one bad row refuses every
+        -- row in the call, so a refused seed leaves the store as it was,
+        -- the same promise NothingIsWrittenBeforeTheChecksPass makes for a
+        -- restore.
+        --
+        -- THE RESULTING ROW IS WHAT IS CHECKED, NOT THE ROW ON DISK. Rows
+        -- already in the store with an unknown status are left alone: a
+        -- module publish is not blocked by them and nothing rewrites them.
+        -- A patch is judged by the row it would produce. One that moves such
+        -- a row to a known status succeeds — that is how the leftovers get
+        -- cleaned up. One that leaves the status unknown (a title edit, say)
+        -- is refused, because writing it back would be writing an unknown
+        -- status. Deleting such a row is not a write of a row and is not
+        -- refused.
+        --
+        -- WHY THE MODULE AND NOT ONLY THE CLIENT. On 2026-10-05 the store
+        -- held 1,785 tasks and 165 epics with status `archived`, which is
+        -- what blocked deleting epic #100. Every client path already refused
+        -- them — RefuseArchivedRows on restore and seed, ImportOldStore's
+        -- RowsWithARemovedStatusAreDropped — but the module accepted any
+        -- string, so an older binary, an old snapshot fed through a raw
+        -- reducer call, or anybody calling a reducer directly could write
+        -- one. The module is the only layer every write must pass through,
+        -- so it is the only place the check cannot be bypassed. The client
+        -- checks stay as the earlier, friendlier refusal; this is the
+        -- guarantee.
 }
 
 rule RefuseImplausibleCeiling {

@@ -48,6 +48,22 @@ pub(crate) const BACKLOG: &str = "backlog";
 
 pub(crate) const KNOWN_STATUSES: [&str; 4] = [BACKLOG, "running", "review", DONE];
 
+/// Refuse a task or epic row whose status is not one of [`KNOWN_STATUSES`].
+///
+/// `spacetime-seed.allium: StoreRefusesUnknownStatus`. Called on the RESULTING
+/// row of every write, so a patch that moves a legacy row to a known status
+/// succeeds and one that leaves it unknown is refused. Deleting is not a write
+/// and is not checked. `kind` is "task" or "epic".
+pub(crate) fn validate_status(kind: &str, id: i64, status: &str) -> Result<(), String> {
+    if KNOWN_STATUSES.contains(&status) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{kind} {id}: unknown status {status:?}; expected one of {KNOWN_STATUSES:?}"
+        ))
+    }
+}
+
 /// Derive an epic's status from its children's, or `None` for "leave it alone".
 ///
 /// The whole of `epics.allium: EpicStatusRecalculation`'s derivation, as a pure

@@ -27,6 +27,7 @@ pub fn seed_epics(ctx: &ReducerContext, rows: Vec<Epic>) -> Result<(), String> {
         if row.id == 0 {
             return Err("seed_epics needs each epic's real id".into());
         }
+        validate_status("epic", row.id, &row.status)?;
         if ctx.db.epics().id().find(row.id).is_some() {
             ctx.db.epics().id().update(row);
         } else {
