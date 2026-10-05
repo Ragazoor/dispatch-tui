@@ -1000,3 +1000,13 @@ fn normalize_server_trims_and_treats_blank_as_none() {
         Some("http://h:1".to_string())
     );
 }
+
+/// An address that cannot be resolved has nothing listening on it. Decided
+/// without a connection attempt, so it cannot wait out the timeout.
+#[test]
+fn an_unresolvable_address_is_nothing_listening() {
+    assert_eq!(
+        probe_address("not-an-address", Duration::from_millis(200)),
+        ManagedAddressState::NothingListening
+    );
+}

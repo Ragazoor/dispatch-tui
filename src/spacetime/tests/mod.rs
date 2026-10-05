@@ -17,6 +17,7 @@ mod refusals;
 mod round_trip;
 mod seed;
 mod sequence_burn;
+mod snapshot_edges;
 
 use crate::db::Database;
 use crate::spacetime::{dump_from_sqlite, SharedTable, Snapshot, TableExtract};

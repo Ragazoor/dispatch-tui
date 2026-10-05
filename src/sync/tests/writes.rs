@@ -2143,3 +2143,32 @@ async fn settings_route_with_no_identity_settled() {
         )]
     );
 }
+
+// -- Coverage gaps closed by task #16686 --------------------------------------
+
+/// A subscribe sends the subscriber and the epic as given; a refusal is an
+/// error, because following an epic that did not take effect is not a success.
+#[tokio::test]
+async fn subscribing_to_an_epic_sends_it_and_a_refusal_is_an_error() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    writer.subscribe_to_epic("user-me", 7).await.unwrap();
+
+    assert_eq!(caller.sent(), [Sent::Subscribe("user-me".to_string(), 7)]);
+
+    let (refusing, _) = writer_with(RecordingCaller::rejecting());
+    assert!(refusing.subscribe_to_epic("user-me", 7).await.is_err());
+}
+
+/// The production identity starts unsettled and answers with the name the
+/// store gave once the connection settles.
+#[tokio::test]
+async fn the_settled_identity_is_none_until_the_store_names_us() {
+    let identity = crate::sync::SettledIdentity::default();
+
+    assert_eq!(identity.user().await.unwrap(), None);
+
+    identity.settle("user-me");
+
+    assert_eq!(identity.user().await.unwrap(), Some("user-me".to_string()));
+}
