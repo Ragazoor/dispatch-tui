@@ -99,6 +99,41 @@ impl super::super::EpicRead for Database {
         .await
     }
 
+    async fn list_undecodable_task_ids_for_epic(
+        &self,
+        epic_id: EpicId,
+    ) -> Result<Vec<crate::models::TaskId>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.list_undecodable_task_ids_for_epic(epic_id).await;
+        }
+        self.db_call_read(move |conn| {
+            let mut stmt = conn
+                .prepare_cached(&format!(
+                    "SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id = ?1 ORDER BY id ASC"
+                ))
+                .context("Failed to prepare list_undecodable_task_ids_for_epic")?;
+            let rows = stmt
+                .query_map(params![epic_id.0], |row| {
+                    let id: i64 = row.get("id")?;
+                    Ok((id, row_to_task(row)))
+                })
+                .context("Failed to query tasks for epic")?;
+            let mut ids = Vec::new();
+            for row in rows {
+                let (id, decoded) = row.context("Failed to read task id")?;
+                match decoded {
+                    Ok(_) => {}
+                    Err(e) if super::is_row_decode_error(&e) => {
+                        ids.push(crate::models::TaskId(id));
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            Ok(ids)
+        })
+        .await
+    }
+
     async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<crate::models::Task>> {
         if let Some(reader) = self.shared_reader() {
             return reader.list_all_tasks_with_epic_id().await;

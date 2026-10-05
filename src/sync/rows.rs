@@ -113,6 +113,12 @@ pub struct RetiredFeedItemRow {
 #[derive(Default)]
 struct Rows {
     tasks: BTreeMap<i64, Task>,
+    /// Tasks the store delivered that did not decode, as `id -> raw epic_id`
+    /// (`0` for none). They are absent from `tasks` but still exist in the
+    /// store, so a subtree check has to be able to count them
+    /// (epics.allium: `DeleteEpicRefused`). A later good copy or a removal
+    /// forgets the entry.
+    undecodable_tasks: BTreeMap<i64, i64>,
     epics: BTreeMap<i64, Epic>,
     repo_paths: BTreeMap<i64, RepoPathRow>,
     repo_base_branches: BTreeMap<i64, RepoBaseBranchRow>,
@@ -252,6 +258,7 @@ impl SharedRows {
         }
         match decode::task(row) {
             Ok(task) => self.write(|rows| {
+                rows.undecodable_tasks.remove(&task.id.0);
                 rows.tasks.insert(task.id.0, task);
                 true
             }),
@@ -265,12 +272,22 @@ impl SharedRows {
                     count,
                     "dropping an undecodable task from the shared store: {e}"
                 );
+                // Dropped from the board, but remembered by id and epic so a
+                // delete pre-check can still count it.
+                self.write(|rows| {
+                    rows.tasks.remove(&row.id);
+                    rows.undecodable_tasks.insert(row.id, row.epic_id);
+                    false
+                });
             }
         }
     }
 
     pub fn remove_task(&self, id: TaskId) {
-        self.write(|rows| rows.tasks.remove(&id.0).is_some());
+        self.write(|rows| {
+            let undecodable = rows.undecodable_tasks.remove(&id.0).is_some();
+            rows.tasks.remove(&id.0).is_some() || undecodable
+        });
     }
 
     pub fn upsert_epic(&self, row: &bindings::Epic) {
@@ -502,6 +519,18 @@ impl SharedRows {
                 rows.tasks.values().filter(|t| t.epic_id == Some(epic)),
                 Task::sort_key,
             )
+        })
+    }
+
+    /// Ids of the epic's tasks the store delivered but that did not decode,
+    /// ascending. Not on the board; counted by the delete pre-check.
+    pub fn undecodable_task_ids_for_epic(&self, epic: EpicId) -> Vec<TaskId> {
+        self.read(|rows| {
+            rows.undecodable_tasks
+                .iter()
+                .filter(|(_, e)| **e == epic.0)
+                .map(|(id, _)| TaskId(*id))
+                .collect()
         })
     }
 

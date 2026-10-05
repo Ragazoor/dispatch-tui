@@ -2658,3 +2658,38 @@ async fn epic_ensure_deletable_refuses_when_any_subtree_task_is_not_done() {
         .unwrap();
     epics.ensure_deletable(epic.id).await.unwrap();
 }
+
+#[tokio::test]
+async fn epic_ensure_deletable_names_the_lowest_id_blocking_task_across_sub_epics() {
+    let db = test_db().await;
+    let tasks = task_svc(&db);
+    let epics = epic_svc(&db);
+    let mk = |parent| CreateEpicParams {
+        title: "E".into(),
+        description: "".into(),
+        sort_order: None,
+        parent_epic_id: parent,
+        feed_command: None,
+        feed_interval_secs: None,
+    };
+    let root = epics.create_epic(mk(None)).await.unwrap();
+    let sub = epics.create_epic(mk(Some(root.id))).await.unwrap();
+    // The lower id lives in the sub-epic, the higher one directly in the root.
+    let mut p = make_task_params("/repo");
+    p.title = "Deep blocker".into();
+    let deep = tasks.create_task(p).await.unwrap();
+    db.set_task_epic_id(deep, Some(sub.id)).await.unwrap();
+    let mut p = make_task_params("/repo");
+    p.title = "Shallow blocker".into();
+    let shallow = tasks.create_task(p).await.unwrap();
+    db.set_task_epic_id(shallow, Some(root.id)).await.unwrap();
+
+    let err = epics.ensure_deletable(root.id).await.unwrap_err();
+
+    let ServiceError::Validation(msg) = err else {
+        panic!("expected Validation, got {err:?}");
+    };
+    assert!(msg.contains(&format!("#{}", deep.0)), "{msg}");
+    assert!(msg.contains("Deep blocker"), "{msg}");
+    assert!(!msg.contains("Shallow blocker"), "{msg}");
+}

@@ -609,16 +609,19 @@ impl EpicService {
 
     /// The delete pre-check (`DeleteEpic`, epics.allium): every task in the
     /// subtree must be done in the store's true rows.
+    ///
+    /// The refusal names what blocks the delete (`DeleteEpicRefused`): the
+    /// lowest-id task that is not done, and any subtree task whose row the
+    /// client could not decode — its status is unknown, so it blocks too.
     pub async fn ensure_deletable(&self, epic_id: EpicId) -> Result<(), ServiceError> {
         self.get_epic(epic_id).await?;
 
-        if !subtree_all_tasks_done(&*self.db, epic_id).await? {
-            return Err(ServiceError::Validation(
-                "cannot delete an epic while a task anywhere in its subtree is not done"
-                    .to_string(),
-            ));
+        let mut blocking = SubtreeBlockers::default();
+        collect_subtree_blockers(&*self.db, epic_id, &mut blocking).await?;
+        match blocking.message() {
+            Some(msg) => Err(ServiceError::Validation(msg)),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     /// epics.allium: `ConfirmDeleteEpic`/`DeleteEpic`. Refuses unless every
@@ -640,26 +643,75 @@ impl EpicService {
     }
 }
 
-/// Every task anywhere in `epic_id`'s subtree (its own direct tasks, plus
-/// those of every descendant epic, at any depth) is `done`. An epic with no
-/// tasks at all qualifies. Boxed for recursion — async fns cannot recurse
-/// unboxed, since the compiler would need an infinitely-sized future type.
-fn subtree_all_tasks_done<'a>(
+/// What stops an epic delete (epics.allium: `DeleteEpicRefused`), gathered
+/// over the whole subtree.
+#[derive(Default)]
+struct SubtreeBlockers {
+    /// The lowest-id task that is not done: id, title, status.
+    first_undone: Option<(crate::models::TaskId, String, TaskStatus)>,
+    /// Tasks whose row the client could not decode. Their status is unknown,
+    /// so they block the delete.
+    unreadable: Vec<crate::models::TaskId>,
+}
+
+impl SubtreeBlockers {
+    fn message(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        if let Some((id, title, status)) = &self.first_undone {
+            parts.push(format!(
+                "task #{} \"{}\" (status: {}) in its subtree is not done",
+                id.0,
+                title,
+                status.as_str()
+            ));
+        }
+        if !self.unreadable.is_empty() {
+            let mut ids = self.unreadable.clone();
+            ids.sort();
+            let ids = ids
+                .iter()
+                .map(|id| format!("#{}", id.0))
+                .collect::<Vec<_>>()
+                .join(", ");
+            parts.push(format!(
+                "{} task(s) in its subtree could not be read (ids {ids})",
+                self.unreadable.len()
+            ));
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(format!("cannot delete epic: {}", parts.join("; ")))
+        }
+    }
+}
+
+/// Walk `epic_id`'s subtree (its own direct tasks, plus those of every
+/// descendant epic, at any depth) and record what blocks a delete. An epic
+/// with no tasks has no blockers. Boxed for recursion — async fns cannot
+/// recurse unboxed, since the compiler would need an infinitely-sized future
+/// type.
+fn collect_subtree_blockers<'a>(
     db: &'a dyn db::TaskAndEpicStore,
     epic_id: EpicId,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, ServiceError>> + Send + 'a>> {
+    out: &'a mut SubtreeBlockers,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ServiceError>> + Send + 'a>> {
     Box::pin(async move {
-        let tasks = db.list_tasks_for_epic(epic_id).await?;
-        if tasks.iter().any(|t| t.status != TaskStatus::Done) {
-            return Ok(false);
-        }
-        let sub_epics = db.list_sub_epics(epic_id).await?;
-        for sub in sub_epics {
-            if !subtree_all_tasks_done(db, sub.id).await? {
-                return Ok(false);
+        for t in db.list_tasks_for_epic(epic_id).await? {
+            let lower = out
+                .first_undone
+                .as_ref()
+                .is_none_or(|(id, _, _)| t.id < *id);
+            if t.status != TaskStatus::Done && lower {
+                out.first_undone = Some((t.id, t.title.clone(), t.status));
             }
         }
-        Ok(true)
+        out.unreadable
+            .extend(db.list_undecodable_task_ids_for_epic(epic_id).await?);
+        for sub in db.list_sub_epics(epic_id).await? {
+            collect_subtree_blockers(db, sub.id, out).await?;
+        }
+        Ok(())
     })
 }
 

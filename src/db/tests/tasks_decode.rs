@@ -267,3 +267,55 @@ async fn list_live_agent_tasks_returns_exactly_the_live_agents_by_id() {
         .collect();
     assert_eq!(live.iter().map(|t| t.id).collect::<Vec<_>>(), expected);
 }
+
+/// `DeleteEpicRefused` (epics.allium): the delete pre-check must be able to
+/// ask which tasks of an epic the bulk read skipped, since a skipped row is
+/// still in the subtree and its status is unknown.
+#[tokio::test]
+async fn undecodable_task_ids_for_epic_lists_the_skipped_rows_of_that_epic() {
+    let db = unattached_db().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    write_corrupt_row(
+        &db,
+        "INSERT INTO tasks (id, title, description, repo_path, status, sub_status,
+                            base_branch, created_at, updated_at, epic_id)
+         VALUES (9001, 'corrupt', '', '/repo', 'not_a_status', 'none', 'main',
+                 '2026-01-01 00:00:00', '2026-01-01 00:00:00', (SELECT MIN(id) FROM epics));",
+    )
+    .await;
+    let healthy = create_task_returning(&db, "ok", "", "/repo", None, TaskStatus::Done)
+        .await
+        .unwrap();
+
+    let ids = db
+        .list_undecodable_task_ids_for_epic(epic.id)
+        .await
+        .unwrap();
+
+    assert_eq!(ids, vec![TaskId(9001)]);
+    assert!(!ids.contains(&healthy.id));
+}
+
+#[tokio::test]
+async fn epic_delete_refusal_counts_an_undecodable_subtree_task() {
+    use crate::service::{EpicService, ServiceError};
+    let db = std::sync::Arc::new(unattached_db().await);
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    write_corrupt_row(
+        &db,
+        "INSERT INTO tasks (id, title, description, repo_path, status, sub_status,
+                            base_branch, created_at, updated_at, epic_id)
+         VALUES (9001, 'corrupt', '', '/repo', 'not_a_status', 'none', 'main',
+                 '2026-01-01 00:00:00', '2026-01-01 00:00:00', (SELECT MIN(id) FROM epics));",
+    )
+    .await;
+    let svc = EpicService::new(db.clone(), db.clone());
+
+    let err = svc.ensure_deletable(epic.id).await.unwrap_err();
+
+    let ServiceError::Validation(msg) = err else {
+        panic!("expected Validation, got {err:?}");
+    };
+    assert!(msg.contains("could not be read"), "{msg}");
+    assert!(msg.contains("#9001"), "{msg}");
+}

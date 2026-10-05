@@ -303,7 +303,11 @@ rule ConfirmDeleteEpic {
 rule DeleteEpic {
     when: DeleteEpic(epic)
 
-    requires: epic.subtree_tasks.all(t => t.status = done)
+    -- decodable(t): the deleting client could decode t's row. A row it could
+    -- not decode is dropped from its reads (observability.allium:
+    -- BulkReadSkipsUndecodableRow) but is still in the subtree, and its status
+    -- is unknown, so it never counts as done.
+    requires: epic.subtree_tasks.all(t => decodable(t) and t.status = done)
 
     -- The epics this delete removes: the epic itself and every descendant.
     -- A feed epic among them is being reset, not pruned.
@@ -419,13 +423,26 @@ rule DeleteEpicRefused {
 
     -- Evaluated over the store's TRUE rows (DeleteEpic's pre-check), before
     -- any subtree teardown or watch-row purge begins.
-    requires: not epic.subtree_tasks.all(t => t.status = done)
+    requires: not epic.subtree_tasks.all(t => decodable(t) and t.status = done)
+
+    -- The refusal names what blocks the delete. The blocking task is the
+    -- LOWEST-ID readable subtree task that is not done — not the first one a
+    -- subtree walk happens to reach — so the same epic always names the same
+    -- task. The tasks the client could not decode are counted and named by id.
+    let unreadable = filter(epic.subtree_tasks, t => not decodable(t))
+    let undone = filter(epic.subtree_tasks, t => decodable(t) and t.status != done)
+    let blocking_task = min_by(undone, t => t.id)    -- null when undone is empty
 
     ensures:
         for task in epic.subtree_tasks:
             task.worktree = task.worktree
             task.tmux_window = task.tmux_window
-        UserInformed(about: delete_refused, epic: epic)
+        UserInformed(
+            about: delete_refused,
+            epic: epic,
+            blocking_task: blocking_task,
+            unreadable_count: unreadable.count
+        )
 
     @guidance
         -- The refusal arm of DeleteEpic's pre-check: the epic, every
@@ -433,6 +450,32 @@ rule DeleteEpicRefused {
         -- and `task_watchers` rows are all left as they are, and the board is
         -- refreshed from the store. See DeleteTask's guidance (tasks.allium)
         -- for the narrow pre-check-to-reducer race that remains.
+        --
+        -- WHAT THE MESSAGE SAYS. A refusal that only says "a task is not done"
+        -- leaves the user hunting through a deep subtree for it, so the
+        -- message names the blocker:
+        --   - a readable blocker: its id, title and status, e.g.
+        --     cannot delete epic: task #123 "Title" (status: running) in its subtree is not done
+        --   - only unreadable tasks block: how many, and their ids, e.g.
+        --     cannot delete epic: 2 task(s) in its subtree could not be read (ids #7, #9)
+        --   - both: the readable blocker as above, plus the unreadable count
+        --     and ids. The readable blocker leads because it is the one the
+        --     user can act on.
+        -- Lowest id is what the store's own delete_epic guard names too
+        -- (spacetime/module/src/tasks_epics.rs: validate_epic_deletable names
+        -- the first undone task id), so a refusal from either check points at
+        -- the same task.
+        --
+        -- WHY UNREADABLE TASKS BLOCK. A row the client cannot decode is
+        -- skipped by its reads, so it is invisible on the board but still in
+        -- the subtree. Its status is unknown, and delete is permanent; treating
+        -- an unknown status as done would let the delete take work nobody
+        -- could see. Refusing, and saying the rows could not be read, is the
+        -- only honest answer.
+        --
+        -- Only the client pre-check (EpicService::ensure_deletable) composes
+        -- this message. The store's delete_epic reducer is unchanged and
+        -- still has the final say over its own true rows.
 }
 
 -- == MCP Epic Tools ==

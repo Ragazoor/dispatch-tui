@@ -567,3 +567,30 @@ pub(super) fn as_setting(row: &Row) -> bindings::Setting {
         value: s(T, row, "value"),
     }
 }
+
+/// `DeleteEpicRefused` (epics.allium): a dropped task is remembered by id and
+/// epic, so the delete pre-check can still count it in the subtree. A later
+/// good copy or a removal forgets it.
+#[test]
+fn an_undecodable_task_is_remembered_against_its_epic_until_replaced_or_removed() {
+    use crate::models::{EpicId, TaskId};
+    let shared = crate::sync::SharedRows::new();
+    let mut task = blank_task();
+    task.epic_id = 7;
+    task.status = "teleported".into();
+    shared.upsert_task(&task);
+    assert_eq!(
+        shared.undecodable_task_ids_for_epic(EpicId(7)),
+        vec![TaskId(task.id)]
+    );
+    assert!(shared.undecodable_task_ids_for_epic(EpicId(8)).is_empty());
+
+    task.status = "done".into();
+    shared.upsert_task(&task);
+    assert!(shared.undecodable_task_ids_for_epic(EpicId(7)).is_empty());
+
+    task.status = "teleported".into();
+    shared.upsert_task(&task);
+    shared.remove_task(TaskId(task.id));
+    assert!(shared.undecodable_task_ids_for_epic(EpicId(7)).is_empty());
+}

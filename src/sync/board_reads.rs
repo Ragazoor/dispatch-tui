@@ -152,6 +152,10 @@ impl crate::db::SharedReader for SubscriptionBoardReads {
         Ok(self.rows.tasks_for_epic(epic))
     }
 
+    async fn list_undecodable_task_ids_for_epic(&self, epic: EpicId) -> Result<Vec<TaskId>> {
+        Ok(self.rows.undecodable_task_ids_for_epic(epic))
+    }
+
     async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>> {
         Ok(self.rows.tasks_with_epic())
     }

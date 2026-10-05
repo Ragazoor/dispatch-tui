@@ -568,6 +568,10 @@ pub trait EpicRead: Send + Sync {
     /// List direct children of the given epic.
     async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>>;
     async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<Task>>;
+    /// Ids of the epic's tasks the bulk read skipped because the row did not
+    /// decode, ascending. Such a task is still in the epic's subtree with an
+    /// unknown status (epics.allium: `DeleteEpicRefused`).
+    async fn list_undecodable_task_ids_for_epic(&self, epic_id: EpicId) -> Result<Vec<TaskId>>;
     /// Fetch all tasks that have a non-null epic_id in a single query.
     /// Use instead of looping over epics and calling list_tasks_for_epic() per epic.
     async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>>;
@@ -1181,6 +1185,8 @@ pub trait SharedReader: Send + Sync {
     async fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
     /// An epic's tasks, in `list_all`'s order.
     async fn list_tasks_for_epic(&self, epic: EpicId) -> Result<Vec<Task>>;
+    /// An epic's tasks that did not decode, by ascending id.
+    async fn list_undecodable_task_ids_for_epic(&self, epic: EpicId) -> Result<Vec<TaskId>>;
     /// Every task with an epic, ordered by epic, then as `list_all`.
     async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>>;
     /// The watcher task ids of `target`, ordered by watch id.
