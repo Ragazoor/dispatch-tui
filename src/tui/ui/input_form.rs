@@ -24,6 +24,21 @@ fn caret_field(prefix: &str, app: &App, area: Rect, active: Style) -> Line<'stat
     )
 }
 
+/// A settled `label` + `value` line clipped to one terminal row (docs/specs/
+/// tasks.allium: CreateTask, SettledLinesStayOneRow). `label` carries its own
+/// indent and separator, e.g. `"  Title: "`. The label always survives; the
+/// value is cut with a trailing "…" so a very long value (dictated text on a
+/// single line) cannot wrap and push the picker below it off the panel.
+fn settled_line(label: &str, value: &str, area: Rect, style: Style) -> Line<'static> {
+    // The panel border takes two columns, matching `caret_field`'s budget.
+    let width = (area.width as usize).saturating_sub(2);
+    let value_width = width.saturating_sub(label.chars().count()).max(1);
+    Line::from(Span::styled(
+        format!("{label}{}", super::shared::truncate(value, value_width)),
+        style,
+    ))
+}
+
 /// The sizing and styling context every repo-path picker list shares.
 ///
 /// `height_offset` is the number of rows the surrounding form already spends
@@ -235,7 +250,11 @@ pub(in crate::tui) const PHOENIX_ARMED_TAG_STEP_LINES: u16 = 5;
 /// than one row, and the slack is what keeps the trailing `[Esc] cancel` hint
 /// inside the border. Both variants survive down to roughly 40 columns, well
 /// past the width a four-column board is legible at.
-pub(in crate::tui) fn input_tag_lines(app: &App, styles: &FormStyles) -> Vec<Line<'static>> {
+pub(in crate::tui) fn input_tag_lines(
+    app: &App,
+    area: Rect,
+    styles: &FormStyles,
+) -> Vec<Line<'static>> {
     // Deliberately not a `DraftSummary`: this step renders the tag as a
     // *prompt*, never as a settled value, so the summary's tag and description
     // strings would be built and dropped every frame — and its phoenix suffix
@@ -245,10 +264,7 @@ pub(in crate::tui) fn input_tag_lines(app: &App, styles: &FormStyles) -> Vec<Lin
     let title = draft.map(|d| d.title.as_str()).unwrap_or("");
     let phoenix_armed = app.input.phoenix_armed();
     let mut lines = Vec::with_capacity(PHOENIX_ARMED_TAG_STEP_LINES as usize);
-    lines.push(Line::from(Span::styled(
-        format!("  Title: {title}"),
-        styles.completed,
-    )));
+    lines.push(settled_line("  Title: ", title, area, styles.completed));
     if phoenix_armed {
         lines.push(Line::from(Span::styled("  Phoenix: yes", styles.completed)));
     }
@@ -266,18 +282,13 @@ pub(in crate::tui) fn input_tag_lines(app: &App, styles: &FormStyles) -> Vec<Lin
 
 pub(in crate::tui) fn input_description_lines(
     app: &App,
+    area: Rect,
     styles: &FormStyles,
 ) -> Vec<Line<'static>> {
     let summary = DraftSummary::from_input(&app.input);
     vec![
-        Line::from(Span::styled(
-            format!("  Title: {}", summary.title),
-            styles.completed,
-        )),
-        Line::from(Span::styled(
-            format!("  Tag: {}", summary.tag),
-            styles.completed,
-        )),
+        settled_line("  Title: ", &summary.title, area, styles.completed),
+        settled_line("  Tag: ", &summary.tag, area, styles.completed),
         Line::from(Span::styled(
             "  Description: opening $EDITOR...".to_string(),
             styles.active,
@@ -329,18 +340,14 @@ pub(in crate::tui) fn input_repo_path_lines<'a>(
 ) -> Vec<Line<'a>> {
     let summary = DraftSummary::from_input(&app.input);
     let mut lines = vec![
-        Line::from(Span::styled(
-            format!("  Title: {}", summary.title),
+        settled_line("  Title: ", &summary.title, area, styles.completed),
+        settled_line("  Tag: ", &summary.tag, area, styles.completed),
+        settled_line(
+            "  Description: ",
+            &summary.description_oneline,
+            area,
             styles.completed,
-        )),
-        Line::from(Span::styled(
-            format!("  Tag: {}", summary.tag),
-            styles.completed,
-        )),
-        Line::from(Span::styled(
-            format!("  Description: {}", summary.description_oneline),
-            styles.completed,
-        )),
+        ),
         caret_field("  Repo path: ", app, area, styles.active),
     ];
     let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
@@ -361,22 +368,15 @@ pub(in crate::tui) fn input_base_branch_lines<'a>(
         .map(|d| d.repo_path.clone())
         .unwrap_or_default();
     let mut lines = vec![
-        Line::from(Span::styled(
-            format!("  Title: {}", summary.title),
+        settled_line("  Title: ", &summary.title, area, styles.completed),
+        settled_line("  Tag: ", &summary.tag, area, styles.completed),
+        settled_line(
+            "  Description: ",
+            &summary.description_oneline,
+            area,
             styles.completed,
-        )),
-        Line::from(Span::styled(
-            format!("  Tag: {}", summary.tag),
-            styles.completed,
-        )),
-        Line::from(Span::styled(
-            format!("  Description: {}", summary.description_oneline),
-            styles.completed,
-        )),
-        Line::from(Span::styled(
-            format!("  Repo path: {repo_path}"),
-            styles.completed,
-        )),
+        ),
+        settled_line("  Repo path: ", &repo_path, area, styles.completed),
         caret_field("  Base branch: ", app, area, styles.active),
     ];
     let history = app.base_branches_for(&repo_path);
@@ -392,7 +392,7 @@ pub(in crate::tui) fn input_base_branch_lines<'a>(
 /// standalone phoenix step did. The sibling step renderers above build their
 /// settled lines inline instead — none of them has a step after it that needs
 /// to restate their answers.
-fn answered_step_lines(app: &App, completed: Style) -> Vec<Line<'static>> {
+fn answered_step_lines(app: &App, area: Rect, completed: Style) -> Vec<Line<'static>> {
     let summary = DraftSummary::from_input(&app.input);
     let draft = app.input.task_draft.as_ref();
     let repo_path = draft.map(|d| d.repo_path.clone()).unwrap_or_default();
@@ -400,16 +400,10 @@ fn answered_step_lines(app: &App, completed: Style) -> Vec<Line<'static>> {
         .map(|d| d.base_branch.clone())
         .unwrap_or_else(|| "main".to_string());
     vec![
-        Line::from(Span::styled(
-            format!("  Title: {}", summary.title),
-            completed,
-        )),
-        Line::from(Span::styled(format!("  Tag: {}", summary.tag), completed)),
-        Line::from(Span::styled(format!("  Repo: {repo_path}"), completed)),
-        Line::from(Span::styled(
-            format!("  Base branch: {base_branch}"),
-            completed,
-        )),
+        settled_line("  Title: ", &summary.title, area, completed),
+        settled_line("  Tag: ", &summary.tag, area, completed),
+        settled_line("  Repo: ", &repo_path, area, completed),
+        settled_line("  Base branch: ", &base_branch, area, completed),
     ]
 }
 
@@ -433,10 +427,11 @@ fn form_step_page<'a>(mut settled: Vec<Line<'a>>, active: Line<'a>, hint: Style)
 /// creates the task.
 pub(in crate::tui) fn input_wrap_up_mode_lines(
     app: &App,
+    area: Rect,
     styles: &FormStyles,
 ) -> Vec<Line<'static>> {
     form_step_page(
-        answered_step_lines(app, styles.completed),
+        answered_step_lines(app, area, styles.completed),
         Line::from(Span::styled(
             "  Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip",
             styles.active,
@@ -503,6 +498,7 @@ pub(in crate::tui) fn input_epic_title_lines(
 
 pub(in crate::tui) fn input_epic_description_lines(
     app: &App,
+    area: Rect,
     styles: &FormStyles,
 ) -> Vec<Line<'static>> {
     let title = app
@@ -512,7 +508,7 @@ pub(in crate::tui) fn input_epic_description_lines(
         .map(|d| d.title.as_str())
         .unwrap_or("");
     vec![
-        Line::from(Span::styled(format!("  Title: {title}"), styles.completed)),
+        settled_line("  Title: ", title, area, styles.completed),
         Line::from(Span::styled(
             "  Description: opening $EDITOR...".to_string(),
             styles.active,
@@ -638,7 +634,11 @@ mod tests {
     #[test]
     fn input_tag_lines_puts_every_key_inside_its_own_label() {
         let app = crate::tui::App::new(vec![]);
-        let text = lines_text(&input_tag_lines(&app, &form_styles()));
+        let text = lines_text(&input_tag_lines(
+            &app,
+            Rect::new(0, 0, 80, 20),
+            &form_styles(),
+        ));
 
         for label in [
             "[b]ug",
@@ -673,7 +673,11 @@ mod tests {
             ..Default::default()
         });
 
-        let text = lines_text(&input_tag_lines(&app, &form_styles()));
+        let text = lines_text(&input_tag_lines(
+            &app,
+            Rect::new(0, 0, 80, 20),
+            &form_styles(),
+        ));
 
         assert!(text.contains("Phoenix: yes"), "got:\n{text}");
         assert!(
@@ -694,7 +698,7 @@ mod tests {
     fn input_tag_lines_returns_a_fixed_line_count_per_variant() {
         let empty = crate::tui::App::new(vec![]);
         assert_eq!(
-            input_tag_lines(&empty, &form_styles()).len(),
+            input_tag_lines(&empty, Rect::new(0, 0, 80, 20), &form_styles()).len(),
             (PHOENIX_ARMED_TAG_STEP_LINES - 1) as usize,
             "unarmed: title + active + blank + hint"
         );
@@ -715,7 +719,7 @@ mod tests {
                 PHOENIX_ARMED_TAG_STEP_LINES - 1
             };
             assert_eq!(
-                input_tag_lines(&app, &form_styles()).len(),
+                input_tag_lines(&app, Rect::new(0, 0, 80, 20), &form_styles()).len(),
                 expected as usize,
                 "phoenix armed: {phoenix}"
             );
@@ -737,7 +741,11 @@ mod tests {
     #[test]
     fn input_tag_lines_omits_the_phoenix_line_when_not_armed() {
         let app = crate::tui::App::new(vec![]);
-        let text = lines_text(&input_tag_lines(&app, &form_styles()));
+        let text = lines_text(&input_tag_lines(
+            &app,
+            Rect::new(0, 0, 80, 20),
+            &form_styles(),
+        ));
 
         assert!(!text.contains("Phoenix: yes"), "got:\n{text}");
     }
@@ -782,7 +790,11 @@ mod tests {
             ..Default::default()
         });
 
-        let text = lines_text(&input_wrap_up_mode_lines(&app, &form_styles()));
+        let text = lines_text(&input_wrap_up_mode_lines(
+            &app,
+            Rect::new(0, 0, 80, 20),
+            &form_styles(),
+        ));
 
         assert!(text.contains("Title: My task"), "got:\n{text}");
         assert!(text.contains("Tag: bug (phoenix)"), "got:\n{text}");
@@ -790,6 +802,89 @@ mod tests {
         assert!(text.contains("Base branch: main"), "got:\n{text}");
         assert!(text.contains("Wrap-up:"), "got:\n{text}");
         assert!(text.contains("[Esc] cancel"), "got:\n{text}");
+    }
+
+    // ---- SettledLinesStayOneRow (docs/specs/tasks.allium: CreateTask) ------
+
+    fn long_draft() -> crate::tui::TaskDraft {
+        crate::tui::TaskDraft {
+            title: "t".repeat(300),
+            description: "dictated words ".repeat(60),
+            repo_path: "/repo/".to_string() + &"r".repeat(300),
+            base_branch: "b".repeat(300),
+            ..Default::default()
+        }
+    }
+
+    fn assert_one_row_each(lines: &[Line<'_>], width: usize) {
+        for line in lines {
+            let text = line_text(line);
+            assert!(
+                text.chars().count() <= width,
+                "line wider than {width}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn repo_path_step_settled_lines_fit_one_row() {
+        let mut app = crate::tui::App::new(vec![]);
+        app.input.task_draft = Some(long_draft());
+        let area = Rect::new(0, 0, 80, 20);
+        let lines = input_repo_path_lines(&app, area, &form_styles());
+        assert_one_row_each(&lines[..4], 78);
+        assert!(line_text(&lines[2]).starts_with("  Description: dictated"));
+        assert!(line_text(&lines[2]).ends_with('…'));
+    }
+
+    #[test]
+    fn base_branch_step_settled_lines_fit_one_row() {
+        let mut app = crate::tui::App::new(vec![]);
+        app.input.task_draft = Some(long_draft());
+        let area = Rect::new(0, 0, 80, 20);
+        let lines = input_base_branch_lines(&app, area, &form_styles());
+        assert_one_row_each(&lines[..5], 78);
+        assert!(line_text(&lines[3]).starts_with("  Repo path: /repo/"));
+    }
+
+    #[test]
+    fn wrap_up_step_settled_lines_fit_one_row() {
+        let mut app = crate::tui::App::new(vec![]);
+        app.input.task_draft = Some(long_draft());
+        let area = Rect::new(0, 0, 80, 20);
+        let lines = input_wrap_up_mode_lines(&app, area, &form_styles());
+        assert_one_row_each(&lines[..4], 78);
+        assert!(line_text(&lines[3]).starts_with("  Base branch: bbb"));
+    }
+
+    #[test]
+    fn tag_description_and_epic_steps_settled_lines_fit_one_row() {
+        let mut app = crate::tui::App::new(vec![]);
+        app.input.task_draft = Some(long_draft());
+        app.input.epic_draft = Some(crate::tui::EpicDraft {
+            title: "e".repeat(300),
+            ..Default::default()
+        });
+        let area = Rect::new(0, 0, 80, 20);
+        let tag = input_tag_lines(&app, area, &form_styles());
+        assert_one_row_each(&tag[..1], 78);
+        let desc = input_description_lines(&app, area, &form_styles());
+        assert_one_row_each(&desc[..2], 78);
+        let epic = input_epic_description_lines(&app, area, &form_styles());
+        assert_one_row_each(&epic[..1], 78);
+    }
+
+    #[test]
+    fn short_settled_values_are_not_clipped() {
+        let mut app = crate::tui::App::new(vec![]);
+        app.input.task_draft = Some(crate::tui::TaskDraft {
+            title: "Short".to_string(),
+            description: "Small".to_string(),
+            ..Default::default()
+        });
+        let lines = input_repo_path_lines(&app, Rect::new(0, 0, 80, 20), &form_styles());
+        assert_eq!(line_text(&lines[0]), "  Title: Short");
+        assert_eq!(line_text(&lines[2]), "  Description: Small");
     }
 
     // ---- append_repo_path_list -------------------------------------------

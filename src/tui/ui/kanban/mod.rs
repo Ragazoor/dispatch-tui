@@ -537,15 +537,15 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
 
     let lines: Vec<Line> = match &app.input.mode {
         InputMode::InputTitle => input_title_lines(app, area, &styles),
-        InputMode::InputTag => input_tag_lines(app, &styles),
-        InputMode::InputDescription => input_description_lines(app, &styles),
+        InputMode::InputTag => input_tag_lines(app, area, &styles),
+        InputMode::InputDescription => input_description_lines(app, area, &styles),
         InputMode::InputRepoPath => input_repo_path_lines(app, area, &styles),
         InputMode::InputBaseBranch => input_base_branch_lines(app, area, &styles),
-        InputMode::InputWrapUpMode => input_wrap_up_mode_lines(app, &styles),
+        InputMode::InputWrapUpMode => input_wrap_up_mode_lines(app, area, &styles),
         InputMode::QuickDispatch => quick_dispatch_lines(app, area, &styles),
         InputMode::ConfirmRetry(id) => confirm_retry_lines(app, *id),
         InputMode::InputEpicTitle => input_epic_title_lines(app, area, &styles),
-        InputMode::InputEpicDescription => input_epic_description_lines(app, &styles),
+        InputMode::InputEpicDescription => input_epic_description_lines(app, area, &styles),
         _ => return false,
     };
 

@@ -117,6 +117,16 @@ rule CreateTask {
         -- non-phoenix task costs no keypress at all for the flag: not pressing
         -- p IS declining it.
         --
+        -- SettledLinesStayOneRow. Every settled line the form restates above
+        -- the active field (Title, Tag, Description, Repo path, Base branch)
+        -- occupies exactly ONE terminal row. A value wider than the row is
+        -- clipped with a trailing "…" so the label stays visible and the
+        -- active field and the repo / branch picker beneath it keep their
+        -- rows. The description is already reduced to its first line; the
+        -- clip applies on top of that, which matters for dictated text that
+        -- arrives as one very long line. Clipping is display only — the
+        -- draft keeps the full text.
+        --
         -- base_branch is set from user input during TUI task creation
         -- (InputBaseBranch step). That step renders the BaseBranchPicker
         -- surface (see dispatch.allium): a fuzzy picker over the branches

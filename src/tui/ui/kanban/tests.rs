@@ -33,7 +33,11 @@ fn input_description_shows_tag_when_set() {
         ..Default::default()
     });
     app.input.set_buffer("some desc".into());
-    let lines = input_description_lines(&app, &dummy_styles());
+    let lines = input_description_lines(
+        &app,
+        ratatui::layout::Rect::new(0, 0, 80, 20),
+        &dummy_styles(),
+    );
     let text: String = lines
         .iter()
         .map(|l| l.to_string())
@@ -52,7 +56,11 @@ fn input_description_shows_none_when_no_tag() {
         tag: None,
         ..Default::default()
     });
-    let lines = input_description_lines(&app, &dummy_styles());
+    let lines = input_description_lines(
+        &app,
+        ratatui::layout::Rect::new(0, 0, 80, 20),
+        &dummy_styles(),
+    );
     let text: String = lines
         .iter()
         .map(|l| l.to_string())
