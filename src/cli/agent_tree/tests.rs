@@ -1718,6 +1718,25 @@ fn a_failed_git_query_keeps_the_last_good_tree_and_sets_a_notice() {
     assert!(notice.text().contains("index.lock"), "got {notice:?}");
 }
 
+/// The warning must name WHY git failed. anyhow's plain Display prints only
+/// the outermost context, so a timeout or a failed spawn logged as `could not
+/// run git` and nothing else — task #4928's 2139 identical, undiagnosable cards.
+#[tokio::test]
+async fn a_git_query_that_could_not_run_logs_its_cause() {
+    let log = crate::test_log::logged_during(|| async {
+        let mut state = RenderState::new();
+        let mut tree = build_tree(&root(), &[]);
+        let timeout =
+            || Err(anyhow::anyhow!("git timed out after 10s").context("could not run git"));
+        let timed_out = MockProcessRunner::new(vec![timeout(), timeout()]);
+        refresh(&root(), "main", &timed_out, &mut tree, &mut state);
+    })
+    .await;
+
+    assert!(log.contains("git query failed"), "got {log}");
+    assert!(log.contains("timed out after 10s"), "got {log}");
+}
+
 /// A working git retracts its own complaint on the next tick.
 #[test]
 fn a_recovering_git_query_clears_its_own_notice() {

@@ -613,7 +613,9 @@ fn refresh(
             tracing::warn!(
                 root = %root.display(),
                 base_branch,
-                error = %e,
+                // `{e:#}` so the log carries the cause (timeout, spawn failure), not
+                // just the outermost context.
+                error = format_args!("{e:#}"),
                 "agent-diff: git query failed, keeping the last good document"
             );
             // `{:#}`, not `{}`: anyhow's plain Display prints only the outermost
