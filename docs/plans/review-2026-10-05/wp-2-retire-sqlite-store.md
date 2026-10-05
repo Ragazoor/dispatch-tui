@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Record what  still owns, then delete the SQLite paths that production no longer reads.
+**Goal:** Record what `src/db` still owns, then delete the SQLite paths that production no longer reads.
 
 ## Context
 
