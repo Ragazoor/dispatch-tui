@@ -221,8 +221,7 @@ fn a_file_row_shows_its_added_and_removed_line_counts() {
         60,
         8,
     );
-    assert!(out.contains("+12"), "expected +12 in:\n{out}");
-    assert!(out.contains("-3"), "expected -3 in:\n{out}");
+    insta::assert_snapshot!("file_row_line_counts", out);
 }
 
 /// The foreground colour `offset` CELLS right of where `needle` starts, on
@@ -301,14 +300,7 @@ fn a_collapsed_directory_shows_its_full_sum_however_deep() {
     rig.press(KeyCode::Char('h'));
 
     let out = rig.rendered();
-    assert!(
-        out.contains("+52"),
-        "a collapsed src must show the whole sum:\n{out}"
-    );
-    assert!(
-        out.contains("-10"),
-        "a collapsed src must show the whole sum:\n{out}"
-    );
+    insta::assert_snapshot!("collapsed_directory_full_sum", out);
 }
 
 /// The merged row is the folder nearest the files, so it carries them.
@@ -425,8 +417,7 @@ fn a_directory_row_shows_the_sum_of_its_descendants() {
         60,
         10,
     );
-    assert!(out.contains("+17"), "expected summed +17 in:\n{out}");
-    assert!(out.contains("-4"), "expected summed -4 in:\n{out}");
+    insta::assert_snapshot!("summed_line_counts", out);
 }
 
 /// An untracked file has no counts and must show none — not "+0 -0", which
@@ -463,8 +454,7 @@ fn counts_render_alongside_the_badge_not_instead_of_it() {
         60,
         8,
     );
-    assert!(out.contains("[Modified]"), "expected the badge in:\n{out}");
-    assert!(out.contains("+2"), "expected the counts in:\n{out}");
+    insta::assert_snapshot!("counts_alongside_badge", out);
 }
 
 /// A rendered companion pane: `TreeState`'s cursor movement resolves

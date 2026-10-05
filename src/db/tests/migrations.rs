@@ -1,81 +1,43 @@
 use super::*;
+use rusqlite::Connection;
 
-#[tokio::test]
-async fn a_fresh_db_has_no_tips_state_table() {
-    let db = in_memory_db().await;
-    let tables: i64 = db
-        .db_call(|conn| {
-            conn.query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='tips_state'",
-                [],
-                |r| r.get(0),
-            )
-            .map_err(anyhow::Error::from)
-        })
-        .await
-        .unwrap();
-    assert_eq!(
-        tables, 0,
-        "v84 must leave no tips_state table behind on a fresh database"
-    );
+use crate::db::migrations as m;
+
+/// One migration that drops tables retired from the schema.
+struct DropCase {
+    /// Migration number, for assertion messages.
+    version: u32,
+    /// Every table the migration removes.
+    tables: &'static [&'static str],
+    /// Builds the tables as the historical migrations left them, populated.
+    /// Uses the shipped migrations so the fixture cannot drift from production.
+    populated: fn() -> Connection,
+    /// The drop itself.
+    drop: fn(&Connection) -> anyhow::Result<()>,
 }
 
-/// v36 created `tips_state`; v84 drops it. The historical v36 entry stays in
-/// `MIGRATIONS` untouched, so an existing database still creates the table on
-/// its way forward and must then lose it — including when the row carries a
-/// non-default watermark and show mode.
-#[tokio::test]
-async fn migration_84_drops_a_populated_v36_tips_state_table() {
-    use rusqlite::Connection as RawConn;
-    let conn = RawConn::open_in_memory().unwrap();
-    // The v36 schema, built by migrate_v36_tips_state itself so the fixture
-    // cannot drift from what shipped.
-    crate::db::migrations::migrate_v36_tips_state(&conn).unwrap();
+fn present(conn: &Connection, tables: &[&'static str]) -> Vec<&'static str> {
+    tables
+        .iter()
+        .copied()
+        .filter(|t| m::table_exists(conn, t))
+        .collect()
+}
+
+fn tips_state_populated() -> Connection {
+    let conn = Connection::open_in_memory().unwrap();
+    m::migrate_v36_tips_state(&conn).unwrap();
     conn.execute(
         "UPDATE tips_state SET seen_up_to = 9, show_mode = 'new_only' WHERE id = 1",
         [],
     )
     .unwrap();
-
-    crate::db::migrations::migrate_v84_drop_tips_state(&conn).unwrap();
-
-    let remaining: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='tips_state'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(remaining, 0, "v84 must drop the populated tips_state table");
+    conn
 }
 
-/// The drop is unconditional DDL, so it must tolerate both a database that
-/// never had the table and a second application against one that has already
-/// lost it.
-#[tokio::test]
-async fn migration_84_is_idempotent_without_a_tips_state_table() {
-    use rusqlite::Connection as RawConn;
-    let conn = RawConn::open_in_memory().unwrap();
-    crate::db::migrations::migrate_v84_drop_tips_state(&conn).unwrap();
-    crate::db::migrations::migrate_v84_drop_tips_state(&conn).unwrap();
-}
-
-/// The four tables of the removed Review and Security boards. Nothing outside
-/// `src/db/migrations.rs` reads or writes them; v103 drops them.
-const LEGACY_PR_TABLES: [&str; 4] = ["my_prs", "review_prs", "bot_prs", "security_alerts"];
-
-fn legacy_pr_tables_present(conn: &rusqlite::Connection) -> Vec<&'static str> {
-    LEGACY_PR_TABLES
-        .into_iter()
-        .filter(|table| crate::db::migrations::table_exists(conn, table))
-        .collect()
-}
-
-/// The legacy PR tables as v26 left them, built by the migrations that
-/// shipped them so the fixture cannot drift from what ran in production.
-fn conn_with_legacy_pr_tables() -> rusqlite::Connection {
-    use crate::db::migrations as m;
-    let conn = rusqlite::Connection::open_in_memory().unwrap();
+/// The legacy PR tables as v26 left them, empty.
+fn conn_with_legacy_pr_tables() -> Connection {
+    let conn = Connection::open_in_memory().unwrap();
     m::migrate_v14_create_review_prs_table(&conn).unwrap();
     m::migrate_v21_create_my_prs_table(&conn).unwrap();
     m::migrate_v23_create_bot_prs_table(&conn).unwrap();
@@ -84,25 +46,7 @@ fn conn_with_legacy_pr_tables() -> rusqlite::Connection {
     conn
 }
 
-#[tokio::test]
-async fn a_fresh_db_has_no_legacy_pr_tables() {
-    let db = in_memory_db().await;
-    let present = db
-        .db_call(|conn| Ok(legacy_pr_tables_present(conn)))
-        .await
-        .unwrap();
-    assert!(
-        present.is_empty(),
-        "v103 must leave no legacy PR table behind on a fresh database, found {present:?}"
-    );
-}
-
-/// v14/v21/v23/v24 created the tables and v26 widened them; v103 drops them.
-/// The historical entries stay in `MIGRATIONS` untouched, so an existing
-/// database still creates the tables on its way forward and must then lose
-/// them — including when they hold rows.
-#[test]
-fn migration_103_drops_populated_legacy_pr_tables() {
+fn legacy_pr_tables_populated() -> Connection {
     let conn = conn_with_legacy_pr_tables();
     conn.execute(
         "INSERT INTO my_prs (repo, number, title, author, url, is_draft,
@@ -112,21 +56,117 @@ fn migration_103_drops_populated_legacy_pr_tables() {
         [],
     )
     .unwrap();
-    assert_eq!(legacy_pr_tables_present(&conn), LEGACY_PR_TABLES);
+    conn
+}
 
-    crate::db::migrations::migrate_v103_drop_legacy_pr_tables(&conn).unwrap();
+fn todos_populated() -> Connection {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE tasks (id INTEGER PRIMARY KEY);
+         CREATE TABLE epics (id INTEGER PRIMARY KEY);
+         INSERT INTO tasks (id) VALUES (1);",
+    )
+    .unwrap();
+    m::migrate_v67_create_todos(&conn).unwrap();
+    m::migrate_v68_add_todo_links(&conn).unwrap();
+    m::migrate_v70_add_todo_parent_id(&conn).unwrap();
+    conn.execute_batch(
+        "INSERT INTO todos (id, title, task_id) VALUES (1, 'parent', 1);
+         INSERT INTO todos (id, title, parent_id) VALUES (2, 'child', 1);",
+    )
+    .unwrap();
+    conn
+}
 
-    let present = legacy_pr_tables_present(&conn);
-    assert!(present.is_empty(), "v103 left {present:?} behind");
+fn filter_presets_populated() -> Connection {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE filter_presets (
+             name TEXT PRIMARY KEY,
+             repo_paths TEXT NOT NULL,
+             mode TEXT NOT NULL DEFAULT 'include'
+         );
+         INSERT INTO filter_presets (name, repo_paths) VALUES ('backend', '[\"/repo\"]');",
+    )
+    .unwrap();
+    conn
+}
+
+/// The migrations that remove a retired table. The historical creating
+/// migrations stay in `MIGRATIONS` untouched, so an existing database still
+/// builds the tables on its way forward and must then lose them, rows included.
+fn drop_cases() -> Vec<DropCase> {
+    vec![
+        DropCase {
+            version: 84,
+            tables: &["tips_state"],
+            populated: tips_state_populated,
+            drop: m::migrate_v84_drop_tips_state,
+        },
+        DropCase {
+            version: 102,
+            tables: &["todos"],
+            populated: todos_populated,
+            drop: m::migrate_v102_drop_todos,
+        },
+        DropCase {
+            version: 103,
+            tables: &["my_prs", "review_prs", "bot_prs", "security_alerts"],
+            populated: legacy_pr_tables_populated,
+            drop: m::migrate_v103_drop_legacy_pr_tables,
+        },
+        DropCase {
+            version: 104,
+            tables: &["filter_presets"],
+            populated: filter_presets_populated,
+            drop: m::migrate_v104_drop_filter_presets,
+        },
+    ]
+}
+
+#[tokio::test]
+async fn a_fresh_db_has_none_of_the_dropped_tables() {
+    let db = in_memory_db().await;
+    for case in drop_cases() {
+        let found = db
+            .db_call(move |conn| Ok(present(conn, case.tables)))
+            .await
+            .unwrap();
+        assert!(
+            found.is_empty(),
+            "v{} must leave no {found:?} table behind on a fresh database",
+            case.version
+        );
+    }
+}
+
+#[test]
+fn drop_migrations_remove_populated_tables() {
+    for case in drop_cases() {
+        let conn = (case.populated)();
+        assert_eq!(
+            present(&conn, case.tables),
+            case.tables,
+            "v{} fixture must start with every table present",
+            case.version
+        );
+
+        (case.drop)(&conn).unwrap();
+
+        let left = present(&conn, case.tables);
+        assert!(left.is_empty(), "v{} left {left:?} behind", case.version);
+    }
 }
 
 /// The drop is unconditional DDL, so it must tolerate a database that never
 /// had the tables and a second application against one that already lost them.
 #[test]
-fn migration_103_is_idempotent_without_legacy_pr_tables() {
-    let conn = rusqlite::Connection::open_in_memory().unwrap();
-    crate::db::migrations::migrate_v103_drop_legacy_pr_tables(&conn).unwrap();
-    crate::db::migrations::migrate_v103_drop_legacy_pr_tables(&conn).unwrap();
+fn drop_migrations_are_idempotent_without_the_tables() {
+    for case in drop_cases() {
+        let conn = Connection::open_in_memory().unwrap();
+        (case.drop)(&conn).unwrap_or_else(|e| panic!("v{} on empty db: {e}", case.version));
+        (case.drop)(&conn).unwrap_or_else(|e| panic!("v{} twice: {e}", case.version));
+    }
 }
 
 #[tokio::test]
@@ -261,129 +301,6 @@ async fn migration_101_is_idempotent_without_task_shells() {
         .unwrap();
     crate::db::migrations::migrate_v101_drop_shell_tracking(&conn).unwrap();
     crate::db::migrations::migrate_v101_drop_shell_tracking(&conn).unwrap();
-}
-
-/// v67 created `todos`; v102 drops it (#4970 removed the TODO subsystem).
-/// A fresh database must show no trace of it.
-#[tokio::test]
-async fn a_fresh_db_has_no_todos_table() {
-    let db = in_memory_db().await;
-    let tables: i64 = db
-        .db_call(|conn| {
-            Ok(conn.query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='todos'",
-                [],
-                |r| r.get(0),
-            )?)
-        })
-        .await
-        .expect("query schema");
-    assert_eq!(
-        tables, 0,
-        "v102 must leave no todos table on a fresh database"
-    );
-}
-
-/// An existing database arrives at v102 with a populated `todos` table, built
-/// by the historical migrations that created it, a nested and a linked row
-/// included. The drop takes the rows with it: the user chose removal without
-/// an export.
-#[tokio::test]
-async fn migration_102_drops_a_populated_todos_table() {
-    use rusqlite::Connection as RawConn;
-    let conn = RawConn::open_in_memory().unwrap();
-    conn.execute_batch(
-        "CREATE TABLE tasks (id INTEGER PRIMARY KEY);
-         CREATE TABLE epics (id INTEGER PRIMARY KEY);
-         INSERT INTO tasks (id) VALUES (1);",
-    )
-    .unwrap();
-    crate::db::migrations::migrate_v67_create_todos(&conn).unwrap();
-    crate::db::migrations::migrate_v68_add_todo_links(&conn).unwrap();
-    crate::db::migrations::migrate_v70_add_todo_parent_id(&conn).unwrap();
-    conn.execute_batch(
-        "INSERT INTO todos (id, title, task_id) VALUES (1, 'parent', 1);
-         INSERT INTO todos (id, title, parent_id) VALUES (2, 'child', 1);",
-    )
-    .unwrap();
-
-    crate::db::migrations::migrate_v102_drop_todos(&conn).unwrap();
-
-    let tables: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='todos'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(tables, 0, "v102 must drop the populated todos table");
-}
-
-#[tokio::test]
-async fn migration_102_is_idempotent_without_todos() {
-    use rusqlite::Connection as RawConn;
-    let conn = RawConn::open_in_memory().unwrap();
-    crate::db::migrations::migrate_v102_drop_todos(&conn).unwrap();
-    crate::db::migrations::migrate_v102_drop_todos(&conn).unwrap();
-}
-
-/// v11 created `filter_presets`; v104 drops it (#4972 removed filter presets).
-#[tokio::test]
-async fn a_fresh_db_has_no_filter_presets_table() {
-    let db = in_memory_db().await;
-    let tables: i64 = db
-        .db_call(|conn| {
-            Ok(conn.query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='filter_presets'",
-                [],
-                |r| r.get(0),
-            )?)
-        })
-        .await
-        .expect("query schema");
-    assert_eq!(
-        tables, 0,
-        "v104 must leave no filter_presets table on a fresh database"
-    );
-}
-
-/// An existing database arrives at v104 with saved presets. The drop takes
-/// the rows with it.
-#[tokio::test]
-async fn migration_104_drops_a_populated_filter_presets_table() {
-    use rusqlite::Connection as RawConn;
-    let conn = RawConn::open_in_memory().unwrap();
-    conn.execute_batch(
-        "CREATE TABLE filter_presets (
-             name TEXT PRIMARY KEY,
-             repo_paths TEXT NOT NULL,
-             mode TEXT NOT NULL DEFAULT 'include'
-         );
-         INSERT INTO filter_presets (name, repo_paths) VALUES ('backend', '[\"/repo\"]');",
-    )
-    .unwrap();
-
-    crate::db::migrations::migrate_v104_drop_filter_presets(&conn).unwrap();
-
-    let tables: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='filter_presets'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(
-        tables, 0,
-        "v104 must drop the populated filter_presets table"
-    );
-}
-
-#[tokio::test]
-async fn migration_104_is_idempotent_without_filter_presets() {
-    use rusqlite::Connection as RawConn;
-    let conn = RawConn::open_in_memory().unwrap();
-    crate::db::migrations::migrate_v104_drop_filter_presets(&conn).unwrap();
-    crate::db::migrations::migrate_v104_drop_filter_presets(&conn).unwrap();
 }
 
 /// v82 is the one-shot replacement for the retired tick reconciler: a database
