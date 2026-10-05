@@ -11,6 +11,7 @@ mod connection;
 mod decode;
 mod encode;
 mod identity;
+mod offline_connector;
 mod queries;
 mod reconnect;
 mod shared_reads;
