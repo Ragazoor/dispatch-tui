@@ -615,7 +615,11 @@ rule WrapUpPr {
         -- transition are applied later, atomically, by ExitSession — see the
         -- race-closure rationale on that rule.
         --
-        -- The /wrap-up skill instructs the agent to inspect its own diff,
+        -- The pr path's steps live in the /wrap-up skill's pr reference file,
+        -- not in its SKILL.md: the skill names that file when the pr action is
+        -- chosen, so an agent on the rebase or done path never loads it (see
+        -- "Skill copy" at the head of mcp-task-tools.allium). That file
+        -- instructs the agent to inspect its own diff,
         -- draft a title and body that reflect the actual work, run
         --   git push -u origin <branch>
         --   gh pr create --draft --base <task.base_branch>
@@ -911,18 +915,24 @@ rule ExitSession {
         --     response wording.
         -- Because that response is a SUCCESS, the agent-facing guidance is the
         -- only thing standing between it and an agent that reads "no error" as
-        -- "closed". Two surfaces must carry it, and both are test-locked:
-        --   • the exit_session tool description, for an agent that reaches the
-        --     tool without the /wrap-up skill loaded (ExitSessionViaMcp);
-        --   • the /wrap-up skill, which must tell the agent that a successful
-        --     response can still report the close did not take effect, and that
-        --     the reaction is to stop and hand back to the human — NOT to retry
-        --     exit_session, and NOT to take a fresh token from wrap_up. Both
-        --     retries are dead ends: the token was consumed before the terminal
-        --     write, so a retry hits the "call wrap_up first" branch above.
-        -- This mirrors the skill obligation recorded for "has no active session"
-        -- in mcp-task-tools.allium; a rewrite of either surface must preserve
-        -- both duties.
+        -- "closed". Two surfaces carry it, and both are test-locked:
+        --   • the failed-close RESPONSE itself, which reaches every caller,
+        --     with or without the /wrap-up skill loaded (ExitSessionViaMcp):
+        --     it says the close did not take effect and that the reaction is
+        --     to stop and hand back to the human — NOT to retry exit_session,
+        --     and NOT to take a fresh token from wrap_up. Both retries are dead
+        --     ends: the token was consumed before the terminal write, so a
+        --     retry hits the "call wrap_up first" branch above;
+        --   • the /wrap-up skill's exit_session-errors reference file, which
+        --     the skill names at the exit_session step and which carries the
+        --     same reaction alongside the "has no active session" case it
+        --     treats as success.
+        -- The exit_session tool DESCRIPTION is no longer one of them. It says
+        -- what the tool does and nothing about how to react to its responses
+        -- (mcp-task-tools.allium: TheNextCallIsNamedJustInTime); the response
+        -- is the just-in-time surface for an agent without the skill, which is
+        -- the case the description copy existed to cover. A rewrite of either
+        -- remaining surface must preserve both duties.
         -- Because the window is left alive, WindowGone never fires for a failed
         -- close, so DetectCrashedAgent (agent-health.allium) is never reached: a
         -- failed close is never reported as a crashed agent.
@@ -965,7 +975,11 @@ rule ExitSession {
         -- is dispatched — so a subtask's successor always starts from a
         -- base_branch that already contains this task's work. A chain that
         -- stops, or fails, must never turn a successful close into an error;
-        -- there is deliberately no agent-facing tool for triggering it.
+        -- there is deliberately no agent-facing tool for triggering it, and the
+        -- /wrap-up skill carries no section telling the agent not to dispatch
+        -- the next subtask itself — exit_session owns the chain, and its own
+        -- description says so (mcp-task-tools.allium:
+        -- TheNextCallIsNamedJustInTime).
 }
 
 -- == Rebase Conflict ==

@@ -88,8 +88,9 @@ value Bump {
 -- is the misreading the dropped line came from.
 enum Preceding {
     spec_first          -- no plan, and the repo keeps specs: the design step is
-                        -- the elicit -> tend -> propagate -> implement -> weed
-                        -- sequence, which states TDD and the Allium cycle
+                        -- one sentence naming allium:elicit, allium:tend,
+                        -- allium:propagate, implementation and allium:weed in
+                        -- that order, which states TDD and the Allium cycle
                         -- itself
     brainstorm          -- no plan, and the repo keeps no specs: the design step
                         -- is `superpowers:brainstorming`, named and no more
@@ -373,6 +374,36 @@ rule ComposeAgentPrompt {
         -- and by epic_section_names_no_mcp_tool, which fails on any
         -- mcp__dispatch__* tool name appearing in the epic section.
 
+    @guarantee TestFirstHasOneOwner
+        -- The test-first, spec-first rule has exactly one owner: the dispatch
+        -- prompt. It reaches the agent as {tdd_instruction} or as the
+        -- spec-first design step (never both — NoLineRestatesTheDesignStep),
+        -- and its one exception, the CVE runbook's "no failing test first for
+        -- a version pin", is stated by the prompt too
+        -- (CveRemediationSkipsTheDesignStep).
+        --
+        -- No other surface injected into every session restates it — not the
+        -- repository's always-loaded agent instructions, not a skill, not a
+        -- tool description. A second copy is a second wording, and two
+        -- wordings of one rule are where an agent finds a conflict: the
+        -- always-loaded copy said "Always use TDD" with no exception, which
+        -- the CVE runbook then had to contradict. Where the rule must change,
+        -- it changes here and nowhere else.
+
+    @guarantee TheResearchPromptGivesItsReasonNotARule
+        -- The research addendum states, in one sentence of reasoning, why a
+        -- research agent stops where it does: it presents its findings
+        -- interactively, and whether to wrap up or change code is the user's
+        -- call once they have read them. It does not carry capitalised
+        -- prohibitions ("Do NOT make code changes", "do NOT wrap up"). An
+        -- agent that knows why it stops can tell a finding from a fix; one
+        -- given a bare rule follows the letter and loses the reason.
+        --
+        -- That sentence is still the whole of the constraint — research
+        -- launches with no permission mode (dispatch.allium:
+        -- EveryTaskAgentLaunchesInAutoMode) — so it must keep both halves:
+        -- no code changes, no wrap-up, until the user says otherwise.
+
     @guidance
         -- == The variants ==
         -- DispatchTask emits one of three variants of build_prompt. The
@@ -393,7 +424,7 @@ rule ComposeAgentPrompt {
         -- rather than "Your task is:" — quick dispatch begins as an
         -- interactive conversation where the agent establishes the goal
         -- and renames the task, then follows the same
-        -- spec_first_instruction sequence as the no-plan variant
+        -- spec_first_instruction sentence as the no-plan variant
         -- (NameTheDesignStep below).
         -- The instruction text is shared verbatim between the two, so the
         -- design step cannot drift apart between them.
@@ -421,7 +452,8 @@ rule ComposeAgentPrompt {
         -- block: its prompt includes only {learning_tools_instruction} and
         -- omits tdd, allium, and wrap_up. The research agent
         -- presents findings interactively and does not terminate via
-        -- the standard wrap-up flow.
+        -- the standard wrap-up flow; its addendum says so as reasoning,
+        -- not as a prohibition (TheResearchPromptGivesItsReasonNotARule).
         -- The fix tag falls through to this rule and uses the full trailing
         -- block — it is purely a kanban-board label, not a routing key. The
         -- security feeds set it on every CVE task they create, and that is
@@ -487,11 +519,12 @@ rule NameTheDesignStep {
         -- case — DispatchTask refuses to launch at all without one.
         --
         -- When the repo HAS specs: the no-plan addendum is
-        -- spec_first_instruction (the elicit -> tend -> propagate ->
-        -- implement -> weed sequence detailed below). That path does NOT
-        -- carry {allium_instruction} — the sequence states the tend/weed
-        -- cycle as its own steps 2 and 5, so the trailing line would be the
-        -- weaker restatement NoLineRestatesTheDesignStep rules out. Keeping
+        -- spec_first_instruction (the sentence naming allium:elicit,
+        -- allium:tend, allium:propagate, implementation and allium:weed in
+        -- order, detailed below). That path does NOT carry
+        -- {allium_instruction} — the sentence names tend and weed itself, so
+        -- the trailing line would be the weaker restatement
+        -- NoLineRestatesTheDesignStep rules out. Keeping
         -- specs is a necessary condition for the line, not a sufficient one:
         -- plan_with_specs is the only state that carries it. This paragraph
         -- read "and the trailing block carries {allium_instruction}" until
@@ -548,22 +581,21 @@ rule NameTheDesignStep {
         -- The trailing block never repeats a rule the addendum above it has
         -- already given. Concretely: when spec_first_instruction is in the
         -- prompt, BOTH {tdd_instruction} and {allium_instruction} are dropped.
-        -- That sequence states test-first as its steps 3 and 4 ("confirm they
-        -- fail before you write any code" / "implement the minimum code that
-        -- makes them pass") and the tend/weed cycle as its steps 2 and 5, all
-        -- four unconditionally.
+        -- That sentence states test-first by its order — allium:propagate
+        -- derives the tests before implementation — and names allium:tend and
+        -- allium:weed on either side of it, all unconditionally.
         --
         -- Repeating either a few lines later is not harmless reinforcement. The
-        -- trailing wordings are WEAKER than the steps they repeat —
+        -- trailing wordings are WEAKER than the sentence they repeat —
         -- {allium_instruction}'s "if your implementation changes domain
-        -- behaviour" is a conditional where step 2 was an unconditional step —
-        -- so an agent reconciling the two can read the restatement as
+        -- behaviour" is a conditional where the sentence names tend without
+        -- one — so an agent reconciling the two can read the restatement as
         -- narrowing the step, and conclude the spec update is optional. Two
         -- wordings of one rule cost tokens and buy ambiguity.
         --
         -- The omission is conditional on spec-first actually being present.
         -- None of the other three states the rules elsewhere — a task WITH a
-        -- plan attached never reaches the sequence, and brainstorm_instruction
+        -- plan attached never reaches the sentence, and brainstorm_instruction
         -- names a skill without naming TDD or Allium — so all three keep
         -- {tdd_instruction}. Only plan_with_specs also keeps
         -- {allium_instruction}: the two spec-less states drop it for a reason
@@ -602,39 +634,49 @@ rule NameTheDesignStep {
         -- still appear on both, deliberately — above it qualifies how the
         -- task may FINISH, here it qualifies when to CALL the skill.
 
+    @guarantee TheDesignStepNamesSkillsNotProcedure
+        -- The spec-first design step is ONE short sentence that names the
+        -- skills and their order — allium:elicit to settle the behaviour,
+        -- allium:tend to record it in docs/specs/, allium:propagate to derive
+        -- tests from it, then the implementation, then allium:weed to confirm
+        -- spec and code agree. It is not a numbered procedure. It was a
+        -- five-step list, and each step paraphrased the skill it named; the
+        -- skills carry their own process, and a prompt that restates it can
+        -- only drift from them.
+        --
+        -- It does not tell the agent to interview the user. Who is there to
+        -- ask differs by launch — a quick dispatch is already a conversation,
+        -- an unattended dispatch may have nobody watching — and a mandate to
+        -- interview contradicts the second. Whether elicit asks anyone, and
+        -- what, is the skill's judgement on what the description already
+        -- settles.
+        --
+        -- Around that sentence the addendum keeps the two clauses both design
+        -- steps share (DesignStepMatchesTheReposSpecs): the design step is not
+        -- the end of the task — implementation follows in the same session,
+        -- except that an epic-decomposition task creates work packages for its
+        -- subtasks instead — and a docs/plans/ doc attached via update_task is
+        -- the agent's judgement call, not a requirement.
+
     @guidance
-        -- == The spec-first sequence, in full ==
+        -- == The spec-first sentence ==
         -- What build_prompt's no-plan variant emits when repo_keeps_specs is
         -- true:
         --   * has_plan = false: preamble "Your task is:" and the addendum
         --     is the design step for a repo that keeps Allium specs (see
         --     DesignStepMatchesTheReposSpecs for the other branch) —
-        --     spec_first_instruction, an ordered
-        --     sequence: interview the user with the allium:elicit skill,
-        --     capture the agreed behaviour in docs/specs/*.allium, generate
-        --     tests from the spec with allium:propagate, implement the
-        --     minimum code to pass them, then confirm alignment with
-        --     allium:weed. The Allium spec, not a prose design doc, is the
-        --     design artefact this variant asks for.
-        --     Two clauses in it are explicitly the agent's judgement call,
-        --     not requirements: writing a docs/plans/ doc and attaching it
-        --     via update_task (worth it only when the implementation is
-        --     large enough for the steps to be worth recording), and
-        --     handing the propagate/implement/weed steps to the
-        --     /allium-loop skill instead of running them inline (worth it
-        --     for large or stubborn convergences). Neither is enforced, and
-        --     the prompt says so — a plan-shaped artefact is no longer the
-        --     expected output of the design step at all.
-        --     There is no vague-vs-clear branch: the same sequence is
+        --     spec_first_instruction, the sentence
+        --     TheDesignStepNamesSkillsNotProcedure describes. The Allium spec,
+        --     not a prose design doc, is the design artefact this variant
+        --     asks for; a plan-shaped artefact is not the expected output of
+        --     the design step at all.
+        --     The sentence no longer names /allium-loop as an alternative
+        --     way to run the propagate/implement/weed steps. That skill's own
+        --     description says when to reach for it, and naming it here was
+        --     a second trigger for one skill.
+        --     There is no vague-vs-clear branch: the same sentence is
         --     named however well-specified the description is, because the
         --     elicit step is what establishes whether it was.
-        --     The sequence names each skill and stops, as the brainstorming
-        --     fallback does (see DesignStepMatchesTheReposSpecs): it does not
-        --     restate how the skills work. Step 1 carried "One question at a
-        --     time" until allium:elicit was found to head a section with that
-        --     exact rule, making the clause a paraphrase of the skill the step
-        --     loads — the case that guarantee already rules out, applied to the
-        --     branch it was not written for.
         --     The addendum is explicit that the spec is not the end of the
         --     task: implementation (TDD) must follow in the same session,
         --     not a separate dispatch — except for an epic-decomposition
@@ -696,10 +738,12 @@ rule RenderCveRunbook {
 
     @guarantee CveRemediationSkipsTheDesignStep
         -- A CVE task is a targeted dependency fix, not a feature to design.
-        -- The elicit -> tend -> propagate -> implement -> weed sequence asks it
-        -- to interview the user about intended behaviour, capture that in an
-        -- Allium spec and write a failing test — three steps that have no
-        -- subject when the whole change is a version pin. So a CVE task never
+        -- The spec-first design step asks it to settle intended behaviour,
+        -- capture that in an Allium spec and derive a failing test from it —
+        -- three steps that have no subject when the whole change is a version
+        -- pin. The runbook's "no failing test first" is the stated exception
+        -- to the test-first rule, and lives beside the rule's one owner
+        -- (TestFirstHasOneOwner). So a CVE task never
         -- reaches NameTheDesignStep, and never carries {tdd_instruction}.
         --
         -- WHAT IDENTIFIES ONE. Where it sits on the board, via under_cve_feed:
@@ -1066,62 +1110,67 @@ rule RenderDependencyBumpRunbook {
         -- emission rule to have held.
 
     @guarantee OnlyStepsWhoseInputsTheTaskAlreadyCarriesMoveToTheHarness
-        -- What deliberately stays with the agent: whether the PR touches only
-        -- dependency files, whether CI is green (it moves between the feed's
-        -- poll and the dispatch, so a value computed earlier would be stale),
-        -- fetching a changelog, scanning it for breaking-change tokens, and
-        -- writing the breaking-change summary. The first two are shared steps
-        -- every branch reaches; each of the last three belongs to ONE branch,
-        -- and not to the same one — the minor branch fetches the changelog
-        -- and scans it, the major branch writes the summary and never fetches
-        -- a changelog at all.
+        -- What deliberately stays with the agent: whether the PR changes only
+        -- dependency manifests and lockfiles, whether CI is green (it moves
+        -- between the feed's poll and the dispatch, so a value computed
+        -- earlier would be stale), reading a changelog and judging whether
+        -- anything in it suggests a breaking change, and writing the
+        -- breaking-change summary. The first two are shared steps every branch
+        -- reaches; each of the last two belongs to ONE branch, and not to the
+        -- same one — the minor branch reads the changelog, the major branch
+        -- writes the summary and never fetches a changelog at all.
         --
-        -- The token scan is deterministic and stays with the agent anyway.
-        -- That is settled, not pending: it cannot run without the changelog,
-        -- and fetching one is network work on a poll timer, for a branch only
-        -- a minority of the queue reaches. Moving it would put a per-PR
-        -- upstream fetch inside every feed cycle to precompute an answer most
-        -- cycles never use. The classifier moved because its inputs were
-        -- already on the task; this one's are not, and that is the line.
-        -- Nor does the harness pre-fill the
-        -- approval message: it names the Bump line the prompt already carries
-        -- rather than asking the agent to restate a kind it was just told, and
-        -- it does not claim a changelog was read on the route where none is.
+        -- The changelog judgement stays with the agent, and it is a judgement,
+        -- not a scan. Fetching a changelog is network work on a poll timer,
+        -- for a branch only a minority of the queue reaches, so moving it
+        -- would put a per-PR upstream fetch inside every feed cycle to
+        -- precompute an answer most cycles never use. The classifier moved
+        -- because its inputs were already on the task; this one's are not,
+        -- and that is the line.
+        --
+        -- Nor does the harness pre-fill the approval message, and the runbook
+        -- does not dictate one: the agent writes it, and it may cite the Bump
+        -- line the prompt already carries. It must not claim a changelog was
+        -- read on the route where none is.
 
-    @guarantee TheDepOnlyAllowlistAdmitsOnlyDeclarativeDependencyFiles
-        -- The dep-only guard is a PATH allowlist, and what goes on it follows
-        -- a rule rather than accruing one ecosystem at a time: a path is
-        -- admitted when the whole file is dependency coordinates — a manifest
-        -- or a lock file — so that matching the path is a sound proxy for
-        -- "this change is only a dependency bump". The guard never reads the
-        -- diff's content, so the proxy is all it has.
+    @guarantee TheRunbookStatesThePolicyNotItsMechanics
+        -- The dependency-bump runbook states its goal and its policy in plain
+        -- sentences and leaves their application to the agent's judgement:
+        -- approve only when the PR changes just dependency manifests,
+        -- lockfiles and pinned GitHub Action versions in workflow files, and
+        -- nothing in the changelog suggests a breaking change; otherwise ask
+        -- the human one direct question. Naming the action-pin case keeps
+        -- Action bumps from all escalating to the human (operator decision,
+        -- #16685). Agent judgement is the accepted approval criterion: the
+        -- kognic-github-app verdict and green CI are the only deterministic
+        -- gates, and no code-level path check backs it (operator decision,
+        -- #16685). It replaced four pieces
+        -- of mechanics, each of which the agent had to execute rather than
+        -- understand:
         --
-        -- The list is NOT exhaustive of what the rule would admit. Maven's
-        -- pom.xml qualifies and is absent. An ecosystem joins when a real PR
-        -- is escalated for nothing, not speculatively — the rule settles
-        -- whether it MAY join, and a PR is what says it should.
+        --   - a path allowlist of sixteen globs for "dependency files only".
+        --     The policy is the reason the list existed — a file that is wholly
+        --     dependency coordinates is safe to take on trust; a build script,
+        --     wrapper or other executable file is not, because a version edit
+        --     there says nothing about what else the diff did. The agent applies
+        --     that reason to the files in front of it, including ecosystems the
+        --     list never named.
+        --   - a token list for "breaking change" in a changelog. The question
+        --     is whether the changelog suggests one, which a deprecation,
+        --     a removed option or a changed default can do without any listed
+        --     word.
+        --   - the exact approval body. What the approval says is the agent's;
+        --     what it must not do is claim a check it did not perform.
+        --   - an eight-item template for the question to the human. The rule is
+        --     ONE direct question that says why the agent did not approve. The
+        --     agent picks what the human needs to answer it.
         --
-        -- Gradle is on it by that rule: gradle/libs.versions.toml, the version
-        -- catalog, and gradle.properties, where Renovate writes some versions.
-        -- Both are declarative. A Renovate PR touching only the version
-        -- catalog used to fail the guard and escalate to the user for nothing.
-        --
-        -- Gradle's BUILD SCRIPTS are deliberately excluded, and the exclusion
-        -- is the rule working rather than a gap in it. build.gradle,
-        -- build.gradle.kts, gradlew and gradle/wrapper/* carry executable code
-        -- and a shipped binary; a path match there says nothing about what the
-        -- diff did, so admitting them would let the agent auto-merge arbitrary
-        -- build logic unseen. The same reasoning excludes sbt's project/*.sbt.
-        -- A version-only edit to one of those is not rejected — it goes to the
-        -- user, which is the guard's own failure route, not an error.
-        --
-        -- .github/workflows/* is the ONE stated exception. It is executable
-        -- too, and it is admitted anyway because for a pinned action there is
-        -- nowhere else the bump can be made — excluding it would send every
-        -- action update to the user, which is the whole class of PR the
-        -- runbook exists to clear. It is an exception because it is named as
-        -- one here; a second one needs the same argument, not the same
-        -- shape.
+        -- What stays structural is unchanged: the classifier reads the bump
+        -- kind before the prompt is built, the runbook carries the one branch
+        -- that kind selects (AReviewRunbookCarriesOnlyTheBranchThatApplies),
+        -- and the app's verdict gates every merge (TheAppsVerdictGatesTheMerge).
+        -- Judgement replaces the checklist inside a branch, not the routing
+        -- between branches.
 
     @guarantee TheAppsVerdictGatesTheMerge
         -- Kognic's GitHub App (login `kognic-github-app`) reviews the PR
@@ -1152,11 +1201,11 @@ rule RenderDependencyBumpRunbook {
         -- says that no verdict exists. Waiting for a verdict that has not
         -- arrived is not a route; the user decides.
         --
-        -- The ASK THE USER question always states the app's verdict, or its
-        -- absence, alongside the items it already carries. "Always" covers
-        -- every route that reaches that terminal, the non-merging ones
-        -- included: there the verdict is reported to the user, not used as a
-        -- gate, because nothing on those routes merges.
+        -- The ASK THE USER question is one direct question saying why the
+        -- agent did not approve; when the reason is the app, it names the
+        -- app's reason or says no verdict exists. On the non-merging routes
+        -- the verdict is not a gate, because nothing there merges, and the
+        -- question carries it only where the agent judges the human needs it.
         --
         -- The app is ADDITIVE. The agent's own dep-only and CI checks stay
         -- exactly as they are, and a merge needs all of them: dep-only,
@@ -1171,18 +1220,14 @@ rule RenderDependencyBumpRunbook {
         -- description first, and the runbook is rendered around that
         -- verdict — see AReviewRunbookCarriesOnlyTheBranchThatApplies
         -- above. Its shared steps are: identify the PR and record its url,
-        -- verify the PR touches only dependency files (the allowlist it
-        -- checks against is governed by
-        -- TheDepOnlyAllowlistAdmitsOnlyDeclarativeDependencyFiles above), and
-        -- check CI. Its
-        -- shared terminals are auto-approve + merge (`gh pr review
-        -- --approve` then `gh pr merge --squash --auto`) and ask the user
-        -- (one direct question, plus sub_status = needs_input). The merge
-        -- terminal opens with a check of the `kognic-github-app` verdict:
-        -- unless the app's latest review is APPROVED, the agent asks the
-        -- user instead, naming the app's reason or its absence — see
-        -- TheAppsVerdictGatesTheMerge above. The ask-the-user question
-        -- always states that verdict. Between
+        -- judge whether the PR changes only dependency manifests and
+        -- lockfiles (see TheRunbookStatesThePolicyNotItsMechanics above), and
+        -- check CI. Its shared terminals are approve + squash auto-merge, and
+        -- ask the user (one direct question, plus sub_status = needs_input).
+        -- The merge terminal opens with a check of the `kognic-github-app`
+        -- verdict: unless the app's latest review is APPROVED, the agent asks
+        -- the user instead, naming the app's reason or its absence — see
+        -- TheAppsVerdictGatesTheMerge above. Between
         -- them sits the one decision body the bump kind selected. The
         -- trailing block is reduced to just {learning_tools_instruction} —
         -- no tdd, no allium, and no wrap_up_instruction, because the
@@ -1214,3 +1259,7 @@ rule RenderPrReviewRunbook {
         -- block is reduced the same way, because the PR review agent
         -- presents findings and waits for the user's instructions.
 }
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------

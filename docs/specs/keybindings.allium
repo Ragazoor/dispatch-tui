@@ -561,6 +561,11 @@ rule ListKeybindingsViaMcp {
         -- An invalid namespace rejects with JSON-RPC -32602, the same code
         -- query_usage uses for an invalid category (mcp-task-tools.allium:
         -- QueryUsageViaMcp).
+        -- The tool description says what the call returns and that the filter
+        -- takes a namespace or family name. It carries no worked example: the
+        -- rejection lists the valid names, and a real response shows the
+        -- output better than a sample does (the tool-description standard at
+        -- the head of mcp-task-tools.allium).
 }
 
 rule HelpOverlayIsTheTable {

@@ -459,6 +459,23 @@ rule RecordLearningViaMcp {
         updated_at: now
     )
 
+    @guarantee TheAuthoringRulesHaveOneHome
+        -- The record_learning tool description is one sentence: it records a
+        -- non-obvious finding to the knowledge base, and points at the
+        -- /learnings skill for how to write one. Every authoring rule — name
+        -- no code, a procedural entry states its boundary, the triage
+        -- question, the record/don't-record lists, the kind and scope tables,
+        -- how to write a summary — lives in the skill alone.
+        --
+        -- The description used to carry a second copy of the load-bearing
+        -- rules, for a caller without the skill loaded. Nothing kept the two
+        -- copies in step, and the copy reached every agent on every
+        -- tools/list, recording or not. The two rules the validator enforces
+        -- still reach a caller without the skill at the moment they matter:
+        -- the rejection says which rule the summary or detail broke, so the
+        -- error, not the description, is the just-in-time copy (see the
+        -- tool-description standard at the head of mcp-task-tools.allium).
+
     @guidance
         -- Agents call this during task execution or at wrap-up to surface
         -- non-obvious learnings. Entries land as approved and are eligible
@@ -519,9 +536,8 @@ rule RecordLearningViaMcp {
         -- them from a product name (GitHub, BigQuery), an external library
         -- name, or a lint name, and a filter that rejects those degrades the
         -- prose it is meant to protect. Keeping them out is the /learnings
-        -- skill's job and the record_learning tool description's job, not the
-        -- validator's. The validator catches only shapes that prose never
-        -- produces; the copy carries the rule in full.
+        -- skill's job, not the validator's. The validator catches only shapes
+        -- that prose never produces; the skill carries the rule in full.
         -- There is no escape hatch (unlike check-doc-symbols.sh's
         -- allow-phantom-symbol: marker): the knowledge base has no human
         -- review step, so a free-text override embedded in agent-authored
@@ -537,11 +553,10 @@ rule RecordLearningViaMcp {
         -- boundary: the case where the agent stops following the entry and
         -- asks a human. Only the detail's PRESENCE is enforced; whether it
         -- actually names a boundary is a convention carried by the /learnings
-        -- skill and the record_learning tool description. The other five kinds
-        -- are unaffected: a pitfall either bites or it does not, and demanding
-        -- a boundary there would be noise.
+        -- skill. The other five kinds are unaffected: a pitfall either bites
+        -- or it does not, and demanding a boundary there would be noise.
         --
-        -- The tool description also carries the intake triage an agent applies
+        -- The /learnings skill also carries the intake triage an agent applies
         -- before writing prose about code: could you write a failing check for
         -- a violation from the source alone, without knowing what the author
         -- meant? If yes it is a lint rule and prose is the wrong home
@@ -549,20 +564,6 @@ rule RecordLearningViaMcp {
         -- and prose is right. This is guidance, not a validated
         -- precondition — nothing can check it mechanically, which is the
         -- point of the question.
-        --
-        -- == What the description carries, and what the skill carries ==
-        -- The two copies are deliberately not equal. The description carries
-        -- only what changes what a caller passes at the moment of the call,
-        -- when the skill may not be loaded: the two hard rules above (name no
-        -- code; a procedural entry states its boundary) and the triage
-        -- question. Everything else — the record/don't-record lists, the kind
-        -- and scope tables, how to write a summary, the third triage branch
-        -- where the finding is a smell and the fix is a refactor rather than a
-        -- sentence — lives in the /learnings skill, and the description points
-        -- there rather than restating it. The split exists because the two
-        -- surfaces have no mechanism keeping them in step: what is duplicated
-        -- is duplicated by hand, so only the load-bearing sentences earn a
-        -- second copy.
         -- Implemented in find_code_citation() / create_learning()
         -- (src/service/learnings.rs).
 }

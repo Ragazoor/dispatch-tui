@@ -3,7 +3,8 @@
 --
 -- Scope: MCP tools for task management (create, get, update, list,
 --        dispatch, subscribe/unsubscribe-to-task, query-usage,
---        set-verify-command) and the CLI plan-attachment surface.
+--        set-verify-command) and the CLI plan-attachment surface; the
+--        standard every tool description and agent-facing skill is held to.
 -- Excludes: Task lifecycle (see tasks.allium); dispatch/retry (see dispatch.allium);
 --           MCP epic tools (see epics.allium); learnings tools (see learnings.allium);
 --           the task-watcher domain rules underlying subscribe_to_task/
@@ -33,6 +34,48 @@ use "./core.allium" as core
 -- missing sentence has a named consequence. Those are asserted in tests, and
 -- derived from the generated schema wherever the fact has a machine-readable
 -- source, so the description cannot drift from the tool it describes.
+--
+-- A description says what the tool does and what it returns, and stops.
+-- Everything else an agent needs has a better home, and a copy in the
+-- description is a second wording nothing keeps in step:
+--
+--   - What to do NEXT goes in the tool's RESPONSE, where it arrives just in
+--     time and only on the path that needs it. wrap_up's response names
+--     exit_session as the final call; neither tool's description repeats it
+--     (see WrapUpViaMcp: TheNextCallIsNamedJustInTime).
+--   - Why a call is REFUSED goes in the refusal's error message, which is
+--     the only text a refused caller is certain to read
+--     (ReviewTasksAreNotWrappedUp).
+--   - A constraint the schema can express is expressed by the schema, not
+--     prose: an enum for a closed value set, a conditional requirement for
+--     one argument depending on another (update_task's url_type).
+--   - An argument that means the same thing on every tool that takes it —
+--     base_branch, wrap_up_mode, auto_run_plan, phoenix, tag, sort_order —
+--     carries one short wording of that meaning, the same on each tool. A
+--     tool adds text only where its meaning differs (an omitted argument
+--     defaulting on create but meaning "no change" on update).
+--   - A story spanning several tools is told once, by the tool where the
+--     caller acts on it: resuming a crashed task is dispatch_task's
+--     (DispatchTaskViaMcp), not update_task's status argument's.
+--   - Authoring rules for a tool's content live in the skill that teaches
+--     them; the description points at the skill (record_learning and the
+--     /learnings skill — learnings.allium: RecordLearningViaMcp).
+--   - Human-UI trivia (which tags the TUI offers), implementation detail
+--     (how a self-reference is guarded) and worked examples (list_keybindings
+--     once showed one) do not belong. A caller acts on neither of the first
+--     two, and the schema plus a real response already show the third.
+--
+-- == Skill copy ==
+--
+-- The agent-facing skills (the /wrap-up, /retro, /allium-loop and /learnings
+-- skills and their siblings) follow the same just-in-time principle. A skill's
+-- SKILL.md carries the flow every invocation walks. Detail only one branch
+-- needs lives in a references/ file beside it, and the branch names that file
+-- at the point it is taken, so the file is loaded only on that path. The
+-- /wrap-up skill's pr path and its exit_session error handling are such
+-- branches (pr-workflow.allium: WrapUpPr, ExitSession); /retro, /allium-loop
+-- and /learnings keep their core flow in SKILL.md and move their long tails
+-- the same way.
 
 -- == MCP Task Tools ==
 
@@ -52,7 +95,9 @@ rule UpdateTaskViaMcp {
 
     -- Typed-url validation contract. The url string and its type travel
     -- together; the handler rejects inconsistent combinations before any
-    -- mutation occurs.
+    -- mutation occurs. The advertised schema states the same contract — an
+    -- enum for url_type, and url_type required whenever url is non-empty —
+    -- so the argument descriptions carry no prose restating it.
     --   • A non-empty url REQUIRES url_type (an unaccompanied url is rejected).
     --   • An unknown url_type (not one of UrlType's literals) is rejected —
     --     whether or not url is present. url_type is parsed into its enum at
@@ -199,7 +244,8 @@ rule UpdateTaskViaMcp {
         -- The typed url is carried by two params: `url` (the string) and
         -- `url_type` (one of pr | security_alert | issue | other). A non-empty
         -- `url` REQUIRES `url_type`; an unknown `url_type` is rejected
-        -- unconditionally, at argument decoding. An
+        -- unconditionally, at argument decoding. Both facts are stated by the
+        -- schema (see the typed-url contract above), not by prose. An
         -- empty-string `url` clears task.url and its type (maps to
         -- FieldUpdate::Clear); any non-empty `url` sets task.url to a
         -- core/TaskUrl{url, url_type} value.
@@ -217,13 +263,11 @@ rule UpdateTaskViaMcp {
         -- (src/service/tasks/crud.rs), which reads the pre-write status and
         -- applies the stamp on top of the patch built from the caller's
         -- params.
-        -- The `status` argument's own description carries one fact this rule
-        -- does not own: moving a task back to backlog is the first half of
-        -- resuming it, because a following dispatch reuses the worktree
-        -- directory it still has. The reason it is stated here rather than
-        -- only next to dispatch_task is that backlog is where a caller meets
-        -- the recovery move — see DispatchTaskViaMcp's guidance below, which
-        -- owns the behaviour.
+        -- The `status` argument's description lists the statuses and nothing
+        -- more. It used to carry the resume-a-crashed-task story and an aside
+        -- that no MCP path deletes a task; the first is dispatch_task's
+        -- (DispatchTaskViaMcp owns it, once), and the second describes a tool
+        -- that does not exist, which no caller acts on.
         -- When status or epic_id changes, the parent epic's status is
         -- recalculated (if a parent epic exists). Re-assigning a task
         -- from one epic to another triggers recalculation on both the
@@ -710,18 +754,14 @@ rule GetTaskViaMcp {
         -- ServiceError::NotFound surfaces as the -32001 not-found code, the
         -- same mapping every other NotFound uses (see CreateTaskViaMcp).
         --
-        -- == The tool description names the response shape ==
-        -- The description states that the response is labelled prose — one
-        -- "Label: value" line per field, not JSON — and that a line is
-        -- rendered only when its field is set, so an absent line means unset
-        -- rather than empty. It names the three lines a wrapping-up agent
-        -- reads: Base branch, Verify command and Wrap-up mode.
-        --
-        -- Saying so is not decoration. The response is the only labelled-prose
-        -- payload in the tool set, and agents that assumed JSON went looking
-        -- for snake_case keys that never appear — a failure that costs the
-        -- reader the verify command specifically, because that line is the one
-        -- with no second source in the prompt.
+        -- == The tool description is one sentence ==
+        -- The description says, in one short sentence, that get_task returns
+        -- a task's details. The format is shown by what it returns: the
+        -- response is labelled "Label: value" lines, and a reader that has the
+        -- response in front of it needs no prose describing it. It used to
+        -- name the format, the absent-line-means-unset convention and the
+        -- three lines a wrapping-up agent reads. Naming those lines belongs to
+        -- the /wrap-up skill, the caller that reads them, not to the tool.
         -- Handled by handle_get_task in src/mcp/handlers/tasks/crud.rs.
 }
 
@@ -876,11 +916,12 @@ rule DispatchTaskViaMcp {
         -- what the worktree already holds, because the resumed agent is a new
         -- agent and carries none of the crashed session's context.
         --
-        -- update_task's own `status` argument carries the same fact where a
-        -- caller meets it — the backlog value is the first half of the recovery
-        -- move, and a description that lists the statuses without saying what
-        -- dispatching from backlog does to an existing worktree sends the
-        -- reader back to guessing.
+        -- This description is the ONE place the recovery move is told.
+        -- update_task's `status` argument carried a copy for a while, on the
+        -- grounds that backlog is where a caller meets the move; it no longer
+        -- does. A caller resuming a task is about to call dispatch_task, so
+        -- that is where it reads the story, and a second copy was a second
+        -- wording to keep in step by hand.
 }
 
 -- Inter-agent messaging no longer has a dispatch MCP tool. It was
@@ -1115,6 +1156,26 @@ rule WrapUpViaMcp {
         -- exit_session (not to wrap_up).
         -- Handled by handle_wrap_up in src/mcp/handlers/tasks/wrap_up.rs.
 
+    @guarantee TheNextCallIsNamedJustInTime
+        -- The instruction to call exit_session next, as the session's final
+        -- action, is stated in wrap_up's success RESPONSE — the moment it
+        -- applies, with the token it needs beside it — and by one short clause
+        -- in the /wrap-up skill. It is stated nowhere else.
+        --
+        -- The wrap_up and exit_session tool DESCRIPTIONS say only what each
+        -- tool does: wrap_up performs the chosen action and returns an exit
+        -- token; exit_session closes the session with that token and, when the
+        -- task's epic auto-dispatches, starts the epic's next backlog subtask.
+        -- Neither carries MUST, "never stop after", or a restatement of the
+        -- other's role. Those words reach every agent on every tools/list, on
+        -- sessions that never wrap up, and repeating an instruction three
+        -- times in capitals reads as distrust rather than as information.
+        --
+        -- The /wrap-up skill no longer carries a section telling the agent not
+        -- to dispatch the epic's next subtask itself. exit_session owns that
+        -- behaviour and its description says it happens; there is no tool an
+        -- agent could misuse to do it anyway.
+
     @guarantee ReviewTasksAreNotWrappedUp
         -- A review-tagged task is refused, whatever its status and whatever
         -- action is asked for. Such a task has no wrap-up to perform: it ends
@@ -1155,6 +1216,13 @@ rule WrapUpViaMcp {
         -- escape hatch is stated because the alternative is an agent that
         -- has done real work and is told only "no" — it would leave the
         -- work uncommitted rather than infer the retag.
+        --
+        -- The rule lives in that refusal message, not in wrap_up's tool
+        -- description. A refused caller is certain to read the error; every
+        -- other caller reads the description on every tools/list and has no
+        -- use for the rule. The description may say in passing that a
+        -- review-tagged task is refused, and no more — the reason and the
+        -- retag escape hatch are the message's.
         --
         -- Refusing wrap_up leaves exit_session unreachable for these tasks
         -- (ExitSessionViaMcp requires a token wrap_up mints), which is the
@@ -1274,7 +1342,13 @@ rule ExitSessionViaMcp {
         -- be moved to its terminal status, that the tmux session is still alive,
         -- names the task, and tells the agent the close needs redoing by hand.
         -- It must NOT claim the session was torn down, because it was not: the
-        -- agent must not treat that response as a completed close.
+        -- agent must not treat that response as a completed close. The same
+        -- text tells the agent to stop and hand back to the human rather than
+        -- retry exit_session or take a fresh token from wrap_up — both are
+        -- dead ends, the token having been consumed. That instruction lives in
+        -- the response because the response reaches every caller, with or
+        -- without the /wrap-up skill loaded; the tool description does not
+        -- carry it (TheNextCallIsNamedJustInTime).
         -- Everything else on that path: the failure is logged at warn, no
         -- kill-window is issued so the window survives and still hosts a live
         -- agent the human can attach to, the task keeps its status, sub_status,
@@ -1302,8 +1376,10 @@ rule ExitSessionViaMcp {
         -- something this close does wrong. When a chain does fire, the response
         -- text names the subtask it dispatched; otherwise it is the plain
         -- session-closed message. There is no agent-facing tool to dispatch the
-        -- next subtask — the tool description says so explicitly, so an agent
-        -- reading tools/list does not go looking for one.
+        -- next subtask. The tool description states the positive fact — that
+        -- exit_session starts the epic's next backlog subtask when the epic
+        -- auto-dispatches — which is what an agent needs to not go looking for
+        -- one.
 }
 
 rule SetVerifyCommandViaMcp {
@@ -1349,3 +1425,9 @@ rule SetVerifyCommandViaMcp {
         -- Handled by handle_set_verify_command in
         -- src/mcp/handlers/tasks/verify.rs.
 }
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "update_task's typed-url contract is now to be stated by the schema: url_type as an enum, and url_type required whenever url is non-empty. The second is a conditional requirement (JSON Schema if/then or a top-level combinator), and tool input schemas reaching Claude may not accept one at the top level. If the conditional cannot be expressed, does the url description keep one clause stating the dependency, or does the contract live only in the validation error?"

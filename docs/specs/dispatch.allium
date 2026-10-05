@@ -262,8 +262,10 @@ rule DispatchTask {
         -- assertion, not by construction.
         -- What differentiates the modes is the prompt content, never the
         -- permission flag. A mode that must not change code says so in
-        -- its prompt — see DispatchResearchTask, whose addendum carries
-        -- the "Do NOT make code changes" instruction.
+        -- its prompt — see DispatchResearchTask, whose addendum says that
+        -- findings are presented interactively and that code changes and
+        -- wrap-up are the user's call (dispatch-prompt.allium:
+        -- TheResearchPromptGivesItsReasonNotARule).
         -- Research was formerly the sole exception, launching with
         -- --permission-mode plan to make investigation read-only by
         -- construction. That traded an unattended agent for an enforced
@@ -899,9 +901,11 @@ rule DispatchResearchTask {
         -- The agent makes no code changes and does not wrap up autonomously.
         -- Launches in auto mode with no --permission-mode flag, exactly
         -- like every other task agent (EveryTaskAgentLaunchesInAutoMode).
-        -- "Do NOT make code changes" is a prompt instruction, not an
-        -- enforced permission boundary — the agent is trusted to honour
-        -- it rather than blocked from disobeying it.
+        -- "No code changes until the user decides" is a prompt
+        -- instruction, not an enforced permission boundary — the agent is
+        -- trusted to honour it rather than blocked from disobeying it. The
+        -- prompt gives it as reasoning, not a capitalised rule (see
+        -- dispatch-prompt.allium: TheResearchPromptGivesItsReasonNotARule).
         -- Prompt note: build_research_prompt emits a stripped-down
         -- trailing block — only {learning_tools_instruction}, no tdd,
         -- allium, or wrap_up. A research agent has more use for the
