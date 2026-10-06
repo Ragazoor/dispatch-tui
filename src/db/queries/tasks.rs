@@ -89,9 +89,6 @@ fn needs_teardown(rows: Vec<RemovedFeedTask>) -> Vec<RemovedFeedTask> {
         .collect()
 }
 
-/// One row of `upsert_feed_tasks_inner`: insert the item, or refresh the
-/// existing task for its `(epic_id, external_id)`.
-///
 /// What every row of one emission shares. `completed_now` is the one clock
 /// read for the whole emission, already formatted; `feed_epic_id` is the epic
 /// whose cycle emitted the batch.
@@ -109,6 +106,8 @@ struct FeedUpsertRow<'a> {
     labels_json: &'a str,
 }
 
+/// One row of `upsert_feed_tasks_inner`: insert the item, or refresh the
+/// existing task for its `(epic_id, external_id)`.
 fn upsert_feed_item(
     tx: &rusqlite::Transaction<'_>,
     batch: &FeedUpsertBatch<'_>,

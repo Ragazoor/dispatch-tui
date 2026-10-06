@@ -563,24 +563,26 @@ fn message_flashes(task: &Task, app: &App) -> (bool, bool) {
 }
 
 /// Line 1 of a task card: select prefix, stripe, id, title, flash glyphs and
-/// the phoenix marker. `emphasised` bolds the title (batch-selected or cursor).
+/// the phoenix marker. The title is bold when the card is batch-selected or
+/// under the cursor.
 fn card_title_line<'a>(
     task: &Task,
     title_text: &str,
-    select_prefix: &str,
+    is_batch_selected: bool,
+    is_cursor: bool,
     col_color: Color,
-    emphasised: bool,
     (has_message_flash, has_message_flash_sent): (bool, bool),
 ) -> Line<'a> {
     // Line 1: prefix + stripe + title.
     // One quarter block on every card, cursor included (board-visuals.allium: "Card
     // stripe"). Stripe weight no longer moves with the cursor — selection is
     // carried by the frame hue and the bold title.
+    let select_prefix = if is_batch_selected { "* " } else { "  " };
     let stripe_char = "\u{258e}";
     let stripe_style = Style::default().fg(col_color);
     // Bold marks the selected card's title (board-visuals.allium: "Selection"). Its fill
     // is unchanged from a resting card's, by design.
-    let title_style = if emphasised {
+    let title_style = if is_batch_selected || is_cursor {
         Style::default().add_modifier(Modifier::BOLD)
     } else {
         Style::default()
@@ -628,7 +630,6 @@ pub(super) fn build_task_list_item<'a>(
     let col_width = ctx.width;
 
     let is_batch_selected = app.selected_tasks().contains(&task.id);
-    let select_prefix = if is_batch_selected { "* " } else { "  " };
 
     let (has_message_flash, has_message_flash_sent) = message_flashes(task, app);
     let any_message_flash = has_message_flash || has_message_flash_sent;
@@ -640,9 +641,9 @@ pub(super) fn build_task_list_item<'a>(
     let line1 = card_title_line(
         task,
         &title_text,
-        select_prefix,
+        is_batch_selected,
+        is_cursor,
         col_color,
-        is_batch_selected || is_cursor,
         (has_message_flash, has_message_flash_sent),
     );
 
