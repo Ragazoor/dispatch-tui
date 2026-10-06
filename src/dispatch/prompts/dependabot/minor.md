@@ -2,6 +2,5 @@ This is a minor bump, so read what changed before merging. Find the changelog, i
    a. gh release view v<new-version> --repo <pkg-owner/pkg-repo> (and any intermediate tags).
    b. The package repo's CHANGELOG.md between the two versions.
    c. The GitHub compare view if neither exists.
-   Scan the release notes for these tokens (case-insensitive): BREAKING, breaking change, removed, deprecat, incompatible, migration, major rewrite.
-   - Changelog found AND no token matched -> go to AUTO-APPROVE + MERGE.
-   - No changelog found OR any token matched -> go to ASK THE USER.
+   - Changelog found and nothing in it suggests a breaking change (a removal, a deprecation, a changed default, a migration step) -> go to AUTO-APPROVE + MERGE.
+   - No changelog found, or it suggests a breaking change -> go to ASK THE USER.

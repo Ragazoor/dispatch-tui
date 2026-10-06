@@ -133,11 +133,7 @@ phoenix. At least one field besides task_id must be provided; every field left o
         (tasks::update_task_schema());
 
     async "get_task" => tasks::handle_get_task,
-        "Get details about a task. The response is labelled prose — one 'Label: value' line per \
-field, not JSON — and a line is rendered only when its field is set, so an absent line means \
-unset rather than empty. Three lines are what a wrapping-up agent needs: 'Base branch' (what to \
-diff and rebase against), 'Verify command' (the check to run green before declaring work \
-complete) and 'Wrap-up mode' (a wrap-up action already chosen for you).",
+        "Get the details of a task by ID.",
         {
             "type": "object",
             "properties": {
@@ -184,21 +180,21 @@ usually the right answer.",
                 },
                 "tag": {
                     "type": "string",
-                    "description": "Task tag: bug, feature, chore, pr-review, research, fix, or dependabot. Controls dispatch behavior. The dependabot tag is intended for feed scripts only — TUI users cannot select it from the tag picker.",
+                    "description": "Task tag: bug, feature, chore, pr-review, research, fix, or dependabot. Controls dispatch behavior.",
                     "enum": task_tag_enum_values()
                 },
                 "base_branch": {
                     "type": "string",
-                    "description": "The base branch for rebase and PR operations (e.g. 'main', 'develop'). Defaults to 'main' if not specified."
+                    "description": "The base branch for rebase and PR operations (e.g. 'main', 'develop')."
                 },
                 "wrap_up_mode": {
                     "type": "string",
-                    "description": "Pre-set the wrap-up action for this task: 'rebase' (rebase onto base_branch), 'pr' (create a PR), or 'done' (mark done immediately).",
+                    "description": "Pre-set the wrap-up action: 'rebase' (rebase onto base_branch), 'pr' (create a PR), or 'done' (mark done immediately).",
                     "enum": crate::models::WrapUpMode::ALL.iter().map(|m| m.as_str()).collect::<Vec<_>>()
                 },
                 "auto_run_plan": {
                     "type": "boolean",
-                    "description": "When true and a plan_path is set, the dispatched agent implements the plan immediately instead of summarizing it and asking for confirmation first. Use only when the plan has already been reviewed (e.g. by the decompose-review skill's work-package confirmation step). Defaults to false."
+                    "description": "When true and a plan_path is set, the dispatched agent implements the plan immediately instead of summarizing it and asking for confirmation first. Use only for a plan already reviewed. Defaults to false."
                 },
                 "phoenix": {
                     "type": "boolean",
@@ -243,7 +239,7 @@ passing it here is rejected.",
                 "title": { "type": "string", "description": "Epic title" },
                 "description": { "type": "string", "description": "Epic description" },
                 "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
-                "parent_epic_id": { "type": "integer", "description": "Optional parent epic ID. When set, this epic becomes a sub-epic of the specified parent. Cannot be set to the epic's own ID (self-referential cycles are rejected by the database)." }
+                "parent_epic_id": { "type": "integer", "description": "Optional parent epic ID. When set, this epic becomes a sub-epic of the specified parent." }
             },
             "required": ["title"]
         };
@@ -293,15 +289,12 @@ loop.",
         };
 
     async "wrap_up" => tasks::handle_wrap_up,
-        "Wrap up a running or review task. All three actions (rebase, done, pr) leave the task \
-running and return an exit token you MUST pass to exit_session — the terminal transition (Done, \
-or Review with the PR url) happens there, not here. \
+        "Wrap up a running or review task with one of three actions (rebase, done, pr) and return an \
+exit token for exit_session; the task stays running until then. \
 'rebase' rebases onto base_branch and fast-forwards it (blocks until complete). \
-'done' performs no git operations. \
-'pr' performs no git operations — the agent runs git push and gh pr create itself, then passes \
-the resulting URL to exit_session (not to wrap_up). \
-A task tagged pr-review or dependabot is refused: a review task ends when its PR merges or when \
-you hand it back to the user, so retag it first if it became real code work.",
+'done' and 'pr' perform no git operations — for 'pr' you run git push and gh pr create yourself \
+and pass the resulting URL to exit_session. \
+A task tagged pr-review or dependabot is refused.",
         {
             "type": "object",
             "properties": {
@@ -380,15 +373,7 @@ failover, so this is the only way ownership ever moves.",
         };
 
     async "record_learning" => learnings::handle_record_learning,
-        "Record a new entry in the shared knowledge base. The entry is immediately active and is \
-injected into future dispatch prompts for agents working in the matching scope. Omit scope_ref to \
-auto-derive it from the calling task (recommended). Three rules apply at call time: an entry \
-describes durable behaviour, a convention or a domain fact, and must not name the function, type, \
-macro, fixture, test or file that implements it (those rot on the next refactor and nothing \
-re-checks this store); if you could write a failing check for a violation from the source alone, \
-it is a lint rule — write the check and record nothing; and a procedural entry must carry a \
-detail saying when to stop following it and ask a human. \
-The /learnings skill carries the full authoring policy.",
+        "Record a non-obvious, durable finding in the shared knowledge base, following the /learnings skill's authoring rules.",
         {
             "type": "object",
             "properties": {
@@ -544,16 +529,10 @@ Pass command=null to clear it.",
         };
 
     async "exit_session" => tasks::handle_exit_session,
-        "Close your agent session in a single call — this is the final step of wrap-up, called after \
-the commit and after any reflection the wrap-up flow has already run. Applies the terminal mutation atomically with clearing the tmux \
-window: 'rebase'/'done' move the task to Done; 'pr' moves it to Review and sets the PR url. The \
-action must match the action passed to wrap_up, or the call is rejected. \
-If the task belongs to an epic with auto_dispatch enabled, closing it automatically dispatches \
-that epic's next backlog subtask — there is no tool for you to call, and you must not try to \
-dispatch it yourself. \
-Read the response text: on rare occasions it reports that the close did not take effect, meaning \
-the task was NOT moved and no subtask was dispatched. Do not treat that as a completed close — \
-tell the user the task still needs closing by hand.",
+        "Close your agent session with the token wrap_up returned. Applies the terminal mutation \
+atomically with clearing the tmux window: 'rebase'/'done' move the task to Done; 'pr' moves it to \
+Review and sets the PR url. The action must match the one passed to wrap_up. If the task belongs \
+to an epic with auto_dispatch enabled, closing it also starts that epic's next backlog subtask.",
         {
             "type": "object",
             "properties": {
@@ -606,7 +585,7 @@ tell the user the task still needs closing by hand.",
 ;
 
     async "list_keybindings" => keybindings::handle_list_keybindings,
-        "List every key the dispatch board, the agent-tree and diff panes, and tmux answer to, grouped by input mode (namespace), straight from the table the key handlers read. Each row has its keys, the context it applies under (when it has one), the action id, a description and a note where a key is easy to misread (for example G jumps to the last row of a column and does not enter an epic; Space does). Read-only.",
+        "List every key the dispatch board, the agent-tree and diff panes, and tmux answer to, grouped by input mode (namespace), straight from the table the key handlers read. Each row has its keys, the context it applies under (when it has one), the action id, a description and a note where a key is easy to misread. Read-only.",
         {
             "type": "object",
             "properties": {

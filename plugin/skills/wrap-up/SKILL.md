@@ -12,7 +12,7 @@ choose the action → `/retro` → commit → verify → `wrap_up(action)` → a
 **`exit_session` is mandatory on every path.** `wrap_up` alone changes nothing terminal — it issues a token and, for `rebase`, does the git work. The task's status is not moved and the session is not closed until `exit_session` runs. A wrap-up that stops after `wrap_up` leaves the tmux window alive and the task stuck in its old status. Never end your turn between the two calls.
 
 - **rebase** — dispatch handles the git work. `wrap_up(action="rebase")` fast-forwards `{base_branch}`; the closing `exit_session` call then marks the task Done and kills your tmux window. On a successful rebase, dispatch also re-indexes the repo in the background if it has a RAG index.
-- **pr** — you handle it. Inspect the diff you produced, write a real title and body that describe what was actually built, and run `gh pr create --draft` yourself. Dispatch deliberately does not author PR bodies: an auto-generated body is always worse than what you can write after seeing the work.
+- **pr** — you handle it; read `references/pr.md` when this path is chosen. Inspect the diff you produced, write a real title and body that describe what was actually built, and run `gh pr create --draft` yourself. Dispatch deliberately does not author PR bodies: an auto-generated body is always worse than what you can write after seeing the work.
 - **done** — no git operations. Use for research, planning, or work already on `{base_branch}`.
 
 **Announce at start:** "I'm using the wrap-up skill to complete this task."
@@ -162,7 +162,7 @@ If it fails, fix the issues, then go back to Step 6 to commit the fix, and re-ru
 
 ## Step 8: The closing sequence
 
-Every path ends with the same three steps. Only Step B differs by action, plus the PR path's authoring work which happens *before* this sequence (see *The PR path* below). The task moves to "done" (rebase, done) or "review" (pr) automatically — don't set the status by hand.
+Every path ends with the same three steps. Only Step B differs by action, plus the PR path's authoring work (`references/pr.md`) which happens *before* this sequence. The task moves to "done" (rebase, done) or "review" (pr) automatically — don't set the status by hand.
 
 Run the three back to back in one turn. Each is a tool call, not a milestone to report on: there is nothing here for the user to read or approve, and every pause is a chance to go idle with `base_branch` already fast-forwarded and the task still stuck in its old status.
 
@@ -180,28 +180,9 @@ If `wrap_up` returns an error, show the user the exact message and stop. Do not 
 
 **C. Call `exit_session`** with `task_id`, `token` (from Step B), `action` (must match the action you passed to `wrap_up`), and `pr_url` on the pr path only. This single call applies the terminal state change, clears the tmux window, and consumes the token — atomically. There is no follow-up call; this closes the loop.
 
-Do not stop between B and C. Skipping `exit_session` leaves the tmux window alive and the task stuck in its old status — and on the PR path, the PR unrecorded.
+Do not stop between B and C: call `exit_session` next, as the final action. Skipping it leaves the tmux window alive and the task stuck in its old status — and on the PR path, the PR unrecorded.
 
-### Don't dispatch the epic's next subtask yourself
-
-If the task belongs to an epic with auto-dispatch on, `exit_session` chains the next backlog subtask server-side. You do nothing. This is worth stating only because `dispatch_task` is a tool you can call, and firing it yourself around a close produces two agents on one epic — one of them branched from a base that predates your own commits. Leave the chaining alone, including when the close fails (below) and no chain happens.
-
-### If `exit_session` errors
-
-- `"has no active session"` — something else (a merge, a manual close) already tore the session down. Treat this as already wrapped up, not a failure. Do not retry, and on the PR path do not re-create the PR.
-- An error naming a mismatched action — the token doesn't match the action you're closing with. Show the user the exact error rather than guessing which action was intended.
-- Missing/empty `pr_url` (pr path) — pass the URL you captured.
-
-### If `exit_session` succeeds but says the close did not take effect
-
-`exit_session` can return a **successful** response that nevertheless reports the close did **not** happen: text saying the task could not be moved to its terminal status, that your tmux session is still alive, and that it needs closing by hand. This is deliberate rather than an error — the exit token is consumed before the terminal write is attempted, so an error response would strand you with no retry path. Read the response text; don't infer success from the absence of an error.
-
-When you get it:
-- **Do not retry** `exit_session` — the token is gone, so a retry only produces "call wrap_up first".
-- **Do not** call `wrap_up` again for a fresh token.
-- Tell the user plainly: the close failed, the task is still in its previous status, the tmux window is still alive, and it needs closing by hand from the TUI.
-- Your session stays open. Nothing was torn down, so the user can attach to the window.
-- On the PR path, the PR itself still exists — don't re-create it. Only the task's move to Review failed.
+If `exit_session` errors, or succeeds but reports that the close did not take effect, read `references/exit-session-errors.md` before reacting.
 
 ### Rate retrieved knowledge
 
@@ -217,96 +198,3 @@ rate_learning(learning_id=<id>, task_id=<id>, verdict="helped")
 - `verdict="wrong"` — the entry was misleading, outdated, or contradicts current code (downvotes it; may go negative). There is no `needs_review` state or human curation step — if it's clearly wrong, delete it with `delete_learning` instead of just downvoting.
 
 Only entries surfaced to you this task can be rated. There is no separate "unused" verdict — simply don't rate entries you didn't act on. `wrap_up` does not accept verdicts; rate through `rate_learning`.
-
-## The PR path: author the PR before the closing sequence
-
-You are creating a real PR with a title and body that reflect the actual work. Dispatch will not do this for you. Do all of the following *after* Step 7 (verification) but *before* Step 8, then run the closing sequence with `action="pr"` — verify before you push and open the PR, not after.
-
-### Inspect what changed
-
-```bash
-git log {base_branch}..HEAD --oneline
-git diff {base_branch}...HEAD --stat
-git diff {base_branch}...HEAD
-```
-
-Read the output. Build a mental model of what shipped: which files changed and why, which behaviours were added/removed/fixed, what the user-visible effect is. If the diff is large, focus on the changes that matter for review (skip generated files, snapshot updates, formatting churn).
-
-### Draft the title and body
-
-**Title** — imperative mood, ≤72 characters, describes the change as a single action. Examples:
-- `fix(auth): handle expired refresh tokens without 500ing`
-- `feat(tui): add project filter to archive view`
-- `refactor(db): split TaskPatch builder into smaller methods`
-
-Avoid `wip:`, `task #N:`, or anything that just restates the task title. The title should be useful in `git log --oneline`.
-
-**Body** — Markdown, `## Summary` grouping the changes under bold category labels — the same structure CodeRabbit's auto-generated PR summaries use. Only include the labels that apply:
-
-- **Breaking Changes**
-- **New Features**
-- **Bug Fixes**
-- **Refactor**
-- **Performance**
-- **Documentation**
-- **Tests**
-- **Chores**
-
-```markdown
-## Summary
-
-- **Bug Fixes**
-  - {user-visible change and why it matters, in plain language}
-- **Documentation**
-  - {user-visible change and why it matters}
-```
-
-Each bullet describes the user-visible change and why — never a function, class, file, or variable name. Skip a category entirely if nothing in the PR belongs to it; a one-line fix can have a single bullet under a single category — don't pad it out. If a PR breaks a public API or requires a migration, put that under **Breaking Changes** first, regardless of what else changed.
-
-Do not add a `## Test plan` section unless the PR is dangerous or breaking (a migration, a change to auth, a change to billing) — omit it by default.
-
-Do not reference the dispatch task — no task IDs, no "Implements #N" (GitHub auto-links `#N` to an unrelated issue/PR in this repo).
-
-If the change has UI implications, add screenshots or a description of the visual effect under a `## Notes` section.
-
-### Push and create the draft PR
-
-Find the repo slug from the remote:
-
-```bash
-git remote get-url origin
-```
-
-The slug is the `owner/repo` portion (e.g. `git@github.com:Acme/dispatch.git` → `Acme/dispatch`).
-
-Push the branch:
-
-```bash
-git push -u origin {branch}
-```
-
-If the push is rejected (non-fast-forward), STOP. Do not force-push without the user's explicit authorisation. Show them the error and ask how to proceed.
-
-Create the PR. Use a HEREDOC for the body so newlines and Markdown survive shell quoting:
-
-```bash
-gh pr create --draft \
-  --base {base_branch} \
-  --head {owner}:{branch} \
-  --repo {owner}/{repo} \
-  --title "{your authored title}" \
-  --body "$(cat <<'EOF'
-{your authored body}
-EOF
-)"
-```
-
-`{owner}` is the first part of the repo slug. The `{owner}:{branch}` format is required so `gh` resolves the branch in the same repo as `--repo` (rather than your authenticated user's namespace).
-
-`gh pr create` prints the PR URL on stdout. Capture it — it is the `pr_url` you pass to `exit_session` in Step C.
-
-If `gh` reports `a pull request for branch '...' already exists`, parse the URL it returns and use that — the PR already exists and your job is just to record it.
-
-### Then run the closing sequence
-
-Go to Step 8 with `action="pr"`. The ordering matters: `wrap_up(action="pr")` deliberately doesn't move the task to Review or set the PR url — that's deferred to `exit_session`. Until `exit_session` runs, dispatch has no PR-merge polling armed for this task, so a merge can't tear the session down between the two calls. Don't reorder to "close first, then finish up".

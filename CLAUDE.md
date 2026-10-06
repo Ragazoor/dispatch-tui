@@ -97,7 +97,7 @@ POSIX-only. Embeddings/RAG (`src/service/embeddings.rs`) run **locally** — `fa
 
 ## Verify Command
 
-A per-repo, single-line shell command that dispatched agents must run before declaring work complete. Stored on the `repo_paths` row for the task's `repo_path`; set via the `set_verify_command` MCP tool or `cargo run -- repo set-verify <path> <command>`. Newlines and carriage returns are rejected — chain steps with `&&` or `;`. It never appears in the dispatch prompt. Instead it reaches the agent through two surfaces: `get_task`'s "Verify command" line (read by the `/wrap-up` skill in its Step 2, and acted on in its Step 7, before the closing sequence ever calls `wrap_up`), and, as a secondary reminder, the `wrap_up` response's action-specific "Verify before exiting" line (`src/mcp/handlers/tasks/wrap_up.rs::wrap_up_verify_line`). See `docs/specs/dispatch.allium` for why both exist.
+Read it from `get_task`'s "Verify command" line, never from this file; how it is stored and surfaced is in [docs/reference.md](docs/reference.md) ("Verify Command").
 
 ## Working With the User
 
@@ -107,31 +107,17 @@ The most important thing is to stay aligned with the user. The Allium specs in `
 - **Behaviour changes start in the spec.** Spec first, then tests, then code (see the two sections below). This applies to UI and interaction behaviour too — that is a first-class Allium surface, not a prose note.
 - **Agreement gets recorded, in one of two places.** A decision about *what the system does* goes into the relevant `docs/specs/*.allium` file. A decision about *how to work in this repo* — a convention, a pitfall, a gotcha that would trip the next agent — goes into the knowledge base via `record_learning`. A decision that lives only in the conversation is lost the moment the session ends.
 
-## Test-Driven Development
-
-Always use TDD. Express intended behaviour as tests before writing the code that satisfies them — for new features, bug fixes, and refactors alike.
-
 ## Allium Specification
 
 The Allium specs in `docs/specs/` are the **source of truth** for domain and interaction behaviour. Each filename names its domain — `tasks.allium`, `dispatch.allium`, `epics.allium`, `feeds.allium`, and so on; `core.allium` holds the shared domain model. Consult the relevant spec before changing core behaviour, and use the `allium:tend` and `allium:weed` skills to keep spec and code aligned.
 
 ## MCP Tools for Agents
 
-The `dispatch` MCP server exposes more than task creation. Worth knowing by name:
-
-- **Knowledge base** — relevant learnings are already injected into your prompt at dispatch time ("Validated knowledge for this task" above); rate each one you act on with `rate_learning` (`helped`/`wrong`). Call `query_learnings` yourself for anything not already surfaced, and `record_learning` to capture a new pitfall/convention/tip. See `docs/specs/learnings.allium`.
-- **Your own task** — `get_task` / `update_task` to read or mutate the task you're running as (title, description, status, plan, tag).
-- **Finishing** — `wrap_up` + `exit_session` to close out a session (see the `/wrap-up` skill). `exit_session` chains the epic's next backlog subtask automatically when `auto_dispatch` is on; there is no tool for you to call.
-
-`create_task`/`create_epic` matter mainly to orchestrating agents decomposing work, not to an agent executing a single dispatched task. Full tool list and schemas: call `tools/list`, or see `docs/specs/mcp-task-tools.allium`.
+The `dispatch` MCP server's tool descriptions say what each tool does; call `tools/list`, or see `docs/specs/mcp-task-tools.allium`. `create_task`/`create_epic` matter mainly to orchestrating agents, not to one executing a single task.
 
 ## Agent-Facing Skill Copy
 
-`plugin/skills/*/SKILL.md` is the **source of truth** for the skills agents run (`/wrap-up`, `/retro`, `/learnings`, `/grill`, `/summarize`, `/decompose-review`, `/allium-loop`). The directory is embedded in the binary via `include_dir!` and only reaches `~/.claude/plugins/local/dispatch/` when `dispatch tui`'s startup configuration check reports the plugin stale and the operator accepts (`docs/specs/startup.allium`) — editing the installed copy is editing a build artifact. Changes there are asserted by the `contains` tests in `src/setup/plugins.rs` (via its `skill_body` helper); see [docs/testing.md](docs/testing.md).
-
-**Frontmatter is gated too, not just bodies** — and for both skill directories at once, in `tests/repo_skills.rs`. Every skill must declare a `name:` matching its directory and a description containing a sentence that starts `Use `, saying *when* to invoke it rather than only what it does; a description with no trigger clause is unreachable except by typing the slash command. A skill that does not fit that convention should gain the clause, not the check gain a branch — the predicate was an eight-way list of accepted phrasings once, which was a transcription of the corpus rather than a rule. Body assertions stay in `src/setup/plugins.rs`, which reads the embedded copy.
-
-`.claude/skills/` is a separate, unrelated path: a plain tracked directory Claude Code auto-discovers for any session inside this repo, with no build or install step. It is held to the same frontmatter contract as `plugin/skills/`, by the same code. **A skill in either must be a directory containing `SKILL.md`** — a bare `.md` file sitting directly under the skills directory is never loaded, and nothing about it looks wrong.
+`plugin/skills/*/SKILL.md` is the source of truth for the skills agents run; edit it, never the installed copy under `~/.claude/plugins/`. A skill must be a directory containing `SKILL.md` (a bare `.md` is never loaded). Install path, test gates and frontmatter contract: [docs/reference.md](docs/reference.md) ("Agent-Facing Skill Copy").
 
 ## Agent Working Directory
 

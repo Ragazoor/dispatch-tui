@@ -206,8 +206,7 @@ fn validate_create_params(params: &CreateLearningParams) -> Result<(), ServiceEr
 
     // A procedural entry steers other agents, so it has to say where it stops
     // applying. Only the detail's presence is enforced; that it actually names
-    // a boundary is a convention the /learnings skill and the record_learning
-    // tool description carry.
+    // a boundary is a convention the /learnings skill carries.
     let has_detail = params.detail.as_ref().is_some_and(|d| !d.trim().is_empty());
     if params.kind == LearningKind::Procedural && !has_detail {
         return Err(ServiceError::Validation(

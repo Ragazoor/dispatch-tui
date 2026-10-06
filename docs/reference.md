@@ -904,3 +904,17 @@ summary="This epic adds the learning store; consult docs/specs/core.allium befor
 scope=task, kind=episodic
 summary="Rebase on main resolved the rusqlite version conflict; use that if it recurs"
 ```
+
+## Verify Command
+
+A per-repo, single-line shell command that dispatched agents must run before declaring work complete. Stored on the `repo_paths` row for the task's `repo_path`; set via the `set_verify_command` MCP tool or `cargo run -- repo set-verify <path> <command>`. Newlines and carriage returns are rejected — chain steps with `&&` or `;`. It never appears in the dispatch prompt. Instead it reaches the agent through two surfaces: `get_task`'s "Verify command" line (read by the `/wrap-up` skill in its Step 2, and acted on in its Step 7, before the closing sequence ever calls `wrap_up`), and, as a secondary reminder, the `wrap_up` response's action-specific "Verify before exiting" line (`src/mcp/handlers/tasks/wrap_up.rs::wrap_up_verify_line`). See `docs/specs/dispatch.allium` for why both exist.
+
+## Agent-Facing Skill Copy
+
+`plugin/skills/*/SKILL.md` is the **source of truth** for the skills agents run (`/wrap-up`, `/retro`, `/learnings`, `/grill`, `/summarize`, `/decompose-review`, `/allium-loop`). The directory is embedded in the binary via `include_dir!` and only reaches `~/.claude/plugins/local/dispatch/` when `dispatch tui`'s startup configuration check reports the plugin stale and the operator accepts (`docs/specs/startup.allium`) — editing the installed copy is editing a build artifact.
+
+A SKILL.md carries the flow every invocation walks; detail only one branch needs lives in a `references/` file beside it, and SKILL.md names that file where the branch is taken ("Skill copy" in `docs/specs/mcp-task-tools.allium`). Changes are asserted by the `contains` tests in `src/setup/plugins.rs` (via its `skill_body` and `skill_text` helpers); see [testing.md](testing.md).
+
+**Frontmatter is gated too, not just bodies** — and for both skill directories at once, in `tests/repo_skills.rs`. Every skill must declare a `name:` matching its directory and a description containing a sentence that starts `Use `, saying *when* to invoke it rather than only what it does; a description with no trigger clause is unreachable except by typing the slash command. A skill that does not fit that convention should gain the clause, not the check gain a branch. Body assertions stay in `src/setup/plugins.rs`, which reads the embedded copy.
+
+`.claude/skills/` is a separate, unrelated path: a plain tracked directory Claude Code auto-discovers for any session inside this repo, with no build or install step, held to the same frontmatter contract by the same code. **A skill in either must be a directory containing `SKILL.md`** — a bare `.md` file directly under the skills directory is never loaded, and nothing about it looks wrong.

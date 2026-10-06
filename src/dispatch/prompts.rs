@@ -270,20 +270,18 @@ unclear, and record what you find."
 }
 
 /// The design instruction for every task that arrives without a plan: an
-/// Allium-first, interview-driven sequence (elicit → spec → tests → code →
-/// weed) that replaced the older `/brainstorming` design-doc-then-plan step in
+/// Allium-first sequence (elicit → spec → tests → code → weed), named as one
+/// sentence of skills, that replaced the older `/brainstorming` design-doc-then-plan step in
 /// task #4366.
 ///
 /// Shared verbatim between the no-plan dispatch addendum and the quick-dispatch
 /// addendum, so the design step cannot drift apart between the two. A
-/// `docs/plans/` doc and a hand-off to `/allium-loop` are both named as the
-/// agent's judgement call rather than requirements — the spec, not a plan, is
-/// what this step is expected to produce.
+/// `docs/plans/` doc is named as the agent's judgement call rather than a
+/// requirement — the spec, not a plan, is what this step is expected to produce.
 ///
-/// Each step names its skill and stops, the same rule
-/// [`brainstorm_instruction`] follows. Step 1 said "One question at a time"
-/// until `allium:elicit` turned out to head a section with that exact rule,
-/// which made the clause a paraphrase of the skill the step loads.
+/// It names each skill and stops, the same rule [`brainstorm_instruction`]
+/// follows: the skills carry their own process (who to interview, how to
+/// converge), and a restatement here can only drift from them.
 ///
 /// Framed as an intermediate step, not a stopping point;
 /// `Research`/`Dependabot`/`PrReview` never reach this addendum (see
@@ -291,20 +289,14 @@ unclear, and record what you find."
 /// needed here. Carries the same epic-decomposition carve-out as
 /// `wrap_up_instruction` so the two stay consistent about what counts as done.
 pub(super) fn spec_first_instruction() -> &'static str {
-    "Design the solution spec-first, in this order:\n\
+    "Design the solution spec-first: elicit the intended behaviour with `allium:elicit`, \
+capture it in docs/specs/ with `allium:tend`, generate tests with `allium:propagate` and \
+confirm they fail before you write any code, implement the minimum that makes them pass, then \
+check spec and code agree with `allium:weed`.\n\
 \n\
-1. Interview the user with the `allium:elicit` skill until the intended behaviour is \
-unambiguous.\n\
-2. Capture what you agreed in the relevant `docs/specs/*.allium` file, via `allium:tend`.\n\
-3. Generate tests from the spec with `allium:propagate` and confirm they fail before you \
-write any code.\n\
-4. Implement the minimum code that makes them pass.\n\
-5. Confirm spec and code agree with `allium:weed`.\n\
-\n\
-Two things are your judgement call, not requirements: write a plan to docs/plans/ and \
-attach it with update_task only if the implementation is big enough that its steps are \
-worth recording; and for a large or stubborn convergence, hand steps 3-5 to the \
-`/allium-loop` skill instead of running them inline.\n\
+Writing a plan to docs/plans/ and attaching it with update_task is your judgement call, \
+not a requirement — do it only if the implementation is big enough that its steps are \
+worth recording.\n\
 \n\
 The spec is not the end of the task — implement it in this same session (or, for an \
 epic-decomposition task, create work packages for its subtasks instead) and verify your \
@@ -969,10 +961,8 @@ pub(super) fn build_research_prompt(
 documentation, and external resources.\n\
 \n\
 When you have gathered sufficient information, present your findings clearly to the user \
-and wait for further instructions. Do NOT call /wrap-up — that is for the user to \
-decide.\n\
-\n\
-Do NOT make code changes.";
+and wait for further instructions; this session is for investigation, so code changes and \
+wrapping up are the user's call once they have read what you found.";
 
     let block = task_block(task_id, title, description, epic);
     render_task_prompt(

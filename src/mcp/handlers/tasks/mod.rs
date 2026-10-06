@@ -60,7 +60,7 @@ mcp_args! {
     #[serde(default)]
     optional status: Option<TaskStatus> = [set(status)] {
         "type": "string",
-        "description": "New status: backlog, running, review, or done. status=\"done\" is a dedicated close call: no other field may be set in the same call, and a dispatched agent cannot use it to close its own task (call wrap_up then exit_session for that instead). There is no MCP path to permanently delete a task — that stays a human TUI action. Moving a crashed task back to backlog is the first half of resuming it: a following dispatch_task reuses its existing worktree rather than creating a fresh one, so its branch, commits and uncommitted changes survive.",
+        "description": "New status: backlog, running, review, or done. status=\"done\" is a dedicated close call: no other field may be set in the same call, and a dispatched agent cannot use it to close its own task.",
         "enum": crate::models::TaskStatus::MCP_UPDATABLE.iter().map(|s| s.as_str()).collect::<Vec<_>>()
     };
 
@@ -97,13 +97,13 @@ mcp_args! {
     #[serde(default)]
     optional url: Option<String> = [manual] {
         "type": "string",
-        "description": "URL associated with this task (PR, issue, security alert, or other link). Pass an empty string to clear it. When set to a non-empty value, url_type is required."
+        "description": "The task's link (PR, issue, security alert, or other). An empty string clears it; a non-empty one needs url_type."
     };
 
     #[serde(default, deserialize_with = "deserialize_optional_url_type")]
     optional url_type: Option<UrlType> = [manual] {
         "type": "string",
-        "description": "Type of the url: 'pr' (pull request — enables PR polling/merge), 'security_alert', 'issue', or 'other'. Required when url is set.",
+        "description": "Type of the url; 'pr' enables PR polling and merge.",
         "enum": crate::models::UrlType::ALL.iter().map(|u| u.as_str()).collect::<Vec<_>>()
     };
 
@@ -113,7 +113,7 @@ mcp_args! {
     #[serde(default)]
     optional tag: Option<TaskTag> = [set(tag, |t| Some(Some(t)))] {
         "type": "string",
-        "description": "Task tag: bug, feature, chore, pr-review, research, fix, or dependabot. Controls dispatch behavior. The dependabot tag is intended for feed scripts only — TUI users cannot select it from the tag picker.",
+        "description": "Task tag: bug, feature, chore, pr-review, research, fix, or dependabot. Controls dispatch behavior.",
         "enum": super::dispatch::task_tag_enum_values()
     };
 
@@ -133,20 +133,20 @@ mcp_args! {
     #[serde(default)]
     optional base_branch: Option<String> = [set_some(base_branch)] {
         "type": "string",
-        "description": "The base branch for rebase and PR operations (e.g. 'main', 'develop'). Defaults to 'main' if not specified."
+        "description": "The base branch for rebase and PR operations (e.g. 'main', 'develop')."
     };
 
     #[serde(default, deserialize_with = "deserialize_nullable_wrap_up_mode")]
     optional wrap_up_mode: Option<Option<WrapUpMode>> = [set(wrap_up_mode)] {
         "type": ["string", "null"],
-        "description": "Pre-set the wrap-up action for this task: 'rebase' (rebase onto base_branch), 'pr' (create a PR), or 'done' (mark done immediately). Pass null to clear.",
+        "description": "Pre-set the wrap-up action: 'rebase' (rebase onto base_branch), 'pr' (create a PR), or 'done' (mark done immediately). Pass null to clear.",
         "enum": crate::models::WrapUpMode::ALL.iter().map(|m| Some(m.as_str())).chain(std::iter::once(None)).collect::<Vec<Option<&str>>>()
     };
 
     #[serde(default)]
     optional auto_run_plan: Option<bool> = [set(auto_run_plan)] {
         "type": "boolean",
-        "description": "When true and the task has a plan_path, the dispatched agent implements the plan immediately instead of asking for confirmation first."
+        "description": "When true and a plan_path is set, the dispatched agent implements the plan immediately instead of summarizing it and asking for confirmation first."
     };
 
     #[serde(default)]

@@ -11,8 +11,6 @@ Task:
 
 Investigate the topic described above. You may read the codebase, documentation, and external resources.
 
-When you have gathered sufficient information, present your findings clearly to the user and wait for further instructions. Do NOT call /wrap-up — that is for the user to decide.
-
-Do NOT make code changes.
+When you have gathered sufficient information, present your findings clearly to the user and wait for further instructions; this session is for investigation, so code changes and wrapping up are the user's call once they have read what you found.
 
 Knowledge base: the `/learnings` skill manages it — check it when something is unclear, and record what you find.

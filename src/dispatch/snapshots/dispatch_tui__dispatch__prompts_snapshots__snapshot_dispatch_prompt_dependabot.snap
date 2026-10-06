@@ -14,27 +14,20 @@ Bump: patch — serde 1.0.195 → 1.0.197
 PR: https://github.com/example/repo/pull/42
    Pass this URL to every `gh` command below — it identifies the repo too, so none of them need `--repo`.
 
-1. Verify the PR touches only dependency files:
-   - Run: gh pr view <PR> --json files
-   - Run: gh pr diff <PR>
-   - Every changed file path must match one of: Cargo.toml, Cargo.lock, package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, requirements*.txt, pyproject.toml, uv.lock, go.mod, go.sum, Gemfile, Gemfile.lock, composer.json, composer.lock, gradle/libs.versions.toml, gradle.properties, .github/workflows/*.
-   - If that check fails, go to ASK THE USER.
+1. Verify the PR touches only dependency files (gh pr view <PR> --json files, gh pr diff <PR>). Approve only a PR that changes just dependency manifests, lockfiles and pinned GitHub Action versions in workflow files; anything else, such as build scripts or source, goes to ASK THE USER.
    - Do not re-check the PR author. The feed that created this task lists PRs by bot author, so a task only exists for a PR that already passed that filter; re-deriving it costs a call and can only ever agree.
-2. Check CI: gh pr checks <PR>.
-   - All checks passing -> continue to step 3.
-   - Any check pending -> go to ASK THE USER and ask whether to wait.
-   - Any check failing -> go to ASK THE USER with the failure summary.
+2. Check CI: gh pr checks <PR>. Passing checks continue to step 3; pending checks go to ASK THE USER, asking whether to wait; failing checks go to ASK THE USER with the failure summary.
 3. This is a patch bump. Nothing further to check — go to AUTO-APPROVE + MERGE.
 
 AUTO-APPROVE + MERGE:
-   - First check Kognic's GitHub App verdict: gh pr view <PR> --json reviews,comments. The app is `kognic-github-app`. It is safe only if the app's LATEST review is APPROVED (a new push dismisses its earlier review). If that review is dismissed, absent or anything else, do NOT approve or merge: go to ASK THE USER and quote the reason from the app's latest comment, or say the app has given no verdict.
-   - gh pr review <PR> --approve --body "Auto-approved by dispatch dependabot agent: <the Bump line above>, CI green, dependency files only."
+   - First check Kognic's GitHub App verdict: gh pr view <PR> --json reviews,comments. The app is `kognic-github-app`. It is safe only if the app's latest review is APPROVED (a new push dismisses its earlier review). If that review is dismissed, absent or anything else, go to ASK THE USER and quote the reason from the app's latest comment, or say the app has given no verdict.
+   - gh pr review <PR> --approve, with a body saying what you actually checked.
    - gh pr merge <PR> --squash --auto
    - Note: --auto requires the repo to have branch protection with required checks; without it, the PR merges immediately.
    - Done. Nothing further is needed: the task is auto-cleaned on merge.
 
 ASK THE USER:
-   - Write ONE direct question that includes: the Bump line above, the dep-only verdict, the CI status summary, the changelog summary or its absence, the verdict of Kognic's GitHub App `kognic-github-app` (its latest review state and the reason in its latest comment, or that it has given none; read it with gh pr view <PR> --json reviews,comments), and the specific reason you are not auto-merging.
+   - Write one direct question that says why you did not approve, with whatever the human needs to decide: the Bump line above, and the CI or changelog findings where they matter. If Kognic's GitHub App `kognic-github-app` blocked the merge, name its verdict.
    - Call update_task(task_id=42, sub_status="needs_input") to flag the task on the kanban board.
    - Stop and wait for the user's reply; the task stays open for them.
 

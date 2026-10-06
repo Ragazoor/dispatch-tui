@@ -13,15 +13,9 @@ This is a quick-dispatched task with a placeholder title. Start by asking the us
 
 Then, before making any changes:
 
-Design the solution spec-first, in this order:
+Design the solution spec-first: elicit the intended behaviour with `allium:elicit`, capture it in docs/specs/ with `allium:tend`, generate tests with `allium:propagate` and confirm they fail before you write any code, implement the minimum that makes them pass, then check spec and code agree with `allium:weed`.
 
-1. Interview the user with the `allium:elicit` skill until the intended behaviour is unambiguous.
-2. Capture what you agreed in the relevant `docs/specs/*.allium` file, via `allium:tend`.
-3. Generate tests from the spec with `allium:propagate` and confirm they fail before you write any code.
-4. Implement the minimum code that makes them pass.
-5. Confirm spec and code agree with `allium:weed`.
-
-Two things are your judgement call, not requirements: write a plan to docs/plans/ and attach it with update_task only if the implementation is big enough that its steps are worth recording; and for a large or stubborn convergence, hand steps 3-5 to the `/allium-loop` skill instead of running them inline.
+Writing a plan to docs/plans/ and attaching it with update_task is your judgement call, not a requirement — do it only if the implementation is big enough that its steps are worth recording.
 
 The spec is not the end of the task — implement it in this same session (or, for an epic-decomposition task, create work packages for its subtasks instead) and verify your work before wrapping up.
 

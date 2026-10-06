@@ -147,7 +147,7 @@ async fn finish_wrap_up_rebase(state: &McpState, id: Option<Value>, task: Task) 
                     "wrap_up complete (task {}, action: rebase). The session is NOT yet closed.{verify_line} \
                 Exit token: {token} — {exit_line}. \
                 You MUST call `exit_session` next as your final action — without it, the tmux window stays alive \
-                and the task remains in its current status. Do not stop, and do not call any other tool first.",
+                and the task remains in its current status.",
                     task_id.0
                 )}]}),
             )
@@ -392,8 +392,10 @@ pub(crate) async fn handle_exit_session(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
                     "Task #{} could NOT be moved to its terminal status — the close did not take \
-                     effect, and your tmux session is still alive. Do not treat this as a completed \
-                     close: the task is still in its previous status and needs closing by hand.",
+                     effect, and your tmux session is still alive. Stop here and hand back to \
+                     the user: the task is still in its previous status and needs closing by hand. \
+                     Retry neither `exit_session` (the token is spent) nor `wrap_up` (a fresh token \
+                     reaches the same failing close).",
                     task_id.0
                 )}]}),
             )
