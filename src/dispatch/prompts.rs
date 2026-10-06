@@ -270,9 +270,9 @@ unclear, and record what you find."
 }
 
 /// The design instruction for every task that arrives without a plan: an
-/// Allium-first sequence (elicit → spec → tests → code → weed), named as one
-/// sentence of skills, that replaced the older `/brainstorming` design-doc-then-plan step in
-/// task #4366.
+/// Allium-first sequence (elicit, tend, propagate, implement, weed), stated as
+/// one sentence that names the skills, which replaced the older
+/// `/brainstorming` design-doc-then-plan step in task #4366.
 ///
 /// Shared verbatim between the no-plan dispatch addendum and the quick-dispatch
 /// addendum, so the design step cannot drift apart between the two. A
