@@ -115,8 +115,8 @@ async fn finish_wrap_up_simple(
         json!({"content": [{"type": "text", "text": format!(
             "wrap_up complete (task {tid}, action: {action_str}).{no_git_note} \
         The session is NOT yet closed.{verify_line} \
-        Exit token: {token} — {exit_line}. \
-        You MUST call `exit_session` next as your final action.{rate_learning_nudge}",
+        Exit token: {token} — {exit_line}.{rate_learning_nudge} \
+        You MUST call `exit_session` next as your final action.",
             tid = task_id.0,
             action_str = action.as_str(),
         )}]}),

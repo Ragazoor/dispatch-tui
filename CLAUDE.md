@@ -104,7 +104,7 @@ Read it from `get_task`'s "Verify command" line, never from this file; how it is
 The most important thing is to stay aligned with the user. The Allium specs in `docs/specs/` are the shared source of truth that alignment is expressed in — when the spec and your intent agree, you are aligned; when they don't, one of them is wrong and it must be resolved before code is written.
 
 - **Ambiguity is a stop condition, not a judgement call.** If the spec is silent, contradictory, or open to more than one reading, ask. Do not pick the plausible interpretation and proceed.
-- **Behaviour changes start in the spec.** Spec first, then tests, then code (see the two sections below). This applies to UI and interaction behaviour too — that is a first-class Allium surface, not a prose note.
+- **Behaviour changes start in the spec.** Spec first, then tests, then code. This applies to UI and interaction behaviour too — that is a first-class Allium surface, not a prose note.
 - **Agreement gets recorded, in one of two places.** A decision about *what the system does* goes into the relevant `docs/specs/*.allium` file. A decision about *how to work in this repo* — a convention, a pitfall, a gotcha that would trip the next agent — goes into the knowledge base via `record_learning`. A decision that lives only in the conversation is lost the moment the session ends.
 
 ## Allium Specification

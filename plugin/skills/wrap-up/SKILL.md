@@ -9,7 +9,7 @@ Wrap up a dispatch worktree. All three paths follow the same shape:
 
 choose the action → `/retro` → commit → verify → `wrap_up(action)` → a single `exit_session(token, action, ...)` call that applies the terminal state change and closes the session.
 
-**`exit_session` is mandatory on every path.** `wrap_up` alone changes nothing terminal — it issues a token and, for `rebase`, does the git work. The task's status is not moved and the session is not closed until `exit_session` runs. A wrap-up that stops after `wrap_up` leaves the tmux window alive and the task stuck in its old status. Never end your turn between the two calls.
+**`exit_session` is mandatory on every path.** `wrap_up` alone changes nothing terminal — it issues a token and, for `rebase`, does the git work. The task's status is not moved and the session is not closed until `exit_session` runs.
 
 - **rebase** — dispatch handles the git work. `wrap_up(action="rebase")` fast-forwards `{base_branch}`; the closing `exit_session` call then marks the task Done and kills your tmux window. On a successful rebase, dispatch also re-indexes the repo in the background if it has a RAG index.
 - **pr** — you handle it; read `references/pr.md` when this path is chosen. Inspect the diff you produced, write a real title and body that describe what was actually built, and run `gh pr create --draft` yourself. Dispatch deliberately does not author PR bodies: an auto-generated body is always worse than what you can write after seeing the work.
