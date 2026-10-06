@@ -296,8 +296,7 @@ async fn cve_feed_interval_secs_round_trips_and_clears() {
 
 /// Overwrite a (repo_path, branch) row's `last_used` via raw SQL so recency
 /// ordering tests are deterministic instead of racing datetime('now') second
-/// resolution (mirrors `seed_learning_with_score_and_updated` in
-/// db/tests/learnings.rs).
+/// resolution.
 async fn set_base_branch_last_used(db: &Database, repo_path: &str, branch: &str, last_used: &str) {
     let repo_path = repo_path.to_string();
     let branch = branch.to_string();

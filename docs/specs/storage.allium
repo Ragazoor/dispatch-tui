@@ -21,6 +21,10 @@
 --           line emitted when a DB call is abnormally slow (see
 --           observability.allium: DbCallSlowWarning).
 --
+-- Learnings and their retrievals (learnings.allium) have no SQLite body at
+-- all: a handle with no store attached refuses them with a "no shared store"
+-- error rather than answering from a table nothing writes on a real board.
+--
 -- THE CONNECTION MODEL IS NARROWED TO TESTS, NOT DELETED. It used to describe
 -- every board. After task #16755 a SQLite store is opened only by a test that
 -- asks for one (overwhelmingly the in-memory medium). The journal-mode trap
