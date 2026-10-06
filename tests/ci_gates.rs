@@ -107,3 +107,17 @@ fn ci_coverage_job_enforces_a_coverage_floor() {
         "coverage floor {floor} is outside the plausible range 50..=100"
     );
 }
+
+#[test]
+fn ci_coverage_job_excludes_generated_bindings() {
+    let ci = repo_file(".github/workflows/ci.yml");
+    let run = ci
+        .lines()
+        .find(|l| l.trim_start().starts_with("run: cargo tarpaulin"))
+        .expect("the coverage job must run `cargo tarpaulin`");
+    assert!(
+        run.contains("--exclude-files 'src/spacetime/bindings/*'"),
+        "generated bindings are ~7% covered and would drag the gated figure down; \
+         pass `--exclude-files 'src/spacetime/bindings/*'` to tarpaulin"
+    );
+}
