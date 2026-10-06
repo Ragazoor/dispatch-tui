@@ -94,6 +94,26 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
 /// A store over a COPY of `data_dir`, read and stopped. The folder named is
 /// only ever read by `cp`.
 async fn read_data_dir(data_dir: &Path) -> Result<Snapshot> {
+    read_data_dir_with(
+        data_dir,
+        &SpacetimeStartSpawner::new(),
+        START_TIMEOUT,
+        &|server| Arc::new(store_for(server)),
+    )
+    .await
+}
+
+/// How long the copy gets to answer before the import gives up.
+const START_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// `read_data_dir` with the process start, the wait and the store reached
+/// through seams, so the path runs without a `spacetime` binary.
+async fn read_data_dir_with(
+    data_dir: &Path,
+    spawner: &dyn StoreSpawner,
+    start_timeout: Duration,
+    store_at: &dyn Fn(&str) -> Arc<dyn SharedStore>,
+) -> Result<Snapshot> {
     if !data_dir.is_dir() {
         bail!("{} is not a directory", data_dir.display());
     }
@@ -117,7 +137,7 @@ async fn read_data_dir(data_dir: &Path) -> Result<Snapshot> {
         .local_addr()?
         .port();
     let address = format!("127.0.0.1:{port}");
-    let child = SpacetimeStartSpawner::new()
+    let child = spawner
         .spawn(&address, &copy, &scratch.path().join("store.log"))
         .context("could not run `spacetime start`")?;
     let group = child.id();
@@ -125,19 +145,22 @@ async fn read_data_dir(data_dir: &Path) -> Result<Snapshot> {
     let result = async {
         let a = address.clone();
         tokio::task::spawn_blocking(move || {
-            let deadline = Instant::now() + Duration::from_secs(30);
+            let deadline = Instant::now() + start_timeout;
             while probe_address(&a, Duration::from_millis(500))
                 != ManagedAddressState::StoreAnswering
             {
                 if Instant::now() > deadline {
-                    bail!("the copy of the store did not start within 30 seconds");
+                    bail!(
+                        "the copy of the store did not start within {} seconds",
+                        start_timeout.as_secs()
+                    );
                 }
                 std::thread::sleep(Duration::from_millis(250));
             }
             Ok(())
         })
         .await??;
-        store_for(&format!("http://{address}")).dump().await
+        store_at(&format!("http://{address}")).dump().await
     }
     .await;
 
@@ -234,6 +257,165 @@ async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spacetime::MemoryStore;
+    use std::io::Read;
+    use std::net::TcpListener;
+    use std::process::{Child, Command, Stdio};
+    use std::sync::Mutex;
+
+    /// Starts `sleep` in its own group instead of `spacetime start`, and
+    /// records the address and data folder it was given.
+    #[derive(Default)]
+    struct FakeSpawner {
+        seen: Mutex<Option<(String, PathBuf)>>,
+        pid: Mutex<Option<ProcessGroup>>,
+        fail: bool,
+        answer_on_start: bool,
+    }
+
+    /// A process group stopped when dropped: a backstop for a test that fails
+    /// before the code under test stops it.
+    struct ProcessGroup(u32);
+
+    impl Drop for ProcessGroup {
+        fn drop(&mut self) {
+            let _ = Command::new("kill")
+                .args(["-TERM", "--", &format!("-{}", self.0)])
+                .status();
+        }
+    }
+
+    impl StoreSpawner for FakeSpawner {
+        fn spawn(&self, address: &str, data_dir: &Path, _log: &Path) -> std::io::Result<Child> {
+            use std::os::unix::process::CommandExt;
+            if self.fail {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "no spacetime",
+                ));
+            }
+            *self.seen.lock().unwrap() = Some((address.to_string(), data_dir.to_path_buf()));
+            if self.answer_on_start {
+                let listener = TcpListener::bind(address)?;
+                std::thread::spawn(move || {
+                    for stream in listener.incoming() {
+                        let Ok(mut stream) = stream else { continue };
+                        let mut buf = [0u8; 512];
+                        let _ = stream.read(&mut buf);
+                        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+                    }
+                });
+            }
+            let child = Command::new("sleep")
+                .arg("60")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .process_group(0)
+                .spawn()?;
+            *self.pid.lock().unwrap() = Some(ProcessGroup(child.id()));
+            Ok(child)
+        }
+    }
+
+    fn data_folder() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/a.txt"), "x").unwrap();
+        dir
+    }
+
+    fn memory_store(_: &str) -> Arc<dyn SharedStore> {
+        Arc::new(MemoryStore::new())
+    }
+
+    fn alive(pid: u32) -> bool {
+        // A zombie still has a /proc entry but is not running.
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .map(|s| !s.contains(") Z "))
+            .unwrap_or(false)
+    }
+
+    #[tokio::test]
+    async fn a_missing_folder_is_refused_before_anything_starts() {
+        let spawner = FakeSpawner::default();
+        let err = read_data_dir_with(
+            Path::new("/nonexistent/dispatch-store"),
+            &spawner,
+            Duration::from_secs(1),
+            &memory_store,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("is not a directory"));
+        assert!(spawner.seen.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_failed_start_names_the_command() {
+        let dir = data_folder();
+        let spawner = FakeSpawner {
+            fail: true,
+            ..Default::default()
+        };
+        let err = read_data_dir_with(dir.path(), &spawner, Duration::from_secs(1), &memory_store)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("could not run `spacetime start`"));
+    }
+
+    #[tokio::test]
+    async fn a_copy_that_never_answers_times_out_and_is_stopped() {
+        let dir = data_folder();
+        let spawner = FakeSpawner::default();
+        let err = read_data_dir_with(dir.path(), &spawner, Duration::ZERO, &memory_store)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("did not start within"));
+        let pid = spawner.pid.lock().unwrap().as_ref().unwrap().0;
+        for _ in 0..50 {
+            if !alive(pid) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("the fake store process was left running");
+    }
+
+    #[tokio::test]
+    async fn an_answering_copy_is_dumped_from_a_copy_not_the_original() {
+        let dir = data_folder();
+        let spawner = FakeSpawner {
+            answer_on_start: true,
+            ..Default::default()
+        };
+        let snapshot =
+            read_data_dir_with(dir.path(), &spawner, Duration::from_secs(10), &memory_store)
+                .await
+                .unwrap();
+        assert!(!snapshot.extracts().is_empty());
+        let (_, served) = spawner.seen.lock().unwrap().clone().unwrap();
+        assert_ne!(served, dir.path());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("sub/a.txt")).unwrap(),
+            "x"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_server_source_naming_the_target_is_refused() {
+        let mut out = Vec::new();
+        let err = import_store(
+            Path::new("/nonexistent/x.db"),
+            Some("http://127.0.0.1:3001/".into()),
+            "http://127.0.0.1:3001",
+            &mut out,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("same store"));
+        assert!(out.is_empty());
+    }
 
     #[test]
     fn an_http_address_is_a_server_and_anything_else_a_folder() {

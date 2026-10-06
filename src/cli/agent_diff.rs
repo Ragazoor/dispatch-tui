@@ -1165,6 +1165,172 @@ mod document_tests {
 }
 
 #[cfg(test)]
+mod refresh_tests {
+    use super::*;
+    use crate::agent_tree_open_set::write_open_set;
+    use crate::process::MockProcessRunner;
+    use crate::worktree_admin::tests::make_linked_worktree;
+
+    const SHA: &str = "1111111111111111111111111111111111111111";
+    const PATCH: &str = "diff --git a/a.rs b/a.rs\n@@ -1 +1 @@\n-old\n+new\n";
+
+    fn ok(stdout: &str) -> Result<std::process::Output> {
+        MockProcessRunner::ok_with_stdout(stdout.as_bytes())
+    }
+
+    /// The git answers one full rebuild of a single open file reads: two
+    /// merge-bases, the fingerprint, the untracked listing and the diff.
+    fn full_rebuild(fingerprint: &str) -> Vec<Result<std::process::Output>> {
+        vec![ok(SHA), ok(SHA), ok(fingerprint), ok(""), ok(PATCH)]
+    }
+
+    /// The git answers a pass that finds nothing moved reads.
+    fn fingerprint_only(fingerprint: &str) -> Vec<Result<std::process::Output>> {
+        vec![ok(SHA), ok(SHA), ok(fingerprint)]
+    }
+
+    struct Pane {
+        _dir: tempfile::TempDir,
+        root: String,
+        last: LastSeen,
+        lines: Vec<DiffLine>,
+        state: DiffState,
+    }
+
+    impl Pane {
+        fn new(open: &[&str]) -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let (root, _) = make_linked_worktree(dir.path(), "task");
+            let pane = Self {
+                _dir: dir,
+                root,
+                last: LastSeen::default(),
+                lines: Vec::new(),
+                state: DiffState::new(),
+            };
+            pane.open(open);
+            pane
+        }
+
+        fn open(&self, open: &[&str]) {
+            let paths: Vec<PathBuf> = open.iter().map(PathBuf::from).collect();
+            write_open_set(&self.root, &paths).unwrap();
+        }
+
+        fn refresh(&mut self, runner: &MockProcessRunner) {
+            refresh(
+                Path::new(&self.root),
+                "main",
+                runner,
+                &mut self.last,
+                &mut self.lines,
+                &mut self.state,
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_open_set_blanks_the_pane_without_asking_git() {
+        let mut pane = Pane::new(&[]);
+        pane.lines = vec![DiffLine {
+            kind: DiffLineKind::Context,
+            text: "stale".into(),
+        }];
+        pane.state.notice = Some("old".into());
+        let runner = MockProcessRunner::new(vec![]);
+        pane.refresh(&runner);
+        assert!(pane.lines.is_empty());
+        assert_eq!(pane.state.notice, None);
+        assert!(runner.recorded_calls().is_empty());
+    }
+
+    #[test]
+    fn a_first_refresh_builds_the_document() {
+        let mut pane = Pane::new(&["a.rs"]);
+        pane.refresh(&MockProcessRunner::new(full_rebuild("1\t1\ta.rs")));
+        assert!(pane.lines.iter().any(|l| l.text == "a.rs"));
+        assert!(pane
+            .lines
+            .iter()
+            .any(|l| l.kind == DiffLineKind::Added && l.text.contains("new")));
+        assert_eq!(pane.state.notice, None);
+    }
+
+    #[test]
+    fn a_refresh_where_nothing_moved_skips_the_diff() {
+        let mut pane = Pane::new(&["a.rs"]);
+        pane.refresh(&MockProcessRunner::new(full_rebuild("1\t1\ta.rs")));
+        let before = pane.lines.len();
+        let runner = MockProcessRunner::new(fingerprint_only("1\t1\ta.rs"));
+        pane.refresh(&runner);
+        assert_eq!(pane.lines.len(), before);
+        assert_eq!(runner.recorded_calls().len(), 3);
+    }
+
+    #[test]
+    fn a_changed_fingerprint_rebuilds() {
+        let mut pane = Pane::new(&["a.rs"]);
+        pane.refresh(&MockProcessRunner::new(full_rebuild("1\t1\ta.rs")));
+        let runner = MockProcessRunner::new(full_rebuild("2\t1\ta.rs"));
+        pane.refresh(&runner);
+        assert_eq!(runner.recorded_calls().len(), 5);
+        assert_eq!(pane.last.fingerprint, "2\t1\ta.rs");
+    }
+
+    #[test]
+    fn a_reordered_open_set_rebuilds_even_when_git_says_nothing_changed() {
+        let mut pane = Pane::new(&["a.rs", "b.rs"]);
+        let two_files = vec![ok(SHA), ok(SHA), ok("fp"), ok(""), ok(PATCH), ok(PATCH)];
+        pane.refresh(&MockProcessRunner::new(two_files));
+        pane.open(&["b.rs", "a.rs"]);
+        let again = vec![ok(SHA), ok(SHA), ok("fp"), ok(""), ok(PATCH), ok(PATCH)];
+        let runner = MockProcessRunner::new(again);
+        pane.refresh(&runner);
+        assert_eq!(runner.recorded_calls().len(), 6);
+        assert_eq!(
+            pane.last.open,
+            vec![PathBuf::from("b.rs"), PathBuf::from("a.rs")]
+        );
+    }
+
+    #[test]
+    fn a_failed_git_query_keeps_the_last_document_and_sets_a_notice() {
+        let mut pane = Pane::new(&["a.rs"]);
+        pane.refresh(&MockProcessRunner::new(full_rebuild("fp")));
+        let kept = pane.lines.len();
+        let runner = MockProcessRunner::new(vec![
+            MockProcessRunner::fail("index.lock exists"),
+            MockProcessRunner::fail("index.lock exists"),
+        ]);
+        pane.refresh(&runner);
+        assert_eq!(pane.lines.len(), kept);
+        assert!(pane.state.notice.is_some());
+    }
+
+    #[test]
+    fn the_notice_clears_on_the_next_good_pass() {
+        let mut pane = Pane::new(&["a.rs"]);
+        pane.state.notice = Some("earlier failure".into());
+        pane.refresh(&MockProcessRunner::new(full_rebuild("fp")));
+        assert_eq!(pane.state.notice, None);
+    }
+
+    #[test]
+    fn the_fingerprint_query_names_the_baseline_and_every_open_path() {
+        let runner = MockProcessRunner::new(vec![ok("x")]);
+        let open = vec![PathBuf::from("a.rs"), PathBuf::from("b.rs")];
+        let got = open_files_fingerprint(Path::new("/w"), SHA, &open, &runner).unwrap();
+        assert_eq!(got, "x");
+        let calls = runner.flattened_calls();
+        assert!(calls[0].contains("diff --numstat"), "{calls:?}");
+        assert!(
+            calls[0].contains(SHA) && calls[0].ends_with("-- a.rs b.rs"),
+            "{calls:?}"
+        );
+    }
+}
+
+#[cfg(test)]
 mod view_tests {
     use super::*;
     use crossterm::event::KeyModifiers;

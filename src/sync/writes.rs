@@ -54,7 +54,7 @@ use super::encode;
 /// "somebody else won the claim" as an ordinary answer while still failing
 /// loudly when the store is down (`sync.allium: AWriteWithNoConnectionIsRefused`
 /// against `StoreRejectsAnInvalidMutation`).
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ReducerOutcome {
     /// The store applied it. Carries the ids of any rows the caller asked to
     /// have read back, which is the only way a reducer answers. A method with
