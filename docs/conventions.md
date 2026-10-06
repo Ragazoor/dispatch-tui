@@ -786,3 +786,34 @@ The same hole has a **cross-file spec** variant, and it is the one that bites wh
 Until that lands, **grep the moved name across four surfaces, not one**: `src/`, `docs/specs/`, `docs/*.md` **and** `tests/`. #4759 moved six guarantees out of `dispatch.allium`, grepped the first two, and shipped two stale citations — in `docs/module-map.md` and `tests/feed_scripts.rs` — that only a review agent caught. `tests/` is the easiest to forget: `check-doc-symbols.sh` indexes it for symbols but does not scan it as a target.
 
 The costliest uncaught shape is the **prose split**: a backticked symbol with its file in parentheses, `` `TmuxWindow::task_id` (src/models/tmux_window.rs) ``. Both halves pass independently — the path exists, the symbol resolves *somewhere* — but nothing ties them together, so moving the symbol leaves the citation stale with both checkers fully green. #4215 hit exactly this: the same rename left three `path::symbol` citations that the checker caught immediately, and two parenthesized-prose ones that survived a clean run of both gates and were only found by review. When you move a symbol, `grep` its bare name across `docs/` — a green hook is not evidence that prose citations followed it.
+
+## `main` moves while you work
+
+Other agents land on `main` during your session. Other agents land on it during your session, so
+the snapshot you read at startup goes stale. Before wrapping up, run `git log
+--oneline main..HEAD` **and** `git log --oneline HEAD..main` — the second is the
+one that catches a base that moved under you. If it is non-empty, merge `main`
+into your branch and re-run the suite before reporting completion; a green run
+against a stale base proves nothing. Assume a function you did not write may have
+been rewritten since you read it.
+
+**Compare against `main`, not `origin/main`.** A sibling agent wrapping up with
+the rebase path fast-forwards the *local* `main` in the parent checkout and does
+not push, so `HEAD..origin/main` can be empty while `HEAD..main` holds the very
+commit that moved your base. Fetching first does not help — there is nothing on
+the remote to fetch. Substituting `origin/main` here reads as "main has not
+moved" and is wrong in exactly the case this check exists for.
+
+**A clean merge doesn't mean no conflict.** `HEAD..main` isn't only a code-conflict
+check. A sibling task's commit can record a *design decision* — in a
+`docs/plans/` doc or an Allium guarantee — that directly contradicts what you're
+mid-implementing, in files yours never touches, so `git merge` succeeds with
+nothing to resolve. Skim new commits' content, not just their file list, before
+wrapping up; if one conflicts with a decision you're making this session, surface
+it to the user rather than silently proceeding either way.
+
+**Re-run it before you describe current behaviour, not only before wrapping up.**
+Answering a design question ("what happens today if…") from the snapshot you read
+at startup states as fact something a sibling may have changed hours ago — and an
+answer like that gets written into a spec, where it outlives the mistake. Check
+`HEAD..main` first whenever the answer decides a design choice.

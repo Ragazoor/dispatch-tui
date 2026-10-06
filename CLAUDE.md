@@ -4,6 +4,10 @@ Terminal kanban board for dispatching Claude Code agents into isolated git workt
 
 **Stack**: Rust (2021 edition), ratatui TUI, SQLite (rusqlite), Axum HTTP/MCP server, tokio async runtime.
 
+**Live data is in SpacetimeDB, not `tasks.db`.** `tasks.db` is a leftover and not authoritative; query tasks through the MCP tools (`list_tasks`, `get_task`). See "Where the live data is" in [docs/reference.md](docs/reference.md).
+
+`AGENTS.md` is a symlink to this file. Edit `CLAUDE.md`.
+
 ## Build & Test
 
 ```bash
@@ -24,38 +28,11 @@ cargo run -- tui
 
 **The lib target runs in ~10s; a cold full run (including compile) is ~80s.** Run it in the foreground — don't background it. In a *fresh worktree* the first compile is slower than that and a cold `cargo test` can pass 120s, which is Claude Code's default Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
 
-**Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. Caveats are in [docs/testing.md](docs/testing.md).
+**Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. Always pass `--engine llvm`: the default engine scores ~1.8 points lower than CI's floor assumes. Keep `spacetime` off `PATH`, as the floor was measured that way. Other caveats are in [docs/testing.md](docs/testing.md).
 
 Everything else about tests — the per-target command list, snapshot workflow, where a new test belongs, the no-wall-clock-sleep rule, coverage — is in [docs/testing.md](docs/testing.md).
 
-**`main` moves while you work.** Other agents land on it during your session, so
-the snapshot you read at startup goes stale. Before wrapping up, run `git log
---oneline main..HEAD` **and** `git log --oneline HEAD..main` — the second is the
-one that catches a base that moved under you. If it is non-empty, merge `main`
-into your branch and re-run the suite before reporting completion; a green run
-against a stale base proves nothing. Assume a function you did not write may have
-been rewritten since you read it.
-
-**Compare against `main`, not `origin/main`.** A sibling agent wrapping up with
-the rebase path fast-forwards the *local* `main` in the parent checkout and does
-not push, so `HEAD..origin/main` can be empty while `HEAD..main` holds the very
-commit that moved your base. Fetching first does not help — there is nothing on
-the remote to fetch. Substituting `origin/main` here reads as "main has not
-moved" and is wrong in exactly the case this check exists for.
-
-**A clean merge doesn't mean no conflict.** `HEAD..main` isn't only a code-conflict
-check. A sibling task's commit can record a *design decision* — in a
-`docs/plans/` doc or an Allium guarantee — that directly contradicts what you're
-mid-implementing, in files yours never touches, so `git merge` succeeds with
-nothing to resolve. Skim new commits' content, not just their file list, before
-wrapping up; if one conflicts with a decision you're making this session, surface
-it to the user rather than silently proceeding either way.
-
-**Re-run it before you describe current behaviour, not only before wrapping up.**
-Answering a design question ("what happens today if…") from the snapshot you read
-at startup states as fact something a sibling may have changed hours ago — and an
-answer like that gets written into a spec, where it outlives the mistake. Check
-`HEAD..main` first whenever the answer decides a design choice.
+**`main` moves while you work.** Before wrapping up, run `git log --oneline main..HEAD` **and** `git log --oneline HEAD..main`. If the second is non-empty, merge `main` into your branch and re-run the suite. Compare against local `main`, never `origin/main`, and skim new commits' content, not just their files. Why, and the traps: [docs/conventions.md](docs/conventions.md) ("`main` moves while you work").
 
 ### First-time setup
 
