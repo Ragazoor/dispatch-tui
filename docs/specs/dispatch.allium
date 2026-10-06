@@ -372,6 +372,17 @@ rule DispatchTask {
         -- (bubblewrap, socat) rather than its required ones (tmux, git, gh,
         -- claude), which have no such fallback.
 
+    @guarantee DevBuildsKeepLineTablesNotFullDebugInfo
+        -- The dev profile in Cargo.toml sets `debug = "line-tables-only"`.
+        -- Task #16776 measured it: this repo links ~30 test binaries, each
+        -- carrying full DWARF, and the target dir reached 11G. Line tables
+        -- cut a cold build from 3m25s to 2m24s and a one-file rebuild from
+        -- 50s to 29s, and the target dir to 8.2G. Panics and backtraces keep
+        -- file:line. What is lost is variable inspection in a debugger, which
+        -- no agent loop uses. Dropping debug info entirely (`debug = 0`) was
+        -- measured too and bought almost nothing more on the rebuild (28s),
+        -- while losing backtrace line numbers, so it is not the setting.
+
     @guarantee PromptIsSeparatedFromTheLaunchFlags
         -- A launch that passes the prompt as a positional argument puts a bare
         -- `--` between the flags and the prompt. The prompt is then the

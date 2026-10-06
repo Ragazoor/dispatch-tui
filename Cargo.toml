@@ -96,6 +96,12 @@ dispatch-tui = { path = ".", features = ["test-support"] }
 # self dev-dependency above.
 test-support = ["dep:dispatch-spacetime-module"]
 
+# Task #16776: ~30 test binaries each linked with full DWARF made a one-file
+# rebuild ~20s slower. Line tables keep file:line in panics and backtraces.
+# See `DevBuildsKeepLineTablesNotFullDebugInfo` in docs/specs/dispatch.allium.
+[profile.dev]
+debug = "line-tables-only"
+
 [lints.clippy]
 # Added by task #602 (2026-05-07): surfaces accidental panics in production paths
 unwrap_used = "warn"
