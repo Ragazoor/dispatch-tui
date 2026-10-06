@@ -282,13 +282,12 @@ impl SyncSession {
         // again — a bug that reads as a network problem and is not one.
         let IdentityVerdict::Conflict { stored, offered } = verdict else {
             if verdict.is_adoption() {
-                // Two writes on two halves of the store seam, and deliberately
-                // not atomic. The credential goes first: an identity with no
-                // credential cannot be proved again and presents as a conflict
-                // on the next connection, whereas a credential with no identity
-                // is simply unused and is overwritten by the next adoption.
-                store.set_user_identity_token(&accepted.token).await?;
-                store.adopt_user_identity(&accepted.identity).await?;
+                // ONE write: the owner and the credential that proves it
+                // land together, so a crash never leaves an identity this
+                // install cannot prove again (`host.allium: AdoptUserIdentity`).
+                store
+                    .adopt_user_identity_with_credential(&accepted.identity, &accepted.token)
+                    .await?;
             }
             let epics = store.subscribed_epics(&accepted.identity).await?;
             let request =

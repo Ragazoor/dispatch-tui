@@ -6,7 +6,7 @@ use tracing_subscriber::EnvFilter;
 
 use dispatch_tui::hooks::{self, SubagentAction};
 use dispatch_tui::tui::ui::truncate;
-use dispatch_tui::{db, dispatch, runtime, startup};
+use dispatch_tui::{dispatch, runtime, startup};
 
 #[derive(Parser)]
 #[command(name = "dispatch")]
@@ -60,7 +60,7 @@ enum Commands {
         /// Skip confirmation prompt
         #[arg(long, short)]
         yes: bool,
-        /// Also delete the database and log files
+        /// Also forget this machine's identity (host.json) and delete the log
         #[arg(long)]
         purge: bool,
     },
@@ -198,10 +198,10 @@ enum Commands {
     },
     /// Remove repo paths that no longer exist on the filesystem.
     PruneRepoPaths,
-    /// Move the shared domain between this board and a SpacetimeDB server.
+    /// Back up a SpacetimeDB server's shared domain, or restore it.
     ///
-    /// The backup, the way out of a migration SpacetimeDB will not perform, and
-    /// the one-time seed — all the same snapshot file. See
+    /// The backup and the way out of a migration SpacetimeDB will not perform
+    /// — the same snapshot file. See
     /// `docs/specs/spacetime-seed.allium`.
     Spacetime {
         #[command(subcommand)]
@@ -268,27 +268,14 @@ enum StoreAction {
 
 /// `dispatch spacetime <action>`'s action.
 ///
-/// Three subcommands rather than one with flags, because they differ in what
+/// Two subcommands rather than one with flags, because they differ in what
 /// they destroy and a flag is easier to mistype than a word. See
 /// `docs/specs/spacetime-seed.allium` (surface SnapshotCommandLine).
 #[derive(Subcommand)]
 enum SpacetimeAction {
-    /// Read every shared table out of this board's SQLite database into a
-    /// snapshot file.
-    ///
-    /// The boring half, and the one that should run often: it reads, it refuses
-    /// nothing, and running it more than necessary costs a file. The realistic
-    /// failure of this whole design is not a bad restore — it is nobody having
-    /// taken a dump recently.
-    Dump {
-        /// Where to write the snapshot. `-` writes to stdout.
-        #[arg(long, short, default_value = "-")]
-        out: String,
-    },
     /// Read every shared table out of a SpacetimeDB server into a snapshot file.
     ///
-    /// The backup of the server itself, once it is the authority. Same file
-    /// format as `dump`, so either can feed `restore`.
+    /// The backup of the server itself. The file `restore` reads.
     DumpServer {
         /// Where to write the snapshot. `-` writes to stdout.
         #[arg(long, short, default_value = "-")]
@@ -315,15 +302,6 @@ enum SpacetimeAction {
         #[arg(long)]
         server: Option<String>,
     },
-    /// Move this board into an empty shared store: the one-time seed.
-    ///
-    /// Connects to the store named by `--spacetime-server` first (minting this
-    /// install's user identity if it has none), dumps this board's SQLite,
-    /// stamps you as the owner of every task with no epic and the creator of
-    /// every task and epic, then restores it — ids kept. Refuses a store that
-    /// already holds tasks or epics. See docs/specs/spacetime-seed.allium:
-    /// SeedSharedStore.
-    Seed,
 }
 
 /// Exit code that tells Claude Code to block the tool call a PreToolUse hook
@@ -394,7 +372,7 @@ fn enter_tmux_session_if_needed() -> Result<()> {
 }
 
 async fn cmd_tui(db: &std::path::Path, port: u16, spacetime_server: Option<String>) -> Result<()> {
-    let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
+    let data_dir = runtime::data_dir_of(db);
     init_app_log_subscriber(data_dir)?;
 
     // The one place the TUI path resolves the operator's `$HOME`-derived
@@ -441,7 +419,7 @@ async fn cmd_agent_tree(db: &std::path::Path, board_port: u16, task_id: i64) -> 
     // Without this every `tracing::warn!` in the renderer went nowhere, which
     // included the only report of a file it could not open.
     // Best-effort: a renderer that cannot open the log still renders.
-    let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
+    let data_dir = runtime::data_dir_of(db);
     let _ = init_app_log_subscriber(data_dir);
     dispatch_tui::cli::agent_tree::run(db, board_port, task_id).await
 }
@@ -449,7 +427,7 @@ async fn cmd_agent_tree(db: &std::path::Path, board_port: u16, task_id: i64) -> 
 /// The diff pane beneath the tree. Same alternate-screen constraint as
 /// [`cmd_agent_tree`], so the same best-effort log redirection.
 async fn cmd_agent_diff(db: &std::path::Path, board_port: u16, task_id: i64) -> Result<()> {
-    let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
+    let data_dir = runtime::data_dir_of(db);
     let _ = init_app_log_subscriber(data_dir);
     dispatch_tui::cli::agent_diff::run(board_port, task_id).await
 }
@@ -590,24 +568,15 @@ fn cmd_caller_headers() -> Result<()> {
     std::process::exit(code);
 }
 
-/// `dispatch spacetime dump|dump-server|restore`.
+/// `dispatch spacetime dump-server|restore`.
 ///
 /// See `docs/specs/spacetime-seed.allium`. The ordering that matters — burn,
 /// then load — lives in `spacetime::restore`, not here; this is argument
 /// handling and file I/O.
-async fn cmd_spacetime(
-    db: &std::path::Path,
-    store_server: Option<String>,
-    action: SpacetimeAction,
-) -> Result<()> {
+async fn cmd_spacetime(action: SpacetimeAction) -> Result<()> {
     use dispatch_tui::spacetime::{self, SharedStore as _};
 
     match action {
-        SpacetimeAction::Dump { out } => {
-            let database = db::Database::open(db).await?;
-            let snapshot = spacetime::dump_from_sqlite(&database).await?;
-            write_snapshot(&out, &snapshot)?;
-        }
         SpacetimeAction::DumpServer {
             out,
             database,
@@ -648,15 +617,6 @@ async fn cmd_spacetime(
                     .sum::<usize>(),
                 snapshot.extracts().len()
             );
-        }
-        SpacetimeAction::Seed => {
-            let server = startup::store_server_or_managed(store_server);
-            let store = spacetime_store(
-                dispatch_tui::sync::SHARED_DATABASE_NAME.to_string(),
-                Some(server.clone()),
-            );
-            dispatch_tui::cli::commands::seed_store(db, server, &store, &mut std::io::stdout())
-                .await?;
         }
     }
     Ok(())
@@ -753,7 +713,7 @@ async fn cmd_plan(
 /// nowhere useful to surface — it's logged to app.log and swallowed rather
 /// than returned, matching `spawn_agent_tree_pane`'s own best-effort stance.
 fn cmd_toggle_agent_tree_pane(db: &std::path::Path, window: String) -> Result<()> {
-    let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
+    let data_dir = runtime::data_dir_of(db);
     let _ = init_app_log_subscriber(data_dir);
     // tmux substitutes `#{window_name}` into the keybinding, so this is the
     // border where an arbitrary argv string becomes a window name. A value that
@@ -818,7 +778,9 @@ fn main() -> Result<()> {
         Commands::Statusline { snapshot, chain } => cmd_statusline(&snapshot, chain.as_deref()),
         Commands::CallerHeaders => cmd_caller_headers(),
         Commands::VerifyFeed { command } => cmd_verify_feed(command),
-        Commands::Uninstall { yes, purge } => dispatch_tui::setup::run_uninstall(yes, purge),
+        Commands::Uninstall { yes, purge } => {
+            dispatch_tui::setup::run_uninstall(yes, purge, &cli.db)
+        }
         Commands::ToggleAgentTreePane { window } => cmd_toggle_agent_tree_pane(&cli.db, window),
         // One connect, one small request, one response — and the connection
         // task the client spawns is driven by this same `block_on` while the
@@ -893,7 +855,7 @@ async fn run_async(
         },
         Commands::Repo { action } => cmd_repo(db, store_server, action).await?,
         Commands::PruneRepoPaths => cmd_prune_repo_paths(db, store_server).await?,
-        Commands::Spacetime { action } => cmd_spacetime(db, store_server, action).await?,
+        Commands::Spacetime { action } => cmd_spacetime(action).await?,
         Commands::Store {
             action: StoreAction::Import { from },
         } => {

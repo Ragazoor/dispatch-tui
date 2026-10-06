@@ -1,15 +1,18 @@
 mod migrations;
 mod queries;
 
-/// The `settings` keys naming this install's machine identity.
+#[cfg(test)]
+pub(crate) use queries::USER_IDENTITY_TOKEN_KEY;
+/// The `settings` keys naming an install's machine identity, as the in-memory
+/// test handle stores them. Production keeps that identity in `host.json`
+/// (`crate::host_file`), so these name rows only a test handle has.
 ///
-/// Re-exported because the snapshot dump (`src/spacetime/dump.rs`) assembles
-/// the shared host registry from them. Spelled inline there instead, a rename
-/// would yield a statement that silently matches nothing rather than a compile
-/// error — and the consequence is a complete-looking backup with no hosts in it.
+/// Re-exported because the snapshot code (`src/spacetime/snapshot.rs`, and the
+/// test-only dump in `src/spacetime/dump.rs`) names the host registry's columns
+/// from them. Spelled inline there instead, a rename would yield a statement
+/// that silently matches nothing rather than a compile error.
 pub(crate) use queries::{
     bump_decode_fallback, parse_datetime, HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY,
-    USER_IDENTITY_TOKEN_KEY,
 };
 #[cfg(test)]
 mod tests;
@@ -759,6 +762,18 @@ pub trait HostStore: Send + Sync {
     /// the other half of the seam — see
     /// [`IdentityCredentialStore::set_user_identity_token`].
     async fn adopt_user_identity(&self, identity: &str) -> Result<()>;
+
+    /// Adopt `identity` together with the `credential` that proves it, as ONE
+    /// write: on a handle that keeps its identity in the host file, one
+    /// whole-file replacement, so the file never holds the one without the
+    /// other (`host.allium: AdoptUserIdentity`). The owner keeps write-once
+    /// semantics; the credential is refreshed. Rejects an empty identity or
+    /// credential.
+    async fn adopt_user_identity_with_credential(
+        &self,
+        identity: &str,
+        credential: &str,
+    ) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1680,6 +1695,12 @@ pub struct Database {
     /// store's rows once a writer is attached. See
     /// [`SharedRetiredFeedItemReader`] and [`Database::with_shared_store`].
     shared_retired_feed_item_reader: Option<Arc<dyn SharedRetiredFeedItemReader>>,
+    /// The data directory whose `host.json` holds this install's identity
+    /// (`host.allium: IdentityLivesInHostFile`). `Some` on every board and CLI
+    /// process: the [`HostStore`] and [`IdentityCredentialStore`] methods then
+    /// read and write the host file and never this handle's SQLite. `None` only
+    /// on a test handle, where the local `settings` rows stand in.
+    host_file_dir: Option<std::path::PathBuf>,
     /// The board's read seam over the in-memory store's own rows. Set only by
     /// [`Database::open_in_memory`] (spec: `spacetime-memory-store.allium`,
     /// `TestBoardReadsShareTheHandlesRows`).
@@ -1714,6 +1735,21 @@ impl Database {
         self.shared_usage_reader = Some(ports.usage_reader);
         self.shared_retired_feed_item_reader = Some(ports.retired_feed_item_reader);
         self
+    }
+
+    /// Keep this install's identity in `<data_dir>/host.json` rather than in
+    /// this handle's SQLite (`host.allium: IdentityLivesInHostFile`). The one
+    /// production way to build a handle's identity half; consuming for the
+    /// same reason [`Self::with_shared_store`] is.
+    pub fn with_host_file(mut self, data_dir: &Path) -> Self {
+        self.host_file_dir = Some(data_dir.to_path_buf());
+        self
+    }
+
+    /// The data directory holding the host file, if this handle keeps its
+    /// identity there.
+    fn host_file_dir(&self) -> Option<&Path> {
+        self.host_file_dir.as_deref()
     }
 
     /// Route the [`SharedReader`] reads to `reader` instead of to SQLite.
@@ -1827,6 +1863,7 @@ impl Database {
             shared_usage_reader: None,
             shared_reader: None,
             shared_retired_feed_item_reader: None,
+            host_file_dir: None,
             #[cfg(any(test, feature = "test-support"))]
             memory_board_reads: None,
         })
@@ -1882,8 +1919,12 @@ impl Database {
         (ports, board_reads)
     }
 
-    /// The pre-cutover in-memory handle: SQLite only, no shared store. For
-    /// tests of the SQLite fallback branch itself.
+    /// An in-memory handle with no shared store attached. In production this is
+    /// the empty placeholder base the store's ports are attached to
+    /// (`runtime::placeholder_database`): it holds no data and no file, and no
+    /// on-disk SQLite is opened (`storage.allium: StoreInUseNeverOpensSqlite`).
+    /// In tests it is also the handle for the SQLite fallback branches
+    /// themselves.
     pub async fn open_in_memory_unattached() -> Result<Self> {
         let id = NEXT_MEMDB_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // A plain `:memory:` connection is private to itself; the read pool
@@ -1921,6 +1962,7 @@ impl Database {
             shared_usage_reader: None,
             shared_reader: None,
             shared_retired_feed_item_reader: None,
+            host_file_dir: None,
             #[cfg(any(test, feature = "test-support"))]
             memory_board_reads: None,
         })

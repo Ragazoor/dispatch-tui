@@ -1074,7 +1074,17 @@ rule AttachPlanViaCli {
 --     board manages the local store.
 --   • `dispatch uninstall [--yes] [--purge]` — destructive: removes the
 --     dispatch MCP configuration from Claude Code; with `--purge` also
---     deletes the database and log files (src/main.rs Commands::Uninstall).
+--     deletes this machine's host file (host.allium: HostFile) and the log
+--     file from the data directory, and the directory itself if that leaves
+--     it empty (src/main.rs Commands::Uninstall). The confirmation it asks
+--     first says that this machine's identity will be forgotten — a later
+--     launch mints a new one, and tasks stamped with the old host id stop
+--     being this machine's — and states no task count: tasks live in the
+--     store, which a purge does not touch, and counting them would mean
+--     opening a database (storage.allium: StoreInUseNeverOpensSqlite). It
+--     never opens, reads or deletes a leftover `tasks.db`, `-wal` or `-shm`
+--     (storage.allium: CodeNeverTouchesLegacyDatabase); those are the
+--     operator's to delete by hand.
 --     Operator-only — never invoked by agents or hooks.
 --   • `dispatch repo set-verify <path> <command>` /
 --     `dispatch repo clear-verify <path>` / `dispatch repo list` — operator

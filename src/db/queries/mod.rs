@@ -23,9 +23,9 @@ macro_rules! set_field {
 }
 
 pub(super) use settings::host_id_key;
-pub(crate) use settings::{
-    HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY, USER_IDENTITY_TOKEN_KEY,
-};
+#[cfg(test)]
+pub(crate) use settings::USER_IDENTITY_TOKEN_KEY;
+pub(crate) use settings::{HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};

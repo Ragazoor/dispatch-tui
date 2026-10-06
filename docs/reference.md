@@ -108,8 +108,8 @@ RUST_LOG=dispatch_tui=debug cargo run -- tui      # then tail the log file (see 
 - **A tmux server must already be running.** `dispatch tui` drives tmux for every
   window/pane operation and does no preflight — start a session (or run the TUI
   from inside one) before launching it.
-- **Where the live data is**: in the SpacetimeDB store, not in `tasks.db`. The board's tasks and epics are served by the store at `DISPATCH_SPACETIME_SERVER` (the managed store defaults to `127.0.0.1:3000`; the operator's board uses `127.0.0.1:3001`, database `dispatch`; the running address is in `~/.local/share/dispatch/store-server`, and the managed store's files are in `~/.local/share/dispatch/spacetime/`). **`tasks.db` is a stale leftover** from before the move: do not read it to learn what the board holds. Query the store through the MCP tools (`list_tasks`, `get_task`) or `spacetime sql`.
-- **DB location**: `$XDG_DATA_HOME/dispatch/tasks.db`, else `~/.local/share/dispatch/tasks.db` (`default_db_path()` in `src/lib.rs`). Override with the global `--db` flag or `DISPATCH_DB`. To reset, delete the file — the schema is rebuilt from `MIGRATIONS` on next open.
+- **Where the live data is**: in the SpacetimeDB store, not in `tasks.db`. The board's tasks and epics are served by the store at `DISPATCH_SPACETIME_SERVER` (the managed store defaults to `127.0.0.1:3000`; the operator's board uses `127.0.0.1:3001`, database `dispatch`; the running address is in `~/.local/share/dispatch/store-server`, and the managed store's files are in `~/.local/share/dispatch/spacetime/`). **`tasks.db` is a leftover** from before the move: dispatch no longer opens, reads or migrates it (`storage.allium: StoreInUseNeverOpensSqlite`), and you may delete it (and any `-wal`/`-shm` beside it) by hand. Query the store through the MCP tools (`list_tasks`, `get_task`) or `spacetime sql`.
+- **Data directory**: the parent of `$XDG_DATA_HOME/dispatch/tasks.db`, else `~/.local/share/dispatch/` (`default_db_path()` in `src/lib.rs`). `--db` / `DISPATCH_DB` only picks that directory — the file it names is never opened. The directory holds `host.json` (this machine's identity: host id, label, user identity and its credential; mode 0600, written whole by rename), `app.log` and the `store-server` record. A board launch with no `host.json` is a first run and mints one; one that exists but cannot be read or parsed is never overwritten, and the launch aborts naming it. One-shot commands (`repo`, `plan`, `prune-repo-paths`, the agent-tree panes) only read it and fail with "run `dispatch tui` once" when it is missing. To forget this machine's identity, `dispatch uninstall --purge` (or delete `host.json`): the next launch mints a new one.
 - **Logs do not go to stderr.** `cmd_tui` installs a `tracing_subscriber` that appends to `app.log` **next to the database file** (`init_app_log_subscriber` in `src/main.rs`), because stderr belongs to the TUI. Watch it with `tail -f ~/.local/share/dispatch/app.log`. The floor is `INFO`; `RUST_LOG` (crate name `dispatch_tui`) raises it.
 - **MCP port**: `DEFAULT_PORT = 3142` (`src/lib.rs`), override with `--port` on `tui`/`setup` or `DISPATCH_PORT`.
 - **Exercising MCP by hand**: see `docs/mcp.md`. Identity comes from headers, and **exactly one** of the two must be set (`src/mcp/identity.rs::from_headers`, applied by the `src/mcp/middleware.rs` middleware). A bare `curl` sends neither, so it resolves to `IdentityError::Missing` and any handler that requires authorization rejects it. Send `-H 'X-Caller-Task-Id: <id>'` to act as that task's agent, or `-H 'X-Caller-Kind: session'` to act as the human session; sending both is a `Conflict`.
@@ -127,7 +127,7 @@ dispatch tui [--port <port>]                     # start the TUI (starts or atta
 dispatch plan <id> <plan-path>                   # attach a plan file to an existing task
 
 # Remove the Claude Code integration (installing it is part of `dispatch tui`)
-dispatch uninstall [-y] [--purge]                # --purge also deletes the DB and logs
+dispatch uninstall [-y] [--purge]                # --purge also forgets host.json and deletes app.log (never touches tasks.db)
 
 # Claude Code hook receivers (wired by `dispatch tui`'s config check; not meant to be run by hand).
 # Each posts its event to the running board and opens no database of its own; with no board
@@ -179,7 +179,7 @@ updating a task.
 
 | Flag | Env Var | Default |
 |------|---------|---------|
-| `--db` | `DISPATCH_DB` | `~/.local/share/dispatch/tasks.db` |
+| `--db` | `DISPATCH_DB` | `~/.local/share/dispatch/tasks.db` — names the data directory (`host.json`, `app.log`); the file itself is never opened |
 | `--port` | `DISPATCH_PORT` | `3142` |
 | `--spacetime-server` | `DISPATCH_SPACETIME_SERVER` | none — `dispatch tui` runs its own managed store on `127.0.0.1:3000` |
 
@@ -463,43 +463,21 @@ Code warns and falls back to running unsandboxed rather than failing to start.
 
 ## SpacetimeDB
 
-The escape hatch for the shared-store migration: dump, restore and the one-time
-seed, all the same snapshot file. Spec: `docs/specs/spacetime-seed.allium`.
+The escape hatch for the shared store: dump a server, restore a snapshot onto
+one. Spec: `docs/specs/spacetime-seed.allium`.
 Nothing here is on the board's path — `spacetime` is a dependency of these
 subcommands only, in the way `gh` is a dependency of PR polling.
 
 ```sh
-dispatch spacetime dump --out board.json          # this board's SQLite → a snapshot
 dispatch spacetime dump-server --out server.json  # the server → a snapshot
-dispatch spacetime restore board.json             # a snapshot → the server
-dispatch spacetime seed                           # this board's SQLite → an EMPTY server, attributed to you
+dispatch spacetime restore server.json            # a snapshot → the server
 ```
 
-### Moving an existing board into a store
-
-A board that has only ever run on SQLite gets into a store once, with `seed`:
-
-```sh
-spacetime start &                                            # or point at a shared server; a board never seeds itself
-spacetime publish -p spacetime/module --yes dispatch
-dispatch spacetime dump --out board-before-seed.json         # a backup first
-dispatch --spacetime-server http://127.0.0.1:3000 spacetime seed
-# Stop that store before the first `dispatch tui` if you want the board to
-# manage it: the managed store starts over its own data directory
-# (see "Running & Debugging Locally"), not the one `spacetime start` defaults to.
-# Or keep running it yourself and name it: `dispatch --spacetime-server http://127.0.0.1:3000 tui`.
-```
-
-`seed` connects to the store first — minting your user identity if this
-install has none — then dumps the board, stamps you as the owner of every task
-with no epic and the creator of every task and epic, and restores it with every
-id kept. Without that stamping the rows would be in the store and on nobody's
-board: a board shows its own user board, the epics it follows and what it
-created. It refuses a store that already holds tasks or epics, leaving it
-untouched. A plain `restore` of a SQLite dump is refused outright, because the
-dump lacks the columns only the store has (`owner`, `created_by`). See
-`docs/specs/spacetime-seed.allium`: `SeedSharedStore`. Nothing is deleted from
-the local database.
+`dispatch spacetime dump` and `dispatch spacetime seed` (a board's SQLite file
+into a store) were removed with task #16755: no command opens a SQLite
+database any more. A board that only ever ran on SQLite and was never seeded
+cannot be moved in by this version; use an older release for that one-time
+step.
 
 `restore` takes `--database` (default `dispatch`, the same name
 `sync::SHARED_DATABASE_NAME` fixes for the board's own connection) and

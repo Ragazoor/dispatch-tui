@@ -15,7 +15,6 @@ fn every_refusal_reason_names_itself_and_keeps_its_detail() {
         ),
         (RefusalReason::SchemaMismatch, "schema mismatch"),
         (RefusalReason::Incomplete, "incomplete snapshot"),
-        (RefusalReason::StoreNotEmpty, "store not empty"),
         (RefusalReason::ArchivedRowsPresent, "archived rows present"),
         (RefusalReason::IdConflict, "id conflict"),
     ];

@@ -1,5 +1,4 @@
 use super::*;
-use crate::db::HostStore;
 use crate::models::test_tmux_window;
 
 mod repo_path {
@@ -922,7 +921,7 @@ mod bootstrap {
     /// `SettingsLocationIsAnExplicitStartupInput` — so this is the only shape
     /// a new one should use.
     ///
-    /// Pre-names the host before handing back the path. These tests exercise
+    /// Pre-names the host (in `host.json`, beside the path) before handing it back. These tests exercise
     /// bootstrap's other wiring (feed seeding, budget snapshot path, the trust
     /// store), not `startup.allium`'s host-label gate, and `cargo test`'s
     /// stdin is never a terminal — an unnamed host here would hit
@@ -935,15 +934,13 @@ mod bootstrap {
             claude_dir: dir.path().join("claude"),
             claude_json_path: dir.path().join(".claude.json"),
         };
-        {
-            let db = crate::db::Database::open(&db_path).await.unwrap();
-            db.ensure_host_identity().await.unwrap();
-            db.rename_host("bootstrap-test-host").await.unwrap();
-        }
+        // The host file `--db`'s directory holds, already named.
+        crate::host_file::resolve_for_launch(dir.path()).unwrap();
+        crate::host_file::rename_host(dir.path(), "bootstrap-test-host").unwrap();
         (dir, db_path, paths)
     }
 
-    /// The happy path: opens a real (temp-file-backed) database, spawns the
+    /// The happy path: reads the host file, spawns the
     /// MCP server and feed runner in the background, and hydrates the
     /// returned `App`/`TuiRuntime` from persisted settings. Binds port 0 so
     /// the OS picks a free ephemeral port — this pins the startup wiring,
@@ -1040,90 +1037,24 @@ mod bootstrap {
     ///
     /// It lives here rather than beside that prompt because it needs the first
     /// store connection, which that prompt runs before. (The stand-in store
-    /// here is SQLite, unrouted, so the row is read back from the file.)
+    /// here is an in-memory SQLite handle, unrouted, so the row is read back
+    /// from the runtime's own handle.)
     #[tokio::test]
     async fn bootstrap_seeds_the_example_feed_epic_without_asking() {
         let (_dir, db_path, paths) = fixture().await;
 
-        TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
-            .await
-            .expect("bootstrap must succeed against a fresh, writable db path");
+        let bootstrap =
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
+                .await
+                .expect("bootstrap must succeed against a fresh, writable db path");
 
-        let db = crate::db::Database::open(&db_path).await.unwrap();
-        let epics = crate::db::EpicRead::list_epics(&db).await.unwrap();
+        let epics = crate::db::EpicRead::list_epics(&*bootstrap.runtime.database)
+            .await
+            .unwrap();
         assert!(
             epics.iter().any(|e| e.feed_command.is_some()),
             "a fresh database must get its example feed epic, with no prompt: {epics:?}"
         );
-    }
-
-    /// docs/specs/startup.allium: `AbortWhenTheHostIdentityStoreIsUnusable`'s
-    /// first face — the identity could not be read or minted at all. (Its
-    /// second face — the identity read fine but a label persist failed — is
-    /// `persist_host_label_maps_a_failed_persist_to_host_identity_unavailable`
-    /// below.)
-    ///
-    /// `bootstrap` used to log-and-continue when `ensure_host_identity`
-    /// failed, leaving `local_host_id` empty and the board drawing anyway —
-    /// silently, because the claim SQL reads `host_id` live and treats a null
-    /// read as the "nobody holds this" wildcard, so a claim succeeds and a
-    /// worktree gets provisioned while the host stamp is skipped for want of
-    /// an id (a silent violation of core.allium's `HostTracksWorktree`).
-    /// `bootstrap` must abort instead, exactly as it does for an unnamed host
-    /// with nobody to ask.
-    ///
-    /// This does not reuse `fixture()`, which pre-names the host — this test
-    /// needs `ensure_host_identity` itself to fail, before any label question
-    /// is even reachable. There is no dependency-injection seam for that (
-    /// `bootstrap` opens its own `Database` from a bare path), and the two
-    /// obvious ways to fake an I/O failure don't work here:
-    /// `Database::open` re-runs `CREATE TABLE IF NOT EXISTS settings` on
-    /// every open regardless of `user_version`, so a dropped table is
-    /// silently recreated before `ensure_host_identity` ever runs; and a
-    /// chmod'd-read-only db file makes `Database::open` itself fail (it
-    /// always opens read-write and its migration runner unconditionally
-    /// begins a write transaction), which would exercise the pre-existing
-    /// `Database::open(..).await?` propagation a few lines above
-    /// `ensure_host_identity`, not the bug this test targets.
-    ///
-    /// Renaming the `settings.value` column survives both: `IF NOT EXISTS`
-    /// only checks the table's *name*, so the table is left alone, and the
-    /// rename itself is an ordinary write against a database that is still
-    /// fully writable — nothing about the rest of `bootstrap`'s startup
-    /// sequence (which touches `settings` only through best-effort,
-    /// warn-and-continue calls) fails because of it. Only
-    /// `ensure_host_identity`'s `INSERT INTO settings (key, value) ...` — the
-    /// literal column name — breaks, with a genuine "no such column: value".
-    #[tokio::test]
-    async fn bootstrap_aborts_when_the_host_identity_store_is_unusable() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("bootstrap.db");
-        let paths = StartupPaths {
-            claude_dir: dir.path().join("claude"),
-            claude_json_path: dir.path().join(".claude.json"),
-        };
-        {
-            let db = crate::db::Database::open(&db_path).await.unwrap();
-            db.db_call(|conn| {
-                conn.execute_batch("ALTER TABLE settings RENAME COLUMN value TO renamed_value")
-                    .map_err(anyhow::Error::from)
-            })
-            .await
-            .unwrap();
-        }
-
-        // `Bootstrap` (the `Ok` payload) does not implement `Debug`, so
-        // `expect_err`/`unwrap_err` aren't available here — match instead.
-        match TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store).await {
-            Ok(_) => panic!(
-                "a host identity that cannot be read or minted at all must abort the launch"
-            ),
-            Err(err) => assert_eq!(
-                err.to_string(),
-                crate::startup::StartupAbort::HostIdentityUnavailable.message(),
-                "bootstrap must abort with startup.allium's host_identity_unavailable message, got: {err}"
-            ),
-        }
     }
 
     /// docs/specs/startup.allium: `NameHostFromStartupPrompt`'s failure
@@ -1151,36 +1082,22 @@ mod bootstrap {
     /// test. `persist_host_label` is the unit `bootstrap` calls once an
     /// answer is in hand, factored out for exactly this reason.
     ///
-    /// The `settings.value`-rename trick the sibling test above uses does not
-    /// isolate this path: `rename_host` and `ensure_host_identity` both write
-    /// through the literal `value` column, so corrupting it fails the
-    /// identity read before a label is ever in play. A trigger that blocks
-    /// writes to the `host_label` key specifically — leaving the `host_id`
-    /// mint alone — isolates the persist step instead.
+    /// The label write is isolated from the identity read by making
+    /// `host.json` unusable to write after a mint: here it is replaced by a
+    /// directory, which no whole-file replacement can rename over. (The first
+    /// face — an identity that cannot be read or minted — is
+    /// `host_file_bootstrap`'s unparseable-host-file test.)
     #[tokio::test]
     async fn persist_host_label_maps_a_failed_persist_to_host_identity_unavailable() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("bootstrap.db");
-        let db = crate::db::Database::open(&db_path).await.unwrap();
-
-        // Mint first, same as a real launch would via `ensure_host_identity`,
-        // so the identity half of the gate is untouched by the corruption
-        // below — this test is only about the label write.
-        db.ensure_host_identity().await.unwrap();
-
-        db.db_call(|conn| {
-            conn.execute_batch(
-                "CREATE TRIGGER block_host_label_write \
-                 BEFORE INSERT ON settings \
-                 WHEN NEW.key = 'host_label' \
-                 BEGIN \
-                     SELECT RAISE(ABORT, 'blocked for test'); \
-                 END;",
-            )
-            .map_err(anyhow::Error::from)
-        })
-        .await
-        .unwrap();
+        crate::host_file::resolve_for_launch(dir.path()).unwrap();
+        let db = crate::db::Database::open_in_memory_unattached()
+            .await
+            .unwrap()
+            .with_host_file(dir.path());
+        let host_file = crate::host_file::host_file_path(dir.path());
+        std::fs::remove_file(&host_file).unwrap();
+        std::fs::create_dir(&host_file).unwrap();
 
         match persist_host_label(&db, "my-new-name").await {
             Ok(()) => {

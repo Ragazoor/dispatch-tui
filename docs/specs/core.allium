@@ -440,6 +440,12 @@ entity Host {
     -- One field rather than two, because two would be two things to keep in
     -- step and one silent way for a machine to be owned by a person the
     -- install no longer believes it is.
+    --
+    -- THE LOCAL ROW IS PERSISTED IN THE HOST FILE (host.allium: HostFile,
+    -- IdentityLivesInHostFile) — id, label and owner, with the credential
+    -- beside them — not in the shared store, which holds only a mirror of it
+    -- for other machines to read, and not in SQLite, where it lived until
+    -- task #16755.
     @invariant LocalHostOwnerIsWrittenOnce
         -- The local row's owner goes null -> some identity, once, and never
         -- moves again. host.allium: AdoptUserIdentity is the only writer, and
@@ -482,7 +488,8 @@ entity Host {
     -- DrawBoardAfterTheHostIsNamed), so no reader of a card ever meets one.
     --
     -- "Unconditionally" is a statement about the domain, not about every store
-    -- that might hold it. A store that cannot be read or written at all yields
+    -- that might hold it. A host file that cannot be read or written at all
+    -- yields
     -- no answer about this row rather than an answer of zero, and that is not
     -- a second arm on this invariant — it is a substrate failure, and the
     -- launch stops on it before any rule here can be evaluated (startup.allium:
@@ -901,8 +908,11 @@ entity SavedRepoBranch {
 
 -- Setting is a general-purpose named value: everything an install used to keep
 -- in a local key/value table (a feed's command, its poll interval, which board
--- sections are collapsed, and so on), except the two things settings.allium's
--- header names as staying local for good.
+-- sections are collapsed, and so on), except the identity settings.allium's
+-- header names as staying local for good — that lives in the host file
+-- (host.allium: IdentityLivesInHostFile). Every Setting row is in the shared
+-- store, keyed by host (settings.allium: SettingsAreStoredPerHost); none is
+-- kept locally.
 --
 -- SCOPED BY HOST, NOT BY UserIdentity, and that is a deliberate choice rather
 -- than an oversight. `host` is minted offline on

@@ -87,17 +87,17 @@ impl super::super::SettingsStore for Database {
 }
 
 impl Database {
-    /// The local `settings` row, unconditionally — never routed through a
-    /// shared writer.
+    /// The handle's own `settings` row, unconditionally — never routed
+    /// through a shared writer or reader.
     ///
-    /// Used by two callers with two different reasons for wanting exactly
-    /// this: [`SettingsStore`](super::super::SettingsStore)'s own read
-    /// methods, which stay local by policy (see that trait's doc comment),
-    /// and `HostStore`/`IdentityCredentialStore` below, which must NEVER
-    /// route — see the `register_host` reducer's doc comment and task #4907.
-    /// Kept as one pair of helpers so that policy is enforced in one place
-    /// rather than by every caller remembering not to reach for the routed
-    /// trait method.
+    /// Only the in-memory test handle reaches it: a production handle is
+    /// always routed through the store, and keeps this install's identity in
+    /// the host file. Used by the settings fallback for an unrouted handle and
+    /// by `HostStore`/`IdentityCredentialStore` on a handle with no host file,
+    /// which must never route — see the `register_host` reducer's doc comment
+    /// and task #4907. Kept as one pair of helpers so that policy is enforced
+    /// in one place rather than by every caller remembering not to reach for
+    /// the routed trait method.
     async fn local_get_setting_string(&self, key: &str) -> Result<Option<String>> {
         let key = key.to_string();
         self.db_call_read(move |conn| {
@@ -324,6 +324,14 @@ impl super::super::RepoConfigStore for Database {
 #[async_trait::async_trait]
 impl super::super::HostStore for Database {
     async fn ensure_host_identity(&self) -> Result<(String, Option<String>)> {
+        // With a host file the identity is READ from it, never minted here:
+        // minting is the board launch's `host_file::resolve_for_launch`, and a
+        // one-shot command with no host file must fail rather than mint
+        // (`cli.allium: CliCommandsNeedAHostFile`).
+        if let Some(dir) = self.host_file_dir() {
+            let identity = host_file_call(dir, crate::host_file::read_for_cli).await?;
+            return Ok((identity.host_id, identity.label));
+        }
         let generated_id = uuid::Uuid::new_v4().to_string();
         let id: String = self
             .db_call(move |conn| {
@@ -375,20 +383,57 @@ impl super::super::HostStore for Database {
         if trimmed.is_empty() {
             anyhow::bail!("host label must not be empty");
         }
+        if let Some(dir) = self.host_file_dir() {
+            let label = trimmed.to_string();
+            host_file_call(dir, move |dir| crate::host_file::rename_host(dir, &label)).await?;
+            return Ok(());
+        }
         // NEVER routed — see `local_get_setting_string`'s doc comment.
         self.local_set_setting_string(HOST_LABEL_KEY, trimmed).await
     }
 
     async fn user_identity(&self) -> Result<Option<String>> {
+        if let Some(dir) = self.host_file_dir() {
+            return Ok(host_file_call(dir, crate::host_file::read_for_cli)
+                .await?
+                .user_identity);
+        }
         self.local_get_setting_string(USER_IDENTITY_KEY)
             .await
             .context("Failed to read the stored user identity")
+    }
+
+    async fn adopt_user_identity_with_credential(
+        &self,
+        identity: &str,
+        credential: &str,
+    ) -> Result<()> {
+        if let Some(dir) = self.host_file_dir() {
+            let (identity, credential) = (identity.to_string(), credential.to_string());
+            host_file_call(dir, move |dir| {
+                crate::host_file::adopt_user_identity(dir, &identity, &credential)
+            })
+            .await?;
+            return Ok(());
+        }
+        // The local rows have no whole-file write to be atomic with; the
+        // credential goes first, for the reason the session used to give.
+        super::super::IdentityCredentialStore::set_user_identity_token(self, credential).await?;
+        self.adopt_user_identity(identity).await
     }
 
     async fn adopt_user_identity(&self, identity: &str) -> Result<()> {
         let identity = identity.trim();
         if identity.is_empty() {
             anyhow::bail!("user identity must not be empty");
+        }
+        if let Some(dir) = self.host_file_dir() {
+            let identity = identity.to_string();
+            host_file_call(dir, move |dir| {
+                crate::host_file::adopt_user_identity_once(dir, &identity)
+            })
+            .await?;
+            return Ok(());
         }
 
         // `DO NOTHING`, not an upsert: the stored identity is written once and
@@ -417,6 +462,11 @@ impl super::super::HostStore for Database {
 #[async_trait::async_trait]
 impl super::super::IdentityCredentialStore for Database {
     async fn user_identity_token(&self) -> Result<Option<String>> {
+        if let Some(dir) = self.host_file_dir() {
+            return Ok(host_file_call(dir, crate::host_file::read_for_cli)
+                .await?
+                .credential);
+        }
         self.local_get_setting_string(USER_IDENTITY_TOKEN_KEY)
             .await
             .context("Failed to read the stored user identity credential")
@@ -431,10 +481,30 @@ impl super::super::IdentityCredentialStore for Database {
             // conflict, which is the worst of both answers.
             anyhow::bail!("user identity credential must not be empty");
         }
+        if let Some(dir) = self.host_file_dir() {
+            let token = token.to_string();
+            host_file_call(dir, move |dir| {
+                crate::host_file::set_credential(dir, &token)
+            })
+            .await?;
+            return Ok(());
+        }
         // NEVER routed — see `local_get_setting_string`'s doc comment.
         self.local_set_setting_string(USER_IDENTITY_TOKEN_KEY, token)
             .await
     }
+}
+
+/// Run a host-file operation off the async runtime: it is small, synchronous
+/// file I/O, and a whole-file replacement fsyncs.
+async fn host_file_call<T: Send + 'static>(
+    data_dir: &std::path::Path,
+    op: impl FnOnce(&std::path::Path) -> Result<T> + Send + 'static,
+) -> Result<T> {
+    let data_dir = data_dir.to_path_buf();
+    tokio::task::spawn_blocking(move || op(&data_dir))
+        .await
+        .context("host file task panicked")?
 }
 
 /// Per-repo cap on remembered base branches (config.max_base_branches_per_repo

@@ -1,4 +1,4 @@
-//! The snapshot escape hatch: dump, restore and seed for the shared domain.
+//! The snapshot escape hatch: dump and restore for the shared domain.
 //!
 //! Spec: [`docs/specs/spacetime-seed.allium`](../../docs/specs/spacetime-seed.allium).
 //!
@@ -35,11 +35,11 @@
 #[rustfmt::skip]
 pub mod bindings;
 mod cli_store;
+#[cfg(test)]
 mod dump;
 mod import;
 pub mod managed_store;
 mod restore;
-mod seed;
 mod snapshot;
 mod store;
 
@@ -47,10 +47,10 @@ mod store;
 mod tests;
 
 pub use cli_store::SpacetimeCliStore;
+#[cfg(test)]
 pub use dump::dump_from_sqlite;
 pub use import::{import_old_store, ImportReport};
 pub use restore::{restore, RestoreError};
-pub use seed::seed;
 pub use snapshot::{
     Refusal, RefusalReason, Row, Sentinel, SharedTable, Snapshot, TableExtract, SHARED_TABLE_COUNT,
     SNAPSHOT_FORMAT_VERSION,

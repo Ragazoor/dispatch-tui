@@ -1,17 +1,31 @@
 -- allium: 3
 -- storage.allium
 --
--- Scope: The SQLite connection model behind the local store — how a store is
---        served, and what decides whether a read can proceed while a write is
---        in flight.
--- Includes: LocalStore and the journal mode it ends up in, DatabaseConnection
---           (the single writer and the lazily-opened read pool), and the
---           consequence that follows for anything exercising concurrency.
+-- Scope: What is left of SQLite in dispatch, and where this install keeps the
+--        few files that are not in the shared store. SQLite is no longer
+--        where a board's data lives (task #16755): every task, epic, setting
+--        and the rest of the shared domain is in the store (sync.allium,
+--        core.allium), and no production path opens a SQLite database at
+--        all. What remains of the connection model below describes the test
+--        fixture, and nothing else.
+-- Includes: the data directory and the files dispatch keeps in it;
+--           StoreInUseNeverOpensSqlite; CodeNeverTouchesLegacyDatabase;
+--           LocalStore and the journal mode it ends up in, DatabaseConnection
+--           (the single writer and the lazily-opened read pool) — now a
+--           test-fixture model only — and the consequence that follows for
+--           any test exercising concurrency.
 -- Excludes: What the stored rows mean (see core.allium and the per-domain
 --           specs); which rows a board is sent and how they travel (see
---           sync.allium); schema migration; and the warn-level line emitted
---           when a DB call is abnormally slow (see observability.allium:
---           DbCallSlowWarning).
+--           sync.allium); the host file's contents and permissions
+--           (host.allium: HostFile); schema migration; and the warn-level
+--           line emitted when a DB call is abnormally slow (see
+--           observability.allium: DbCallSlowWarning).
+--
+-- THE CONNECTION MODEL IS NARROWED TO TESTS, NOT DELETED. It used to describe
+-- every board. After task #16755 a SQLite store is opened only by a test that
+-- asks for one (overwhelmingly the in-memory medium). The journal-mode trap
+-- below still matters — it is a trap in TEST code, which is where it always
+-- bit — so it is kept rather than deleted with the production use.
 
 ------------------------------------------------------------
 -- Enumerations
@@ -32,9 +46,11 @@ enum JournalMode {
 
 -- Where a store keeps its pages.
 --
--- file: a path on disk. This is every real board.
+-- file: a path on disk, for the tests that need a file. No production path
+--   opens one.
 -- memory: an in-process store that exists only while the creating process
---   lives, used by tests and by nothing else.
+--   lives: the tests' fixture, and the empty placeholder base the store's
+--   ports are attached to in production. It holds no data and has no file.
 enum StoreMedium {
     file
     memory
@@ -44,7 +60,38 @@ enum StoreMedium {
 -- Entities and Variants
 ------------------------------------------------------------
 
--- The local SQLite store a dispatch process reads and writes.
+-- The directory this install keeps its own files in: the parent of the path
+-- `--db` / DISPATCH_DB names, defaulting to `$XDG_DATA_HOME/dispatch`, else
+-- `~/.local/share/dispatch`. The option still names a database FILE, because
+-- that is what it named when the board's database lived there; no command
+-- opens that file now, and the folder around it is what everything else is
+-- placed beside.
+--
+-- What lives here: the host file (host.allium: HostFile), app.log, the store
+-- address record (startup.allium: StoreAddressRecord), trajectories
+-- (observability.allium) and the shipped feed scripts (feeds.allium). On an
+-- install that predates task #16755 the old `tasks.db` (with `-wal` and
+-- `-shm`) may still be here too, as an inert leftover. The managed store's
+-- own data is NOT here when --db is overridden: it is always under the
+-- default data directory (spacetime-snapshot.allium:
+-- ManagedStoreDataIgnoresTheBoardDatabase).
+entity DataDirectory {
+    path: String
+
+    @invariant CodeNeverTouchesLegacyDatabase
+        -- No path in dispatch opens, reads, writes, deletes, truncates,
+        -- renames or moves a leftover `tasks.db` or its `-wal` / `-shm`
+        -- companions: not a board launch, not a subcommand, not `uninstall
+        -- --purge`. Its rows are a stale copy of what the store has held
+        -- since the move to it, and nothing is migrated out of it — a
+        -- launch with no host file is a first run and mints a fresh identity
+        -- (host.allium: MintHostIdentity). Deleting the files is the
+        -- operator's, by hand.
+}
+
+-- A SQLite store a dispatch process has open. In production only ever the
+-- empty in-memory placeholder (StoreInUseNeverOpensSqlite); a file store is
+-- only ever a test fixture.
 entity LocalStore {
     medium: StoreMedium
 
@@ -65,6 +112,25 @@ entity LocalStore {
             and (medium = memory implies journal_mode = rollback)
     }
 
+    @invariant StoreInUseNeverOpensSqlite
+        -- With the shared store in use — which is every launch, since the
+        -- store is mandatory (sync.allium's header) — dispatch opens no
+        -- ON-DISK SQLite store for any purpose: tasks.db is never opened. An
+        -- empty in-memory placeholder base, to which the store's ports are
+        -- attached, is permitted; it holds no data and no file. Not for the board, not for MCP, not for
+        -- `repo`, `plan`, `prune-repo-paths`, `agent-tree`, `agent-diff`, the
+        -- hooks, `uninstall` or any subcommand added later. The shared domain
+        -- is read from and written to the store (sync.allium:
+        -- BoardReadsFromTheSubscription, BoardWritesThroughTheStore); this
+        -- install's identity is read from and written to the host file
+        -- (host.allium: IdentityLivesInHostFile); there is nothing left for a
+        -- SQLite connection to serve.
+        --
+        -- Stated as a property of the CODE rather than of a state, like
+        -- sync.allium's AConnectedBoardDrawsOnlyDeliveredRows: what is
+        -- checkable is that no production path constructs a LocalStore. The
+        -- in-memory and file fixtures are for tests.
+
     @invariant AskingForWalDoesNotMakeItSo
         -- Opening a store asks for wal in both cases, and a memory store
         -- silently settles for rollback instead. Nothing fails, nothing warns,
@@ -73,39 +139,40 @@ entity LocalStore {
         -- THIS IS THE TRAP THIS SPEC EXISTS FOR. A memory store is the obvious
         -- fixture — fast, self-cleaning, needs no path — so a test about
         -- concurrent access naturally reaches for one, and then exercises
-        -- locking rules no board ever runs under. The test is not merely
+        -- locking rules it does not mean to. The test is not merely
         -- unrepresentative: a read and a write that would never have met on a
-        -- real board now contend, the read waits, and on a loaded machine it
+        -- wal store now contend, the read waits, and on a loaded machine it
         -- can wait past the lock wait and fail. It fails rarely, it fails with
         -- "database is locked", and the name of whatever test it lands in
         -- suggests a data-consistency bug rather than a fixture that does not
-        -- match production. That happened, and cost a session a full re-run to
-        -- rule out the change under test — see ConcurrencyIsObservedOnAWalStore.
+        -- match what it claims to test. That happened, and cost a session a
+        -- full re-run to rule out the change under test — see
+        -- ConcurrencyIsObservedOnAWalStore.
 
     @invariant ConcurrencyIsObservedOnAWalStore
-        -- Any claim this system makes about what happens when a read and a write
-        -- overlap is a claim about a wal store, because every board is one. An
-        -- observation of that overlap taken on a memory store is an observation of
-        -- a different system: the two connections exclude each other there and do
-        -- not here.
+        -- Any claim this system makes about what happens when a read and a
+        -- write overlap on a SQLite store is a claim about a wal store. An
+        -- observation of that overlap taken on a memory store is an
+        -- observation of a different system: the two connections exclude each
+        -- other there and do not on a file.
         --
-        -- This cuts both ways, which is why it is stated as one rule rather than
-        -- as advice about flaky tests. A memory store can report contention a
-        -- board would never see — the failure described in
-        -- AskingForWalDoesNotMakeItSo — and it can equally report success a board
-        -- would never see, because a reader that waits for the writer and then
-        -- reads is trivially consistent with it. A snapshot-consistency check run
-        -- that way passes without ever testing the isolation it names.
+        -- This cuts both ways, which is why it is stated as one rule rather
+        -- than as advice about flaky tests. A memory store can report
+        -- contention a wal store would never see — the failure described in
+        -- AskingForWalDoesNotMakeItSo — and it can equally report success a
+        -- wal store would never see, because a reader that waits for the
+        -- writer and then reads is trivially consistent with it. A
+        -- snapshot-consistency check run that way passes without ever testing
+        -- the isolation it names.
 }
 
--- One SQLite connection held by a running dispatch process.
+-- One SQLite connection held by a test's store.
 --
 -- A store is served by exactly one writer connection — every mutation is
 -- dispatched to it, so mutations serialise against each other rather than
 -- against the store — and by a small pool of read-only connections that serve
 -- pure reads. Pool connections are opened lazily, the first time a read is
--- assigned to their slot, because most processes (one-shot CLI subcommands,
--- most tests) never need more than one.
+-- assigned to their slot, because most tests never need more than one.
 entity DatabaseConnection {
     store: LocalStore
 
@@ -148,6 +215,8 @@ config {
 
 rule StoreOpened {
     -- Opening a store settles its journal mode, and the medium decides it.
+    -- Only a test asks for a file store; production asks for at most the
+    -- in-memory placeholder (StoreInUseNeverOpensSqlite).
     when: StoreRequested(medium)
 
     ensures:
@@ -201,3 +270,9 @@ invariant ReadPoolIsBounded {
         (DatabaseConnections where role = reader and store = s).count
             <= config.read_pool_size)
 }
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "`--db` / DISPATCH_DB still name a database file, although after task #16755 no command opens it and the option's only job is choosing the data directory. Keep the option as it is, or add a `--data-dir` and retire `--db`?"

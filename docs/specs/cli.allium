@@ -10,11 +10,12 @@
 --           code that blocks a gated tool call); the three process classes a
 --           subcommand runs in; how one-shot commands open the store
 --           (CliCommandsReachTheStoreWithoutManagingIt), including the
---           store address a board leaves beside its database; the
+--           store address a board leaves beside its database, and the host
+--           file they need and never write (CliCommandsNeedAHostFile); the
 --           operator-facing
 --           output of `repo set-verify`, `repo clear-verify`, `repo list`,
---           `prune-repo-paths`, `plan`, `spacetime dump|dump-server|restore|seed`
---           and `store import`; the plan file check that precedes the store;
+--           `prune-repo-paths`, `plan`, `spacetime dump-server|restore` and
+--           `store import`; the plan file check that precedes the store;
 --           and the terminal hand-back every companion-pane renderer owes
 --           its shell.
 -- Excludes: `dispatch tui` and everything a launch does before the board
@@ -32,8 +33,7 @@
 --           `repo status` and `repo sync` measure and do (see repo-sync.allium:
 --           RepoStatusCli, RepoSyncCli); what the snapshot commands and the
 --           import write into a store and when they refuse (see
---           spacetime-seed.allium: SnapshotCommandLine, SeedSharedStore,
---           ImportOldStore; startup.allium: ImportBringsUpTheManagedStore);
+--           spacetime-seed.allium: SnapshotCommandLine, ImportOldStore; startup.allium: ImportBringsUpTheManagedStore);
 --           the plan attachment itself (see mcp-task-tools.allium:
 --           AttachPlanViaCli); `uninstall` (see mcp-task-tools.allium, "Other
 --           CLI subcommands"); where a one-shot command's log lines go (see
@@ -136,14 +136,15 @@ config {
 
 rule CliCommandsReachTheStoreWithoutManagingIt {
     -- Every subcommand that reads or writes shared rows itself — repo,
-    -- prune-repo-paths, plan — opens the store the same way. `spacetime seed`
-    -- and `store import` connect the same way once their target is chosen,
-    -- but choose it as spacetime-snapshot.allium's
-    -- SeedTargetsTheNamedStoreOrTheManagedAddress and
-    -- ImportTargetsTheNamedStoreOrBringsUpTheManagedOne say (see the open
-    -- question on whether they read the recorded address). The companion
+    -- prune-repo-paths, plan — opens the store the same way. `store import`
+    -- connects the same way once its target is chosen, but chooses it as
+    -- spacetime-snapshot.allium's
+    -- ImportTargetsTheNamedStoreOrBringsUpTheManagedOne says (see the open
+    -- question on whether it reads the recorded address). The companion
     -- panes do not open the store at all (PaneRenderersAskTheBoard, below).
     when: CliStoreRequested(invocation)
+
+    requires: host_file_present()
 
     let address =
         if invocation.named_store != null: invocation.named_store
@@ -153,8 +154,10 @@ rule CliCommandsReachTheStoreWithoutManagingIt {
     ensures: CliConnectedTo(invocation: invocation, server: address)
 
     @guidance
-        -- The connection is the board's first-connection path: the local
-        -- database is opened for this install's host identity, the store is
+        -- The connection is the board's first-connection path: this
+        -- install's identity is read from the host file (host.allium:
+        -- IdentityLivesInHostFile) — no database is opened
+        -- (storage.allium: StoreInUseNeverOpensSqlite) — the store is
         -- connected and the identity settled, and the first subscription
         -- applied. A store that cannot be reached ends the command with
         -- failure, naming the reason (startup.allium:
@@ -182,10 +185,41 @@ rule CliCommandsReachTheStoreWithoutManagingIt {
         -- running and no store named, these commands fail rather than bring
         -- a store up.
         --
-        -- `spacetime dump`, `dump-server` and `restore` do not come through
-        -- here: dump reads this board's local SQLite directly, and the other
-        -- two talk to the server they are given through the `spacetime` CLI
-        -- (spacetime-seed.allium).
+        -- `dump-server` and `restore` do not come through here: they talk to
+        -- the server they are given through the `spacetime` CLI
+        -- (spacetime-seed.allium). There is no `spacetime dump` (of a local
+        -- database) or `spacetime seed` any more (spacetime-seed.allium:
+        -- "Seeding (removed)").
+        --
+        -- == Black boxes ==
+        -- host_file_present() asks whether host.allium's HostFile exists in
+        -- the data directory.
+}
+
+rule CliCommandsNeedAHostFile {
+    -- A one-shot command that needs this install's identity, run where there
+    -- is no host file yet.
+    when: CliStoreRequested(invocation)
+
+    requires: not host_file_present()
+
+    ensures: CliFailed(invocation: invocation, reason: no_host_identity_message())
+
+    @guidance
+        -- The command ends with failure, saying that this machine has no
+        -- identity yet and that one interactive `dispatch tui` creates it. It
+        -- does NOT mint an identity: minting is the board launch's
+        -- (host.allium: MintHostIdentity), which is also where the host
+        -- label is asked for. Before task #16755 these commands minted one
+        -- themselves; that was dropped so that the only writer of a new
+        -- identity is the launch that names the machine.
+        --
+        -- A one-shot command never writes the host file at all, on this path
+        -- or any other: renaming the host, adopting an identity and storing
+        -- its credential are the board's.
+        --
+        -- == Black boxes ==
+        -- no_host_identity_message() is the line described above.
 }
 
 ------------------------------------------------------------
@@ -299,29 +333,25 @@ rule SnapshotCommandsReportWhatTheyDid {
             CliReported(on: stderr, line: "Wrote " + destination)
         else if command = restore:
             CliPrinted(line: restored_summary(rows, tables))
-        else if command = seed:
-            CliPrinted(line: seeded_summary(rows, current_operator()))
 
     @guidance
         -- The operator-facing lines of spacetime-seed.allium's
         -- SnapshotCommandLine; what each command writes, and when it refuses,
         -- is specified there.
         --
-        -- `dump` and `dump-server` write the snapshot to the file named by
+        -- `dump-server` writes the snapshot to the file named by
         -- `--out`, or to stdout for `-` (the default), pretty-printed so that
         -- two backups diff line by line. Only a file destination prints
         -- `Wrote <file>`, and it prints it on stderr — stdout may BE the
         -- snapshot. `restore` reads its file, or stdin for `-`, and prints
-        -- `Restored <rows> rows across <tables> tables.` `seed` prints
-        -- `Seeded <rows> rows into the store as <operator>.`
+        -- `Restored <rows> rows across <tables> tables.`
         --
         -- A refusal is reported as the refusal reason itself, not as a crash,
         -- and ends with failure; by NothingIsWrittenBeforeTheChecksPass the
         -- store was not written to.
         --
         -- == Black boxes ==
-        -- restored_summary, seeded_summary and current_operator() are the
-        -- lines and the identity described above.
+        -- restored_summary is the line described above.
 }
 
 rule StoreImportReportsItsCounts {
@@ -494,6 +524,14 @@ surface DispatchCommandLine {
         -- feeds.allium's). They are meant to be read by a person and piped
         -- through `cut` or `grep` by a script alike.
 
+    @guarantee NoSubcommandOpensSqlite
+        -- No subcommand opens a SQLite database: not `repo`, `plan`,
+        -- `prune-repo-paths`, `agent-tree`, `agent-diff`, the hooks,
+        -- `uninstall` (whose `--purge` neither reads nor deletes a leftover
+        -- tasks.db — mcp-task-tools.allium, "Other CLI subcommands") nor any
+        -- other, and the board does not either (storage.allium:
+        -- StoreInUseNeverOpensSqlite, CodeNeverTouchesLegacyDatabase).
+
     @guarantee NoTaskListOrStatusCommand
         -- There is no subcommand that lists tasks or changes a task's status.
         -- The board and the MCP tools are the only surfaces for task state
@@ -517,14 +555,19 @@ surface DispatchCommandLine {
         --                               the rules above
         --   repo status|sync            repo-sync.allium: RepoStatusCli, RepoSyncCli
         --   prune-repo-paths            PruneRepoPathsViaCli
-        --   spacetime dump|dump-server|restore|seed
+        --   spacetime dump-server|restore
         --                               spacetime-seed.allium: SnapshotCommandLine
         --   store import --from <src>   spacetime-seed.allium: ImportOldStore
         --
-        -- Two options are global: `--db` (the local database; also
-        -- DISPATCH_DB) and `--spacetime-server` (the store; also
-        -- DISPATCH_SPACETIME_SERVER). The local database's folder is also
-        -- where a command's log lines go.
+        -- Two options are global: `--db` (also DISPATCH_DB) and
+        -- `--spacetime-server` (the store; also DISPATCH_SPACETIME_SERVER).
+        -- `--db` still names a database file, but no command opens it: its
+        -- folder is the data directory (storage.allium: DataDirectory), where
+        -- the host file is read from and a command's log lines go.
+        --
+        -- REMOVED with task #16755: `spacetime dump` (a snapshot of the local
+        -- database) and `spacetime seed` (an empty store seeded from it). Both
+        -- are now unknown subcommands and end with usage_error.
         --
         -- THE COMMANDS THAT NEVER FAIL. `statusline`, `caller-headers` and
         -- `toggle-agent-tree-pane` always end with success, because a
@@ -540,6 +583,6 @@ surface DispatchCommandLine {
 
 open question "An unparseable argument list exits 2 before any command body runs, and exit 2 is also Claude Code's 'block this tool call' signal. A `pr-gate` invocation that fails to parse (an id that is not a number, a renamed flag after an upgrade) therefore BLOCKS the gated `gh pr create`, contradicting the gate's fail-open stance (pr-workflow.allium: PrLearningsGate). Is a parse failure meant to block, or should pr-gate map usage errors to a non-blocking code?"
 
-open question "Task #4982: CliCommandsReachTheStoreWithoutManagingIt now falls back to the address a named-store board recorded beside the --db database before the managed address. `spacetime seed` resolves its store through the same helper today (startup::store_server_or_managed), and `store import` with nothing named brings up the managed store. Should `seed` also read the recorded address (so a seed run in a plain terminal targets the store the board is using), and should `import` — which would then write into a store some board is running on rather than bring the managed one up — read it too, or ignore it?"
+open question "Task #4982: CliCommandsReachTheStoreWithoutManagingIt now falls back to the address a named-store board recorded beside the --db database before the managed address, while `store import` with nothing named brings up the managed store. Should `import` — which would then write into a store some board is running on rather than bring the managed one up — read the recorded address too, or ignore it?"
 
 open question "`prune-repo-paths` judges existence on the local filesystem, but saved repo paths are shared rows in the store (core/SavedRepoPath has no host). Run on one machine, it forgets every repo path that exists only on a teammate's machine. Is pruning meant to be per-host, or is the shared table meant to hold only paths valid everywhere?"

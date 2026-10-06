@@ -6,7 +6,10 @@
 --        how its display name is changed. And the person's: how an install
 --        learns which human it belongs to, and what it does when that answer
 --        changes underneath it.
--- Includes: minting the single local Host row on first run; the one rule that
+-- Includes: WHERE this install keeps who it is — the host file in the data
+--           directory (HostFile, IdentityLivesInHostFile); minting the single
+--           local Host row on first run (a board launch with no host
+--           file); the one rule that
 --           changes the machine's label, and the validation it applies;
 --           adopting a UserIdentity offered by a shared store, confirming an
 --           unchanged one, and refusing a changed one.
@@ -61,6 +64,70 @@
 use "./core.allium" as core
 
 ------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- The file this install keeps who it is in: `host.json` in the data
+-- directory (storage.allium: DataDirectory), beside --db.
+--
+-- It holds the LOCAL Host row's three fields — core/Host's id, label and
+-- owner — and the credential that proves that owner to the store. Nothing
+-- else: every setting lives in the store (settings.allium:
+-- SettingsAreStoredPerHost), and a key the file does not know is not a
+-- setting it should start holding.
+entity HostFile {
+    path: String               -- <data directory>/config.host_file_name
+    permissions: String        -- the file's mode; always config.host_file_mode
+    credential: String?        -- the user identity's login credential; null until the first connection hands one out
+
+    -- The file holds a login credential, so only its owner may read it.
+    invariant HostFileIsPrivate {
+        permissions = config.host_file_mode
+    }
+
+    @invariant IdentityLivesInHostFile
+        -- This install's identity — host id, host label, user identity and its
+        -- credential — is read from and written to the host file and nowhere
+        -- else. Not the store: the store holds a MIRROR of the host row
+        -- (sync.allium: RegisterHostOnConnect) and never the credential, which
+        -- is what the install presents to the store and so cannot live in it.
+        -- Not SQLite: that is where these four used to sit, as rows of the old
+        -- settings table, and since task #16755 nothing reads them there
+        -- (storage.allium: CodeNeverTouchesLegacyDatabase). Nothing is carried
+        -- over from it either: an install upgrading past #16755 has no host
+        -- file, so its first launch is a first run and mints a fresh identity
+        -- (MintHostIdentity).
+        --
+        -- The host file is what core/local_host() resolves. Every reader and
+        -- every writer of the local Host row in this file — MintHostIdentity,
+        -- RenameHost, AdoptUserIdentity — is a read or write of it; a one-shot
+        -- CLI command reads it and never writes it (cli.allium:
+        -- CliCommandsNeedAHostFile).
+
+    @invariant HostFileIsWrittenWhole
+        -- Every write replaces the whole file atomically: the new content is
+        -- written to a temporary file in the same directory, with the private
+        -- mode already applied, and renamed over the old one. A reader
+        -- therefore sees the old file or the new one, never half of either;
+        -- a crash mid-write leaves the old identity intact rather than a
+        -- damaged file. The private mode is set before the content is
+        -- written, never afterwards, so the credential is never readable by
+        -- anyone else for any length of time.
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- The host file's name in the data directory.
+    host_file_name: String = "host.json"
+
+    -- Owner read/write only: the file carries the login credential.
+    host_file_mode: String = "0600"
+}
+
+------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
 
@@ -70,13 +137,42 @@ rule MintHostIdentity {
     when: FirstRun()
 
     requires: core/Hosts.count = 0
+    requires: not host_file_present()
 
-    ensures: core/Host.created(
-        id: generated_opaque_id(),
-        label: null
-    )
+    ensures:
+        core/Host.created(
+            id: generated_opaque_id(),
+            label: null
+        )
+        HostFile.created(
+            path: host_file_path(),
+            permissions: config.host_file_mode,
+            credential: null
+        )
 
     @guidance
+        -- A BOARD LAUNCH WITH NO HOST FILE IS A FIRST RUN. A fresh id is
+        -- minted, the label is left null, and host.json is written (with the
+        -- private mode, as a whole-file replacement) before anything reads
+        -- the host. That includes an install upgrading past task #16755: its
+        -- old identity sat in the legacy database, which nothing reads
+        -- (storage.allium: CodeNeverTouchesLegacyDatabase), so it is a first
+        -- run like any other.
+        --
+        -- A HOST FILE THAT EXISTS BUT CANNOT BE READ MINTS NOTHING. The
+        -- `not host_file_present()` guard is what keeps a damaged or
+        -- unreadable host.json from being overwritten with a new identity:
+        -- no local Host row results, and the startup gate aborts with
+        -- host_identity_unavailable (startup.allium:
+        -- AbortWhenTheHostIdentityStoreIsUnusable). So does a host file that
+        -- cannot be written here.
+        --
+        -- WHO FIRES FirstRun. The board launch, as its identity step: after
+        -- the configuration check and before the host-label gate reads
+        -- core/local_host() (startup.allium: CheckHostLabel). A one-shot CLI
+        -- command never fires it — with no host file it fails instead
+        -- (cli.allium: CliCommandsNeedAHostFile).
+        --
         -- Fires once, at installation, before any rule can read a Host. This
         -- is what makes core/Host's ExactlyOneLocalHost invariant safe to
         -- state without an "or zero" arm, and what lets Task.is_locally_owned be
@@ -122,6 +218,11 @@ rule MintHostIdentity {
         -- than relying on FirstRun firing once: an install whose Host row
         -- already exists must keep the id it has, because task rows already
         -- name it. A second mint would orphan every one of them.
+        --
+        -- == Black boxes ==
+        -- host_file_present() asks whether a host file exists in the data
+        -- directory, readable or not; host_file_path() is the data directory
+        -- joined with config.host_file_name.
 }
 
 -- == Naming ==
@@ -136,6 +237,9 @@ rule RenameHost {
         HostRenamed()
 
     @guidance
+        -- The label is written to the host file (IdentityLivesInHostFile),
+        -- as a whole-file replacement (HostFileIsWrittenWhole).
+        --
         -- Renaming changes what a human sees and nothing else. The id is
         -- deliberately absent from the ensures: it is what Task.host refers
         -- to, so changing it would orphan every task this machine owns. The
@@ -229,6 +333,12 @@ rule AdoptUserIdentity {
         -- is opaque to every rule in this system — which is exactly why
         -- core/UserIdentity is an external entity. An install that invented one
         -- would be inventing a person, and the store would not recognise them.
+        --
+        -- WRITTEN TO THE HOST FILE, WITH ITS CREDENTIAL. The owner and the
+        -- credential the store handed out with it are written together, in
+        -- one whole-file replacement (HostFileIsWrittenWhole), so the file
+        -- never holds an identity without the credential that proves it or
+        -- the reverse.
         --
         -- THE STORED ANSWER IS core/local_host().owner, AND THERE IS NO OTHER.
         -- "Persists across restarts" is not a separate obligation this rule
@@ -343,4 +453,5 @@ rule RefuseAChangedUserIdentity {
 ------------------------------------------------------------
 -- Open Questions
 ------------------------------------------------------------
+
 

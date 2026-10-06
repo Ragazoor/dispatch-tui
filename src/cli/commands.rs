@@ -214,35 +214,3 @@ pub fn resolve_plan_path(path: &Path) -> Result<String> {
         .map_err(|e| anyhow::anyhow!("Failed to resolve plan path {}: {}", path.display(), e))?;
     Ok(plan_path.to_string_lossy().into_owned())
 }
-
-/// `dispatch spacetime seed` — move this board into an empty shared store.
-///
-/// Spec: `spacetime-seed.allium`'s `SeedSharedStore`. Connects to `server`
-/// first, as a board would: that is what mints this install's user identity
-/// on a first run, and the identity is what every row is attributed to. Then
-/// dumps the board's own database and seeds `store` from it — refused, with
-/// the store untouched, if the store already holds tasks or epics.
-///
-/// `store` writes the rows; the binary passes the `spacetime`-CLI store for
-/// the same server.
-pub async fn seed_store(
-    db_path: &Path,
-    server: String,
-    store: &dyn crate::spacetime::SharedStore,
-    out: &mut dyn Write,
-) -> Result<()> {
-    use anyhow::Context;
-    let connected = crate::runtime::open_cli_store(db_path, Some(server)).await?;
-    let operator = crate::db::HostStore::user_identity(&*connected.database)
-        .await?
-        .context("connected to the store, but no user identity was stored")?;
-
-    let local = Database::open(db_path).await?;
-    let snapshot = crate::spacetime::dump_from_sqlite(&local).await?;
-    let rows: usize = snapshot.extracts().iter().map(|e| e.rows.len()).sum();
-    crate::spacetime::seed(store, snapshot, &operator)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    writeln!(out, "Seeded {rows} rows into the store as {operator}.")?;
-    Ok(())
-}

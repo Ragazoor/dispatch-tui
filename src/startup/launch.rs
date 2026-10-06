@@ -149,11 +149,12 @@ pub enum StartupAbort {
     /// This machine has no label and nobody could be asked for one.
     /// `startup.allium`'s `AbortWhenTheHostIsUnnamedAndNoOneCanAnswer`.
     HostUnnamed,
-    /// The store this machine's Host row lives in is unusable — either the
-    /// row could not be read or minted at all, or the machine is unnamed and
-    /// a label it was just given could not be written back. Both are the
-    /// same broken substrate with the same remedy (repair the settings
-    /// store), which is why one reason covers both rather than a second
+    /// The host file this machine's Host row lives in is unusable — either
+    /// it exists and could not be read or parsed (and is never overwritten),
+    /// a first run's new one could not be written, or the machine is unnamed
+    /// and a label it was just given could not be written back. All are the
+    /// same broken substrate with the same remedy (repair host.json or its
+    /// directory), which is why one reason covers both rather than a second
     /// value alongside `HostUnnamed` (which means the identity read fine,
     /// the store would accept a label, and there simply isn't one yet).
     /// `startup.allium`'s `AbortWhenTheHostIdentityStoreIsUnusable`.
@@ -309,9 +310,10 @@ impl StartupAbort {
             ),
             Self::HostIdentityUnavailable => String::from(
                 "This machine's identity could not be read or created — dispatch could not \
-                 reach or write its settings. Check that the database and its directory are \
-                 reachable and writable, then run `dispatch tui` again; there is no name to \
-                 type here, the problem is lower down than that.",
+                 read or write its identity file, host.json, in its data directory. Check that \
+                 host.json and the directory are readable and writable (a damaged host.json is \
+                 never overwritten: repair or remove it), then run `dispatch tui` again; there \
+                 is no name to type here, the problem is lower down than that.",
             ),
             Self::SpacetimeCliMissing => String::from(
                 "The `spacetime` command is not installed, and dispatch needs it to run its \

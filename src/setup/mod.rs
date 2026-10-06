@@ -8,6 +8,8 @@
 mod config;
 mod hooks;
 mod plugins;
+#[cfg(test)]
+mod purge_tests;
 pub(crate) mod statusline;
 
 use anyhow::{Context, Result};
@@ -239,37 +241,6 @@ impl Confirmer for StdinConfirmer {
             trimmed.to_string()
         })
     }
-}
-
-fn count_tasks(db_path: &std::path::Path) -> Result<i64> {
-    let conn =
-        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))?;
-    Ok(count)
-}
-
-pub fn remove_database(db_path: &std::path::Path) -> Result<bool> {
-    if !db_path.exists() {
-        return Ok(false);
-    }
-
-    let parent = db_path
-        .parent()
-        .context("database path has no parent directory")?;
-
-    for name in ["tasks.db", "tasks.db-wal", "tasks.db-shm", "app.log"] {
-        let path = parent.join(name);
-        if path.exists() {
-            fs::remove_file(&path)
-                .with_context(|| format!("Failed to remove {}", path.display()))?;
-        }
-    }
-
-    if parent.exists() && parent.read_dir()?.next().is_none() {
-        fs::remove_dir(parent).with_context(|| format!("Failed to remove {}", parent.display()))?;
-    }
-
-    Ok(true)
 }
 
 /// Apply the dispatch MCP entry to `target` (Claude Code's user-global config,
@@ -703,20 +674,25 @@ pub(super) struct UninstallPaths {
 
 impl UninstallPaths {
     /// Resolve the real `$HOME`-derived locations used in production.
-    fn resolve() -> Result<Self> {
+    ///
+    /// `db_path` is the operator's `--db` / `DISPATCH_DB`: it names the data
+    /// directory the purge works in, and is never opened.
+    fn resolve(db_path: &Path) -> Result<Self> {
         let claude_dir = claude_dir()?;
         Ok(Self {
             mcp_path: user_global_config_path()?,
             legacy_mcp_path: claude_dir.join(".mcp.json"),
             plugin_path: plugins::plugin_dir()?,
-            db_path: crate::default_db_path(),
+            db_path: db_path.to_path_buf(),
             statusline_path: statusline::settings_path(&claude_dir),
         })
     }
 }
 
-pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
-    let paths = UninstallPaths::resolve()?;
+/// `db_path` is the global `--db` (default: the XDG data directory's
+/// `tasks.db`); `--purge` works in its parent directory.
+pub fn run_uninstall(yes: bool, purge: bool, db_path: &Path) -> Result<()> {
+    let paths = UninstallPaths::resolve(db_path)?;
     run_uninstall_in(&paths, &StdinConfirmer, yes, purge)
 }
 
@@ -745,7 +721,7 @@ pub(super) fn run_uninstall_in(
     // be cleaned up manually.
 
     if purge {
-        any_removed |= purge_database(&paths.db_path, confirmer)?;
+        any_removed |= purge_data_dir(&paths.db_path, confirmer)?;
     }
 
     if any_removed {
@@ -780,7 +756,10 @@ fn print_uninstall_plan(paths: &UninstallPaths, purge: bool) {
     );
     eprintln!("  Status line: {} (if present)", statusline_path.display());
     if purge {
-        eprintln!("  Database:    {}", db_path.display());
+        eprintln!(
+            "  Identity:    host.json and app.log in {}",
+            crate::runtime::data_dir_of(db_path).display()
+        );
     }
 }
 
@@ -846,27 +825,59 @@ fn remove_installed_files(paths: &UninstallPaths) -> bool {
     any_removed
 }
 
-/// The `--purge` step: delete the database only if the user confirms the
-/// dangerous prompt. Returns whether it was removed.
-fn purge_database(db_path: &Path, confirmer: &dyn Confirmer) -> Result<bool> {
+/// The `--purge` step: forget this machine's identity (`host.json`) and
+/// remove the log, behind the dangerous prompt, and the data directory too
+/// once that leaves it empty. Returns whether anything was removed.
+///
+/// Tasks live in the store, which a purge does not touch, so no count is
+/// stated (counting would mean opening a database). A leftover `tasks.db` and
+/// its companions are never opened, read, moved or deleted
+/// (`storage.allium: CodeNeverTouchesLegacyDatabase`): they are the operator's
+/// to delete by hand.
+fn purge_data_dir(db_path: &Path, confirmer: &dyn Confirmer) -> Result<bool> {
+    let data_dir = crate::runtime::data_dir_of(db_path);
+    let host_file = crate::host_file::host_file_path(data_dir);
+    let log = data_dir.join("app.log");
+    let present: Vec<&PathBuf> = [&host_file, &log]
+        .into_iter()
+        .filter(|p| p.exists())
+        .collect();
+    if present.is_empty() {
+        println!("No host file or log in {}, skipping", data_dir.display());
+        return Ok(false);
+    }
+    eprintln!(
+        "\n  This forgets this machine's identity: a later launch mints a new one, and tasks \
+         stamped with the old host id stop being this machine's. This cannot be undone."
+    );
+    if !confirmer.confirm_dangerous("Remove this machine's host file and log?")? {
+        println!("Kept host file and log.");
+        return Ok(false);
+    }
     let mut removed = false;
-    if db_path.exists() {
-        let task_count = count_tasks(db_path).unwrap_or(0);
-        eprintln!("\n  Database contains {task_count} task(s). This cannot be undone.");
-        if confirmer.confirm_dangerous("Delete database?")? {
-            match remove_database(db_path) {
-                Ok(true) => {
-                    println!("Removed database");
-                    removed = true;
-                }
-                Ok(false) => println!("Database not found, skipping"),
-                Err(e) => eprintln!("Warning: failed to remove database: {e}"),
+    for path in present {
+        match fs::remove_file(path) {
+            Ok(()) => {
+                println!("Removed {}", path.display());
+                removed = true;
             }
-        } else {
-            println!("Kept database.");
+            Err(e) => eprintln!("Warning: failed to remove {}: {e}", path.display()),
+        }
+    }
+    if data_dir
+        .read_dir()
+        .is_ok_and(|mut entries| entries.next().is_none())
+    {
+        match fs::remove_dir(data_dir) {
+            Ok(()) => println!("Removed {}", data_dir.display()),
+            Err(e) => eprintln!("Warning: failed to remove {}: {e}", data_dir.display()),
         }
     } else {
-        println!("Database not found, skipping");
+        eprintln!(
+            "Note: {} still holds other files. A leftover tasks.db (and -wal/-shm) there is no \
+             longer used by dispatch and can be deleted by hand.",
+            data_dir.display()
+        );
     }
     Ok(removed)
 }
@@ -971,7 +982,6 @@ impl Confirmer for FakeConfirmer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Database;
     use crate::process::MockProcessRunner;
     use serde_json::json;
 
@@ -1065,44 +1075,6 @@ mod tests {
         write_file_if_changed(&path, "#!/bin/bash", true).unwrap();
         let mode = fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o755, 0o755, "should have executable permissions");
-    }
-
-    // -- Database removal --
-
-    #[test]
-    fn remove_database_deletes_db_and_related_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let data_dir = dir.path().join("dispatch");
-        fs::create_dir_all(&data_dir).unwrap();
-        fs::write(data_dir.join("tasks.db"), "db").unwrap();
-        fs::write(data_dir.join("tasks.db-wal"), "wal").unwrap();
-        fs::write(data_dir.join("tasks.db-shm"), "shm").unwrap();
-        fs::write(data_dir.join("app.log"), "log").unwrap();
-
-        let db_path = data_dir.join("tasks.db");
-        let removed = remove_database(&db_path).unwrap();
-        assert!(removed);
-        assert!(!data_dir.join("tasks.db").exists());
-        assert!(!data_dir.join("tasks.db-wal").exists());
-        assert!(!data_dir.join("tasks.db-shm").exists());
-        assert!(!data_dir.join("app.log").exists());
-        assert!(!data_dir.exists());
-    }
-
-    #[test]
-    fn remove_database_keeps_parent_if_not_empty() {
-        let dir = tempfile::tempdir().unwrap();
-        let data_dir = dir.path().join("dispatch");
-        fs::create_dir_all(&data_dir).unwrap();
-        fs::write(data_dir.join("tasks.db"), "db").unwrap();
-        fs::write(data_dir.join("other.txt"), "keep").unwrap();
-
-        let db_path = data_dir.join("tasks.db");
-        let removed = remove_database(&db_path).unwrap();
-        assert!(removed);
-        assert!(!data_dir.join("tasks.db").exists());
-        assert!(data_dir.exists());
-        assert!(data_dir.join("other.txt").exists());
     }
 
     // -- MCP setup application --
@@ -1204,15 +1176,6 @@ mod tests {
     }
 
     #[test]
-    fn remove_database_noop_when_missing() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("dispatch").join("tasks.db");
-
-        let removed = remove_database(&db_path).unwrap();
-        assert!(!removed);
-    }
-
-    #[test]
     fn setup_does_not_write_settings_json() {
         // Regression guard: the setup flow must not create or modify settings.json.
         // That file is user-owned config; dispatch must not add permissions to it.
@@ -1227,21 +1190,6 @@ mod tests {
             !settings.exists(),
             "setup must not create settings.json; permissions are user-managed"
         );
-    }
-
-    // -- count_tasks --
-
-    #[tokio::test]
-    async fn count_tasks_reports_zero_for_fresh_db() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("dispatch").join("tasks.db");
-        fs::create_dir_all(db_path.parent().unwrap()).unwrap();
-        // Create the schema, then drop the handle so count_tasks can open it.
-        let db = Database::open(&db_path).await.unwrap();
-        drop(db);
-
-        let count = count_tasks(&db_path).unwrap();
-        assert_eq!(count, 0, "a freshly-created db has no tasks");
     }
 
     // -- display_for --
@@ -1368,46 +1316,15 @@ mod tests {
         assert_eq!(confirmer.confirm_call_count(), 0);
     }
 
-    #[tokio::test]
-    async fn run_uninstall_in_purge_deletes_db_when_dangerous_confirmed() {
-        let dir = tempfile::tempdir().unwrap();
-        let paths = uninstall_layout(dir.path());
-        let db = Database::open(&paths.db_path).await.unwrap();
-        drop(db);
-        assert!(paths.db_path.exists());
-
-        // confirm "Continue?" -> yes; confirm_dangerous "Delete database?" -> yes.
-        let confirmer = FakeConfirmer::new(vec![true], vec![true]);
-        run_uninstall_in(&paths, &confirmer, false, true).unwrap();
-
-        assert!(!paths.db_path.exists(), "purge must delete the database");
-        assert_eq!(confirmer.dangerous_call_count(), 1);
-    }
-
-    #[tokio::test]
-    async fn run_uninstall_in_purge_keeps_db_when_dangerous_declined() {
-        let dir = tempfile::tempdir().unwrap();
-        let paths = uninstall_layout(dir.path());
-        let db = Database::open(&paths.db_path).await.unwrap();
-        drop(db);
-
-        let confirmer = FakeConfirmer::new(vec![true], vec![false]);
-        run_uninstall_in(&paths, &confirmer, false, true).unwrap();
-
-        assert!(
-            paths.db_path.exists(),
-            "declining the dangerous prompt must keep the database"
-        );
-    }
-
-    #[tokio::test]
-    async fn run_uninstall_in_yes_still_prompts_before_deleting_db() {
+    #[test]
+    fn run_uninstall_in_yes_still_prompts_before_forgetting_the_identity() {
         // Regression guard: --yes suppresses "Continue?" but must NOT
-        // auto-confirm the irreversible database deletion.
+        // auto-confirm the irreversible forgetting of this machine's identity.
         let dir = tempfile::tempdir().unwrap();
         let paths = uninstall_layout(dir.path());
-        let db = Database::open(&paths.db_path).await.unwrap();
-        drop(db);
+        let data_dir = paths.db_path.parent().unwrap();
+        fs::create_dir_all(data_dir).unwrap();
+        fs::write(data_dir.join("host.json"), br#"{"host_id":"h"}"#).unwrap();
 
         // No confirm answers queued (would panic if consulted); dangerous -> no.
         let confirmer = FakeConfirmer::new(vec![], vec![false]);
@@ -1417,9 +1334,12 @@ mod tests {
         assert_eq!(
             confirmer.dangerous_call_count(),
             1,
-            "--yes must still prompt before deleting the database"
+            "--yes must still prompt before forgetting the identity"
         );
-        assert!(paths.db_path.exists(), "db kept because dangerous declined");
+        assert!(
+            data_dir.join("host.json").exists(),
+            "host file kept because dangerous declined"
+        );
     }
 
     #[test]

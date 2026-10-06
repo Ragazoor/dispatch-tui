@@ -178,11 +178,9 @@ pub async fn import_store(
             if !crate::spacetime::managed_store::spacetime_cli_on_path() {
                 bail!("the `spacetime` CLI is not on PATH; install it first");
             }
-            let store_data_dir = crate::default_db_path()
-                .parent()
-                .unwrap_or(Path::new("."))
-                .join("spacetime");
-            let log_dir = db_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+            let store_data_dir =
+                crate::runtime::data_dir_of(&crate::default_db_path()).join("spacetime");
+            let log_dir = crate::runtime::data_dir_of(db_path).to_path_buf();
             let managed = Arc::new(ManagedStore::for_launch(store_data_dir, &log_dir));
             let m = managed.clone();
             let ready = tokio::task::spawn_blocking(move || m.bring_up())

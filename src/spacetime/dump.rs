@@ -2,7 +2,9 @@
 //!
 //! Spec: `docs/specs/spacetime-seed.allium` — the `TakeSnapshot` rule.
 //!
-//! This is the seed side. The shared store's own dump lives on
+//! Test fixture only (`dispatch spacetime dump` was removed with task #16755):
+//! no production path reads a SQLite database. It builds snapshots for tests
+//! from an in-memory handle. The shared store's own dump lives on
 //! [`crate::spacetime::SharedStore::dump`]; both produce the same artefact, and
 //! [`crate::spacetime::restore`] does not care which it is handed.
 

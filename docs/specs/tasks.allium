@@ -1517,8 +1517,9 @@ rule BatchDelete {
     -- every task and epic, together, inside ONE atomic reducer call
     -- (`batch_delete` in spacetime/module/src/lib.rs), which validates
     -- everything BEFORE deleting anything. The local SQLite path
-    -- (src/db/queries/tasks.rs), reached only by a Database with no shared
-    -- store attached — never the board's — is one transaction too, but checks
+    -- (src/db/queries/tasks.rs), reached only by a test's Database with no
+    -- shared store attached — never the board's, and never any production
+    -- path (storage.allium: StoreInUseNeverOpensSqlite) — is one transaction too, but checks
     -- only that every id exists, matching its single-item delete_task and
     -- delete_epic, which do not re-check status either. See the guidance for
     -- why looping DeleteTask/DeleteEpic once per item — which is what this

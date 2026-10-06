@@ -22,7 +22,8 @@
 --           follows live in host.allium and sync.allium. This file only
 --           asserts that MemoryReducerCaller reaches the outcomes those
 --           files already describe. The SQLite LocalStore/JournalMode model
---           (see storage.allium, retiring once every domain here lands) and
+--           (see storage.allium, narrowed by task #16755 to test fixtures)
+--           and
 --           the seed/restore JSON store (spacetime::store::MemoryStore in
 --           code) are unrelated, orthogonal tools with no domain semantics
 --           of their own and are untouched by this file.

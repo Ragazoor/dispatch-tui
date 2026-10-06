@@ -160,12 +160,12 @@ pub(super) async fn schema_refusal(
 ///
 /// `spacetime-seed.allium: RefuseArchivedRows`. `archived` was retired by task
 /// #4971 (`epics.allium: ArchivedStatusMigration`), which also rebuilds the
-/// status CHECK constraints so a live board can never write it back. Every
-/// CURRENT path that produces a snapshot (`seed_store`, `cmd_spacetime`'s
-/// `Dump`) opens its SQLite source through `Database::open`, which runs v106
-/// before a single row is read, so a current binary can no longer hand this
-/// function a snapshot it would refuse. The one way in is a snapshot FILE
-/// written to disk by a binary older than v106. There is deliberately no
+/// status CHECK constraints in SQLite so a live board can never write it back.
+/// A store, though, CAN still hold archived rows: the module refuses new
+/// writes with an unknown status, but rows an older module wrote remain, so a
+/// `dump-server` of such a store produces a snapshot carrying them, as does a
+/// snapshot FILE
+/// written to disk by an older binary. There is deliberately no
 /// store-side equivalent of that migration (see its own guidance for why a
 /// second copy was declined), so the answer here is refusal rather than a
 /// best-effort reconciliation:

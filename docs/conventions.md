@@ -240,9 +240,11 @@ fell through finds nothing.
 
 **Never routed:** the Host row (`HostStore`) and the user identity's
 credential (`IdentityCredentialStore`). They are this install's own and stay
-on this machine (`host.allium`) — in SQLite's `settings` table until Phase 12c
-(#4976) moves them to a small local file; the shared Host registry gets a
-mirror via `sync.allium: RegisterHostOnConnect`.
+on this machine (`host.allium`), in `host.json` in the data directory
+(`src/host_file/mod.rs`; task #16755). `Database::with_host_file` points a
+handle at it, and a handle without one — the in-memory test handle — keeps them
+in its `settings` table. The shared Host registry gets a mirror via
+`sync.allium: RegisterHostOnConnect`.
 
 `UsageStore` followed in Phase 11 (task #4915), for the same reads-must-follow-
 writes reason, but for a different underlying cause: `query_usage` groups and

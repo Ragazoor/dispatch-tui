@@ -57,7 +57,7 @@ const AGENT_TREE_TOGGLE_COMMAND: &str = concat!(
     " toggle-agent-tree-pane '#{window_name}'\""
 );
 
-use crate::db::{HostStore, RepoConfigRead, TaskRead};
+use crate::db::{RepoConfigRead, TaskRead};
 use crate::models::{TaskId, TmuxWindow};
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::embeddings::EmbeddingService;
@@ -364,7 +364,7 @@ pub struct CliStore {
     _session: crate::sync::SyncSession,
 }
 
-/// Open the database at `db_path` routed through the store `server` names,
+/// Route a handle through the store `server` names,
 /// and make the first connection — the same one a board makes at startup,
 /// with the same failures (`startup.allium`: `AbortWhenNoStoreIsConfigured`,
 /// `AbortWhenTheStoreCannotBeReached`). For the subcommands that read or write
@@ -379,7 +379,7 @@ pub async fn open_cli_store(db_path: &Path, server: Option<String>) -> Result<Cl
         std::env::var(crate::startup::STORE_SERVER_ENV).ok(),
         db_path,
     );
-    let (database, host_id, _label) = open_with_host_identity(db_path).await?;
+    let (database, host_id) = open_with_cli_identity(db_path).await?;
     let parts = StoreParts::build(database, &host_id);
     // No host-registry push: a short-lived command is not a board, and the
     // board already registers this host on every connect.
@@ -390,15 +390,43 @@ pub async fn open_cli_store(db_path: &Path, server: Option<String>) -> Result<Cl
     })
 }
 
-/// Open the database at `db_path` and read (or mint) this install's host
-/// identity. `startup.allium`: `AbortWhenTheHostIdentityStoreIsUnusable`.
-async fn open_with_host_identity(db_path: &Path) -> Result<(db::Database, String, Option<String>)> {
-    let database = db::Database::open(db_path).await?;
-    let (host_id, label) = database.ensure_host_identity().await.map_err(|e| {
-        tracing::error!("Failed to read/mint host identity: {e:#}");
-        crate::startup::StartupAbort::HostIdentityUnavailable
-    })?;
-    Ok((database, host_id, label))
+/// The data directory `--db` names: where `host.json`, `app.log` and the store
+/// record live. The database file itself is never opened.
+pub fn data_dir_of(db_path: &Path) -> &Path {
+    match db_path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        _ => Path::new("."),
+    }
+}
+
+/// The handle every process routes through the store. It holds no data of its
+/// own: an in-memory placeholder base for the routed ports (a production path
+/// never opens `tasks.db` — `storage.allium: StoreInUseNeverOpensSqlite`),
+/// with this install's identity kept in `<data_dir>/host.json`
+/// (`host.allium: IdentityLivesInHostFile`).
+async fn placeholder_database(data_dir: &Path) -> Result<db::Database> {
+    Ok(db::Database::open_in_memory_unattached()
+        .await?
+        .with_host_file(data_dir))
+}
+
+/// A one-shot command's identity: read from the host file, never minted
+/// (`cli.allium: CliCommandsNeedAHostFile`).
+async fn open_with_cli_identity(db_path: &Path) -> Result<(db::Database, String)> {
+    let data_dir = data_dir_of(db_path);
+    let dir = data_dir.to_path_buf();
+    let identity =
+        tokio::task::spawn_blocking(move || crate::host_file::read_for_cli(&dir)).await??;
+    // A host file no board has connected with yet holds no user identity, so
+    // there is no one for the command to act as: refuse, and write nothing.
+    if identity.user_identity.is_none() {
+        anyhow::bail!(
+            "this machine's identity in {} has no user identity yet: run `dispatch tui` once \
+             so a board can connect to the store and complete it",
+            crate::host_file::host_file_path(data_dir).display()
+        );
+    }
+    Ok((placeholder_database(data_dir).await?, identity.host_id))
 }
 
 /// The first connection, shared by the board and the CLI: connect, settle the
@@ -566,11 +594,8 @@ fn select_store_target(
                 // Fixed, not derived from `--db`: a throwaway database must not
                 // start a second store or lose sight of the module hash the first
                 // recorded.
-                let store_data_dir = crate::default_db_path()
-                    .parent()
-                    .unwrap_or(Path::new("."))
-                    .join("spacetime");
-                let log_dir = db_path.parent().unwrap_or(Path::new("."));
+                let store_data_dir = data_dir_of(&crate::default_db_path()).join("spacetime");
+                let log_dir = data_dir_of(db_path);
                 StoreTarget::Managed(Arc::new(
                     crate::spacetime::managed_store::ManagedStore::for_launch(
                         store_data_dir,
@@ -999,19 +1024,34 @@ impl TuiRuntime {
         // strict one on purpose — see the long note at the `set_local_host_id`
         // call below for why a board that cannot read its own identity must
         // not draw.
-        let (database, host_id, host_label) = open_with_host_identity(db_path).await?;
+        //
+        // The agent port is claimed first, so a launch that is going to abort
+        // on a port somebody else holds mints no host file
+        // (`CheckHostLabelAfterStartupConfigResolves`: `requires:
+        // agent_port_available`, then `FirstRun`). Claimed here, before the
+        // board takes the screen, so a port another
+        // process still holds aborts the launch where the operator can read it
+        // — `startup.allium`'s `AbortWhenTheAgentPortIsTaken`. Bound inside the
+        // spawned task instead, the failure would land on a stderr the drawn
+        // board has already covered, leaving a board no agent can reach.
+        let mcp_listener = claim_agent_port(port).await?;
+        let data_dir = data_dir_of(db_path).to_path_buf();
+        let identity = {
+            let dir = data_dir.clone();
+            tokio::task::spawn_blocking(move || crate::host_file::resolve_for_launch(&dir))
+                .await??
+        };
+        let (host_id, host_label) = (identity.host_id, identity.label);
+        let database = placeholder_database(&data_dir).await?;
         // Routed at construction: which backing a read or write goes to cannot
         // change under a caller. Nothing connects yet — that is
         // `connect_first` below, once the host is named.
         let parts = build_store(database, &host_id);
         let database = parts.database.clone();
 
-        // The data directory the operator named with `--db`: the example feed
-        // epic's script lives there (seeded once the store is up, below).
-        let data_dir = db_path
-            .parent()
-            .unwrap_or(std::path::Path::new("."))
-            .to_path_buf();
+        // `data_dir` (above) is the directory the operator named with `--db`:
+        // the example feed epic's script lives there (seeded once the store is
+        // up, below).
 
         // Initialise the embedding model (blocks until loaded; may download on first run).
         // Tests bypass run_tui entirely and construct TuiRuntime directly, so
@@ -1036,12 +1076,6 @@ impl TuiRuntime {
         ));
         let (mcp_notify_tx, mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
         let feed_notify_tx = mcp_notify_tx.clone();
-        // Claimed here, before the board takes the screen, so a port another
-        // process still holds aborts the launch where the operator can read it
-        // — `startup.allium`'s `AbortWhenTheAgentPortIsTaken`. Bound inside the
-        // spawned task instead, the failure would land on a stderr the drawn
-        // board has already covered, leaving a board no agent can reach.
-        let mcp_listener = claim_agent_port(port).await?;
 
         // Mint (or read back) this install's Host identity — see
         // host.allium: MintHostIdentity. A failure here is NOT best-effort:

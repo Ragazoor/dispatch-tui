@@ -36,10 +36,6 @@ cargo install --path .
 # again when the board exits. A team points every board at a shared one instead:
 #   export DISPATCH_SPACETIME_SERVER=http://team-store:3000
 
-# Upgrading a board that ran before the store was required? Move it in once
-# (see docs/reference.md, "Moving an existing board into a store"):
-#   dispatch spacetime seed
-
 dispatch tui
 ```
 

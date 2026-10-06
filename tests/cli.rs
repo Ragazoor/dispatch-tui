@@ -29,6 +29,23 @@ async fn sqlite() -> (NamedTempFile, Database) {
     (tmp, db)
 }
 
+/// A named host file in `dir`: the identity every store-backed one-shot
+/// command needs before it reaches for the store (cli.allium:
+/// CliCommandsNeedAHostFile). The commands never write it.
+fn write_host_file(dir: &Path) {
+    let identity = dispatch_tui::host_file::HostIdentity {
+        host_id: "cli-test-host".to_string(),
+        label: Some("cli-test".to_string()),
+        user_identity: Some("c0ffee".to_string()),
+        credential: Some("token".to_string()),
+    };
+    std::fs::write(
+        dispatch_tui::host_file::host_file_path(dir),
+        serde_json::to_vec(&identity).unwrap(),
+    )
+    .unwrap();
+}
+
 /// `dispatch repo list`'s output.
 async fn list(db: &Database) -> String {
     let mut out = Vec::new();
@@ -48,8 +65,10 @@ async fn list(db: &Database) -> String {
 /// independent of whatever else the machine is running.
 #[test]
 fn store_backed_commands_fail_cleanly_when_the_store_is_unreachable() {
-    let tmp = NamedTempFile::new().unwrap();
-    let db = tmp.path().to_str().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    write_host_file(tmp.path());
+    let db = tmp.path().join("dispatch.db");
+    let db = db.to_str().unwrap();
     let plan = make_plan_file("A plan", "Goal.");
     let plan = plan.path().to_str().unwrap();
     let dead = {
@@ -80,6 +99,52 @@ fn store_backed_commands_fail_cleanly_when_the_store_is_unreachable() {
     }
 }
 
+/// `uninstall --purge` works in the data directory `--db` names, not only the
+/// default one: a purge against a throwaway `--db` forgets that directory's
+/// identity and leaves the real one alone. `$HOME` and `$XDG_DATA_HOME` point
+/// into a temp directory, so nothing real is reachable either way.
+#[test]
+fn uninstall_purge_honours_db() {
+    let home = tempfile::tempdir().unwrap();
+    let xdg = home.path().join("xdg");
+    let default_dir = xdg.join("dispatch");
+    std::fs::create_dir_all(&default_dir).unwrap();
+    write_host_file(&default_dir);
+    let chosen = home.path().join("chosen");
+    std::fs::create_dir_all(&chosen).unwrap();
+    write_host_file(&chosen);
+    std::fs::write(chosen.join("app.log"), b"log").unwrap();
+
+    let mut child = binary()
+        .env("HOME", home.path())
+        .env("XDG_DATA_HOME", &xdg)
+        .env_remove("DISPATCH_DB")
+        .args([
+            "--db",
+            chosen.join("tasks.db").to_str().unwrap(),
+            "uninstall",
+            "--yes",
+            "--purge",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"y\ny\n").unwrap();
+    let out = child.wait_with_output().unwrap();
+
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        !chosen.exists(),
+        "the --db directory is purged (and removed, being empty)"
+    );
+    assert!(
+        default_dir.join("host.json").exists(),
+        "the default data directory is not the one named, so it is left alone"
+    );
+}
+
 /// An `http://` address nothing listens on: claimed from the OS, then released.
 fn dead_store_address() -> String {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -98,6 +163,7 @@ fn dead_store_address() -> String {
 #[test]
 fn a_command_with_nothing_named_reaches_the_store_recorded_beside_its_database() {
     let dir = tempfile::tempdir().unwrap();
+    write_host_file(dir.path());
     let db = dir.path().join("dispatch.db");
     let recorded = dead_store_address();
     std::fs::write(dir.path().join("store-server"), format!("{recorded}\n")).unwrap();
@@ -129,6 +195,7 @@ fn a_command_with_nothing_named_reaches_the_store_recorded_beside_its_database()
 #[test]
 fn the_environment_wins_over_the_recorded_store() {
     let dir = tempfile::tempdir().unwrap();
+    write_host_file(dir.path());
     let db = dir.path().join("dispatch.db");
     let recorded = dead_store_address();
     let from_env = dead_store_address();

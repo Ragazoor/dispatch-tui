@@ -15,7 +15,6 @@ mod managed_store_real;
 mod module_schema;
 mod refusals;
 mod round_trip;
-mod seed;
 mod sequence_burn;
 mod snapshot_edges;
 

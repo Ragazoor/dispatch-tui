@@ -6,7 +6,8 @@
 --        SavedRepoPath and SavedRepoBranch, which it follows structurally;
 --        this file owns the write operations on it.
 -- Includes: SaveSetting, ClearSetting — an upsert and a delete, scoped to
---           this install's own Host.
+--           this install's own Host; WHERE settings live (the shared store,
+--           per host — SettingsAreStoredPerHost).
 -- Excludes: host_id, host_label, the stored UserIdentity and its credential
 --           (see host.allium) — none of these is a Setting, despite having
 --           been stored alongside them in the same key/value table before this
@@ -16,10 +17,12 @@
 --           already argues against. The stored UserIdentity is core/Host.owner
 --           for the same reason. Its credential is narrower still: it is what
 --           PROVES that identity, never appears in a shared table at all, and
---           has no counterpart here (see storage.allium's local exceptions).
---           Also excluded: which rows a board is sent and how they get there
---           (see sync.allium) — this file says whose a setting is, not how
---           that fact is transported. Also excluded: the board's LIVE repo
+--           has no counterpart here. All four live in the host file
+--           (host.allium: IdentityLivesInHostFile), never in the store's
+--           settings table. Also excluded: which rows a board is sent and how
+--           they get there (see sync.allium: SubscribeToThisHostsSettings) —
+--           this file says whose a setting is, not how that fact is
+--           transported. Also excluded: the board's LIVE repo
 --           filter (board-layout.allium: active_repo_filter).
 --
 -- REMOVED: saved repo-filter presets. This file once also owned
@@ -43,6 +46,34 @@
 -- — without that gap.
 
 use "./core.allium" as core
+
+-- SettingsAreStoredPerHost. Every setting — the repo filter and its mode,
+-- notifications, collapsed sections, the GitHub queries, the dependabot
+-- config, the reviews and CVE feed commands and intervals, the last project,
+-- the main session's window, learning reflection, and any key added later —
+-- is a core/Setting row in the SHARED STORE, keyed by (this host's id, key).
+-- It is written through the store (SaveSetting, ClearSetting below, routed by
+-- sync.allium: BoardWritesThroughTheStore), read back from this host's
+-- settings subscription (sync.allium: SubscribeToThisHostsSettings), and kept
+-- nowhere else: not in the host file, which holds identity only, and not in
+-- SQLite, of which no production path opens an on-disk database
+-- (storage.allium:
+-- StoreInUseNeverOpensSqlite). There is no local fallback for a store that is
+-- down: a setting write then fails like every other shared write
+-- (sync.allium: AWriteWithNoConnectionIsRefused).
+--
+-- NOTHING IS COPIED IN FROM THE OLD LOCAL TABLE. Settings rows have been
+-- routed to the store since Phase 9; whatever a leftover tasks.db still holds
+-- is not read (storage.allium: CodeNeverTouchesLegacyDatabase), and a host
+-- with no rows in the store starts from the defaults.
+--
+-- PER HOST, NOT PER STORE. Two machines on one store each see only their own
+-- rows, because the host id is part of the key and the subscription asks for
+-- this host's rows alone. One machine's repo filter, or a feed command naming
+-- a script path on its own disk, never reaches a colleague's board — nor the
+-- same person's other machine. core/Setting's SettingIsUniquePerHostAndKey is
+-- the expression form of the key; this paragraph is the claim about where the
+-- rows are.
 
 ------------------------------------------------------------
 -- Rules

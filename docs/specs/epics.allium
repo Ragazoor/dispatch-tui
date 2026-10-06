@@ -1554,14 +1554,22 @@ rule ArchivedStatusMigration {
         -- silently dropped or backfilled on the fly — see
         -- `spacetime-seed.allium: RefuseArchivedRows`. In practice the only
         -- way a row like that reaches a restore at all is a snapshot FILE
-        -- written by a binary older than this migration: every live path
-        -- that produces a fresh snapshot — `dispatch spacetime seed` and
-        -- `dispatch spacetime dump` alike — opens its SQLite source through
-        -- `Database::open`, which runs v106 before a single row is read, so a
-        -- current binary can no longer hand this rule a snapshot it would
-        -- refuse. The operator's path for an old file is to restore it into
-        -- an ordinary SQLite board (which runs v106 on open) and take a
-        -- fresh dump before seeding or restoring it into the shared store.
+        -- written by a binary older than this migration, or a dump of a store
+        -- that still holds rows written before the module refused them
+        -- (spacetime-seed.allium: StoreRefusesUnknownStatus).
+        --
+        -- SINCE TASK #16755 THIS RULE NEVER RUNS IN PRODUCTION. No launch
+        -- opens a board database any more (storage.allium:
+        -- StoreInUseNeverOpensSqlite, CodeNeverTouchesLegacyDatabase), and
+        -- `dispatch spacetime seed` and
+        -- `dispatch spacetime dump`, which used to open their SQLite source
+        -- through `Database::open` and so run v106 first, are removed. v106
+        -- is kept as the record of what the removal did and for the tests
+        -- that open a SQLite fixture. An old snapshot file with archived rows
+        -- is refused as above, and there is no longer a supported route that
+        -- upgrades such a file first (the old one — restore it into a SQLite
+        -- board, which ran v106 on open, and dump that — went with the local
+        -- dump).
 }
 
 ------------------------------------------------------------

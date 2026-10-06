@@ -632,8 +632,8 @@ impl Snapshot {
         &self.extracts
     }
 
-    /// Mutable access for the seed's backfills, which amend the extracts
-    /// before a restore (`spacetime-seed.allium`: `BackfillTaskOwner`).
+    /// Mutable access, for tests that corrupt a snapshot on purpose.
+    #[cfg(test)]
     pub(crate) fn extracts_mut(&mut self) -> &mut [TableExtract] {
         &mut self.extracts
     }
@@ -751,8 +751,6 @@ pub enum RefusalReason {
     SchemaMismatch,
     /// The snapshot does not cover every shared table exactly once.
     Incomplete,
-    /// A seed was asked of a store that already holds tasks or epics.
-    StoreNotEmpty,
     /// A task or epic row still carries the retired `archived` status.
     ArchivedRowsPresent,
     /// An import found a task, epic or learning whose id the target already
@@ -786,7 +784,6 @@ impl std::fmt::Display for Refusal {
             RefusalReason::FormatUnsupported => "unsupported snapshot format",
             RefusalReason::SchemaMismatch => "schema mismatch",
             RefusalReason::Incomplete => "incomplete snapshot",
-            RefusalReason::StoreNotEmpty => "store not empty",
             RefusalReason::ArchivedRowsPresent => "archived rows present",
             RefusalReason::IdConflict => "id conflict",
         };

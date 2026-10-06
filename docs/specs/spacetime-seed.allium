@@ -6,17 +6,20 @@
 --        worth having, what restoring one is obliged to preserve, and the one
 --        obligation that is invisible until it bites — that a store which has
 --        had ids written into it does not know what ids it has handed out.
--- Includes: taking a snapshot; restoring one; the id-sequence burn that must
---           follow a restore; what makes a second restore of the same snapshot
---           a no-op; the one-time backfills that seeding performs; the
---           store's own refusal of a task or epic row with an unknown status.
+-- Includes: taking a snapshot of a store; restoring one; the id-sequence
+--           burn that must follow a restore; what makes a second restore of
+--           the same snapshot a no-op; importing an old store; the store's
+--           own refusal of a task or epic row with an unknown status.
+-- Retired: seeding a store from a board's local SQLite database, and dumping
+--          that database to a snapshot (`dispatch spacetime seed` and
+--          `dispatch spacetime dump`), removed with task #16755 — see
+--          "Seeding (removed)" below.
 -- Excludes: the shared schema itself and the shape of every row in it (see
 --           core.allium, which owns Task, Epic, Host, SavedRepoPath and the
 --           rest); which store is authoritative and why (see
 --           docs/superpowers/specs/2026-09-17-spacetimedb-migration-design.md);
 --           the subscription model, the user identity and the connect/reconnect
---           loop (see sync.allium and host.allium — a seed only borrows the
---           first connection, to learn whose rows these are); and transport — nothing here cares
+--           loop (see sync.allium and host.allium); and transport — nothing here cares
 --           whether a snapshot travels as JSON, as a file, or over a socket.
 --
 -- Why this exists as its own file, and exists FIRST. This is the escape hatch,
@@ -31,10 +34,13 @@
 --   outright. The way out is to dump, rebuild, and restore. Nothing else
 --   offers one.
 --
---   The seed. The shared store starts from one existing board, with its task
---   and epic ids carried over unchanged, so that every id already written into
---   a worktree name, a branch name, a plan path or a person's memory still
---   means what it meant.
+--   The move. Rows cross from one store to another — a restore onto a rebuilt
+--   store, or an import from an old one — with their task and epic ids carried
+--   over unchanged, so that every id already written into a worktree name, a
+--   branch name, a plan path or a person's memory still means what it meant.
+--   (This job was once "the seed": the shared store starting from one board's
+--   local database. Every board has been on the store since task #4916, and
+--   the seed was removed with task #16755.)
 --
 -- One artefact serves all three because the three want the same guarantees:
 -- everything, unaltered, and restorable onto a store that then behaves as if
@@ -67,9 +73,9 @@ use "./core.allium" as core
 -- stays off this list, permanently, is the identity credential
 -- (`IdentityCredentialStore`'s `user_identity_token`): it is the proof this
 -- install presents to authenticate, not a row the store could hold without
--- circularity, so it lives in a local file/`settings` row instead
--- (`docs/conventions.md`'s "Never routed"). Not an oversight; that split is
--- the table partition in the migration design.
+-- circularity, so it lives in the host file instead (host.allium:
+-- IdentityLivesInHostFile). Not an oversight; that split is the table
+-- partition in the migration design.
 --
 -- Three members are dead: `task_shells` (shell tracking, removed in #4965),
 -- `todos` (the TODO overlay, removed in #4970), and `filter_presets` (saved
@@ -77,8 +83,8 @@ use "./core.allium" as core
 -- table only while it is empty: a table holding any row refuses the publish
 -- ("table contains data"), and even an empty one disconnects every client
 -- (checked on SpacetimeDB 2.10.1 in task #4972). So all three stay in the
--- module, never written, and a dump of any from a local board is always
--- empty. They stay in this list because the store still holds them and
+-- module, never written, and a dump of any of them is always empty. They stay
+-- in this list because the store still holds them and
 -- "complete" means every table it holds.
 enum SharedTable {
     tasks
@@ -108,11 +114,13 @@ enum SharedTable {
 -- here. It never becomes a Snapshot, so no rule below can bind it, and giving
 -- it a reason code would describe a refusal this spec does not govern. It is
 -- an ordinary unreadable-input failure of whatever loads the file.
+--
+-- store_not_empty was the seed's own refusal (a seed into a store that
+-- already held tasks or epics) and went with the seed (task #16755).
 enum RefusalReason {
     format_unsupported    -- written by a version of the tool this one cannot read
     schema_mismatch       -- the rows describe a schema this store does not have
     incomplete            -- the snapshot does not cover every shared table, or an id ceiling is implausible (RefuseImplausibleCeiling)
-    store_not_empty       -- a seed was asked of a store that already holds tasks or epics
     archived_rows_present -- a task or epic row still carries the retired `archived` status
     id_conflict           -- an import found a task, epic or learning whose id is already taken by a DIFFERENT row (ImportOldStore)
 }
@@ -230,7 +238,7 @@ entity Snapshot {
 -- THIS ENTITY IS THE REASON THIS SPEC EXISTS. The shared store generates an id
 -- only when the caller supplies none, and a caller that supplies one is not
 -- asking for a generated id, so the counter does not move. That is a perfectly
--- reasonable rule and it is silently catastrophic for a seed: restoring ten
+-- reasonable rule and it is silently catastrophic for a restore: restoring ten
 -- thousand tasks with their original ids leaves the counter exactly where it
 -- started, and the very next task created gets id 1 — an id that a ten-year-old
 -- task already holds.
@@ -249,8 +257,8 @@ entity IdSequence {
     -- whatever route those rows arrived by.
     --
     -- Stated as a property of the store rather than as a step in the restore
-    -- procedure on purpose: it must hold after a restore, after a seed, after
-    -- a restore-on-top-of-a-restore, and in the ordinary case where no restore
+    -- procedure on purpose: it must hold after a restore, after an import,
+    -- after a restore-on-top-of-a-restore, and in the ordinary case where no restore
     -- has ever happened and it holds for free. An implementation that satisfies
     -- it by burning the counter and one that satisfies it some other way are
     -- both correct; one that reports success without satisfying it is not.
@@ -449,7 +457,7 @@ rule BurnIdSequences {
         -- pre-allocates ids in blocks, but a block is reserved storage, not a
         -- shortcut past generating each value, so it does not shorten this
         -- loop. What makes the cost acceptable is that it runs once, inside one
-        -- reducer, against an empty table, at seed or recovery time — never on
+        -- reducer, against an empty table, at recovery or import time — never on
         -- a path anybody waits on twice.
         --
         -- Gaps in the id space are expected and harmless: nothing in the domain
@@ -576,14 +584,16 @@ rule RefuseArchivedRows {
         -- `archived` retired with task #4971 (epics.allium:
         -- ArchivedStatusMigration): a live board can no longer produce a row
         -- carrying it, because the migration that removes the status also
-        -- rebuilds the CHECK constraints so nothing can write it back. Every
-        -- CURRENT path that produces a snapshot (`dispatch spacetime seed`
-        -- and `dispatch spacetime dump` alike) opens its SQLite source
-        -- through `Database::open`, which runs v106 before a single row is
-        -- read — so a current binary can no longer hand this rule a
-        -- snapshot it would refuse. The one way in is a snapshot FILE
-        -- written to disk by a binary older than v106, offered to
-        -- `RestoreSnapshot` long after that file was taken.
+        -- rebuilds the CHECK constraints so nothing can write it back. The
+        -- only path that still produces a snapshot is a dump of a store
+        -- (`dispatch spacetime dump-server`), and a store can hold such a row
+        -- only if it was written before StoreRefusesUnknownStatus — which is
+        -- exactly what this rule exists to catch. The other way in is a
+        -- snapshot FILE written to disk by a binary older than v106, offered
+        -- to `RestoreSnapshot` long after that file was taken. (Until task
+        -- #16755 `dispatch spacetime seed` and `dispatch spacetime dump`
+        -- produced snapshots from a board's SQLite file, after running v106
+        -- over it; both are gone.)
         --
         -- REFUSAL, NOT A SECOND MIGRATION. ArchivedStatusMigration's own
         -- guidance explains why a store-side re-implementation of its four
@@ -631,7 +641,8 @@ rule StoreRefusesUnknownStatus {
     @guidance
         -- WHAT "A WRITE" IS. Every reducer that writes a task or epic row:
         -- create_task, patch_task, create_epic, patch_epic, seed_tasks,
-        -- seed_epics and the feed upserts — any path, present or future, that
+        -- seed_epics (which restore and import write through, despite the
+        -- name) and the feed upserts — any path, present or future, that
         -- leaves a row in `tasks` or `epics`. The known statuses are exactly
         -- core/TaskStatus's four (backlog, running, review, done), which is
         -- the type both core/Task.status and core/Epic.status declare; the
@@ -657,7 +668,8 @@ rule StoreRefusesUnknownStatus {
         -- WHY THE MODULE AND NOT ONLY THE CLIENT. On 2026-10-05 the store
         -- held 1,785 tasks and 165 epics with status `archived`, which is
         -- what blocked deleting epic #100. Every client path already refused
-        -- them — RefuseArchivedRows on restore and seed, ImportOldStore's
+        -- them — RefuseArchivedRows on restore (and on the since-removed
+        -- seed), ImportOldStore's
         -- RowsWithARemovedStatusAreDropped — but the module accepted any
         -- string, so an older binary, an old snapshot fed through a raw
         -- reducer call, or anybody calling a reducer directly could write
@@ -712,143 +724,30 @@ rule RefuseImplausibleCeiling {
         -- RefuseArchivedRows was added beside it.
 }
 
--- == Seeding ==
+-- == Seeding (removed) ==
 
--- IMPLEMENTED in Phase 12a (task #4916) as `dispatch spacetime seed`, once the
--- store became mandatory and an existing board needed a way in. The operator
--- is this install's user identity: the command connects first — minting the
--- identity on a first connection, exactly as a board would — so the value the
--- backfills stamp is the one this person's board will subscribe by.
-rule SeedSharedStore {
-    when: SeedSharedStore(operator, snapshot)
-
-    requires: snapshot.format_version = config.snapshot_format_version
-    requires: store_holds_no_tasks_or_epics()
-
-    ensures:
-        BackfillTaskOwner(operator: operator, snapshot: snapshot)
-        BackfillCreatedBy(operator: operator, snapshot: snapshot)
-        RestoreSnapshot(operator: operator, snapshot: snapshot)
-
-    @guidance
-        -- Seeding is a restore into an empty store plus the backfills that only
-        -- a first seed can perform, and it is spelled as a separate trigger
-        -- rather than a flag so that the backfills cannot be reached by an
-        -- ordinary restore. A restore that re-attributed ownership would
-        -- quietly reassign a teammate's tasks to whoever ran the recovery.
-        --
-        -- THE BACKFILL RUNS FIRST, AND IT AMENDS THE SNAPSHOT RATHER THAN THE
-        -- STORE. The order here is load-bearing and was the other way round
-        -- until the store gained the field. core.allium's
-        -- OwnerTracksUserBoardTask is enforced on every write, so an epic-less
-        -- task with no owner is not a row the store will accept and then let a
-        -- later pass correct — it is a row the store refuses, which aborts the
-        -- restore before the backfill it was waiting for can run. There is no
-        -- ordering of "write, then fix" that works; the fix has to happen to
-        -- the rows on their way in.
-        --
-        -- This is the same shape as the burn, and for the same underlying
-        -- reason: the store's own invariants decide what may be written, so
-        -- anything that has to be true of a row must be true before the row is
-        -- offered, not arranged afterwards.
-        --
-        -- It happens once, from one board. Other boards are not merged in:
-        -- their local histories start at id 1 too, and merging two id spaces is
-        -- the problem this whole design avoids rather than solves. What that
-        -- costs is stated plainly in the design — the other boards' existing
-        -- tasks do not come across — and it was accepted rather than overlooked.
-}
-
-rule RefuseSeedingANonEmptyStore {
-    when: SeedSharedStore(operator, snapshot)
-
-    requires: not store_holds_no_tasks_or_epics()
-
-    ensures: RestoreRefused(operator: operator, refusal: Refusal{reason: store_not_empty, detail: refusal_detail(snapshot)})
-
-    @guidance
-        -- A seed ATTRIBUTES: every row it writes is stamped as the seeding
-        -- person's. Into a store that already holds a team's tasks, that would
-        -- hand the seeder rows that are not theirs — and, since a restore
-        -- matches on id, overwrite a teammate's task that happens to share an
-        -- id with one of the seeder's. "It happens once, from one board"
-        -- (SeedSharedStore) is enforced here rather than trusted. Checked
-        -- before anything else, so the refusal leaves the store untouched like
-        -- every other refusal in this file. An ordinary RestoreSnapshot has no
-        -- such check: it attributes nothing, and restoring over an existing
-        -- store is what recovery is.
-}
-
-rule BackfillTaskOwner {
-    when: BackfillTaskOwner(operator, snapshot)
-
-    requires: snapshot.extracts.any(e => e.table = tasks)
-
-    ensures:
-        for task in core/Tasks where epic = null:
-            task.owner = operator
-
-    @guidance
-        -- A task belongs to an epic or to a person's own board. Before this
-        -- migration there were no people, so an epic-less task belonged to
-        -- nobody in particular and the field did not exist. At seed time every
-        -- such task becomes a task on the seeding user's board, because that is
-        -- factually who it belonged to.
-        --
-        -- The other field a reader expects to see backfilled here — the machine
-        -- holding a task's worktree — is deliberately absent, because it is
-        -- already correct: it has been stamped at provisioning time since the
-        -- host identity landed, and inventing a value for it would overwrite a
-        -- true one with a guess.
-        --
-        -- IT AMENDS THE SNAPSHOT, NOT THE STORE. See SeedSharedStore's guidance
-        -- for why the order cannot be the other way round. The practical
-        -- consequence is worth stating on its own: a plain RestoreSnapshot of a
-        -- snapshot taken before this field existed is REFUSED outright, by
-        -- RefuseMismatchedSchema, because the tasks extract does not name the
-        -- column the store has. That is the wanted behaviour rather than a
-        -- regression — the alternative is a board on which some tasks belong to
-        -- nobody and no reader can tell which — but it does mean a pre-migration
-        -- snapshot is only restorable through SeedSharedStore, which supplies
-        -- the missing answer.
-        --
-        -- THE BACKFILL MUST ADD THE COLUMN TO THE EXTRACT, NOT ONLY TO THE
-        -- ROWS. RestoreSnapshot compares the extract's declared columns against
-        -- the store's, so a backfill that wrote the value into every task row
-        -- and left the column list alone would be refused by the very rule it
-        -- was run to satisfy — and refused for a snapshot that was, by then,
-        -- perfectly restorable.
-}
-
-rule BackfillCreatedBy {
-    when: BackfillCreatedBy(operator, snapshot)
-
-    ensures:
-        for task in core/Tasks:
-            task.created_by = operator
-    ensures:
-        for epic in core/Epics:
-            epic.created_by = operator
-
-    @guidance
-        -- Every row a single-board history holds was created on that board,
-        -- by the person seeding it — the same "factually who it belonged to"
-        -- argument BackfillTaskOwner makes, applied to every task and epic
-        -- rather than only the epic-less ones.
-        --
-        -- WITHOUT IT THE SEEDED BOARD LOSES ITS EPICS. core/Task.created_by and
-        -- core/Epic.created_by postdate this file's first draft, and they are
-        -- what sync.allium's own_creations subscribes by. A board asks for its
-        -- user board (owner), the epics it follows (Subscription rows — none,
-        -- on a board that never had an identity to follow as), and what it
-        -- created. With created_by left empty, every epic and every task in
-        -- one would be in the store and on nobody's board.
-        --
-        -- The module-only columns that carry no attribution — the dead shell
-        -- columns — are added to the extract with their sentinel, for the
-        -- reason BackfillTaskOwner's last paragraph gives: the extract must
-        -- name every column the store has, or the restore is refused.
-}
+-- REMOVED with task #16755: SeedSharedStore, RefuseSeedingANonEmptyStore,
+-- BackfillTaskOwner and BackfillCreatedBy, with `dispatch spacetime seed`
+-- that reached them, and `dispatch spacetime dump` (a snapshot of a board's
+-- own SQLite file) beside them.
+--
+-- What they did: seeding took a snapshot of ONE board's local database and
+-- restored it into an empty store, first stamping every epic-less task's
+-- owner and every task's and epic's created_by with the seeding person's
+-- identity — the backfills a database with no people in it needed before the
+-- store, whose rows all name a person, would accept them. It refused a store
+-- that already held a task or epic, because it attributed every row to the
+-- seeder.
+--
+-- Why they are gone rather than kept as an escape hatch: they read SQLite,
+-- and no production path does any more (storage.allium:
+-- StoreInUseNeverOpensSqlite). Every board has been on the store since task
+-- #4916, so there is no board left whose rows exist only in its local file —
+-- a leftover tasks.db is a stale copy of what the store already holds
+-- (storage.allium: CodeNeverTouchesLegacyDatabase), and seeding from it would
+-- resurrect old state, or be refused by a non-empty store. Moving rows between
+-- stores is dump-server, restore and ImportOldStore, which all work on
+-- stores.
 
 ------------------------------------------------------------
 -- Invariants
@@ -895,7 +794,7 @@ actor Operator {
 
 -- == Importing the old store ==
 
--- Why this is not a restore and not a seed. Since the managed local store
+-- Why this is not a restore. Since the managed local store
 -- (startup.allium: BringUpTheManagedStoreOnceTheHostIsNamed) a bare
 -- `dispatch tui` runs over its own data directory, and an operator whose board
 -- lived in a store they started by hand finds an empty board. Their rows are
@@ -905,12 +804,11 @@ actor Operator {
 --
 --   A restore overwrites by key: re-run after a week on the managed store and
 --   it erases the week.
---   A seed refuses any store that holds a task or epic, so it cannot be re-run
---   once the board has been used, and it re-attributes every row to the
---   seeder, whereas the old store's rows already name their owner.
---   Neither knows the retired `archived` status is to be dropped.
+--   A restore does not know the retired `archived` status is to be dropped.
+--   (The seed, removed with task #16755, was no better: it refused any store
+--   that held a task or epic, and re-attributed every row to the seeder.)
 --
--- ImportOldStore is the third thing: an ADD-ONLY copy. It is read-only on its
+-- ImportOldStore is the other thing: an ADD-ONLY copy. It is read-only on its
 -- source, never overwrites or deletes a row in its target, and can be run
 -- again and again.
 --
@@ -992,8 +890,8 @@ rule ImportOldStore {
         -- OWNERSHIP IS NOT RE-STAMPED. The old store's rows already carry
         -- `owner` and `created_by`, and the same install's identity signs for
         -- both stores, so they are written exactly as read. This is unlike
-        -- SeedSharedStore, which exists because a SQLite board had no people
-        -- in it. The one exception is OrphansLeaveTheirDroppedEpic, which has
+        -- the removed seed, which existed because a SQLite board had no
+        -- people in it. The one exception is OrphansLeaveTheirDroppedEpic, which has
         -- to give a task an owner.
         --
         -- THE ORDER IS THE RESTORE'S. Every refusal and the schema check come
@@ -1069,7 +967,6 @@ surface SnapshotCommandLine {
     provides:
         TakeSnapshot(operator)
         RestoreSnapshot(operator, snapshot)
-        SeedSharedStore(operator, snapshot)
         ImportOldStore(operator, source)
 
     @guarantee ImportNeverTouchesItsSource
@@ -1106,8 +1003,14 @@ surface SnapshotCommandLine {
 
     @guidance
         -- These are separate subcommands rather than one command with flags,
-        -- because the three differ in what they destroy, and a flag is easier
-        -- to mistype than a word.
+        -- because they differ in what they destroy, and a flag is easier to
+        -- mistype than a word.
+        --
+        -- TakeSnapshot is `dispatch spacetime dump-server` — a dump of a
+        -- store. There is no longer a dump of a board's own database
+        -- (`dispatch spacetime dump`) or a seed from one (`dispatch spacetime
+        -- seed`); both were removed with task #16755, and an invocation of
+        -- either is an unknown subcommand.
         --
         -- The dump side is the half that should be boring and frequent: it
         -- reads, it refuses nothing, and running it more often than necessary

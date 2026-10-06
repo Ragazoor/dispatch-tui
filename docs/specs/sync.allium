@@ -62,6 +62,11 @@
 -- a store: the one the operator gave, or the managed one. Everything below
 -- holds for every board, not only a configured one.
 --
+-- AND NO BOARD HAS A LOCAL DATABASE (task #16755). The board's old SQLite
+-- file is not opened by the board, by MCP or by any subcommand
+-- (storage.allium: StoreInUseNeverOpensSqlite), and nothing is migrated out
+-- of a leftover copy (storage.allium: CodeNeverTouchesLegacyDatabase).
+--
 -- THE ONE PLACE A BOARD IS REALLY WORSE OFF THAN BEFORE. A board reads only
 -- the store, and a store that goes down means a board with no cards on it. There is no fallback to the local copy and there must not be
 -- one: core.allium's shared tables have exactly one copy, and a board that
@@ -536,6 +541,40 @@ rule SubscribeOnceIdentityIsSettled {
         -- survived is a board that silently stops updating.
 }
 
+rule SubscribeToThisHostsSettings {
+    when: UserIdentitySettled(identity)
+
+    let connection = the_board_connection()
+
+    requires: connection.status = connected
+
+    ensures:
+        SettingsSubscriptionAsserted(
+            connection: connection,
+            host: core/local_host()
+        )
+
+    @guidance
+        -- THE FOURTH ASK, AND THE ONLY ONE SCOPED BY MACHINE. Beside the three
+        -- SubscribeOnceIdentityIsSettled makes by person, the board asks for
+        -- this host's own core/Setting rows and no other host's
+        -- (settings.allium: SettingsAreStoredPerHost). The host id is known
+        -- before any identity settles — it comes from the host file — but the
+        -- ask is asserted with the others so that one initial subscription,
+        -- applied once, delivers everything the board reads at startup
+        -- (FirstConnectionLetsTheBoardDraw), settings included.
+        --
+        -- It does not weaken SubscriptionsCoverOnlyTheOwnBoardAndItsEpics'
+        -- containment claim: what it names is this machine's own rows, so a
+        -- colleague's settings — their filters, their feed scripts' paths —
+        -- are never on this machine. Re-asserted on every connection, like
+        -- the rest.
+        --
+        -- The settings are read from these rows and from nowhere else; there
+        -- is no local copy to fall back to while the store is down, and a
+        -- disconnected board reads none (ADisconnectedBoardDrawsNoSharedRows).
+}
+
 rule ASubEpicOfAFollowedEpicIsAskedForToo {
     when: SubEpicDelivered(connection, epic)
 
@@ -972,8 +1011,9 @@ rule BoardWritesThroughTheStore {
         -- and retrievals, and usage telemetry. What stays local is this
         -- install's own identity: its Host row (id and label, mirrored to the
         -- shared registry by RegisterHostOnConnect) and the stored user
-        -- identity with the credential that proves it (host.allium). The line
-        -- is core.allium's, not this file's.
+        -- identity with the credential that proves it, all in the host file
+        -- (host.allium: IdentityLivesInHostFile). The line is core.allium's,
+        -- not this file's.
         --
         -- AND NOT ANYTHING THAT RUNS A PROCESS. Dispatching an agent,
         -- provisioning a worktree, releasing one, running a feed's command:

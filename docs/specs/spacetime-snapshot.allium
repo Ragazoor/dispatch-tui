@@ -2,14 +2,12 @@
 -- spacetime-snapshot.allium
 --
 -- Scope: The mechanics underneath spacetime-seed.allium's snapshot, restore
---        and import: where each table's rows come from when a snapshot is
---        taken, what the artefact's values look like so that two dumps of the
+--        and import: what the artefact's values look like so that two dumps of the
 --        same board agree whichever store produced them, how rows cross the
 --        boundary into and out of the shared store, and WHICH store each
 --        operator command reads from or writes to — the managed one, a named
 --        one, or the `spacetime` CLI's own default.
--- Includes: the per-table extract sources of a local (SQLite) dump; the
---           store-neutral value representation of a snapshot (canonical
+-- Includes: the store-neutral value representation of a snapshot (canonical
 --           booleans, absence as null, integers as integers, byte vectors as
 --           number arrays, rows in id order); the sentinel translation at the
 --           store boundary; the size bound on one write to the store and the
@@ -17,17 +15,22 @@
 --           and whether it brings the managed store up; where the managed
 --           store's data, module-hash record and log live; and that a board
 --           process stops its managed store at most once.
+-- Retired: the local (SQLite) dump and its per-table extract sources
+--          (DumpLocalBoard, ExtractSource, LocalTableSource and the rules that
+--          read each table), and the seed's store selection — removed with
+--          `dispatch spacetime dump` and `dispatch spacetime seed` in task
+--          #16755 (spacetime-seed.allium: "Seeding (removed)"). Every snapshot
+--          is now a dump of a store.
 -- Excludes: what a snapshot must contain, the restore's refusals, the
---           id-sequence burn, idempotent restore, seeding's backfills and the
---           import's add-only semantics (all spacetime-seed.allium — not
+--           id-sequence burn, idempotent restore and the import's add-only
+--           semantics (all spacetime-seed.allium — not
 --           restated here); the managed store's lifecycle on a board launch —
 --           select, adopt, start, publish, connect, stop on exit and on abort
 --           (startup.allium: ManagedStoreHost and the rules from
 --           AbortWhenTheManagedStoreHasNoCli to
 --           StopTheManagedStoreWhenStartupAborts, plus
 --           ImportBringsUpTheManagedStore); the subscription and first
---           connection (sync.allium); the local SQLite connection model a
---           local dump reads through (storage.allium); and the in-process
+--           connection (sync.allium); and the in-process
 --           reducer stand-in (spacetime-memory-store.allium), which is
 --           unrelated to the snapshot's own in-memory test store.
 --
@@ -35,8 +38,8 @@
 -- snapshot is FOR and what restoring one must preserve; it deliberately says
 -- nothing about transport or encoding. But two of its promises are only kept
 -- by decisions taken at exactly that level. "A dump of the same board is the
--- same file whichever store dumped it" is what lets a diff between a board
--- backup and a server backup be read at all, and it depends on value
+-- same file whichever store dumped it" is what lets a diff between two
+-- backups be read at all, and it depends on value
 -- representation. "Rows travel whole" depends on a store boundary that
 -- translates the store's sentinels back to absence rather than leaking them.
 -- And "which store does this command touch" is the question an operator in
@@ -49,17 +52,6 @@ use "./spacetime-seed.allium" as seed
 -- Enumerations
 ------------------------------------------------------------
 
--- Where a local dump reads one shared table's rows from. A TOTAL mapping over
--- seed/SharedTable: adding a shared table forces a choice here rather than
--- falling through a default, because a table the local dump silently skips
--- is a backup that silently omits it.
-enum ExtractSource {
-    sqlite_table     -- a local table of the same name, read as it is
-    | host_identity  -- assembled from this install's own machine identity (hosts)
-    | local_settings -- assembled from the local key/value settings, stamped with this host (settings)
-    | always_empty   -- nothing local holds it: poll_owners, and the dead task_shells, todos, filter_presets
-}
-
 -- The value a store-side column holds to mean "absent", for columns the store
 -- keeps non-optional although the domain treats them as absent-able.
 enum Sentinel {
@@ -71,20 +63,16 @@ enum Sentinel {
 -- the board itself for contrast.
 enum StoreCommand {
     board          -- `dispatch tui`
-    | dump_local   -- `dispatch spacetime dump`
     | dump_server  -- `dispatch spacetime dump-server`
     | restore      -- `dispatch spacetime restore`
-    | seed_store   -- `dispatch spacetime seed`
     | import_store -- `dispatch store import`
 }
 
 -- What a command ends up talking to.
 enum StoreTarget {
-    local_board_database -- the SQLite file named by --db; no store at all
-    | named_store        -- the store named by --spacetime-server or DISPATCH_SPACETIME_SERVER
+    named_store          -- the store named by --spacetime-server or DISPATCH_SPACETIME_SERVER
     | named_by_flag      -- the store named by the command's own --server flag
     | managed_store      -- the managed store, brought up for the command and stopped after it
-    | managed_address    -- the managed store's address, connected to as it is: nothing is started or stopped
     | cli_default_server -- whatever server the operator's `spacetime` CLI is configured for
 }
 
@@ -99,12 +87,6 @@ entity SentinelColumn {
 ------------------------------------------------------------
 -- Entities
 ------------------------------------------------------------
-
--- Where the local dump reads one shared table from.
-entity LocalTableSource {
-    table: seed/SharedTable
-    source: ExtractSource
-}
 
 -- Which store one invocation of a command resolved to.
 entity StoreSelection {
@@ -162,130 +144,6 @@ config {
 }
 
 ------------------------------------------------------------
--- Rules: where a local dump's rows come from
-------------------------------------------------------------
-
-rule DumpLocalBoard {
-    when: DumpLocalBoard(operator, board_database)
-
-    ensures:
-        for s in LocalTableSources:
-            ExtractTable(board_database: board_database, table: s.table, source: s.source)
-    ensures:
-        LocalSnapshotTaken(
-            snapshot: seed/Snapshot.created(
-                format_version: seed/config.snapshot_format_version,
-                taken_at: now,
-                extracts: extract_each_table_by_its_source(board_database)
-            )
-        )
-
-    @guidance
-        -- This is seed/TakeSnapshot for a local board, and it inherits that
-        -- rule's obligations unchanged: every table, one consistent read, rows
-        -- whole, columns recorded per table. The single read is one deferred
-        -- read transaction over every table. The board database is opened the
-        -- ordinary way first, so its migrations run before a row is read —
-        -- which is why a current binary cannot hand
-        -- seed/RefuseArchivedRows a snapshot it would refuse.
-        --
-        -- Each table is read according to its ExtractSource (the rules
-        -- below). The mapping is total and lives with the dump rather than
-        -- on the shared-table vocabulary itself, because "which tables does
-        -- SQLite have" is one source's concern and the vocabulary is shared
-        -- by the restore, the store boundary and the artefact.
-}
-
-rule ReadASqliteBackedTable {
-    when: ExtractTable(board_database, table, source)
-    requires: source = sqlite_table
-
-    ensures:
-        TableExtracted(table: table, columns: local_columns(table), rows: local_rows_in_id_order(table))
-
-    @guidance
-        -- tasks, epics, task_watchers, task_subagents, repo_paths,
-        -- repo_base_branches, subscriptions, learnings, learning_retrievals,
-        -- usage_events and retired_feed_items. The columns are the local
-        -- table's own, read from the result rather than declared, so a local
-        -- column the store lacks surfaces at restore as
-        -- seed/RefuseMismatchedSchema rather than being dropped here.
-        -- Ordered by id where the table has one, so a dump of an unchanged
-        -- board is byte-identical run to run. Values are converted per
-        -- SnapshotValuesAreStoreNeutral.
-}
-
-rule AssembleTheHostRegistryFromThisInstall {
-    when: ExtractTable(board_database, table, source)
-    requires: source = host_identity
-
-    ensures:
-        if this_install_host_id(board_database) = null:
-            TableExtracted(table: table, columns: host_columns(), rows: [])
-        else:
-            TableExtracted(table: table, columns: host_columns(), rows: [this_install_host_row(board_database)])
-
-    @guidance
-        -- A local board has no host table: this machine's id, label and the
-        -- user identity that owns it live as identity settings. The registry
-        -- is therefore ONE row, this install's, built from those values in the
-        -- store's column order. An install that never minted a host id has no
-        -- machine to register and gets an empty extract — never a fabricated
-        -- id, which would be a machine that does not exist with tasks pinned
-        -- to it. The empty extract still names its columns
-        -- (seed/EveryExtractNamesItsColumns).
-        --
-        -- Only THIS install's host crosses: a local board knows no other.
-        -- A teammate's host row reaches a store only from their own board.
-}
-
-rule AssembleSettingsFromThisInstall {
-    when: ExtractTable(board_database, table, source)
-    requires: source = local_settings
-
-    ensures:
-        if this_install_host_id(board_database) = null:
-            TableExtracted(table: table, columns: setting_columns(), rows: [])
-        else:
-            TableExtracted(
-                table: table,
-                columns: setting_columns(),
-                rows: local_settings_except_identity_keys(board_database)
-            )
-
-    @guidance
-        -- The local settings table has no host column — one file has only
-        -- ever held one machine's settings — so each row is stamped with this
-        -- install's host id, and its key in the store is "<host>/<key>",
-        -- spelled exactly as the store's own module spells it.
-        --
-        -- THE FOUR IDENTITY KEYS NEVER CROSS: the host id, the host label,
-        -- the user identity and the user identity credential. They share the
-        -- local table but are not settings (settings.allium's Excludes); the
-        -- first three reach the store as the hosts row above, and the
-        -- credential reaches it never (seed/SharedTable's note on the identity
-        -- credential). Excluded by key, because nothing else distinguishes
-        -- them.
-}
-
-rule EmitAnAlwaysEmptyTable {
-    when: ExtractTable(board_database, table, source)
-    requires: source = always_empty
-
-    ensures: TableExtracted(table: table, columns: declared_columns(table), rows: [])
-
-    @guidance
-        -- poll_owners has rows only once two hosts contend for a claim
-        -- through a shared store, which a standalone board never had.
-        -- task_shells, todos and filter_presets are dead tables the store
-        -- still holds (seed/SharedTable). Neither kind has a local source,
-        -- so the extract is empty by construction — but still present and
-        -- still naming its columns, which come from a declared list kept in
-        -- step with the store's schema by test, not inferred from rows that
-        -- do not exist.
-}
-
-------------------------------------------------------------
 -- Rules: the store boundary
 ------------------------------------------------------------
 
@@ -325,8 +183,8 @@ rule WriteRowsToTheStore {
             RowWritten(table: table, row: with_sentinels_for_absence(table, row))
 
     @guidance
-        -- The write half of the boundary, used by seed/RestoreSnapshot,
-        -- seed/SeedSharedStore and seed/ImportOldStore alike. Absence in the
+        -- The write half of the boundary, used by seed/RestoreSnapshot and
+        -- seed/ImportOldStore alike. Absence in the
         -- snapshot becomes the column's sentinel; a value the store's schema
         -- marks optional is wrapped as present. Which columns are optional is
         -- asked of the store's published schema, not hard-coded: wrapping a
@@ -378,17 +236,6 @@ rule RefuseAColumnTheStoreDoesNotHave {
 -- Rules: which store each command targets
 ------------------------------------------------------------
 
-rule DumpLocalReadsOnlyTheBoardDatabase {
-    when: SelectStore(selection)
-    requires: selection.command = dump_local
-
-    ensures: selection.target = local_board_database
-
-    @guidance
-        -- `dispatch spacetime dump` reads the SQLite file --db names and
-        -- touches no store, managed or named.
-}
-
 rule DumpServerAndRestoreUseTheirOwnServerFlag {
     when: SelectStore(selection)
     requires: selection.command = dump_server or selection.command = restore
@@ -410,26 +257,6 @@ rule DumpServerAndRestoreUseTheirOwnServerFlag {
         -- or --server points at. See the open question.
 }
 
-rule SeedTargetsTheNamedStoreOrTheManagedAddress {
-    when: SelectStore(selection)
-    requires: selection.command = seed_store
-
-    ensures:
-        if selection.named_store != null:
-            selection.target = named_store
-        else:
-            selection.target = managed_address
-
-    @guidance
-        -- `dispatch spacetime seed` connects first, as a board would, to
-        -- mint or read this install's user identity (seed/SeedSharedStore),
-        -- and then writes to the same server. With no store named that is the
-        -- managed store's address — but the managed store is NOT brought up
-        -- for it, unlike an import (startup.allium:
-        -- ImportBringsUpTheManagedStore). It succeeds only when a managed
-        -- store is already serving there. See the open question.
-}
-
 rule ImportTargetsTheNamedStoreOrBringsUpTheManagedOne {
     when: SelectStore(selection)
     requires: selection.command = import_store
@@ -441,7 +268,7 @@ rule ImportTargetsTheNamedStoreOrBringsUpTheManagedOne {
             selection.target = managed_store
 
     @guidance
-        -- Stated here only so that the six commands can be read side by side;
+        -- Stated here only so that the commands can be read side by side;
         -- the behaviour is startup.allium's ImportBringsUpTheManagedStore. A
         -- missing `spacetime` CLI is refused before anything is started, with
         -- an install hint, as for a board launch.
@@ -475,6 +302,9 @@ rule ManagedStoreDataIgnoresTheBoardDatabase {
     ensures: location.log_file = directory_of(board_database) + "/" + config.managed_store_log_name
 
     @guidance
+        -- `board_database` is the path --db names; only its directory is
+        -- used (storage.allium: DataDirectory) — no database is opened.
+        --
         -- THE DATA FOLLOWS THE MACHINE, THE LOG FOLLOWS THE LAUNCH. A
         -- throwaway --db (a worktree build, a scratch run) must not start a
         -- second managed store over an empty data directory, nor lose sight of
@@ -531,25 +361,16 @@ invariant SortOrderHasNoSentinel {
         c.column != "sort_order"
 }
 
--- The local dump's source mapping covers every shared table, once.
-invariant EveryTableHasOneLocalSource {
-    for t in seed/SharedTables:
-        LocalTableSources.count(s => s.table = t) = 1
-}
-
 -- SnapshotValuesAreStoreNeutral: a snapshot's values do not depend on which
--- store produced it. A boolean is true/false, never 0/1 (the local store has
--- no boolean class, and the list of boolean columns is declared because the
--- local column types are not a reliable guide). An integer stays an integer —
+-- store produced it. A boolean is true/false, never 0/1. An integer stays an integer —
 -- an id that round-trips as 4096.0 compares unequal to 4096 while looking
 -- right in a diff. A byte vector is an array of byte values, the shape the
 -- store's own query output uses. Absence is null, never a sentinel. Rows are
 -- in id order and the file is pretty-printed, so two backups diff line by
 -- line. A value with no faithful representation — a non-finite float, a
 -- boolean column holding anything but 0, 1 or null — is refused, never
--- written under a different name. Consequence: a dump of the same board from
--- its SQLite and from a store it was restored into is the same file, modulo
--- taken_at. Not expressible as a state assertion: it relates the outputs of
+-- written under a different name. Consequence: a dump of a store and a dump
+-- of another store it was restored into are the same file, modulo taken_at. Not expressible as a state assertion: it relates the outputs of
 -- two different readers.
 
 -- SentinelsNeverReachTheSnapshot: a SentinelColumn's sentinel exists only
@@ -577,9 +398,8 @@ invariant EveryTableHasOneLocalSource {
 -- the board and an import with no store named ever start or adopt the managed
 -- store, and both stop it on every exit they can run (startup.allium:
 -- TheManagedStoreStopsWithItsBoard, ImportBringsUpTheManagedStore). A command
--- that only connects to the managed address (seed) or that reaches the CLI's
--- default server (dump-server, restore) never starts, publishes to or stops
--- anything, so it can never leave a store behind.
+-- that reaches the CLI's default server (dump-server, restore) never starts,
+-- publishes to or stops anything, so it can never leave a store behind.
 
 ------------------------------------------------------------
 -- Surfaces
@@ -593,28 +413,23 @@ surface SnapshotTargets {
             selection.command
             selection.target
             selection.brings_up_managed_store
-        for s in LocalTableSources:
-            s.table
-            s.source
         for location in ManagedStoreLocations:
             location.data_dir
             location.module_hash_record
             location.log_file
 
     provides:
-        DumpLocalBoard(operator, board_database)
         DumpStore(operator, server, database)
         SelectStore(selection)
 
     @guarantee EveryCommandSaysWhichStoreItTouched
         -- Each command reports the server it wrote to or read from: a
-        -- restore its row and table counts, a seed the identity it stamped,
-        -- an import its per-table imported / already-there / dropped counts.
+        -- restore its row and table counts, an import its per-table imported / already-there / dropped counts.
         -- During an incident "which store did that just change" must not
         -- need to be inferred from flags and environment.
 
     @guidance
-        -- The restore, seed and import commands are spacetime-seed.allium's
+        -- The restore and import commands are spacetime-seed.allium's
         -- SnapshotCommandLine; this surface adds only the store each resolves
         -- to. There is still deliberately no MCP twin for any of them.
 }
@@ -623,12 +438,8 @@ surface SnapshotTargets {
 -- Open Questions
 ------------------------------------------------------------
 
-open question "A dump of a STORE (`dispatch spacetime dump-server`, and the import's read of its source) reads each shared table with a separate query, so a write landing between two reads can produce a snapshot holding a watch whose task is absent. spacetime-seed.allium's TakeSnapshot requires one consistent read ('reads one moment, not ten'), which the local dump honours with one read transaction. Is the store dump an accepted exception (a store dump is usually taken from a quiet store), or must it read one moment — and if so, through what, since the CLI offers no multi-statement snapshot read?"
+open question "A dump of a STORE (`dispatch spacetime dump-server`, and the import's read of its source) reads each shared table with a separate query, so a write landing between two reads can produce a snapshot holding a watch whose task is absent. spacetime-seed.allium's TakeSnapshot requires one consistent read ('reads one moment, not ten'). Is the store dump an accepted exception (a store dump is usually taken from a quiet store), or must it read one moment — and if so, through what, since the CLI offers no multi-statement snapshot read?"
 
-open question "`dispatch spacetime restore` and `dump-server` default to the `spacetime` CLI's own configured server and ignore --spacetime-server / DISPATCH_SPACETIME_SERVER, while `seed` and `store import` honour them and fall back to the managed store. Is that split intended (restore and dump-server are pointed at a server deliberately, every time), or should all four resolve the store the same way — and should restore into the managed store bring it up as import does?"
-
-open question "`dispatch spacetime seed` with no store named connects to the managed store's address but does not bring the managed store up, so it fails unless a board (or a hand-started store) is already serving there; `dispatch store import` in the same situation adopts or starts it, publishes the module and stops it after. Should seed bring the managed store up the same way?"
+open question "`dispatch spacetime restore` and `dump-server` default to the `spacetime` CLI's own configured server and ignore --spacetime-server / DISPATCH_SPACETIME_SERVER, while `store import` honours them and falls back to the managed store. Is that split intended (restore and dump-server are pointed at a server deliberately, every time), or should all three resolve the store the same way — and should restore into the managed store bring it up as import does?"
 
 open question "A row too large for one store write is discovered while writing — after the id sequences have been burned and earlier tables written — so it fails a restore partway rather than refusing it up front, which is the shape seed/NothingIsWrittenBeforeTheChecksPass exists to rule out. The restore is resumable, but re-running it fails on the same row. Should the size check join the up-front refusals?"
-
-open question "The local dump decodes text that is not valid UTF-8 lossily rather than refusing it, on the grounds that a dump which aborts is a backup that cannot be taken. That contradicts spacetime-seed.allium's 'rows travel whole' (no field altered on the way out). Is lossy decoding the accepted exception, or should such a row be refused like a non-finite float?"

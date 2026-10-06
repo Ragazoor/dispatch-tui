@@ -58,8 +58,8 @@ use "./core.allium" as core
 -- Each MCP tool call from a dispatched-agent caller becomes one
 -- TrajectoryEntry, serialised as a single JSON object on its own line.
 -- Entries for a given task accumulate in a single per-task file named
--- by the task's integer ID. The centralized data dir (parent of the
--- SQLite database) holds all trajectory files so they outlive worktree
+-- by the task's integer ID. The centralized data dir (storage.allium:
+-- DataDirectory — the parent of the --db path) holds all trajectory files so they outlive worktree
 -- cleanup and remain queryable in a single location.
 --
 -- args and result are stored as opaque JSON strings to keep this spec free
@@ -198,8 +198,9 @@ rule TrajectoryAppend {
     )
 
     @guidance
-        -- dispatch_data_dir is the parent directory of the SQLite database
-        -- (e.g. ~/.local/share/dispatch/). It is not task-specific.
+        -- dispatch_data_dir is the data directory (storage.allium:
+        -- DataDirectory): the parent of the --db path, e.g.
+        -- ~/.local/share/dispatch/. It is not task-specific.
         -- append_jsonl opens the file in append mode (O_APPEND | O_CREAT),
         -- writes one JSON-encoded TrajectoryEntry followed by "\n", flushes,
         -- and closes the file. The flush is required, not incidental: the
@@ -443,6 +444,9 @@ rule FeatureUsageLogStaysBounded {
 -- == Slow DB call latency warning ==
 
 rule DbCallSlowWarning {
+    -- Since task #16755 only test fixtures make such calls (storage.allium: StoreInUseNeverOpensSqlite); the rule
+    -- still holds for them.
+    --
     -- When an async call to the SQLite database completes, its wall-clock
     -- elapsed time is measured from just before the call is issued to when it
     -- resolves — which includes any time the call spent queued behind other
