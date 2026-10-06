@@ -143,7 +143,7 @@ rm src/dispatch/snapshots/*.snap.new                 # always clean up
 | A `Task` fixture | `TaskBuilder` (`src/models/task_builder.rs`, gated like `test_tmux_window`) — don't hand-roll another `Task { .. }` literal |
 | Domain-type invariants | inline in the owning module |
 | Agent prompt rendering (all variants) | `src/dispatch/prompts_snapshots.rs` |
-| Agent-facing skill copy (`plugin/skills/*/SKILL.md`) | `mod tests` in `src/setup/plugins.rs` (via `skill_body`) |
+| Agent-facing skill copy (`plugin/skills/*/SKILL.md`) | `src/setup/plugins/tests.rs` (via `skill_body`) |
 | tmux semantics — which pane, which cwd, how many panes, which window a name resolves to | `tests/tmux_lifecycle.rs` (topology/cwd) / `tests/tmux_split_hook.rs` (split-pane cwd and keystroke absence) / `tests/tmux_window_targets.rs` (exact window-name resolution under prefix collisions) / `tests/tmux_diff_pane.rs` (agent-tree diff pane geometry, and which panes the toggle kills), shared rig in `tests/tmux_harness/mod.rs` |
 | tmux argv shape — that we sent the right command string | `MockProcessRunner` tests inline in `src/tmux.rs` |
 | Anything that drives a dispatch/resume/provision/finish through a mock | wherever the behaviour lives, but script the runner with `DispatchScript` (`src/dispatch/mock_sequence.rs`) — never a hand-written `vec![ok(), ok(), …]`. `DispatchScript::finish()` covers the `finish_task` rebase path, including anything that reaches it through `wrap_up` |

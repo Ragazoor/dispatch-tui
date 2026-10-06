@@ -9,7 +9,7 @@
 //! clause", which is exactly the drift these tests exist to catch.
 //!
 //! Content assertions on the shipped skills' *bodies* stay in
-//! `src/setup/plugins.rs`, where they can read the embedded copy.
+//! `src/setup/plugins/tests.rs`, where they can read the embedded copy.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
@@ -172,7 +172,7 @@ fn allium_weed_loop_prompt_does_not_enumerate_a_stale_subset_of_the_specs() {
 //
 // The generic rules above say every description has a name and a trigger.
 // These pin facts specific to one skill, where a wrong or missing sentence has
-// a named consequence. They live here rather than in `src/setup/plugins.rs`
+// a named consequence. They live here rather than in `src/setup/plugins/tests.rs`
 // because they read frontmatter, and the parser lives here.
 
 fn description_of(root: &str, skill: &str) -> String {
