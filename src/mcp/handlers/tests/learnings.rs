@@ -945,20 +945,13 @@ async fn query_learnings_soft_tag_boost_does_not_hard_filter() {
 
 // --- tool description --------------------------------------------------------
 
-/// `record_learning`'s validator is deliberately narrow: it rejects only the
-/// shapes prose never produces, because no regex separates an internal symbol
-/// from a product name. Everything else in the rule — don't name the code, the
-/// machine-check triage, the boundary on a procedural entry — lives in prose,
-/// in two places: `plugin/skills/learnings/SKILL.md` and this description.
-///
-/// The skill copy is pinned by tests in `src/setup/plugins.rs`. This pins the
-/// other half. The description is the only surface guaranteed to be in front
-/// of an agent at the moment it calls the tool — an agent can reach
-/// `record_learning` without the `/learnings` skill loaded — and it is long
-/// enough to be a standing target for a trim. See docs/specs/learnings.allium:
-/// RecordLearningViaMcp.
+/// learnings.allium: TheAuthoringRulesHaveOneHome. Every authoring rule lives
+/// in `plugin/skills/learnings/SKILL.md` alone (pinned by tests in
+/// `src/setup/plugins.rs`); the description points there and carries no second
+/// copy. A caller without the skill meets the two validated rules in the
+/// rejection, which says which rule the summary or detail broke.
 #[tokio::test]
-async fn record_learning_tool_description_carries_the_rule_the_validator_cannot() {
+async fn record_learning_tool_description_defers_every_authoring_rule_to_the_skill() {
     let state = test_state().await;
     let resp = call(&state, "tools/list", None).await;
     let tools = resp.result.unwrap()["tools"].as_array().unwrap().clone();
@@ -970,28 +963,20 @@ async fn record_learning_tool_description_carries_the_rule_the_validator_cannot(
         .unwrap()
         .to_string();
 
-    for (needle, why) in [
-        (
-            "must not name the function",
-            "the don't-name-the-code rule, which the validator only partly enforces",
-        ),
-        (
-            "failing check",
-            "the machine-check triage that routes lintable findings away from prose",
-        ),
-        (
-            "lint rule",
-            "the triage's yes-branch, without which the question has no answer",
-        ),
-        (
-            "when to stop",
-            "the boundary a procedural entry's detail must state",
-        ),
+    assert!(
+        description.contains("/learnings"),
+        "record_learning's description must point at the /learnings skill: {description}"
+    );
+    for needle in [
+        "must not name the function",
+        "failing check",
+        "lint rule",
+        "when to stop",
     ] {
         assert!(
-            description.contains(needle),
-            "record_learning's description must carry {why} — expected {needle:?} in: \
-             {description}"
+            !description.contains(needle),
+            "record_learning's description must not carry the authoring rule {needle:?} — \
+             the /learnings skill is its one home: {description}"
         );
     }
 }

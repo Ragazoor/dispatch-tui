@@ -210,8 +210,40 @@ fn epic_section_names_no_mcp_tool() {
     }
 }
 
+/// `TheResearchPromptGivesItsReasonNotARule`: the research addendum says, in
+/// one sentence of reasoning, why the agent stops where it does — it presents
+/// its findings interactively, and code changes and wrap-up are the user's call
+/// once they have read them. That sentence is the whole constraint (research
+/// launches with no permission mode), so it keeps both halves.
 #[test]
-fn research_prompt_names_forbidden_wrap_up_tool() {
+fn research_prompt_gives_one_reason_covering_code_changes_and_wrap_up() {
+    let text = build_research_prompt(
+        TaskId(7),
+        "Research async runtimes",
+        "Compare tokio vs async-std",
+        None,
+        &PromptContext::default(),
+    );
+    let reason = text
+        .split_terminator(['.', '\n'])
+        .map(str::to_lowercase)
+        .find(|s| s.contains("code") && s.contains("wrap") && s.contains("user"))
+        .unwrap_or_else(|| {
+            panic!(
+                "one sentence must say that both code changes and wrap-up are the \
+user's call, got: {text}"
+            )
+        });
+    assert!(
+        reason.contains("change"),
+        "the reason must cover code changes, got: {reason:?}"
+    );
+}
+
+/// The same guarantee's other half: no capitalised prohibitions. An agent
+/// given a bare rule follows the letter and loses the reason.
+#[test]
+fn research_prompt_carries_no_capitalised_prohibition() {
     let text = build_research_prompt(
         TaskId(7),
         "Research async runtimes",
@@ -220,8 +252,8 @@ fn research_prompt_names_forbidden_wrap_up_tool() {
         &PromptContext::default(),
     );
     assert!(
-        text.contains("/wrap-up"),
-        "research prompt should explicitly forbid /wrap-up by name, got: {text}"
+        !text.contains("NOT"),
+        "the research prompt must give its reason, not a capitalised rule, got: {text}"
     );
 }
 
@@ -313,93 +345,120 @@ fn spec_first_instruction_frames_the_spec_as_an_intermediate_step() {
 doesn't finish the task, got: {text}"
     );
     assert!(
-        text.contains("implement it"),
-        "spec_first_instruction should instruct the agent to implement \
-after agreeing the spec, got: {text}"
+        text.contains("implement") && text.contains("same session"),
+        "spec_first_instruction should say implementation follows in the \
+same session, got: {text}"
     );
 }
 
-/// The whole point of task #4366: the design step is an Allium spec built
-/// by interview, not a prose design doc produced by /brainstorming.
+/// `TheDesignStepNamesSkillsNotProcedure`: the design step is ONE sentence
+/// naming allium:elicit, allium:tend, allium:propagate, the implementation and
+/// allium:weed, in that order. The skills carry their own process; a prompt
+/// that restates it can only drift from them.
 #[test]
-fn spec_first_instruction_names_the_elicit_spec_test_implement_sequence() {
+fn spec_first_instruction_names_the_skills_in_order_in_one_sentence() {
     let text = spec_first_instruction();
-    for token in [
+    const SKILLS: [&str; 4] = [
         "allium:elicit",
-        "docs/specs/",
+        "allium:tend",
         "allium:propagate",
         "allium:weed",
-    ] {
+    ];
+    let sentence = text
+        .split_terminator(['.', '\n'])
+        .find(|s| s.contains("allium:elicit"))
+        .unwrap_or_else(|| panic!("spec_first_instruction must name allium:elicit, got: {text}"));
+    for skill in SKILLS {
         assert!(
-            text.contains(token),
-            "spec_first_instruction should name {token}, got: {text}"
+            sentence.contains(skill),
+            "the sentence naming allium:elicit must also name {skill} — one sentence \
+names every skill, got: {sentence:?} in {text}"
         );
     }
+    let idx = |needle: &str| sentence.find(needle).expect("named above");
+    assert!(
+        idx("allium:elicit") < idx("allium:tend")
+            && idx("allium:tend") < idx("allium:propagate")
+            && idx("allium:propagate") < idx("allium:weed"),
+        "the skills must be named in order elicit, tend, propagate, weed, got: {sentence:?}"
+    );
+    // Test-first is stated by the order: propagate derives the tests before
+    // the implementation, and weed follows it.
+    let implement = sentence[idx("allium:propagate")..]
+        .find("implement")
+        .map(|i| i + idx("allium:propagate"))
+        .unwrap_or_else(|| {
+            panic!("the implementation must sit between propagate and weed, got: {sentence:?}")
+        });
+    assert!(
+        implement < idx("allium:weed"),
+        "the implementation must come after propagate and before weed, got: {sentence:?}"
+    );
     assert!(
         !text.contains("/brainstorming"),
         "spec_first_instruction must not name the retired /brainstorming skill, got: {text}"
     );
-    // The sequence is ordered: elicit before the spec, spec before tests,
-    // tests before the alignment check.
-    let idx = |needle: &str| text.find(needle).expect("token present");
+}
+
+/// It is not a numbered procedure: the five-step list paraphrased each skill
+/// it named.
+#[test]
+fn spec_first_instruction_is_not_a_numbered_procedure() {
+    let text = spec_first_instruction();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let numbered = trimmed
+            .split_once(". ")
+            .is_some_and(|(head, _)| !head.is_empty() && head.chars().all(|c| c.is_ascii_digit()));
+        assert!(
+            !numbered,
+            "spec_first_instruction must not be a numbered list, found {line:?} in: {text}"
+        );
+    }
+}
+
+/// It does not tell the agent to interview the user: who is there to ask
+/// differs by launch, and an unattended dispatch may have nobody watching.
+/// Whether elicit asks anyone is the skill's judgement.
+#[test]
+fn spec_first_instruction_does_not_mandate_interviewing_the_user() {
+    let text = spec_first_instruction().to_lowercase();
     assert!(
-        idx("allium:elicit") < idx("docs/specs/"),
-        "interview comes before the spec, got: {text}"
-    );
-    assert!(
-        idx("docs/specs/") < idx("allium:propagate"),
-        "the spec comes before the tests it generates, got: {text}"
-    );
-    assert!(
-        idx("allium:propagate") < idx("allium:weed"),
-        "tests come before the alignment check, got: {text}"
+        !text.contains("interview"),
+        "spec_first_instruction must not tell the agent to interview the user, got: {text}"
     );
 }
 
-/// The sequence names each skill and stops — the same rule
-/// `brainstorm_instruction` follows, applied to the branch it was not
-/// written for. `allium:elicit`'s SKILL.md heads a section "Ask one
-/// question at a time", so restating it here is a paraphrase of the skill
-/// the step loads, and can only drift from it.
+/// `/allium-loop` is no longer named as an alternative way to run the
+/// propagate/implement/weed steps — its own description says when to reach
+/// for it, and naming it here was a second trigger for one skill.
 #[test]
-fn spec_first_instruction_does_not_paraphrase_the_skills_it_names() {
+fn spec_first_instruction_does_not_name_allium_loop() {
     let text = spec_first_instruction();
     assert!(
-        !text.contains("One question at a time"),
-        "step 1 must not restate allium:elicit's own interview rule, got: {text}"
-    );
-    // The skill is still named — dropping the paraphrase must not drop the
-    // step that loads it.
-    assert!(
-        text.contains("allium:elicit"),
-        "step 1 must still name the skill, got: {text}"
+        !text.contains("allium-loop"),
+        "spec_first_instruction must not name /allium-loop, got: {text}"
     );
 }
 
-/// Both escape hatches are the agent's judgement call. A prompt that reads
-/// as *requiring* a plan doc is the behaviour this task removed.
+/// The two clauses both design steps share survive the rewrite: the plan doc
+/// is the agent's judgement call, attached via update_task, and only when it
+/// is worth it.
 #[test]
-fn spec_first_instruction_makes_the_plan_doc_and_allium_loop_optional() {
+fn spec_first_instruction_keeps_the_plan_doc_a_judgement_call() {
     let text = spec_first_instruction();
     assert!(
-        text.contains("judgement call") || text.contains("not requirements"),
-        "spec_first_instruction should mark the optional steps as the agent's \
-call, got: {text}"
+        text.contains("judgement call") || text.contains("not a requirement"),
+        "spec_first_instruction should mark the plan doc as the agent's call, got: {text}"
     );
-    // A plan is still described well enough to write one when it helps.
     assert!(
         text.contains("docs/plans/") && text.contains("update_task"),
         "spec_first_instruction should still say where an optional plan goes \
 and how to attach it, got: {text}"
     );
     assert!(
-        text.contains("only if"),
-        "the plan clause should be conditional, not an instruction, got: {text}"
-    );
-    assert!(
-        text.contains("/allium-loop"),
-        "spec_first_instruction should offer /allium-loop for a large or \
-stubborn convergence, got: {text}"
+        text.contains("work packages"),
+        "the epic-decomposition carve-out must survive, got: {text}"
     );
 }
 
@@ -912,12 +971,6 @@ fn research_prompt_content() {
         text.contains("present") || text.contains("findings"),
         "research prompt should instruct presenting findings"
     );
-    assert!(
-        text.contains("Do NOT make code changes")
-            || text.contains("do not make code changes")
-            || text.contains("no code changes"),
-        "research prompt should prohibit code changes"
-    );
 }
 
 fn seed(id: i64, scope: LearningScope, count: i64) -> Learning {
@@ -1293,12 +1346,7 @@ fn a_dependabot_prompt_carries_only_the_branch_its_bump_takes() {
             label: "minor",
             title: "#29 Bump requests from 2.32.4 to 2.33.0 in /venvs/basic",
             body: "",
-            present: &[
-                "Bump: minor — requests",
-                "CHANGELOG",
-                "BREAKING",
-                "gh pr merge",
-            ],
+            present: &["Bump: minor — requests", "changelog", "gh pr merge"],
             absent: &["gh pr comment", "cannot be routed"],
         },
         Route {
@@ -1531,10 +1579,11 @@ fn every_dependabot_route_keeps_the_shared_steps_and_the_ask_terminal() {
 }
 
 /// `TheAppsVerdictGatesTheMerge`: the verdict check opens the merge
-/// terminal, so it appears on exactly the routes that can merge, and the
-/// ask terminal asks for the verdict on every route.
+/// terminal, so it appears on exactly the routes that can merge. The ask
+/// terminal no longer carries the app's verdict on every route — it is one
+/// direct question, and names the app only where the app is the reason.
 #[test]
-fn the_apps_verdict_gates_the_merge_and_is_reported_on_every_ask() {
+fn the_apps_verdict_gates_the_merge() {
     const APP: &str = "kognic-github-app";
     for (title, merges) in [
         ("Bump foo from 1.0.0 to 1.0.1", true),
@@ -1543,19 +1592,10 @@ fn the_apps_verdict_gates_the_merge_and_is_reported_on_every_ask() {
         ("fix(deps): update python (non-major)", false),
         ("chore: something else", false),
     ] {
-        let ctx = PromptContext {
-            tag: Some(TaskTag::Dependabot),
-            ..PromptContext::default()
+        let text = dependabot_prompt(title);
+        let Some((merge, _ask)) = text.split_once("ASK THE USER:") else {
+            panic!("{title:?}: no ask terminal, got: {text}");
         };
-        let text = build_prompt(TaskId(42), title, "", None, None, &ctx);
-        let (merge, ask) = match text.split_once("ASK THE USER:") {
-            Some((before, after)) => (before, after),
-            None => panic!("{title:?}: no ask terminal, got: {text}"),
-        };
-        assert!(
-            ask.contains(APP),
-            "{title:?}: the ask terminal must state the app's verdict, got: {ask}"
-        );
         let gated = merge
             .split_once("AUTO-APPROVE + MERGE:")
             .is_some_and(|(_, terminal)| {
@@ -1569,92 +1609,148 @@ fn the_apps_verdict_gates_the_merge_and_is_reported_on_every_ask() {
     }
 }
 
-/// Everything `TheDepOnlyAllowlistAdmitsOnlyDeclarativeDependencyFiles`
-/// claims is a claim about ONE rendered line, so the assertions below read
-/// that line rather than the whole prompt — a path that appears anywhere
-/// else in the runbook must not pass for an allowlist entry.
-///
-/// One render serves all three claims because the line is static markdown:
-/// no branch and no bump kind varies it, so a second render under a
-/// different title would assert the same bytes while implying the title
-/// decides which paths are admitted.
-#[test]
-fn the_dep_only_allowlist_admits_declarative_dependency_files_and_nothing_executable() {
-    const PREFIX: &str = "Every changed file path must match one of:";
+/// Every bump kind the runbook can render, by title.
+const DEPENDABOT_ROUTES: [&str; 5] = [
+    "Bump foo from 1.0.0 to 1.0.1",
+    "Bump foo from 1.0.0 to 1.1.0",
+    "fix(deps): update dependency foo to v9",
+    "fix(deps): update python (non-major)",
+    "chore: something else",
+];
+
+fn dependabot_prompt(title: &str) -> String {
     let ctx = PromptContext {
         tag: Some(TaskTag::Dependabot),
         ..PromptContext::default()
     };
-    let text = build_prompt(
-        TaskId(42),
-        "Bump serde from 1.0.0 to 1.0.1",
-        "",
-        None,
-        None,
-        &ctx,
-    );
-    let line = text
-        .lines()
-        .find(|line| line.contains(PREFIX))
-        .unwrap_or_else(|| panic!("no dep-only allowlist line, got: {text}"));
+    build_prompt(TaskId(42), title, "", None, None, &ctx)
+}
 
-    // Gradle. A Renovate PR touching only the version catalog is a
-    // dependency bump and nothing else, so it must clear the guard rather
-    // than escalate. Both files are declarative, which is what earns them
-    // the place.
-    for needle in ["gradle/libs.versions.toml", "gradle.properties"] {
-        assert!(
-            line.contains(needle),
-            "the allowlist must admit {needle:?}, got: {line}"
-        );
+/// `TheRunbookStatesThePolicyNotItsMechanics`: the dep-only check is a plain
+/// policy — dependency manifests, lockfiles and pinned GitHub Action versions
+/// in workflow files — applied by the agent's judgement, not a path allowlist
+/// it has to match. Naming the action-pin case keeps Action bumps from all
+/// escalating to the human.
+#[test]
+fn the_dependabot_runbook_states_the_dep_only_policy_in_plain_words() {
+    for title in DEPENDABOT_ROUTES {
+        let text = dependabot_prompt(title);
+        let lower = text.to_lowercase();
+        for needle in ["manifest", "lockfile", "github action", "workflow"] {
+            assert!(
+                lower.contains(needle),
+                "{title:?}: the dep-only policy must name {needle:?}, got: {text}"
+            );
+        }
     }
+}
 
-    // The guard never reads the diff, so a path match is its whole
-    // evidence. A build script's path says nothing about what the diff
-    // did, so admitting one would let the agent auto-merge arbitrary build
-    // logic unseen.
-    for needle in [
-        "build.gradle",
-        "gradlew",
-        "gradle/wrapper",
-        "project/plugins.sbt",
-        "project/build.properties",
-    ] {
+/// The same guarantee: the sixteen-glob allowlist is gone. The agent applies
+/// the reason the list existed to the files in front of it, including
+/// ecosystems the list never named.
+#[test]
+fn the_dependabot_runbook_carries_no_path_allowlist() {
+    for title in DEPENDABOT_ROUTES {
+        let text = dependabot_prompt(title);
         assert!(
-            !line.contains(needle),
-            "{needle:?} carries executable build logic and must stay off the allowlist, \
-got: {line}"
+            !text.contains("must match one of"),
+            "{title:?}: the runbook must not carry a path allowlist, got: {text}"
         );
+        for glob in [
+            "requirements*.txt",
+            "pnpm-lock.yaml",
+            "composer.lock",
+            "Gemfile.lock",
+            "go.sum",
+            "gradle/libs.versions.toml",
+            ".github/workflows/*",
+        ] {
+            assert!(
+                !text.contains(glob),
+                "{title:?}: {glob:?} is an allowlist entry, and the allowlist is \
+gone, got: {text}"
+            );
+        }
     }
+}
+
+/// The same guarantee: "breaking change" is a judgement about the changelog,
+/// not a token scan — a deprecation, a removed option or a changed default
+/// can suggest one without any listed word. The minor branch still reads the
+/// changelog and asks that question.
+#[test]
+fn the_minor_branch_judges_the_changelog_rather_than_scanning_for_tokens() {
+    let text = dependabot_prompt("Bump foo from 1.0.0 to 1.1.0");
+    let lower = text.to_lowercase();
     assert!(
-        line.contains(".github/workflows/*"),
-        "the one stated exception must survive, got: {line}"
+        lower.contains("changelog") && lower.contains("breaking"),
+        "the minor branch must still read the changelog for a breaking change, got: {text}"
     );
-
-    // Adding an ecosystem must not drop one. The allowlist is a single
-    // rendered line, so an edit to it can silently lose an entry that
-    // nothing else asserts.
-    for needle in [
-        "Cargo.toml",
-        "Cargo.lock",
-        "package.json",
-        "package-lock.json",
-        "pnpm-lock.yaml",
-        "yarn.lock",
-        "requirements*.txt",
-        "pyproject.toml",
-        "uv.lock",
-        "go.mod",
-        "go.sum",
-        "Gemfile",
-        "Gemfile.lock",
-        "composer.json",
-        "composer.lock",
-    ] {
+    for token_list in ["tokens", "major rewrite", "deprecat,", "BREAKING"] {
         assert!(
-            line.contains(needle),
-            "the allowlist must still admit {needle:?}, got: {line}"
+            !text.contains(token_list),
+            "the minor branch must not carry a breaking-change token list \
+(found {token_list:?}), got: {text}"
         );
+    }
+}
+
+/// The same guarantee: the approval message is the agent's. The runbook does
+/// not dictate its body; what it must not do is claim a check it did not
+/// perform. The approve and squash auto-merge commands stay.
+#[test]
+fn the_merge_terminal_dictates_no_approval_body() {
+    for title in [
+        "Bump foo from 1.0.0 to 1.0.1",
+        "Bump foo from 1.0.0 to 1.1.0",
+    ] {
+        let text = dependabot_prompt(title);
+        assert!(
+            !text.contains("--approve --body \""),
+            "{title:?}: the runbook must not dictate the approval body, got: {text}"
+        );
+        assert!(
+            !text.contains("Auto-approved by dispatch dependabot agent"),
+            "{title:?}: the exact approval text is gone, got: {text}"
+        );
+        assert!(
+            text.contains("--approve") && text.contains("--squash --auto"),
+            "{title:?}: approve + squash auto-merge stay, got: {text}"
+        );
+    }
+}
+
+/// The same guarantee: the ask terminal is ONE direct question that says why
+/// the agent did not approve, and the agent picks what the human needs. The
+/// eight-item template for that question is gone.
+#[test]
+fn the_ask_terminal_is_one_direct_question_without_a_template() {
+    for title in DEPENDABOT_ROUTES {
+        let text = dependabot_prompt(title);
+        let Some((_, ask)) = text.split_once("ASK THE USER:") else {
+            panic!("{title:?}: no ask terminal, got: {text}");
+        };
+        let lower = ask.to_lowercase();
+        assert!(
+            lower.contains("one direct question"),
+            "{title:?}: the ask terminal must still ask one direct question, got: {ask}"
+        );
+        assert!(
+            lower.contains("why"),
+            "{title:?}: the question must say why the agent did not approve, got: {ask}"
+        );
+        for item in [
+            "that includes:",
+            "dep-only verdict",
+            "ci status summary",
+            "changelog summary or its absence",
+        ] {
+            assert!(
+                !lower.contains(item),
+                "{title:?}: the ask terminal must not carry the item template \
+(found {item:?}), got: {ask}"
+            );
+        }
     }
 }
 

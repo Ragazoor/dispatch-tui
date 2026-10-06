@@ -951,9 +951,15 @@ fn research_agent_prompt_is_correct() {
         prompt.contains("research agent"),
         "research_agent prompt should identify as a research agent, got: {prompt}"
     );
+    // TheResearchPromptGivesItsReasonNotARule: the constraint is reasoning,
+    // not a capitalised prohibition — but it still covers code changes.
     assert!(
-        prompt.contains("Do NOT make code changes"),
-        "research_agent prompt must forbid code changes, got: {prompt}"
+        prompt.to_lowercase().contains("code change"),
+        "research_agent prompt must still address code changes, got: {prompt}"
+    );
+    assert!(
+        !prompt.contains("Do NOT"),
+        "research_agent prompt must give its reason, not a capitalised rule, got: {prompt}"
     );
 }
 

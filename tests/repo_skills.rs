@@ -250,3 +250,54 @@ fn summarize_description_mentions_its_sub_step_role() {
         "summarize's description must say it also runs as another skill's sub-step, got: {desc}"
     );
 }
+
+/// Every markdown file under `dir`, recursively.
+fn markdown_under(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries {
+        let path = entry.expect("readable dir entry").path();
+        if path.is_dir() {
+            out.extend(markdown_under(&path));
+        } else if path.extension().is_some_and(|e| e == "md") {
+            out.push(path);
+        }
+    }
+    out
+}
+
+/// dispatch-prompt.allium: TestFirstHasOneOwner. The test-first rule has one
+/// owner, the dispatch prompt ({tdd_instruction} or the spec-first design
+/// step, with the CVE runbook's stated exception beside it). The repository's
+/// always-loaded agent instructions do not restate it: that copy said "Always
+/// use TDD" with no exception, which the CVE runbook then had to contradict.
+#[test]
+fn the_always_loaded_instructions_do_not_restate_the_test_first_rule() {
+    let path = repo_path("CLAUDE.md");
+    let body = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    for needle in ["TDD", "Test-Driven Development"] {
+        assert!(
+            !body.contains(needle),
+            "CLAUDE.md must not restate the test-first rule ({needle:?}) — the dispatch \
+             prompt is its one owner"
+        );
+    }
+}
+
+/// The same guarantee, for skills: no skill restates the rule either.
+#[test]
+fn no_skill_restates_the_test_first_rule() {
+    for root in SKILL_ROOTS {
+        for path in markdown_under(&repo_path(root)) {
+            let body =
+                fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            assert!(
+                !body.contains("Always use TDD"),
+                "{} restates the test-first rule — the dispatch prompt is its one owner",
+                path.display()
+            );
+        }
+    }
+}

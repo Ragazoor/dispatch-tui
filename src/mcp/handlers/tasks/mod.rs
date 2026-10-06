@@ -474,14 +474,12 @@ mod tests {
         );
     }
 
-    /// rule-guidance.GetTaskViaMcp ("The tool description names the response
-    /// shape"). The description quotes the labels a wrapping-up agent reads.
-    /// Those labels are inline `format!` literals in `format_task_detail`, so
-    /// pinning them as prose on both sides would let a rename go stale on one
-    /// side with the test still green. Instead: render a task carrying all of
-    /// them, harvest every single-quoted label out of the live description, and
-    /// require each to appear in the render. Rename a label in the renderer and
-    /// this fails until the description follows.
+    /// rule-guidance.GetTaskViaMcp. The description is one sentence now and
+    /// need not quote any label (naming the lines a wrapping-up agent reads is
+    /// the /wrap-up skill's job). Whatever it does quote must still be a label
+    /// the renderer emits: render a task carrying all of them, harvest every
+    /// single-quoted label out of the live description, and require each to
+    /// appear in the render.
     #[test]
     fn get_task_description_quotes_only_labels_the_renderer_emits() {
         let mut task = make_task("main");
@@ -505,10 +503,6 @@ mod tests {
             .step_by(2)
             .filter(|q| *q != "Label: value")
             .collect();
-        assert!(
-            !quoted.is_empty(),
-            "get_task's description must quote the labels it points the agent at, got: {desc}"
-        );
         for label in quoted {
             assert!(
                 output.contains(label),

@@ -1053,32 +1053,37 @@ async fn exit_session_failed_close_does_not_chain() {
     assert!(untouched.worktree.is_none());
 }
 
-/// `ExitSessionViaMcp` guidance in docs/specs/mcp-task-tools.allium says the
-/// agent must not treat the failure response as a completed close. The tool
-/// description is the only surface guaranteed to be in front of the agent at the
-/// moment it calls `exit_session` — an agent can reach the tool without the
-/// /wrap-up skill loaded — so it is what has to carry that instruction.
+/// `ExitSessionViaMcp` / pr-workflow.allium `ExitSession`: the failed-close
+/// RESPONSE is the just-in-time surface for an agent without the /wrap-up
+/// skill loaded, so it carries the reaction itself — stop and hand back to the
+/// human, and retry neither exit_session nor wrap_up (the token was consumed,
+/// so both are dead ends). The tool description no longer carries it
+/// (TheNextCallIsNamedJustInTime).
 #[tokio::test]
-async fn exit_session_tool_description_warns_about_a_close_that_did_not_take_effect() {
-    let state = test_state().await;
-    let resp = call(&state, "tools/list", None).await;
-    let tools = resp.result.unwrap()["tools"].as_array().unwrap().clone();
-    let description = tools
-        .iter()
-        .find(|t| t["name"] == "exit_session")
-        .expect("exit_session must be registered")["description"]
-        .as_str()
-        .unwrap()
-        .to_string();
+async fn exit_session_failed_close_response_says_stop_and_retry_neither_call() {
+    let fx = ChainFixture::with_failing_close().await;
+    let closing = fx.closing_subtask(None).await;
+
+    let resp = fx.close(closing, WrapUpAction::Done).await;
+    let text = extract_response_text(&resp);
+    let lower = text.to_lowercase();
 
     assert!(
-        description.contains("did not take effect"),
-        "description must name the failure the response can report, got: {description}"
+        lower.contains("did not take effect"),
+        "the response must still say the close did not take effect, got: {text}"
     );
     assert!(
-        description.contains("not treat"),
-        "description must tell the agent not to treat that response as a completed close, \
-         got: {description}"
+        lower.contains("stop"),
+        "the response must tell the agent to stop, got: {text}"
+    );
+    assert!(
+        lower.contains("user") || lower.contains("human"),
+        "the response must tell the agent to hand back to the human, got: {text}"
+    );
+    assert!(
+        text.contains("exit_session") && text.contains("wrap_up"),
+        "the response must name both dead-end retries — exit_session again, and a \
+         fresh token from wrap_up — got: {text}"
     );
 }
 

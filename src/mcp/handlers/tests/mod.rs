@@ -589,18 +589,29 @@ fn dispatch_task_description_advertises_worktree_reuse_and_the_recovery_move() {
     }
 }
 
-/// The same guidance's last paragraph: `update_task`'s own `status` argument is
-/// where a caller meets `backlog`, so it carries the reuse fact too rather than
-/// listing the statuses and leaving the reader to guess.
+/// mcp-task-tools.allium: UpdateTaskViaMcp. The `status` argument lists the
+/// statuses and nothing more. The resume-a-crashed-task story is
+/// dispatch_task's (DispatchTaskViaMcp tells it once), and the aside that no MCP
+/// path deletes a task describes a tool that does not exist.
 #[test]
-fn update_task_status_description_says_what_dispatching_from_backlog_reuses() {
+fn update_task_status_description_tells_no_resume_story_and_no_delete_aside() {
     let update = tool_def("update_task");
     let status = update["inputSchema"]["properties"]["status"]["description"]
         .as_str()
-        .unwrap();
+        .unwrap()
+        .to_lowercase();
+    for needle in ["resum", "reuse", "worktree", "delete"] {
+        assert!(
+            !status.contains(needle),
+            "update_task.status must not carry {needle:?} — the resume story is \
+dispatch_task's and there is no delete tool, got: {status}"
+        );
+    }
+    // TheNextCallIsNamedJustInTime: the next-call instruction lives in the
+    // wrap_up response, not in an argument description.
     assert!(
-        status.contains("reuse") || status.contains("reused"),
-        "update_task.status must say that dispatching from backlog reuses an existing worktree, got: {status}"
+        !status.contains("exit_session"),
+        "update_task.status must not restate the wrap_up/exit_session sequence, got: {status}"
     );
 }
 
@@ -671,22 +682,29 @@ fn every_update_tool_description_names_every_field_it_accepts() {
     );
 }
 
-/// rule-guidance.GetTaskViaMcp ("The tool description names the response
-/// shape"). The response is labelled prose, one line per field, rendered only
-/// when set — not JSON. Agents that assumed JSON went looking for snake_case
-/// keys that never appear. The description is where that is cheapest to say,
-/// and it names the three lines the /wrap-up skill reads.
+/// rule-guidance.GetTaskViaMcp ("The tool description is one sentence"). The
+/// format is shown by what the call returns; naming the lines a wrapping-up
+/// agent reads belongs to the /wrap-up skill, the caller that reads them.
 #[test]
-fn get_task_description_names_the_response_shape() {
+fn get_task_description_is_one_sentence() {
     let desc = tool_description("get_task");
-    assert!(
-        desc.contains("not JSON"),
-        "get_task description must say the response is not JSON, got: {desc}"
+    assert_eq!(
+        sentence_count(&desc),
+        1,
+        "get_task's description must be one sentence, got: {desc}"
     );
-    // Which labels it quotes is checked against the renderer itself, in
-    // `get_task_description_quotes_only_labels_the_renderer_emits`
-    // (src/mcp/handlers/tasks/mod.rs) — a fixed list here would go stale
-    // silently when a label is renamed.
+    assert!(
+        !desc.contains("JSON") && !desc.contains("Verify command"),
+        "get_task's description must not describe the response format or name its lines, \
+got: {desc}"
+    );
+}
+
+/// Sentences in `text`, split on terminal punctuation.
+fn sentence_count(text: &str) -> usize {
+    text.split_terminator(['.', '!', '?'])
+        .filter(|s| !s.trim().is_empty())
+        .count()
 }
 
 /// `list_tasks` renders a task's url under its own type label, so a
@@ -782,9 +800,16 @@ fn no_tool_description_cites_internal_symbol_names() {
 #[test]
 fn every_tool_description_meets_the_detail_floor() {
     const MIN_SENTENCES: usize = 3;
+    // The two descriptions the spec makes one sentence by design:
+    // GetTaskViaMcp ("The tool description is one sentence") and
+    // learnings.allium's TheAuthoringRulesHaveOneHome.
+    const ONE_SENTENCE_BY_SPEC: [&str; 2] = ["get_task", "record_learning"];
     let defs = tool_definitions();
     for tool in defs["tools"].as_array().unwrap() {
         let name = tool["name"].as_str().unwrap();
+        if ONE_SENTENCE_BY_SPEC.contains(&name) {
+            continue;
+        }
         let desc = tool["description"].as_str().unwrap();
         let sentences = desc
             .split_terminator(['.', '!', '?'])
@@ -810,25 +835,218 @@ fn create_epic_description_mentions_sub_epics() {
     );
 }
 
-/// The recording policy lives in the `/learnings` skill. What stays in the
-/// description is the part that changes what a caller passes *at call time*,
-/// when the skill may not be loaded: an entry names no code, and a
-/// `procedural` entry must say where it stops. Both surfaces must keep stating
-/// the no-symbol-names rule — it is the one the validator cannot enforce.
+/// learnings.allium: TheAuthoringRulesHaveOneHome. The record_learning
+/// description is one sentence: it records a non-obvious finding and points at
+/// the /learnings skill. Every authoring rule lives in the skill alone; the
+/// validator's rejection is the just-in-time copy for a caller without it.
 #[test]
-fn record_learning_description_keeps_the_call_time_rules_and_defers_the_rest() {
+fn record_learning_description_is_one_sentence_pointing_at_the_skill() {
     let desc = tool_description("record_learning");
     assert!(
         desc.contains("/learnings"),
-        "record_learning description must point at the /learnings skill for the full policy, got: {desc}"
+        "record_learning description must point at the /learnings skill, got: {desc}"
+    );
+    assert_eq!(
+        sentence_count(&desc),
+        1,
+        "record_learning's description must be one sentence, got: {desc}"
+    );
+    let lower = desc.to_lowercase();
+    for rule in ["procedural", "lint rule", "failing check", "must not name"] {
+        assert!(
+            !lower.contains(rule),
+            "record_learning's description must not carry the authoring rule {rule:?} — \
+it lives in the /learnings skill, got: {desc}"
+        );
+    }
+}
+
+/// mcp-task-tools.allium: WrapUpViaMcp / TheNextCallIsNamedJustInTime. The
+/// wrap_up description says what the tool does and returns. It carries no
+/// MUST and no "never stop after" — the next call is named by the wrap_up
+/// response, at the moment it applies.
+#[test]
+fn wrap_up_description_carries_no_next_call_mandate() {
+    let desc = tool_description("wrap_up");
+    assert!(
+        !desc.contains("MUST"),
+        "wrap_up's description must not carry MUST, got: {desc}"
     );
     assert!(
-        desc.to_lowercase().contains("procedural"),
-        "record_learning description must keep the procedural-needs-a-boundary rule, got: {desc}"
+        !desc.to_lowercase().contains("never stop"),
+        "wrap_up's description must not carry never-stop wording, got: {desc}"
     );
-    // No length bound here on purpose. The two assertions above carry the
-    // intent — the call-time rules stay, the policy is deferred — and a
-    // character count with no derivation just gets raised by whoever trips it.
+    assert!(
+        desc.contains("token"),
+        "wrap_up's description must still say it returns an exit token, got: {desc}"
+    );
+}
+
+/// ReviewTasksAreNotWrappedUp: the reason a review task is refused, and the
+/// retag escape hatch, live in the refusal message. The description may say
+/// in passing that a review-tagged task is refused, and no more.
+#[test]
+fn wrap_up_description_leaves_the_review_refusal_reason_to_the_error() {
+    let desc = tool_description("wrap_up").to_lowercase();
+    for needle in ["retag", "merges", "hand it back"] {
+        assert!(
+            !desc.contains(needle),
+            "wrap_up's description must leave {needle:?} to the refusal message, got: {desc}"
+        );
+    }
+}
+
+/// TheNextCallIsNamedJustInTime: the exit_session description says what the
+/// tool does — closes the session with the token and, when the epic
+/// auto-dispatches, starts its next backlog subtask. It carries no MUST, no
+/// "final step" instruction, no "must not dispatch it yourself", and nothing
+/// about how to react to its responses (the failed-close response carries
+/// that itself).
+#[test]
+fn exit_session_description_says_only_what_the_tool_does() {
+    let desc = tool_description("exit_session");
+    let lower = desc.to_lowercase();
+    assert!(
+        !desc.contains("MUST"),
+        "exit_session's description must not carry MUST, got: {desc}"
+    );
+    for needle in [
+        "must not",
+        "final step",
+        "did not take effect",
+        "not treat",
+        "never stop",
+    ] {
+        assert!(
+            !lower.contains(needle),
+            "exit_session's description must not carry {needle:?}, got: {desc}"
+        );
+    }
+    assert!(
+        lower.contains("next backlog subtask") && lower.contains("auto"),
+        "exit_session's description must state the positive fact that it starts the \
+epic's next backlog subtask when the epic auto-dispatches, got: {desc}"
+    );
+}
+
+/// keybindings.allium: ListKeybindingsViaMcp. The description says what the
+/// call returns and carries no worked example — a real response shows the
+/// output better than a sample does.
+#[test]
+fn list_keybindings_description_carries_no_worked_example() {
+    let desc = tool_description("list_keybindings");
+    let lower = desc.to_lowercase();
+    assert!(
+        !lower.contains("for example") && !lower.contains("e.g."),
+        "list_keybindings' description must not carry a worked example, got: {desc}"
+    );
+}
+
+/// The shared-argument rule at the head of mcp-task-tools.allium: an argument
+/// that means the same thing on every tool carries one short wording of that
+/// meaning, the same on each tool. A tool adds text only where its meaning
+/// differs, so the shared wording opens every tool's description of it.
+#[test]
+fn a_shared_argument_carries_one_wording_on_every_tool() {
+    let defs = tool_definitions();
+    let tools = defs["tools"].as_array().unwrap();
+    for arg in [
+        "base_branch",
+        "wrap_up_mode",
+        "auto_run_plan",
+        "phoenix",
+        "tag",
+        "sort_order",
+    ] {
+        let wordings: Vec<(&str, &str)> = tools
+            .iter()
+            .filter_map(|t| {
+                let d = t["inputSchema"]["properties"][arg]["description"].as_str()?;
+                Some((t["name"].as_str().unwrap(), d))
+            })
+            .collect();
+        assert!(
+            wordings.len() >= 2,
+            "{arg} is a shared argument, expected it on at least two tools, got: {wordings:?}"
+        );
+        let (_, shortest) = wordings
+            .iter()
+            .min_by_key(|(_, d)| d.len())
+            .copied()
+            .unwrap();
+        // The shared meaning: the shortest wording up to its first sentence
+        // break, so a tool-specific tail ("Defaults to …", "Pass null to
+        // clear.") does not count against it.
+        let core = shortest.split(". ").next().unwrap_or(shortest);
+        for (tool, d) in &wordings {
+            assert!(
+                d.starts_with(core),
+                "{arg}: {tool}'s wording does not start with the shared one {core:?}, \
+got: {d:?} (all: {wordings:?})"
+            );
+        }
+    }
+}
+
+/// The same rule's other half: an omitted argument defaults on create but
+/// means "no change" on update, so an update tool's argument does not promise
+/// a default.
+#[test]
+fn an_update_tool_promises_no_default_for_an_omitted_argument() {
+    let defs = tool_definitions();
+    for tool in defs["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        if !name.starts_with("update_") {
+            continue;
+        }
+        let Some(props) = tool["inputSchema"]["properties"].as_object() else {
+            continue;
+        };
+        for (arg, schema) in props {
+            let d = schema["description"].as_str().unwrap_or("");
+            assert!(
+                !d.contains("Defaults to"),
+                "{name}.{arg}: an omitted argument means no change on an update tool, so it \
+must not promise a default, got: {d}"
+            );
+        }
+    }
+}
+
+/// Human-UI trivia does not belong in a description: which tags the TUI tag
+/// picker offers is nothing a caller acts on.
+#[test]
+fn no_tag_description_carries_tui_trivia() {
+    let defs = tool_definitions();
+    for tool in defs["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        if let Some(d) = tool["inputSchema"]["properties"]["tag"]["description"].as_str() {
+            assert!(
+                !d.contains("TUI") && !d.contains("tag picker"),
+                "{name}.tag must not carry TUI trivia, got: {d}"
+            );
+        }
+    }
+}
+
+/// Implementation detail (how a self-reference is guarded) does not belong in
+/// an argument description either.
+#[test]
+fn no_argument_description_explains_how_the_database_guards_it() {
+    let defs = tool_definitions();
+    for tool in defs["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        let Some(props) = tool["inputSchema"]["properties"].as_object() else {
+            continue;
+        };
+        for (arg, schema) in props {
+            let d = schema["description"].as_str().unwrap_or("");
+            assert!(
+                !d.to_lowercase().contains("database"),
+                "{name}.{arg} must not describe how the database guards it, got: {d}"
+            );
+        }
+    }
 }
 
 /// `create_task` used to spell out the transport headers that carry caller

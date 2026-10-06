@@ -1967,7 +1967,7 @@ mod tests {
     /// blocked.
     #[test]
     fn wrap_up_skill_does_not_record_the_pr_url_via_update_task() {
-        for line in skill_body("wrap-up").lines() {
+        for line in skill_text("wrap-up").lines() {
             let lower = line.to_lowercase();
             assert!(
                 !(lower.contains("update_task") && lower.contains("url")),
@@ -1984,7 +1984,7 @@ mod tests {
     /// as literal example text, which would truncate the section before the
     /// part these tests need to inspect.
     fn pr_body_draft_section() -> String {
-        let content = skill_body("wrap-up");
+        let content = references_text("wrap-up");
         let (_, after) = content
             .split_once("### Draft the title and body")
             .expect("wrap-up skill must have a 'Draft the title and body' step");
@@ -2070,7 +2070,9 @@ mod tests {
     /// any depth (so promoting or demoting the heading cannot silently widen it
     /// to the rest of the file); if you reword the heading, re-anchor it here.
     fn failed_close_guidance() -> String {
-        let content = skill_body("wrap-up").to_lowercase();
+        // pr-workflow.allium ExitSession: the reaction lives in the skill's
+        // exit_session-errors reference file, not in SKILL.md.
+        let content = references_text("wrap-up").to_lowercase();
         section_after(&content, "did not take effect").expect(
             "wrap-up skill must document that a successful exit_session response \
              can still report the close did not take effect",
@@ -2128,7 +2130,7 @@ mod tests {
     /// whole-document check would still pass with the dispatch step's override
     /// deleted. Re-anchor here if the heading is reworded.
     fn allium_loop_dispatch_instruction() -> String {
-        section_after(skill_body("allium-loop"), "### Each Iteration")
+        section_after(&skill_text("allium-loop"), "### Each Iteration")
             .expect("allium-loop skill must have an 'Each Iteration' section")
     }
 
@@ -2154,6 +2156,173 @@ mod tests {
             section.contains("name the surviving test"),
             "the convergence gate must keep requiring a deleted test's \
              replacement to be named, not asserted in the abstract"
+        );
+    }
+
+    /// Every embedded file under a skill's `references/` directory, as
+    /// `(file name, contents)`, in a stable order. Empty when the skill has no
+    /// references directory.
+    fn skill_references(skill: &str) -> Vec<(String, &'static str)> {
+        let Some(dir) = PLUGIN_DIR.get_dir(format!("skills/{skill}/references")) else {
+            return Vec::new();
+        };
+        let mut files: Vec<(String, &'static str)> = dir
+            .files()
+            .map(|f| {
+                let name = f
+                    .path()
+                    .file_name()
+                    .expect("a reference file has a name")
+                    .to_string_lossy()
+                    .into_owned();
+                let body = f
+                    .contents_utf8()
+                    .unwrap_or_else(|| panic!("{} must be UTF-8", f.path().display()));
+                (name, body)
+            })
+            .collect();
+        files.sort();
+        files
+    }
+
+    /// The concatenated text of a skill's reference files — where branch
+    /// detail lives under the just-in-time skill-copy rule ("Skill copy" at
+    /// the head of docs/specs/mcp-task-tools.allium).
+    fn references_text(skill: &str) -> String {
+        skill_references(skill)
+            .into_iter()
+            .map(|(_, body)| body)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// `SKILL.md` followed by every reference file: the whole copy an agent can
+    /// reach from the skill, for assertions about content that may live on
+    /// either side of the core-flow / branch-detail split.
+    fn skill_text(skill: &str) -> String {
+        format!("{}\n{}", skill_body(skill), references_text(skill))
+    }
+
+    /// The reference file of `skill` whose contents include `anchor`, with the
+    /// name SKILL.md must cite it by. Panics naming `what` when none does.
+    fn reference_containing(skill: &str, anchor: &str, what: &str) -> (String, &'static str) {
+        skill_references(skill)
+            .into_iter()
+            .find(|(_, body)| body.contains(anchor))
+            .unwrap_or_else(|| {
+                panic!("{skill}: {what} must live in a references/ file containing {anchor:?}")
+            })
+    }
+
+    /// The wrap-up skill's Step 8 closing sequence, up to the next `## ` heading.
+    fn wrap_up_closing_sequence() -> &'static str {
+        let body = skill_body("wrap-up");
+        body.split_once("## Step 8")
+            .map(|(_, rest)| rest.split("\n## ").next().unwrap_or(rest))
+            .expect("wrap-up skill must have a Step 8 closing sequence")
+    }
+
+    /// "Skill copy" (mcp-task-tools.allium): a SKILL.md carries the flow every
+    /// invocation walks; detail only one branch needs lives in a references/
+    /// file beside it, and the branch names that file. Each of these skills
+    /// moves its long tail that way, so each has a references/ directory and
+    /// SKILL.md names every file in it — an unnamed reference is never loaded.
+    #[test]
+    fn agent_skills_keep_branch_detail_in_references_the_skill_names() {
+        for skill in ["wrap-up", "retro", "allium-loop", "learnings"] {
+            let refs = skill_references(skill);
+            assert!(
+                !refs.is_empty(),
+                "{skill}: branch detail must live in a references/ file beside SKILL.md, \
+                 found none"
+            );
+            let body = skill_body(skill);
+            for (name, _) in refs {
+                assert!(
+                    body.contains(&format!("references/{name}")),
+                    "{skill}: SKILL.md must name references/{name} at the branch that \
+                     needs it, or it is never loaded"
+                );
+            }
+        }
+    }
+
+    /// pr-workflow.allium WrapUpPr: the pr path's steps live in the wrap-up
+    /// skill's pr reference file, named when the pr action is chosen, so an
+    /// agent on the rebase or done path never loads them.
+    #[test]
+    fn wrap_up_pr_path_lives_in_a_reference_named_from_the_branch() {
+        let body = skill_body("wrap-up");
+        for step in [
+            "### Draft the title and body",
+            "### Push and create the draft PR",
+        ] {
+            assert!(
+                !body.contains(step),
+                "wrap-up SKILL.md must not carry the pr path's {step:?} step — it belongs \
+                 in the pr reference file"
+            );
+        }
+        let (name, reference) =
+            reference_containing("wrap-up", "### Draft the title and body", "the pr path");
+        assert!(
+            reference.contains("gh pr create"),
+            "the pr reference must carry the PR-creation step"
+        );
+        assert!(
+            body.contains(&format!("references/{name}")),
+            "wrap-up SKILL.md must name references/{name} where the pr path is taken"
+        );
+    }
+
+    /// pr-workflow.allium ExitSession: the exit_session error handling — the
+    /// "has no active session" case treated as success, and the successful
+    /// response that reports a close which did not take effect — lives in a
+    /// reference file the skill names at the exit_session step.
+    #[test]
+    fn wrap_up_exit_session_errors_live_in_a_reference_named_at_the_step() {
+        let body = skill_body("wrap-up");
+        assert!(
+            !body.contains("has no active session"),
+            "wrap-up SKILL.md must not carry the exit_session error cases — they belong \
+             in the exit_session-errors reference file"
+        );
+        let (name, reference) = reference_containing(
+            "wrap-up",
+            "has no active session",
+            "the exit_session error handling",
+        );
+        assert!(
+            reference.contains("did not take effect"),
+            "the exit_session-errors reference must carry the failed-close reaction beside \
+             the has-no-active-session case"
+        );
+        assert!(
+            wrap_up_closing_sequence().contains(&format!("references/{name}")),
+            "wrap-up's closing sequence must name references/{name} at the exit_session step"
+        );
+    }
+
+    /// TheNextCallIsNamedJustInTime: exit_session owns the epic chain and its
+    /// description says so, so the skill carries no section telling the agent
+    /// not to dispatch the next subtask itself.
+    #[test]
+    fn wrap_up_skill_has_no_dont_dispatch_the_next_subtask_section() {
+        let lower = skill_text("wrap-up").to_lowercase();
+        assert!(
+            !lower.contains("next subtask yourself"),
+            "wrap-up must not carry a don't-dispatch-the-next-subtask section — \
+             exit_session owns the chain"
+        );
+    }
+
+    /// The other half of the same guarantee: the skill still names exit_session
+    /// as the call after wrap_up, in its closing sequence.
+    #[test]
+    fn wrap_up_skill_names_exit_session_in_its_closing_sequence() {
+        assert!(
+            wrap_up_closing_sequence().contains("exit_session"),
+            "wrap-up's closing sequence must name exit_session as the next call"
         );
     }
 
@@ -2185,7 +2354,7 @@ mod tests {
     /// still pass after the instruction under test has been deleted. If you
     /// reword an anchor heading, re-anchor it here.
     fn retro_section(anchor: &str) -> String {
-        let content = skill_body("retro").to_lowercase();
+        let content = skill_text("retro").to_lowercase();
         section_after(&content, anchor).unwrap_or_else(|| {
             panic!("retro skill must contain the section anchored on {anchor:?}")
         })
@@ -2303,7 +2472,7 @@ mod tests {
         // one-line doc correction into a task + worktree + agent dispatch. The
         // agent that just did the work has the context and is already in a
         // worktree whose next step is a commit; it should make the fix.
-        let content = skill_body("retro").to_lowercase();
+        let content = skill_text("retro").to_lowercase();
         assert!(
             !content.contains("do not edit files yourself"),
             "retro must no longer ban editing outright — fixing small context \
@@ -2362,7 +2531,7 @@ mod tests {
         // restoring "`feature` for an enhancement idea" to Step 3 is the
         // likeliest regression, and no other section legitimately contains
         // this string, so widening the scope here is safe.
-        let whole_skill = skill_body("retro").to_lowercase();
+        let whole_skill = skill_text("retro").to_lowercase();
         assert!(
             !whole_skill.contains("`feature` for"),
             "retro must not still describe when to use the feature tag, in any section"
@@ -2462,7 +2631,7 @@ mod tests {
         // a fenced code block containing its own "## Session Retrospective"
         // heading, which retro_section's "next heading of any depth" cutoff
         // would treat as the section boundary and truncate before this line.
-        let content = skill_body("retro").to_lowercase();
+        let content = skill_text("retro").to_lowercase();
         assert!(
             content.contains("root-cause issues flagged"),
             "retro's output template must include a line surfacing \
@@ -2645,7 +2814,7 @@ mod tests {
     /// check pass even with this specific rule missing.
     #[test]
     fn learnings_skill_forbids_code_citations() {
-        let section = section_after(skill_body("learnings"), "### Do NOT record:")
+        let section = section_after(&skill_text("learnings"), "### Do NOT record:")
             .expect("learnings skill must have a 'Do NOT record' section");
         assert!(
             section.contains("path.rs::symbol") || section.contains("path.rs"),
@@ -2666,7 +2835,7 @@ mod tests {
     /// behaviour the immediate rule exists to prevent.
     #[test]
     fn wrap_up_and_learnings_agree_that_rating_is_not_deferred() {
-        let learnings = skill_body("learnings");
+        let learnings = skill_text("learnings");
         assert!(
             learnings.contains("not deferred to wrap-up"),
             "the learnings skill must keep the rate-immediately rule this test pins wrap-up to"
@@ -2685,7 +2854,7 @@ mod tests {
     /// rule in full rather than deferring to what `record_learning` rejects.
     #[test]
     fn learnings_skill_forbids_naming_implementation_detail_a_validator_misses() {
-        let section = section_after(skill_body("learnings"), "### Do NOT record:")
+        let section = section_after(&skill_text("learnings"), "### Do NOT record:")
             .expect("learnings skill must have a 'Do NOT record' section");
         for term in ["function", "type", "macro", "fixture", "file"] {
             assert!(
@@ -2708,7 +2877,7 @@ mod tests {
     /// instead of to prose.
     #[test]
     fn learnings_skill_carries_the_machine_check_triage() {
-        let content = skill_body("learnings").to_lowercase();
+        let content = skill_text("learnings").to_lowercase();
         assert!(
             content.contains("failing check"),
             "the skill must ask whether a failing check could be written from the \
@@ -2731,7 +2900,7 @@ mod tests {
     /// ported from OKF's required `# Escalate` section).
     #[test]
     fn learnings_skill_requires_a_boundary_on_procedural_entries() {
-        let content = skill_body("learnings").to_lowercase();
+        let content = skill_text("learnings").to_lowercase();
         assert!(
             content.contains("procedural") && content.contains("ask a human"),
             "the skill must say a procedural entry's detail names when to stop and \
@@ -2745,7 +2914,7 @@ mod tests {
     /// here would quietly undo the section above it.
     #[test]
     fn learnings_skill_summary_guidance_names_no_symbol() {
-        let section = section_after(skill_body("learnings"), "### Writing a good summary")
+        let section = section_after(&skill_text("learnings"), "### Writing a good summary")
             .expect("learnings skill must have a summary-writing section");
         assert!(
             !section.contains("TaskPatch"),
@@ -2758,7 +2927,7 @@ mod tests {
     /// passing scope="project" gets a deserialization error).
     #[test]
     fn learnings_skill_scope_table_has_no_project_row() {
-        let content = skill_body("learnings");
+        let content = skill_text("learnings");
         assert!(
             !content.contains("| `project` |"),
             "the scope table must not offer a project scope row: {content}"
@@ -2773,7 +2942,7 @@ mod tests {
         // The correct text says "there is no human review step", which itself
         // contains the substring "human review" — so this checks for the old
         // false CLAIM (routing an entry TO review) rather than the substring.
-        let content = skill_body("learnings").to_lowercase();
+        let content = skill_text("learnings").to_lowercase();
         assert!(
             !content.contains("routes an approved entry"),
             "the learnings skill must not claim a wrong verdict routes an entry \
