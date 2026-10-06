@@ -94,19 +94,10 @@ impl App {
                 None => vec![],
             },
             "jump_to_deepest_epic" => {
-                let target = self
-                    .selected_epic_id()
-                    .zip(self.selected_column_status())
-                    .map(|(id, status)| {
-                        crate::models::deepest_epic_with(
-                            id,
-                            status,
-                            &self.board.epics,
-                            &self.board.tasks,
-                        )
-                    });
-                match target {
-                    Some(id) => keyed(self, Message::Epic(EpicMessage::JumpTo(id))),
+                match self.selected_epic_id().zip(self.selected_column_status()) {
+                    Some((id, status)) => {
+                        keyed(self, Message::Epic(EpicMessage::JumpToDeepest(id, status)))
+                    }
                     None => vec![],
                 }
             }

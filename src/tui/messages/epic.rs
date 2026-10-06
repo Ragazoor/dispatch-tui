@@ -17,6 +17,9 @@ pub enum EpicMessage {
     /// Open `target`'s epic view with every epic between the current view and
     /// it on the trail (`epics.allium: Epic Navigation`).
     JumpTo(EpicId),
+    /// `Enter` on an epic card in the column `status`: jump to the deepest
+    /// epic holding the work that puts the card there.
+    JumpToDeepest(EpicId, crate::models::TaskStatus),
     Refresh(Vec<Epic>),
     /// Splice a single fresh epic into `app.board.epics`.
     Updated(Epic),
@@ -56,6 +59,7 @@ impl EpicMessage {
             EpicMessage::Exit => app.handle_exit_epic(),
             EpicMessage::ExitAll => app.handle_exit_all_epics(),
             EpicMessage::JumpTo(target) => app.handle_jump_to_epic(target),
+            EpicMessage::JumpToDeepest(id, status) => app.handle_jump_to_deepest_epic(id, status),
             EpicMessage::Refresh(epics) => app.handle_refresh_epics(epics),
             EpicMessage::Updated(epic) => app.handle_epic_updated(epic),
             EpicMessage::Created(epic) => app.handle_epic_created(epic),

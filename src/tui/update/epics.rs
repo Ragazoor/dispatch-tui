@@ -44,17 +44,25 @@ impl App {
     /// and `target` so that `q` climbs back one level at a time.
     pub(in crate::tui) fn handle_jump_to_epic(&mut self, target: EpicId) -> Vec<Command> {
         let path = crate::models::epic_path(target, &self.board.epics);
-        let below = match self
+        let start = self
             .current_epic_id()
             .and_then(|cur| path.iter().position(|&e| e == cur))
-        {
-            Some(i) => &path[i + 1..],
-            None => &path[..],
-        };
+            .map_or(0, |i| i + 1);
+        let below = &path[start..];
         for &id in below {
             self.handle_enter_epic(id);
         }
         vec![]
+    }
+
+    pub(in crate::tui) fn handle_jump_to_deepest_epic(
+        &mut self,
+        epic: EpicId,
+        status: TaskStatus,
+    ) -> Vec<Command> {
+        let target =
+            crate::models::deepest_epic_with(epic, status, &self.board.epics, &self.board.tasks);
+        self.handle_jump_to_epic(target)
     }
 
     pub(in crate::tui) fn handle_refresh_epics(&mut self, epics: Vec<Epic>) -> Vec<Command> {

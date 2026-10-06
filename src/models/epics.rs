@@ -361,29 +361,29 @@ pub fn deepest_epic_with(
     tasks: &[Task],
 ) -> EpicId {
     let children = build_children_map(epics);
+    let holders: HashSet<EpicId> = tasks
+        .iter()
+        .filter(|t| t.status == status)
+        .filter_map(|t| t.epic_id)
+        .collect();
     let mut current = root;
     // Each step moves strictly down the tree, so the bound only guards cycles.
     for _ in 0..=epics.len() {
-        if tasks
-            .iter()
-            .any(|t| t.epic_id == Some(current) && t.status == status)
-        {
+        if holders.contains(&current) {
             return current;
         }
-        let carriers: Vec<EpicId> = children
+        let mut carriers = children
             .get(&current)
             .into_iter()
             .flatten()
             .copied()
             .filter(|&kid| {
-                let subtree = descendant_epic_ids_with_map(kid, &children);
-                tasks
+                descendant_epic_ids_with_map(kid, &children)
                     .iter()
-                    .any(|t| t.status == status && t.epic_id.is_some_and(|e| subtree.contains(&e)))
-            })
-            .collect();
-        match carriers.as_slice() {
-            [only] => current = *only,
+                    .any(|e| holders.contains(e))
+            });
+        match (carriers.next(), carriers.next()) {
+            (Some(only), None) => current = only,
             _ => return current,
         }
     }
