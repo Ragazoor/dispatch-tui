@@ -705,29 +705,9 @@ pub async fn run_tui(
         Err(e) => return Err(abort_managed_startup(target.managed(), e)),
     };
 
-    // Set up terminal
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableFocusChange)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
-    // Set up tmux keybinding: Prefix+Space → jump back to this window.
-    // Best-effort: failures don't prevent the TUI from starting.
+    let mut terminal = enter_tui_terminal()?;
     let tmux_runner = runtime.runner.clone();
-    // One probe for the session and the window name together, rather than one
-    // each: they are read for the same purpose and a window renamed between two
-    // calls would be described by neither answer. See
-    // `tmux::current_window_context`.
-    let self_pane = tmux::self_pane_id();
-    let here = tmux::current_window_context(self_pane.as_deref(), &*tmux_runner).ok();
-    let original_window_name = here
-        .as_ref()
-        .and_then(|c| TmuxWindow::parse(&c.window_name));
-    let session = here.as_ref().map_or("", |c| c.session_name.as_str());
-    setup_tmux_for_tui(session, self_pane.as_deref(), &*tmux_runner);
-    publish_store_server_for(&target, session, &server, &*tmux_runner);
-    publish_board_port(session, port, &*tmux_runner);
+    let tmux_wiring = wire_tmux_for_tui(&target, &server, port, &*tmux_runner);
 
     // Create two channels:
     //    - key_rx: raw crossterm KeyEvents from the blocking poll thread
@@ -769,9 +749,27 @@ pub async fn run_tui(
     await_split_restores(runtime.take_split_restores(), QUIT_RESTORE_TIMEOUT).await;
 
     // Tear down tmux keybinding and restore the original window name.
-    teardown_tmux_for_tui(session, original_window_name.as_ref(), &*tmux_runner);
+    teardown_tmux_for_tui(
+        &tmux_wiring.session,
+        tmux_wiring.original_window_name.as_ref(),
+        &*tmux_runner,
+    );
 
-    // Cleanup terminal
+    leave_tui_terminal(&mut terminal)?;
+
+    result
+}
+
+/// Take over the terminal: raw mode, alternate screen, focus events.
+fn enter_tui_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableFocusChange)?;
+    Ok(Terminal::new(CrosstermBackend::new(stdout))?)
+}
+
+/// Hand the terminal back, undoing [`enter_tui_terminal`].
+fn leave_tui_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -779,13 +777,85 @@ pub async fn run_tui(
         LeaveAlternateScreen
     )?;
     terminal.show_cursor()?;
+    Ok(())
+}
 
-    result
+/// What `run_tui` needs back from the tmux setup to undo it on exit.
+struct TmuxWiring {
+    session: String,
+    original_window_name: Option<TmuxWindow>,
+}
+
+/// Set up the tmux keybinding (Prefix+Space → jump back to this window) and
+/// publish the store address and board port. Best-effort: failures don't
+/// prevent the TUI from starting.
+fn wire_tmux_for_tui(
+    target: &StoreTarget,
+    server: &str,
+    port: u16,
+    tmux_runner: &dyn ProcessRunner,
+) -> TmuxWiring {
+    // One probe for the session and the window name together, rather than one
+    // each: they are read for the same purpose and a window renamed between two
+    // calls would be described by neither answer. See
+    // `tmux::current_window_context`.
+    let self_pane = tmux::self_pane_id();
+    let here = tmux::current_window_context(self_pane.as_deref(), tmux_runner).ok();
+    let original_window_name = here
+        .as_ref()
+        .and_then(|c| TmuxWindow::parse(&c.window_name));
+    let session = here
+        .as_ref()
+        .map_or(String::new(), |c| c.session_name.clone());
+    setup_tmux_for_tui(&session, self_pane.as_deref(), tmux_runner);
+    publish_store_server_for(target, &session, server, tmux_runner);
+    publish_board_port(&session, port, tmux_runner);
+    TmuxWiring {
+        session,
+        original_window_name,
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Embedding backfill — run at startup to embed learnings missing vectors
 // ---------------------------------------------------------------------------
+
+/// The pending model load. Production loads the real model on a blocking
+/// thread; tests have nothing to wait for.
+#[cfg(not(test))]
+type EmbeddingLoad = tokio::task::JoinHandle<Result<Arc<EmbeddingService>>>;
+#[cfg(test)]
+struct EmbeddingLoad;
+
+/// Start loading the embedding model (blocks until loaded; may download on
+/// first run). Tests bypass run_tui entirely and construct TuiRuntime
+/// directly, so the real load is only reached in production.
+#[cfg(not(test))]
+fn start_embedding_load() -> EmbeddingLoad {
+    eprintln!("Loading embedding model...");
+    tokio::task::spawn_blocking(EmbeddingService::new)
+}
+#[cfg(test)]
+fn start_embedding_load() -> EmbeddingLoad {
+    EmbeddingLoad
+}
+
+/// Wait for the load [`start_embedding_load`] began.
+#[cfg(not(test))]
+async fn finish_embedding_load(load: EmbeddingLoad) -> Result<Arc<EmbeddingService>> {
+    load.await
+        .map_err(|e| anyhow::anyhow!("Embedding thread panicked: {e}"))?
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to initialise embedding model: {e}\n\
+                 Clear cache with: rm -rf ~/.cache/huggingface/hub/"
+            )
+        })
+}
+#[cfg(test)]
+async fn finish_embedding_load(_load: EmbeddingLoad) -> Result<Arc<EmbeddingService>> {
+    Ok(EmbeddingService::new_noop())
+}
 
 /// Seed the example feed epic and provision the managed feed-epic tree.
 /// Idempotent and best-effort: a failure is logged and never blocks startup.
@@ -1060,11 +1130,7 @@ impl TuiRuntime {
         // Started now and awaited after the first store connection: the two
         // are independent, so a cold start costs the slower of them rather
         // than both.
-        #[cfg(not(test))]
-        let emb_load = {
-            eprintln!("Loading embedding model...");
-            tokio::task::spawn_blocking(EmbeddingService::new)
-        };
+        let emb_load = start_embedding_load();
 
         // Spawn MCP server with notification channel.
         // Handed the operator's config location rather than looking it up — see
@@ -1124,18 +1190,7 @@ impl TuiRuntime {
         let store_server = server;
         let sync_store: Arc<dyn crate::sync::SyncStore> = database.clone();
 
-        #[cfg(not(test))]
-        let emb_svc = emb_load
-            .await
-            .map_err(|e| anyhow::anyhow!("Embedding thread panicked: {e}"))?
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to initialise embedding model: {e}\n\
-                     Clear cache with: rm -rf ~/.cache/huggingface/hub/"
-                )
-            })?;
-        #[cfg(test)]
-        let emb_svc = EmbeddingService::new_noop();
+        let emb_svc = finish_embedding_load(emb_load).await?;
 
         let mcp_deps = mcp::McpDeps {
             db: database.clone(),
@@ -1188,11 +1243,30 @@ impl TuiRuntime {
             paths,
         );
 
+        runtime.start_background_tasks(&parts, session, sync_store, app.repo_paths());
+
+        Ok(Bootstrap {
+            store_server,
+            app,
+            runtime,
+            mcp_notify_rx,
+            msg_rx,
+        })
+    }
+
+    /// Start the tasks that keep the board live behind the first connection.
+    fn start_background_tasks(
+        &self,
+        parts: &StoreParts,
+        session: crate::sync::SyncSession,
+        sync_store: Arc<dyn crate::sync::SyncStore>,
+        saved_repo_paths: &[String],
+    ) {
         // Keep the board redrawing behind the connection, and keep the
         // connection up: the first attempt is already answered (above), so the
         // loop starts from `connected` and only ever handles later drops.
-        drop(runtime.spawn_row_change_pump(parts.rows.clone()));
-        drop(runtime.spawn_shared_store_connection(
+        drop(self.spawn_row_change_pump(parts.rows.clone()));
+        drop(self.spawn_shared_store_connection(
             session,
             sync_store,
             parts.settled_identity.clone(),
@@ -1202,16 +1276,7 @@ impl TuiRuntime {
         // RefreshRepoSyncStateOnStartup: the only genuinely new network traffic
         // this feature introduces — one fetch per saved repo path. Fire-and-forget,
         // so a slow or offline network never delays startup.
-        let saved_repo_paths = app.repo_paths().to_vec();
-        drop(runtime.exec_refresh_all_repo_sync(&saved_repo_paths));
-
-        Ok(Bootstrap {
-            store_server,
-            app,
-            runtime,
-            mcp_notify_rx,
-            msg_rx,
-        })
+        drop(self.exec_refresh_all_repo_sync(saved_repo_paths));
     }
 
     /// Wire the services, the feed runner and the message channel around an

@@ -542,23 +542,8 @@ fn task_card_prefix_width(task: &Task, flash_received: bool, flash_sent: bool) -
     2 + 1 + 3 + id_len + flash_width + phoenix_width + CARD_CHROME_WIDTH
 }
 
-/// Build a styled framed ListItem for a task card in a kanban column.
-/// Line 1: stripe + title
-/// Line 2: status icon + age/activity metadata
-pub(super) fn build_task_list_item<'a>(
-    task: &Task,
-    status: TaskStatus,
-    app: &App,
-    now: DateTime<Utc>,
-    is_cursor: bool,
-    ctx: &ColRenderCtx,
-) -> ListItem<'a> {
-    let col_color = ctx.color;
-    let col_width = ctx.width;
-
-    let is_batch_selected = app.selected_tasks().contains(&task.id);
-    let select_prefix = if is_batch_selected { "* " } else { "  " };
-
+/// Whether the task has a live received / sent message flash.
+fn message_flashes(task: &Task, app: &App) -> (bool, bool) {
     // Same threshold the expiry sweep uses (`App::tick_message_flash`), read from
     // the one constant so the two cannot drift apart.
     let has_message_flash = app
@@ -574,12 +559,19 @@ pub(super) fn build_task_list_item<'a>(
         .message_flash_sent
         .get(&task.id)
         .is_some_and(|t| t.elapsed() < crate::tui::MESSAGE_FLASH_TTL);
-    let any_message_flash = has_message_flash || has_message_flash_sent;
+    (has_message_flash, has_message_flash_sent)
+}
 
-    let prefix_width = task_card_prefix_width(task, has_message_flash, has_message_flash_sent);
-    let max_title = (col_width as usize).saturating_sub(prefix_width);
-    let title_text = format_task_title(task, max_title);
-
+/// Line 1 of a task card: select prefix, stripe, id, title, flash glyphs and
+/// the phoenix marker. `emphasised` bolds the title (batch-selected or cursor).
+fn card_title_line<'a>(
+    task: &Task,
+    title_text: &str,
+    select_prefix: &str,
+    col_color: Color,
+    emphasised: bool,
+    (has_message_flash, has_message_flash_sent): (bool, bool),
+) -> Line<'a> {
     // Line 1: prefix + stripe + title.
     // One quarter block on every card, cursor included (board-visuals.allium: "Card
     // stripe"). Stripe weight no longer moves with the cursor — selection is
@@ -588,7 +580,7 @@ pub(super) fn build_task_list_item<'a>(
     let stripe_style = Style::default().fg(col_color);
     // Bold marks the selected card's title (board-visuals.allium: "Selection"). Its fill
     // is unchanged from a resting card's, by design.
-    let title_style = if is_batch_selected || is_cursor {
+    let title_style = if emphasised {
         Style::default().add_modifier(Modifier::BOLD)
     } else {
         Style::default()
@@ -618,7 +610,41 @@ pub(super) fn build_task_list_item<'a>(
         ));
     }
 
-    let line1 = Line::from(line1_spans);
+    Line::from(line1_spans)
+}
+
+/// Build a styled framed ListItem for a task card in a kanban column.
+/// Line 1: stripe + title
+/// Line 2: status icon + age/activity metadata
+pub(super) fn build_task_list_item<'a>(
+    task: &Task,
+    status: TaskStatus,
+    app: &App,
+    now: DateTime<Utc>,
+    is_cursor: bool,
+    ctx: &ColRenderCtx,
+) -> ListItem<'a> {
+    let col_color = ctx.color;
+    let col_width = ctx.width;
+
+    let is_batch_selected = app.selected_tasks().contains(&task.id);
+    let select_prefix = if is_batch_selected { "* " } else { "  " };
+
+    let (has_message_flash, has_message_flash_sent) = message_flashes(task, app);
+    let any_message_flash = has_message_flash || has_message_flash_sent;
+
+    let prefix_width = task_card_prefix_width(task, has_message_flash, has_message_flash_sent);
+    let max_title = (col_width as usize).saturating_sub(prefix_width);
+    let title_text = format_task_title(task, max_title);
+
+    let line1 = card_title_line(
+        task,
+        &title_text,
+        select_prefix,
+        col_color,
+        is_batch_selected || is_cursor,
+        (has_message_flash, has_message_flash_sent),
+    );
 
     let indicator = classify_card_indicator(task, status, app, now);
     // Read the severity off the indicator before it is consumed, so the border and

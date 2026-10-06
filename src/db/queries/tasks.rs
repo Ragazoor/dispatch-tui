@@ -92,19 +92,39 @@ fn needs_teardown(rows: Vec<RemovedFeedTask>) -> Vec<RemovedFeedTask> {
 /// One row of `upsert_feed_tasks_inner`: insert the item, or refresh the
 /// existing task for its `(epic_id, external_id)`.
 ///
-/// `completed_now` is the one clock read for the whole emission, already
-/// formatted; `feed_epic_id` is the epic whose cycle emitted the batch.
-#[allow(clippy::too_many_arguments)]
-fn upsert_feed_item(
-    tx: &rusqlite::Transaction<'_>,
+/// What every row of one emission shares. `completed_now` is the one clock
+/// read for the whole emission, already formatted; `feed_epic_id` is the epic
+/// whose cycle emitted the batch.
+struct FeedUpsertBatch<'a> {
     epic_id: EpicId,
     feed_epic_id: Option<i64>,
-    item: &FeedItem,
-    repo_path: &str,
-    base_branch: &str,
-    labels_json: &str,
-    completed_now: &str,
+    completed_now: &'a str,
+}
+
+/// The per-item inputs of one `upsert_feed_item` call.
+struct FeedUpsertRow<'a> {
+    item: &'a FeedItem,
+    repo_path: &'a str,
+    base_branch: &'a str,
+    labels_json: &'a str,
+}
+
+fn upsert_feed_item(
+    tx: &rusqlite::Transaction<'_>,
+    batch: &FeedUpsertBatch<'_>,
+    row: &FeedUpsertRow<'_>,
 ) -> Result<()> {
+    let FeedUpsertBatch {
+        epic_id,
+        feed_epic_id,
+        completed_now,
+    } = *batch;
+    let FeedUpsertRow {
+        item,
+        repo_path,
+        base_branch,
+        labels_json,
+    } = *row;
     let sub_status = SubStatus::default_for(item.status).as_str().to_string();
     // item.url is copied into url so the card surfaces it
     // immediately. url_type precedence: an explicit item.url_type
@@ -1616,6 +1636,11 @@ impl Database {
 
             let tx = conn.unchecked_transaction()?;
 
+            let batch = FeedUpsertBatch {
+                epic_id,
+                feed_epic_id,
+                completed_now: &completed_now,
+            };
             for (((item, repo_path), base_branch), labels_json) in items
                 .iter()
                 .zip(repo_paths.iter())
@@ -1624,13 +1649,13 @@ impl Database {
             {
                 upsert_feed_item(
                     &tx,
-                    epic_id,
-                    feed_epic_id,
-                    item,
-                    repo_path,
-                    base_branch,
-                    labels_json,
-                    &completed_now,
+                    &batch,
+                    &FeedUpsertRow {
+                        item,
+                        repo_path,
+                        base_branch,
+                        labels_json,
+                    },
                 )?;
             }
 

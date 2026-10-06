@@ -1059,7 +1059,7 @@ fn tree_context_holds(
 }
 
 fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyAction {
-    use crate::keybindings::{key_label, key_name, lookup, KeyNamespace, KEY_BINDINGS};
+    use crate::keybindings::{lookup, KeyNamespace, KEY_BINDINGS};
     // Any key acknowledges a notice — docs/specs/agent-tree.allium's
     // ClearAgentTreeErrorNotice. Cleared before dispatching, so a key that sets
     // a fresh one wins.
@@ -1072,17 +1072,9 @@ fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyA
     // AgentTreeGgChordNeverExpires in docs/specs/agent-tree.allium — there is
     // no deadline, so the only thing that can end a pending chord is the next
     // key, whenever it comes.
-    let was_pending_g = std::mem::take(&mut state.pending_g);
-    let mut name = key_name(key);
-    let mut label = key_label(key);
-    if name == "g" {
-        if !was_pending_g {
-            state.pending_g = true;
-            return KeyAction::Continue;
-        }
-        name = "gg".to_string();
-        label = "gg".to_string();
-    }
+    let Some((name, label)) = resolve_gg_chord(state, key) else {
+        return KeyAction::Continue;
+    };
 
     // The table decides which action this press runs: the pane-wide keys are
     // rows in both sections (AgentKeysFollowFocus), the cursor keys rows of
@@ -1097,8 +1089,42 @@ fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyA
         return KeyAction::Continue;
     };
     let action = row.action;
+    match run_tree_action(state, root, ns, action, key) {
+        Some(result) => {
+            state.usage.push(crate::cli::pane_key_event(action, &label));
+            result
+        }
+        None => KeyAction::Continue,
+    }
+}
+
+/// The key's name and label after the `gg` chord is resolved, or `None` when
+/// the press only armed the chord and there is nothing to look up yet.
+fn resolve_gg_chord(state: &mut RenderState, key: KeyEvent) -> Option<(String, String)> {
+    use crate::keybindings::{key_label, key_name};
+    let was_pending_g = std::mem::take(&mut state.pending_g);
+    let name = key_name(key);
+    if name != "g" {
+        return Some((name, key_label(key)));
+    }
+    if !was_pending_g {
+        state.pending_g = true;
+        return None;
+    }
+    Some(("gg".to_string(), "gg".to_string()))
+}
+
+/// Run one resolved action. `None` means the action had no effect (nothing to
+/// jump to, or an unknown id), so the press records no usage event.
+fn run_tree_action(
+    state: &mut RenderState,
+    root: &TreeNode,
+    ns: crate::keybindings::KeyNamespace,
+    action: &str,
+    key: KeyEvent,
+) -> Option<KeyAction> {
+    use crate::keybindings::KeyNamespace;
     let half_page = state.half_page();
-    let mut took_effect = true;
     let result = match action {
         "exit_pane" => KeyAction::Exit,
         "toggle_focus" => {
@@ -1192,22 +1218,10 @@ fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyA
             state.tree_state.toggle_selected();
             KeyAction::Continue
         }
-        "jump_to_agent" => match state.agents.jump_target() {
-            Some(window) => KeyAction::JumpTo(window),
-            None => {
-                took_effect = false;
-                KeyAction::Continue
-            }
-        },
-        _ => {
-            took_effect = false;
-            KeyAction::Continue
-        }
+        "jump_to_agent" => return state.agents.jump_target().map(KeyAction::JumpTo),
+        _ => return None,
     };
-    if took_effect {
-        state.usage.push(crate::cli::pane_key_event(action, &label));
-    }
-    result
+    Some(result)
 }
 
 /// Everything the loop needs to keep the diff pane in step with the open set:

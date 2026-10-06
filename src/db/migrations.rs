@@ -583,12 +583,17 @@ fn migrate_v17_add_conflict_sub_status(conn: &Connection) -> Result<()> {
     .context("Failed to rebuild tasks table for migration 17 (add conflict sub_status)")
 }
 
+/// `$HOME/` as the replacement for a leading `~/`, or `None` when `$HOME` is
+/// unset. The one place the tilde-expanding migrations read the environment.
+fn home_prefix() -> Option<String> {
+    let home = std::env::var_os("HOME")?;
+    Some(format!("{}/", home.to_string_lossy()))
+}
+
 fn migrate_v18_expand_tilde_paths(conn: &Connection) -> Result<()> {
     // Expand ~/... to $HOME/... in all repo_path columns.
     // This prevents filter mismatches between tilde and absolute forms.
-    if let Some(home) = std::env::var_os("HOME") {
-        let home = home.to_string_lossy();
-        let prefix = format!("{home}/");
+    if let Some(prefix) = home_prefix() {
         conn.execute(
             "UPDATE tasks SET repo_path = ?1 || substr(repo_path, 3) WHERE repo_path LIKE '~/%'",
             params![prefix],
@@ -847,10 +852,7 @@ fn migrate_v31_re_expand_tilde_paths(conn: &Connection) -> Result<()> {
     // Re-expand ~/... to $HOME/... in all path columns.
     // Migration v18 did this once, but paths saved between v18 and the
     // expand_tilde-on-write fix (commit fd26d80) may still contain tildes.
-    if let Some(home) = std::env::var_os("HOME") {
-        let home = home.to_string_lossy();
-        let prefix = format!("{home}/");
-
+    if let Some(prefix) = home_prefix() {
         // Simple text columns: tasks.repo_path, epics.repo_path, repo_paths.path
         conn.execute(
             "UPDATE tasks SET repo_path = ?1 || substr(repo_path, 3) WHERE repo_path LIKE '~/%'",

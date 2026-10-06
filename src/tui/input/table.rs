@@ -305,144 +305,29 @@ impl App {
         key: KeyEvent,
         label: &str,
     ) -> Vec<Command> {
-        use crate::tui::messages::{InputMessage, SystemMessage, TaskMessage};
+        use crate::tui::messages::SystemMessage;
         use KeyNamespace as N;
         let action = b.action;
         if !b.records_usage {
             return self.run_text_edit(ns, action);
         }
-        let msg_keyed = |app: &mut App, msg: Message| app.dispatch_keyed(msg, action, label);
         match ns {
             N::BoardNormal => self.run_normal(b, key, label),
-            N::BoardDetail => match action {
-                "close_detail" => msg_keyed(self, Message::Task(TaskMessage::CloseDetail)),
-                "scroll_detail" => {
-                    let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
-                    if let ViewMode::TaskDetail {
-                        scroll, max_scroll, ..
-                    } = &mut self.board.view_mode
-                    {
-                        *scroll = if down {
-                            scroll.saturating_add(1).min(*max_scroll)
-                        } else {
-                            scroll.saturating_sub(1)
-                        };
-                    }
-                    vec![key_event(action, label)]
-                }
-                "zoom_detail" => {
-                    if let ViewMode::TaskDetail { zoomed, .. } = &mut self.board.view_mode {
-                        *zoomed = !*zoomed;
-                    }
-                    vec![key_event(action, label)]
-                }
-                _ => vec![],
-            },
-            N::BoardSearch => {
-                match action {
-                    "search_cancel" => {
-                        self.search.query = self.search.saved.take().unwrap_or_default();
-                        self.input.mode = InputMode::Normal;
-                    }
-                    "search_commit" => {
-                        self.search.saved = None;
-                        self.input.mode = InputMode::Normal;
-                    }
-                    _ => return vec![],
-                }
-                // The query may have changed: recompute filtered columns.
-                self.sync_board_selection();
-                vec![key_event(action, label)]
+            N::BoardDetail => self.run_detail(action, key, label),
+            N::BoardSearch => self.run_search(action, label),
+            N::BoardHelp => self.run_help(action, key, label),
+            N::BoardError => {
+                self.dispatch_keyed(Message::System(SystemMessage::DismissError), action, label)
             }
-            N::BoardHelp => match action {
-                "close_help" => msg_keyed(self, Message::System(SystemMessage::ToggleHelp)),
-                "scroll_help" => {
-                    let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
-                    let max = self.interaction.help_max_scroll.get().unwrap_or(usize::MAX);
-                    let now = self.interaction.help_scroll;
-                    self.interaction.help_scroll = if down {
-                        now.saturating_add(1).min(max)
-                    } else {
-                        now.saturating_sub(1)
-                    };
-                    vec![key_event(action, label)]
-                }
-                _ => vec![],
-            },
-            N::BoardError => msg_keyed(self, Message::System(SystemMessage::DismissError)),
-            N::BoardText | N::BoardPickerRepoPath | N::BoardPickerBaseBranch => match action {
-                "picker_move_cursor" => {
-                    let delta = if key.code == KeyCode::Down { 1 } else { -1 };
-                    msg_keyed(
-                        self,
-                        Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(
-                            delta,
-                        )),
-                    )
-                }
-                "cancel_input" => msg_keyed(self, Message::Input(InputMessage::CancelInput)),
-                "submit_input" => {
-                    // Typing is data entry, not a keybinding use: only the
-                    // commit and the cancel of a text mode are recorded.
-                    let mut cmds = self.submit_text_input();
-                    cmds.push(key_event(action, label));
-                    cmds
-                }
-                _ => vec![],
-            },
+            N::BoardText | N::BoardPickerRepoPath | N::BoardPickerBaseBranch => {
+                self.run_text_mode(action, key, label)
+            }
             N::BoardRepoFilter => self.handle_key_repo_filter(key, action, label),
             N::BoardPickerTag => self.run_tag_picker(action, key, label),
             N::BoardPickerWrapUpMode => self.run_wrap_up_picker(action, key, label),
-            N::BoardPickerQuickDispatch => match action {
-                "quick_dispatch_cancel" => {
-                    msg_keyed(self, Message::Input(InputMessage::CancelInput))
-                }
-                "quick_dispatch_move_cursor" => {
-                    let delta = if key.code == KeyCode::Down { 1 } else { -1 };
-                    msg_keyed(
-                        self,
-                        Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(
-                            delta,
-                        )),
-                    )
-                }
-                "quick_dispatch_select" => {
-                    let idx = self.input.repo_cursor;
-                    msg_keyed(
-                        self,
-                        Message::Input(InputMessage::SelectQuickDispatchRepo(idx)),
-                    )
-                }
-                _ => vec![],
-            },
-            N::BoardPickerMoveToEpic => {
-                use crate::tui::messages::TaskMessage::*;
-                match action {
-                    "move_to_epic_picker_navigate" => match tree_nav_for(key) {
-                        Some(nav) => msg_keyed(self, Message::Task(MoveToEpicNavigate(nav))),
-                        None => vec![],
-                    },
-                    "move_to_epic_picker_confirm" => {
-                        msg_keyed(self, Message::Task(MoveToEpicConfirm))
-                    }
-                    "move_to_epic_picker_cancel" => {
-                        msg_keyed(self, Message::Task(MoveToEpicCancel))
-                    }
-                    _ => vec![],
-                }
-            }
-            N::BoardPickerReparentEpic => {
-                use crate::tui::messages::EpicMessage::*;
-                match action {
-                    "reparent_picker_navigate" => match tree_nav_for(key) {
-                        Some(nav) => msg_keyed(self, Message::Epic(ReparentNavigate(nav))),
-                        None => vec![],
-                    },
-                    "reparent_picker_confirm" => msg_keyed(self, Message::Epic(ReparentConfirm)),
-                    "reparent_picker_cancel" => msg_keyed(self, Message::Epic(ReparentCancel)),
-                    _ => vec![],
-                }
-            }
+            N::BoardPickerQuickDispatch => self.run_quick_dispatch_picker(action, key, label),
+            N::BoardPickerMoveToEpic => self.run_move_to_epic_picker(action, key, label),
+            N::BoardPickerReparentEpic => self.run_reparent_picker(action, key, label),
             N::BoardConfirmMoveToEpic => {
                 use crate::tui::messages::TaskMessage::*;
                 let msg = match action {
@@ -450,7 +335,7 @@ impl App {
                     "confirm_move_task_to_epic_no" => MoveToEpicCancel,
                     _ => MoveToEpicCancelAll,
                 };
-                msg_keyed(self, Message::Task(msg))
+                self.dispatch_keyed(Message::Task(msg), action, label)
             }
             N::BoardConfirmReparentEpic => {
                 use crate::tui::messages::EpicMessage::*;
@@ -459,7 +344,7 @@ impl App {
                     "confirm_reparent_epic_no" => ReparentCancel,
                     _ => ReparentCancelAll,
                 };
-                msg_keyed(self, Message::Epic(msg))
+                self.dispatch_keyed(Message::Epic(msg), action, label)
             }
             N::BoardConfirmRetry => match self.input.mode.clone() {
                 InputMode::ConfirmRetry(id) => self.handle_key_confirm_retry(label, action, id),
@@ -475,39 +360,207 @@ impl App {
             | N::BoardConfirmDeleteRepoPath
             | N::BoardConfirmTrustRepo
             | N::BoardConfirmTrustRepoQuickDispatch
-            | N::BoardConfirmRepoSync => {
-                let yes = action.ends_with("_yes");
-                match self.input.mode.clone() {
-                    InputMode::ConfirmQuit => self.handle_key_confirm_quit(label, yes),
-                    InputMode::ConfirmDeleteTask(id) => {
-                        self.handle_key_confirm_delete_task(label, yes, id)
-                    }
-                    InputMode::ConfirmBatchDelete => {
-                        self.handle_key_confirm_batch_delete(label, yes)
-                    }
-                    InputMode::ConfirmDeleteEpic => self.handle_key_confirm_delete_epic(label, yes),
-                    InputMode::ConfirmDone => self.handle_key_confirm_done(label, yes),
-                    InputMode::ConfirmDetachTmux(_) => {
-                        self.handle_key_confirm_detach_tmux(label, yes)
-                    }
-                    InputMode::ConfirmOverrideFeedOwner { .. } => {
-                        self.handle_key_confirm_override_feed_owner(label, yes)
-                    }
-                    InputMode::ConfirmDeleteRepoPath => {
-                        self.handle_key_confirm_delete_repo_path(label, yes)
-                    }
-                    InputMode::ConfirmTrustRepo { task_id, mode } => {
-                        self.handle_key_confirm_trust_repo(label, yes, task_id, mode)
-                    }
-                    InputMode::ConfirmTrustRepoQuickDispatch { draft, epic_id } => self
-                        .handle_key_confirm_trust_repo_quick_dispatch(label, yes, draft, epic_id),
-                    InputMode::ConfirmRepoSync { repo_path } => {
-                        self.handle_key_confirm_repo_sync(label, yes, repo_path)
-                    }
-                    _ => vec![],
-                }
-            }
+            | N::BoardConfirmRepoSync => self.run_confirm(action.ends_with("_yes"), label),
             N::AgentTreeTree | N::AgentTreeAgents | N::AgentDiff | N::TmuxGlobal => vec![],
+        }
+    }
+
+    /// The task detail view: close, scroll, zoom.
+    fn run_detail(&mut self, action: &'static str, key: KeyEvent, label: &str) -> Vec<Command> {
+        use crate::tui::messages::TaskMessage;
+        match action {
+            "close_detail" => {
+                self.dispatch_keyed(Message::Task(TaskMessage::CloseDetail), action, label)
+            }
+            "scroll_detail" => {
+                let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
+                if let ViewMode::TaskDetail {
+                    scroll, max_scroll, ..
+                } = &mut self.board.view_mode
+                {
+                    *scroll = if down {
+                        scroll.saturating_add(1).min(*max_scroll)
+                    } else {
+                        scroll.saturating_sub(1)
+                    };
+                }
+                vec![key_event(action, label)]
+            }
+            "zoom_detail" => {
+                if let ViewMode::TaskDetail { zoomed, .. } = &mut self.board.view_mode {
+                    *zoomed = !*zoomed;
+                }
+                vec![key_event(action, label)]
+            }
+            _ => vec![],
+        }
+    }
+
+    /// The `/` search prompt: commit keeps the query, cancel restores the saved one.
+    fn run_search(&mut self, action: &'static str, label: &str) -> Vec<Command> {
+        match action {
+            "search_cancel" => {
+                self.search.query = self.search.saved.take().unwrap_or_default();
+                self.input.mode = InputMode::Normal;
+            }
+            "search_commit" => {
+                self.search.saved = None;
+                self.input.mode = InputMode::Normal;
+            }
+            _ => return vec![],
+        }
+        // The query may have changed: recompute filtered columns.
+        self.sync_board_selection();
+        vec![key_event(action, label)]
+    }
+
+    /// The help overlay: close and scroll.
+    fn run_help(&mut self, action: &'static str, key: KeyEvent, label: &str) -> Vec<Command> {
+        use crate::tui::messages::SystemMessage;
+        match action {
+            "close_help" => {
+                self.dispatch_keyed(Message::System(SystemMessage::ToggleHelp), action, label)
+            }
+            "scroll_help" => {
+                let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
+                let max = self.interaction.help_max_scroll.get().unwrap_or(usize::MAX);
+                let now = self.interaction.help_scroll;
+                self.interaction.help_scroll = if down {
+                    now.saturating_add(1).min(max)
+                } else {
+                    now.saturating_sub(1)
+                };
+                vec![key_event(action, label)]
+            }
+            _ => vec![],
+        }
+    }
+
+    /// The text-entry modes and the repo / base-branch pickers.
+    fn run_text_mode(&mut self, action: &'static str, key: KeyEvent, label: &str) -> Vec<Command> {
+        use crate::tui::messages::InputMessage;
+        match action {
+            "picker_move_cursor" => self.move_repo_cursor(action, key, label),
+            "cancel_input" => {
+                self.dispatch_keyed(Message::Input(InputMessage::CancelInput), action, label)
+            }
+            "submit_input" => {
+                // Typing is data entry, not a keybinding use: only the
+                // commit and the cancel of a text mode are recorded.
+                let mut cmds = self.submit_text_input();
+                cmds.push(key_event(action, label));
+                cmds
+            }
+            _ => vec![],
+        }
+    }
+
+    /// Move the repo list cursor one row for an Up / Down press.
+    fn move_repo_cursor(
+        &mut self,
+        action: &'static str,
+        key: KeyEvent,
+        label: &str,
+    ) -> Vec<Command> {
+        let delta = if key.code == KeyCode::Down { 1 } else { -1 };
+        self.dispatch_keyed(
+            Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(delta)),
+            action,
+            label,
+        )
+    }
+
+    /// The quick-dispatch repo picker.
+    fn run_quick_dispatch_picker(
+        &mut self,
+        action: &'static str,
+        key: KeyEvent,
+        label: &str,
+    ) -> Vec<Command> {
+        use crate::tui::messages::InputMessage;
+        match action {
+            "quick_dispatch_cancel" => {
+                self.dispatch_keyed(Message::Input(InputMessage::CancelInput), action, label)
+            }
+            "quick_dispatch_move_cursor" => self.move_repo_cursor(action, key, label),
+            "quick_dispatch_select" => {
+                let idx = self.input.repo_cursor;
+                self.dispatch_keyed(
+                    Message::Input(InputMessage::SelectQuickDispatchRepo(idx)),
+                    action,
+                    label,
+                )
+            }
+            _ => vec![],
+        }
+    }
+
+    /// The "move task to epic" tree picker.
+    fn run_move_to_epic_picker(
+        &mut self,
+        action: &'static str,
+        key: KeyEvent,
+        label: &str,
+    ) -> Vec<Command> {
+        use crate::tui::messages::TaskMessage::*;
+        let msg = match action {
+            "move_to_epic_picker_navigate" => match tree_nav_for(key) {
+                Some(nav) => MoveToEpicNavigate(nav),
+                None => return vec![],
+            },
+            "move_to_epic_picker_confirm" => MoveToEpicConfirm,
+            "move_to_epic_picker_cancel" => MoveToEpicCancel,
+            _ => return vec![],
+        };
+        self.dispatch_keyed(Message::Task(msg), action, label)
+    }
+
+    /// The "reparent epic" tree picker.
+    fn run_reparent_picker(
+        &mut self,
+        action: &'static str,
+        key: KeyEvent,
+        label: &str,
+    ) -> Vec<Command> {
+        use crate::tui::messages::EpicMessage::*;
+        let msg = match action {
+            "reparent_picker_navigate" => match tree_nav_for(key) {
+                Some(nav) => ReparentNavigate(nav),
+                None => return vec![],
+            },
+            "reparent_picker_confirm" => ReparentConfirm,
+            "reparent_picker_cancel" => ReparentCancel,
+            _ => return vec![],
+        };
+        self.dispatch_keyed(Message::Epic(msg), action, label)
+    }
+
+    /// The yes / no confirmation modes. The input mode says which confirmation
+    /// is open; the key only says yes or no.
+    fn run_confirm(&mut self, yes: bool, label: &str) -> Vec<Command> {
+        match self.input.mode.clone() {
+            InputMode::ConfirmQuit => self.handle_key_confirm_quit(label, yes),
+            InputMode::ConfirmDeleteTask(id) => self.handle_key_confirm_delete_task(label, yes, id),
+            InputMode::ConfirmBatchDelete => self.handle_key_confirm_batch_delete(label, yes),
+            InputMode::ConfirmDeleteEpic => self.handle_key_confirm_delete_epic(label, yes),
+            InputMode::ConfirmDone => self.handle_key_confirm_done(label, yes),
+            InputMode::ConfirmDetachTmux(_) => self.handle_key_confirm_detach_tmux(label, yes),
+            InputMode::ConfirmOverrideFeedOwner { .. } => {
+                self.handle_key_confirm_override_feed_owner(label, yes)
+            }
+            InputMode::ConfirmDeleteRepoPath => {
+                self.handle_key_confirm_delete_repo_path(label, yes)
+            }
+            InputMode::ConfirmTrustRepo { task_id, mode } => {
+                self.handle_key_confirm_trust_repo(label, yes, task_id, mode)
+            }
+            InputMode::ConfirmTrustRepoQuickDispatch { draft, epic_id } => {
+                self.handle_key_confirm_trust_repo_quick_dispatch(label, yes, draft, epic_id)
+            }
+            InputMode::ConfirmRepoSync { repo_path } => {
+                self.handle_key_confirm_repo_sync(label, yes, repo_path)
+            }
+            _ => vec![],
         }
     }
 
