@@ -88,6 +88,28 @@ impl App {
                 cmds.push(key_event(action, label));
                 cmds
             }
+            "exit_all_epics" => keyed(self, Message::Epic(EpicMessage::ExitAll)),
+            "jump_to_task_epic" => match self.selected_task().and_then(|t| t.epic_id) {
+                Some(id) => keyed(self, Message::Epic(EpicMessage::JumpTo(id))),
+                None => vec![],
+            },
+            "jump_to_deepest_epic" => {
+                let target = self
+                    .selected_epic_id()
+                    .zip(self.selected_column_status())
+                    .map(|(id, status)| {
+                        crate::models::deepest_epic_with(
+                            id,
+                            status,
+                            &self.board.epics,
+                            &self.board.tasks,
+                        )
+                    });
+                match target {
+                    Some(id) => keyed(self, Message::Epic(EpicMessage::JumpTo(id))),
+                    None => vec![],
+                }
+            }
             "enter_epic" => match self.selected_epic_id() {
                 Some(id) => keyed(self, Message::Epic(EpicMessage::Enter(id))),
                 None => vec![],

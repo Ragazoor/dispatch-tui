@@ -1186,6 +1186,19 @@ impl App {
         self.epic_folds.toggle(status, epic);
     }
 
+    /// The status of the column the cursor is in, or `None` on the select-all
+    /// column.
+    pub(in crate::tui) fn selected_column_status(&self) -> Option<TaskStatus> {
+        let col = self.selection().column();
+        TaskStatus::from_column_index(col.checked_sub(1)?)
+    }
+
+    /// Whether the cursor is in a column flattened mode applies to.
+    pub(in crate::tui) fn cursor_in_flattened_column(&self) -> bool {
+        self.selected_column_status()
+            .is_some_and(|s| self.is_flattened_for_status(s))
+    }
+
     /// Whether flattened mode applies to `status`. The exempt columns live on
     /// [`TaskStatus::UNFLATTENED`], so this is only the mode half of the
     /// question; nothing here restates which columns those are.

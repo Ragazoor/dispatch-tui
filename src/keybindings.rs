@@ -245,6 +245,8 @@ pub enum KeyContext {
     OnFoldedEpicGroup,
     OnEpicCard,
     OnTaskCard,
+    OnFlattenedTaskCard,
+    OnUnflattenedTaskCard,
     OffEpicCard,
     OnDirectory,
     OnFile,
@@ -276,6 +278,8 @@ impl KeyContext {
             Self::OnFoldedEpicGroup => "on a folded epic group",
             Self::OnEpicCard => "on an epic card",
             Self::OnTaskCard => "on a task card",
+            Self::OnFlattenedTaskCard => "on a task card in a flattened column",
+            Self::OnUnflattenedTaskCard => "on a task card in a column that is not flattened",
             Self::OffEpicCard => "anywhere but an epic card",
             Self::OnDirectory => "on a directory",
             Self::OnFile => "on a file",
@@ -316,7 +320,13 @@ impl KeyContext {
             SearchActive | InsideEpicView | EpicViewNoSearch | TopLevel | WithSelection => {
                 ContextAxis::View
             }
-            OnColumnSelectAll | OnFoldedSection | OnFoldedEpicGroup | OnEpicCard | OnTaskCard
+            OnColumnSelectAll
+            | OnFoldedSection
+            | OnFoldedEpicGroup
+            | OnEpicCard
+            | OnTaskCard
+            | OnFlattenedTaskCard
+            | OnUnflattenedTaskCard
             | OffEpicCard => ContextAxis::Cursor,
             TaskOnOtherMachine | TaskPinnedInSplit | TaskWindowSplitOpen | TaskWithWindow
             | BacklogTask | StuckTask | TaskDispatching | TaskWithWorktree
@@ -344,7 +354,12 @@ pub fn contexts_overlap(a: KeyContext, b: KeyContext) -> bool {
         }
         // A ladder rung is a task card, so only a cursor context that can be
         // a task card holds with it.
-        let cursor_with_ladder = |c: KeyContext| matches!(c, OnTaskCard | OffEpicCard);
+        let cursor_with_ladder = |c: KeyContext| {
+            matches!(
+                c,
+                OnTaskCard | OnFlattenedTaskCard | OnUnflattenedTaskCard | OffEpicCard
+            )
+        };
         return match (xa, xb) {
             (ContextAxis::Cursor, ContextAxis::Ladder) => cursor_with_ladder(a),
             (ContextAxis::Ladder, ContextAxis::Cursor) => cursor_with_ladder(b),
@@ -359,15 +374,23 @@ pub fn contexts_overlap(a: KeyContext, b: KeyContext) -> bool {
                 || pair(InsideEpicView, EpicViewNoSearch)
                 || pair(TopLevel, WithSelection)
         }
-        // OffEpicCard is every cursor position except an epic card.
-        ContextAxis::Cursor => [
-            OnColumnSelectAll,
-            OnFoldedSection,
-            OnFoldedEpicGroup,
-            OnTaskCard,
-        ]
-        .iter()
-        .any(|c| pair(OffEpicCard, *c)),
+        // OffEpicCard is every cursor position except an epic card; a task
+        // card is on exactly one of the flattened / unflattened contexts.
+        ContextAxis::Cursor => {
+            [
+                OnColumnSelectAll,
+                OnFoldedSection,
+                OnFoldedEpicGroup,
+                OnTaskCard,
+                OnFlattenedTaskCard,
+                OnUnflattenedTaskCard,
+            ]
+            .iter()
+            .any(|c| pair(OffEpicCard, *c))
+                || [OnFlattenedTaskCard, OnUnflattenedTaskCard]
+                    .iter()
+                    .any(|c| pair(OnTaskCard, *c))
+        }
         // The rungs are one evaluated order, so no two hold together.
         ContextAxis::Ladder | ContextAxis::PaneRow | ContextAxis::Zoom => false,
     }
@@ -505,6 +528,12 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "exit_epic",
         "Leave the epic view and return to the board",
     ),
+    normal(
+        &["Q"],
+        Some(C::InsideEpicView),
+        "exit_all_epics",
+        "Leave every epic view and return to the board",
+    ),
     normal(&["q"], Some(C::TopLevel), "quit", "Quit dispatch"),
     normal(
         &["Esc"],
@@ -551,9 +580,27 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     normal(
         &["Enter"],
+        Some(C::OnUnflattenedTaskCard),
+        "open_task_detail",
+        "Open the task detail panel",
+    ),
+    normal(
+        &["i"],
         Some(C::OnTaskCard),
         "open_task_detail",
         "Open the task detail panel",
+    ),
+    normal(
+        &["Enter"],
+        Some(C::OnFlattenedTaskCard),
+        "jump_to_task_epic",
+        "Jump to the epic the task belongs to; does nothing for a task with no epic",
+    ),
+    normal(
+        &["Enter"],
+        Some(C::OnEpicCard),
+        "jump_to_deepest_epic",
+        "Jump to the deepest epic holding the work that puts this epic in the column",
     ),
     normal(
         &["Space"],

@@ -855,6 +855,16 @@ entity Epic {
     -- Every epic below this one, at any depth (this epic excluded).
     subtree_epics: sub_epics + sub_epics.flat_map(e => e.subtree_epics)
 
+    -- Where Enter on this epic's card lands (epics.allium: JumpToDeepestEpic).
+    -- Starting here: stay when the epic has a direct task with `status`;
+    -- otherwise step into the sub-epic whose subtree holds such a task,
+    -- provided exactly one does; stop at this epic when none or several do.
+    deepest_epic_with(status):
+        if subtasks.any(t => t.status = status): this
+        else if sub_epics.count(e => e.subtree_tasks.any(t => t.status = status)) = 1:
+            sub_epics.first(e => e.subtree_tasks.any(t => t.status = status)).deepest_epic_with(status)
+        else: this
+
     -- The epic whose feed cycle emits items filed under this one: this epic
     -- if it carries a feed_command, else the nearest ancestor that does, else
     -- null. A grouped feed's per-repo sub-epics and a role-routed feed's role

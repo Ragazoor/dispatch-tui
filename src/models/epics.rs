@@ -332,6 +332,64 @@ pub fn ancestor_titles<'a>(epic: &'a Epic, epics: &'a [Epic]) -> Vec<&'a str> {
     chain
 }
 
+/// The chain of epic ids from the root epic down to `target`, both included.
+/// Cycle-safe like [`ancestor_titles`].
+pub fn epic_path(target: EpicId, epics: &[Epic]) -> Vec<EpicId> {
+    let by_id = epic_id_lookup(epics);
+    let mut seen: HashSet<EpicId> = HashSet::new();
+    let mut chain = Vec::new();
+    let mut cursor = Some(target);
+    while let Some(id) = cursor {
+        if !seen.insert(id) {
+            break;
+        }
+        chain.push(id);
+        cursor = by_id.get(&id).and_then(|e| e.parent_epic_id);
+    }
+    chain.reverse();
+    chain
+}
+
+/// Where Enter on `root`'s card lands in the column `status`
+/// (`core/Epic.deepest_epic_with`): stay on an epic with a direct task in
+/// `status`, step into the one sub-epic whose subtree holds such a task, and
+/// stop at an epic where none or several sub-epics do.
+pub fn deepest_epic_with(
+    root: EpicId,
+    status: TaskStatus,
+    epics: &[Epic],
+    tasks: &[Task],
+) -> EpicId {
+    let children = build_children_map(epics);
+    let mut current = root;
+    // Each step moves strictly down the tree, so the bound only guards cycles.
+    for _ in 0..=epics.len() {
+        if tasks
+            .iter()
+            .any(|t| t.epic_id == Some(current) && t.status == status)
+        {
+            return current;
+        }
+        let carriers: Vec<EpicId> = children
+            .get(&current)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|&kid| {
+                let subtree = descendant_epic_ids_with_map(kid, &children);
+                tasks
+                    .iter()
+                    .any(|t| t.status == status && t.epic_id.is_some_and(|e| subtree.contains(&e)))
+            })
+            .collect();
+        match carriers.as_slice() {
+            [only] => current = *only,
+            _ => return current,
+        }
+    }
+    current
+}
+
 /// Collect all tasks whose `epic_id` is in the subtree rooted at `root`.
 ///
 /// Returns every task directly under `root` or under any of its descendant

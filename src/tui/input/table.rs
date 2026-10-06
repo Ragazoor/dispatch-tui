@@ -148,6 +148,14 @@ impl App {
             C::OnFoldedEpicGroup => self.cursor_is_on_folded_epic_header(),
             C::OnEpicCard => self.selected_epic_id().is_some(),
             C::OnTaskCard => matches!(self.selected_column_item(), Some(ColumnItem::Task(_))),
+            C::OnFlattenedTaskCard => {
+                matches!(self.selected_column_item(), Some(ColumnItem::Task(_)))
+                    && self.cursor_in_flattened_column()
+            }
+            C::OnUnflattenedTaskCard => {
+                matches!(self.selected_column_item(), Some(ColumnItem::Task(_)))
+                    && !self.cursor_in_flattened_column()
+            }
             C::OffEpicCard => self.selected_epic_id().is_none(),
             // Agent-tree pane contexts: the board has no file tree.
             C::OnDirectory | C::OnFile => false,

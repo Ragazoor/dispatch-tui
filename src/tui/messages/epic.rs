@@ -12,6 +12,11 @@ use crate::tui::App;
 pub enum EpicMessage {
     Enter(EpicId),
     Exit,
+    /// Leave every epic view at once (`Q`).
+    ExitAll,
+    /// Open `target`'s epic view with every epic between the current view and
+    /// it on the trail (`epics.allium: Epic Navigation`).
+    JumpTo(EpicId),
     Refresh(Vec<Epic>),
     /// Splice a single fresh epic into `app.board.epics`.
     Updated(Epic),
@@ -49,6 +54,8 @@ impl EpicMessage {
         match self {
             EpicMessage::Enter(id) => app.handle_enter_epic(id),
             EpicMessage::Exit => app.handle_exit_epic(),
+            EpicMessage::ExitAll => app.handle_exit_all_epics(),
+            EpicMessage::JumpTo(target) => app.handle_jump_to_epic(target),
             EpicMessage::Refresh(epics) => app.handle_refresh_epics(epics),
             EpicMessage::Updated(epic) => app.handle_epic_updated(epic),
             EpicMessage::Created(epic) => app.handle_epic_created(epic),

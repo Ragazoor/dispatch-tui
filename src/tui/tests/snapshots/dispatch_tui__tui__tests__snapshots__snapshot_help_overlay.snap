@@ -28,15 +28,15 @@ expression: rendered
                         ║  Esc                                                                 ║
                         ║    Leave the epic view and return to the board                       ║
                         ║    (inside an epic view, no search active)                           ║
+                        ║  Q                                                                   ║
+                        ║    Leave every epic view and return to the board                     ║
+                        ║    (inside an epic view)                                             ║
                         ║  q                                                                   ║
                         ║    Quit dispatch                                                     ║
                         ║    (on the top-level board)                                          ║
                         ║  Esc                                                                 ║
                         ║    Clear the current selection                                       ║
                         ║    (on the top-level board, no search active, with cards selected or ║
-                        ║    the cursor on a select-all row)                                   ║
-                        ║  Enter                                                               ║
-                        ║    Toggle select-all for the column                                  ║
                         ╚══════════════════════════════════════════════════════════════════════╝
                               │                           │                              │
                               │                           │                              │

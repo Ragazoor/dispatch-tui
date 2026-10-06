@@ -1573,6 +1573,91 @@ rule ArchivedStatusMigration {
 }
 
 ------------------------------------------------------------
+-- Epic Navigation
+------------------------------------------------------------
+
+-- Walking down one epic at a time is the slow way to reach work buried in a
+-- deep tree. Three jumps shorten it, and one key undoes them. Every jump
+-- opens an epic view whose "trail" is the chain of epic views between the
+-- view the user pressed the key in and the epic landed on: one epic view per
+-- level, each ancestor of the target below the starting view included.
+-- Nothing the jump skips is lost — the trail is what makes q undo it a level
+-- at a time, exactly as if the user had walked down by hand.
+--
+-- The epic tree below is read as it stands when the key is pressed. A jump
+-- changes only which view is showing; no task or epic data changes.
+
+-- The deepest epic whose own card the user would have had to open to reach
+-- the work that earns `epic` its place in the column `status`. Starting at
+-- `epic`: while the epic has no direct task with that status and exactly one
+-- sub-epic whose subtree holds a task with that status, step into that
+-- sub-epic. Stop when the epic has a direct task with that status, or when
+-- two or more sub-epics hold such tasks (the branch point is the answer: the
+-- user chooses there), or when no sub-epic does (an epic whose own status
+-- came from its sub-epics' statuses with no task behind it stops here).
+-- The repo filter and the other board-wide filters are not consulted: the
+-- jump targets where the work is, not where it happens to be visible.
+-- That definition is core/Epic.deepest_epic_with(status).
+
+rule JumpToDeepestEpic {
+    when: UserJumpsIntoEpic(epic, column_status)
+
+    ensures:
+        ViewShowing(epic.deepest_epic_with(column_status))
+        -- The trail holds every epic from `epic` down to the target, so a
+        -- target equal to `epic` is the ordinary single-level entry.
+
+    @guidance
+        -- Enter on an epic card, in any column and in any view (main board
+        -- or inside an epic view). column_status is the column the card is
+        -- in. Space on the same card keeps its meaning: it enters `epic`
+        -- itself, one level, with no descent.
+}
+
+rule JumpToTaskEpic {
+    when: UserJumpsToTaskEpic(task)
+    requires: task.epic != null
+
+    ensures:
+        ViewShowing(task.epic)
+        -- The trail runs from the epic directly below the view the key was
+        -- pressed in (or from the root epic on the main board) down to
+        -- task.epic.
+
+    @guidance
+        -- Enter on a task card in a FLATTENED column (board-layout.allium:
+        -- FlattenedView.flattens). A task with no epic has nowhere to jump:
+        -- the press does nothing. A flattened column can show a task from
+        -- deeper than the current view, so the trail is longer than one
+        -- level whenever task.epic is not a direct child of the current epic.
+        -- In a column that is not flattened Enter keeps opening the task
+        -- detail panel; `i` opens it in every column.
+}
+
+rule ExitEpicOneLevel {
+    when: UserExitsEpicView(view)
+
+    ensures:
+        ViewShowing(view.parent)
+
+    @guidance
+        -- q (and Esc when no search is active) inside an epic view. Leaves
+        -- exactly one level of the trail, whether the level was entered by a
+        -- jump or by Space.
+}
+
+rule ExitAllEpics {
+    when: UserExitsAllEpicViews(view)
+
+    ensures:
+        ViewShowing(MainBoard)
+
+    @guidance
+        -- Q inside an epic view returns to the main board whatever the depth
+        -- of the trail. On the main board Q does nothing.
+}
+
+------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn enter_on_epic_toggles_detail() {
+fn enter_on_epic_opens_its_epic_view() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![make_epic(10)];
     // Epic is at row 0 in Backlog column (no standalone tasks)
@@ -10,8 +10,8 @@ fn enter_on_epic_toggles_detail() {
 
     app.handle_key(make_key(KeyCode::Enter));
     assert!(
-        matches!(app.board.view_mode, ViewMode::Board(_)),
-        "Should stay in board view — Enter on epic is a no-op until Task 5 input routing"
+        matches!(app.board.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)),
+        "Enter on an epic card jumps into the deepest epic holding its work"
     );
 }
 

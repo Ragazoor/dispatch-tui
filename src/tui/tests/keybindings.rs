@@ -192,6 +192,18 @@ fn app_for(binding: &KeyBinding) -> App {
             app
         }
         Some(C::OnEpicCard) => make_app_with_epic_selected(),
+        Some(C::OnFlattenedTaskCard) => {
+            let mut app = app_with_running_task(|t| t.epic_id = Some(EpicId(10)));
+            app.board.epics = vec![make_epic(10)];
+            app.board.flattened = true;
+            app
+        }
+        Some(C::OnUnflattenedTaskCard) => {
+            let mut app = make_app();
+            app.selection_mut().set_column(1);
+            app.selection_mut().set_row(1, 0);
+            app
+        }
         Some(C::OnTaskCard) | Some(C::OffEpicCard) | Some(C::TaskWithWindow) | None => match action
         {
             "refresh_feed" => feed_epic_app(),

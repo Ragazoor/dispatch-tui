@@ -33,6 +33,30 @@ impl App {
         vec![]
     }
 
+    pub(in crate::tui) fn handle_exit_all_epics(&mut self) -> Vec<Command> {
+        while matches!(self.board.view_mode, ViewMode::Epic { .. }) {
+            self.handle_exit_epic();
+        }
+        vec![]
+    }
+
+    /// Open `target`'s epic view, entering each epic between the current view
+    /// and `target` so that `q` climbs back one level at a time.
+    pub(in crate::tui) fn handle_jump_to_epic(&mut self, target: EpicId) -> Vec<Command> {
+        let path = crate::models::epic_path(target, &self.board.epics);
+        let below = match self
+            .current_epic_id()
+            .and_then(|cur| path.iter().position(|&e| e == cur))
+        {
+            Some(i) => &path[i + 1..],
+            None => &path[..],
+        };
+        for &id in below {
+            self.handle_enter_epic(id);
+        }
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_refresh_epics(&mut self, epics: Vec<Epic>) -> Vec<Command> {
         self.board.epics = epics;
         let valid_ids: HashSet<EpicId> = self.board.epics.iter().map(|e| e.id).collect();

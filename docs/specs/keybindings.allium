@@ -199,7 +199,7 @@ enum KeyReceiver { dispatch | tmux }
 -- whether an epic view is open and ignore search:
 --   search_active             "with a search active"            Esc: clear_search
 --                              (any view)
---   inside_epic_view          "inside an epic view"             q: exit_epic; U, R
+--   inside_epic_view          "inside an epic view"             q: exit_epic; Q: exit_all_epics; U, R
 --                              (search active or not)
 --   epic_view_no_search       "inside an epic view, no search   Esc: exit_epic
 --                              active"
@@ -224,14 +224,20 @@ enum KeyReceiver { dispatch | tmux }
 --   on_folded_epic_group      "on a folded epic group"          Enter / Space:
 --                                                                toggle_epic_fold
 --   on_epic_card              "on an epic card"                 Space: enter_epic;
+--                                                                Enter: jump_to_deepest_epic;
 --                                                                m: reparent_epic; H/L
---   on_task_card              "on a task card"                  Enter: open_task_detail;
+--   on_task_card              "on a task card"                  i: open_task_detail;
 --                                                                m: move_task_to_epic
+--   on_flattened_task_card    "on a task card in a flattened    Enter: jump_to_task_epic
+--                              column" (FlattenedView.flattens;  (does nothing when the task
+--                              a subset of on_task_card)         has no epic)
+--   on_unflattened_task_card  "on a task card in a column       Enter: open_task_detail
+--                              that is not flattened"
+--                              (the other part of on_task_card)
 --   off_epic_card             "anywhere but an epic card"       H/L: move_task_forward /
 --                              (a task card, or no card at all:   move_task_backward
 --                              an empty column, a folded
 --                              header, a select-all row)
---   Enter on an epic card has no row and does nothing.
 --   H/L on an epic card move that epic's status even with cards selected.
 --   Anywhere else (off_epic_card) they move the selection if there is one,
 --   else the card under the cursor, and record move_task_forward /
@@ -291,7 +297,8 @@ enum KeyContext {
     search_active | inside_epic_view | epic_view_no_search | top_level |
     with_selection |
     on_column_select_all | on_folded_section | on_folded_epic_group |
-    on_epic_card | on_task_card | off_epic_card |
+    on_epic_card | on_task_card | on_flattened_task_card |
+    on_unflattened_task_card | off_epic_card |
     on_directory | on_file |
     task_on_other_machine | task_pinned_in_split | task_window_split_open |
     task_with_window | backlog_task | stuck_task | task_dispatching |

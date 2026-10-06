@@ -9,6 +9,7 @@ mod delete;
 mod dispatch;
 mod done_ordering;
 mod epic_folds;
+mod epic_jump;
 mod epic_placement;
 mod epics;
 mod help_overlay;
