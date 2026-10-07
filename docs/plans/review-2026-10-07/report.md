@@ -14,7 +14,7 @@ Scope: whole repo at `main` 2e8d0715. Measured: `cargo clippy --all-targets -- -
 
 Layered, trait-seamed: `models` → store traits (`db`) → `service` → `mcp`/`tui`/`runtime`, with an Elm-style `App` core and the SpacetimeDB store behind `sync`. Applied consistently.
 
-- **Ports and SQLite adapter share `src/db` (Medium).** Every query method is `if let Some(port) = self.shared_*() { return … }` then an SQLite body (guards: `queries/tasks.rs` 35, `epics.rs` 14, `settings.rs` 14). Production always attaches ports (`src/runtime/mod.rs::StoreParts`), and `Database::open_in_memory` attaches the memory store too, so the SQLite bodies run only under `open_in_memory_unattached` tests. The layering is also inverted: `sync` imports helpers from `db` (`crate::db::bump_decode_fallback` in `sync/rows.rs` ×5 and `sync/decode.rs` ×3; `crate::db::parse_datetime` in `sync/decode.rs`). **Fix:** move the traits, patch/filter types and shared helpers to a `store` module; gate the SQLite adapter, `migrations.rs` and `queries/` behind `#[cfg(any(test, feature = "test-support"))]`.
+- **Ports and SQLite adapter share `src/db` (Medium).** Every query method is `if let Some(port) = self.shared_*() { return … }` then an SQLite body (guards: `queries/tasks.rs` 35, `epics.rs` 14, `settings.rs` 14). Production always attaches ports (`src/runtime/mod.rs::StoreParts`), and `Database::open_in_memory` attaches the memory store too, so the SQLite bodies run only under `open_in_memory_unattached` tests. The layering is also inverted: `sync` imports helpers from `db` (`crate::db::bump_decode_fallback` in `sync/rows.rs` ×5 and `sync/decode.rs` ×3; `crate::db::parse_datetime` in `sync/decode.rs`). **Fix (decided with the user, 2026-10-07): remove SQLite entirely**, not just gate it behind test-support. Move the traits, patch/filter types and shared helpers to a `store` module; move the tests that use `open_in_memory_unattached`/`Database::open` onto the in-memory store; delete the SQLite bodies, `migrations.rs`, `queries/`'s SQLite code, `spacetime::dump_from_sqlite` and the `rusqlite`/`tokio-rusqlite` dependencies; rewrite `storage.allium` to cover only the data directory.
 - **Production builds a SQLite schema for a placeholder (Medium).** `src/runtime/mod.rs::placeholder_database` calls `Database::open_in_memory_unattached`, which clones `SCHEMA_TEMPLATE`, built by replaying the full migration chain (`src/db/mod.rs`). It keeps `rusqlite` (`bundled`, `backup`) as a production dependency. Falls out of the item above.
 - **`Database::open(path)` is `pub` and ungated with no production caller (Low).** Only tests use it. Gate it with the adapter.
 - **MCP context resources read through two paths (Low).** `src/mcp/handlers/context.rs` lists the own task via `state.db.get_task` but reads it via `state.task_svc.get_task`; learnings are read via `state.db.get_learning` while every learnings handler uses `state.learning_svc`. Route both through the services so list and read cannot disagree.
@@ -70,7 +70,7 @@ Functions over 120 lines (production):
 
 ## 5. Magic wand: top 3
 
-1. **Split `src/db` into `store` (ports) and a test-only SQLite adapter.** Removes ~7k lines from the production build, the startup schema replay and `rusqlite` from release builds, fixes the `sync → db` inversion, and stops dead bodies counting against coverage.
+1. **Split the ports out of `src/db` into `store` and remove SQLite entirely.** Removes ~7k lines, the startup schema replay and `rusqlite` from release builds, fixes the `sync → db` inversion, and stops dead bodies counting against coverage.
 2. **Split `sync/sdk_connector.rs` by concern and cover it with the fake connector.** The last god file on the live data path, and the least-tested one.
 3. **Make the docs describe the store that exists.** `CLAUDE.md`, `docs/module-map.md`, `docs/invariants.md` still describe a SQLite board read path; agents start every session from these.
 
@@ -95,6 +95,6 @@ Related docs: `docs/module-map.md` has no row for `src/spacetime/`, `src/startup
 4. Dedupe the `sync/rows.rs` drop block and the hex helpers; use status constants in the module.
 
 **Larger efforts**
-5. Split `src/db` into a `store` ports module and a test-gated SQLite adapter; re-measure coverage and recalibrate the floor deliberately.
+5. Split the store ports out of `src/db` into a `store` module and remove SQLite entirely; re-measure coverage and recalibrate the floor deliberately.
 6. Split `sync/sdk_connector.rs` and raise its coverage.
 7. Split the three new long functions (`column_items_for_status_with_view_tasks`, `run_normal`, `render_task_detail_overlay`) and `bootstrap_inner`; move inline test modules out of the large production files.
