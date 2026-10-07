@@ -286,7 +286,7 @@ async fn unfollowing_the_last_epic_reasserts_with_an_empty_list() {
 /// `sync.allium: AnUnfollowReassertsTheWholeAsk`'s "DOES NOT FIRE ON A FOLLOW"
 /// clause. Growing the followed set is already live via the connector's own
 /// widen path (`ASubscriptionRowWidensTheAsk`, `follow_epic` in
-/// `sdk_connector.rs`) — a `StoreConnector` under this trait never sees that
+/// `sdk_connector/`) — a `StoreConnector` under this trait never sees that
 /// widening, so if the session ALSO reasserted on growth it would be a second,
 /// redundant full resubscribe on every follow. It must not.
 #[tokio::test]

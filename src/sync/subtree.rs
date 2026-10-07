@@ -4,7 +4,7 @@
 //! `ASubEpicOfAFollowedEpicIsAskedForToo`. Following an epic follows its whole
 //! sub-epic tree, at any depth — but the store's SQL cannot walk a parent
 //! chain, so the board walks it: each covered epic is asked for by its direct
-//! sub-epics (`sdk_connector::subtree_queries`), and each sub-epic that
+//! sub-epics (`sdk_connector::queries::subtree_queries`), and each sub-epic that
 //! arrives under a covered parent becomes covered in turn.
 //!
 //! Pure bookkeeping, so the walk is testable without a store; the connector

@@ -102,7 +102,7 @@ enum ReducerDomain {
 
 -- The native in-process stand-in for a real SpacetimeDB reducer call. Lives
 -- at src/sync/memory_caller/mod.rs, beside the production adapter
--- (src/sync/sdk_connector.rs) that implements the same ReducerCaller trait
+-- (src/sync/sdk_connector/callers.rs) that implements the same ReducerCaller trait
 -- against a real server. Never runs inside SpacetimeDB and never uses a
 -- ReducerContext — it is an independent reimplementation, not the module
 -- code relocated.

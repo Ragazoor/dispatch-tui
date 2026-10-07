@@ -226,3 +226,88 @@ async fn a_request_that_cannot_be_sent_names_what_was_not_sent() {
         .unwrap_err();
     assert!(err.to_string().contains("could not send a save"));
 }
+
+// ---- The connector and caller with no live connection -----------------------
+//
+// Everything above exercises pure folding. These drive the `StoreConnector` and
+// `ReducerCaller` surfaces on a connector that was never connected, which is the
+// state every refusal path starts from and needs no server.
+
+mod unconnected {
+    use super::*;
+    use crate::models::TaskId;
+    use crate::sync::writes::{ReducerCaller, SettledIdentity};
+    use crate::sync::{SharedRows, StoreConnector, SubscriptionRequest};
+    use std::sync::Arc;
+
+    use super::super::{SdkReducerCaller, SpacetimeSdkConnector};
+
+    fn connector() -> Arc<SpacetimeSdkConnector> {
+        Arc::new(SpacetimeSdkConnector::new(
+            "dispatch",
+            Arc::new(SharedRows::new()),
+        ))
+    }
+
+    #[tokio::test]
+    async fn subscribing_before_connecting_is_refused_by_name() {
+        let error = connector()
+            .subscribe(&SubscriptionRequest::new("ab12", vec![], "host-1"))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("before connecting"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_reported_drop_is_handed_over_once() {
+        let connector = connector();
+        *connector.dropped.lock().unwrap() = Some("socket closed".into());
+        assert_eq!(
+            connector.take_drop().await.as_deref(),
+            Some("socket closed")
+        );
+        assert_eq!(connector.take_drop().await, None);
+    }
+
+    #[tokio::test]
+    async fn disconnecting_forgets_a_pending_drop() {
+        let connector = connector();
+        *connector.dropped.lock().unwrap() = Some("socket closed".into());
+        connector.disconnect().await;
+        assert_eq!(connector.take_drop().await, None);
+    }
+
+    #[tokio::test]
+    async fn connecting_to_nothing_reports_a_failure_not_a_connection() {
+        let connector = connector();
+        let result = connector.connect("http://127.0.0.1:1", None).await;
+        assert!(result.is_err());
+        assert!(connector.current().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_write_with_no_connection_says_nothing_was_queued() {
+        let status = Arc::new(SettledIdentity::default());
+        let caller = SdkReducerCaller::new(connector(), status);
+        let error = caller.delete_task(TaskId(1)).await.unwrap_err();
+        let text = error.to_string();
+        assert!(text.contains("not connected"), "{text}");
+        assert!(text.contains("nothing was queued"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_write_with_no_connection_quotes_the_recorded_outage() {
+        let status = Arc::new(SettledIdentity::default());
+        status.set_last_error(Some("connection refused".into()));
+        let caller = SdkReducerCaller::new(connector(), status);
+        let error = caller.delete_task(TaskId(1)).await.unwrap_err();
+        assert!(error.to_string().contains("connection refused"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_create_with_no_connection_is_refused_before_anything_is_sent() {
+        let caller = SdkReducerCaller::new(connector(), Arc::new(SettledIdentity::default()));
+        let error = caller.create_task(task("t")).await.unwrap_err();
+        assert!(error.to_string().contains("not connected"), "{error}");
+    }
+}

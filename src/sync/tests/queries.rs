@@ -38,7 +38,7 @@ fn a_board_with_no_epics_asks_only_for_its_own() {
 /// `sync.allium: SubscribeOnceIdentityIsSettled`'s `own_creations` — asked for
 /// unconditionally, unlike `epics` above, because the whole point is finding a
 /// task or epic this identity just made regardless of which epic it landed in
-/// or whether anyone follows it yet. See `src/sync/sdk_connector.rs::generated_id`
+/// or whether anyone follows it yet. See `src/sync/sdk_connector/outcome.rs::generated_id`
 /// for why the read-back needs this.
 #[test]
 fn own_creations_are_asked_for_even_with_nothing_followed() {
