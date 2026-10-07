@@ -552,7 +552,7 @@ async fn update_task_done_rejection_does_not_block_leaving_done() {
             .db_write()
             .patch_task(
                 task_id,
-                &db::TaskPatch::new()
+                &store::TaskPatch::new()
                     .status(TaskStatus::Done)
                     .completed_at(Some(finished))
                     .sort_order(Some(7)),

@@ -130,8 +130,8 @@ fn a_sub_epics_done_task_dates_the_parent_epic_card() {
 }
 
 /// A card the column cannot date sorts last, below every dated one — it is the
-/// card the column knows least about. Should not occur after
-/// `migrate_v99_add_completed_at`.
+/// card the column knows least about. Should not occur: every done row
+/// carries a completion time.
 #[test]
 fn an_undated_epic_with_no_dated_subtask_sorts_last() {
     let mut app = App::new(vec![

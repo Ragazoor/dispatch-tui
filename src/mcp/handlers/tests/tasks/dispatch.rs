@@ -49,7 +49,7 @@ async fn wait_for_task_changed(
 struct ChainFixture {
     _dir: tempfile::TempDir,
     repo_path: String,
-    db: Arc<dyn db::TaskStore>,
+    db: Arc<dyn store::TaskStore>,
     state: Arc<McpState>,
     notify_rx: tokio::sync::mpsc::UnboundedReceiver<crate::mcp::McpEvent>,
     /// The same runner the state holds, kept concrete so a test can inspect
@@ -204,7 +204,10 @@ impl ChainFixture {
             .await
             .unwrap();
         self.db
-            .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(auto_dispatch))
+            .patch_epic(
+                epic.id,
+                &store::EpicPatch::new().auto_dispatch(auto_dispatch),
+            )
             .await
             .unwrap();
         epic.id
@@ -517,7 +520,7 @@ async fn exit_session_chain_respects_tag_routing() {
     fx.db
         .patch_task(
             next,
-            &db::TaskPatch::new()
+            &store::TaskPatch::new()
                 .plan_path(None)
                 .tag(Some(crate::models::TaskTag::Research)),
         )
@@ -1159,7 +1162,7 @@ async fn dispatch_next_tool_no_longer_exists() {
 
 #[tokio::test]
 async fn wrap_up_rebase_preserves_tmux_window() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish().no_remote().shared_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -1190,7 +1193,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new()
+        &store::TaskPatch::new()
             .worktree(Some("/repo/.worktrees/1-rebase-preserve"))
             .tmux_window(Some(&test_tmux_window("task-99"))),
     )
@@ -1227,7 +1230,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
 
 #[tokio::test]
 async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish()
         .no_remote()
         .rebase_conflicts_in_stderr(&["foo.rs"])
@@ -1261,7 +1264,7 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-conflict-sub")),
+        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-conflict-sub")),
     )
     .await
     .unwrap();
@@ -1295,7 +1298,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
     // When a task has Conflict sub_status from a previous rebase attempt,
     // and a new rebase fails with a non-conflict error (e.g. Other), the
     // stale Conflict sub_status should be cleared — matching TUI behavior.
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     // This queue was stale before the script existed: it led with a
     // `detect_default_branch` response `finish_task` never asks for, and omitted
     // the dirty-worktree porcelain read, so every response after the first
@@ -1333,7 +1336,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new()
+        &store::TaskPatch::new()
             .worktree(Some("/repo/.worktrees/1-stale-conflict"))
             .sub_status(SubStatus::Conflict),
     )
@@ -1708,7 +1711,7 @@ async fn dispatch_task_respects_tag_routing() {
     fx.db
         .patch_task(
             task_id,
-            &db::TaskPatch::new()
+            &store::TaskPatch::new()
                 .plan_path(None)
                 .tag(Some(crate::models::TaskTag::Feature)),
         )
@@ -1736,7 +1739,7 @@ async fn dispatch_task_dependabot_tag_routes_through_dispatch_agent() {
     fx.db
         .patch_task(
             task_id,
-            &db::TaskPatch::new().tag(Some(crate::models::TaskTag::Dependabot)),
+            &store::TaskPatch::new().tag(Some(crate::models::TaskTag::Dependabot)),
         )
         .await
         .unwrap();

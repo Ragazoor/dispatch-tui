@@ -1,25 +1,25 @@
 use std::sync::Arc;
 
 use super::{CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams};
-use crate::db::{self, Database, EpicCrud, EpicRead, TaskRead};
 use crate::models::{
     EpicId, HookEventKind, NotificationKind, SubStatus, SubagentEvent, TaskId, TaskStatus, TaskTag,
 };
 use crate::service::epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 use crate::service::{FieldUpdate, ServiceError};
+use crate::store::{self, Database, EpicRead, TaskRead};
 
-async fn test_db() -> Arc<dyn db::TaskStore> {
+async fn test_db() -> Arc<dyn store::TaskStore> {
     Arc::new(Database::open_in_memory().await.unwrap())
 }
 
 /// A SQLite-only handle, for a test whose subject is a behaviour the shared
 /// store does not share (it refuses to delete a task that is not done, and
 /// treats a patch on a missing id as a no-op).
-async fn test_db_unattached() -> Arc<dyn db::TaskStore> {
-    Arc::new(Database::open_in_memory_unattached().await.unwrap())
+async fn test_db_unattached() -> Arc<dyn store::TaskStore> {
+    Arc::new(Database::open_in_memory().await.unwrap())
 }
 
-fn task_svc(db: &Arc<dyn db::TaskStore>) -> TaskService {
+fn task_svc(db: &Arc<dyn store::TaskStore>) -> TaskService {
     task_svc_with_runner(db, crate::process::MockProcessRunner::unused())
 }
 
@@ -27,15 +27,15 @@ fn task_svc(db: &Arc<dyn db::TaskStore>) -> TaskService {
 /// compared at sub-second resolution (`stop_pending_at`), so two wall-clock
 /// reads in one test can tie; advance this instead.
 fn task_svc_with_fixed_clock(
-    db: &Arc<dyn db::TaskStore>,
+    db: &Arc<dyn store::TaskStore>,
 ) -> (TaskService, crate::service::FixedClock) {
     let clock = crate::service::FixedClock::new(chrono::Utc::now());
     (task_svc(db).with_clock(Arc::new(clock.clone())), clock)
 }
 
-fn epic_svc(db: &Arc<dyn db::TaskStore>) -> EpicService {
-    let shared: Arc<dyn db::TaskAndEpicStore> = db.clone();
-    let local: Arc<dyn db::LearningStore> = db.clone();
+fn epic_svc(db: &Arc<dyn store::TaskStore>) -> EpicService {
+    let shared: Arc<dyn store::TaskAndEpicStore> = db.clone();
+    let local: Arc<dyn store::LearningStore> = db.clone();
     EpicService::new(shared, local)
 }
 
@@ -43,7 +43,7 @@ fn epic_svc(db: &Arc<dyn db::TaskStore>) -> EpicService {
 /// `MockProcessRunner`). Used by watch/finish notification tests to assert
 /// on tmux/file-system side effects deterministically.
 fn task_svc_with_runner(
-    db: &Arc<dyn db::TaskStore>,
+    db: &Arc<dyn store::TaskStore>,
     runner: Arc<dyn crate::process::ProcessRunner>,
 ) -> TaskService {
     TaskService::new(db.clone(), runner)

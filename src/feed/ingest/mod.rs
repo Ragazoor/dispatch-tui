@@ -25,8 +25,8 @@ mod tests;
 
 use role_routed::run_role_routed_feed_sync;
 
-use crate::db::{RemovedFeedTask, TaskStore};
 use crate::models::{EpicId, FeedItem};
+use crate::store::{RemovedFeedTask, TaskStore};
 use anyhow::Result;
 
 /// Whether a sync pass may act on what its emission OMITS.

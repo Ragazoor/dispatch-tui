@@ -116,7 +116,7 @@ impl TmuxWindow {
     }
 
     /// [`parse`] for a name the caller already owns — the DB read path, which
-    /// gets a `String` out of rusqlite and would otherwise re-allocate it.
+    /// gets a `String` from the store and would otherwise re-allocate it.
     /// Hands the string back on rejection so the caller can log the value.
     ///
     /// [`parse`]: TmuxWindow::parse

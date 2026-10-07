@@ -65,36 +65,14 @@ fn store_backed_commands(plan: &Path) -> Vec<Vec<String>> {
     .collect()
 }
 
-/// A populated pre-#16755 `tasks.db` with no host identity in it, left in
-/// rollback-journal mode so it is self-contained with no `-wal`/`-shm` (a
-/// dropped handle closes on a background thread a test cannot wait for).
-/// Opening it the way the board used to recreates the companions, and minting
-/// an identity into it changes its bytes.
+/// A pre-#16755 `tasks.db` left behind, with no host identity in it. Dispatch
+/// has no SQLite to write one with any more, so the fixture is a file with the
+/// SQLite magic header and some payload: all the guarantee needs is bytes whose
+/// digest and mtime a stray open, truncate or rewrite would change.
 async fn legacy_database(db_path: &Path) {
-    use dispatch_tui::db::{CreateTaskRequest, Database, TaskCrud};
-    let db = Database::open(db_path).await.unwrap();
-    db.create_task(CreateTaskRequest {
-        title: "Left behind",
-        description: "",
-        repo_path: "/tmp/legacy-repo",
-        plan: None,
-        status: dispatch_tui::models::TaskStatus::Backlog,
-        base_branch: "main",
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
-    })
-    .await
-    .unwrap();
-    db.db_call(|conn| {
-        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE;")
-            .map_err(anyhow::Error::from)
-    })
-    .await
-    .unwrap();
+    let mut bytes = b"SQLite format 3\0".to_vec();
+    bytes.extend((0..4096u32).map(|n| (n % 251) as u8));
+    std::fs::write(db_path, bytes).unwrap();
     let left = footprint(db_path);
     assert!(
         !left.wal && !left.shm,
@@ -323,8 +301,8 @@ async fn purge_states_no_task_count_and_never_opens_the_legacy_database() {
 // StoreInUseNeverOpensSqlite / CodeNeverTouchesLegacyDatabase, at the code
 // ---------------------------------------------------------------------------
 
-/// Production source under `src/`: every `.rs` file except the SQLite test
-/// fixture itself (`src/db/`), generated bindings, and test files, with inline
+/// Production source under `src/`: every `.rs` file except generated
+/// bindings and test files, with inline
 /// `#[cfg(test)] mod … { … }` blocks and `//` comments removed.
 fn production_sources() -> Vec<(PathBuf, String)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -336,7 +314,7 @@ fn production_sources() -> Vec<(PathBuf, String)> {
             let rel = path.strip_prefix(&root).unwrap().to_path_buf();
             let name = path.file_name().unwrap().to_string_lossy().to_string();
             if path.is_dir() {
-                if name != "tests" && name != "bindings" && rel != Path::new("db") {
+                if name != "tests" && name != "bindings" {
                     stack.push(path);
                 }
                 continue;
@@ -389,6 +367,45 @@ fn strip_tests_and_comments(text: &str) -> String {
         i += 1;
     }
     kept
+}
+
+/// Dispatch links no SQLite at all: not in `Cargo.toml`, not in a source file
+/// (`storage.allium: StoreInUseNeverOpensSqlite`). The store is the shared
+/// store, real or the in-memory fake, and nothing else.
+#[test]
+fn dispatch_links_no_sqlite() {
+    let manifest =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+    let manifest_hits: Vec<&str> = manifest
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#') && l.to_lowercase().contains("sqlite"))
+        .collect();
+    assert!(
+        manifest_hits.is_empty(),
+        "Cargo.toml must name no SQLite crate; found: {manifest_hits:?}"
+    );
+
+    let mut hits = Vec::new();
+    let mut stack = vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                for (n, line) in text.lines().enumerate() {
+                    if line.contains("rusqlite") {
+                        hits.push(format!("{}:{}", path.display(), n + 1));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "no source may use rusqlite; found: {hits:?}"
+    );
 }
 
 /// No production path constructs a SQLite store: not the board, not MCP, not

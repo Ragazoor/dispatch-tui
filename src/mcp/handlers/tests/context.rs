@@ -198,7 +198,7 @@ async fn new_learning(
         .unwrap();
     state
         .db
-        .patch_learning(id, &crate::db::LearningPatch::new().status(status))
+        .patch_learning(id, &crate::store::LearningPatch::new().status(status))
         .await
         .unwrap();
     id
@@ -224,7 +224,7 @@ async fn set_learning_status(
 ) {
     state
         .db
-        .patch_learning(id, &crate::db::LearningPatch::new().status(status))
+        .patch_learning(id, &crate::store::LearningPatch::new().status(status))
         .await
         .unwrap();
 }
@@ -237,7 +237,7 @@ fn learning_uri(id: crate::models::LearningId) -> String {
 async fn expected_learning_uris(state: &Arc<McpState>) -> Vec<String> {
     let mut learnings = state
         .db
-        .list_learnings(crate::db::LearningFilter {
+        .list_learnings(crate::store::LearningFilter {
             status: Some(crate::models::LearningStatus::Approved),
             ..Default::default()
         })
@@ -1448,7 +1448,7 @@ async fn listing_and_reading_leave_tasks_epics_and_learnings_untouched() {
     let snapshot = |s: Arc<McpState>| async move {
         let tasks = s.db.list_all().await.unwrap();
         let learnings =
-            s.db.list_learnings(crate::db::LearningFilter::default())
+            s.db.list_learnings(crate::store::LearningFilter::default())
                 .await
                 .unwrap();
         let epics = s.db.list_epics().await.unwrap();

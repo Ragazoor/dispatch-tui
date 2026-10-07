@@ -35,8 +35,6 @@
 #[rustfmt::skip]
 pub mod bindings;
 mod cli_store;
-#[cfg(test)]
-mod dump;
 mod import;
 pub mod managed_store;
 mod restore;
@@ -47,8 +45,6 @@ mod store;
 mod tests;
 
 pub use cli_store::SpacetimeCliStore;
-#[cfg(test)]
-pub use dump::dump_from_sqlite;
 pub use import::{import_old_store, ImportReport};
 pub use restore::{restore, RestoreError};
 pub use snapshot::{

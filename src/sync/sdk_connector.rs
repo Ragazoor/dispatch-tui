@@ -1226,8 +1226,7 @@ impl ReducerCaller for SdkReducerCaller {
     // happened" — unlike [`outcome_of`]'s fold, which is correct for every
     // reducer that DOES have an ordinary refusal to answer with.
 
-    /// `live_subagents` after the write. Never refuses — matches
-    /// `src/db/queries/subagents.rs::subagent_start`, which has no precondition.
+    /// `live_subagents` after the write. Never refuses: starting a subagent has no precondition.
     async fn subagent_start(
         &self,
         task_id: TaskId,
@@ -1261,8 +1260,7 @@ impl ReducerCaller for SdkReducerCaller {
     }
 
     /// The live subagent count and whether the row is now in `review`, after
-    /// the write. Never refuses — matches
-    /// `src/db/queries/subagents.rs::subagent_stop`, where an unrecognised
+    /// the write. Never refuses: an unrecognised
     /// `agent_id` is a no-op rather than an error.
     async fn subagent_stop(
         &self,
@@ -1290,8 +1288,7 @@ impl ReducerCaller for SdkReducerCaller {
         .await?
     }
 
-    /// Same shape as [`Self::subagent_stop`] — see
-    /// `src/db/queries/subagents.rs::subagent_clear`.
+    /// Same shape as [`Self::subagent_stop`].
     async fn subagent_clear(&self, task_id: TaskId) -> anyhow::Result<DrainReadBack> {
         let connection = self.connection()?;
         let task_id = task_id.0;

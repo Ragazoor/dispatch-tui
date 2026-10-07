@@ -3,7 +3,7 @@
 #
 # The checker used to validate only bare `src/…​.rs` existence, which let three
 # whole classes of stale reference through:
-#   - brace lists (`src/db/queries/{tasks,prs}.rs`) never matched the regex
+#   - brace lists (`src/store/queries/{tasks,prs}.rs`) never matched the regex
 #   - `file.rs:NN` line citations dropped the `:NN` and were never validated
 #   - `docs/…` paths were not checked at all
 # Each case below pins one of those down, plus the cases that must keep passing.
@@ -22,9 +22,9 @@ WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
 # --- Fixture repo: a couple of real files for docs to point at. -------------
-mkdir -p "$WORKDIR/src/db/queries" "$WORKDIR/docs/specs"
-printf 'line1\nline2\nline3\n' >"$WORKDIR/src/db/queries/tasks.rs"
-printf 'line1\nline2\nline3\n' >"$WORKDIR/src/db/queries/epics.rs"
+mkdir -p "$WORKDIR/src/store/queries" "$WORKDIR/docs/specs"
+printf 'line1\nline2\nline3\n' >"$WORKDIR/src/store/queries/tasks.rs"
+printf 'line1\nline2\nline3\n' >"$WORKDIR/src/store/queries/epics.rs"
 printf 'a spec\n' >"$WORKDIR/docs/specs/real.allium"
 printf 'a doc\n' >"$WORKDIR/docs/real.md"
 
@@ -51,11 +51,11 @@ expect() {
 }
 
 # --- Cases that must pass (green). -----------------------------------------
-expect 0 'See `src/db/queries/tasks.rs` for CRUD.' \
+expect 0 'See `src/store/queries/tasks.rs` for CRUD.' \
     'existing src path passes'
-expect 0 'See `src/db/queries/{tasks,epics}.rs` for CRUD.' \
+expect 0 'See `src/store/queries/{tasks,epics}.rs` for CRUD.' \
     'brace list whose members all exist passes'
-expect 0 'See `src/db/queries/tasks.rs:2` for the helper.' \
+expect 0 'See `src/store/queries/tasks.rs:2` for the helper.' \
     'in-range line citation passes'
 expect 0 'See `docs/real.md` and `docs/specs/real.allium`.' \
     'existing docs paths pass'
@@ -63,13 +63,13 @@ expect 0 'The `docs/specs/` directory holds the specs.' \
     'existing directory reference passes'
 
 # --- Cases that must fail (red). ------------------------------------------
-expect 1 'See `src/db/queries/gone.rs` for CRUD.' \
+expect 1 'See `src/store/queries/gone.rs` for CRUD.' \
     'missing src path fails'
-expect 1 'See `src/db/queries/{tasks,gone}.rs` for CRUD.' \
+expect 1 'See `src/store/queries/{tasks,gone}.rs` for CRUD.' \
     'brace list with a missing member fails'
-expect 1 'See `src/db/queries/tasks.rs:9999` for the helper.' \
+expect 1 'See `src/store/queries/tasks.rs:9999` for the helper.' \
     'out-of-range line citation fails'
-expect 1 'See `src/db/queries/tasks.rs:2-9999` for the helper.' \
+expect 1 'See `src/store/queries/tasks.rs:2-9999` for the helper.' \
     'out-of-range line-range citation fails'
 expect 1 'See `docs/gone.md` for details.' \
     'missing docs path fails'

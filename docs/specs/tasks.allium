@@ -989,8 +989,8 @@ rule MoveTaskToEpic {
         -- Moving a task changes which epic(s) own it: the previous epic
         -- (if any) and the new epic (if any) both have their status
         -- recalculated per the EpicStatusRecalculation invariant in
-        -- epics.allium. updated_at is refreshed automatically by the
-        -- database layer; the assertion above documents the intent.
+        -- epics.allium. updated_at is refreshed by the store's write
+        -- itself; the assertion above documents the intent.
         --
         -- Feed-sourced tasks (external_id set) may be re-ingested under
         -- their original feed epic on the next poll; moving such a task is
@@ -1259,7 +1259,7 @@ rule MoveTaskToEpic {
 -- rather than a collision with a different task's.
 --
 -- The worktree column has exactly one writer, patch_task in
--- src/db/queries/tasks.rs, and every value that SETS it originates from
+-- src/store/queries/tasks.rs, and every value that SETS it originates from
 -- provision_worktree — reaching the column through
 -- src/mcp/handlers/tasks/dispatch.rs or src/runtime/tasks.rs::exec_persist_task.
 -- No other surface can introduce one: CopyTask copies into a draft that has no
@@ -1274,8 +1274,8 @@ rule MoveTaskToEpic {
 -- Implementation of the feed path: src/feed/mod.rs::cleanup_removed_feed_tasks,
 -- which performs the same unconditional teardown. It is fed by the feed
 -- stale-deletes, which report what they removed rather than tearing down
--- inline: the DELETE statements in src/db/queries/tasks.rs carry a RETURNING
--- clause and yield src/db/mod.rs::RemovedFeedTask rows (only those still owning
+-- inline: the DELETE statements in src/store/queries/tasks.rs carry a RETURNING
+-- clause and yield src/store/mod.rs::RemovedFeedTask rows (only those still owning
 -- a worktree or a tmux window — the delete is unconditional either way), which
 -- reach both feed entry points on src/feed/ingest/mod.rs::FeedSyncOutcome.
 -- cleanup_removed_feed_tasks groups them by repo_path and runs a repo's
@@ -1516,12 +1516,8 @@ rule BatchDelete {
     -- convention: `all_pass` below is re-evaluated over the TRUE state of
     -- every task and epic, together, inside ONE atomic reducer call
     -- (`batch_delete` in spacetime/module/src/lib.rs), which validates
-    -- everything BEFORE deleting anything. The local SQLite path
-    -- (src/db/queries/tasks.rs), reached only by a test's Database with no
-    -- shared store attached — never the board's, and never any production
-    -- path (storage.allium: StoreInUseNeverOpensSqlite) — is one transaction too, but checks
-    -- only that every id exists, matching its single-item delete_task and
-    -- delete_epic, which do not re-check status either. See the guidance for
+    -- everything BEFORE deleting anything. A handle with no
+    -- shared store attached refuses it (storage.allium). See the guidance for
     -- why looping DeleteTask/DeleteEpic once per item — which is what this
     -- rule used to compile down to — could not hold that guarantee up under
     -- their own per-item reducer guards.
@@ -1889,7 +1885,9 @@ rule EditTask {
 -- sub_status assertions written out in the rules above document the
 -- resulting state rather than adding a per-rule duty. A write supplying an
 -- explicit (status, sub_status) pair that is invalid is rejected before it
--- reaches the store, and a database constraint backs the invariant up.
+-- reaches the store. Nothing behind that check backs the invariant up: the
+-- SQLite CHECK constraint that once did went with SQLite (task #36865), and
+-- the store's reducers accept any sub_status string.
 -- Exception: writes that set a specific sub_status override the default
 -- (e.g., HookNotification keeps status=running and sets
 -- sub_status=needs_input; FinishTaskConflict keeps the parent status and
@@ -1909,7 +1907,7 @@ rule EditTask {
 
 -- Resolved 2026-09-28 (task #4971, final iteration): BatchDelete's atomicity
 -- gap — FIXED. `batch_delete` (spacetime/module/src/lib.rs,
--- src/db/queries/tasks.rs) validates every selected task and epic against the
+-- src/store/queries/tasks.rs) validates every selected task and epic against the
 -- true state together, in one transaction, before deleting any of them,
 -- replacing the N independent `delete_task`/`delete_epic` reducer calls this
 -- question describes. See BatchDelete's guidance above for the mechanism and

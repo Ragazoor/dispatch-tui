@@ -78,15 +78,14 @@ boundaries — `Ctrl+←/→` steps through path segments, which is the point.
 Schema enum values may be added in a migration before all rows are upgraded. Never `panic!` (or `unwrap()`/`expect()`) on a value read from the DB — a poisoned row must not kill the TUI.
 
 <!-- allow-phantom-symbol: `Enum` below is a stand-in for any such enum, not a type -->
-**Field level.** An enum that can legitimately gain variants (a newer binary writing a value this one doesn't know) defaults with a warning: `Enum::parse(&s).unwrap_or_else(|| { tracing::warn!(...); Enum::Default })`. `parse_feed_role` and `parse_epic_origin` (`src/db/queries/mod.rs`) are the canonical examples. Fields where no default is meaningful — `status`, `sub_status`, `tag`, `wrap_up_mode`, the timestamps, the `url`/`url_type` pair — instead fail the row via `unknown_enum`, and the row-level policy below decides what that costs.
+**Field level.** An enum that can legitimately gain variants (a newer binary writing a value this one doesn't know) defaults with a warning: `Enum::parse(&s).unwrap_or_else(|| { tracing::warn!(...); Enum::Default })`. The `feed_role` and `origin` columns in `epic` (`src/sync/decode.rs::epic`) are the canonical examples. Fields where no default is meaningful — `status`, `sub_status`, `tag`, `wrap_up_mode`, the timestamps, the `url`/`url_type` pair — instead fail the row, and the row-level policy below decides what that costs.
 
-**Row level — the decode-failure policy.** Which reads tolerate an undecodable row is deliberate, not incidental:
+**Row level — the decode-failure policy.** The board's rows arrive from the subscription (or from the in-memory store a test handle owns) and are decoded in `src/sync/decode.rs`; which reads tolerate an undecodable row is deliberate, not incidental:
 
-- **Bulk reads skip and warn.** `list_all`, `list_epics`, `list_root_epics`, `list_sub_epics`, `list_tasks_for_epic`, and `list_all_tasks_with_epic_id` run their `query_map` iterator through `collect_decodable` (`src/db/queries/mod.rs`), which drops each undecodable row with a `tracing::warn!` and keeps the rest. One corrupt row degrades the board instead of blanking it — before this, a single unparseable `status` made `list_all` return `Err` and the TUI rendered an empty board.
-- **Single-entity reads fail loudly.** `get_task`, `get_epic`, and `find_task_by_plan` return the decode error: the caller asked for that specific row, so silently answering "not found" would be a lie. This is also how a corrupt row stays diagnosable once the bulk read has stopped surfacing it.
-- **Only decode errors are skippable.** `collect_decodable` propagates anything that is not a row-content failure — a `SqliteFailure` (I/O error, interrupt) mid-iteration would otherwise silently truncate a healthy result set, and an `InvalidColumnName` would hide a mismatch between `TASK_COLUMNS` and `row_to_task`.
+- **A row that fails to decode is dropped and counted, not fatal.** `SharedRows::upsert_task`, `upsert_epic` and the other `upsert_*` calls (`src/sync/rows.rs`) pass the failure to `drop_undecodable` (`src/store/decode.rs`), which logs it with a `tracing::warn!` and bumps the counter below. One corrupt row degrades the board instead of blanking it. A dropped task is remembered by id and epic (`undecodable_tasks`) so a delete pre-check can still count it.
+- **Single-entity reads see only what decoded.** `get_task` and `get_epic` answer from the decoded rows, so a dropped row reads as "not found"; the warning in the log and the counter are how a dropped row stays diagnosable.
 
-**Decode-fallback counter:** every field-level default and every row skipped by `collect_decodable` bumps a process-wide `AtomicU64` exposed as `crate::db::decode_fallback_count()`. The value is included in the `tracing::warn!` (`count=N`) so the warns are greppable in aggregate, and the accessor lets tests and ad-hoc debugging detect slow-bleeding decode bugs without chasing log lines. It is monotonic and never reset — assert on deltas, since the test suite shares one process. When you add a new soft-fail branch, bump it via `db::queries::bump_decode_fallback()`.
+**Decode-fallback counter:** every field-level default and every row dropped by `drop_undecodable` bumps a process-wide `AtomicU64` exposed as `crate::store::decode_fallback_count()`. The value is included in the `tracing::warn!` (`count=N`) so the warns are greppable in aggregate, and the accessor lets tests and ad-hoc debugging detect slow-bleeding decode bugs without chasing log lines. It is monotonic and never reset — assert on deltas, since the test suite shares one process. When you add a new soft-fail branch, bump it via `store::bump_decode_fallback()` (or call `store::drop_undecodable` for a dropped row).
 
 ## Border parsing
 
@@ -132,11 +131,11 @@ It mirrors `FieldUpdate` (same three-state semantics, same `Some(Some(_))`/`Some
 
 `UpdateTaskParams.tmux_window` is an `Option<TmuxWindowUpdate>` for the same reason `url` is an `Option<UrlUpdate>`: the field is not a plain string. `TmuxWindowUpdate::Set` carries a `TmuxWindow` (`src/models/tmux_window.rs`), so a repo path, a branch name or a half-typed window name is a compile error rather than a target tmux resolves by *prefix* onto some other task's window. Read that type's doc comment before touching this — it explains which two strings it excludes and why.
 
-The DB boundary is where it becomes text again: `TaskPatch.tmux_window` is `Option<Option<&TmuxWindow>>`, serialised with `as_str()`, and read back through `read_tmux_window` (`src/db/queries/mod.rs`), which soft-fails a malformed stored value to `None` rather than failing the row.
+The DB boundary is where it becomes text again: `TaskPatch.tmux_window` is `Option<Option<&TmuxWindow>>`, serialised with `as_str()`, and read back through `tmux_window` (`src/sync/decode.rs`), which soft-fails a malformed stored value to `None` rather than failing the row.
 
 ## `TaskPatch` / `EpicPatch` — double-Option in the DB layer
 
-`TaskPatch` and `EpicPatch` (`src/db/mod.rs`) use `Option<Option<T>>` for nullable fields — the DB-layer equivalent of `FieldUpdate`:
+`TaskPatch` and `EpicPatch` (`src/store/mod.rs`) use `Option<Option<T>>` for nullable fields — the DB-layer equivalent of `FieldUpdate`:
 
 | Value | Meaning |
 |-------|---------|
@@ -153,23 +152,6 @@ cannot name the higher-ranked lifetime and fails to compile with "lifetime may n
 enough". Either build one patch up front and add the branch-specific fields conditionally, or
 use a free function with an explicit `<'a>` — as `with_status_transition` in
 `src/service/tasks/crud.rs` does.
-
-### OwnedTaskPatch (and OwnedCreateTaskRequest)
-
-`db_call` closures must be `Send + 'static`, so borrowed fields from `TaskPatch<'_>` cannot
-cross the boundary. `OwnedTaskPatch` and `OwnedCreateTaskRequest` in `src/db/queries/tasks.rs`
-are owned mirrors that exist solely to satisfy this constraint. Convert via the `From` impl:
-`OwnedTaskPatch::from(patch)`.
-
-**Parity is compiler-enforced.** Both `From` impls use an exhaustive destructuring of the
-source struct (no `..`), so adding a field to `TaskPatch` or `CreateTaskRequest` without
-also updating the owned mirror and its `From` impl is a **compile error**. When you add a
-field, name it in the destructuring pattern and add it to the `Self { … }` construction; the
-compiler rejects anything less.
-
-`OwnedTaskPatch` deliberately omits `labels` — labels are pre-serialised to JSON before
-entering `db_call` and handled via `labels_json` in `patch_task`. The `labels: _` binding in
-the `From` impl keeps the exhaustive pattern intact despite the omission.
 
 ### updated_field_names — same pattern, same reason
 
@@ -189,7 +171,7 @@ a field; they are not redundant with the destructuring.
 
 ## DB trait narrowing — take the narrowest sub-trait you need
 
-`TaskStore` (`src/db/mod.rs::TaskStore`) is the whole store — every member trait, plus the read bundle so the upcast to `Arc<dyn TaskReadStore>` stays available. New consumers should hold the narrowest sub-trait they actually call:
+`TaskStore` (`src/store/mod.rs::TaskStore`) is the whole store — every member trait, plus the read bundle so the upcast to `Arc<dyn TaskReadStore>` stays available. New consumers should hold the narrowest sub-trait they actually call:
 
 | Consumer | Holds |
 |----------|-------|
@@ -208,17 +190,17 @@ machine's own), so a second backend could implement one of them. Phases 9–11
 moved settings, the knowledge base and usage to the shared side, and Phase 12a
 (task #4916) made the store mandatory — so there is one backend, nothing for a
 seam to separate, and both umbrella traits are gone. `TaskStore`
-(`src/db/mod.rs::TaskStore`) is the one complete store, and its doc comment is
+(`src/store/mod.rs::TaskStore`) is the one complete store, and its doc comment is
 the single home for which table is reached through which member trait — don't
 restate the list here.
 
 **Where a call actually goes is a property of `Database`'s routing, not of
 the traits.** A `Database` built by `runtime::StoreParts::build` carries a
 writer and four readers over the connection's rows, attached together by
-`Database::with_shared_store` (`db::SharedStorePorts`) so a handle is routed
+`Database::with_shared_store` (`store::SharedStorePorts`) so a handle is routed
 all or nothing:
 
-| Port (`src/db/mod.rs`) | Implemented by (`src/sync/`) | Covers |
+| Port (`src/store/mod.rs`) | Implemented by (`src/sync/`) | Covers |
 |---|---|---|
 | `SharedWriter` | `ReducerWriter` | every shared mutation |
 | `SharedReader` | `SubscriptionBoardReads` (the same adapter the board draws from) | tasks, epics, watchers, repo config, subscriptions, settings |
@@ -226,31 +208,30 @@ all or nothing:
 | `SharedUsageReader` | `SubscriptionUsageReads` | usage aggregation, done in Rust because a subscription cannot `GROUP BY` |
 | `SharedRetiredFeedItemReader` | `SubscriptionRetiredFeedItemReads` | `retired_without_task`'s subtree join (task #4971), for the same reason as usage |
 
-Each routed method is `if let Some(port) = self.shared_…() { return port.… }`
-followed by its SQLite body. **The SQLite body is not a fallback** — a
-store-backed handle never reaches it. It serves only handles built without
-ports, which today means the test suite's `Database::open_in_memory()`, until
-Phase 12b (#4975) replaces that with an in-memory store and Phase 12c (#4976)
-deletes the SQLite bodies. A new shared read or write therefore needs its
-port method *and* its routing guard: a method with only an SQLite body
-compiles, passes every test, and on a real board reads a table nothing writes.
-`sync::tests::shared_reads` is the pattern for proving a read routes — it
-answers from a store-backed handle over an EMPTY SQLite file, so a read that
-fell through finds nothing.
+Each routed method is `self.shared_…()?.…` — it hands the call to the
+port and returns its answer. **There is no local fallback and no SQLite**
+(task #36865): a handle built without ports (`Database::unattached()`) refuses
+every shared call with a `no shared store attached` error, and tests use
+`Database::open_in_memory()`, which attaches ports over an in-memory store that
+runs the module's own reducer logic. A new shared read or write therefore needs
+its port method *and* its routing in `src/store/queries/`; the routing test
+`every_routed_mutation_reaches_the_writer` (`src/store/tests/shared_writer.rs`)
+calls every writer method through `Database` and fails when one is missing.
 
 **Never routed:** the Host row (`HostStore`) and the user identity's
 credential (`IdentityCredentialStore`). They are this install's own and stay
 on this machine (`host.allium`), in `host.json` in the data directory
 (`src/host_file/mod.rs`; task #16755). `Database::with_host_file` points a
-handle at it, and a handle without one — the in-memory test handle — keeps them
-in its `settings` table. The shared Host registry gets a mirror via
+handle at it, and a handle without one refuses these calls — nothing is kept in
+a fallback. `Database::open_in_memory()` gets a temporary data directory holding
+a host file. The shared Host registry gets a mirror via
 `sync.allium: RegisterHostOnConnect`.
 
 `UsageStore` followed in Phase 11 (task #4915), for the same reads-must-follow-
 writes reason, but for a different underlying cause: `query_usage` groups and
 counts rows, a shape no subscription's `WHERE` clause can express, so the
 aggregation has to be done in Rust over the rows a standing subscription
-already holds rather than left to SQL. See [`crate::db::SharedUsageReader`],
+already holds rather than left to SQL. See [`crate::store::SharedUsageReader`],
 implemented by `sync::SubscriptionUsageReads` (`src/sync/usage_reads.rs`). No
 spec: `usage_events` is append-only telemetry with no user-observable rule
 beyond "recorded".
@@ -266,7 +247,7 @@ reducer call; only the join needed a reader of its own.
 write path, but every real retirement goes through `delete_task`/`delete_epic`/
 `batch_delete` or the migration itself, so it had no production caller and was
 removed — `retire_feed_item` inside the module is the shared helper those four
-call into.) See [`crate::db::SharedRetiredFeedItemReader`], implemented by
+call into.) See [`crate::store::SharedRetiredFeedItemReader`], implemented by
 `sync::SubscriptionRetiredFeedItemReads` (`src/sync/retired_feed_item_reads.rs`).
 
 Both readers, like every port in the table above, are attached in production
@@ -357,7 +338,7 @@ Unmocked calls panic rather than silently returning a default, and a new seam me
 
 Reading through `state.db` directly is fine — list, get, and other queries have no side effects beyond the read. **Mutations are different: task and epic writes go through `TaskServiceApi` / `EpicServiceApi`, not `state.db` directly.** The service layer owns the invariants that a bare DB write would skip — most importantly epic-status recalculation (see below).
 
-**This boundary is now compiler-enforced.** `McpState.db` and `TuiRuntime.database` are typed `Arc<dyn db::TaskReadStore>`, not `Arc<dyn db::TaskStore>`. `TaskReadStore` exposes the task/epic **read** surface (`TaskRead` + `EpicRead`) plus the settings/learning/usage stores, but **not** `TaskCrud`/`EpicCrud`. So `state.db.patch_task(...)` (or `create_epic`, `set_task_epic_id`, `recalculate_epic_status`, …) from a handler is a **compile error**. A `compile_fail` doctest on `TaskReadStore` (`src/db/mod.rs`) locks this in. <!-- allow-phantom-symbol: compile_fail is a rustdoc attribute, not our symbol -->
+**This boundary is now compiler-enforced.** `McpState.db` and `TuiRuntime.database` are typed `Arc<dyn store::TaskReadStore>`, not `Arc<dyn store::TaskStore>`. `TaskReadStore` exposes the task/epic **read** surface (`TaskRead` + `EpicRead`) plus the settings/learning/usage stores, but **not** `TaskCrud`/`EpicCrud`. So `state.db.patch_task(...)` (or `create_epic`, `set_task_epic_id`, `recalculate_epic_status`, …) from a handler is a **compile error**. A `compile_fail` doctest on `TaskReadStore` (`src/store/mod.rs`) locks this in. <!-- allow-phantom-symbol: compile_fail is a rustdoc attribute, not our symbol -->
 
 **The name is scoped on purpose.** `TaskReadStore` seals **task/epic** writes only, not every write — settings/learning/usage writes stay reachable through it (see the caveat below). The old name `ReadStore` implied read-only-everything, which was a misnomer; the `Task` prefix makes the guarantee honest.
 
@@ -405,23 +386,13 @@ Two constructs cover it, and both are in `tasks.allium`:
 
 Expect the duplication: it is the language's shape, not a smell to refactor away.
 
-## DB access — `db_call` / `db_call_read`
+## The `Database` router
 
-`Database` (`src/db/mod.rs`) wraps a single writer [`tokio_rusqlite::Connection`] — a dedicated worker thread owning the underlying `rusqlite::Connection` — plus a small pool of up to 4 lazily-opened, read-only connections (WAL on a file-backed store — see the in-memory caveat below). There is no sync handle or mutex; schema init and migrations run on the writer thread, mutations dispatch to the writer, and pure reads dispatch across the pool instead of queueing behind writer traffic.
+`Database` (`src/store/mod.rs`) holds no data and no connection: it is a router over the attached ports (see "The store seam" above). Every `*Store` trait method is `async fn` and hands the call to the one port that serves it, through `self.shared_writer()?`, `self.shared_reader()?` or the learning, usage and retired-feed-item readers. A handle with no port attached returns a `no shared store attached` error rather than answering from anywhere else.
 
-- `Database::open(path).await` opens the writer connection and runs the migration chain on its worker thread. `Database::open_in_memory().await` instead clones a process-wide, already-migrated template (~0.05 ms against ~87 ms to replay ~88 migrations) — sound only because an in-memory database is always brand new, whereas a file on disk can be at any older `user_version`. See "Schema template" in [docs/testing.md](testing.md) for the equivalence guards. Pool connections are not opened by either — each slot opens lazily on first use, so instances that never issue a concurrent read (most CLI subcommands, most tests) never pay for connections they don't need.
-- `self.db_call(|conn| { … }).await` is the **writer** entry point. Use it for any closure that writes (`execute`/`execute_batch`/INSERT/UPDATE/DELETE), or that must read a connection-local counter like `get_total_changes` — that's a per-connection SQLite tally, so reading it from a pool connection would always return 0.
-- `self.db_call_read(|conn| { … }).await` is the **read-pool** entry point, dispatched round-robin across the pool. Use it only for closures that issue no writes: pool connections are opened `SQLITE_OPEN_READ_ONLY`, so a write attempted through one fails loudly (`SQLITE_READONLY`) instead of silently succeeding or corrupting state. A write committed via `db_call` is immediately visible to a subsequent `db_call_read` — pool reads never see a stale snapshot.
+**A routed call is not a transaction.** Each writer method is one reducer call, and SpacetimeDB runs a reducer to completion before the next, so a rule that must be atomic belongs in a reducer (`spacetime/module/src/`, mirrored by `src/sync/memory_caller/`), not in a sequence of port calls: two calls can be interleaved by another host's write between them. `try_record_stop`, `record_user_prompt_submit`, the claim methods and `batch_delete` are single reducers for this reason.
 
-**`open_in_memory` is not WAL, and does not say so.** SQLite's `memdb` has nowhere to put the write-ahead log's shared memory, so the `PRAGMA journal_mode=WAL` that `apply_writer_pragmas` issues quietly returns `memory` instead of failing — an in-memory store runs on a rollback journal, where the writer locks the whole store for its transaction and any overlapping read waits for it. A file-backed store gets real WAL, where a read never waits for a write. The two stores are indistinguishable until a read and a write overlap, which makes the in-memory one a trap for exactly the tests most likely to reach for it: a concurrency test written against it exercises locking rules no board runs under. It can fail where a board would not — a starved reader that exhausts its 5 s busy timeout reports `database is locked`, rarely and under load, from a test whose name suggests a data bug (this cost a session a full re-run; see task #4900) — and it can *pass* where a board would not, because a reader that simply waits out the writer is trivially consistent with it. Any test that overlaps a read with a write needs a file-backed board: `populated_board_on_disk` in `src/spacetime/tests/mod.rs`, or `spawn_board` in `tests/common/mod.rs`. `src/db/tests/journal_mode.rs` pins both halves. See `docs/specs/storage.allium`.
-
-Both closures receive a `&mut rusqlite::Connection`, must be `Send + 'static`, and return `Result<R>`. Errors are routed back through `tokio_rusqlite::Error::Other` and surfaced as `anyhow::Error`. Clone any borrowed `&str`/slice arguments to owned values before moving them into the closure.
-
-**`db_call` is not a transaction, and "single writer" is per-process.** Neither entry point opens one — a closure issuing four statements runs them as four implicit transactions, and another writer can interleave between them. The single-writer connection serialises writes *within one `Database` instance*; it says nothing across processes, and dispatch can still run more than one at a time (`plan`, `repo`, `verify-feed` and the agent-tree panes each open the same file). So a multi-statement closure that must be atomic has to say so: open one explicitly with `conn.unchecked_transaction()`, do the work against the `tx`, and `tx.commit()`. See `src/db/queries/subagents.rs` for the read-modify-write shape (fence, mutate, recount, update) and `src/db/queries/tasks.rs` for two more. Getting this wrong is not hypothetical — a read-then-write pair split across two hook processes silently desynchronised a denormalised counter in task #3755. Nothing Claude Code runs from a hook is among the processes that can do this to you any more — the event hooks and the PR gate alike open no database and deliver to the board instead (`HookDelivery` in `docs/specs/agent-health.allium`). The explicit transactions they drove are still load-bearing, because the board runs its own reads and writes concurrently with the TUI's.
-
-Every `*Store` trait method is `async fn` and uses whichever entry point matches its access pattern — `db_call_read` for pure reads (`TaskRead`, `EpicRead`, `SettingsStore`, `RepoConfigStore`, `HostStore`, `LearningStore`, `LearningRetrievalStore`, `UsageStore`), `db_call` for anything that mutates. Callers `.await` each store call the same way regardless of which one it uses underneath.
-
-**The trait bundles do not nest the way the names suggest.** `TaskAndEpicStore` is `TaskCrud + EpicCrud` and is emphatically *not* a supertrait of `TaskReadStore`, which adds `RepoConfigStore + HostStore + SettingsStore + IdentityCredentialStore` (and more) on top of `TaskRead + EpicRead`. So a handle typed `Arc<dyn TaskAndEpicStore>` — which is what `EpicService` holds — cannot be coerced to `&dyn TaskReadStore`, and "the write store obviously covers the reads" is false. Only `TaskStore` bundles everything. Check the bounds in `src/db/mod.rs` before designing against an assumed hierarchy: this is why `TaskService`, whose `dispatch` prologue reads the settings/learning surface, holds `Arc<dyn TaskStore>` rather than the narrower write bundle its CRUD methods alone would need.
+**The trait bundles do not nest the way the names suggest.** `TaskAndEpicStore` is `TaskCrud + EpicCrud` and is emphatically *not* a supertrait of `TaskReadStore`, which adds `RepoConfigStore + HostStore + SettingsStore + IdentityCredentialStore` (and more) on top of `TaskRead + EpicRead`. So a handle typed `Arc<dyn TaskAndEpicStore>` — which is what `EpicService` holds — cannot be coerced to `&dyn TaskReadStore`, and "the write store obviously covers the reads" is false. Only `TaskStore` bundles everything. Check the bounds in `src/store/mod.rs` before designing against an assumed hierarchy: this is why `TaskService`, whose `dispatch` prologue reads the settings/learning surface, holds `Arc<dyn TaskStore>` rather than the narrower write bundle its CRUD methods alone would need.
 
 ## Inline-mutation boundary
 
@@ -502,19 +473,19 @@ Any `unsafe` block must have a `// SAFETY:` comment directly above it explaining
 
 Claude Code hooks used to be separate `dispatch` processes, each opening the database, so the writer connection's serialisation bought nothing across them. They now deliver to the board (`HookDelivery` in `docs/specs/agent-health.allium`) and the writes are serialised by one connection again. Both rules below survive that, because neither was only about processes: a hook's *arrival order* at the board is still whatever the agent's session produced, so a `get_task` snapshot taken before a decision can still be stale by the time the write lands. The second is the one that is easy to miss.
 
-**Decide in the statement.** A hook write whose outcome depends on task state puts that state in its own `WHERE` and reads the rowcount, rather than branching on a prior read. `try_record_stop` and `record_user_prompt_submit` (`src/db/queries/tasks.rs`) both do this, each inside one `unchecked_transaction()` — `db_call` opens none of its own. Their return enums (`StopOutcome`, `UserPromptOutcome`) exist so the caller can act on what the write actually did (e.g. recalculate the epic) without re-reading and re-deciding.
+**Decide in the statement.** A hook write whose outcome depends on task state puts that state in its own `WHERE` and reads the rowcount, rather than branching on a prior read. `try_record_stop` and `record_user_prompt_submit` (the module's `agent_state` source) both do this, each as one reducer. Their return enums (`StopOutcome`, `UserPromptOutcome`) exist so the caller can act on what the write actually did (e.g. recalculate the epic) without re-reading and re-deciding.
 
 **A predicate over current columns cannot order two racing writes.** Serialising the writes does not order the *events*: which of two hooks reaches the board first is decided by the agent's session, not by us. `record_user_prompt_submit` voids the deferred `Stop` a human's prompt supersedes — but not one deferred by the turn that prompt itself started, whose write can land first. No boolean over the live columns separates those, and neither does a generation counter incremented by one hook and stamped by the other: the stamping hook reads the pre-increment value, so anything derived from write order inherits the race. What works is each hook recording its own **event** time — `tasks.stop_pending_at`, written by the defer branch — and the other comparing against it. Event times are fixed before either write is attempted, so the comparison is the same whichever commits first. Ties break toward the outcome that self-corrects. See `HookStop` / `HookUserPromptSubmit` in `docs/specs/agent-health.allium`.
 
-Two consequences for tests. `stop_pending_at` is stored at millisecond resolution (`format_datetime_millis`, not `format_datetime`) because the two events can share a second. And a test that needs one hook to be observably later than another must inject a `FixedClock` and advance it — two wall-clock reads in the same test can land in the same millisecond and tie.
+Two consequences for tests. `stop_pending_at` is stored at millisecond resolution (millisecond-precision `stamp`, `src/sync/encode.rs`, not whole seconds) because the two events can share a second. And a test that needs one hook to be observably later than another must inject a `FixedClock` and advance it — two wall-clock reads in the same test can land in the same millisecond and tie.
 
 ## Reparenting an epic — three guards, no immutability
 
-`parent_epic_id` **is** mutable: `EpicPatch` declares it `nullable` (`src/db/mod.rs::EpicPatch`), `patch_epic` writes it (`src/db/queries/epics.rs::patch_epic`), `EpicService::update_epic` implements reparent-and-detach (`src/service/epics.rs::update_epic`), and the TUI has a reparent picker (`src/tui/ui/kanban/popups/reparent_epic.rs`). Route reparenting through the service — it owns three guards a bare `patch_epic` skips:
+`parent_epic_id` **is** mutable: `EpicPatch` declares it `nullable` (`src/store/mod.rs::EpicPatch`), `patch_epic` writes it (`src/store/queries/epics.rs::patch_epic`), `EpicService::update_epic` implements reparent-and-detach (`src/service/epics.rs::update_epic`), and the TUI has a reparent picker (`src/tui/ui/kanban/popups/reparent_epic.rs`). Route reparenting through the service — it owns three guards a bare `patch_epic` skips:
 
 1. **Cycle detection** — `check_no_cycle` (`src/service/epics.rs::check_no_cycle`) walks the proposed parent's ancestor chain and rejects with `ServiceError::Validation` if the epic being moved appears in it (self-parent included).
 2. **RepoGroup guard** (in `src/service/epics.rs::update_epic`) — an auto-created `EpicOrigin::RepoGroup` sub-epic cannot be reparented *or* detached to root; either would orphan it outside its grouping root.
-3. **DB `CHECK (parent_epic_id != id)`** (migration v35) — defence-in-depth against a row becoming its own parent, alongside the visited-set guard in `recalculate_epic_status_inner`.
+3. **The visited-set guard** in the store's epic-status recalculation — defence in depth against a row becoming its own parent.
 
 `UpdateEpicParams.parent_epic_id` is an `Option<Option<EpicId>>`: `None` leaves the parent alone, `Some(Some(id))` reparents, `Some(None)` detaches to root.
 
@@ -719,7 +690,7 @@ Use whichever of these fits the thing you're waiting on:
 
 - **An injected clock for time-dependent behaviour.** Hook-event timestamps persist at one-second resolution, so a test that needs two events in distinct seconds must not sleep ≥1s — inject `service::FixedClock` via `TaskService::with_clock` and `clock.advance(chrono::Duration::seconds(2))`. Production defaults to `SystemClock` (`Utc::now()`), so no call sites change.
 
-- **An injected threshold when the behaviour under test is "did this take longer than X".** Don't sleep past the real threshold, and don't assume a trivial closure beats it either — a loaded CI box can push a no-op `db_call` past 200 ms, so asserting the *absence* of a slow-call warning is just as load-sensitive as asserting its presence. `Database::set_slow_call_threshold` (`#[cfg(test)]`, per-instance so parallel tests don't race) pins `SLOW_DB_CALL_THRESHOLD` for one `Database`: `Duration::ZERO` forces the warning, an hour forbids it. See `src/db/tests/async_handle.rs`.
+- **An injected threshold when the behaviour under test is "did this take longer than X".** Don't sleep past the real threshold. Make the threshold a parameter the test can set to zero or to an hour, as the feed runner's interval and the subprocess deadline are.
 
 ## Tag system
 

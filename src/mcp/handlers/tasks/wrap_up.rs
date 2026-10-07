@@ -36,7 +36,7 @@ fn exit_instruction(action: WrapUpAction) -> String {
 /// `wrap_up` without running the skill's check must not read this as licence
 /// to skip verifying altogether).
 async fn wrap_up_verify_line(
-    db: &dyn crate::db::TaskReadStore,
+    db: &dyn crate::store::TaskReadStore,
     repo_path: &str,
     action: WrapUpAction,
 ) -> String {

@@ -1,9 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use dispatch_tui::db::{
+use dispatch_tui::models::*;
+use dispatch_tui::store::{
     CreateLearningRow, CreateTaskRequest, Database, EpicCrud, EpicPatch, EpicRead, LearningStore,
     TaskCrud, TaskPatch, TaskRead,
 };
-use dispatch_tui::models::*;
 
 #[tokio::test]
 async fn full_epic_lifecycle() {

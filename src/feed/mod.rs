@@ -11,11 +11,11 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
 
-use crate::db::{RemovedFeedTask, TaskStore};
 use crate::mcp::McpEvent;
 use crate::models::{Epic, EpicId, MIN_FEED_INTERVAL_SECS};
 use crate::process::ProcessRunner;
 use crate::runtime::poll_ownership::{decide_poll_action, PollAction};
+use crate::store::{RemovedFeedTask, TaskStore};
 
 pub(crate) use cycle::{FeedCycle, FeedCycleOutcome};
 pub(crate) use exec::degraded_partial_emission;
@@ -512,8 +512,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::db::{Database, EpicCrud, EpicPatch, EpicRead, RepoConfigStore, TaskCrud};
     use crate::models::{test_tmux_window, TaskStatus, TaskTag, MIN_FEED_INTERVAL_SECS};
+    use crate::store::{Database, EpicCrud, EpicPatch, EpicRead, RepoConfigStore, TaskCrud};
 
     use super::exec::AlwaysFailRunner;
 
@@ -528,7 +528,9 @@ mod tests {
         runner: Arc<dyn ProcessRunner>,
     ) -> (FeedRunner, mpsc::UnboundedReceiver<McpEvent>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let board_reads = crate::sync::tests::sqlite_reads::board_reads_of(&db);
+        let board_reads = db
+            .board_reads()
+            .expect("a memory-attached handle serves its own board reads");
         (
             FeedRunner::new(db, tx, runner, board_reads, "test-host".into()),
             rx,
@@ -1142,13 +1144,15 @@ mod tests {
     }
 
     /// Write-time validation is what normally keeps a sub-floor row from
-    /// existing, so this test writes one via `patch_epic` — the same bypass a
-    /// hand-edited database represents. The epic must not be polled at all:
-    /// clamping would run it at a cadence nobody chose while looking healthy.
+    /// existing, so this test writes one via `patch_epic`, bypassing the
+    /// service. The epic must not be polled at all: clamping would run it at a
+    /// cadence nobody chose while looking healthy. (An interval of 0 is not
+    /// tried: the store reads 0 as "no interval set", which is a different
+    /// state with its own default.)
     #[tokio::test]
     async fn tick_skips_an_epic_whose_stored_interval_is_below_the_floor() {
-        for bad in [0, MIN_FEED_INTERVAL_SECS - 1] {
-            let db = Arc::new(Database::open_in_memory_unattached().await.unwrap());
+        for bad in [MIN_FEED_INTERVAL_SECS - 1] {
+            let db = Arc::new(Database::open_in_memory().await.unwrap());
             let epic = db.create_epic("Too Fast", "", None).await.unwrap();
             db.patch_epic(
                 epic.id,
@@ -1664,7 +1668,7 @@ mod tests {
             Arc::new(crate::process::MockProcessRunner::new(vec![]));
         let board_reads = db.board_reads().expect("memory handle has board reads");
         let runner = FeedRunner::new(
-            Arc::clone(&db) as Arc<dyn crate::db::TaskStore>,
+            Arc::clone(&db) as Arc<dyn crate::store::TaskStore>,
             tx,
             proc_runner,
             board_reads,
@@ -2092,9 +2096,9 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::{Condvar, Mutex};
 
-    use crate::db::{RemovedFeedTask, TaskPatch};
     use crate::models::TaskId;
     use crate::process::MockProcessRunner;
+    use crate::store::{RemovedFeedTask, TaskPatch};
 
     fn removed_task(
         id: i64,

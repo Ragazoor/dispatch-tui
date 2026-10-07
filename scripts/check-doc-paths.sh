@@ -9,10 +9,10 @@
 # explicit path to scan a single file instead.
 #
 # What is validated, per reference:
-#   - plain paths (`src/db/mod.rs`, `docs/conventions.md`, `docs/specs/x.allium`)
+#   - plain paths (`src/store/mod.rs`, `docs/conventions.md`, `docs/specs/x.allium`)
 #   - directory references written with a trailing slash (`src/tui/ui/kanban/`)
-#   - brace lists (`src/db/queries/{tasks,epics}.rs`) — every member is checked
-#   - line citations (`src/db/mod.rs:30`, `src/db/mod.rs:30-42`) — the file must
+#   - brace lists (`src/store/queries/{tasks,epics}.rs`) — every member is checked
+#   - line citations (`src/store/mod.rs:30`, `src/store/mod.rs:30-42`) — the file must
 #     have at least that many lines
 #
 # Behaviour is pinned by scripts/test-check-doc-paths.sh.

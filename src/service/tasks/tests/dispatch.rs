@@ -18,7 +18,7 @@ mod dispatch_seam {
     /// A `Backlog` task rooted at a fresh temp repo, plus a service wired to
     /// `runner`. The tempdir is returned so the caller keeps it alive.
     async fn fixture(
-        db: &Arc<dyn db::TaskStore>,
+        db: &Arc<dyn store::TaskStore>,
         runner: Arc<dyn crate::process::ProcessRunner>,
     ) -> (TaskService, Task, tempfile::TempDir) {
         let bootstrap = task_svc(db);
@@ -156,7 +156,7 @@ mod dispatch_seam {
         let (svc, task, _dir) = fixture(&db, runner.clone()).await;
         db.patch_task(
             task.id,
-            &db::TaskPatch::new().host(Some("some-other-machine")),
+            &store::TaskPatch::new().host(Some("some-other-machine")),
         )
         .await
         .unwrap();
@@ -190,27 +190,25 @@ mod dispatch_seam {
     /// read at the write instead, the only available outcome was that forbidden
     /// row, logged and carried on from.
     ///
-    /// The store is broken by renaming the column every settings read selects;
-    /// dropping the table does not work, because opening the database recreates
-    /// it. The claim is passed as already `Held`, because the claim SQL reads
-    /// `host_id` from that same table (`LOCALLY_OWNED_PREDICATE`) and would
-    /// otherwise abort one step earlier — upholding the invariant, but by a
-    /// different arm than the one under test.
+    /// The identity is broken by replacing `host.json` with a directory, which
+    /// nothing can read as a host file. The claim is passed as already `Held`
+    /// so the dispatch reaches the host resolution under test rather than
+    /// stopping at the claim.
     #[tokio::test]
     async fn dispatch_aborts_when_the_host_identity_cannot_be_resolved() {
-        let concrete = Arc::new(Database::open_in_memory().await.unwrap());
-        let db: Arc<dyn db::TaskStore> = concrete.clone();
+        let host_dir = tempfile::tempdir().unwrap();
+        let concrete = Arc::new(
+            Database::open_in_memory()
+                .await
+                .unwrap()
+                .with_host_file(host_dir.path()),
+        );
+        let db: Arc<dyn store::TaskStore> = concrete.clone();
         let runner = Arc::new(MockProcessRunner::new(vec![]));
         let (svc, task, _dir) = fixture(&db, runner.clone()).await;
         let id = task.id;
 
-        concrete
-            .db_call(|conn| {
-                conn.execute_batch("ALTER TABLE settings RENAME COLUMN value TO renamed_value")
-                    .map_err(anyhow::Error::from)
-            })
-            .await
-            .unwrap();
+        std::fs::create_dir(crate::host_file::host_file_path(host_dir.path())).unwrap();
 
         let outcome = svc
             .dispatch(request(

@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use dispatch_tui::db::Database;
 use dispatch_tui::models::{HookEventKind, SubStatus, TaskStatus};
 use dispatch_tui::service::{CreateTaskParams, FixedClock, TaskService, UpdateTaskParams};
+use dispatch_tui::store::Database;
 
 #[tokio::test]
 async fn hook_event_flow_drives_sub_status_and_lifecycle() {

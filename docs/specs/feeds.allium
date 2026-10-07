@@ -1529,7 +1529,7 @@ rule UpsertFeedTasks {
         -- alone.
         -- The ON CONFLICT clause is conditional on external_id NOT NULL —
         -- non-feed tasks (external_id = null) never collide.
-        -- Implementation: src/db/queries/tasks.rs::upsert_feed_tasks (takes a
+        -- Implementation: src/store/queries/tasks.rs::upsert_feed_tasks (takes a
         -- repo_paths slice, one entry per item, parallel to items, plus a
         -- parallel base_branches slice). The parallel-slice contract is
         -- enforced up front: if items, repo_paths, and base_branches do not all
@@ -1550,7 +1550,7 @@ rule UpsertFeedTasks {
         -- not by tearing down inline: upsert_feed_tasks' delete carries
         -- RETURNING id, repo_path, worktree, tmux_window and yields the removed
         -- rows that still owned a worktree or a tmux window as
-        -- src/db/mod.rs::RemovedFeedTask values (rows owning neither need no
+        -- src/store/mod.rs::RemovedFeedTask values (rows owning neither need no
         -- teardown and are not reported; the delete itself is unconditional).
         -- They ride out on src/feed/ingest/mod.rs::FeedSyncOutcome and the two
         -- feed entry points pass them to
@@ -1676,7 +1676,7 @@ rule GroupedFeedUpsert {
         -- groups and the absent-sub-epic reconciliation share the same
         -- upsert_feed_tasks path, and therefore the same removed-row report:
         -- sync_grouped_feed returns the affected sub-epic ids alongside the
-        -- concatenated src/db/mod.rs::RemovedFeedTask rows from every one of
+        -- concatenated src/store/mod.rs::RemovedFeedTask rows from every one of
         -- those calls, which reach src/feed/mod.rs::cleanup_removed_feed_tasks
         -- via src/feed/ingest/mod.rs::FeedSyncOutcome. Grouping migration
         -- deletes and recreates wholesale, so this is the path where an
@@ -1841,8 +1841,8 @@ rule RoleRoutedFeedSync {
     --     task, exactly as UpsertFeedTasks' insert path).
     --
     -- Because a parent-stranded task is MOVED (not re-inserted), it never
-    -- collides with itself under the subtree-uniqueness constraint
-    -- (enforce_feed_task_subtree_unique_insert): the move relocates the single
+    -- collides with itself under the subtree-uniqueness constraint:
+    -- the move relocates the single
     -- existing row rather than inserting a second one. Treating the parent as
     -- out of scope — so the router insert-inserts a routed copy while the flat
     -- copy lingers — is precisely the deadlock this scoping avoids.
@@ -2045,14 +2045,14 @@ rule RoleRoutedFeedSync {
         -- roles.target_for(route(signals)) gives the role sub-epic
         -- (role_target), if roles.can_auto_group(role_target) is true the
         -- actual target is a repo-group sub-epic found-or-created via
-        -- db.create_repo_group_sub_epic (src/db/mod.rs), keyed by
+        -- db.create_repo_group_sub_epic (src/store/mod.rs), keyed by
         -- src/models/paths.rs::repo_name_from_url and memoised in an
         -- in-memory (role_sub_epic_id, repo_name) -> repo_group_epic_id cache
         -- for the duration of one sync; a create failure falls back to
         -- role_target. can_auto_group is src/models/epics.rs::can_auto_group (group_by_repo
         -- && feed_command.is_none()).
         -- The subtree delete is
-        -- src/db/queries/tasks.rs::delete_stale_subtree_feed_tasks, ONE level
+        -- src/store/queries/tasks.rs::delete_stale_subtree_feed_tasks, ONE level
         -- deep (DELETE ... WHERE epic_id IN (SELECT id FROM epics WHERE
         -- parent_epic_id = ?1) ... RETURNING id, repo_path, worktree,
         -- tmux_window). src/feed/ingest/stale.rs::delete_stale_subtree
@@ -2066,7 +2066,7 @@ rule RoleRoutedFeedSync {
         --
         -- TaskTeardown fan-out. Both deletes report what they removed, so the
         -- row does not vanish silently and orphan an in-flight agent's
-        -- worktree. The shared row type is src/db/mod.rs::RemovedFeedTask
+        -- worktree. The shared row type is src/store/mod.rs::RemovedFeedTask
         -- {id, repo_path, worktree, tmux_window}; only rows that still own a
         -- worktree or a tmux window are reported (the RETURNING statement
         -- deletes every stale row either way — reporting only narrows what the
@@ -2167,9 +2167,8 @@ rule RoleRoutedFeedSync {
         -- src/feed/ingest/tests.rs::absent_task_with_worktree_is_reported_as_removed
         -- and src/feed/ingest/tests.rs::flat_sync_reports_removed_task_with_worktree
         -- (the report reaches the outcome on both sync paths);
-        -- src/db/tests/tasks_feed/additive_and_stale.rs::delete_stale_subtree_feed_tasks_returns_removed_rows_with_state
-        -- and src/db/tests/tasks_feed/additive_and_stale.rs::upsert_feed_tasks_returns_removed_rows_with_state
-        -- (the RETURNING contract on both stale-delete statements);
+        -- src/store/tests/tasks_feed/additive_and_stale.rs::delete_stale_subtree_feed_tasks_never_reports_manual_tasks
+        -- (the removed-rows report on the stale-delete path);
         -- src/feed/mod.rs::tick_removed_task_tears_down_its_worktree
         -- and src/runtime/tests/feeds.rs::exec_trigger_epic_feed_removed_task_tears_down_its_worktree
         -- (the teardown is actually wired up, once per feed path); and the
@@ -2582,7 +2581,7 @@ rule DegradedNonEmptyEmission {
         -- path added later inherits neither shape automatically.
         --
         -- Shape 1 — pick the DB variant. The removal is inside the upsert, so
-        -- there is no step to skip: src/db/queries/tasks.rs::upsert_feed_tasks_additive
+        -- there is no step to skip: src/store/queries/tasks.rs::upsert_feed_tasks_additive
         -- is the insert/update half of upsert_feed_tasks WITHOUT its per-epic
         -- stale delete, sharing one private helper with it so the two cannot
         -- drift in what they WRITE. It returns the same (empty) removed-row type
@@ -2629,7 +2628,7 @@ rule DegradedNonEmptyEmission {
         -- degraded_partial_when_items_present_and_stderr_present (fires),
         -- not_partially_degraded_when_zero_items and
         -- not_partially_degraded_when_no_stderr (both boundaries);
-        -- src/db/tests/tasks_feed/additive_and_stale.rs::upsert_feed_tasks_additive_upserts_without_deleting_absent_tasks;
+        -- src/store/tests/tasks_feed/additive_and_stale.rs::upsert_feed_tasks_additive_upserts_without_deleting_absent_tasks;
         -- src/feed/ingest/tests.rs, one per removal mechanism:
         -- additive_role_routed_sync_keeps_a_task_absent_from_the_emission,
         -- additive_role_routed_sync_keeps_parent_stranded_tasks,
@@ -2820,7 +2819,7 @@ rule AppendOnlyFeed {
         -- and is covered where that rule's own guidance says it is.
         -- src/feed/ingest/tests.rs covers the reconcile behaviour, reusing the
         -- existing additive_* assertions rather than duplicating them, and
-        -- src/db/tests/tasks.rs covers the retirement claim above
+        -- src/store/tests/tasks.rs covers the retirement claim above
         -- (upsert_feed_tasks_inserts_no_task_for_a_retired_external_id).
 }
 
@@ -3150,8 +3149,8 @@ rule ManualFeedTrigger {
 -- parent-stranded feed task down to its routed role sub-epic and by deleting
 -- stale parent-stranded feed tasks. A violation means an emission bypassed the
 -- role router with a flat upsert (the manual-trigger / stale-parent-task bug),
--- which also deadlocks the subtree-uniqueness constraint
--- (core/Epic enforce_feed_task_subtree_unique_insert) on the next reconcile.
+-- which also deadlocks the subtree-uniqueness constraint on the next
+-- reconcile.
 -- Manual (external_id = null) tasks on the parent are permitted and unaffected.
 invariant NoFlatFeedTasksOnReviewsParent {
     for epic in core/Epics where feed_role = reviews_parent:
@@ -3230,12 +3229,12 @@ invariant DefaultFeedIntervalClearsTheFloor {
 -- delete+recreate would (even if only transiently) risk two rows sharing an
 -- external_id in the subtree.
 
--- Insert-trigger self-conflict on in-place updates (resolved, migration
--- v76): the "SAME role -> fields updated in place" path above (== Global
+-- Insert-trigger self-conflict on in-place updates (resolved; the SQLite
+-- triggers it concerned were removed with SQLite, task #36865): the "SAME role -> fields updated in place" path above (== Global
 -- identity and the move ==) resolves via `INSERT ... ON CONFLICT(epic_id,
 -- external_id) DO UPDATE` (UpsertFeedTasks' statement, reused here). SQLite
 -- fires BEFORE INSERT triggers before resolving the ON CONFLICT arm, so the
--- v72 enforce_feed_task_subtree_unique_insert trigger — whose EXISTS check
+-- v72 subtree-uniqueness insert trigger — whose EXISTS check
 -- had no exclusion for the row ON CONFLICT was about to update, unlike the
 -- sibling update trigger's `t.id != OLD.id` — matched the task's own prior
 -- row and aborted, on EVERY re-upsert of an already-tracked task. Because

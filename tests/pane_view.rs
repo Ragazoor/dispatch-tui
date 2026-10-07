@@ -10,22 +10,19 @@
 
 mod common;
 
-use std::path::Path;
-
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
 use common::{dead_port, repo_file, seed_task, spawn_board};
-use dispatch_tui::db::{Database, TaskCrud, TaskPatch, TaskRead};
 use dispatch_tui::hooks::fetch_pane_view;
 use dispatch_tui::hooks::wire::{PaneTask, PaneViewRequest, PANE_VIEW_PATH};
 use dispatch_tui::models::{test_tmux_window, TaskId, TaskStatus};
+use dispatch_tui::store::{Database, TaskCrud, TaskPatch, TaskRead};
 
 /// Seed a task with `status`, and a tmux window when `window` is set.
-async fn seed_with(db_path: &Path, title: &str, status: TaskStatus, window: bool) -> TaskId {
-    let id = seed_task(db_path, title).await;
-    let db = Database::open(db_path).await.unwrap();
+async fn seed_with(db: &Database, title: &str, status: TaskStatus, window: bool) -> TaskId {
+    let id = seed_task(db, title).await;
     let mut patch = TaskPatch::new().status(status);
     let tmux = test_tmux_window(&format!("task-{}", id.0));
     if window {
@@ -44,8 +41,8 @@ async fn seed_with(db_path: &Path, title: &str, status: TaskStatus, window: bool
 #[tokio::test]
 async fn the_board_answers_with_the_tasks_worktree_and_base_branch() {
     let board = spawn_board().await;
-    let id = seed_task(&board.db_path(), "With a worktree").await;
-    let db = Database::open(&board.db_path()).await.unwrap();
+    let id = seed_task(&board.db, "With a worktree").await;
+    let db = board.db.clone();
     db.patch_task(id, &TaskPatch::new().worktree(Some("/wt/4982-x")))
         .await
         .unwrap();
@@ -81,7 +78,7 @@ async fn a_task_the_board_does_not_hold_is_answered_with_a_null_task() {
 #[tokio::test]
 async fn a_task_without_a_worktree_is_answered_as_present_without_one() {
     let board = spawn_board().await;
-    let id = seed_task(&board.db_path(), "No worktree").await;
+    let id = seed_task(&board.db, "No worktree").await;
 
     let view = fetch_pane_view(board.port, id.0).await.expect("answered");
 
@@ -100,12 +97,12 @@ async fn a_task_without_a_worktree_is_answered_as_present_without_one() {
 #[tokio::test]
 async fn live_agents_are_exactly_the_boards_live_agents_by_id() {
     let board = spawn_board().await;
-    let db_path = board.db_path();
-    let review = seed_with(&db_path, "review, window", TaskStatus::Review, true).await;
-    let running = seed_with(&db_path, "running, window", TaskStatus::Running, true).await;
-    seed_with(&db_path, "running, no window", TaskStatus::Running, false).await;
-    seed_with(&db_path, "backlog, window", TaskStatus::Backlog, true).await;
-    seed_with(&db_path, "done, window", TaskStatus::Done, true).await;
+    let db_path = &board.db;
+    let review = seed_with(db_path, "review, window", TaskStatus::Review, true).await;
+    let running = seed_with(db_path, "running, window", TaskStatus::Running, true).await;
+    seed_with(db_path, "running, no window", TaskStatus::Running, false).await;
+    seed_with(db_path, "backlog, window", TaskStatus::Backlog, true).await;
+    seed_with(db_path, "done, window", TaskStatus::Done, true).await;
 
     let view = fetch_pane_view(board.port, running.0)
         .await
@@ -123,24 +120,14 @@ async fn live_agents_are_exactly_the_boards_live_agents_by_id() {
 #[tokio::test]
 async fn asking_changes_no_row() {
     let board = spawn_board().await;
-    let id = seed_with(&board.db_path(), "asked about", TaskStatus::Running, true).await;
-    let before = Database::open(&board.db_path())
-        .await
-        .unwrap()
-        .list_all()
-        .await
-        .unwrap();
+    let id = seed_with(&board.db, "asked about", TaskStatus::Running, true).await;
+    let before = board.db.list_all().await.unwrap();
 
     for _ in 0..3 {
         fetch_pane_view(board.port, id.0).await.expect("answered");
     }
 
-    let after = Database::open(&board.db_path())
-        .await
-        .unwrap()
-        .list_all()
-        .await
-        .unwrap();
+    let after = board.db.list_all().await.unwrap();
     assert_eq!(before, after, "answering a pane must write nothing");
 }
 
@@ -150,7 +137,7 @@ async fn asking_changes_no_row() {
 #[tokio::test]
 async fn asking_pushes_no_refresh_to_the_board() {
     let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();
-    let db: std::sync::Arc<dyn dispatch_tui::db::TaskStore> =
+    let db: std::sync::Arc<dyn dispatch_tui::store::TaskStore> =
         std::sync::Arc::new(Database::open_in_memory().await.unwrap());
     let router = dispatch_tui::mcp::router(
         dispatch_tui::mcp::McpDeps {
@@ -242,7 +229,7 @@ fn no_pane_renderer_source_opens_the_store() {
         "src/cli/agent_tree_agents.rs",
         "src/cli/agent_tree_commits.rs",
     ];
-    const FORBIDDEN: &[&str] = &["open_cli_store", "crate::db::", "TaskRead", "Database"];
+    const FORBIDDEN: &[&str] = &["open_cli_store", "crate::store::", "TaskRead", "Database"];
     for file in FILES {
         let source = repo_file(file);
         for needle in FORBIDDEN {

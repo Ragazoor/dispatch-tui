@@ -5,12 +5,20 @@
 //! behaviour this repo writes by hand, which is why it is asserted at all.
 
 use super::{accepted, refused, RefusingSubscriber, ScriptedConnector};
-use crate::db::{Database, HostStore, IdentityCredentialStore, SubscriptionStore};
+use crate::store::{Database, EpicCrud, HostStore, IdentityCredentialStore, SubscriptionStore};
 use crate::sync::{ConnectionStatus, StepOutcome, SyncSession, RECONNECT_BACKOFF_BASE};
 use std::time::{Duration, Instant};
 
+/// A store holding epics 1 through 42, so a test can follow any of them: the
+/// store refuses a subscription to an epic that does not exist.
 async fn store() -> Database {
-    Database::open_in_memory_unattached().await.unwrap()
+    let db = Database::open_in_memory().await.unwrap();
+    for n in 1..=42 {
+        db.create_epic(&format!("epic {n}"), "", None)
+            .await
+            .unwrap();
+    }
+    db
 }
 
 /// The happy path, stated so the outage tests below have something to differ

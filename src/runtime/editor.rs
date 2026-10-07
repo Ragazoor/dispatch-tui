@@ -745,9 +745,9 @@ mod tests {
     // finalize-result dispatch. The watcher itself is covered by the pure
     // watch_editor tests above.
 
-    use crate::db::{CreateTaskRequest, Database, RepoConfigRead, TaskRead};
     use crate::models::TaskStatus;
     use crate::process::MockProcessRunner;
+    use crate::store::{CreateTaskRequest, Database, RepoConfigRead, TaskRead};
     use crate::tui::{App, EditKind};
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -772,7 +772,7 @@ mod tests {
     /// (`epics.allium: EditEpic`'s take-over prompt), where nothing has
     /// claimed the epic, so the conflicting-owner branch needs a fixed owner.
     pub(super) fn editor_runtime_with_board_reads(
-        db: Arc<dyn crate::db::TaskStore>,
+        db: Arc<dyn crate::store::TaskStore>,
         runner: Arc<dyn ProcessRunner>,
         msg_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::Message>,
         board_reads: Arc<dyn crate::sync::BoardReads>,
@@ -895,7 +895,7 @@ mod tests {
         );
     }
 
-    async fn seed_task(db: &dyn crate::db::TaskStore) -> models::Task {
+    async fn seed_task(db: &dyn crate::store::TaskStore) -> models::Task {
         let id = db
             .create_task(CreateTaskRequest {
                 title: "Original title",
@@ -1211,8 +1211,8 @@ mod tests {
 #[cfg(test)]
 mod epic_edit_tests {
     use super::*;
-    use crate::db::{Database, EpicCrud, EpicRead};
     use crate::process::{MockProcessRunner, ProcessRunner};
+    use crate::store::{Database, EpicCrud, EpicRead};
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -1421,7 +1421,7 @@ mod epic_edit_tests {
         let epic = db.create_epic("Original", "", None).await.unwrap();
         db.patch_epic(
             epic.id,
-            &crate::db::EpicPatch::new().feed_command(Some("true")),
+            &crate::store::EpicPatch::new().feed_command(Some("true")),
         )
         .await
         .unwrap();
@@ -1459,7 +1459,7 @@ mod epic_edit_tests {
         let epic = db.create_epic("Original", "", None).await.unwrap();
         db.patch_epic(
             epic.id,
-            &crate::db::EpicPatch::new().feed_command(Some("true")),
+            &crate::store::EpicPatch::new().feed_command(Some("true")),
         )
         .await
         .unwrap();

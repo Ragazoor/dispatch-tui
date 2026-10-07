@@ -24,7 +24,7 @@ async fn make_task(state: &Arc<McpState>, title: &str) -> crate::models::TaskId 
 /// `mcp-task-tools.allium: OverridePollOwnerViaMcp`, task scope. On a
 /// single-machine test harness (no shared store attached) the underlying
 /// `PollOwnershipStore::override_poll_owner` is a harmless no-op — see
-/// `db::PollOwnershipStore` — so this asserts the call succeeds and reports
+/// `store::PollOwnershipStore` — so this asserts the call succeeds and reports
 /// the reassignment, not that a row changed (there is none to read back on
 /// this backing).
 #[tokio::test]

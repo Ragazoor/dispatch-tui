@@ -4,32 +4,28 @@
 //! `spacetime/module/README.md`'s "Why almost nothing here is `Option`" for the
 //! sentinels this file undoes.
 //!
-//! # The second decoder problem
+//! # Keeping the decoders honest
 //!
-//! `src/db/queries/mod.rs::row_to_task` already turns a stored row into a
-//! [`models::Task`]. This is a second one, over a different row type, and two
-//! decoders for one domain type is a thing that drifts. Three things hold them
-//! together:
+//! The in-memory store (`Database::open_in_memory`) decodes through this file
+//! too, so every test that writes through a memory-attached handle exercises
+//! it. Two things hold it to one policy:
 //!
 //! - **The parsers are shared, not re-implemented.** Status, sub-status, tag,
-//!   wrap-up mode, tmux window, feed role and origin all go through the same
-//!   `models` constructors SQLite's decoder uses, and timestamps through the
-//!   same [`crate::db::parse_datetime`]. What is written here is the field
+//!   wrap-up mode, tmux window, feed role and origin all go through the
+//!   `models` constructors, and timestamps through
+//!   [`crate::store::parse_datetime`]. What is written here is the field
 //!   mapping and the sentinel undo — nothing that parses.
-//! - **The soft-fail policy is copied deliberately, field by field.** A
-//!   malformed `tmux_window` is dropped with a warning and an unknown status is
-//!   refused, exactly as in SQLite's decoder, because a row that renders one
-//!   way from disk and another way from the store is worse than either.
-//! - **`tests::decode` drives a real SQLite board through the dump and back.**
-//!   That is the strongest of the three: the assertion is not that this decoder
-//!   is right in the abstract, but that it reproduces the very row SQLite read.
+//! - **The soft-fail policy is applied field by field.** A malformed
+//!   `tmux_window` is dropped with a warning and an unknown status is refused,
+//!   because a row that renders one way from one read and another way from
+//!   the next is worse than either.
 //!
 //! # Why absence is refused rather than defaulted
 //!
 //! An unknown enum fails the row. The caller drops it, so a task written by a
 //! newer binary is missing from the board rather than sitting on it with a
-//! plausible wrong status — the same bargain `collect_decodable` already makes
-//! for SQLite's bulk reads.
+//! plausible wrong status — the same bargain `drop_undecodable` makes for
+//! every bulk read.
 
 use chrono::{DateTime, Utc};
 
@@ -94,7 +90,7 @@ fn id(raw: i64) -> Option<i64> {
 fn timestamp(table: &str, row_id: i64, column: &str, raw: &str) -> Decoded<Option<DateTime<Utc>>> {
     match text(raw) {
         None => Ok(None),
-        Some(raw) => crate::db::parse_datetime(raw)
+        Some(raw) => crate::store::parse_datetime(raw)
             .map(Some)
             .map_err(|e| DecodeError::new(table, row_id, format!("{column}: {e}"))),
     }
@@ -102,7 +98,7 @@ fn timestamp(table: &str, row_id: i64, column: &str, raw: &str) -> Decoded<Optio
 
 /// A required timestamp column.
 fn required_timestamp(table: &str, row_id: i64, column: &str, raw: &str) -> Decoded<DateTime<Utc>> {
-    crate::db::parse_datetime(raw)
+    crate::store::parse_datetime(raw)
         .map_err(|e| DecodeError::new(table, row_id, format!("{column}: {e}")))
 }
 
@@ -193,8 +189,8 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
 /// `url` and `url_type` are one value or neither.
 ///
 /// A url without a type (or the reverse) is a row the application cannot
-/// produce, so it fails rather than being coerced to `None` — the same call
-/// SQLite's `read_task_url` makes, for the same reason.
+/// produce, so it fails rather than being coerced to `None` — for the same reason
+/// every decoder here refuses an inconsistent pair.
 fn task_url(row: &bindings::Task) -> Result<Option<TaskUrl>, String> {
     match (text(&row.url), text(&row.url_type)) {
         (None, None) => Ok(None),
@@ -210,18 +206,17 @@ fn task_url(row: &bindings::Task) -> Result<Option<TaskUrl>, String> {
 /// A malformed window name is dropped, not refused.
 ///
 /// The card is still worth drawing without it; refusing would take the whole
-/// task off the board over a cosmetic field. SQLite's `read_tmux_window` makes
-/// the same call.
+/// task off the board over a cosmetic field.
 fn tmux_window(raw: &str) -> Option<TmuxWindow> {
     let raw = text(raw)?;
     match TmuxWindow::from_owned(raw.to_owned()) {
         Ok(window) => Some(window),
         Err(raw) => {
-            // Counted, not only logged. `db::decode_fallback_count` is the
+            // Counted, not only logged. `store::decode_fallback_count` is the
             // process-wide gauge for "this board is quietly dropping data", and
             // a soft-fail that skipped it would leave that number reading zero
             // on the board's primary read path.
-            let count = crate::db::bump_decode_fallback();
+            let count = crate::store::bump_decode_fallback();
             tracing::warn!(
                 count,
                 raw,
@@ -270,12 +265,12 @@ pub fn epic(row: &bindings::Epic) -> Decoded<Epic> {
         // `parse_feed_role`/`parse_epic_origin`: a role written by a newer
         // binary must not take the epic and every task under it off the board.
         feed_role: FeedRole::parse(&row.feed_role).unwrap_or_else(|| {
-            let count = crate::db::bump_decode_fallback();
+            let count = crate::store::bump_decode_fallback();
             tracing::warn!(count, value = %row.feed_role, "unknown feed_role from the shared store; defaulting to none");
             FeedRole::None
         }),
         origin: EpicOrigin::parse(&row.origin).unwrap_or_else(|| {
-            let count = crate::db::bump_decode_fallback();
+            let count = crate::store::bump_decode_fallback();
             tracing::warn!(count, value = %row.origin, "unknown epic origin from the shared store; defaulting to manual");
             EpicOrigin::Manual
         }),

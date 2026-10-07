@@ -12,8 +12,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use crate::db::{SharedUsageReader, UsageQuery};
 use crate::models::UsageSummary;
+use crate::store::{SharedUsageReader, UsageQuery};
 
 use super::SharedRows;
 

@@ -50,14 +50,14 @@ use "./core.allium" as core
 --
 -- The RAG ranking itself (rag_rank_learnings, src/service/embeddings.rs) is
 -- unchanged and backend-agnostic: it scores whatever (Learning, embedding)
--- rows it is handed by cosine similarity, client-side, whether those rows
--- came from SQLite or from a SpacetimeDB subscription. Moving the storage
--- changes nothing about how a learning is scored or ranked.
+-- rows it is handed by cosine similarity, client-side; it was unchanged by
+-- the move from SQLite to the SpacetimeDB subscription. Moving the storage
+-- changed nothing about how a learning is scored or ranked.
 --
--- learning_verdicts is not a table on either backend: migration v74 dropped
--- it, and a verdict has never been more than an in-flight score effect on
--- core/Learning.upvote_count (see Retrievals & Verdicts below and
--- core.allium). Only core/Learning and core/Retrieval have module tables.
+-- learning_verdicts is not a table in the store: the old SQLite migration v74
+-- dropped it long before SQLite was removed (task #36865), and a verdict has
+-- never been more than an in-flight score effect on core/Learning.upvote_count
+-- (see Retrievals & Verdicts below and core.allium). Only core/Learning and core/Retrieval have module tables.
 
 ------------------------------------------------------------
 -- Scope Model
@@ -634,9 +634,9 @@ rule RateLearningViaMcp {
         -- downvoted entry stays active but ranks lower and becomes eligible for
         -- ArchiveStaleLearning once its score is non-positive and it goes
         -- untouched for config.stale_learning_threshold.
-        -- The verdict itself is not persisted: migration v74 dropped the
-        -- learning_verdicts table, so only the in-flight score effect is
-        -- applied. See apply_verdicts in src/service/learnings.rs.
+        -- The verdict itself is not persisted: there is no learning_verdicts
+        -- table (the old SQLite migration v74 dropped it), so only the
+        -- in-flight score effect is applied. See apply_verdicts in src/service/learnings.rs.
         -- The retrieval guard ensures agents only rate learnings actually
         -- surfaced to them (prompt injection or query_learnings).
         -- Replaces the former upvote_learning tool and the wrap_up

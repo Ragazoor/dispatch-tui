@@ -1,28 +1,35 @@
 //! Task #16755, settings.allium: SettingsAreStoredPerHost — "NOTHING IS
 //! COPIED IN FROM THE OLD LOCAL TABLE ... a host with no rows in the store
 //! starts from the defaults", and settings are read "from these rows and from
-//! nowhere else" (sync.allium: SubscribeToThisHostsSettings).
+//! nowhere else" (sync.allium: SubscribeToThisHostsSettings). Task #36865 took
+//! the local table away altogether, so a handle with no store has nowhere to
+//! answer from or to write to.
 
 use std::sync::Arc;
 
-use crate::db::{Database, SettingsStore};
+use crate::store::{Database, SettingsStore};
 use crate::sync::{SharedRows, SubscriptionBoardReads};
 
-/// A store-backed handle whose own SQLite holds a setting the store does not:
-/// the read answers from the (empty) store, i.e. the default, and the local
-/// row is never consulted.
+/// A handle with no store attached refuses a settings write and a settings
+/// read, rather than keeping the value somewhere nothing else reads.
 #[tokio::test]
-async fn a_setting_only_in_the_local_table_is_not_read_when_the_store_has_none() {
-    let local = Database::open_in_memory_unattached().await.unwrap();
-    local
-        .set_setting_string("repo_filter", "/legacy/repo")
-        .await
-        .unwrap();
-    local.set_setting_bool("notifications", true).await.unwrap();
+async fn a_handle_with_no_store_refuses_settings_rather_than_keeping_them_locally() {
+    let local = Database::unattached();
 
-    let store_backed = local.with_shared_reader(Arc::new(SubscriptionBoardReads::new(Arc::new(
-        SharedRows::new(),
-    ))));
+    let write = local
+        .set_setting_string("repo_filter", "/legacy/repo")
+        .await;
+    assert!(write.is_err(), "a write has no store to land in");
+    let read = local.get_setting_string("repo_filter").await;
+    assert!(read.is_err(), "a read has no store to answer from");
+}
+
+/// A store-backed handle with no row for a key answers with the default.
+#[tokio::test]
+async fn a_setting_the_store_does_not_hold_reads_as_unset() {
+    let store_backed = Database::unattached().with_shared_reader(Arc::new(
+        SubscriptionBoardReads::new(Arc::new(SharedRows::new())),
+    ));
 
     assert_eq!(
         store_backed
@@ -30,7 +37,7 @@ async fn a_setting_only_in_the_local_table_is_not_read_when_the_store_has_none()
             .await
             .unwrap(),
         None,
-        "no row in the store means the default, never the local copy"
+        "no row in the store means the default"
     );
     assert_eq!(
         store_backed

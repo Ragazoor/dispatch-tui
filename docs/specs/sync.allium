@@ -183,7 +183,7 @@ entity BoardConnection {
     -- `FeedRunner`'s OTHER reads — `list_epics`, every
     -- `list_tasks_for_epic`/`list_epics_with_parent` call ingest's routing
     -- makes while walking a feed epic's sub-epics — are ALSO answered from
-    -- the subscription rather than from SQLite, through `SharedReader`. Not
+    -- the subscription, through `SharedReader`. Not
     -- `list_repo_paths`, though: `repo_paths`/`repo_base_branches` are
     -- subscribed to UNFILTERED (SubscribeOnceIdentityIsSettled's "repo lists"
     -- clause), so that one read is always complete regardless of
@@ -865,8 +865,8 @@ rule BoardReadsFromTheSubscription {
         -- and every other read went to a local table that
         -- BoardWritesThroughTheStore had stopped writing: a task created a
         -- moment earlier answered "not found". The implementation's
-        -- counterpart is `db::SharedReader`, attached by `runtime::bootstrap`
-        -- at the same point as `db::SharedWriter` and over the same rows.
+        -- counterpart is `store::SharedReader`, attached by `runtime::bootstrap`
+        -- at the same point as `store::SharedWriter` and over the same rows.
 }
 
 rule SubscribedRowsArriveUnasked {
@@ -953,7 +953,7 @@ rule RowsWithARemovedStatusAreDropped {
         -- the ordinary way.
         --
         -- DIFFERENT FROM ArchivedStatusMigration, ON PURPOSE. epics.allium:
-        -- ArchivedStatusMigration is the SQLite-schema migration for the same
+        -- ArchivedStatusMigration was the SQLite-schema migration for the same
         -- removal, and it does keep history: it retires archived feed tasks as
         -- RetiredFeedItems and turns an archived task still holding a worktree
         -- into `done`. That migration ran against a board's own database, where

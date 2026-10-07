@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Integration test: full task lifecycle through App::update() with a real (in-memory) DB.
 
-use dispatch_tui::db::{self, CreateTaskRequest, Database, TaskCrud, TaskRead};
 use dispatch_tui::models::{DispatchMode, Task, TaskId, TaskStatus, TmuxWindow};
+use dispatch_tui::store::{self, CreateTaskRequest, Database, TaskCrud, TaskRead};
 use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 
 async fn make_app() -> (App, Database) {
@@ -19,7 +19,7 @@ async fn execute(db: &Database, cmds: &[Command]) {
                 let _ = db
                     .patch_task(
                         task.id,
-                        &db::TaskPatch::new()
+                        &store::TaskPatch::new()
                             .status(task.status)
                             .worktree(task.worktree.as_deref())
                             .tmux_window(task.tmux_window.as_ref()),

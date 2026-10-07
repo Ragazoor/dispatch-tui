@@ -1,12 +1,12 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::db::LearningFilter;
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{
     LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict, TaskId,
 };
+use crate::store::LearningFilter;
 
 use super::types::{
     deserialize_flexible_id, deserialize_optional_flexible_i64, fetch_caller_task, parse_args,

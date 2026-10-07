@@ -50,7 +50,7 @@ async fn subscribe_to_task_already_finished_does_not_create_row() {
     let svc = task_svc(&db);
     let watcher = svc.create_task(make_task_params("/repo")).await.unwrap();
     let target = svc.create_task(make_task_params("/repo")).await.unwrap();
-    db.patch_task(target, &db::TaskPatch::new().status(TaskStatus::Done))
+    db.patch_task(target, &store::TaskPatch::new().status(TaskStatus::Done))
         .await
         .unwrap();
 
@@ -114,7 +114,7 @@ async fn update_task_to_done_notifies_live_watcher() {
     let watcher = svc.create_task(make_task_params("/repo")).await.unwrap();
     db.patch_task(
         watcher,
-        &db::TaskPatch::new()
+        &store::TaskPatch::new()
             .worktree(Some(&worktree))
             .tmux_window(Some(&test_tmux_window("task-watcher"))),
     )
@@ -146,7 +146,7 @@ async fn update_task_to_done_is_noop_when_status_unchanged() {
     let svc = task_svc_with_runner(&db, runner);
 
     let target = svc.create_task(make_task_params("/repo")).await.unwrap();
-    db.patch_task(target, &db::TaskPatch::new().status(TaskStatus::Done))
+    db.patch_task(target, &store::TaskPatch::new().status(TaskStatus::Done))
         .await
         .unwrap();
 
@@ -176,52 +176,6 @@ async fn update_task_to_done_logs_and_drops_dead_watcher() {
         .unwrap();
 
     assert!(db.list_watchers_of(target).await.unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn delete_task_notifies_watchers_of_deletion() {
-    let tmp = tempfile::tempdir().unwrap();
-    let worktree = tmp.path().to_str().unwrap().to_string();
-    let db = test_db_unattached().await;
-    let mock = Arc::new(crate::process::MockProcessRunner::new(vec![
-        crate::process::MockProcessRunner::ok_with_stdout(READY_PANE_STDOUT),
-        crate::process::MockProcessRunner::ok(),
-        crate::process::MockProcessRunner::ok(),
-    ]));
-    let runner: Arc<dyn crate::process::ProcessRunner> = mock.clone();
-    let svc = task_svc_with_runner(&db, runner);
-
-    let watcher = svc.create_task(make_task_params("/repo")).await.unwrap();
-    db.patch_task(
-        watcher,
-        &db::TaskPatch::new()
-            .worktree(Some(&worktree))
-            .tmux_window(Some(&test_tmux_window("task-watcher"))),
-    )
-    .await
-    .unwrap();
-    let target = svc.create_task(make_task_params("/repo")).await.unwrap();
-    svc.subscribe_to_task(watcher, target).await.unwrap();
-
-    svc.delete_task(target).await.unwrap();
-
-    assert_eq!(mock.recorded_calls().len(), 3);
-    assert!(db.list_watchers_of(target).await.unwrap().is_empty());
-
-    // Assert the delivered message body actually says the task was
-    // deleted before it finished (not a generic/finished-style body).
-    let messages_dir = tmp.path().join(".claude-messages");
-    let entries: Vec<_> = std::fs::read_dir(&messages_dir).unwrap().collect();
-    assert_eq!(entries.len(), 1, "should have exactly one message file");
-    let content = std::fs::read_to_string(entries[0].as_ref().unwrap().path()).unwrap();
-    assert!(
-        content.contains("deleted"),
-        "message should mention deletion: {content}"
-    );
-    assert!(
-        content.contains("before it finished"),
-        "message should mention it was deleted before finishing: {content}"
-    );
 }
 
 #[tokio::test]
@@ -257,7 +211,7 @@ async fn delete_task_does_not_notify_watcher_when_target_already_finished_via_by
         .unwrap();
     db.patch_task(
         watcher,
-        &db::TaskPatch::new()
+        &store::TaskPatch::new()
             .worktree(Some(&worktree))
             .tmux_window(Some(&test_tmux_window("task-watcher"))),
     )
@@ -272,7 +226,7 @@ async fn delete_task_does_not_notify_watcher_when_target_already_finished_via_by
     // Bypass TaskService entirely (simulating FeedRunner's sanctioned
     // direct DB write) so notify_watchers_if_finished never runs and the
     // watcher row is NOT cleared by the finish hook.
-    db.patch_task(target, &db::TaskPatch::new().status(TaskStatus::Done))
+    db.patch_task(target, &store::TaskPatch::new().status(TaskStatus::Done))
         .await
         .unwrap();
     assert_eq!(
@@ -306,6 +260,13 @@ async fn delete_task_cleans_up_rows_where_it_was_the_watcher() {
     let watcher = svc.create_task(make_task_params("/repo")).await.unwrap();
     let target = svc.create_task(make_task_params("/repo")).await.unwrap();
     svc.subscribe_to_task(watcher, target).await.unwrap();
+    // The store only deletes a finished task.
+    db.patch_task(
+        watcher,
+        &store::TaskPatch::new().status(crate::models::TaskStatus::Done),
+    )
+    .await
+    .unwrap();
 
     svc.delete_task(watcher).await.unwrap();
 

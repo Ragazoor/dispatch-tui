@@ -21,7 +21,7 @@ use super::{
     settle_identity, BoardConnection, ConnectionEvent, ConnectionStatus, IdentityVerdict,
     StoreConnector, SubscriptionRequest,
 };
-use crate::db::{HostStore, IdentityCredentialStore, SubscriptionStore};
+use crate::store::{HostStore, IdentityCredentialStore, SubscriptionStore};
 
 /// The store surface a sync session needs: who this install is, what proves it,
 /// and what it follows.

@@ -4,7 +4,7 @@ use crate::models::test_tmux_window;
 /// A running task with a worktree and a tmux window — what `exit_session`
 /// closes.
 async fn running_task_with_window(
-    db: &Arc<dyn db::TaskStore>,
+    db: &Arc<dyn store::TaskStore>,
     epic_id: Option<EpicId>,
 ) -> (TaskId, crate::models::TmuxWindow) {
     let svc = task_svc(db);

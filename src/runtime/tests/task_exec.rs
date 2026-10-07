@@ -179,7 +179,7 @@ async fn exec_refresh_from_db_returns_commands_from_refresh() {
     rt.db_write()
         .patch_task(
             task.id,
-            &db::TaskPatch::new().status(models::TaskStatus::Review),
+            &store::TaskPatch::new().status(models::TaskStatus::Review),
         )
         .await
         .unwrap();
@@ -674,7 +674,9 @@ async fn cleanup_fixture_owning(
     .unwrap();
     db.patch_task(
         task.id,
-        &db::TaskPatch::new().worktree(worktree).tmux_window(window),
+        &store::TaskPatch::new()
+            .worktree(worktree)
+            .tmux_window(window),
     )
     .await
     .unwrap();
@@ -932,7 +934,7 @@ async fn exec_cleanup_tears_down_even_if_another_row_names_the_worktree() {
     .await
     .unwrap();
     rt.db_write()
-        .patch_task(sharer.id, &db::TaskPatch::new().worktree(Some(worktree)))
+        .patch_task(sharer.id, &store::TaskPatch::new().worktree(Some(worktree)))
         .await
         .unwrap();
 
@@ -1474,7 +1476,7 @@ async fn exec_patch_sub_status_updates_db() {
     rt.db_write()
         .patch_task(
             id,
-            &db::TaskPatch::new().status(models::TaskStatus::Running),
+            &store::TaskPatch::new().status(models::TaskStatus::Running),
         )
         .await
         .unwrap();

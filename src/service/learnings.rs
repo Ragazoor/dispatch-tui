@@ -2,7 +2,6 @@ use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
 
-use crate::db::{self, CreateLearningRow, LearningFilter};
 use crate::models::{
     Learning, LearningId, LearningKind, LearningScope, LearningVerdict, RetrievalSource, TaskId,
 };
@@ -10,6 +9,7 @@ use crate::service::embeddings::{
     deserialize_candidate_rows, embed_text_for_learning, embed_text_for_query, rag_rank_learnings,
     serialize_embedding, EmbeddingService, RagRankParams, RAG_SIMILARITY_THRESHOLD,
 };
+use crate::store::{self, CreateLearningRow, LearningFilter};
 
 use super::ServiceError;
 
@@ -224,12 +224,12 @@ fn validate_create_params(params: &CreateLearningParams) -> Result<(), ServiceEr
 // ---------------------------------------------------------------------------
 
 pub struct LearningService {
-    pub db: Arc<dyn db::TaskStore>,
+    pub db: Arc<dyn store::TaskStore>,
     embedding_service: Arc<EmbeddingService>,
 }
 
 impl LearningService {
-    pub fn new(db: Arc<dyn db::TaskStore>, embedding_service: Arc<EmbeddingService>) -> Self {
+    pub fn new(db: Arc<dyn store::TaskStore>, embedding_service: Arc<EmbeddingService>) -> Self {
         Self {
             db,
             embedding_service,
@@ -414,13 +414,13 @@ mod learning_tests {
     use std::sync::Arc;
 
     use super::{CreateLearningParams, LearningService, QueryLearningsParams};
-    use crate::db::{CreateTaskRequest, Database, TaskStore};
     use crate::models::{
         LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict, RetrievalSource,
         TaskId, TaskStatus,
     };
     use crate::service::embeddings::EmbeddingService;
     use crate::service::ServiceError;
+    use crate::store::{CreateTaskRequest, Database, TaskStore};
 
     async fn service() -> LearningService {
         let db = Arc::new(Database::open_in_memory().await.unwrap());

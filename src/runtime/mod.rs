@@ -57,16 +57,16 @@ const AGENT_TREE_TOGGLE_COMMAND: &str = concat!(
     " toggle-agent-tree-pane '#{window_name}'\""
 );
 
-use crate::db::{RepoConfigRead, TaskRead};
 use crate::models::{TaskId, TmuxWindow};
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::embeddings::EmbeddingService;
 use crate::service::FieldUpdate;
+use crate::store::{RepoConfigRead, TaskRead};
 use crate::tui::{
     self, App, Command, EpicFoldState, Message, RepoFilterMode, SectionFoldState,
     COLLAPSED_EPICS_KEY, COLLAPSED_SECTIONS_KEY,
 };
-use crate::{db, dispatch, mcp, models, tmux};
+use crate::{dispatch, mcp, models, store, tmux};
 
 /// Convert `Option<String>` to `FieldUpdate`: `Some(v)` → `Set(v)`, `None` → `Clear`.
 fn option_to_field_update(opt: Option<String>) -> FieldUpdate {
@@ -275,7 +275,7 @@ struct Bootstrap {
 /// change under a caller. Every reader and the writer's claim chain sit over
 /// the same `rows`, so a process cannot read one copy and write another.
 pub struct StoreParts {
-    pub database: Arc<db::Database>,
+    pub database: Arc<store::Database>,
     pub rows: Arc<crate::sync::SharedRows>,
     /// The one adapter over `rows`: the board draws from it and `database`'s
     /// shared reads route to it.
@@ -285,7 +285,7 @@ pub struct StoreParts {
     /// Reused everywhere a reducer call is needed outside `SharedWriter`
     /// proper — today, only the host-registry mirror (`sync.allium:
     /// RegisterHostOnConnect`/`RegisterHostOnRename`). `register_host` is
-    /// deliberately NOT a `SharedWriter` method (see `db::SharedWriter`'s doc
+    /// deliberately NOT a `SharedWriter` method (see `store::SharedWriter`'s doc
     /// comment), so it needs its own handle to the transport.
     pub reducer_caller: Arc<dyn crate::sync::ReducerCaller>,
     /// Ask the store at an address for its database's identity, before any
@@ -300,7 +300,7 @@ impl StoreParts {
     /// install's own — known before any connection, because it is minted
     /// locally on first run (`host.allium: MintHostIdentity`) — and the claim
     /// needs it on every write.
-    pub fn build(database: db::Database, host_id: &str) -> Self {
+    pub fn build(database: store::Database, host_id: &str) -> Self {
         let rows = Arc::new(crate::sync::SharedRows::new());
         let sdk = Arc::new(crate::sync::SpacetimeSdkConnector::new(
             crate::sync::SHARED_DATABASE_NAME,
@@ -315,7 +315,7 @@ impl StoreParts {
         // shared read, and the writer's claim chain — which must take the
         // task the column shows as next, so it reads the same seam.
         let board_reads = Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone()));
-        let database = Arc::new(database.with_shared_store(db::SharedStorePorts {
+        let database = Arc::new(database.with_shared_store(store::SharedStorePorts {
             writer: Arc::new(crate::sync::ReducerWriter::new(
                 reducer_caller.clone(),
                 settled_identity.clone(),
@@ -349,7 +349,7 @@ impl StoreParts {
 /// No reconnect loop — a command that loses its store mid-run fails, and the
 /// operator runs it again.
 pub struct CliStore {
-    pub database: Arc<db::Database>,
+    pub database: Arc<store::Database>,
     _session: crate::sync::SyncSession,
 }
 
@@ -453,19 +453,16 @@ pub fn data_dir_of(db_path: &Path) -> &Path {
 }
 
 /// The handle every process routes through the store. It holds no data of its
-/// own: an in-memory placeholder base for the routed ports (a production path
-/// never opens `tasks.db` — `storage.allium: StoreInUseNeverOpensSqlite`),
-/// with this install's identity kept in `<data_dir>/host.json`
-/// (`host.allium: IdentityLivesInHostFile`).
-async fn placeholder_database(data_dir: &Path) -> Result<db::Database> {
-    Ok(db::Database::open_in_memory_unattached()
-        .await?
-        .with_host_file(data_dir))
+/// own: an empty base for the routed ports to attach to (dispatch has no
+/// SQLite — `storage.allium: StoreInUseNeverOpensSqlite`), with this install's
+/// identity kept in `<data_dir>/host.json` (`host.allium: IdentityLivesInHostFile`).
+fn placeholder_database(data_dir: &Path) -> store::Database {
+    store::Database::unattached().with_host_file(data_dir)
 }
 
 /// A one-shot command's identity: read from the host file, never minted
 /// (`cli.allium: CliCommandsNeedAHostFile`).
-async fn open_with_cli_identity(db_path: &Path) -> Result<(db::Database, String)> {
+async fn open_with_cli_identity(db_path: &Path) -> Result<(store::Database, String)> {
     let data_dir = data_dir_of(db_path);
     let dir = data_dir.to_path_buf();
     let identity =
@@ -479,7 +476,7 @@ async fn open_with_cli_identity(db_path: &Path) -> Result<(db::Database, String)
             crate::host_file::host_file_path(data_dir).display()
         );
     }
-    Ok((placeholder_database(data_dir).await?, identity.host_id))
+    Ok((placeholder_database(data_dir), identity.host_id))
 }
 
 /// The first connection, shared by the board and the CLI: connect, settle the
@@ -952,7 +949,7 @@ async fn finish_embedding_load(_load: EmbeddingLoad) -> Result<Arc<EmbeddingServ
 
 /// Seed the example feed epic and provision the managed feed-epic tree.
 /// Idempotent and best-effort: a failure is logged and never blocks startup.
-async fn seed_and_provision_feeds(database: &Arc<db::Database>, data_dir: &Path) {
+async fn seed_and_provision_feeds(database: &Arc<store::Database>, data_dir: &Path) {
     if let Err(e) = crate::setup::seed_feed_epics(database, data_dir).await {
         tracing::warn!("Example feed epic seeding failed: {e:#}");
     }
@@ -962,7 +959,7 @@ async fn seed_and_provision_feeds(database: &Arc<db::Database>, data_dir: &Path)
 }
 
 /// Fire-and-forget: partial work is retried on the next startup.
-fn spawn_embedding_backfill(database: Arc<db::Database>, emb: Arc<EmbeddingService>) {
+fn spawn_embedding_backfill(database: Arc<store::Database>, emb: Arc<EmbeddingService>) {
     tokio::spawn(async move {
         if let Err(e) = backfill_embeddings(database, emb).await {
             tracing::warn!("Embedding backfill failed: {e}");
@@ -975,7 +972,7 @@ fn spawn_embedding_backfill(database: Arc<db::Database>, emb: Arc<EmbeddingServi
 /// Runs at startup in a background task. Failures are logged via `tracing::warn`
 /// by the caller; this function propagates errors so the caller can decide.
 pub(crate) async fn backfill_embeddings(
-    db: Arc<dyn crate::db::LearningStore + Send + Sync>,
+    db: Arc<dyn crate::store::LearningStore + Send + Sync>,
     emb_svc: Arc<EmbeddingService>,
 ) -> Result<()> {
     use crate::service::embeddings::{embed_text_for_learning, serialize_embedding};
@@ -994,7 +991,7 @@ pub(crate) async fn backfill_embeddings(
         let emb_bytes = serialize_embedding(emb_vec);
         db.patch_learning(
             learning.id,
-            &crate::db::LearningPatch::new().embedding(&emb_bytes),
+            &crate::store::LearningPatch::new().embedding(&emb_bytes),
         )
         .await?;
     }
@@ -1010,7 +1007,7 @@ struct TuiRuntime {
     // `task_svc` / `epic_svc`, which own the `recalculate_epic_status` invariant
     // — calling a mutating method on `database` is a compile error. See the
     // mutation-boundary section of docs/conventions.md.
-    database: Arc<dyn db::TaskReadStore>,
+    database: Arc<dyn store::TaskReadStore>,
     /// Where the board's CARDS come from — see
     /// [`crate::sync::BoardReads`] and `docs/specs/sync.allium`'s
     /// `BoardReadsFromTheSubscription`.
@@ -1033,7 +1030,7 @@ struct TuiRuntime {
     /// the read-only `database` above. See the mutation-boundary section of
     /// docs/conventions.md. In test builds it also backs the `#[cfg(test)]`
     /// `db_write()` accessor used to seed fixtures.
-    feed_db: Arc<dyn db::TaskStore>,
+    feed_db: Arc<dyn store::TaskStore>,
     task_svc: Arc<dyn crate::service::TaskServiceApi>,
     epic_svc: Arc<dyn crate::service::EpicServiceApi>,
     learning_svc: Arc<dyn crate::service::LearningServiceApi>,
@@ -1120,7 +1117,7 @@ impl TuiRuntime {
     /// feed subsystem's write handle; not available in production builds, so
     /// command handlers keep going through the services.
     #[cfg(test)]
-    pub(super) fn db_write(&self) -> &Arc<dyn db::TaskStore> {
+    pub(super) fn db_write(&self) -> &Arc<dyn store::TaskStore> {
         &self.feed_db
     }
 
@@ -1169,7 +1166,7 @@ impl TuiRuntime {
         port: u16,
         paths: &StartupPaths,
         server: String,
-        build_store: fn(db::Database, &str) -> StoreParts,
+        build_store: fn(store::Database, &str) -> StoreParts,
         accept_store_switch: bool,
     ) -> Result<Bootstrap> {
         Self::bootstrap_inner(
@@ -1191,7 +1188,7 @@ impl TuiRuntime {
         port: u16,
         paths: &StartupPaths,
         target: StoreTarget,
-        build_store: fn(db::Database, &str) -> StoreParts,
+        build_store: fn(store::Database, &str) -> StoreParts,
         accept_store_switch: bool,
     ) -> Result<Bootstrap> {
         // ONE read of the host identity, used twice: the board needs its own
@@ -1217,7 +1214,7 @@ impl TuiRuntime {
                 .await??
         };
         let (host_id, host_label) = (identity.host_id, identity.label);
-        let database = placeholder_database(&data_dir).await?;
+        let database = placeholder_database(&data_dir);
         // Routed at construction: which backing a read or write goes to cannot
         // change under a caller. Nothing connects yet — that is
         // `connect_first` below, once the host is named.
@@ -1394,7 +1391,7 @@ impl TuiRuntime {
     /// Wire the services, the feed runner and the message channel around an
     /// already-connected store. Nothing here touches the network or the terminal.
     fn build_runtime(
-        database: &Arc<db::Database>,
+        database: &Arc<store::Database>,
         runner: &Arc<dyn ProcessRunner>,
         emb_svc: &Arc<EmbeddingService>,
         parts: &StoreParts,
@@ -1741,7 +1738,7 @@ async fn execute_commands<B: Backend>(
 /// itself, via [`crate::sync::push_host_registration`]
 /// (`sync.allium: RegisterHostOnRename`).
 async fn persist_host_label(
-    db: &dyn db::HostStore,
+    db: &dyn store::HostStore,
     label: &str,
 ) -> std::result::Result<(), crate::startup::StartupAbort> {
     db.rename_host(label).await.map_err(|e| {
@@ -1763,7 +1760,7 @@ async fn claim_agent_port(port: u16) -> Result<tokio::net::TcpListener> {
 }
 
 /// Resolve the host's label, prompting if it is unset, and persist a new one.
-async fn name_the_host(label: Option<String>, database: &db::Database) -> Result<()> {
+async fn name_the_host(label: Option<String>, database: &store::Database) -> Result<()> {
     let resolved = if label.is_none() {
         let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
         tokio::task::spawn_blocking(move || {
@@ -1812,7 +1809,7 @@ async fn resolve_store_server(target: &StoreTarget) -> Result<String> {
 async fn hydrate_app(
     tasks: Vec<models::Task>,
     host_id: &str,
-    database: &db::Database,
+    database: &store::Database,
     runner: &dyn ProcessRunner,
 ) -> App {
     let mut app = App::new(tasks);
@@ -1839,7 +1836,7 @@ async fn hydrate_app(
 // init load helpers — extracted from run_tui's startup block
 // ---------------------------------------------------------------------------
 
-async fn load_notifications_pref(db: &dyn db::SettingsStore, app: &mut App) {
+async fn load_notifications_pref(db: &dyn store::SettingsStore, app: &mut App) {
     let enabled = db
         .get_setting_bool("notifications_enabled")
         .await
@@ -1848,7 +1845,7 @@ async fn load_notifications_pref(db: &dyn db::SettingsStore, app: &mut App) {
     app.set_notifications_enabled(enabled);
 }
 
-async fn load_repo_filter(db: &dyn db::SettingsStore, app: &mut App) {
+async fn load_repo_filter(db: &dyn store::SettingsStore, app: &mut App) {
     if let Ok(Some(val)) = db.get_setting_string("repo_filter").await {
         if let Ok(paths) = serde_json::from_str::<Vec<String>>(&val) {
             app.set_repo_filter(paths.into_iter().collect());
@@ -1865,7 +1862,7 @@ async fn load_repo_filter(db: &dyn db::SettingsStore, app: &mut App) {
 /// is a standing preference and survives a restart (board-layout.allium:
 /// "Collapsed Sections"). An unreadable or absent row simply leaves everything
 /// unfolded.
-async fn load_collapsed_sections(db: &dyn db::SettingsStore, app: &mut App) {
+async fn load_collapsed_sections(db: &dyn store::SettingsStore, app: &mut App) {
     if let Ok(Some(val)) = db.get_setting_string(COLLAPSED_SECTIONS_KEY).await {
         app.set_section_folds(SectionFoldState::parse(&val));
     }
@@ -1873,7 +1870,7 @@ async fn load_collapsed_sections(db: &dyn db::SettingsStore, app: &mut App) {
 
 /// Restore the folded epic groups, on the same terms as
 /// `load_collapsed_sections` (board-layout.allium: "Epic Folding").
-async fn load_collapsed_epics(db: &dyn db::SettingsStore, app: &mut App) {
+async fn load_collapsed_epics(db: &dyn store::SettingsStore, app: &mut App) {
     if let Ok(Some(val)) = db.get_setting_string(COLLAPSED_EPICS_KEY).await {
         app.set_epic_folds(EpicFoldState::parse(&val));
     }

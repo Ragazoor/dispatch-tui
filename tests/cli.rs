@@ -6,8 +6,8 @@
 //! Most tests invoke the compiled binary via `std::process::Command`. The
 //! commands that read or write shared rows (`repo`, `prune-repo-paths`,
 //! `plan`) need a shared store since task #4916, so their bodies are tested
-//! in-process through `dispatch_tui::cli::commands` against a temp-file
-//! SQLite database — the stand-in until Phase 12b (#4975) — and the binary is
+//! in-process through `dispatch_tui::cli::commands` against an
+//! in-memory store, and the binary is
 //! checked only for refusing them without a store. Task creation is no longer
 //! exposed via the CLI — tests seed tasks through the DB API directly.
 
@@ -20,12 +20,14 @@ use tempfile::NamedTempFile;
 
 use common::seed_task;
 use dispatch_tui::cli::commands;
-use dispatch_tui::db::{Database, TaskRead};
+use dispatch_tui::store::{Database, TaskRead};
 
-/// A fresh temp-file SQLite database for the in-process command tests.
+/// A fresh in-memory store for the in-process command tests. The temp file is
+/// only a path that nothing opens, for the tests that also pass `--db` to the
+/// binary.
 async fn sqlite() -> (NamedTempFile, Database) {
     let tmp = NamedTempFile::new().unwrap();
-    let db = Database::open(tmp.path()).await.unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     (tmp, db)
 }
 
@@ -316,20 +318,15 @@ fn update_subcommand_removed() {
 
 #[tokio::test]
 async fn plan_attaches_to_existing_task() {
-    let db = NamedTempFile::new().unwrap();
-    let id = seed_task(db.path(), "Plan Target").await;
+    let db = std::sync::Arc::new(Database::open_in_memory().await.unwrap());
+    let id = seed_task(&db, "Plan Target").await;
     let attach_plan = make_plan_file("Detailed Plan", "Step by step.");
     let plan_path = commands::resolve_plan_path(attach_plan.path()).unwrap();
 
     let mut out = Vec::new();
-    commands::attach_plan(
-        std::sync::Arc::new(Database::open(db.path()).await.unwrap()),
-        id.0,
-        &plan_path,
-        &mut out,
-    )
-    .await
-    .unwrap();
+    commands::attach_plan(db.clone(), id.0, &plan_path, &mut out)
+        .await
+        .unwrap();
     let stdout = String::from_utf8(out).unwrap();
     assert!(
         stdout.contains(&format!("Plan attached to task #{}", id.0)),
@@ -338,8 +335,7 @@ async fn plan_attaches_to_existing_task() {
 
     // The plan must actually be persisted (routing through the service path
     // writes it), not just echoed.
-    let reopened = Database::open(db.path()).await.unwrap();
-    let task = reopened.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert!(
         task.plan_path.is_some(),
         "Expected plan_path to be persisted, got None"
@@ -348,18 +344,13 @@ async fn plan_attaches_to_existing_task() {
 
 #[tokio::test]
 async fn plan_nonexistent_task_fails() {
-    let db = NamedTempFile::new().unwrap();
+    let db = std::sync::Arc::new(Database::open_in_memory().await.unwrap());
     let attach_plan = make_plan_file("Orphan Plan", "No task.");
     let plan_path = commands::resolve_plan_path(attach_plan.path()).unwrap();
 
-    let err = commands::attach_plan(
-        std::sync::Arc::new(Database::open(db.path()).await.unwrap()),
-        9999,
-        &plan_path,
-        &mut Vec::new(),
-    )
-    .await
-    .expect_err("attaching a plan to a missing task must fail");
+    let err = commands::attach_plan(db.clone(), 9999, &plan_path, &mut Vec::new())
+        .await
+        .expect_err("attaching a plan to a missing task must fail");
     assert!(
         err.to_string().contains("not found"),
         "Expected 'not found' error, got: {err}"
@@ -802,8 +793,8 @@ async fn dispatch_repo_set_verify_rejects_newline() {
         .await
         .expect_err("expected failure for newline command");
     assert!(
-        format!("{err:#}").to_lowercase().contains("newline"),
-        "expected newline error: {err:#}"
+        format!("{err:#}").to_lowercase().contains("single line"),
+        "expected single-line error: {err:#}"
     );
 }
 

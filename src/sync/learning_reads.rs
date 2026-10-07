@@ -4,10 +4,10 @@
 //!
 //! # The mirror of `SharedWriter`, not of `BoardReads`
 //!
-//! `db::SharedWriter` is the port a routed WRITE goes through when a store is
+//! `store::SharedWriter` is the port a routed WRITE goes through when a store is
 //! attached, defined in `db` and implemented here in `sync`; `Database`
 //! itself is still the local SQL path, reached when no writer is attached.
-//! [`db::SharedLearningReader`] is the same shape for reads: no "local"
+//! [`store::SharedLearningReader`] is the same shape for reads: no "local"
 //! implementation exists here, because `Database`'s own existing SQL methods
 //! already ARE the local implementation — the same way there is no "local
 //! writer" type beside `SharedWriter`.
@@ -35,8 +35,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use crate::db::{LearningFilter, SharedLearningReader};
 use crate::models::{Learning, LearningId, LearningRetrieval, TaskId};
+use crate::store::{LearningFilter, SharedLearningReader};
 
 use super::SharedRows;
 

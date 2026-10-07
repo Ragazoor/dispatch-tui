@@ -467,7 +467,7 @@ pub(crate) async fn handle_query_usage(
         None => None,
     };
 
-    let query = crate::db::UsageQuery {
+    let query = crate::store::UsageQuery {
         category: args.category,
         actor: args.actor,
         since,

@@ -155,6 +155,10 @@ async fn delete_task_removes_it() {
         })
         .await
         .unwrap();
+    // The store only deletes a finished task.
+    db.patch_task(id, &crate::store::TaskPatch::new().status(TaskStatus::Done))
+        .await
+        .unwrap();
 
     svc.delete_task(id).await.unwrap();
 

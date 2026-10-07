@@ -1088,9 +1088,10 @@ rule SurfaceAutoDispatchFailure {
 -- run_role_routed_feed_sync to move tasks across role sub-epics and
 -- across group_by_repo transitions without creating duplicates.
 --
--- Enforced at the database level by triggers added in migration v72:
--- enforce_feed_task_subtree_unique_insert (BEFORE INSERT)
--- enforce_feed_task_subtree_unique_update (BEFORE UPDATE OF epic_id)
+-- Enforced by the store's feed reducers. It used to be enforced at the
+-- database level by SQLite triggers (migration v72, since removed with SQLite
+-- in task #36865), so the invariant is stated here as history and as the
+-- rule the feed's own existing-task index upholds.
 --
 -- The feed respects this invariant by building its existing-task index
 -- across the full subtree (repo-group children first, role sub-epic last
@@ -1540,9 +1541,9 @@ rule ArchivedStatusMigration {
         -- the recalculation then settles it by its remaining children like
         -- any other epic (see "Epic status recalculation").
         --
-        -- THIS RULE RUNS ONCE, AGAINST SQLite, AND HAS NO STORE-SIDE
-        -- EQUIVALENT. It is implemented only as src/db/migrations.rs's v106,
-        -- from before task #4916 made the shared store mandatory; the
+        -- THIS RULE HAS NO STORE-SIDE EQUIVALENT, AND NO IMPLEMENTATION LEFT.
+        -- It was implemented only as the SQLite migration v106, from before
+        -- task #4916 made the shared store mandatory; the
         -- module's KNOWN_STATUSES never admitted `archived` and nothing
         -- there re-derives phases 1-4 over an already-populated store. A
         -- second copy of this migration written against the store was
@@ -1564,8 +1565,8 @@ rule ArchivedStatusMigration {
         -- `dispatch spacetime seed` and
         -- `dispatch spacetime dump`, which used to open their SQLite source
         -- through `Database::open` and so run v106 first, are removed. v106
-        -- is kept as the record of what the removal did and for the tests
-        -- that open a SQLite fixture. An old snapshot file with archived rows
+        -- was deleted with the rest of the migrations (task #36865), and this
+        -- rule stays as the record of what the removal did. An old snapshot file with archived rows
         -- is refused as above, and there is no longer a supported route that
         -- upgrades such a file first (the old one — restore it into a SQLite
         -- board, which ran v106 on open, and dump that — went with the local

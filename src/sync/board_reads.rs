@@ -8,7 +8,7 @@
 //! screen, and nothing else — the reads the row-change pump and the tick's
 //! revision guard refresh. Every other read goes through the runtime's
 //! `database`, which since task #4916 answers from the same rows through
-//! `db::SharedReader`.
+//! `store::SharedReader`.
 //!
 //! # Two implementations, and which one runs
 //!
@@ -124,10 +124,10 @@ impl BoardReads for SubscriptionBoardReads {
 }
 
 /// The same rows answer every other shared read `Database` routes
-/// (`db::SharedReader`, `sync.allium`'s `BoardReadsFromTheSubscription`) — one
+/// (`store::SharedReader`, `sync.allium`'s `BoardReadsFromTheSubscription`) — one
 /// adapter over [`SharedRows`], not two kept in step.
 #[async_trait]
-impl crate::db::SharedReader for SubscriptionBoardReads {
+impl crate::store::SharedReader for SubscriptionBoardReads {
     async fn list_all(&self) -> Result<Vec<Task>> {
         Ok(self.rows.tasks())
     }

@@ -504,7 +504,7 @@ async fn update_epic_feed_command_clear() {
         .db_write()
         .patch_epic(
             epic.id,
-            &crate::db::EpicPatch::default().feed_command(Some("old cmd")),
+            &crate::store::EpicPatch::default().feed_command(Some("old cmd")),
         )
         .await
         .unwrap();
@@ -539,7 +539,7 @@ async fn update_epic_feed_command_absent_preserves_existing() {
         .db_write()
         .patch_epic(
             epic.id,
-            &crate::db::EpicPatch::default().feed_command(Some("keep me")),
+            &crate::store::EpicPatch::default().feed_command(Some("keep me")),
         )
         .await
         .unwrap();
@@ -595,7 +595,7 @@ async fn update_epic_feed_interval_secs_clear() {
         .db_write()
         .patch_epic(
             epic.id,
-            &crate::db::EpicPatch::default().feed_interval_secs(Some(120)),
+            &crate::store::EpicPatch::default().feed_interval_secs(Some(120)),
         )
         .await
         .unwrap();
@@ -630,7 +630,7 @@ async fn get_epic_shows_feed_command() {
         .db_write()
         .patch_epic(
             epic.id,
-            &crate::db::EpicPatch::default()
+            &crate::store::EpicPatch::default()
                 .feed_command(Some("./scripts/feed.sh"))
                 .feed_interval_secs(Some(300)),
         )
@@ -777,7 +777,7 @@ async fn create_approved_learning(
         .db
         .patch_learning(
             id,
-            &crate::db::LearningPatch::new().status(crate::models::LearningStatus::Approved),
+            &crate::store::LearningPatch::new().status(crate::models::LearningStatus::Approved),
         )
         .await
         .unwrap();
@@ -810,7 +810,7 @@ async fn record_learning_creates_proposed_entry() {
     let text = extract_response_text(&resp);
     assert!(text.contains("active"), "expected 'active' in: {text}");
 
-    let filter = crate::db::LearningFilter {
+    let filter = crate::store::LearningFilter {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
@@ -845,7 +845,7 @@ async fn record_learning_derives_scope_ref_for_repo() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let filter = crate::db::LearningFilter {
+    let filter = crate::store::LearningFilter {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
@@ -893,7 +893,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let filter = crate::db::LearningFilter {
+    let filter = crate::store::LearningFilter {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
@@ -948,7 +948,7 @@ async fn record_learning_user_scope_no_scope_ref() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let filter = crate::db::LearningFilter {
+    let filter = crate::store::LearningFilter {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };

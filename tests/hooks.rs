@@ -15,9 +15,9 @@ use std::path::Path;
 use tokio::process::Command;
 
 use common::{dead_port, repo_file, seed_running_task, seed_task, spawn_board, Board};
-use dispatch_tui::db::{Database, TaskCrud, TaskPatch};
 use dispatch_tui::mcp::BackgroundWrite;
 use dispatch_tui::models::{SubStatus, TaskStatus};
+use dispatch_tui::store::{TaskCrud, TaskPatch};
 
 /// Run `dispatch <args…> --port <port>`. Returns the exit status and stderr.
 async fn run(port: u16, args: &[&str]) -> (std::process::Output, String) {
@@ -47,7 +47,7 @@ async fn run_pr_gate(port: u16, id: &str) -> (Option<i32>, String) {
 /// Seed a running task on `board` and return its id as the string the CLI
 /// takes.
 async fn seed(board: &Board, title: &str) -> (dispatch_tui::models::TaskId, String) {
-    let id = seed_running_task(&board.db_path(), title, SubStatus::Active).await;
+    let id = seed_running_task(&board.db, title, SubStatus::Active).await;
     (id, id.0.to_string())
 }
 
@@ -58,7 +58,7 @@ async fn seed(board: &Board, title: &str) -> (dispatch_tui::models::TaskId, Stri
 #[tokio::test]
 async fn hook_pre_tool_use_stamps_activity_through_the_board() {
     let board = spawn_board().await;
-    let id = seed_running_task(&board.db_path(), "PreToolUse", SubStatus::Active).await;
+    let id = seed_running_task(&board.db, "PreToolUse", SubStatus::Active).await;
 
     let (ok, stderr) = run_hook(board.port, &["hook", &id.0.to_string(), "pre_tool_use"]).await;
     assert!(ok, "stderr: {stderr}");
@@ -73,7 +73,7 @@ async fn hook_pre_tool_use_stamps_activity_through_the_board() {
 #[tokio::test]
 async fn hook_notification_sets_needs_input_through_the_board() {
     let board = spawn_board().await;
-    let id = seed_running_task(&board.db_path(), "Notification", SubStatus::Active).await;
+    let id = seed_running_task(&board.db, "Notification", SubStatus::Active).await;
 
     let (ok, stderr) = run_hook(board.port, &["hook", &id.0.to_string(), "notification"]).await;
     assert!(ok, "stderr: {stderr}");
@@ -86,7 +86,7 @@ async fn hook_notification_sets_needs_input_through_the_board() {
 #[tokio::test]
 async fn hook_notification_kind_reaches_the_board() {
     let board = spawn_board().await;
-    let id = seed_running_task(&board.db_path(), "Notification kind", SubStatus::Active).await;
+    let id = seed_running_task(&board.db, "Notification kind", SubStatus::Active).await;
 
     // `auth_success` is the one subtype that is a deliberate no-op, so it
     // proves the subtype travelled: a dropped `--kind` would raise instead.
@@ -114,7 +114,7 @@ async fn hook_notification_kind_reaches_the_board() {
 #[tokio::test]
 async fn hook_stop_defers_or_flips_through_the_board() {
     let board = spawn_board().await;
-    let id = seed_running_task(&board.db_path(), "Stop", SubStatus::Active).await;
+    let id = seed_running_task(&board.db, "Stop", SubStatus::Active).await;
 
     let (ok, stderr) = run_hook(board.port, &["hook", &id.0.to_string(), "stop"]).await;
     assert!(ok, "stderr: {stderr}");
@@ -130,8 +130,8 @@ async fn hook_stop_defers_or_flips_through_the_board() {
 #[tokio::test]
 async fn hook_user_prompt_submit_returns_to_running_through_the_board() {
     let board = spawn_board().await;
-    let id = seed_task(&board.db_path(), "UserPromptSubmit").await;
-    let conn = Database::open(&board.db_path()).await.unwrap();
+    let id = seed_task(&board.db, "UserPromptSubmit").await;
+    let conn = board.db.clone();
     conn.patch_task(id, &TaskPatch::new().status(TaskStatus::Review))
         .await
         .unwrap();
@@ -151,7 +151,7 @@ async fn hook_user_prompt_submit_returns_to_running_through_the_board() {
 #[tokio::test]
 async fn hook_subagent_start_then_stop_round_trips_through_the_board() {
     let board = spawn_board().await;
-    let id = seed_running_task(&board.db_path(), "Subagent", SubStatus::Active).await;
+    let id = seed_running_task(&board.db, "Subagent", SubStatus::Active).await;
     let task_id = id.0.to_string();
 
     let (ok, stderr) = run_hook(
@@ -190,7 +190,7 @@ async fn hook_subagent_start_then_stop_round_trips_through_the_board() {
 #[tokio::test]
 async fn hook_subagent_clear_voids_a_pending_stop_through_the_board() {
     let board = spawn_board().await;
-    let id = seed_running_task(&board.db_path(), "Subagent clear", SubStatus::Active).await;
+    let id = seed_running_task(&board.db, "Subagent clear", SubStatus::Active).await;
     let task_id = id.0.to_string();
 
     for args in [
@@ -223,8 +223,8 @@ async fn hook_subagent_clear_voids_a_pending_stop_through_the_board() {
 #[tokio::test]
 async fn hook_peer_message_stamps_sender_and_target_through_the_board() {
     let board = spawn_board().await;
-    let sender = seed_running_task(&board.db_path(), "Sender", SubStatus::Active).await;
-    let target = seed_running_task(&board.db_path(), "Target", SubStatus::Active).await;
+    let sender = seed_running_task(&board.db, "Sender", SubStatus::Active).await;
+    let target = seed_running_task(&board.db, "Target", SubStatus::Active).await;
 
     let (ok, stderr) = run_hook(
         board.port,
@@ -255,7 +255,7 @@ async fn hook_peer_message_stamps_sender_and_target_through_the_board() {
 #[tokio::test]
 async fn hook_peer_message_trajectory_is_written_by_the_board() {
     let board = spawn_board().await;
-    let sender = seed_running_task(&board.db_path(), "Sender", SubStatus::Active).await;
+    let sender = seed_running_task(&board.db, "Sender", SubStatus::Active).await;
 
     let (ok, stderr) = run_hook(
         board.port,
@@ -424,7 +424,7 @@ async fn hook_unknown_kind_fails_before_delivery() {
 /// call produces. Returns the task id alongside it, for the tests that go on
 /// to make a second attempt.
 async fn pr_gate_first_reminder(board: &Board) -> (String, String) {
-    let id = seed_task(&board.db_path(), "gate me").await.0.to_string();
+    let id = seed_task(&board.db, "gate me").await.0.to_string();
     let (code, stderr) = run_pr_gate(board.port, &id).await;
     assert_eq!(code, Some(2), "first call must block, got: {stderr}");
     (id, stderr)

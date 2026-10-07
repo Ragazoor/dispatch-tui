@@ -131,7 +131,7 @@ mod epic_tests {
         rt.db_write()
             .patch_epic(
                 epic.id,
-                &db::EpicPatch::new()
+                &store::EpicPatch::new()
                     .status(models::TaskStatus::Done)
                     .completed_at(Some(finished)),
             )
@@ -438,7 +438,7 @@ mod feed_epic_trigger {
         let task = db.list_tasks_for_epic(epic_id).await.unwrap().remove(0);
         db.patch_task(
             task.id,
-            &db::TaskPatch::new()
+            &store::TaskPatch::new()
                 .worktree(Some("/repo/a/.worktrees/7-pr-1"))
                 .tmux_window(Some(&test_tmux_window("dispatch:pr-1"))),
         )
@@ -841,7 +841,7 @@ mod feed_epic_trigger {
         // reads it from the DB so a manual refresh cannot use a stale flag.
         db.patch_epic(
             epic.id,
-            &db::EpicPatch::new()
+            &store::EpicPatch::new()
                 .feed_command(Some(cmd))
                 .group_by_repo(true),
         )
@@ -892,7 +892,7 @@ mod feed_epic_trigger {
         // group_by_repo stays false; dispatch must key on feed_role, not that flag.
         db.patch_epic(
             epic.id,
-            &db::EpicPatch::new()
+            &store::EpicPatch::new()
                 .feed_role(crate::models::FeedRole::ReviewsParent)
                 .feed_command(Some(cmd)),
         )
@@ -952,7 +952,7 @@ mod epic_auto_dispatch_and_group_by_repo {
             .unwrap();
         // Default is false; opt in first so the toggle-to-false is meaningful.
         rt.db_write()
-            .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(true))
+            .patch_epic(epic.id, &store::EpicPatch::new().auto_dispatch(true))
             .await
             .unwrap();
         let enabled = rt.database.get_epic(epic.id).await.unwrap().unwrap();
@@ -975,7 +975,7 @@ mod epic_auto_dispatch_and_group_by_repo {
             .await
             .unwrap();
         rt.db_write()
-            .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(false))
+            .patch_epic(epic.id, &store::EpicPatch::new().auto_dispatch(false))
             .await
             .unwrap();
 
@@ -1014,7 +1014,7 @@ mod epic_auto_dispatch_and_group_by_repo {
             .await
             .unwrap();
         rt.db_write()
-            .patch_epic(epic.id, &db::EpicPatch::new().group_by_repo(true))
+            .patch_epic(epic.id, &store::EpicPatch::new().group_by_repo(true))
             .await
             .unwrap();
 
@@ -1040,7 +1040,7 @@ mod epic_auto_dispatch_and_group_by_repo {
             .await
             .unwrap();
         rt.db_write()
-            .patch_epic(epic.id, &db::EpicPatch::new().feed_append_only(true))
+            .patch_epic(epic.id, &store::EpicPatch::new().feed_append_only(true))
             .await
             .unwrap();
 

@@ -61,13 +61,11 @@ to look.
 | `src/service/managed_feeds.rs` | Managed feed config read/write (`get`/`set_managed_feed_config`) |
 | `src/service/embeddings.rs` | `EmbeddingService` — text embedding computation used by RAG and learning search |
 | `src/service/clock.rs` | `Clock` trait + `SystemClock`/`FixedClock` for injectable time in services/tests |
-| `src/db/mod.rs` | `Database` struct, `db_call` (writer) / `db_call_read` (read pool), the `*Store` trait hierarchy (`TaskStore`, `TaskReadStore`, …), `patch_struct!` behind the `TaskPatch`/`EpicPatch` builders |
-| `src/db/migrations.rs` | Versioned schema migrations (`MIGRATIONS` array, `migrate_vN_*` functions, `LATEST_SCHEMA_VERSION`) |
-| `src/db/queries/mod.rs` | `impl TaskStore for Database` — fans out across the per-domain query files; `set_field!` macro and the soft-fail row decoders (`row_to_task`, `row_to_epic`) |
-| `src/db/queries/{tasks,epics,learnings,settings,usage}.rs` | CRUD per domain |
-| `src/db/queries/subagents.rs` | `task_subagents` CRUD with session fencing, keeping `tasks.live_subagents` in step |
-| `src/db/tests/mod.rs` | Database unit tests entry point |
-| `src/db/tests/{tasks,epics,learnings,settings,usage,migrations,async_handle,read_pool}.rs` | Tests per domain, plus the async-handle and read-pool behaviour tests |
+| `src/store/mod.rs` | `Database` — a router over the attached store ports, with no data or connection of its own — the `*Store` trait hierarchy (`TaskStore`, `TaskReadStore`, …), the port traits (`SharedWriter`, `SharedReader`, …), `patch_struct!` behind the `TaskPatch`/`EpicPatch` builders |
+| `src/store/decode.rs` | The decode-fallback counter (`bump_decode_fallback`, `drop_undecodable`) and `parse_datetime`, shared by the readers that decode the store's rows |
+| `src/store/queries/{tasks,epics,learnings,settings,usage}.rs` | `impl <Trait> for Database` per domain — each method hands the call to its port; `settings.rs` also holds the host-file identity calls and the identity key names |
+| `src/store/tests/mod.rs` | Store unit tests entry point |
+| `src/store/tests/{tasks,epics,learnings,settings,usage,shared_writer}.rs` | Tests per domain over the in-memory store, plus the routing tests (`shared_writer.rs`) |
 | `src/dispatch/mod.rs` | Dispatch module root: PR-status polling via `gh` (`check_pr_status`, `pr_head_branch`) and local-path resolution (`resolve_repo_path`, `resolve_feed_item_repo_paths`); the pure URL/name parsing it builds on lives in `src/models/paths.rs` |
 | `src/dispatch/agents.rs` | The agent launchers — `dispatch_agent`, `research_agent`, `quick_dispatch_agent`, `resume_agent` — plus `fetch_verify_command` (a soft-fail settings read used by the `wrap_up` MCP handler, not by any launcher). Each launcher provisions a worktree, writes the prompt file, and starts `claude` inside a tmux window |
 | `src/dispatch/caller_identity.rs` | The per-task MCP config every agent launch is given (`claude --mcp-config`), carrying a fixed `X-Caller-Task-Id`. Derived from the user's own `dispatch` entry so the URL cannot drift, and written into the worktree's git admin directory so git never sees it and `git worktree remove` deletes it. See `AgentCarriesItsOwnCallerIdentity` in `docs/specs/dispatch.allium` |

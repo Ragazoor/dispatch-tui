@@ -380,7 +380,7 @@ async fn list_entries(
     // are loaded and ordered here.
     let mut learnings = state
         .learning_svc
-        .list_learnings(crate::db::LearningFilter {
+        .list_learnings(crate::store::LearningFilter {
             status: Some(LearningStatus::Approved),
             ..Default::default()
         })

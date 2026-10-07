@@ -21,12 +21,12 @@ use serde_json::{json, Value};
 
 use tokio::sync::mpsc;
 
-use crate::db::{self, CreateLearningRow, CreateTaskRequest, Database};
 use crate::mcp::identity::{CallerIdentity, IdentityError};
 use crate::mcp::{BackgroundWrite, McpDeps, McpState};
 use crate::models::{SubStatus, TaskStatus};
 use crate::process::{MockProcessRunner, ProcessRunner};
 use crate::service::embeddings::{serialize_embedding, EmbeddingService};
+use crate::store::{self, CreateLearningRow, CreateTaskRequest, Database};
 
 use super::dispatch::{handle_mcp, tool_definitions};
 use super::types::{JsonRpcRequest, JsonRpcResponse};
@@ -39,7 +39,7 @@ async fn test_state_with_overrides(
     runner: Arc<dyn ProcessRunner>,
     notify_tx: Option<mpsc::UnboundedSender<crate::mcp::McpEvent>>,
     task_svc: Option<Arc<dyn crate::service::TaskServiceApi>>,
-) -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
+) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
     test_state_with_overrides_and_bg_done(runner, notify_tx, task_svc, None).await
 }
 
@@ -52,20 +52,20 @@ async fn test_state_with_overrides_and_bg_done(
     notify_tx: Option<mpsc::UnboundedSender<crate::mcp::McpEvent>>,
     task_svc: Option<Arc<dyn crate::service::TaskServiceApi>>,
     bg_write_done_tx: Option<mpsc::UnboundedSender<BackgroundWrite>>,
-) -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     state_over(db, runner, notify_tx, task_svc, bg_write_done_tx)
 }
 
 /// Build the `McpState` over `db`. Split from the constructor above so a test
 /// can bring a SQLite-only handle.
 fn state_over(
-    db: Arc<dyn db::TaskStore>,
+    db: Arc<dyn store::TaskStore>,
     runner: Arc<dyn ProcessRunner>,
     notify_tx: Option<mpsc::UnboundedSender<crate::mcp::McpEvent>>,
     task_svc: Option<Arc<dyn crate::service::TaskServiceApi>>,
     bg_write_done_tx: Option<mpsc::UnboundedSender<BackgroundWrite>>,
-) -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
+) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
     let mut state = McpState::new(
         McpDeps {
             db: db.clone(),
@@ -96,7 +96,7 @@ async fn test_state_with_bg_done() -> (Arc<McpState>, mpsc::UnboundedReceiver<Ba
     (state, rx)
 }
 
-async fn test_state_with_db() -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
+async fn test_state_with_db() -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
     test_state_with_overrides(Arc::new(MockProcessRunner::new(vec![])), None, None).await
 }
 
@@ -221,7 +221,7 @@ async fn create_running_task_with_window_in(
         .unwrap();
     let worktree = format!("{repo_path}/.worktrees/{}-running-task", task_id.0);
     let window = crate::models::TmuxWindow::for_task(task_id);
-    let patch = crate::db::TaskPatch::new()
+    let patch = crate::store::TaskPatch::new()
         .worktree(Some(worktree.as_str()))
         .tmux_window(Some(&window));
     state.db_write().patch_task(task_id, &patch).await.unwrap();

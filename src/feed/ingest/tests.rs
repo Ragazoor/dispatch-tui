@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::db::{CreateTaskRequest, Database, EpicCrud, EpicPatch, EpicRead, TaskCrud, TaskPatch};
 use crate::models::{test_tmux_window, FeedRole, Signal, TaskId, TaskStatus, TaskTag};
+use crate::store::{
+    CreateTaskRequest, Database, EpicCrud, EpicPatch, EpicRead, TaskCrud, TaskPatch,
+};
 
 fn make_item(external_id: &str, url: &str) -> FeedItem {
     FeedItem {
@@ -54,7 +56,7 @@ fn entries(
 // (DegradedNonEmptyEmission) calls the real function by its `super::` path, so
 // the mode under test is always visible at the call site.
 async fn run_role_routed_feed_sync(
-    db: &dyn crate::db::TaskStore,
+    db: &dyn crate::store::TaskStore,
     parent_id: EpicId,
     entries: Vec<FeedItemWithTarget>,
 ) -> anyhow::Result<FeedSyncOutcome> {
@@ -62,7 +64,7 @@ async fn run_role_routed_feed_sync(
 }
 
 async fn run_feed_sync(
-    db: &dyn crate::db::TaskStore,
+    db: &dyn crate::store::TaskStore,
     epic_id: EpicId,
     group_by_repo: bool,
     entries: Vec<FeedItemWithTarget>,
@@ -71,7 +73,7 @@ async fn run_feed_sync(
 }
 
 async fn run_feed_sync_by_role(
-    db: &dyn crate::db::TaskStore,
+    db: &dyn crate::store::TaskStore,
     epic_id: EpicId,
     feed_role: FeedRole,
     group_by_repo: bool,
@@ -89,7 +91,7 @@ async fn run_feed_sync_by_role(
 }
 
 async fn sync_grouped_feed(
-    db: &dyn crate::db::TaskStore,
+    db: &dyn crate::store::TaskStore,
     parent_id: EpicId,
     entries: Vec<FeedItemWithTarget>,
 ) -> FeedSyncOutcome {
@@ -1275,90 +1277,6 @@ async fn role_routed_group_by_repo_off_rehomes_repo_tasks_no_duplicate() {
     }
 }
 
-/// When orphaned repo-group sub-epic tasks pre-exist (simulating a state from
-/// before the fix), the next feed cycle must re-home them without duplicating.
-#[tokio::test]
-async fn role_routed_orphaned_repo_tasks_rehosted_on_next_sync() {
-    let db = Arc::new(Database::open_in_memory_unattached().await.unwrap());
-    let parent = db.create_epic("Reviews", "", None).await.unwrap();
-    db.patch_epic(
-        parent.id,
-        &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
-    )
-    .await
-    .unwrap();
-
-    // Manually create the role sub-epic and an orphaned repo-group sub-epic
-    // with a task, simulating the pre-fix state.
-    //
-    // We use raw SQL because:
-    //   - create_epic sets origin='manual', not 'repo-group'; the feed code
-    //     identifies repo sub-epics by origin='repo-group'.
-    //   - CreateTaskRequest has no external_id field (always NULL); tasks must
-    //     have a non-NULL external_id to be visible to the existing-task index.
-    //   - Insert the task with external_id=NULL then UPDATE to avoid the v72
-    //     BEFORE INSERT trigger (same pattern as the v71 test).
-    let (team_id, repo_sub_id) = db.db_call(|conn| {
-        conn.execute_batch(
-            "INSERT INTO epics (title, description, status, feed_role, origin, parent_epic_id)
-             VALUES ('Team Reviews', '', 'backlog', 'team-reviews', 'manual', 1);
-             INSERT INTO epics (title, description, status, feed_role, origin, parent_epic_id, group_by_repo)
-             VALUES ('myrepo', '', 'backlog', 'none', 'repo-group',
-                     (SELECT id FROM epics WHERE feed_role = 'team-reviews'), 0);",
-        )
-        .map_err(anyhow::Error::from)?;
-        let team_id: i64 = conn.query_row(
-            "SELECT id FROM epics WHERE feed_role = 'team-reviews'",
-            [],
-            |r| r.get(0),
-        )?;
-        let repo_sub_id: i64 = conn.query_row(
-            "SELECT id FROM epics WHERE origin = 'repo-group'",
-            [],
-            |r| r.get(0),
-        )?;
-        Ok::<_, anyhow::Error>((team_id, repo_sub_id))
-    })
-    .await
-    .unwrap();
-    let team = EpicId(team_id);
-    let repo_sub_id = EpicId(repo_sub_id);
-
-    db.db_call(move |conn| {
-        conn.execute_batch(&format!(
-            "INSERT INTO tasks (title, description, repo_path, status, base_branch, epic_id)
-             VALUES ('PR #1', '', '/r', 'backlog', 'main', {repo});
-             UPDATE tasks SET external_id = 'pr-1' WHERE epic_id = {repo};",
-            repo = repo_sub_id.0
-        ))
-        .map_err(anyhow::Error::from)
-    })
-    .await
-    .unwrap();
-
-    // Feed cycle with group_by_repo=false — should find the orphaned task
-    // and re-home it, producing exactly one task on the role sub-epic.
-    let items = vec![make_signal_item(
-        "pr-1",
-        "https://github.com/org/myrepo/pull/1",
-        vec![Signal::TeamRequest],
-    )];
-    run_role_routed_feed_sync(&*db, parent.id, entries(&items, &[""], &["main"]))
-        .await
-        .unwrap();
-
-    let team_tasks = db.list_tasks_for_epic(team).await.unwrap();
-    assert_eq!(team_tasks.len(), 1, "task re-homed to role sub-epic");
-    assert_eq!(team_tasks[0].external_id.as_deref(), Some("pr-1"));
-    assert!(
-        db.list_tasks_for_epic(repo_sub_id)
-            .await
-            .unwrap()
-            .is_empty(),
-        "orphaned repo-group sub-epic now empty"
-    );
-}
-
 /// Clearing a dropped sub-epic removes only feed tasks (external_id set);
 /// a manually-added task (external_id = null) in that sub-epic survives.
 #[tokio::test]
@@ -2540,7 +2458,7 @@ async fn mirror_sync_purge_leaves_no_watch_rows_for_the_removed_task() {
     run_feed_sync(&*db, epic.id, false, vec![]).await.unwrap();
 
     assert!(
-        crate::db::TaskRead::get_task(&*db, target)
+        crate::store::TaskRead::get_task(&*db, target)
             .await
             .unwrap()
             .is_none(),

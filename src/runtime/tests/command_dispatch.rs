@@ -168,7 +168,7 @@ async fn dispatch_task_clear_worktree_pointer_clears_both_pointers() {
     rt.db_write()
         .patch_task(
             task.id,
-            &db::TaskPatch::new()
+            &store::TaskPatch::new()
                 .worktree(Some("/repo/.worktrees/1-torn-down"))
                 .tmux_window(Some(&test_tmux_window("task-1")))
                 .host(Some("this-machine")),
@@ -1207,7 +1207,7 @@ async fn await_usage_row(rt: &TuiRuntime, action: &str) -> crate::models::UsageS
         loop {
             let rows = rt
                 .database
-                .query_usage(&db::UsageQuery::default())
+                .query_usage(&store::UsageQuery::default())
                 .await
                 .unwrap();
             if let Some(row) = rows.into_iter().find(|r| r.action == action) {

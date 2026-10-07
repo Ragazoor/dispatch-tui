@@ -9,12 +9,12 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
-use dispatch_tui::db::{Database, EpicRead, SettingsStore};
 use dispatch_tui::feed::FeedRunner;
 use dispatch_tui::mcp::McpEvent;
 use dispatch_tui::models::{Epic, FeedRole};
 use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
 use dispatch_tui::service::provision_managed_feeds_from_settings;
+use dispatch_tui::store::{Database, EpicRead, SettingsStore};
 
 /// Always-failing runner: each `git symbolic-ref` call falls back to "main".
 struct AlwaysFailRunner;

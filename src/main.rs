@@ -326,9 +326,8 @@ fn default_db_path() -> PathBuf {
 // ---------------------------------------------------------------------------
 
 /// Initialise a `tracing_subscriber` appending to `<data_dir>/app.log`, so
-/// this process's `tracing::warn!`/`info!` calls (including a slow `db_call`
-/// warning — see `docs/specs/observability.allium`'s `DbCallSlowWarning`
-/// rule) are actually persisted rather than silently dropped.
+/// this process's `tracing::warn!`/`info!` calls are actually persisted rather
+/// than silently dropped.
 fn init_app_log_subscriber(data_dir: &std::path::Path) -> Result<()> {
     std::fs::create_dir_all(data_dir)?;
     let log_path = data_dir.join("app.log");

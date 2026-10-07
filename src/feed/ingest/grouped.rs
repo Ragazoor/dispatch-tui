@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 
 use super::FeedItemWithTarget;
-use crate::db::{RemovedFeedTask, TaskStore};
 use crate::models::{EpicId, FeedItem};
+use crate::store::{RemovedFeedTask, TaskStore};
 
 /// Upsert `items` into `sub_epic_id`, then recalculate its status on success
 /// (which propagates upward to the parent). Logs a warning on failure. Shared

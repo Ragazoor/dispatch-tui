@@ -73,7 +73,7 @@ async fn wrap_up_rejects_backlog_task() {
 
 #[tokio::test]
 async fn wrap_up_accepts_running_blocked_task() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = rebase_ok_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -104,7 +104,7 @@ async fn wrap_up_accepts_running_blocked_task() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new()
+        &store::TaskPatch::new()
             .worktree(Some("/repo/.worktrees/1-my-task"))
             .sub_status(crate::models::SubStatus::NeedsInput),
     )
@@ -130,7 +130,7 @@ async fn wrap_up_accepts_running_blocked_task() {
 
 #[tokio::test]
 async fn wrap_up_accepts_running_active_task() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = rebase_ok_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -161,7 +161,7 @@ async fn wrap_up_accepts_running_active_task() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
     )
     .await
     .unwrap();
@@ -189,7 +189,7 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
     //   - name exit_session as the next call,
     //   - be imperative (not advisory like "when ready"),
     //   - say the session is not yet closed so the agent does not stop.
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = rebase_ok_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -220,7 +220,7 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
     )
     .await
     .unwrap();
@@ -326,7 +326,7 @@ async fn wrap_up_invalid_action() {
         .db_write()
         .patch_task(
             task_id,
-            &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+            &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
         )
         .await
         .unwrap();
@@ -345,7 +345,7 @@ async fn wrap_up_invalid_action() {
 
 #[tokio::test]
 async fn wrap_up_rebase_returns_started() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = rebase_ok_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -376,7 +376,7 @@ async fn wrap_up_rebase_returns_started() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-my-task")),
+        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-my-task")),
     )
     .await
     .unwrap();
@@ -400,7 +400,7 @@ async fn wrap_up_rebase_returns_started() {
 
 #[tokio::test]
 async fn wrap_up_rebase_returns_exit_token() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"),
         MockProcessRunner::ok_with_stdout(b""),
@@ -454,7 +454,7 @@ async fn wrap_up_rebase_returns_exit_token() {
 
 #[tokio::test]
 async fn wrap_up_done_returns_exit_token() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -485,7 +485,7 @@ async fn wrap_up_done_returns_exit_token() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new()
+        &store::TaskPatch::new()
             .worktree(Some("/repo/.worktrees/1-t"))
             .tmux_window(Some(&test_tmux_window("task-1"))),
     )
@@ -564,7 +564,7 @@ async fn wrap_up_pr_defers_review_and_url_to_exit_session() {
         .db_write()
         .patch_task(
             task_id,
-            &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-pr-task")),
+            &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-pr-task")),
         )
         .await
         .unwrap();
@@ -629,7 +629,7 @@ async fn wrap_up_pr_response_contains_token_and_no_retro_instruction() {
         .db_write()
         .patch_task(
             task_id,
-            &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+            &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
         )
         .await
         .unwrap();
@@ -683,8 +683,8 @@ async fn wrap_up_pr_response_contains_token_and_no_retro_instruction() {
 
 async fn make_state_with_runner(
     runner: Arc<dyn ProcessRunner>,
-) -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let state = Arc::new(McpState::new(
         McpDeps {
             db: db.clone(),
@@ -705,7 +705,7 @@ fn rebase_ok_runner() -> Arc<dyn ProcessRunner> {
     DispatchScript::finish().no_remote().shared_runner()
 }
 
-async fn create_wrappable_task(db: &Arc<dyn db::TaskStore>) -> crate::models::TaskId {
+async fn create_wrappable_task(db: &Arc<dyn store::TaskStore>) -> crate::models::TaskId {
     let task_id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -725,7 +725,7 @@ async fn create_wrappable_task(db: &Arc<dyn db::TaskStore>) -> crate::models::Ta
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
     )
     .await
     .unwrap();
@@ -849,7 +849,7 @@ async fn wrap_up_pr_success_includes_verify_reminder_when_configured() {
         .db_write()
         .patch_task(
             task_id,
-            &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+            &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
         )
         .await
         .unwrap();
@@ -918,7 +918,7 @@ async fn wrap_up_done_success_includes_verify_reminder_when_configured() {
 
 #[tokio::test]
 async fn wrap_up_rebase_conflict_returns_error() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish()
         .no_remote()
         .rebase_conflicts_in_stderr(&["foo.rs"])
@@ -952,7 +952,7 @@ async fn wrap_up_rebase_conflict_returns_error() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-conflict-task")),
+        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-conflict-task")),
     )
     .await
     .unwrap();
@@ -982,7 +982,7 @@ async fn wrap_up_rebase_dirty_primary_worktree_returns_error() {
     // A dirty primary worktree must be reported as its own distinct error —
     // not conflated with a rebase conflict — and must not flip the task's
     // sub_status to Conflict, since no rebase was ever attempted.
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish()
         .dirty_primary(&["unrelated.rs"])
         .shared_runner();
@@ -1015,7 +1015,7 @@ async fn wrap_up_rebase_dirty_primary_worktree_returns_error() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-dirty-primary-task")),
+        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-dirty-primary-task")),
     )
     .await
     .unwrap();
@@ -1052,7 +1052,7 @@ async fn wrap_up_rebase_dirty_primary_worktree_returns_error() {
 
 #[tokio::test]
 async fn wrap_up_rebase_not_on_main_returns_error() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     // HEAD is on something other than the base branch, so the finish refuses at
     // its first call — the script declares that as its whole sequence, which is
     // what makes the stale trailing response this queue used to carry
@@ -1089,7 +1089,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-wrong-branch")),
+        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-wrong-branch")),
     )
     .await
     .unwrap();
@@ -1170,7 +1170,7 @@ async fn test_state_with_notify() -> (
     Arc<McpState>,
     tokio::sync::mpsc::UnboundedReceiver<crate::mcp::McpEvent>,
 ) {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let state = Arc::new(McpState::new(
@@ -1261,8 +1261,8 @@ async fn failed_update_does_not_send_notification() {
 // wrap_up: reflection nudge
 // =======================================================================
 
-async fn make_rebase_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+async fn make_rebase_state() -> (Arc<dyn store::TaskStore>, Arc<McpState>) {
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = rebase_ok_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -1277,7 +1277,7 @@ async fn make_rebase_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
 }
 
 async fn seed_task_with_worktree(
-    db: &Arc<dyn db::TaskStore>,
+    db: &Arc<dyn store::TaskStore>,
     suffix: &str,
 ) -> crate::models::TaskId {
     let task_id = db
@@ -1299,7 +1299,7 @@ async fn seed_task_with_worktree(
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().worktree(Some(&format!(
+        &store::TaskPatch::new().worktree(Some(&format!(
             "/repo/.worktrees/{}-task-{suffix}",
             task_id.0
         ))),
@@ -1531,7 +1531,7 @@ async fn exit_session_after_close_token_is_gone() {
 
 #[tokio::test]
 async fn exit_session_full_flow_rebase() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"),
         MockProcessRunner::ok_with_stdout(b""),
@@ -1551,7 +1551,7 @@ async fn exit_session_full_flow_rebase() {
     let task_id = create_wrappable_task(&db).await;
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().tmux_window(Some(&test_tmux_window("task-1"))),
+        &store::TaskPatch::new().tmux_window(Some(&test_tmux_window("task-1"))),
     )
     .await
     .unwrap();
@@ -1595,7 +1595,7 @@ async fn exit_session_full_flow_rebase() {
 
 #[tokio::test]
 async fn wrap_up_second_call_overwrites_token() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         // First rebase
         MockProcessRunner::ok_with_stdout(b"main\n"),
@@ -1622,7 +1622,7 @@ async fn wrap_up_second_call_overwrites_token() {
     let task_id = create_wrappable_task(&db).await;
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().tmux_window(Some(&test_tmux_window("task-1"))),
+        &store::TaskPatch::new().tmux_window(Some(&test_tmux_window("task-1"))),
     )
     .await
     .unwrap();
@@ -1777,7 +1777,7 @@ async fn wrap_up_rebase_does_not_kill_window() {
 
     // Set up worktree + tmux_window so is_wrappable passes.
     let window = test_tmux_window("task-rebase-window");
-    let patch = crate::db::TaskPatch::new()
+    let patch = crate::store::TaskPatch::new()
         .worktree(Some("/repo/.worktrees/task-rebase"))
         .tmux_window(Some(&window));
     state.db_write().patch_task(task_id, &patch).await.unwrap();
@@ -1843,7 +1843,7 @@ async fn exit_session_already_done_task_stays_done() {
         .db_write()
         .patch_task(
             task_id,
-            &crate::db::TaskPatch::new().status(TaskStatus::Done),
+            &crate::store::TaskPatch::new().status(TaskStatus::Done),
         )
         .await
         .unwrap();
@@ -1915,7 +1915,7 @@ async fn exit_session_resets_sub_status_to_default_for_done() {
         .db_write()
         .patch_task(
             task_id,
-            &crate::db::TaskPatch::new().sub_status(SubStatus::Stale),
+            &crate::store::TaskPatch::new().sub_status(SubStatus::Stale),
         )
         .await
         .unwrap();
@@ -1976,7 +1976,7 @@ async fn exit_session_emits_refresh_after_done_patch() {
 
 #[tokio::test]
 async fn wrap_up_then_exit_session_end_to_end() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     // The finish's own calls come from the script; the two tmux calls after it
     // belong to `exit_session`, which the script has no vocabulary to model, so
     // they are appended — the pattern documented on `DispatchScript::responses`.
@@ -2017,7 +2017,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
     db.patch_task(
         task_id,
-        &crate::db::TaskPatch::new()
+        &crate::store::TaskPatch::new()
             .worktree(Some("/repo/.worktrees/e2e"))
             .tmux_window(Some(&test_tmux_window("e2e-window"))),
     )
@@ -2095,7 +2095,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
 async fn wrap_up_done_defers_done_transition_to_exit_session() {
     use crate::process::MockProcessRunner;
     let runner: Arc<dyn crate::process::ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let state = Arc::new(McpState::new(
         McpDeps {
             db: db.clone(),
@@ -2125,7 +2125,7 @@ async fn wrap_up_done_defers_done_transition_to_exit_session() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new()
+        &store::TaskPatch::new()
             .worktree(Some("/repo/.worktrees/1-done-task"))
             .tmux_window(Some(&test_tmux_window("task-1"))),
     )
@@ -2199,7 +2199,7 @@ async fn wrap_up_done_recalculates_epic_status() {
     // wrap_up(done) on an epic's only running subtask must NOT advance the
     // epic yet (status is deferred to exit_session); the closing call is
     // what auto-advances the epic to Done.
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -2232,7 +2232,7 @@ async fn wrap_up_done_recalculates_epic_status() {
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new()
+        &store::TaskPatch::new()
             .worktree(Some("/repo/.worktrees/1-t"))
             .tmux_window(Some(&test_tmux_window("task-1"))),
     )
@@ -2318,7 +2318,7 @@ async fn wrap_up_pr_recalculates_epic_status() {
         .db_write()
         .patch_task(
             task_id,
-            &db::TaskPatch::new()
+            &store::TaskPatch::new()
                 .worktree(Some("/repo/.worktrees/1-t"))
                 .tmux_window(Some(&test_tmux_window("task-1"))),
         )
@@ -2392,7 +2392,7 @@ async fn dispatch_task_recalculates_epic_status() {
     let repo_path = dir.path().to_str().unwrap().to_string();
     std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     // The worktree dir is pre-created below, so this is the reused-worktree
     // shape — see `src/dispatch/mock_sequence.rs`.
     let runner: Arc<dyn ProcessRunner> =

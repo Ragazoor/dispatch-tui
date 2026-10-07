@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::db;
 use crate::models::{EpicId, FeedRole, Learning, RetrievalSource, Task, TaskId, TaskTag};
 use crate::service::embeddings::{
     deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, EmbeddingService,
     RagRankParams,
 };
+use crate::store;
 
 use crate::claude_paths::{claude_dir_name, plugin_dir_rel, statusline_settings_name};
 
@@ -66,7 +66,7 @@ pub struct EpicContext {
 
 impl EpicContext {
     /// Build epic context from the database for a task that belongs to an epic.
-    pub async fn from_db(task: &Task, db: &dyn db::TaskReadStore) -> Option<Self> {
+    pub async fn from_db(task: &Task, db: &dyn store::TaskReadStore) -> Option<Self> {
         let epic_id = task.epic_id?;
         let epic = db.get_epic(epic_id).await.ok()??;
         Some(Self::from_epic(epic, db).await)
@@ -78,7 +78,7 @@ impl EpicContext {
     /// that skips [`from_db`](Self::from_db)'s re-read cannot skip the ancestry
     /// walk with it — which is exactly what a hand-written struct literal at
     /// such a call site did before this existed.
-    pub async fn from_epic(epic: crate::models::Epic, db: &dyn db::TaskReadStore) -> Self {
+    pub async fn from_epic(epic: crate::models::Epic, db: &dyn store::TaskReadStore) -> Self {
         let under_cve_feed = Self::walk_to_cve_root(&epic, db).await;
         EpicContext {
             epic_id: epic.id,
@@ -100,7 +100,7 @@ impl EpicContext {
     /// would do the same job approximately, and would put an arbitrary number
     /// in the spec that only exists because the guard was the weaker of the
     /// two.
-    async fn walk_to_cve_root(epic: &crate::models::Epic, db: &dyn db::TaskReadStore) -> bool {
+    async fn walk_to_cve_root(epic: &crate::models::Epic, db: &dyn store::TaskReadStore) -> bool {
         let mut seen: HashSet<EpicId> = HashSet::new();
         let mut cursor = epic.id;
         let mut role = epic.feed_role;
@@ -1055,7 +1055,7 @@ pub use crate::service::embeddings::RAG_SIMILARITY_THRESHOLD as DISPATCH_RAG_THR
 /// On embedding failure the function falls back to an empty list so a single
 /// model error never blocks dispatch.
 pub async fn list_learnings_for_dispatch_rag(
-    db: &dyn crate::db::TaskReadStore,
+    db: &dyn crate::store::TaskReadStore,
     task: &Task,
     emb_svc: &Arc<EmbeddingService>,
     threshold: f32,
@@ -1104,7 +1104,7 @@ pub async fn list_learnings_for_dispatch_rag(
 }
 
 pub async fn build_and_record_injections(
-    db: &dyn crate::db::TaskReadStore,
+    db: &dyn crate::store::TaskReadStore,
     task: &crate::models::Task,
     emb_svc: &Arc<EmbeddingService>,
 ) -> Vec<Learning> {

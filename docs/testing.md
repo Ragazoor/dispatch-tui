@@ -10,7 +10,7 @@ the rest lives here.
 
 ```bash
 cargo test                                # full suite
-cargo test db::tests                      # database CRUD and migrations
+cargo test store::tests                   # the Database router and its ports
 cargo test service::                      # domain service layer
 cargo test tui::tests                     # TUI input/message handling
 cargo test mcp::handlers::tests           # MCP JSON-RPC handlers
@@ -52,8 +52,8 @@ about managing a backgrounded run. Don't background it: the Bash tool's
 `run_in_background` option buys nothing at this length and costs you the
 failure modes below.
 
-It got there by not rebuilding the schema for every test — see "Schema template"
-below. Incremental compilation after a one-file edit (~13 s) is now the larger
+Every database-touching test runs over the in-memory store, which builds no
+schema. Incremental compilation after a one-file edit (~13 s) is now the larger
 half of an edit→test cycle, so if a run feels slow, it is the compile.
 
 The dev profile uses `debug = "line-tables-only"` (`DevBuildsKeepLineTablesNotFullDebugInfo` in `docs/specs/dispatch.allium`). That cut a one-file rebuild from ~50s to ~29s. A *fresh* worktree still pays a cold build (~2.5 min) and its first `tests/spacetime_module.rs` run builds the wasm module (~40s); later runs reuse the cache.
@@ -69,44 +69,19 @@ process found" is evidence it died.
 
 Suite is green; if a runtime test fails locally, suspect timing — `spawn_blocking`-based tests are timing-sensitive.
 
-## Schema template
+## The in-memory store
 
 `Database::open_in_memory()` — the constructor behind essentially every
-DB-touching test — does **not** replay the migration chain. It clones a
-process-wide, already-migrated template via SQLite's backup API
-(`init_schema_from_template_sync` in `src/db/mod.rs`). Replaying ~88 migrations
-costs ~87 ms per database; the clone costs ~0.05 ms. That single change took the
-suite from ~260 s to ~20 s, `db::` alone from 103 s to 4 s.
+DB-touching test — attaches ports over a fresh, private in-process store: one
+`SharedRows` and one `MemoryReducerCaller` that runs the module's own reducer
+logic over it. Two handles never share rows, and a handle's host file lives in
+a temporary directory removed with it. Nothing builds a schema, so a handle
+costs microseconds.
 
-`Database::open()` (file-backed) still migrates for real, and must: a file on
-disk can be at any older `user_version`. The clone is only equivalent because an
-in-memory database is always brand new.
-
-**Adding a migration needs no action here** — the template is built by
-`init_schema_sync`, the same function `Database::open` uses, so it picks up new
-migrations automatically. `src/db/tests/schema_template.rs` fails loudly if that
-ever stops being true. It pins four properties, each a way a clone could quietly
-differ from a migrated database:
-
-| Guard | Catches |
-|---|---|
-| identical `sqlite_master` | the template not picking up a new migration |
-| identical `user_version` | a clone that looks unmigrated and re-runs the chain |
-| identical per-table row counts | a migration-seeded row lost by the clone |
-| identical connection PRAGMAs | a PRAGMA set on one init path but not the other |
-
-That last one is the subtle one: PRAGMAs are properties of the *connection*, and
-the backup API copies pages only, so the template path has to set them itself.
-Both paths call `apply_writer_pragmas`, so they cannot drift by construction —
-the test guards against someone re-inlining one of them.
-
-Two traps if you ever think about replacing the mechanism. Capturing DDL from
-`sqlite_master` and re-executing it looks equivalent but carries neither
-`user_version` nor seeded rows, and is only ~28x faster rather than ~1700x. And
-`foreign_keys` reads as the dangerous PRAGMA to drop but isn't: `libsqlite3-sys`
-builds bundled SQLite with `-DSQLITE_DEFAULT_FOREIGN_KEYS=1`, so it is on
-regardless — `synchronous`, `cache_size` and `temp_store` are the ones that
-actually differ from their defaults.
+There is no SQLite: `Database::unattached()` is the empty base with no ports,
+for the tests whose subject is "a handle with no store refuses". A fault a test
+needs to inject (an unreadable store, an unreadable host file) is injected with
+that handle, or with a replaced `host.json`, not with a broken table.
 
 ## Snapshot tests
 
@@ -135,8 +110,8 @@ rm src/dispatch/snapshots/*.snap.new                 # always clean up
 | What you're testing | Where |
 |---|---|
 | TUI key handling / message flow | `src/tui/tests/` |
-| DB schema, CRUD | `src/db/tests/` |
-| A database migration | `src/db/tests/migrations*.rs` (pick by version range; `migrations_late.rs` is the newest) — the migration fn must be `pub(super)` to be callable from there. See "Adding a Database Migration" in `docs/how-to.md` for the column-guard rule. |
+| The `Database` router, its ports, CRUD over the in-memory store | `src/store/tests/` |
+| A SpacetimeDB module change (table, column, reducer) | `spacetime/module/` tests and `tests/spacetime_module.rs`; mirror it in `src/sync/memory_caller/` |
 | Service-layer business rules | inline in `src/service/<domain>/` |
 | MCP JSON-RPC handler behaviour | `src/mcp/handlers/tests/` |
 | Full task/epic lifecycle | `tests/` (integration tests) |
@@ -175,11 +150,11 @@ Skill copy is asserted with targeted `contains` checks (not snapshots) so that d
 
 The same hazard has a rendering form: the buffer-search helpers in `src/tui/tests/helpers.rs` scan **every row of the whole terminal buffer**, not the overlay's rect. An overlay whose bottom rows are clipped off still satisfies an assertion for a bare `"close"` or `"cancel"`, because the board's own footer hint bar is drawn outside the popup and uses the same words. Assert the overlay's exact wording including its bracketed hints (`"[q/Esc] close"`), and run any new overlay assertion against the unfixed code first to confirm it really goes red.
 
-Inline test modules (`mod tests`, `mod property_tests`) must have `#[allow(clippy::unwrap_used, clippy::expect_used)]` at the top — the workspace `-D warnings` policy otherwise rejects bare `unwrap()`/`expect()` calls. See `src/db/tests/mod.rs` for the canonical pattern.
+Inline test modules (`mod tests`, `mod property_tests`) must have `#[allow(clippy::unwrap_used, clippy::expect_used)]` at the top — the workspace `-D warnings` policy otherwise rejects bare `unwrap()`/`expect()` calls. See `src/store/tests/mod.rs` for the canonical pattern.
 
 ## No wall-clock sleeps in tests
 
-Tests must never sleep on the wall clock — not to "wait for" `spawn_blocking` or detached `tokio::spawn` work, and not to cross a duration threshold — and must never measure it either. Instead await a deterministic completion signal (oneshot / `Notify` / an `McpEvent`), inject a clock, or inject the threshold (`Database::set_slow_call_threshold`, used by `src/db/tests/async_handle.rs`). `./scripts/check-no-test-sleep.sh` (in the pre-push hook, with its own self-test) enforces this: no `tokio::time::sleep` anywhere under `src/`/`tests/`, and no `std::thread::sleep` or `.elapsed()` in test code — test files *and* top-level inline `#[cfg(test)] mod` blocks. Production use of both is unaffected, and a deadline-bounded poll may carry an `// allow-test-sleep: <why>` marker. When a test's subject *is* a deadline, bound it structurally (`tokio::time::timeout`, `Receiver::recv_timeout`) rather than asserting on measured elapsed time. See the "No `tokio::time::sleep` in tests" section of `docs/conventions.md` for the exact scoping rule, its remaining blind spot, and the canonical patterns.
+Tests must never sleep on the wall clock — not to "wait for" `spawn_blocking` or detached `tokio::spawn` work, and not to cross a duration threshold — and must never measure it either. Instead await a deterministic completion signal (oneshot / `Notify` / an `McpEvent`), inject a clock, or inject the threshold. `./scripts/check-no-test-sleep.sh` (in the pre-push hook, with its own self-test) enforces this: no `tokio::time::sleep` anywhere under `src/`/`tests/`, and no `std::thread::sleep` or `.elapsed()` in test code — test files *and* top-level inline `#[cfg(test)] mod` blocks. Production use of both is unaffected, and a deadline-bounded poll may carry an `// allow-test-sleep: <why>` marker. When a test's subject *is* a deadline, bound it structurally (`tokio::time::timeout`, `Receiver::recv_timeout`) rather than asserting on measured elapsed time. See the "No `tokio::time::sleep` in tests" section of `docs/conventions.md` for the exact scoping rule, its remaining blind spot, and the canonical patterns.
 
 ## Coverage
 
@@ -197,7 +172,7 @@ Coverage is not in the pre-push hook; every *other* CI gate is, and `tests/ci_ga
 
 Two root-level tests watch the module from outside:
 
-- `src/spacetime/tests/module_schema.rs` compares the SHARED columns to SQLite by position. Module-only columns are checked by presence, because SpacetimeDB only appends columns.
+- `src/spacetime/tests/module_schema.rs` reads the module's tables from its source; the snapshot fixtures take their column lists from it.
 - `tests/spacetime_module.rs` publishes the module into a throwaway instance when `spacetime` is on `PATH`.
 
 **The board embeds a committed prebuilt `src/spacetime/module.wasm`.** After any module change, run `./scripts/build-managed-module.sh`. The hook, CI and `cargo test` check a source-hash stamp beside the wasm, not the wasm bytes, which differ per machine.

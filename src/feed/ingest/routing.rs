@@ -5,9 +5,9 @@ use std::collections::HashMap;
 
 use super::role_routed::RoleSubEpics;
 use super::FeedItemWithTarget;
-use crate::db::TaskStore;
 use crate::feed::route;
 use crate::models::{EpicId, Task, TaskId};
+use crate::store::TaskStore;
 use anyhow::Result;
 
 /// Result of [`route_and_group_entries`]: present entries grouped by target
@@ -52,7 +52,7 @@ async fn apply_move(
     db.set_task_epic_id(task_id, Some(target)).await?;
     db.patch_task(
         task_id,
-        &crate::db::TaskPatch::new()
+        &crate::store::TaskPatch::new()
             .title(&item.title)
             .description(&item.description)
             .tag(Some(item.tag))

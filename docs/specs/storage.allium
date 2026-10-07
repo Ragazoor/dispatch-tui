@@ -1,64 +1,28 @@
 -- allium: 3
 -- storage.allium
 --
--- Scope: What is left of SQLite in dispatch, and where this install keeps the
---        few files that are not in the shared store. SQLite is no longer
---        where a board's data lives (task #16755): every task, epic, setting
---        and the rest of the shared domain is in the store (sync.allium,
---        core.allium), and no production path opens a SQLite database at
---        all. What remains of the connection model below describes the test
---        fixture, and nothing else.
+-- Scope: Where this install keeps the few files that are not in the shared
+--        store, and the fact that dispatch has no SQLite at all (task
+--        #36865). Every task, epic, setting and the rest of the shared domain
+--        is in the store (sync.allium, core.allium); this install's identity
+--        is in the host file (host.allium). There is no local database to
+--        open, migrate or fall back to, in production or in tests: a test's
+--        store is the in-memory SpacetimeDB fake
+--        (spacetime-memory-store.allium).
 -- Includes: the data directory and the files dispatch keeps in it;
---           StoreInUseNeverOpensSqlite; CodeNeverTouchesLegacyDatabase;
---           LocalStore and the journal mode it ends up in, DatabaseConnection
---           (the single writer and the lazily-opened read pool) — now a
---           test-fixture model only — and the consequence that follows for
---           any test exercising concurrency.
+--           StoreInUseNeverOpensSqlite; CodeNeverTouchesLegacyDatabase.
 -- Excludes: What the stored rows mean (see core.allium and the per-domain
 --           specs); which rows a board is sent and how they travel (see
 --           sync.allium); the host file's contents and permissions
---           (host.allium: HostFile); schema migration; and the warn-level
---           line emitted when a DB call is abnormally slow (see
---           observability.allium: DbCallSlowWarning).
+--           (host.allium: HostFile).
 --
--- Learnings and their retrievals (learnings.allium) have no SQLite body at
--- all: a handle with no store attached refuses them with a "no shared store"
--- error rather than answering from a table nothing writes on a real board.
---
--- THE CONNECTION MODEL IS NARROWED TO TESTS, NOT DELETED. It used to describe
--- every board. After task #16755 a SQLite store is opened only by a test that
--- asks for one (overwhelmingly the in-memory medium). The journal-mode trap
--- below still matters — it is a trap in TEST code, which is where it always
--- bit — so it is kept rather than deleted with the production use.
-
-------------------------------------------------------------
--- Enumerations
-------------------------------------------------------------
-
--- How a store records changes, which is what decides whether readers and the
--- writer exclude one another.
---
--- wal: writers append to a log and readers read the last committed state.
---   A read never waits for a write, and a write never waits for a read.
--- rollback: the writer locks the whole store for the duration of its
---   transaction. Any read overlapping that window waits, and gives up if it
---   waits longer than the lock wait.
-enum JournalMode {
-    wal
-    rollback
-}
-
--- Where a store keeps its pages.
---
--- file: a path on disk, for the tests that need a file. No production path
---   opens one.
--- memory: an in-process store that exists only while the creating process
---   lives: the tests' fixture, and the empty placeholder base the store's
---   ports are attached to in production. It holds no data and has no file.
-enum StoreMedium {
-    file
-    memory
-}
+-- The storage handle holds no data of its own: it only routes each call to
+-- an attached store port or to the host file. A handle with no store attached
+-- refuses every shared read and write with a "no shared store attached" error
+-- rather than answering from a table nothing writes; a handle with no host
+-- file attached likewise refuses every identity read and write. In production
+-- only the placeholder base the store's ports are attached to is ever without
+-- a store, and only until the ports are attached.
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -68,11 +32,12 @@ enum StoreMedium {
 -- `--db` / DISPATCH_DB names, defaulting to `$XDG_DATA_HOME/dispatch`, else
 -- `~/.local/share/dispatch`. The option still names a database FILE, because
 -- that is what it named when the board's database lived there; no command
--- opens that file now, and the folder around it is what everything else is
+-- opens that file, and the folder around it is what everything else is
 -- placed beside.
 --
 -- What lives here: the host file (host.allium: HostFile), app.log, the store
--- address record (startup.allium: StoreAddressRecord), trajectories
+-- address record (startup.allium: StoreAddressRecord), the store pin file
+-- `store-identity` (startup.allium: store pin), trajectories
 -- (observability.allium) and the shipped feed scripts (feeds.allium). On an
 -- install that predates task #16755 the old `tasks.db` (with `-wal` and
 -- `-shm`) may still be here too, as an inert leftover. The managed store's
@@ -91,188 +56,20 @@ entity DataDirectory {
         -- launch with no host file is a first run and mints a fresh identity
         -- (host.allium: MintHostIdentity). Deleting the files is the
         -- operator's, by hand.
-}
-
--- A SQLite store a dispatch process has open. In production only ever the
--- empty in-memory placeholder (StoreInUseNeverOpensSqlite); a file store is
--- only ever a test fixture.
-entity LocalStore {
-    medium: StoreMedium
-
-    -- Not chosen freely: see JournalModeFollowsTheMedium. A file store is
-    -- always wal; a memory store is always rollback, because the write-ahead
-    -- log needs shared memory that an in-process store has nowhere to put.
-    journal_mode: JournalMode
-
-    -- True exactly when a read issued while a write is in flight completes
-    -- without waiting for that write.
-    readers_are_independent_of_writers: journal_mode = wal
-
-    -- Relationships
-    connections: DatabaseConnection with store = this
-
-    invariant JournalModeFollowsTheMedium {
-        (medium = file implies journal_mode = wal)
-            and (medium = memory implies journal_mode = rollback)
-    }
 
     @invariant StoreInUseNeverOpensSqlite
-        -- With the shared store in use — which is every launch, since the
-        -- store is mandatory (sync.allium's header) — dispatch opens no
-        -- ON-DISK SQLite store for any purpose: tasks.db is never opened. An
-        -- empty in-memory placeholder base, to which the store's ports are
-        -- attached, is permitted; it holds no data and no file. Not for the board, not for MCP, not for
-        -- `repo`, `plan`, `prune-repo-paths`, `agent-tree`, `agent-diff`, the
-        -- hooks, `uninstall` or any subcommand added later. The shared domain
-        -- is read from and written to the store (sync.allium:
+        -- Dispatch contains no SQLite: no binding is linked, no schema is
+        -- built, no migration runs and no connection is opened, for any
+        -- purpose, in production or in a test. Not for the board, not for
+        -- MCP, not for `repo`, `plan`, `prune-repo-paths`, `agent-tree`,
+        -- `agent-diff`, the hooks, `uninstall` or any subcommand added later.
+        -- The shared domain is read from and written to the store (sync.allium:
         -- BoardReadsFromTheSubscription, BoardWritesThroughTheStore); this
         -- install's identity is read from and written to the host file
-        -- (host.allium: IdentityLivesInHostFile); there is nothing left for a
-        -- SQLite connection to serve.
+        -- (host.allium: IdentityLivesInHostFile).
         --
         -- Stated as a property of the CODE rather than of a state, like
-        -- sync.allium's AConnectedBoardDrawsOnlyDeliveredRows: what is
-        -- checkable is that no production path constructs a LocalStore. The
-        -- in-memory and file fixtures are for tests.
-
-    @invariant AskingForWalDoesNotMakeItSo
-        -- Opening a store asks for wal in both cases, and a memory store
-        -- silently settles for rollback instead. Nothing fails, nothing warns,
-        -- and the returned store looks identical to a file one.
-        --
-        -- THIS IS THE TRAP THIS SPEC EXISTS FOR. A memory store is the obvious
-        -- fixture — fast, self-cleaning, needs no path — so a test about
-        -- concurrent access naturally reaches for one, and then exercises
-        -- locking rules it does not mean to. The test is not merely
-        -- unrepresentative: a read and a write that would never have met on a
-        -- wal store now contend, the read waits, and on a loaded machine it
-        -- can wait past the lock wait and fail. It fails rarely, it fails with
-        -- "database is locked", and the name of whatever test it lands in
-        -- suggests a data-consistency bug rather than a fixture that does not
-        -- match what it claims to test. That happened, and cost a session a
-        -- full re-run to rule out the change under test — see
-        -- ConcurrencyIsObservedOnAWalStore.
-
-    @invariant ConcurrencyIsObservedOnAWalStore
-        -- Any claim this system makes about what happens when a read and a
-        -- write overlap on a SQLite store is a claim about a wal store. An
-        -- observation of that overlap taken on a memory store is an
-        -- observation of a different system: the two connections exclude each
-        -- other there and do not on a file.
-        --
-        -- This cuts both ways, which is why it is stated as one rule rather
-        -- than as advice about flaky tests. A memory store can report
-        -- contention a wal store would never see — the failure described in
-        -- AskingForWalDoesNotMakeItSo — and it can equally report success a
-        -- wal store would never see, because a reader that waits for the
-        -- writer and then reads is trivially consistent with it. A
-        -- snapshot-consistency check run that way passes without ever testing
-        -- the isolation it names.
-}
-
--- One SQLite connection held by a test's store.
---
--- A store is served by exactly one writer connection — every mutation is
--- dispatched to it, so mutations serialise against each other rather than
--- against the store — and by a small pool of read-only connections that serve
--- pure reads. Pool connections are opened lazily, the first time a read is
--- assigned to their slot, because most tests never need more than one.
-entity DatabaseConnection {
-    store: LocalStore
-
-    -- A writer may write and read; a reader may only read, and a write
-    -- attempted on a reader fails loudly rather than succeeding quietly.
-    role: writer | reader
-
-    -- How long a statement on this connection waits for another connection's
-    -- lock before it gives up and reports the store as locked. On a wal store
-    -- nothing ever waits this out; on a rollback store it is the whole
-    -- difference between a slow read and a failed one.
-    lock_wait: Duration
-
-    @guidance
-        -- The lock wait is in force from the moment the connection exists,
-        -- before any statement runs on it — including the statements that
-        -- apply the connection's own settings. A lock wait installed BY those
-        -- statements would not be in force while they ran, which is the
-        -- version of this bug that does not exist here only because the SQLite
-        -- binding installs a default wait at open time. Nothing in this system
-        -- restates it, so nothing in this system may reduce it to zero either.
-}
-
-------------------------------------------------------------
--- Config
-------------------------------------------------------------
-
-config {
-    -- How long any connection waits on another connection's lock before
-    -- reporting the store as locked. Reached only on a rollback store.
-    connection_lock_wait: Duration = 5.seconds
-
-    -- Read-only connections available to serve pure reads.
-    read_pool_size: Integer = 4
-}
-
-------------------------------------------------------------
--- Rules
-------------------------------------------------------------
-
-rule StoreOpened {
-    -- Opening a store settles its journal mode, and the medium decides it.
-    -- Only a test asks for a file store; production asks for at most the
-    -- in-memory placeholder (StoreInUseNeverOpensSqlite).
-    when: StoreRequested(medium)
-
-    ensures:
-        if medium = file:
-            LocalStore.created(medium: medium, journal_mode: wal)
-        else:
-            LocalStore.created(medium: medium, journal_mode: rollback)
-}
-
-rule ReadDuringWrite {
-    -- A read issued while a write is in flight. On a wal store it proceeds; on
-    -- a rollback store it waits for the writer, and fails if the wait runs out.
-    when: ReadIssued(connection, store)
-
-    requires: connection.role = reader
-    requires: connection.store = store
-    requires: WriteInFlight(store)
-
-    ensures:
-        if store.readers_are_independent_of_writers:
-            ReadProceeded(connection: connection)
-        else:
-            ReadWaitedForTheWriter(
-                connection: connection,
-                giving_up_after: connection.lock_wait
-            )
-
-    @guidance
-        -- The waiting branch is not merely slower. A writer that commits in a
-        -- tight loop re-takes the lock as soon as it is released, so a waiting
-        -- reader is not queued behind one transaction but racing every
-        -- subsequent one. Under load that race is lost often enough to exhaust
-        -- the lock wait, and the read then fails with "database is locked".
-}
-
-------------------------------------------------------------
--- Invariants
-------------------------------------------------------------
-
-invariant EveryConnectionServesOneStore {
-    DatabaseConnections.all(c => c.store != null)
-}
-
-invariant AtMostOneWriterPerStore {
-    LocalStores.all(s =>
-        (DatabaseConnections where role = writer and store = s).count <= 1)
-}
-
-invariant ReadPoolIsBounded {
-    LocalStores.all(s =>
-        (DatabaseConnections where role = reader and store = s).count
-            <= config.read_pool_size)
+        -- sync.allium's AConnectedBoardDrawsOnlyDeliveredRows.
 }
 
 ------------------------------------------------------------

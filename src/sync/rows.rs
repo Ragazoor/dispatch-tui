@@ -40,11 +40,11 @@ use chrono::{DateTime, Utc};
 
 use tokio::sync::watch;
 
-use crate::db::{LearningFilter, UsageQuery};
 use crate::models::{
     Epic, EpicId, Learning, LearningId, LearningRetrieval, PollScopeId, Task, TaskId, UsageSummary,
 };
 use crate::spacetime::bindings;
+use crate::store::{LearningFilter, UsageQuery};
 
 use super::decode;
 
@@ -141,7 +141,7 @@ struct Rows {
     /// Telemetry (Phase 11, task #4915). Unconditionally subscribed, like
     /// `learnings` above — nothing here is scoped by owner or host.
     usage_events: BTreeMap<i64, UsageEventRow>,
-    /// The three tables `db::SharedReader` needs beyond the ones above (task
+    /// The three tables `store::SharedReader` needs beyond the ones above (task
     /// #4916). None carries a sentinel, an enum or a timestamp a reader
     /// interprets, so they are held as the store sends them.
     ///
@@ -263,15 +263,7 @@ impl SharedRows {
                 true
             }),
             Err(e) => {
-                // Counted as well as logged: this is the same bargain
-                // `collect_decodable` makes for SQLite's bulk reads, and
-                // `db::decode_fallback_count` is the one number that says a
-                // board is quietly dropping rows.
-                let count = crate::db::bump_decode_fallback();
-                tracing::warn!(
-                    count,
-                    "dropping an undecodable task from the shared store: {e}"
-                );
+                crate::store::drop_undecodable("task", &e);
                 // Dropped from the board, but remembered by id and epic so a
                 // delete pre-check can still count it.
                 self.write(|rows| {
@@ -302,15 +294,7 @@ impl SharedRows {
                 true
             }),
             Err(e) => {
-                // Counted as well as logged: this is the same bargain
-                // `collect_decodable` makes for SQLite's bulk reads, and
-                // `db::decode_fallback_count` is the one number that says a
-                // board is quietly dropping rows.
-                let count = crate::db::bump_decode_fallback();
-                tracing::warn!(
-                    count,
-                    "dropping an undecodable epic from the shared store: {e}"
-                );
+                crate::store::drop_undecodable("epic", &e);
             }
         }
     }
@@ -385,11 +369,7 @@ impl SharedRows {
                 })
             }
             Err(e) => {
-                let count = crate::db::bump_decode_fallback();
-                tracing::warn!(
-                    count,
-                    "dropping an undecodable learning from the shared store: {e}"
-                );
+                crate::store::drop_undecodable("learning", &e);
             }
         }
     }
@@ -405,11 +385,7 @@ impl SharedRows {
                 true
             }),
             Err(e) => {
-                let count = crate::db::bump_decode_fallback();
-                tracing::warn!(
-                    count,
-                    "dropping an undecodable learning retrieval from the shared store: {e}"
-                );
+                crate::store::drop_undecodable("learning retrieval", &e);
             }
         }
     }
@@ -425,11 +401,7 @@ impl SharedRows {
                 true
             }),
             Err(e) => {
-                let count = crate::db::bump_decode_fallback();
-                tracing::warn!(
-                    count,
-                    "dropping an undecodable usage event from the shared store: {e}"
-                );
+                crate::store::drop_undecodable("usage event", &e);
             }
         }
     }
@@ -832,7 +804,7 @@ impl SharedRows {
 
     /// Of `external_ids`, the subset retired under `feed_epic_id` AND absent
     /// from every task anywhere in `feed_epic_id`'s subtree — the read twin of
-    /// `db::TaskCrud::retired_without_task`'s SQLite recursive-CTE query, done
+    /// `store::TaskCrud::retired_without_task`'s SQLite recursive-CTE query, done
     /// in Rust over the rows a standing subscription already holds, the same
     /// reasoning [`Self::usage_summary`] documents.
     pub fn retired_without_task(

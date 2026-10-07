@@ -79,15 +79,6 @@ impl std::str::FromStr for UrlType {
     }
 }
 
-impl rusqlite::types::FromSql for UrlType {
-    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
-        let s = String::column_result(value)?;
-        UrlType::parse(&s).ok_or_else(|| {
-            rusqlite::types::FromSqlError::Other(format!("bad url_type: {s}").into())
-        })
-    }
-}
-
 /// A typed URL attached to a task. `url` and `url_type` always travel together.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskUrl {

@@ -3,7 +3,7 @@
 //! Spec: `docs/specs/sync.allium`'s `BoardWritesThroughTheStore`,
 //! `AWriteWithNoConnectionIsRefused` and `StoreRejectsAnInvalidMutation`.
 //!
-//! This is the implementation of [`crate::db::SharedWriter`] that a configured
+//! This is the implementation of [`crate::store::SharedWriter`] that a configured
 //! board runs. [`ReducerWriter`] holds the two things a mutation needs that the
 //! store cannot supply — who is writing, and when — encodes the row, and hands
 //! it to a [`ReducerCaller`].
@@ -29,15 +29,15 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 
-use crate::db::{
-    CreateLearningRow, CreateTaskRequest, EpicPatch, LearningPatch, SharedWriter, TaskPatch,
-    UsageCap,
-};
 use crate::models::{
     Epic, EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource,
     StopOutcome, SubStatus, SubagentDrain, TaskId, TaskStatus, UserPromptOutcome,
 };
 use crate::spacetime::bindings;
+use crate::store::{
+    CreateLearningRow, CreateTaskRequest, EpicPatch, LearningPatch, SharedWriter, TaskPatch,
+    UsageCap,
+};
 
 use super::encode;
 
@@ -184,7 +184,7 @@ pub trait ReducerCaller: Send + Sync {
 
     // -- Learnings and retrievals (Phase 10, task #4914) ----------------------
     //
-    // Nothing here is scoped by host — see `db::SharedWriter`'s doc comment on
+    // Nothing here is scoped by host — see `store::SharedWriter`'s doc comment on
     // these methods. `create_learning` needs the same content-matched id
     // read-back `create_task` uses: unlike `create_repo_group_sub_epic`, a
     // learning has no natural unique key — duplicates are a soft constraint
@@ -377,7 +377,7 @@ pub trait ReducerCaller: Send + Sync {
 
     // -- Host registry (Phase 6c) -----------------------------------------------
     //
-    // NOT part of `SharedWriter` — see `db::SharedWriter`'s doc comment and
+    // NOT part of `SharedWriter` — see `store::SharedWriter`'s doc comment and
     // `sync.allium: RegisterHostOnConnect`/`RegisterHostOnRename`. Still an
     // ordinary reducer call, which is why it lives on this transport trait
     // rather than being bolted on separately; [`push_host_registration`]
@@ -395,7 +395,7 @@ pub trait ReducerCaller: Send + Sync {
 /// The shared wrapper `sync.allium: RegisterHostOnConnect` and
 /// `RegisterHostOnRename` both call: a failed or delayed push must not block
 /// the connection or the rename it followed, so this logs and returns rather
-/// than propagating. Not a `SharedWriter` method — see `db::SharedWriter`'s
+/// than propagating. Not a `SharedWriter` method — see `store::SharedWriter`'s
 /// doc comment for why the host identity write itself stays local and
 /// unconditional; this is the separate mirror on top of it.
 pub async fn push_host_registration(
@@ -641,8 +641,7 @@ impl ReducerWriter {
     }
 
     /// Shared body of `upsert_feed_tasks`/`upsert_feed_tasks_additive`.
-    /// `delete_absent` selects the stale-delete pass, the same switch
-    /// `src/db/queries/tasks.rs::upsert_feed_tasks_inner` uses.
+    /// `delete_absent` selects the stale-delete pass.
     ///
     /// The predict-then-verify shape (this task's plan doc, decision 1): a
     /// reducer cannot report which rows it deleted, and a deleted row is gone
@@ -662,7 +661,7 @@ impl ReducerWriter {
         repo_paths: &[String],
         base_branches: &[String],
         delete_absent: bool,
-    ) -> Result<Vec<crate::db::RemovedFeedTask>> {
+    ) -> Result<Vec<crate::store::RemovedFeedTask>> {
         if items.len() != repo_paths.len() || items.len() != base_branches.len() {
             anyhow::bail!(
                 "upsert_feed_tasks slice length mismatch: items={}, repo_paths={}, base_branches={}",
@@ -740,11 +739,11 @@ impl ReducerWriter {
     async fn confirm_removed(
         &self,
         candidates: Vec<crate::models::Task>,
-    ) -> Vec<crate::db::RemovedFeedTask> {
+    ) -> Vec<crate::store::RemovedFeedTask> {
         let mut removed = Vec::with_capacity(candidates.len());
         for candidate in candidates {
             if matches!(self.reads.get_task(candidate.id).await, Ok(None)) {
-                removed.push(crate::db::RemovedFeedTask {
+                removed.push(crate::store::RemovedFeedTask {
                     id: candidate.id,
                     repo_path: candidate.repo_path,
                     worktree: candidate.worktree,
@@ -1056,7 +1055,7 @@ impl SharedWriter for ReducerWriter {
             .applied()
     }
 
-    /// Always `0` — see `db::SharedWriter::archive_stale_learnings`'s doc
+    /// Always `0` — see `store::SharedWriter::archive_stale_learnings`'s doc
     /// comment for why the count is not worth a read-back.
     async fn archive_stale_learnings(&self, cutoff: chrono::DateTime<chrono::Utc>) -> Result<u64> {
         self.caller
@@ -1223,7 +1222,7 @@ impl SharedWriter for ReducerWriter {
         items: &[crate::models::FeedItem],
         repo_paths: &[String],
         base_branches: &[String],
-    ) -> Result<Vec<crate::db::RemovedFeedTask>> {
+    ) -> Result<Vec<crate::store::RemovedFeedTask>> {
         self.upsert_feed_tasks_inner(epic_id, items, repo_paths, base_branches, true)
             .await
     }
@@ -1234,7 +1233,7 @@ impl SharedWriter for ReducerWriter {
         items: &[crate::models::FeedItem],
         repo_paths: &[String],
         base_branches: &[String],
-    ) -> Result<Vec<crate::db::RemovedFeedTask>> {
+    ) -> Result<Vec<crate::store::RemovedFeedTask>> {
         self.upsert_feed_tasks_inner(epic_id, items, repo_paths, base_branches, false)
             .await
     }
@@ -1251,7 +1250,7 @@ impl SharedWriter for ReducerWriter {
         &self,
         parent_id: EpicId,
         keep_external_ids: &[String],
-    ) -> Result<Vec<crate::db::RemovedFeedTask>> {
+    ) -> Result<Vec<crate::store::RemovedFeedTask>> {
         let children: std::collections::HashSet<EpicId> = self
             .reads
             .list_epics()

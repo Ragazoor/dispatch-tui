@@ -18,13 +18,13 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use dispatch_tui::db::{self, CreateTaskRequest, Database, TaskCrud};
 use dispatch_tui::mcp::identity::HEADER_KIND;
 use dispatch_tui::mcp::McpDeps;
 use dispatch_tui::models::{test_tmux_window, TaskStatus};
 use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
 use dispatch_tui::service::embeddings::EmbeddingService;
 use dispatch_tui::service::{TaskService, UpdateTaskParams};
+use dispatch_tui::store::{self, CreateTaskRequest, Database, TaskCrud};
 
 #[tokio::test]
 async fn subscribe_then_finish_delivers_notification() {
@@ -45,7 +45,7 @@ async fn subscribe_then_finish_delivers_notification() {
 
     let router = dispatch_tui::mcp::router(
         McpDeps {
-            db: db.clone() as Arc<dyn db::TaskStore>,
+            db: db.clone() as Arc<dyn store::TaskStore>,
             runner: runner.clone(),
             embedding_service: EmbeddingService::new_noop(),
             data_dir: std::env::temp_dir(),
@@ -77,7 +77,7 @@ async fn subscribe_then_finish_delivers_notification() {
         .unwrap();
     db.patch_task(
         watcher_id,
-        &db::TaskPatch::new()
+        &store::TaskPatch::new()
             .worktree(Some(&watcher_worktree))
             .tmux_window(Some(&test_tmux_window("task-watcher"))),
     )

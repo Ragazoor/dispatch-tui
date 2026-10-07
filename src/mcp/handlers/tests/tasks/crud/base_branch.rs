@@ -387,7 +387,7 @@ async fn list_tasks_includes_pr_url_in_output() {
     );
     state
         .db_write()
-        .patch_task(task_id, &crate::db::TaskPatch::new().url(Some(&url)))
+        .patch_task(task_id, &crate::store::TaskPatch::new().url(Some(&url)))
         .await
         .unwrap();
 
@@ -725,7 +725,7 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
     );
     state
         .db_write()
-        .patch_task(task_id, &db::TaskPatch::new().url(Some(&url)))
+        .patch_task(task_id, &store::TaskPatch::new().url(Some(&url)))
         .await
         .unwrap();
 

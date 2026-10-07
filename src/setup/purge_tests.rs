@@ -32,18 +32,11 @@ fn yes_to_everything() -> FakeConfirmer {
     FakeConfirmer::new(vec![true, true, true], vec![true, true])
 }
 
-/// A real, populated, cleanly closed SQLite file plus sentinel `-wal`/`-shm`
+/// A leftover `tasks.db` file plus sentinel `-wal`/`-shm`
 /// companions. Returns each file and its bytes.
 async fn leftover_database(data_dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     let db_path = data_dir.join("tasks.db");
-    let db = crate::db::Database::open(&db_path).await.unwrap();
-    db.db_call(|conn| {
-        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE;")
-            .map_err(anyhow::Error::from)
-    })
-    .await
-    .unwrap();
-    drop(db);
+    fs::write(&db_path, b"SQLite format 3\0 leftover").unwrap();
     fs::write(data_dir.join("tasks.db-wal"), b"wal sentinel").unwrap();
     fs::write(data_dir.join("tasks.db-shm"), b"shm sentinel").unwrap();
     ["tasks.db", "tasks.db-wal", "tasks.db-shm"]

@@ -9,7 +9,6 @@ pub mod agent_tree_open_set;
 pub mod backoff;
 pub(crate) mod claude_paths;
 pub mod cli;
-pub mod db;
 pub mod dispatch;
 pub mod editor;
 pub mod feed;
@@ -28,6 +27,7 @@ pub mod service;
 pub mod setup;
 pub mod spacetime;
 pub mod startup;
+pub mod store;
 pub mod sync;
 #[cfg(test)]
 mod test_log;

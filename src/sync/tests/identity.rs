@@ -3,7 +3,7 @@
 //! `docs/specs/host.allium`: AdoptUserIdentity, ConfirmUnchangedUserIdentity,
 //! RefuseAChangedUserIdentity.
 
-use crate::db::{Database, HostStore, IdentityCredentialStore};
+use crate::store::{Database, HostStore, IdentityCredentialStore};
 use crate::sync::{identity_conflict_message, settle_identity, IdentityVerdict};
 
 #[test]
@@ -83,22 +83,23 @@ async fn a_fresh_install_has_no_user_identity() {
 /// Test 1 of the phase plan: minted on first connect, and still there after a
 /// restart.
 ///
-/// "Restart" is a second `Database` handle over the same file, which is what a
-/// restart actually is from this code's point of view. An in-memory database
-/// would prove nothing here — it is the persistence that is under test.
+/// "Restart" is a second `Database` handle over the same host file, which is
+/// what a restart actually is from this code's point of view. A handle with a
+/// private directory would prove nothing here — it is the persistence that is
+/// under test.
 #[tokio::test]
 async fn a_user_identity_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("dispatch.db");
+    crate::host_file::resolve_for_launch(dir.path()).unwrap();
 
     {
-        let db = Database::open(&path).await.unwrap();
+        let db = Database::unattached().with_host_file(dir.path());
         db.set_user_identity_token("token-a").await.unwrap();
         db.adopt_user_identity("user-a").await.unwrap();
         assert_eq!(db.user_identity().await.unwrap().as_deref(), Some("user-a"));
     }
 
-    let restarted = Database::open(&path).await.unwrap();
+    let restarted = Database::unattached().with_host_file(dir.path());
     assert_eq!(
         restarted.user_identity().await.unwrap().as_deref(),
         Some("user-a")
@@ -177,8 +178,13 @@ async fn a_blank_identity_or_credential_is_refused() {
 /// still keys on the host.
 #[tokio::test]
 async fn two_installs_of_one_person_hold_one_identity_and_two_host_ids() {
-    let laptop = Database::open_in_memory().await.unwrap();
-    let desktop = Database::open_in_memory().await.unwrap();
+    // Each machine mints its own host file, as a first launch does.
+    let laptop_dir = tempfile::tempdir().unwrap();
+    let desktop_dir = tempfile::tempdir().unwrap();
+    crate::host_file::resolve_for_launch(laptop_dir.path()).unwrap();
+    crate::host_file::resolve_for_launch(desktop_dir.path()).unwrap();
+    let laptop = Database::unattached().with_host_file(laptop_dir.path());
+    let desktop = Database::unattached().with_host_file(desktop_dir.path());
 
     let (laptop_host, _) = laptop.ensure_host_identity().await.unwrap();
     let (desktop_host, _) = desktop.ensure_host_identity().await.unwrap();

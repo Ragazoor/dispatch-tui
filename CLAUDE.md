@@ -2,7 +2,7 @@
 
 Terminal kanban board for dispatching Claude Code agents into isolated git worktrees via tmux.
 
-**Stack**: Rust (2021 edition), ratatui TUI, SQLite (rusqlite), Axum HTTP/MCP server, tokio async runtime.
+**Stack**: Rust (2021 edition), ratatui TUI, SpacetimeDB shared store, Axum HTTP/MCP server, tokio async runtime.
 
 **Live data is in SpacetimeDB, not `tasks.db`.** `tasks.db` is a leftover and not authoritative; query tasks through the MCP tools (`list_tasks`, `get_task`). See "Where the live data is" in [docs/reference.md](docs/reference.md).
 
@@ -121,7 +121,7 @@ Read these on demand:
 - [docs/architecture.md](docs/architecture.md) — Message→Command, ProcessRunner, command queue draining, editor session invariant, layout-cache coherence, render dirty flag, error handling, quick dispatch
 - [docs/conventions.md](docs/conventions.md) — the full convention set: `FieldUpdate`/`TaskPatch` double-Option, DB/service trait narrowing, the `run_bounded` primitive, keybinding telemetry, Clippy/visibility rules, tag system, and more
 - [docs/module-map.md](docs/module-map.md) — module and subsystem responsibilities
-- [docs/how-to.md](docs/how-to.md) — adding an MCP tool, TUI view, entity, database migration; knowledge base MCP tools
+- [docs/how-to.md](docs/how-to.md) — adding an MCP tool, TUI view, entity; knowledge base MCP tools
 - [docs/mcp.md](docs/mcp.md) — MCP notification flow, error codes, debugging handlers, feed epics, knowledge base flow
 - [docs/reference.md](docs/reference.md) — key bindings, CLI subcommands, configuration, environment variables, troubleshooting, learning store
 - [docs/specs/](docs/specs/) — Allium specifications for domain logic (one file per domain: `tasks`, `dispatch`, `epics`, `feeds`, `learnings`, `sync`, `storage`, `startup`, …; `core` holds the shared model — `ls docs/specs/`)
@@ -133,4 +133,4 @@ Subsystem entry points (no dedicated doc page — read the source):
 - `src/cli/` — CLI subcommand implementations (`agent_tree`, `caller_headers`, `statusline`)
 - `src/mcp/trajectory.rs` — agent trajectory capture (records the agent's tool-call history for a task)
 - `src/repo_sync.rs` — local-first repo sync: `ahead_behind` drift measurement and `sync_repo` (fetch, merge `origin/<base>`, push). See `docs/specs/repo-sync.allium`
-- `src/sync/` — the shared store: the connection loop, the identity handshake, and **where the board's cards come from**. `board_reads::BoardReads` is that seam, with one implementation over SQLite and one over the subscription; the runtime picks by whether `--spacetime-server` / `DISPATCH_SPACETIME_SERVER` is set, which is unset on every board today. See `docs/specs/sync.allium`
+- `src/sync/` — the shared store: the connection loop, the identity handshake, and **where the board's cards come from**. `board_reads::BoardReads` is that seam, served by the subscription (`SubscriptionBoardReads`), or by the in-memory store a test handle owns. See `docs/specs/sync.allium`

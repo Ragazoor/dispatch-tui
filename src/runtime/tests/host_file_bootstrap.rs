@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::*;
-use crate::db::TaskCrud;
 use crate::host_file::{host_file_path, HostIdentity};
 use crate::sync::tests::{accepted, ScriptedConnector};
 use crate::sync::StoreConnector;
@@ -19,27 +18,13 @@ use crate::sync::StoreConnector;
 const TEST_STORE: &str = "http://store.test";
 
 /// The stand-in store `misc.rs`'s bootstrap tests use: whatever database
-/// bootstrap hands over, unrouted, behind a connector that accepts once.
-fn test_store(database: crate::db::Database, _host: &str) -> StoreParts {
+/// bootstrap hands over, routed over fresh rows, behind a connector that accepts once.
+fn test_store(database: crate::store::Database, _host: &str) -> StoreParts {
     let connector: Arc<dyn StoreConnector> =
         ScriptedConnector::new(vec![accepted("c0ffee", "secret-token")]);
-    let rows = Arc::new(crate::sync::SharedRows::new());
-    let settled_identity = Arc::new(crate::sync::SettledIdentity::default());
-    let sdk = Arc::new(crate::sync::SpacetimeSdkConnector::new(
-        "test",
-        rows.clone(),
-    ));
     StoreParts {
-        database: Arc::new(database),
-        board_reads: Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
-        rows,
         connector,
-        reducer_caller: Arc::new(crate::sync::SdkReducerCaller::new(
-            sdk,
-            settled_identity.clone(),
-        )),
-        settled_identity,
-        store_identity: |_| None,
+        ..StoreParts::build(database, "test-host")
     }
 }
 
@@ -73,42 +58,19 @@ fn footprint(db_path: &Path) -> LegacyFootprint {
     }
 }
 
-/// A data directory holding a populated pre-#16755 `tasks.db` — a real
-/// SQLite file with a task in it and NO host identity — closed cleanly so no
-/// `-wal`/`-shm` remain. Any launch that opens it shows: opening it in WAL
-/// mode recreates the companions, and minting an identity into it changes its
-/// bytes.
+/// A data directory holding a pre-#16755 `tasks.db` — a file with the SQLite
+/// header and NO host identity — and no `-wal`/`-shm`. Any launch that opens
+/// it shows: it recreates the companions, and minting an identity into it
+/// changes its bytes.
 async fn legacy_install() -> (tempfile::TempDir, PathBuf, StartupPaths) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("tasks.db");
-    {
-        let db = crate::db::Database::open(&db_path).await.unwrap();
-        db.create_task(crate::db::CreateTaskRequest {
-            title: "Left behind",
-            description: "",
-            repo_path: "/tmp/legacy-repo",
-            plan: None,
-            status: crate::models::TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
-        .await
-        .unwrap();
-        // Leave WAL mode on the way out, so the file is self-contained and its
-        // companions are gone the moment this returns — dropping the handle
-        // closes it on a background thread, which a test cannot wait for.
-        db.db_call(|conn| {
-            conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE;")
-                .map_err(anyhow::Error::from)
-        })
-        .await
-        .unwrap();
-    }
+    // Dispatch has no SQLite to write one with; the magic header and a payload
+    // are all the guarantee needs, since a stray open or rewrite shows in the
+    // bytes and the mtime.
+    let mut bytes = b"SQLite format 3\0".to_vec();
+    bytes.extend((0..4096u32).map(|n| (n % 251) as u8));
+    std::fs::write(&db_path, bytes).unwrap();
     let paths = StartupPaths {
         claude_dir: dir.path().join("claude"),
         claude_json_path: dir.path().join(".claude.json"),

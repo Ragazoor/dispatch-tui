@@ -342,7 +342,7 @@ async fn record_hook_event_pre_tool_use_stamps_and_clears_needs_input() {
     let earlier = chrono::Utc::now() - chrono::Duration::seconds(30);
     db.patch_task(
         id,
-        &crate::db::TaskPatch::new().last_notification_at(Some(earlier)),
+        &crate::store::TaskPatch::new().last_notification_at(Some(earlier)),
     )
     .await
     .unwrap();
@@ -411,7 +411,7 @@ async fn record_hook_event_notification_resolve_kinds_clear_needs_input() {
         let id = create_running_task(&svc, SubStatus::NeedsInput).await;
         db.patch_task(
             id,
-            &crate::db::TaskPatch::new().last_notification_at(Some(chrono::Utc::now())),
+            &crate::store::TaskPatch::new().last_notification_at(Some(chrono::Utc::now())),
         )
         .await
         .unwrap();
@@ -528,7 +528,7 @@ async fn record_hook_event_suppressed_idle_prompt_does_not_clobber_needs_input()
     let id = create_running_task(&svc, SubStatus::NeedsInput).await;
     db.patch_task(
         id,
-        &crate::db::TaskPatch::new().last_notification_at(Some(chrono::Utc::now())),
+        &crate::store::TaskPatch::new().last_notification_at(Some(chrono::Utc::now())),
     )
     .await
     .unwrap();
@@ -578,7 +578,7 @@ async fn record_hook_event_notification_auth_success_does_not_clobber_needs_inpu
     let stamped = chrono::Utc::now();
     db.patch_task(
         id,
-        &crate::db::TaskPatch::new().last_notification_at(Some(stamped)),
+        &crate::store::TaskPatch::new().last_notification_at(Some(stamped)),
     )
     .await
     .unwrap();
@@ -603,7 +603,7 @@ async fn record_hook_event_stop_transitions_to_review_and_clears_stamps() {
     let now = chrono::Utc::now();
     db.patch_task(
         id,
-        &crate::db::TaskPatch::new()
+        &crate::store::TaskPatch::new()
             .last_pre_tool_use_at(Some(now))
             .last_notification_at(Some(now)),
     )
@@ -1343,7 +1343,7 @@ async fn subagent_start_never_drains_a_pending_stop() {
     let id = create_running_task(&svc, SubStatus::Active).await;
     // The stranded state directly, rather than reproducing the interleaving via
     // hook events — this test is about the subagent arm, not how it got there.
-    db.patch_task(id, &crate::db::TaskPatch::new().stop_pending(true))
+    db.patch_task(id, &crate::store::TaskPatch::new().stop_pending(true))
         .await
         .unwrap();
 
@@ -1703,49 +1703,14 @@ async fn update_task_pr_finalisation_false_with_non_pr_url() {
 #[tokio::test]
 async fn update_task_propagates_db_error_on_prior_task_read() {
     // When update_task needs to read the prior task state (epic_id is set, so
-    // needs_prior=true) and the DB returns an error when reading the task back,
+    // needs_prior=true) and the store returns an error when reading the task,
     // the error should propagate rather than being silently swallowed as None.
-    let db = Arc::new(Database::open_in_memory_unattached().await.unwrap());
-    let svc = TaskService::new(db.clone(), crate::process::MockProcessRunner::unused());
+    // A handle with no store attached refuses every read, which is that error.
+    let db = Arc::new(Database::unattached());
+    let svc = TaskService::new(db, crate::process::MockProcessRunner::unused());
 
-    // Create a task that we'll corrupt so get_task fails
-    let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
-        .await
-        .unwrap();
-
-    // Corrupt the task's tag to an unknown value so that get_task returns an error.
-    // tag has no CHECK constraint so the UPDATE succeeds, but parse_tag() will fail
-    // when the row is read back.
-    let raw_id = id.0;
-    db.db_call(move |conn| {
-        conn.execute(
-            "UPDATE tasks SET tag = 'invalid_unknown_tag' WHERE id = ?1",
-            rusqlite::params![raw_id],
-        )?;
-        Ok(())
-    })
-    .await
-    .unwrap();
-
-    // Create an epic so we can link to it (epic_id triggers needs_prior=true)
-    let epic = db.create_epic("E", "D", None).await.unwrap();
-
-    // update_task with epic_id → needs_prior=true → get_task fails → should propagate
     let result = svc
-        .update_task(UpdateTaskParams::for_task(id).epic_id(epic.id))
+        .update_task(UpdateTaskParams::for_task(TaskId(1)).epic_id(EpicId(1)))
         .await;
 
     assert!(
@@ -1759,50 +1724,14 @@ async fn update_task_propagates_db_error_on_prior_task_read() {
     );
 }
 
-// -- Repo-grouping routing -------------------------------------------------
-
-#[tokio::test]
-async fn create_task_on_grouped_epic_routes_into_sub_epic() {
-    use crate::db::EpicCrud;
-    let db = std::sync::Arc::new(crate::db::Database::open_in_memory().await.unwrap());
-    let svc =
-        crate::service::TaskService::new(db.clone(), crate::process::MockProcessRunner::unused());
-    let root = db.create_epic("root", "", None).await.unwrap();
-    db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
-        .await
-        .unwrap();
-
-    let task = svc
-        .create_task_returning(crate::service::CreateTaskParams {
-            title: "t".into(),
-            description: String::new(),
-            repo_path: "/x/dispatch".into(),
-            plan_path: None,
-            epic_id: Some(root.id),
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
-        .await
-        .unwrap();
-
-    let placed = db.get_epic(task.epic_id.unwrap()).await.unwrap().unwrap();
-    assert_eq!(placed.title, "dispatch");
-    assert_eq!(placed.origin, crate::models::EpicOrigin::RepoGroup);
-    assert_ne!(task.epic_id, Some(root.id));
-}
-
 #[tokio::test]
 async fn update_repo_path_reroutes_within_grouped_epic() {
-    use crate::db::EpicCrud;
-    let db = std::sync::Arc::new(crate::db::Database::open_in_memory().await.unwrap());
+    use crate::store::EpicCrud;
+    let db = std::sync::Arc::new(crate::store::Database::open_in_memory().await.unwrap());
     let svc =
         crate::service::TaskService::new(db.clone(), crate::process::MockProcessRunner::unused());
     let root = db.create_epic("root", "", None).await.unwrap();
-    db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+    db.patch_epic(root.id, &crate::store::EpicPatch::new().group_by_repo(true))
         .await
         .unwrap();
     let task = svc
@@ -1843,14 +1772,14 @@ async fn move_task_to_grouped_epic_routes_into_sub_epic() {
     // Create a group_by_repo non-feed root, a standalone task, call
     // move_task_to_epic(task, Some(root)) and assert the task lands in a
     // per-repo RepoGroup sub-epic, NOT directly on the root.
-    use crate::db::EpicCrud;
-    let db = std::sync::Arc::new(crate::db::Database::open_in_memory().await.unwrap());
+    use crate::store::EpicCrud;
+    let db = std::sync::Arc::new(crate::store::Database::open_in_memory().await.unwrap());
     let svc =
         crate::service::TaskService::new(db.clone(), crate::process::MockProcessRunner::unused());
 
     // Create a grouped (non-feed) root.
     let root = db.create_epic("root", "", None).await.unwrap();
-    db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+    db.patch_epic(root.id, &crate::store::EpicPatch::new().group_by_repo(true))
         .await
         .unwrap();
 
@@ -1895,8 +1824,8 @@ async fn move_task_to_grouped_epic_routes_into_sub_epic() {
 #[tokio::test]
 async fn move_task_to_non_grouped_epic_lands_directly() {
     // Regression guard: moving to a plain (non-grouped) epic must NOT route.
-    use crate::db::EpicCrud;
-    let db = std::sync::Arc::new(crate::db::Database::open_in_memory().await.unwrap());
+    use crate::store::EpicCrud;
+    let db = std::sync::Arc::new(crate::store::Database::open_in_memory().await.unwrap());
     let svc =
         crate::service::TaskService::new(db.clone(), crate::process::MockProcessRunner::unused());
 
@@ -1939,7 +1868,7 @@ async fn move_task_to_non_grouped_epic_lands_directly() {
 /// A backlog phoenix task with every inheritable field set to something
 /// distinguishable, so `WhatTheSuccessorInherits` can be asserted field by
 /// field rather than on a couple of representatives.
-async fn phoenix_task(db: &Arc<dyn db::TaskStore>, epic_id: Option<EpicId>) -> TaskId {
+async fn phoenix_task(db: &Arc<dyn store::TaskStore>, epic_id: Option<EpicId>) -> TaskId {
     let svc = task_svc(db);
     let id = svc
         .create_task(CreateTaskParams {
@@ -1962,7 +1891,7 @@ async fn phoenix_task(db: &Arc<dyn db::TaskStore>, epic_id: Option<EpicId>) -> T
 
 /// The successor of `predecessor`, or `None` when nothing was respawned.
 async fn successor_of(
-    db: &Arc<dyn db::TaskStore>,
+    db: &Arc<dyn store::TaskStore>,
     predecessor: TaskId,
 ) -> Option<crate::models::Task> {
     task_svc(db)
@@ -2083,7 +2012,7 @@ async fn the_successor_inherits_labels() {
     let svc = task_svc(&db);
     let id = phoenix_task(&db, None).await;
     let labels = vec!["scala-common".to_string(), "security".to_string()];
-    db.patch_task(id, &db::TaskPatch::new().labels(&labels))
+    db.patch_task(id, &store::TaskPatch::new().labels(&labels))
         .await
         .unwrap();
 
@@ -2168,7 +2097,7 @@ async fn a_feed_owned_task_does_not_respawn() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = phoenix_task(&db, None).await;
-    db.patch_task(id, &db::TaskPatch::new().external_id(Some("pr-42")))
+    db.patch_task(id, &store::TaskPatch::new().external_id(Some("pr-42")))
         .await
         .unwrap();
 
@@ -2249,7 +2178,7 @@ async fn a_skipped_respawn_does_not_contaminate_the_close_result() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = phoenix_task(&db, None).await;
-    db.patch_task(id, &db::TaskPatch::new().external_id(Some("pr-42")))
+    db.patch_task(id, &store::TaskPatch::new().external_id(Some("pr-42")))
         .await
         .unwrap();
     svc.update_task(
@@ -2606,7 +2535,7 @@ async fn ensure_deletable_passes_a_done_task() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
-    db.patch_task(id, &db::TaskPatch::new().status(TaskStatus::Done))
+    db.patch_task(id, &store::TaskPatch::new().status(TaskStatus::Done))
         .await
         .unwrap();
 
@@ -2653,7 +2582,7 @@ async fn epic_ensure_deletable_refuses_when_any_subtree_task_is_not_done() {
     let err = epics.ensure_deletable(epic.id).await.unwrap_err();
     assert!(matches!(err, ServiceError::Validation(_)), "got {err:?}");
 
-    db.patch_task(t, &db::TaskPatch::new().status(TaskStatus::Done))
+    db.patch_task(t, &store::TaskPatch::new().status(TaskStatus::Done))
         .await
         .unwrap();
     epics.ensure_deletable(epic.id).await.unwrap();

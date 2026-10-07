@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use super::FeedItemWithTarget;
-use crate::db::{RemovedFeedTask, TaskStore};
 use crate::models::EpicId;
+use crate::store::{RemovedFeedTask, TaskStore};
 
 /// Insert/update present roles. Because every cross-role task was already
 /// moved out of its losing epic by [`super::routing::route_and_group_entries`],

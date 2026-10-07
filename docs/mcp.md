@@ -129,7 +129,7 @@ curl -s -X POST http://127.0.0.1:3142/mcp \
 
 Feed epics are epics whose tasks are populated externally by a shell command rather than by a human. When an epic has a `feed_command` set, the runtime runs it periodically (`feed_interval_secs`) and calls `upsert_feed_tasks()` to sync the results. Each feed task has an `external_id` that is used as the upsert key — tasks are created on first appearance and updated (but not deleted) on subsequent runs.
 
-Feed tasks appear in their own column on the kanban board (`SubStatus::Feed`). The schema is backed by migration v38. See `docs/specs/feeds.allium` for the full specification.
+Feed tasks appear in their own column on the kanban board (`SubStatus::Feed`). The schema is part of the store module. See `docs/specs/feeds.allium` for the full specification.
 
 ## Knowledge Base Flow
 
@@ -156,7 +156,7 @@ Each learning has a `scope` that determines which tasks receive it:
 
 ### Ordering
 
-Candidate entries are fetched from SQLite ordered by kind (`procedural` first), then scope specificity (`epic` → `repo` → `user`), then `upvote_count DESC`. That ordering only selects the candidate set: the injected block itself is RAG-ranked by relevance to the task, so `kind` confers no precedence in the final prompt. Procedural entries are **not** prepended as a verbatim prefix — every retrieved entry, procedural included, goes into the single ranked block.
+Candidate entries are fetched from the store ordered by kind (`procedural` first), then scope specificity (`epic` → `repo` → `user`), then `upvote_count DESC`. That ordering only selects the candidate set: the injected block itself is RAG-ranked by relevance to the task, so `kind` confers no precedence in the final prompt. Procedural entries are **not** prepended as a verbatim prefix — every retrieved entry, procedural included, goes into the single ranked block.
 
 ### Status lifecycle
 
@@ -170,6 +170,6 @@ Approved entries affect dispatch; archived entries do not. `rejected` remains a 
 
 - `src/mcp/handlers/learnings.rs` — MCP tool handlers
 - `src/service/learnings.rs` — `LearningService` (create, query, retrieval/verdicts, stale sweep, delete)
-- `src/db/` — `LearningStore` trait, `LearningPatch`, `LearningFilter`
+- `src/store/` — `LearningStore` trait, `LearningPatch`, `LearningFilter`
 - `src/dispatch/agents.rs` — prompt augmentation in `dispatch_with_prompt()`
 - `docs/specs/learnings.allium` — full domain specification

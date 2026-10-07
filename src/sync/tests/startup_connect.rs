@@ -6,7 +6,7 @@
 //! `AbortWhenTheStoreCannotBeReached`.
 
 use super::{accepted, refused, ScriptedConnector};
-use crate::db::{Database, HostStore, IdentityCredentialStore};
+use crate::store::{Database, HostStore, IdentityCredentialStore};
 use crate::sync::{ConnectionStatus, SyncSession};
 use std::time::Instant;
 
@@ -15,10 +15,7 @@ use std::time::Instant;
 /// minted itself, and the user identity and credential the store issued.
 #[tokio::test]
 async fn a_fresh_install_connects_and_mints_its_identities() {
-    let dir = tempfile::tempdir().unwrap();
-    let db = Database::open(&dir.path().join("dispatch.db"))
-        .await
-        .unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let connector = ScriptedConnector::new(vec![accepted("c0ffee", "token-1")]);
     let mut session = SyncSession::open("store.example", connector.clone());
 

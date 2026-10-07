@@ -8,7 +8,7 @@ mod spawn_refresh_from_db_via_msg_tx {
     async fn spawn_refresh_from_db_sends_task_refresh_via_msg_tx() {
         let db = test_db().await;
         // Create a task so the refresh has something to send.
-        db.create_task(crate::db::CreateTaskRequest {
+        db.create_task(crate::store::CreateTaskRequest {
             title: "test task",
             description: "desc",
             repo_path: "/repo",
@@ -71,7 +71,7 @@ mod spawn_refresh_task {
         rt.db_write()
             .patch_task(
                 id,
-                &db::TaskPatch::new()
+                &store::TaskPatch::new()
                     .status(models::TaskStatus::Running)
                     .sub_status(models::SubStatus::Active),
             )
@@ -114,6 +114,14 @@ mod spawn_refresh_task {
         )
         .await;
         let id = app.tasks()[0].id;
+        // The store only deletes a finished task.
+        rt.db_write()
+            .patch_task(
+                id,
+                &store::TaskPatch::new().status(models::TaskStatus::Done),
+            )
+            .await
+            .unwrap();
         rt.db_write().delete_task(id).await.unwrap();
 
         rt.spawn_refresh_task(id).await.unwrap();
@@ -145,7 +153,7 @@ mod spawn_refresh_epic {
         let epic = db.create_epic("Epic", "desc", None).await.unwrap();
         db.patch_epic(
             epic.id,
-            &db::EpicPatch::new().status(models::TaskStatus::Running),
+            &store::EpicPatch::new().status(models::TaskStatus::Running),
         )
         .await
         .unwrap();
@@ -197,7 +205,7 @@ mod spawn_refresh_epic {
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let rt = make_runtime(db.clone(), tx, runner).await;
         let epic = db.create_epic("Feed Epic", "desc", None).await.unwrap();
-        db.create_task(crate::db::CreateTaskRequest {
+        db.create_task(crate::store::CreateTaskRequest {
             title: "Feed Task",
             description: "from feed",
             repo_path: "/repo",

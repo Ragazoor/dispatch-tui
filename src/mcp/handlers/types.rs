@@ -419,7 +419,7 @@ pub(super) fn parse_args<T: serde::de::DeserializeOwned>(
 /// JSON-RPC responses. Used by handlers that resolve the caller task for
 /// context inheritance (project_id, epic_id, etc.).
 pub(super) async fn fetch_caller_task(
-    db: &dyn crate::db::TaskReadStore,
+    db: &dyn crate::store::TaskReadStore,
     id: &Option<serde_json::Value>,
     caller_id: crate::models::TaskId,
 ) -> Result<crate::models::Task, JsonRpcResponse> {
@@ -592,8 +592,8 @@ mod flexible_i64_tests {
 #[cfg(test)]
 mod fetch_caller_task_tests {
     use super::fetch_caller_task;
-    use crate::db::{CreateTaskRequest, Database, TaskCrud};
     use crate::models::{TaskId, TaskStatus};
+    use crate::store::{CreateTaskRequest, Database, TaskCrud};
     use serde_json::json;
 
     #[tokio::test]

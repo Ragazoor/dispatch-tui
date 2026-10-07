@@ -5,11 +5,11 @@ mod common;
 
 use serde_json::{json, Value};
 
-use dispatch_tui::db::CreateTaskRequest;
 use dispatch_tui::mcp::identity::{HEADER_KIND, HEADER_TASK_ID};
 use dispatch_tui::mcp::trajectory::TRAJECTORIES_SUBDIR;
 use dispatch_tui::mcp::BackgroundWrite;
 use dispatch_tui::models::{TaskId, TaskStatus};
+use dispatch_tui::store::CreateTaskRequest;
 
 /// Happy path: a task-identity call writes one JSONL entry to
 /// `<data_dir>/trajectories/<task_id>.jsonl`.

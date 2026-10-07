@@ -3,9 +3,9 @@
 //! sub-epics, never hand-made (`Manual`) ones. Each function recalculates the
 //! epics it mutates, owning the status-rollup invariant.
 
-use crate::db::{LearningStore, TaskAndEpicStore};
 use crate::models::{repo_name_from_path, EpicId, EpicOrigin, TaskId};
 use crate::service::ServiceError;
+use crate::store::{LearningStore, TaskAndEpicStore};
 
 /// Resolve where a task assigned to `root_id` should actually live.
 /// Routes into a per-repo sub-epic only when `root` is `group_by_repo` AND
@@ -159,18 +159,18 @@ async fn delete_if_empty_repo_group(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{
+    use crate::models::{EpicId, LearningKind, LearningScope, LearningStatus, TaskStatus};
+    use crate::store::{
         CreateLearningRow, Database, EpicCrud, EpicRead, LearningFilter, LearningStore, TaskCrud,
         TaskPatch,
     };
-    use crate::models::{EpicId, LearningKind, LearningScope, LearningStatus, TaskStatus};
 
     async fn mk() -> Database {
         Database::open_in_memory().await.unwrap()
     }
 
     async fn add_task(db: &Database, epic: EpicId, repo: &str) -> crate::models::TaskId {
-        db.create_task(crate::db::CreateTaskRequest {
+        db.create_task(crate::store::CreateTaskRequest {
             title: "t",
             description: "",
             repo_path: repo,
@@ -192,7 +192,7 @@ mod tests {
     async fn route_target_creates_sub_epic_for_grouped_root() {
         let db = mk().await;
         let root = db.create_epic("root", "", None).await.unwrap();
-        db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+        db.patch_epic(root.id, &crate::store::EpicPatch::new().group_by_repo(true))
             .await
             .unwrap();
         let target = route_target(&db, root.id, "/x/dispatch").await.unwrap();
@@ -214,7 +214,7 @@ mod tests {
         let feed = db.create_epic("feed", "", None).await.unwrap();
         db.patch_epic(
             feed.id,
-            &crate::db::EpicPatch::new()
+            &crate::store::EpicPatch::new()
                 .group_by_repo(true)
                 .feed_command(Some("gh ...")),
         )
@@ -230,7 +230,7 @@ mod tests {
     async fn regroup_migrates_all_direct_tasks() {
         let db = mk().await;
         let root = db.create_epic("root", "", None).await.unwrap();
-        db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+        db.patch_epic(root.id, &crate::store::EpicPatch::new().group_by_repo(true))
             .await
             .unwrap();
         add_task(&db, root.id, "/x/alpha").await;
@@ -248,7 +248,7 @@ mod tests {
     async fn flatten_rehomes_tasks_then_deletes_empty_repo_groups() {
         let db = mk().await;
         let root = db.create_epic("root", "", None).await.unwrap();
-        db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+        db.patch_epic(root.id, &crate::store::EpicPatch::new().group_by_repo(true))
             .await
             .unwrap();
         add_task(&db, root.id, "/x/alpha").await;
@@ -270,7 +270,7 @@ mod tests {
     async fn flatten_preserves_manual_sub_epics() {
         let db = mk().await;
         let root = db.create_epic("root", "", None).await.unwrap();
-        db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+        db.patch_epic(root.id, &crate::store::EpicPatch::new().group_by_repo(true))
             .await
             .unwrap();
         let manual = db.create_epic("notes", "", Some(root.id)).await.unwrap(); // origin=Manual
@@ -285,7 +285,7 @@ mod tests {
     async fn reroute_moves_task_to_correct_sub_epic_and_cleans_source() {
         let db = mk().await;
         let root = db.create_epic("root", "", None).await.unwrap();
-        db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+        db.patch_epic(root.id, &crate::store::EpicPatch::new().group_by_repo(true))
             .await
             .unwrap();
         let t = add_task(&db, root.id, "/x/alpha").await;
@@ -313,7 +313,7 @@ mod tests {
         let db = mk().await;
         // Create a group_by_repo root epic.
         let root = db.create_epic("root", "", None).await.unwrap();
-        db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+        db.patch_epic(root.id, &crate::store::EpicPatch::new().group_by_repo(true))
             .await
             .unwrap();
         // Route a task into a RepoGroup sub-epic so the sub-epic exists.
@@ -376,7 +376,7 @@ mod tests {
     async fn rescope_learnings_when_repo_group_sub_epic_deleted_by_reroute() {
         let db = mk().await;
         let root = db.create_epic("root", "", None).await.unwrap();
-        db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+        db.patch_epic(root.id, &crate::store::EpicPatch::new().group_by_repo(true))
             .await
             .unwrap();
         let t = add_task(&db, root.id, "/x/alpha").await;
@@ -432,7 +432,7 @@ mod tests {
     async fn unscoped_and_other_learnings_untouched_during_rescope() {
         let db = mk().await;
         let root = db.create_epic("root", "", None).await.unwrap();
-        db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+        db.patch_epic(root.id, &crate::store::EpicPatch::new().group_by_repo(true))
             .await
             .unwrap();
         add_task(&db, root.id, "/x/alpha").await;

@@ -332,34 +332,23 @@ impl SharedTable {
     /// `settings` rather than in a table of its own, so the dump builds the row
     /// rather than selecting it.
     ///
-    /// **Declared as data because the positional module-vs-SQLite check cannot
-    /// cover it.** That check compares each shared table against its SQLite
-    /// counterpart, and skips the tables that have none — which leaves the one
-    /// table whose row is assembled by hand as the only one nothing verifies.
-    /// Listing the columns here lets the same test compare THIS against the
-    /// module instead, so appending a column to `hosts` and forgetting the dump
-    /// fails at the module change rather than mid-restore, during the incident
-    /// the snapshot exists for.
+    /// **Declared as data so the round-trip tests can compare it against the
+    /// module.** Appending a column to `hosts` and forgetting this list fails
+    /// at the module change rather than mid-restore, during the incident the
+    /// snapshot exists for.
     ///
-    /// An empty slice means "assembled from nothing" — i.e. a SQLite-backed
-    /// table, which is read rather than assembled.
-    /// **Doubles as the expected column list for every always-empty table**
-    /// (`dump::Source::Empty`: `poll_owners`, and the dead `task_shells`,
-    /// `todos` and `filter_presets`), even though nothing is actually assembled from a settings
-    /// key the way `hosts` is — `dump::Source::Empty` reads no settings row at all, and
-    /// the second element of each pair is unused there. It is still the
-    /// right home for the list: this method's whole job, per the schema
-    /// parity test (`src/spacetime/tests/module_schema.rs`), is "the expected
-    /// columns for a table `dump::is_sqlite_backed` says has no real SQLite
-    /// source", and `poll_owners` is exactly that — it just has a different
-    /// reason (see the table's own doc comment in `spacetime/module/src/lib.rs`)
-    /// than `hosts` does for being one.
+    /// An empty slice means "assembled from nothing": the table is read
+    /// rather than assembled. For a table with no assembly the list is also
+    /// the expected column set of an always-empty table (`poll_owners`, and the
+    /// dead `task_shells`, `todos` and `filter_presets`), which is why it
+    /// lives here: nothing is assembled from a settings key for them the way
+    /// `hosts` is, and the second element of each pair is unused.
     pub fn assembled_columns(self) -> &'static [(&'static str, &'static str)] {
         match self {
             SharedTable::Hosts => &[
-                ("id", crate::db::HOST_ID_KEY),
-                ("label", crate::db::HOST_LABEL_KEY),
-                ("owner", crate::db::USER_IDENTITY_KEY),
+                ("id", crate::store::HOST_ID_KEY),
+                ("label", crate::store::HOST_LABEL_KEY),
+                ("owner", crate::store::USER_IDENTITY_KEY),
             ],
             SharedTable::PollOwners => &[
                 ("id", ""),

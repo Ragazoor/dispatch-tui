@@ -21,7 +21,7 @@ async fn mcp_tool_call_records_usage_event() {
 
     let results = state
         .db
-        .query_usage(&crate::db::UsageQuery::default())
+        .query_usage(&crate::store::UsageQuery::default())
         .await
         .unwrap();
     assert_eq!(results.len(), 1);

@@ -499,10 +499,10 @@ fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
     if !spacetime_available_or_skip() {
         return;
     }
-    use dispatch_tui::db::LearningFilter;
     use dispatch_tui::service::embeddings::{
         rag_rank_learnings, serialize_embedding, RagRankParams,
     };
+    use dispatch_tui::store::LearningFilter;
 
     let instance = Instance::start("module-test");
     let published = instance.publish(&module_path(), None);
@@ -1370,7 +1370,7 @@ fn a_usage_event_recorded_elsewhere_is_visible_from_here() {
     if !spacetime_available_or_skip() {
         return;
     }
-    use dispatch_tui::db::UsageQuery;
+    use dispatch_tui::store::UsageQuery;
 
     let instance = Instance::start("module-test");
     let published = instance.publish(&module_path(), None);

@@ -9,9 +9,9 @@ mod common;
 
 use serde_json::{json, Value};
 
-use dispatch_tui::db::CreateTaskRequest;
 use dispatch_tui::mcp::identity::{HEADER_KIND, HEADER_TASK_ID};
 use dispatch_tui::models::{TaskId, TaskStatus};
+use dispatch_tui::store::CreateTaskRequest;
 
 fn parse_created_task_id(resp: &Value) -> TaskId {
     let text = resp["result"]["content"][0]["text"]

@@ -619,7 +619,7 @@ pub struct DispatchInputs {
 /// Async and side-effecting (it records prompt-injection retrievals), so callers
 /// run it before handing the task to the blocking dispatch itself.
 pub async fn prepare_inputs(
-    db: &dyn crate::db::TaskReadStore,
+    db: &dyn crate::store::TaskReadStore,
     task: &Task,
     emb_svc: &std::sync::Arc<crate::service::embeddings::EmbeddingService>,
 ) -> DispatchInputs {
@@ -631,7 +631,7 @@ pub async fn prepare_inputs(
 /// chain, which reads the epic to check `auto_dispatch` and would otherwise
 /// re-read it here.
 pub async fn prepare_inputs_with_epic_ctx(
-    db: &dyn crate::db::TaskReadStore,
+    db: &dyn crate::store::TaskReadStore,
     task: &Task,
     emb_svc: &std::sync::Arc<crate::service::embeddings::EmbeddingService>,
     epic_ctx: Option<EpicContext>,
@@ -650,7 +650,7 @@ pub async fn prepare_inputs_with_epic_ctx(
 /// and returns `None` if the DB lookup fails so either caller proceeds
 /// without the line rather than failing.
 pub async fn fetch_verify_command(
-    db: &dyn crate::db::TaskReadStore,
+    db: &dyn crate::store::TaskReadStore,
     repo_path: &str,
 ) -> Option<String> {
     db.get_verify_command(repo_path).await.unwrap_or_else(|e| {

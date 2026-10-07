@@ -15,8 +15,8 @@ use super::routing::route_and_group_entries;
 use super::stale::{clear_parent_stranded_tasks, delete_stale_subtree};
 use super::upsert::upsert_role_groups;
 use super::{FeedItemWithTarget, FeedSyncOutcome};
-use crate::db::TaskStore;
 use crate::models::{Epic, EpicId, Task};
+use crate::store::TaskStore;
 use anyhow::Result;
 
 /// Display title used when the role sub-epic must be created. The role
@@ -54,7 +54,7 @@ async fn ensure_role_sub_epic(
     let created = db
         .create_epic(role_sub_epic_title(role), "", Some(parent_id))
         .await?;
-    db.patch_epic(created.id, &crate::db::EpicPatch::new().feed_role(role))
+    db.patch_epic(created.id, &crate::store::EpicPatch::new().feed_role(role))
         .await?;
     Ok(created.id)
 }

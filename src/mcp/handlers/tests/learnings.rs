@@ -56,7 +56,7 @@ async fn create_approved_learning(
         .db
         .patch_learning(
             id,
-            &crate::db::LearningPatch::new().status(crate::models::LearningStatus::Approved),
+            &crate::store::LearningPatch::new().status(crate::models::LearningStatus::Approved),
         )
         .await
         .unwrap();
@@ -116,7 +116,7 @@ async fn record_learning_creates_proposed_entry() {
     let text = extract_response_text(&resp);
     assert!(text.contains("active"), "expected 'active' in: {text}");
 
-    let filter = crate::db::LearningFilter {
+    let filter = crate::store::LearningFilter {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
@@ -151,7 +151,7 @@ async fn record_learning_derives_scope_ref_for_repo() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let filter = crate::db::LearningFilter {
+    let filter = crate::store::LearningFilter {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
@@ -199,7 +199,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let filter = crate::db::LearningFilter {
+    let filter = crate::store::LearningFilter {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
@@ -254,7 +254,7 @@ async fn record_learning_user_scope_no_scope_ref() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let filter = crate::db::LearningFilter {
+    let filter = crate::store::LearningFilter {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
@@ -331,7 +331,7 @@ async fn record_learning_rejects_code_citation_in_summary() {
 
     let learnings = state
         .db
-        .list_learnings(crate::db::LearningFilter::default())
+        .list_learnings(crate::store::LearningFilter::default())
         .await
         .unwrap();
     assert!(
@@ -479,7 +479,7 @@ async fn record_learning_still_creates_when_similar_exists() {
 
     let all = state
         .db
-        .list_learnings(crate::db::LearningFilter::default())
+        .list_learnings(crate::store::LearningFilter::default())
         .await
         .unwrap();
     assert_eq!(
@@ -815,7 +815,7 @@ async fn delete_learning_success() {
 
     let remaining = state
         .db
-        .list_learnings(crate::db::LearningFilter::default())
+        .list_learnings(crate::store::LearningFilter::default())
         .await
         .unwrap();
     assert!(remaining.is_empty(), "learning must be deleted");

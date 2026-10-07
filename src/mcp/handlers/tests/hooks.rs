@@ -91,7 +91,7 @@ async fn a_pane_keypress_is_recorded_as_keybinding_usage() {
         crate::hooks::wire::HookResponse::Observed(crate::hooks::wire::ObserveOutcome::Applied)
     );
     let rows = db
-        .query_usage(&crate::db::UsageQuery::default())
+        .query_usage(&crate::store::UsageQuery::default())
         .await
         .unwrap();
     assert_eq!(rows.len(), 1, "{rows:?}");

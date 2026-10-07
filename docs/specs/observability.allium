@@ -3,8 +3,8 @@
 --
 -- Scope: Observability — per-task audit log of MCP tool calls, feature-usage
 --        recording for keybindings (the board TUI and the agent-tree
---        companion and diff panes), slow-DB-call latency warnings, the
---        decode-failure policy for rows read back from the database, and the
+--        companion and diff panes), the
+--        decode-failure policy for rows read back from the store, and the
 --        `dispatch statusline` process that records each session's
 --        subscription windows and active model.
 -- Includes: TrajectoryEntry value type, append-on-each-MCP-call rule,
@@ -13,10 +13,6 @@
 --           keypress is recorded (every keypress that takes effect, once),
 --           when it is not (a keypress that changes nothing), and how the
 --           event log stays bounded (oldest-first eviction at a row cap);
---           SlowDbCallWarning value type and the DbCallSlowWarning rule that
---           emits a warn-level log line when a DB call exceeds the configured
---           latency threshold, on either dispatch path (the single writer
---           connection or a read-only pool connection);
 --           DecodeFallbackWarning value type and the three rules deciding what
 --           an undecodable row costs: bulk reads skip it and warn, single-entity
 --           reads fail, and errors that are not row-decode failures always
@@ -37,16 +33,8 @@
 --           keybinding table), and what each action does belongs to the spec
 --           owning that behaviour (core, tasks, epics, split-pane, …), not
 --           here.
---           Slow-db-call warnings reach a durable log file in one process:
---           the TUI, which initialises a tracing subscriber writing to
---           <data_dir>/app.log. Hooks used to be the second such process;
---           they no longer open a database at all (see agent-health.allium:
---           HookDelivery), so the calls they once made are now the board's
---           own and are logged there. The one-shot CLI subcommands (update,
---           pr-gate, list, repo, prune-repo-paths, plan, setup) call the same
---           shared DB-call paths, but with no subscriber configured their
---           warn events are silently dropped -- persisting those is out of
---           scope for now (see DbCallSlowWarning for the scope boundary).
+--           Dispatch has no local database to time (storage.allium:
+--           StoreInUseNeverOpensSqlite), so there is no slow-DB-call warning.
 
 use "./core.allium" as core
 
@@ -76,36 +64,12 @@ value TrajectoryEntry {
     duration_ms:    Integer    -- wall-clock time from dispatch to response
 }
 
--- A single warn-level log record emitted when an async DB call takes longer
--- than the configured latency threshold. Unlike TrajectoryEntry, this is not
--- persisted to a dedicated file: it is a tracing event whose durable capture
--- depends on the running process having a subscriber configured (see
--- DbCallSlowWarning for the scope boundary). It has no identity and no lifecycle.
-value SlowDbCallWarning {
-    duration_ms: Integer   -- measured wall-clock elapsed time of the DB call,
-                           -- including time spent queued behind other calls on
-                           -- the same connection, or retrying behind another
-                           -- connection's SQLite lock
-    execute_ms:  Integer   -- how long the call's own work ran once it held a
-                           -- connection. The directly measured part
-    queued_ms:   Integer   -- the rest of duration_ms: everything that was not
-                           -- the call's own work, which is dominated by waiting
-                           -- for a connection but also absorbs dispatch
-                           -- overhead. Derived as duration_ms - execute_ms
-                           -- rather than measured, so the two parts always sum
-                           -- to duration_ms exactly
-    location:    String    -- call-site of the invoking db_call / db_call_read
-                           -- caller, formatted as "file.rs:line:column"
-                           -- (std::panic::Location's Display, which includes
-                           -- the column)
-}
-
 -- A single warn-level log record emitted when a row read back from the
 -- database cannot be decoded into its domain type, or when an unknown enum
--- value is defaulted rather than failing the row. Like SlowDbCallWarning this
--- is a tracing event, not a persisted entity: no identity, no lifecycle. Its
--- durable capture depends on the running process having a subscriber
--- configured (same scope boundary as DbCallSlowWarning).
+-- value is defaulted rather than failing the row. This is a tracing event, not
+-- a persisted entity: no identity, no lifecycle. Its durable capture depends
+-- on the running process having a subscriber configured (only the TUI writes
+-- <data_dir>/app.log).
 value DecodeFallbackWarning {
     entity_kind: String   -- which collection the row came from, e.g. "tasks"
     reason:      String   -- the decode failure, verbatim
@@ -153,13 +117,6 @@ config {
     -- is several months of recording at observed rates, which is the horizon
     -- pruning decisions are taken over.
     usage_event_row_cap: Integer = 100_000
-    -- A DB call whose measured wall-clock elapsed time exceeds this many
-    -- milliseconds is considered abnormally slow and triggers a warn log.
-    -- The same threshold applies on both dispatch paths (writer and read pool).
-    -- 200ms sits well above normal SQLite query time (sub-millisecond to low
-    -- milliseconds) and well below perceptible user lag, so it only fires on
-    -- genuinely abnormal calls.
-    slow_db_call_threshold_ms: Integer = 200
 }
 
 ------------------------------------------------------------
@@ -439,98 +396,6 @@ rule FeatureUsageLogStaysBounded {
         -- retained window. A total read from this log is a lower bound on
         -- all-time use, which is why pruning decisions window by date rather
         -- than trusting an all-time total.
-}
-
--- == Slow DB call latency warning ==
-
-rule DbCallSlowWarning {
-    -- Since task #16755 only test fixtures make such calls (storage.allium: StoreInUseNeverOpensSqlite); the rule
-    -- still holds for them.
-    --
-    -- When an async call to the SQLite database completes, its wall-clock
-    -- elapsed time is measured from just before the call is issued to when it
-    -- resolves — which includes any time the call spent queued behind other
-    -- calls on the same connection, or retrying behind another connection's
-    -- write lock. If that elapsed time exceeds the configured threshold, a
-    -- warn-level log line is emitted carrying the elapsed duration and the
-    -- call site that issued the call.
-    --
-    -- "db_call" in this rule's name and prose means either dispatch path: the
-    -- single writer connection (db_call, which serves every mutation) or one of
-    -- the read-only pool connections (db_call_read, which serves pure reads).
-    -- DbCallCompleted fires for both, and the threshold check and resulting
-    -- warning are identical on both. Which connection served the call is not
-    -- part of the warning.
-    when: DbCallCompleted(location, elapsed_ms, execute_ms)
-
-    -- Only abnormally slow calls warn. Calls at or below the threshold produce
-    -- no log line. The threshold is deliberately still measured against total
-    -- elapsed time, not execute_ms: a call that really did take five seconds
-    -- mattered to whoever was waiting on it, however the time was spent. The
-    -- split below changes what the warning explains, not which calls it fires
-    -- for.
-    requires: elapsed_ms > config.slow_db_call_threshold_ms
-
-    ensures: SlowDbCallLogged(
-        warning: SlowDbCallWarning {
-            duration_ms: elapsed_ms,
-            queued_ms: elapsed_ms - execute_ms,
-            execute_ms: execute_ms,
-            location: location
-        }
-    )
-
-    @guidance
-        -- The elapsed time is real wall-clock time (std::time::Instant), not an
-        -- injected clock: this is pure observability, not domain logic under
-        -- test with fake time. location is std::panic::Location::caller() of
-        -- whichever db_call call site was invoked, obtained for free via
-        -- #[track_caller] so no call site needs to change; it is rendered via
-        -- std::panic::Location's Display as "file.rs:line:column".
-        --
-        -- WHY THE DURATION IS SPLIT: read calls are assigned to a pool
-        -- connection round-robin, so a cheap query can land on a connection
-        -- that is already mid-flight on an unrelated slow read, wait out that
-        -- connection's queue, and cross the threshold on queueing alone. The
-        -- single-connection writer path has always had the same ambiguity (a
-        -- fast call queued behind a slow one), now spread across several
-        -- connections instead of one.
-        --
-        -- Reporting only total elapsed time made the warning name the victim
-        -- rather than the cause, and misleadingly: the most frequent call site
-        -- in a real log was `task_exists`, a SELECT 1 on the primary key, at
-        -- 200-300ms. A single-row indexed lookup cannot cost that, so the
-        -- location was pointing at an innocent query every time.
-        --
-        -- queued_ms and execute_ms make the two separable from a single line,
-        -- with no timestamp correlation across neighbouring warnings. High
-        -- queued_ms with low execute_ms means contention and the location is
-        -- incidental; high execute_ms means the logged call site really is the
-        -- expensive one.
-        --
-        -- SCOPE BOUNDARY (intentional, not a bug): SlowDbCallLogged is a
-        -- tracing::warn event ("slow db_call"), not an entity, and its durable
-        -- capture depends on the running process having a tracing subscriber.
-        -- One process initialises a subscriber and thus persists these
-        -- warnings to <data_dir>/app.log: the TUI subcommand. Both dispatch
-        -- paths are shared code, so the timing check runs in every process
-        -- that calls either of them (the TUI, its in-process MCP server and
-        -- FeedRunner, and each one-shot CLI subcommand), but only the TUI has
-        -- a subscriber, so only its warnings are persisted. The `hook`
-        -- subcommand used to be the second, because it fired on every agent
-        -- tool-use event and was the likeliest source of the write-lock
-        -- contention this instrumentation exists to catch. That contention is
-        -- gone: a hook opens no database (see agent-health.allium:
-        -- HookDelivery), and the work it used to do in its own process now
-        -- runs inside the board's, under the board's subscriber — so the
-        -- calls this warning was added for are still logged, by the process
-        -- that now makes them.
-        -- The remaining one-shot subcommands (update, pr-gate, list, repo,
-        -- prune-repo-paths, plan, setup) still have no subscriber, so their
-        -- warn events are silently dropped; persisting those is deferred.
-        --
-        -- No new metric, counter, or queryable surface: the log line in the
-        -- existing app.log is the complete deliverable.
 }
 
 -- == Decode-failure policy ==

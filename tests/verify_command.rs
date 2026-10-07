@@ -3,16 +3,17 @@
 //! task.repo_path is found by the wrap-up lookup when called with
 //! the repo_path from a real task row.
 
-use dispatch_tui::db::{CreateTaskRequest, Database, RepoConfigStore, TaskCrud, TaskRead};
 use dispatch_tui::dispatch::fetch_verify_command;
 use dispatch_tui::models::TaskStatus;
+use dispatch_tui::store::{CreateTaskRequest, Database, RepoConfigStore, TaskCrud, TaskRead};
 
 #[tokio::test]
 async fn verify_command_lookup_matches_task_repo_path() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let db = Database::open(tmp.path()).await.unwrap();
+    let db = Database::open_in_memory().await.unwrap();
 
-    // Register a verify command for the repo path.
+    // Register a verify command for the repo path. The store only sets a
+    // command on a saved path.
+    db.save_repo_path("/home/me/repo").await.unwrap();
     db.set_verify_command("/home/me/repo", Some("cargo test"))
         .await
         .unwrap();
@@ -46,8 +47,7 @@ async fn verify_command_lookup_matches_task_repo_path() {
 
 #[tokio::test]
 async fn verify_command_lookup_returns_none_for_unregistered_path() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let db = Database::open(tmp.path()).await.unwrap();
+    let db = Database::open_in_memory().await.unwrap();
 
     let fetched = fetch_verify_command(&db, "/not/registered").await;
     assert_eq!(fetched, None);
@@ -55,10 +55,10 @@ async fn verify_command_lookup_returns_none_for_unregistered_path() {
 
 #[tokio::test]
 async fn verify_command_lookup_requires_exact_path_match() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let db = Database::open(tmp.path()).await.unwrap();
+    let db = Database::open_in_memory().await.unwrap();
 
     // Store under expanded path
+    db.save_repo_path("/home/me/repo").await.unwrap();
     db.set_verify_command("/home/me/repo", Some("cargo test"))
         .await
         .unwrap();

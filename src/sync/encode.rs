@@ -11,7 +11,7 @@
 //!
 //! # The two absences, and why they do not collapse
 //!
-//! `db::TaskPatch` is a double `Option`: `None` means "do not touch this
+//! `store::TaskPatch` is a double `Option`: `None` means "do not touch this
 //! field", `Some(None)` means "set it to absent", `Some(Some(v))` means "set it
 //! to v". The module's patch is a single `Option`, because absence in a COLUMN
 //! is a sentinel there (`""`, `0`) rather than a null — see "Why almost nothing
@@ -19,7 +19,7 @@
 //!
 //! So the mapping is:
 //!
-//! | `db::TaskPatch` | module `TaskPatch` |
+//! | `store::TaskPatch` | module `TaskPatch` |
 //! |---|---|
 //! | `None` | `None` — untouched |
 //! | `Some(None)` | `Some(<sentinel>)` — cleared |
@@ -34,9 +34,9 @@
 //! the module too (zero is a real sort order and null means "fall back to the
 //! id"), so it stays doubly optional all the way through.
 
-use crate::db::{CreateTaskRequest, TaskPatch};
 use crate::models::TaskStatus;
 use crate::spacetime::bindings;
+use crate::store::{CreateTaskRequest, TaskPatch};
 
 /// The module's spelling of an empty label list. Not `""`: the column holds
 /// JSON, and SQLite's decoder reads `[]` for a task with no labels.
@@ -58,7 +58,7 @@ fn nullable<T, U>(field: Option<Option<T>>, set: impl Fn(T) -> U, clear: U) -> O
 
 /// The timestamp format both stores write.
 ///
-/// The same string `db::queries::format_datetime_millis` produces. Spelled out
+/// The same string `store::queries::format_datetime_millis` produces. Spelled out
 /// rather than imported because that one is `pub(super)` to `db` and widening
 /// it would make a SQLite formatting detail part of the crate's surface — where
 /// the thing that actually has to agree is the FORMAT, which this comment and
@@ -67,8 +67,7 @@ pub(super) fn stamp(at: chrono::DateTime<chrono::Utc>) -> String {
     at.format("%Y-%m-%d %H:%M:%S%.3f").to_string()
 }
 
-/// The `started_at` a subagent row carries: RFC 3339, matching
-/// `src/db/queries/subagents.rs::subagent_start`. That column is never compared across rows,
+/// The `started_at` a subagent row carries: RFC 3339. That column is never compared across rows,
 /// so it has no need of [`stamp`]'s sortable format.
 pub(super) fn subagent_started_at(at: chrono::DateTime<chrono::Utc>) -> String {
     at.to_rfc3339()
@@ -194,7 +193,7 @@ pub fn create_task_row(
 /// Translate a patch into the module's.
 ///
 /// Every field the board may patch appears here. A field absent from
-/// `db::TaskPatch` — `live_subagents` and the rest of the denormalised
+/// `store::TaskPatch` — `live_subagents` and the rest of the denormalised
 /// counters — is absent here too: those have dedicated writers on purpose, so
 /// no handler can desync a count, and giving them a patch route would undo
 /// that.
@@ -207,7 +206,7 @@ pub fn task_patch(patch: &TaskPatch<'_>) -> bindings::TaskPatch {
         worktree: nullable(patch.worktree, str::to_string, String::new()),
         tmux_window: nullable(patch.tmux_window, |w| w.to_string(), String::new()),
         plan_path: nullable(patch.plan_path, str::to_string, String::new()),
-        // Not patchable through `db::TaskPatch` — `set_task_epic_id` owns it,
+        // Not patchable through `store::TaskPatch` — `set_task_epic_id` owns it,
         // because moving a task between epics has to recalculate both.
         epic_id: None,
         sub_status: patch.sub_status.map(|s| s.as_str().to_string()),
@@ -306,7 +305,7 @@ pub fn create_epic_row(
 }
 
 /// Translate an epic patch into the module's.
-pub fn epic_patch(patch: &crate::db::EpicPatch<'_>) -> bindings::EpicPatch {
+pub fn epic_patch(patch: &crate::store::EpicPatch<'_>) -> bindings::EpicPatch {
     bindings::EpicPatch {
         title: patch.title.map(str::to_string),
         description: patch.description.map(str::to_string),
@@ -333,8 +332,7 @@ pub fn epic_patch(patch: &crate::db::EpicPatch<'_>) -> bindings::EpicPatch {
 // ---------------------------------------------------------------------------
 
 /// Resolve one feed item into the fully-formed row `upsert_feed_tasks`'s
-/// reducer applies. Mirrors `src/db/queries/tasks.rs::upsert_feed_tasks_inner`'s
-/// per-item resolution exactly — `sub_status` from
+/// reducer applies. Resolves each item as follows — `sub_status` from
 /// `SubStatus::default_for(item.status)`, `url_type` inferred where the item
 /// does not name one explicitly — so the reducer itself never has to know a
 /// feed item's domain defaults; see the module's `FeedTaskUpsertItem` doc
@@ -380,7 +378,7 @@ pub fn feed_task_upsert_item(
 /// entirely by its own `scope`/`scope_ref`, not by who created it — see
 /// `docs/specs/learnings.allium`'s Storage Backend section.
 pub fn create_learning_row(
-    row: &crate::db::CreateLearningRow<'_>,
+    row: &crate::store::CreateLearningRow<'_>,
     now: &str,
 ) -> bindings::Learning {
     bindings::Learning {
@@ -407,10 +405,10 @@ pub fn create_learning_row(
 /// other column this module maps, `Learning.embedding` is a real `Option`,
 /// not a sentinel-bearing required column (see the module's own doc comment
 /// on `Learning`), so there is no sentinel to collapse into and `nullable`
-/// does not apply. `db::LearningPatch::embedding` is a single `Option<&[u8]>`
+/// does not apply. `store::LearningPatch::embedding` is a single `Option<&[u8]>`
 /// (there is no "clear the embedding" caller), so `Some(bytes)` becomes
 /// `Some(Some(bytes))` — untouched stays `None`.
-pub fn learning_patch(patch: &crate::db::LearningPatch<'_>) -> bindings::LearningPatch {
+pub fn learning_patch(patch: &crate::store::LearningPatch<'_>) -> bindings::LearningPatch {
     bindings::LearningPatch {
         status: patch.status.map(|s| s.as_str().to_string()),
         summary: patch.summary.map(str::to_string),

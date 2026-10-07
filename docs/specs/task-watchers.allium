@@ -86,15 +86,13 @@ rule SubscribeToTask {
         -- target) pair is a no-op success — the `not exists existing` guard
         -- means no duplicate row is created and no error is raised.
         -- Implementation: src/mcp/handlers/tasks/watch.rs, backed by a
-        -- `task_watchers` table. On SQLite (migration in
-        -- src/db/migrations.rs) idempotency is a UNIQUE(watcher_task_id,
-        -- target_task_id) constraint plus INSERT OR IGNORE; on a shared
-        -- store the module's task_watchers carries no such index (a
+        -- `task_watchers` table. The module's task_watchers carries no
+        -- unique index (a
         -- SpacetimeDB reducer runs to completion before the next one
         -- starts, so create_task_watcher's own find-then-insert check IS
         -- the whole safety argument, the same reasoning
         -- create_repo_group_sub_epic uses for its own uniqueness) — same
-        -- observable idempotency, different mechanism per backing.
+        -- observable idempotency.
 }
 
 rule UnsubscribeFromTask {
@@ -270,7 +268,8 @@ rule NotifyWatchersOnDelete {
         -- write paths.
         --
         -- ArchivedStatusMigration IS EXEMPT FROM THE NOTIFICATION CLAUSE,
-        -- BY NECESSITY RATHER THAN CHOICE. It runs at db-open, outside any
+        -- BY NECESSITY RATHER THAN CHOICE. It ran at db-open (it no longer
+        -- runs at all: epics.allium, ArchivedStatusMigration), outside any
         -- live TaskService/FeedRunner process and before any watcher task's
         -- tmux window could exist to nudge — there is no "deliver later"
         -- for a notification whose recipient is not running yet. The
@@ -278,7 +277,7 @@ rule NotifyWatchersOnDelete {
         -- migration-deleted task's watch rows are purged the same as any
         -- other removal); only the WatcherNotificationDue emission for its
         -- target-role, unfinished-status branch does not apply. Matches
-        -- `src/db/migrations.rs`'s v106 phase, which purges `task_watchers`
+        -- the removed SQLite migration v106's phase, which purges `task_watchers`
         -- explicitly but emits nothing.
 }
 
@@ -377,4 +376,4 @@ rule DeadWatcherDrop {
 -- Open Questions
 ------------------------------------------------------------
 
-open question "NotifyWatchersOnDelete's target-role, unfinished-status branch is owed on EVERY TaskRowRemoved, including the feed's stale removal (feeds.allium: UpsertFeedTasks, RoleRoutedFeedSync's delete_stale_subtree/clear_parent_stranded_tasks) — but neither backend delivers it there today. SQLite's `delete_returning_removed` and the module's `delete_task_side_effects` (called from `delete_stale_feed_tasks_in_epic`) both purge the TaskWatcher rows silently, same as the watcher-role branch, with no WatcherNotificationDue emitted for a still-open target. Delivering it for real means carrying the affected watcher_task_ids out of the DB transaction and calling the tmux-notify path from the feed ingest cycle (which today only TaskService::delete_task reaches) — on both SQLite and the module. Is that worth building, given feed removal is a batch/background operation rather than a single deliberate user action? Or should this rule's target-role branch be narrowed to the TUI/MCP-driven paths (tasks.allium: DeleteTask, BatchDelete; epics.allium: DeleteEpic) and the feed path documented as silent cleanup only, matching ArchivedStatusMigration's exemption above? Undecided; not a task #4971 regression — both backends already agreed on the same (silent) behavior before this task, task #4971's `delete_task_side_effects` fix only brought the module's row-cleanup up to parity with SQLite's, not the notification."
+open question "NotifyWatchersOnDelete's target-role, unfinished-status branch is owed on EVERY TaskRowRemoved, including the feed's stale removal (feeds.allium: UpsertFeedTasks, RoleRoutedFeedSync's delete_stale_subtree/clear_parent_stranded_tasks) — but neither backend delivers it there today. The module's `delete_task_side_effects` (called from `delete_stale_feed_tasks_in_epic`) purges the TaskWatcher rows silently, same as the watcher-role branch, with no WatcherNotificationDue emitted for a still-open target. Delivering it for real means carrying the affected watcher_task_ids out of the DB transaction and calling the tmux-notify path from the feed ingest cycle (which today only TaskService::delete_task reaches) — in the module and its in-memory stand-in. Is that worth building, given feed removal is a batch/background operation rather than a single deliberate user action? Or should this rule's target-role branch be narrowed to the TUI/MCP-driven paths (tasks.allium: DeleteTask, BatchDelete; epics.allium: DeleteEpic) and the feed path documented as silent cleanup only, matching ArchivedStatusMigration's exemption above? Undecided; not a task #4971 regression — the feed path was silent before that task too (task #4971's `delete_task_side_effects` fix only brought the module's row-cleanup up to parity with the since-removed SQLite backend, not the notification)."

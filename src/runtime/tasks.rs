@@ -819,7 +819,7 @@ impl TuiRuntime {
     /// `crate::sync::SyncStore` for why that surface mixes routed and local
     /// methods.
     /// `connector` is built by the caller rather than here, because the write
-    /// side needs it too: `db::SharedWriter` is attached to the `Database` at
+    /// side needs it too: `store::SharedWriter` is attached to the `Database` at
     /// construction, and a connector created inside this task would be
     /// unreachable from there. One connector, so reads and writes cannot end up
     /// on two sockets to the same store.

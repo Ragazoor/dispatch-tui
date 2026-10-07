@@ -837,7 +837,7 @@ fn memory_caller_matches_the_real_reducers() {
         }
         wait_for!(
             rows_real
-                .usage_summary(&dispatch_tui::db::UsageQuery::default())
+                .usage_summary(&dispatch_tui::store::UsageQuery::default())
                 .iter()
                 .map(|s| s.count)
                 .sum::<i64>()
@@ -850,12 +850,12 @@ fn memory_caller_matches_the_real_reducers() {
         }
         assert_eq!(
             rows_real
-                .usage_summary(&dispatch_tui::db::UsageQuery::default())
+                .usage_summary(&dispatch_tui::store::UsageQuery::default())
                 .iter()
                 .map(|s| s.count)
                 .sum::<i64>(),
             rows_mem
-                .usage_summary(&dispatch_tui::db::UsageQuery::default())
+                .usage_summary(&dispatch_tui::store::UsageQuery::default())
                 .iter()
                 .map(|s| s.count)
                 .sum::<i64>(),

@@ -31,11 +31,11 @@ trap 'rm -rf "$WORKDIR"' EXIT
 # --- Fixture repo -----------------------------------------------------------
 # Real identifiers live in code; the phantom `ghost_helper` appears ONLY inside
 # comments, so a comment-blind index would wrongly accept it.
-mkdir -p "$WORKDIR/src/db" "$WORKDIR/src/feed" "$WORKDIR/tests" "$WORKDIR/docs/specs" "$WORKDIR/docs/plans"
+mkdir -p "$WORKDIR/src/store" "$WORKDIR/src/feed" "$WORKDIR/tests" "$WORKDIR/docs/specs" "$WORKDIR/docs/plans"
 
 printf 'Fixture root doc.\n' >"$WORKDIR/CLAUDE.md"
 
-cat >"$WORKDIR/src/db/mod.rs" <<'RS'
+cat >"$WORKDIR/src/store/mod.rs" <<'RS'
 /// Calls `ghost_helper` — a name that exists in no code, only in this comment.
 pub fn real_function(opt_value: Option<u32>) -> Option<u32> {
     opt_value
@@ -131,7 +131,7 @@ expect 0 docs/scratch.md 'Never pass `--force-with-lease`.' \
     'a CLI flag is not a candidate token'
 expect 0 docs/scratch.md 'The `main` entry point.' \
     'a single prosey word with no underscore is not a candidate token'
-expect 0 docs/scratch.md 'See `src/db/mod.rs` for CRUD.' \
+expect 0 docs/scratch.md 'See `src/store/mod.rs` for CRUD.' \
     'a path is not a candidate token'
 expect 0 docs/scratch.md 'Set `RUST_LOG` to raise the floor.' \
     'an uppercase env var is not a candidate token'
@@ -149,7 +149,7 @@ expect 1 src/scratch.rs '//! Module entry, see `ghost_function`.' \
     'backticked phantom in a module-level doc comment fails'
 
 # The index-must-strip-comments regression: `ghost_helper` occurs in the
-# fixture's src/db/mod.rs, but only inside a comment. It must not self-validate.
+# fixture's src/store/mod.rs, but only inside a comment. It must not self-validate.
 expect 1 docs/scratch.md 'Call `ghost_helper` to do it.' \
     'token occurring only in another comment fails — index strips comments'
 
@@ -174,7 +174,7 @@ expect 1 src/scratch.rs '// allow-phantom-symbol: too far away
 # Verified per-file, not against the global index: a symbol that exists in some
 # OTHER file is still a wrong citation, and that is exactly how #4091's
 # spec-first `run_feed_cycle` stayed green.
-expect 0 docs/specs/scratch.allium '-- Implementation: src/db/mod.rs::real_function.' \
+expect 0 docs/specs/scratch.allium '-- Implementation: src/store/mod.rs::real_function.' \
     'unbackticked path::symbol resolving in the cited file passes'
 expect 0 docs/specs/scratch.allium '-- Implementation: src/feed/cycle.rs::FeedCycle::run.' \
     'multi-segment path::Type::method resolving in the cited file passes'
@@ -182,13 +182,13 @@ expect 0 docs/scratch.md 'See `src/feed/cycle.rs::FeedCycle::run` for the loop.'
     'backticked path::symbol resolving in the cited file passes'
 expect 1 docs/specs/scratch.allium '-- Implementation: src/feed/cycle.rs::run_feed_cycle.' \
     'path::symbol naming a function that never existed fails (the #4091 rot)'
-expect 1 docs/specs/scratch.allium '-- Implementation: src/db/mod.rs::ghost_function.' \
+expect 1 docs/specs/scratch.allium '-- Implementation: src/store/mod.rs::ghost_function.' \
     'path::symbol whose symbol is absent from the cited file fails'
 expect 1 docs/specs/scratch.allium '-- Implementation: src/feed/cycle.rs::real_function.' \
     'path::symbol naming a real symbol in the WRONG file fails'
 expect 1 docs/specs/scratch.allium '-- Implementation: src/feed/nowhere.rs::real_function.' \
     'path::symbol whose file does not exist fails'
-expect 1 docs/scratch.md 'See `src/db/mod.rs::ghost_function` for that.' \
+expect 1 docs/scratch.md 'See `src/store/mod.rs::ghost_function` for that.' \
     'backticking does not launder a stale path::symbol citation'
 expect 0 docs/specs/scratch.allium '-- Was src/feed/cycle.rs::run_feed_cycle. allow-phantom-symbol: renamed' \
     'marker suppresses a stale path::symbol citation'
@@ -250,7 +250,7 @@ expect 0 docs/specs/scratch.allium '-- build_ghost_prompt has the same shape:' \
     'bare token in an Allium comment is not scanned'
 
 # --- Working artifacts are excluded from the default scan. ---------------
-# The fixture's src/db/mod.rs holds `ghost_helper` on purpose, so the default
+# The fixture's src/store/mod.rs holds `ghost_helper` on purpose, so the default
 # scan is expected to be red. What matters is that nothing under docs/plans/ is
 # reported: those are dated artifacts describing code as it stood then.
 printf 'Stale by design: `plans_only_phantom`.\n' >"$WORKDIR/docs/plans/old.md"

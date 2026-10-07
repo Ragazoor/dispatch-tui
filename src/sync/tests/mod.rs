@@ -16,8 +16,6 @@ mod offline_connector;
 mod queries;
 mod reconnect;
 mod settings_store_only;
-mod shared_reads;
-pub(crate) mod sqlite_reads;
 mod startup_connect;
 mod subscriptions;
 mod subtree;

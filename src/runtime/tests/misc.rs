@@ -208,9 +208,9 @@ mod prepare_inputs {
 
     #[tokio::test]
     async fn prepare_inputs_reads_epic_context_and_injections() {
-        use crate::db::CreateLearningRow;
         use crate::models::{LearningKind, LearningScope, RetrievalSource};
         use crate::service::embeddings::{serialize_embedding, EmbeddingService};
+        use crate::store::CreateLearningRow;
 
         let (rt, _app) = test_runtime().await;
         let db = rt.db_write().clone();
@@ -308,9 +308,9 @@ mod backfill_embeddings {
 
     #[tokio::test]
     async fn backfill_fills_missing_embeddings() {
-        use crate::db::{CreateLearningRow, LearningStore};
         use crate::models::{LearningKind, LearningScope};
         use crate::service::embeddings::EmbeddingService;
+        use crate::store::{CreateLearningRow, LearningStore};
 
         let db = Arc::new(Database::open_in_memory().await.unwrap());
 
@@ -352,7 +352,7 @@ mod backfill_embeddings {
 
         // Run the backfill using the test stub service.
         let emb_svc = EmbeddingService::new_noop();
-        let db_for_backfill: Arc<dyn crate::db::LearningStore + Send + Sync> = db.clone();
+        let db_for_backfill: Arc<dyn crate::store::LearningStore + Send + Sync> = db.clone();
         super::backfill_embeddings(db_for_backfill, emb_svc)
             .await
             .unwrap();
@@ -384,9 +384,9 @@ mod backfill_embeddings {
 
     #[tokio::test]
     async fn backfill_is_noop_when_no_missing_embeddings() {
-        use crate::db::{CreateLearningRow, LearningStore};
         use crate::models::{LearningKind, LearningScope};
         use crate::service::embeddings::{serialize_embedding, EmbeddingService};
+        use crate::store::{CreateLearningRow, LearningStore};
 
         let db = Arc::new(Database::open_in_memory().await.unwrap());
 
@@ -413,7 +413,7 @@ mod backfill_embeddings {
 
         // Backfill should succeed without doing any work.
         let emb_svc = EmbeddingService::new_noop();
-        let db_for_backfill: Arc<dyn crate::db::LearningStore + Send + Sync> = db.clone();
+        let db_for_backfill: Arc<dyn crate::store::LearningStore + Send + Sync> = db.clone();
         super::backfill_embeddings(db_for_backfill, emb_svc)
             .await
             .unwrap();
@@ -788,44 +788,57 @@ mod bootstrap {
 
     const TEST_STORE: &str = "http://store.test";
 
-    /// The stand-in store: SQLite, unrouted, behind a connector that accepts.
-    /// The reducer caller is the real one over a connector that never
-    /// connects, so the one reducer startup calls — the host-registry mirror —
-    /// fails and is logged, as it is best-effort by design.
+    /// The stand-in store: the in-memory reducers over fresh rows, behind a
+    /// connector that answers as scripted.
     fn test_store_with(
-        database: crate::db::Database,
+        database: crate::store::Database,
         connector: Arc<dyn StoreConnector>,
     ) -> StoreParts {
-        let rows = Arc::new(crate::sync::SharedRows::new());
-        let settled_identity = Arc::new(crate::sync::SettledIdentity::default());
-        let sdk = Arc::new(crate::sync::SpacetimeSdkConnector::new(
-            "test",
-            rows.clone(),
-        ));
+        use crate::sync as sy;
+        let rows = Arc::new(sy::SharedRows::new());
+        let clock: Arc<dyn crate::service::Clock> = Arc::new(crate::service::SystemClock);
+        let reducer_caller: Arc<dyn sy::ReducerCaller> = Arc::new(
+            sy::memory_caller::MemoryReducerCaller::new(rows.clone(), clock.clone()),
+        );
+        let settled_identity = Arc::new(sy::SettledIdentity::default());
+        settled_identity.settle("c0ffee");
+        let board_reads = Arc::new(sy::SubscriptionBoardReads::new(rows.clone()));
+        let database = database.with_shared_store(crate::store::SharedStorePorts {
+            writer: Arc::new(sy::ReducerWriter::new(
+                reducer_caller.clone(),
+                settled_identity.clone(),
+                clock,
+                "bootstrap-test-host".to_string(),
+                board_reads.clone(),
+            )),
+            reader: board_reads.clone(),
+            learning_reader: Arc::new(sy::SubscriptionLearningReads::new(rows.clone())),
+            usage_reader: Arc::new(sy::SubscriptionUsageReads::new(rows.clone())),
+            retired_feed_item_reader: Arc::new(sy::SubscriptionRetiredFeedItemReads::new(
+                rows.clone(),
+            )),
+        });
         StoreParts {
             database: Arc::new(database),
-            board_reads: Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
             rows,
+            board_reads,
             connector,
-            reducer_caller: Arc::new(crate::sync::SdkReducerCaller::new(
-                sdk,
-                settled_identity.clone(),
-            )),
             settled_identity,
+            reducer_caller,
             store_identity: |_| None,
         }
     }
 
     /// One scripted answer: a connect beyond the one startup makes panics,
     /// which is the point — startup makes exactly one attempt.
-    fn test_store(database: crate::db::Database, _host: &str) -> StoreParts {
+    fn test_store(database: crate::store::Database, _host: &str) -> StoreParts {
         test_store_with(
             database,
             ScriptedConnector::new(vec![accepted("c0ffee", "token")]),
         )
     }
 
-    fn unreachable_store(database: crate::db::Database, _host: &str) -> StoreParts {
+    fn unreachable_store(database: crate::store::Database, _host: &str) -> StoreParts {
         test_store_with(
             database,
             ScriptedConnector::new(vec![refused("connection refused")]),
@@ -865,7 +878,7 @@ mod bootstrap {
     const OTHER_DB: &str = "c200a1ada23f68e494f28f6a791a2afe105f5a0056e01e6762e3d3618a893ccb";
 
     /// A reachable store whose database is PINNED_DB.
-    fn store_holding_pinned_db(database: crate::db::Database, host: &str) -> StoreParts {
+    fn store_holding_pinned_db(database: crate::store::Database, host: &str) -> StoreParts {
         StoreParts {
             store_identity: |_| Some(PINNED_DB.to_string()),
             ..test_store(database, host)
@@ -876,7 +889,7 @@ mod bootstrap {
     /// answers: any connection attempt panics, so a test that passes proves
     /// the launch never connected.
     fn store_holding_other_db_never_connect(
-        database: crate::db::Database,
+        database: crate::store::Database,
         _host: &str,
     ) -> StoreParts {
         StoreParts {
@@ -886,7 +899,7 @@ mod bootstrap {
     }
 
     /// A reachable store whose database is OTHER_DB.
-    fn store_holding_other_db(database: crate::db::Database, host: &str) -> StoreParts {
+    fn store_holding_other_db(database: crate::store::Database, host: &str) -> StoreParts {
         StoreParts {
             store_identity: |_| Some(OTHER_DB.to_string()),
             ..test_store(database, host)
@@ -1200,7 +1213,7 @@ mod bootstrap {
                 .await
                 .expect("bootstrap must succeed against a fresh, writable db path");
 
-        let epics = crate::db::EpicRead::list_epics(&*bootstrap.runtime.database)
+        let epics = crate::store::EpicRead::list_epics(&*bootstrap.runtime.database)
             .await
             .unwrap();
         assert!(
@@ -1243,10 +1256,7 @@ mod bootstrap {
     async fn persist_host_label_maps_a_failed_persist_to_host_identity_unavailable() {
         let dir = tempfile::tempdir().unwrap();
         crate::host_file::resolve_for_launch(dir.path()).unwrap();
-        let db = crate::db::Database::open_in_memory_unattached()
-            .await
-            .unwrap()
-            .with_host_file(dir.path());
+        let db = crate::store::Database::unattached().with_host_file(dir.path());
         let host_file = crate::host_file::host_file_path(dir.path());
         std::fs::remove_file(&host_file).unwrap();
         std::fs::create_dir(&host_file).unwrap();

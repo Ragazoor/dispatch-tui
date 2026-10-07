@@ -26,9 +26,9 @@
 
 use anyhow::Result;
 
-use crate::db::{EpicCrud, EpicPatch};
 use crate::models::{Epic, EpicId, FeedRole};
 use crate::service::ServiceError;
+use crate::store::{EpicCrud, EpicPatch};
 
 /// Default display title for a freshly-created managed epic. Consulted only on
 /// creation — once an epic exists its title is owned by the user. The sub-epic
@@ -166,7 +166,7 @@ pub struct ManagedFeedSettings {
 /// callable through a read-only `&dyn SettingsStore` handle, so a non-service
 /// consumer can fetch them and hand them to `EpicServiceApi::provision_managed_feeds`.
 pub async fn read_managed_feed_settings(
-    db: &dyn crate::db::SettingsStore,
+    db: &dyn crate::store::SettingsStore,
 ) -> Result<ManagedFeedSettings> {
     Ok(ManagedFeedSettings {
         reviews_command: db.get_reviews_feed_command().await?,
@@ -192,7 +192,7 @@ pub struct ManagedFeedSettingsPatch {
 /// Persist only the provided managed-feed settings fields, leaving any absent
 /// field unchanged. Mirrors [`read_managed_feed_settings`] for the write side.
 pub async fn write_managed_feed_settings(
-    db: &dyn crate::db::SettingsStore,
+    db: &dyn crate::store::SettingsStore,
     patch: ManagedFeedSettingsPatch,
 ) -> std::result::Result<(), ServiceError> {
     // Both intervals are checked before ANY of the four settings is written.
@@ -230,7 +230,7 @@ pub async fn write_managed_feed_settings(
 // coerces in. Non-service consumers go through
 // `EpicServiceApi::provision_managed_feeds` instead. The inner
 // `ensure_managed_epics` call upcasts the trait object to `&dyn EpicCrud`.
-pub async fn provision_managed_feeds_from_settings(db: &dyn crate::db::TaskStore) -> Result<()> {
+pub async fn provision_managed_feeds_from_settings(db: &dyn crate::store::TaskStore) -> Result<()> {
     let s = read_managed_feed_settings(db).await?;
     ensure_managed_epics(
         db,
@@ -245,8 +245,8 @@ pub async fn provision_managed_feeds_from_settings(db: &dyn crate::db::TaskStore
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{Database, EpicRead, SettingsStore};
     use crate::models::MIN_FEED_INTERVAL_SECS;
+    use crate::store::{Database, EpicRead, SettingsStore};
 
     const REVIEWS: &str = "/scripts/fetch-reviews.sh";
     const CVE: &str = "/scripts/fetch-cve.sh";

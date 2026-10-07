@@ -10,13 +10,13 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::db::{CreateTaskRequest, SharedWriter, TaskPatch};
 use crate::models::{
     EpicId, LearningId, NotificationWrite, PollScopeId, RetrievalSource, StopOutcome, SubStatus,
     SubagentDrain, TaskId, TaskStatus, UserPromptOutcome,
 };
 use crate::service::{Clock, FixedClock};
 use crate::spacetime::bindings;
+use crate::store::{CreateTaskRequest, SharedWriter, TaskPatch};
 use crate::sync::encode;
 use crate::sync::writes::{
     push_host_registration, DrainReadBack, ReducerCaller, ReducerOutcome, ReducerWriter,
@@ -1580,10 +1580,9 @@ async fn record_user_prompt_submit_reads_a_refusal_as_no_op() {
     );
 }
 
-/// Both timestamps come off the SAME `now` — mirroring
-/// `src/db/queries/tasks.rs::record_user_prompt_submit`'s single-`now`, two-precision split
-/// (seconds for `last_pre_tool_use_at`, millis for the void-comparison) —
-/// see this task's plan doc, decision 4.
+/// Both timestamps come off the SAME `now` — a single-`now`,
+/// two-precision split (seconds for `last_pre_tool_use_at`, millis for the
+/// void-comparison) — see this task's plan doc, decision 4.
 #[tokio::test]
 async fn record_user_prompt_submit_stamps_both_timestamps_from_the_passed_now() {
     let (writer, caller) = writer_with(RecordingCaller::returning(&[]));
@@ -2037,7 +2036,7 @@ async fn a_board_with_no_identity_cannot_respawn_a_phoenix_successor() {
 // -- Host registry (Phase 6c) -------------------------------------------------
 //
 // `push_host_registration` is NOT a `SharedWriter` method — see
-// `db::SharedWriter`'s doc comment — so it is exercised directly rather than
+// `store::SharedWriter`'s doc comment — so it is exercised directly rather than
 // through `ReducerWriter`, against the same `RecordingCaller` every other
 // transport-level test here uses.
 

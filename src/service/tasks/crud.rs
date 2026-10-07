@@ -6,13 +6,13 @@
 
 use std::sync::Arc;
 
-use crate::db::{self, CreateTaskRequest, TaskPatch};
 use crate::models::{
     classify_agent_activity, clears_pending_stop, completed_at_for_status_transition, EpicId,
     HookEventKind, NotificationWrite, StopOutcome, SubStatus, SubagentEvent, Task, TaskId,
     TaskStatus, TaskUrl, UserPromptOutcome, WrapUpBlock, DEFAULT_BASE_BRANCH,
 };
 use crate::service::ServiceError;
+use crate::store::{self, CreateTaskRequest, TaskPatch};
 
 use super::params::{CreateTaskParams, ListTasksFilter, UpdateTaskParams};
 use super::validators::build_task_patch;
@@ -147,13 +147,13 @@ pub struct ClosedSession {
 pub struct TaskService {
     /// The wide bundle, not the `TaskAndEpicStore` the CRUD methods alone would
     /// need: [`dispatch`](Self::dispatch) runs the dispatch prologue, which
-    /// reads the whole [`TaskReadStore`](db::TaskReadStore) surface (epic
+    /// reads the whole [`TaskReadStore`](store::TaskReadStore) surface (epic
     /// banner, learning injections and their retrieval records). `TaskStore` is
     /// the whole store plus that read bundle, so it is still the narrowest
     /// handle covering what this service actually calls — and one
     /// handle is what keeps the prologue's reads and the service's writes on
     /// the same database by construction.
-    pub db: Arc<dyn db::TaskStore>,
+    pub db: Arc<dyn store::TaskStore>,
     clock: Arc<dyn crate::service::Clock>,
     pub(super) runner: Arc<dyn crate::process::ProcessRunner>,
     /// This install's `Host` id, resolved once and reused.
@@ -188,7 +188,10 @@ impl TaskService {
     /// Tests pass [`MockProcessRunner::unused`](crate::process::MockProcessRunner::unused);
     /// production says so by name via
     /// [`new_with_real_runner`](Self::new_with_real_runner).
-    pub fn new(db: Arc<dyn db::TaskStore>, runner: Arc<dyn crate::process::ProcessRunner>) -> Self {
+    pub fn new(
+        db: Arc<dyn store::TaskStore>,
+        runner: Arc<dyn crate::process::ProcessRunner>,
+    ) -> Self {
         Self {
             db,
             clock: Arc::new(crate::service::SystemClock),
@@ -219,7 +222,7 @@ impl TaskService {
 
     /// Construct a `TaskService` that shells out for real. Named so that the
     /// non-hermetic choice is visible at the call site; see [`new`](Self::new).
-    pub fn new_with_real_runner(db: Arc<dyn db::TaskStore>) -> Self {
+    pub fn new_with_real_runner(db: Arc<dyn store::TaskStore>) -> Self {
         // `RealProcessRunner::default()` names no `~/.claude.json`, so an agent
         // dispatched through a service built here would carry no caller
         // identity. No caller does that today (pr-gate, hooks, plan attach);
@@ -433,7 +436,7 @@ impl TaskService {
             CloseSessionOutcome::Review { pr_url } => (TaskStatus::Review, Some(pr_url)),
         };
 
-        let mut patch = db::TaskPatch::new()
+        let mut patch = store::TaskPatch::new()
             .status(status)
             .sub_status(SubStatus::default_for(status))
             .tmux_window(None);
@@ -1293,7 +1296,7 @@ impl TaskService {
     ///
     /// Returns the claimed task with its `Running` status applied, or `Ok(None)`
     /// when no backlog subtask remains. Selecting and claiming are a single
-    /// conditional write ([`db::TaskStore::try_claim_next_backlog_task`]), so
+    /// conditional write ([`store::TaskStore::try_claim_next_backlog_task`]), so
     /// there is no window in which a concurrent caller can take the row this one
     /// picked: two concurrent callers claim two *different* subtasks, never the
     /// same one — the guarantee `AutoDispatchNextSubtask` in
@@ -1339,7 +1342,7 @@ impl TaskService {
     /// someone else got there first (or the task is gone); the caller must
     /// provision nothing and launch no agent.
     ///
-    /// One conditional write ([`db::TaskStore::try_claim_backlog_task`]), sharing
+    /// One conditional write ([`store::TaskStore::try_claim_backlog_task`]), sharing
     /// its SET list with the by-epic claim so "what a claim writes" has a single
     /// definition. Being one statement is what keeps the caller's side simple:
     /// the claim can never half-apply, so `Err` means nothing was written and

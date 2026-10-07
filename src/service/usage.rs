@@ -4,8 +4,8 @@
 //! but "fire-and-forget" is not "silent". See `UsageWriteFailureIsSilent` in
 //! `docs/specs/observability.allium`.
 
-use crate::db::UsageStore;
 use crate::models::UsageEvent;
+use crate::store::UsageStore;
 
 /// Record a feature-usage event, warning on failure instead of discarding the
 /// `Result`.
@@ -32,8 +32,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{UsageCap, UsageQuery};
     use crate::models::{UsageActor, UsageCategory, UsageSummary};
+    use crate::store::{UsageCap, UsageQuery};
     use crate::test_log::logged_during;
 
     struct FailingUsageStore;

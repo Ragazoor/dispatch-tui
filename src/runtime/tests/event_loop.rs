@@ -139,7 +139,7 @@ async fn apply_loop_event_tick_triggers_window_sweep() {
     // Give the task a live tmux window so the tick has something to sweep.
     db.patch_task(
         id,
-        &crate::db::TaskPatch::new().tmux_window(Some(&test_tmux_window("dispatch:1"))),
+        &crate::store::TaskPatch::new().tmux_window(Some(&test_tmux_window("dispatch:1"))),
     )
     .await
     .unwrap();
@@ -474,7 +474,10 @@ mod execute_commands {
         .await;
         let id = app.tasks()[0].id;
         rt.db_write()
-            .patch_task(id, &db::TaskPatch::new().status(models::TaskStatus::Done))
+            .patch_task(
+                id,
+                &store::TaskPatch::new().status(models::TaskStatus::Done),
+            )
             .await
             .unwrap();
 

@@ -111,7 +111,7 @@ async fn get_epic_matches_list_epics_progress_for_grouped_epic() {
         .unwrap();
     state
         .db_write()
-        .patch_epic(root.id, &db::EpicPatch::new().group_by_repo(true))
+        .patch_epic(root.id, &store::EpicPatch::new().group_by_repo(true))
         .await
         .unwrap();
     let sub = state
@@ -570,7 +570,7 @@ async fn update_epic_feed_command_clear() {
         .db_write()
         .patch_epic(
             epic.id,
-            &crate::db::EpicPatch::default().feed_command(Some("old cmd")),
+            &crate::store::EpicPatch::default().feed_command(Some("old cmd")),
         )
         .await
         .unwrap();
@@ -605,7 +605,7 @@ async fn update_epic_feed_command_absent_preserves_existing() {
         .db_write()
         .patch_epic(
             epic.id,
-            &crate::db::EpicPatch::default().feed_command(Some("keep me")),
+            &crate::store::EpicPatch::default().feed_command(Some("keep me")),
         )
         .await
         .unwrap();
@@ -706,7 +706,7 @@ async fn update_epic_feed_interval_secs_clear() {
         .db_write()
         .patch_epic(
             epic.id,
-            &crate::db::EpicPatch::default().feed_interval_secs(Some(120)),
+            &crate::store::EpicPatch::default().feed_interval_secs(Some(120)),
         )
         .await
         .unwrap();
@@ -741,7 +741,7 @@ async fn get_epic_shows_feed_command() {
         .db_write()
         .patch_epic(
             epic.id,
-            &crate::db::EpicPatch::default()
+            &crate::store::EpicPatch::default()
                 .feed_command(Some("./scripts/feed.sh"))
                 .feed_interval_secs(Some(300)),
         )

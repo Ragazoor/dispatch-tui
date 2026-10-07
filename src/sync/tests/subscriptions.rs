@@ -5,17 +5,25 @@
 //! worktree gating still keys on host.
 
 use super::{accepted, ScriptedConnector};
-use crate::db::{
+use crate::models::TaskStatus;
+use crate::store::{
     CreateTaskRequest, Database, EpicCrud, HostStore, IdentityCredentialStore, SubscriptionStore,
     TaskCrud,
 };
-use crate::models::TaskStatus;
 use crate::sync::{StepOutcome, SubscriptionRequest, SyncSession};
 use std::sync::Arc;
 use std::time::Instant;
 
+/// A store holding epics 1 through 42, so a test can follow any of them: the
+/// store refuses a subscription to an epic that does not exist.
 async fn store() -> Database {
-    Database::open_in_memory_unattached().await.unwrap()
+    let db = Database::open_in_memory().await.unwrap();
+    for n in 1..=42 {
+        db.create_epic(&format!("epic {n}"), "", None)
+            .await
+            .unwrap();
+    }
+    db
 }
 
 /// A session connected as "user-a" against whatever `db` already holds — the
@@ -194,7 +202,7 @@ async fn a_subscription_follows_the_person_across_their_machines() {
 /// shared ownership moves a directory.
 #[tokio::test]
 async fn shared_ownership_does_not_make_another_machines_worktree_dispatchable() {
-    use crate::db::TaskPatch;
+    use crate::store::TaskPatch;
 
     let db = store().await;
     let (this_host, _) = db.ensure_host_identity().await.unwrap();

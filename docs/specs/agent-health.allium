@@ -335,7 +335,7 @@ rule HookStop {
         -- subagent drains.
         --
         -- The real implementation is two separate conditional UPDATE
-        -- statements in one transaction (src/db/queries/tasks.rs::
+        -- statements in one transaction (src/store/queries/tasks.rs::
         -- try_record_stop), not a single if/else: a "flip" statement gated
         -- on live_subagents = 0, and a "defer" statement gated on
         -- live_subagents > 0.

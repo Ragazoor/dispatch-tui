@@ -1,6 +1,6 @@
 use super::*;
-use crate::db::{CreateTaskRequest, Database, EpicCrud, EpicRead, TaskCrud, TaskRead};
 use crate::models::{FeedRole, TaskStatus};
+use crate::store::{CreateTaskRequest, Database, EpicCrud, EpicRead, TaskCrud, TaskRead};
 
 async fn task_in_epic(db: &Database, epic_id: EpicId) -> crate::models::Task {
     let id = db

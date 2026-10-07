@@ -2,8 +2,8 @@
 //! feed task stranded flat on the reviews_parent epic.
 
 use super::role_routed::RoleSubEpics;
-use crate::db::{RemovedFeedTask, TaskStore};
 use crate::models::EpicId;
+use crate::store::{RemovedFeedTask, TaskStore};
 
 /// Subtree-scoped delete: removes merged/closed PRs from flat role sub-epics
 /// and clears role sub-epics absent from this emission (moved tasks are in

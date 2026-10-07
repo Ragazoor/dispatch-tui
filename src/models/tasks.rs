@@ -144,7 +144,7 @@ define_str_enum!(TaskStatus, "status" {
 /// sign to interpret (`board-layout.allium`, "Done Column Ordering").
 ///
 /// The value is **truncated to whole milliseconds**, which is the precision the
-/// storage column keeps (`format_datetime_millis`). Truncating here rather than
+/// storage column keeps (`stamp` in `src/sync/encode.rs`). Truncating here rather than
 /// at the write is what keeps the value this returns equal to the one a later
 /// read gives back: the runtime splices this result straight into the in-memory
 /// board (`write_back_task_completed_at`), so an untruncated one would disagree
@@ -486,10 +486,9 @@ impl Task {
     /// every gate built on this is a no-op — see `DispatchTask`, `ResumeTask`,
     /// `RetryResume` and `RetryFresh` in `docs/specs/dispatch.allium`.
     ///
-    /// Its SQL twin is `LOCALLY_OWNED_PREDICATE` (`src/db/queries/mod.rs`),
-    /// which both claim statements splice into their `WHERE`. The two express
-    /// one rule in two languages and neither can enforce the other: a third
-    /// arm added here is owed by that constant too.
+    /// The store's claim reducers apply the same rule on their side
+    /// (`validate_task_ownership` in `spacetime/module/`), so a third arm
+    /// added here is owed there too.
     pub fn is_locally_owned(&self, local_host_id: Option<&str>) -> bool {
         match (&self.host, local_host_id) {
             (None, _) => true,

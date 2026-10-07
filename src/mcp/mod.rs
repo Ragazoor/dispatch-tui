@@ -11,13 +11,13 @@ use uuid::Uuid;
 use axum::{routing::post, Router};
 use tokio::sync::mpsc;
 
-use crate::db;
 use crate::models::{EpicId, TaskId};
 use crate::process::ProcessRunner;
 use crate::service::embeddings::EmbeddingService;
 use crate::service::{
     EpicService, EpicServiceApi, LearningService, LearningServiceApi, TaskService, TaskServiceApi,
 };
+use crate::store;
 
 /// Events sent from the MCP server to the TUI runtime.
 #[derive(Debug)]
@@ -122,7 +122,7 @@ pub(crate) struct ExitToken {
 /// Bundles the four fields that appear in every signature so callers
 /// construct one struct instead of passing a 5–6-argument list.
 pub struct McpDeps {
-    pub db: Arc<dyn db::TaskStore>,
+    pub db: Arc<dyn store::TaskStore>,
     pub runner: Arc<dyn ProcessRunner>,
     pub embedding_service: Arc<EmbeddingService>,
     pub data_dir: std::path::PathBuf,
@@ -132,7 +132,7 @@ pub struct McpState {
     /// Read-only DB handle. Task/epic *mutations* must go through `task_svc` /
     /// `epic_svc` — calling a mutating method here is a compile error. See the
     /// mutation-boundary section of `docs/conventions.md`.
-    pub db: Arc<dyn db::TaskReadStore>,
+    pub db: Arc<dyn store::TaskReadStore>,
     pub task_svc: Arc<dyn TaskServiceApi>,
     pub epic_svc: Arc<dyn EpicServiceApi>,
     pub learning_svc: Arc<dyn LearningServiceApi>,
@@ -170,7 +170,7 @@ pub(crate) struct TestHooks {
     /// mutations go through `task_svc`/`epic_svc`). Reachable only via
     /// [`McpState::db_write`].
     #[cfg(test)]
-    pub(crate) db_write: Arc<dyn db::TaskStore>,
+    pub(crate) db_write: Arc<dyn store::TaskStore>,
 }
 
 impl McpState {
@@ -185,7 +185,7 @@ impl McpState {
         ));
         // Narrow the write-capable dependency handle to the read-only surface
         // consumers are allowed to touch. Mutations go through the services above.
-        let db: Arc<dyn db::TaskReadStore> = deps.db.clone();
+        let db: Arc<dyn store::TaskReadStore> = deps.db.clone();
         Self {
             db,
             task_svc,
@@ -212,7 +212,7 @@ impl McpState {
     /// Test-only write handle for seeding DB fixtures directly. Not available in
     /// production builds, so handler code keeps going through the services.
     #[cfg(test)]
-    pub(crate) fn db_write(&self) -> &Arc<dyn db::TaskStore> {
+    pub(crate) fn db_write(&self) -> &Arc<dyn store::TaskStore> {
         &self.test_hooks.db_write
     }
 

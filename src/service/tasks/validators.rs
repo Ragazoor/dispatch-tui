@@ -5,8 +5,8 @@
 //! etc.) live on `TaskService` in `crud.rs` because they take `&self`.
 
 use super::params::UpdateTaskParams;
-use crate::db::TaskPatch;
 use crate::models::SubStatus;
+use crate::store::TaskPatch;
 
 /// Build a `TaskPatch` from `UpdateTaskParams`. The expanded repo path and
 /// the (already-validated) sub_status are passed in separately because they

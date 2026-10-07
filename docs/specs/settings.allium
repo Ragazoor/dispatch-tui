@@ -56,8 +56,7 @@ use "./core.allium" as core
 -- sync.allium: BoardWritesThroughTheStore), read back from this host's
 -- settings subscription (sync.allium: SubscribeToThisHostsSettings), and kept
 -- nowhere else: not in the host file, which holds identity only, and not in
--- SQLite, of which no production path opens an on-disk database
--- (storage.allium:
+-- any local database, since dispatch has none (storage.allium:
 -- StoreInUseNeverOpensSqlite). There is no local fallback for a store that is
 -- down: a setting write then fails like every other shared write
 -- (sync.allium: AWriteWithNoConnectionIsRefused).

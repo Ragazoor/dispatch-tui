@@ -1,7 +1,7 @@
 use super::*;
-use crate::db::{CreateTaskRequest, EpicPatch};
 use crate::models::test_tmux_window;
 use crate::service::TmuxWindowUpdate;
+use crate::store::{CreateTaskRequest, EpicPatch};
 use proptest::prelude::*;
 
 /// The task statuses an epic rolls up over.
@@ -129,10 +129,6 @@ proptest! {
         let actual = rt.block_on(async {
             let db = test_db_unattached().await;
             let epic = db.create_epic("E", "", None).await.unwrap();
-            // Seed the baseline status the recalc pivots on.
-            db.patch_epic(epic.id, &EpicPatch::new().status(baseline))
-                .await
-                .unwrap();
             for status in &task_statuses {
                 db.create_task(CreateTaskRequest {
                     title: "t",
@@ -151,6 +147,12 @@ proptest! {
                 .await
                 .unwrap();
             }
+            // Seed the baseline status the recalc pivots on, after the tasks:
+            // the store recalculates as each one is created, and the property
+            // is about the recalculation from this baseline.
+            db.patch_epic(epic.id, &EpicPatch::new().status(baseline))
+                .await
+                .unwrap();
             db.recalculate_epic_status(epic.id).await.unwrap();
             db.get_epic(epic.id).await.unwrap().unwrap().status
         });

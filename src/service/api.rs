@@ -494,7 +494,7 @@ macro_rules! learning_service_api {
 
             async fn list_learnings(
                 &self,
-                filter: $crate::db::LearningFilter
+                filter: $crate::store::LearningFilter
             ) -> Result<Vec<$crate::models::Learning>, $crate::service::ServiceError>;
 
             async fn record_retrieval(
@@ -573,15 +573,15 @@ learning_service_api!(service_api_stub_bridge, MockLearningService);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Database;
     use crate::models::{Task, TaskId};
     use crate::service::{
         CreateEpicParams, CreateLearningParams, CreateTaskParams, ListTasksFilter, ServiceError,
     };
+    use crate::store::Database;
     use std::sync::Arc;
 
     /// `TaskStore` because `TaskService` takes it; upcasts for `EpicService`.
-    async fn store() -> Arc<dyn crate::db::TaskStore> {
+    async fn store() -> Arc<dyn crate::store::TaskStore> {
         Arc::new(Database::open_in_memory().await.unwrap())
     }
 
@@ -646,7 +646,8 @@ mod tests {
 
     #[tokio::test]
     async fn learning_service_api_delegates_to_learning_service() {
-        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let db: Arc<dyn crate::store::TaskStore> =
+            Arc::new(Database::open_in_memory().await.unwrap());
         let svc: Arc<dyn LearningServiceApi> = Arc::new(LearningService::new(
             db,
             crate::service::embeddings::EmbeddingService::new_test(),

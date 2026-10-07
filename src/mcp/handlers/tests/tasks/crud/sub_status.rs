@@ -254,7 +254,7 @@ async fn list_tasks_shows_sub_status() {
         .db_write()
         .patch_task(
             task_id,
-            &db::TaskPatch::new().sub_status(crate::models::SubStatus::NeedsInput),
+            &store::TaskPatch::new().sub_status(crate::models::SubStatus::NeedsInput),
         )
         .await
         .unwrap();
@@ -297,7 +297,7 @@ async fn get_task_shows_sub_status() {
         .db_write()
         .patch_task(
             task_id,
-            &db::TaskPatch::new().sub_status(crate::models::SubStatus::ChangesRequested),
+            &store::TaskPatch::new().sub_status(crate::models::SubStatus::ChangesRequested),
         )
         .await
         .unwrap();
@@ -782,7 +782,7 @@ async fn list_tasks_done_status_filter() {
 
 #[tokio::test]
 async fn wrap_up_rebase_does_not_change_status() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish().no_remote().shared_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -813,7 +813,7 @@ async fn wrap_up_rebase_does_not_change_status() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-rebase-done")),
+        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-rebase-done")),
     )
     .await
     .unwrap();
@@ -840,7 +840,7 @@ async fn wrap_up_rebase_does_not_change_status() {
 
 #[tokio::test]
 async fn wrap_up_rebase_does_not_recalculate_epic_status() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish().no_remote().shared_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -873,7 +873,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-only-task")),
+        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-only-task")),
     )
     .await
     .unwrap();
@@ -900,7 +900,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
 
 #[tokio::test]
 async fn wrap_up_accepts_string_task_id() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish().no_remote().shared_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -931,7 +931,7 @@ async fn wrap_up_accepts_string_task_id() {
         .unwrap();
     db.patch_task(
         task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
     )
     .await
     .unwrap();
@@ -995,7 +995,7 @@ async fn get_task_shows_all_fields() {
         .db_write()
         .patch_task(
             task_id,
-            &db::TaskPatch::new()
+            &store::TaskPatch::new()
                 .worktree(Some("/repo/.worktrees/1-full"))
                 .tmux_window(Some(&test_tmux_window("task-1")))
                 .url(Some(&full_url))
@@ -1097,7 +1097,7 @@ async fn list_tasks_shows_tag_and_plan_indicators() {
         .db_write()
         .patch_task(
             task_id,
-            &db::TaskPatch::new().tag(Some(crate::models::TaskTag::Bug)),
+            &store::TaskPatch::new().tag(Some(crate::models::TaskTag::Bug)),
         )
         .await
         .unwrap();

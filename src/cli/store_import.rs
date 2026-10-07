@@ -235,7 +235,7 @@ async fn run(
     let snapshot = read_source(source).await?;
 
     let connected = crate::runtime::open_cli_store(db_path, Some(server.to_string())).await?;
-    let operator = crate::db::HostStore::user_identity(&*connected.database)
+    let operator = crate::store::HostStore::user_identity(&*connected.database)
         .await?
         .context("connected to the store, but no user identity was stored")?;
 

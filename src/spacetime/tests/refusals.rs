@@ -47,7 +47,7 @@ async fn a_snapshot_from_before_columns_were_recorded_is_refused() {
 async fn a_column_the_store_lacks_is_refused_without_writing() {
     let mut snapshot = snapshot_of_a_populated_board().await;
     let store = super::store_for(&snapshot);
-    snapshot.add_column_for_test(SharedTable::Tasks, "owner");
+    snapshot.add_column_for_test(SharedTable::Tasks, "no_such_column");
 
     let refusal = restore(&store, &snapshot).await.unwrap_err().into_refusal();
 
@@ -62,7 +62,7 @@ async fn a_column_the_snapshot_lacks_is_refused_without_writing() {
     let snapshot = snapshot_of_a_populated_board().await;
     let store = super::store_for(&snapshot);
     let mut columns = store.columns(SharedTable::Tasks).await.unwrap();
-    columns.push("owner".into());
+    columns.push("no_such_column".into());
     store.set_columns(SharedTable::Tasks, columns);
 
     let refusal = restore(&store, &snapshot).await.unwrap_err().into_refusal();

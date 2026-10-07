@@ -1567,8 +1567,8 @@ pub enum CardOrderKey {
     /// value as the completion *rank* this replaced had to.
     Completed(std::cmp::Reverse<DateTime<Utc>>),
     /// A Done card with no completion time at all. Last, below every dated
-    /// card: the column knows least about it. Should not occur once
-    /// pre-existing done rows are migrated (`migrate_v99_add_completed_at`).
+    /// card: the column knows least about it. Should not occur: every done
+    /// row carries a completion time.
     Undated,
 }
 

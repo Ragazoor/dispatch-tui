@@ -13,18 +13,16 @@
 --           build (a reducer belongs to exactly one domain, and a domain is
 --           either fully implemented or not yet started — no partial
 --           domains); the panic a caller gets from a not-yet-covered domain;
---           and the rule deciding when Database::open_in_memory() starts
---           attaching this stand-in instead of leaving every test handle
---           unattached, as it does today.
+--           and the rule deciding when Database::open_in_memory() attaches
+--           this stand-in rather than returning an unattached handle (since
+--           task #8277 it always attaches it, together with a private host
+--           file).
 -- Excludes: what a reducer call actually means once its domain is covered —
 --           task and epic rules live in core.allium, tasks.allium and
 --           epics.allium; the identity and subscription rules a real board
 --           follows live in host.allium and sync.allium. This file only
 --           asserts that MemoryReducerCaller reaches the outcomes those
---           files already describe. The SQLite LocalStore/JournalMode model
---           (see storage.allium, narrowed by task #16755 to test fixtures)
---           and
---           the seed/restore JSON store (spacetime::store::MemoryStore in
+--           files already describe. The seed/restore JSON store (spacetime::store::MemoryStore in
 --           code) are unrelated, orthogonal tools with no domain semantics
 --           of their own and are untouched by this file.
 -- Dependencies: ReducerDomain's members correspond to the shared tables and
@@ -256,17 +254,15 @@ rule OpenInMemoryAttachesStoreOnceComplete {
             TestDatabaseHandle.created(shared_store_attached: false)
 
     @guidance
-        -- Before the_store is complete, this is exactly today's behaviour:
-        -- every handle is unattached and every existing test keeps
-        -- exercising SQLite. Nothing before the final work package changes
-        -- what this rule produces.
+        -- There is no SQLite behind an unattached handle (task #36865): it
+        -- refuses every shared read and write (storage.allium).
         --
         -- The store is complete (task #8277; the Rust carries no
         -- is_complete check, so the attach is unconditional), so the attached handle is built from one
         -- fresh SharedRows and one MemoryReducerCaller over it, with every
         -- port (writer and all readers) over those same rows. The writer
         -- settles as a fixed test user and a fixed test host id, and stamps
-        -- with the system clock — the same clock SQLite used. Each handle
+        -- with the system clock. Each handle
         -- gets its own store; two handles never share rows.
 }
 
@@ -285,8 +281,7 @@ rule TestBoardReadsShareTheHandlesRows {
         -- through the handle is visible to the board reads at once and
         -- PollOwner claims are real rather than always "unclaimed". There is
         -- no SQLite-backed BoardReads: the old LocalBoardReads stand-in is
-        -- gone, and a test of the SQLite fallback reads the handle directly.
-        -- An unattached handle has no such seam and has no answer.
+        -- gone. An unattached handle has no such seam and has no answer.
 }
 
 ------------------------------------------------------------
@@ -305,7 +300,7 @@ surface StandInFidelity {
         -- is covered. Each later work package adds its own scenarios to that
         -- same suite rather than starting a new one, mirroring the shape
         -- tests/spacetime_module.rs and src/spacetime/tests/module_schema.rs
-        -- already use to diff the real module against SQLite. CI installs
+        -- already use to read the real module. CI installs
         -- the `spacetime` CLI (pinned to the version the rest of the repo
         -- builds against) specifically so this suite runs for real rather
         -- than taking its "not on PATH" skip — see .github/workflows/ci.yml's

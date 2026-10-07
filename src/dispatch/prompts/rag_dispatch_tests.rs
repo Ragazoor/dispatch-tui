@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use crate::db::{
+use crate::models::{LearningKind, LearningScope, TaskStatus};
+use crate::service::embeddings::{serialize_embedding, EmbeddingService};
+use crate::store::{
     CreateLearningRow, CreateTaskRequest, Database, LearningRetrievalStore, LearningStore,
     TaskCrud, TaskRead,
 };
-use crate::models::{LearningKind, LearningScope, TaskStatus};
-use crate::service::embeddings::{serialize_embedding, EmbeddingService};
 
 use super::{build_and_record_injections, list_learnings_for_dispatch_rag, DISPATCH_INJECTION_CAP};
 

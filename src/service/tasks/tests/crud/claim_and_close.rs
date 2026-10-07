@@ -129,7 +129,7 @@ async fn close_session_recalculates_the_parent_epic() {
 
 /// Create an epic with `count` backlog subtasks, sort_order 1..=count.
 async fn epic_with_backlog_subtasks(
-    db: &Arc<dyn db::TaskStore>,
+    db: &Arc<dyn store::TaskStore>,
     count: i64,
 ) -> (EpicId, Vec<TaskId>) {
     let epic_svc = epic_svc(db);
@@ -251,7 +251,7 @@ async fn claim_next_backlog_task_clears_leftover_subagents_without_flipping() {
     db.subagent_start(ids[0], "stale", "old-session", chrono::Utc::now())
         .await
         .unwrap();
-    db.patch_task(ids[0], &crate::db::TaskPatch::new().stop_pending(true))
+    db.patch_task(ids[0], &crate::store::TaskPatch::new().stop_pending(true))
         .await
         .unwrap();
 
@@ -317,7 +317,7 @@ async fn dispatch_claim_clears_leftover_subagents_without_flipping() {
     db.subagent_start(id, "stale", "old-session", chrono::Utc::now())
         .await
         .unwrap();
-    db.patch_task(id, &crate::db::TaskPatch::new().stop_pending(true))
+    db.patch_task(id, &crate::store::TaskPatch::new().stop_pending(true))
         .await
         .unwrap();
 

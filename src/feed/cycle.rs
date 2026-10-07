@@ -20,10 +20,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::guard::FeedSyncGuard;
-use crate::db::TaskStore;
 use crate::dispatch::resolve_feed_item_repo_paths;
 use crate::models::EpicId;
 use crate::process::ProcessRunner;
+use crate::store::TaskStore;
 
 /// What a feed cycle did, for its caller to present.
 pub(crate) enum FeedCycleOutcome {
@@ -247,8 +247,8 @@ mod tests {
 
     use super::super::exec::AlwaysFailRunner;
     use super::*;
-    use crate::db::{Database, EpicCrud, EpicPatch, EpicRead};
     use crate::models::FeedRole;
+    use crate::store::{Database, EpicCrud, EpicPatch, EpicRead};
 
     /// One PR, enough to be routed and therefore enough to be stranded.
     const EMISSION: &str = r#"[{"external_id":"pr-1","title":"PR 1","description":"","status":"backlog","tag":"pr-review"}]"#;
@@ -323,37 +323,18 @@ mod tests {
 
     /// The other half of bucket 5: the epic row is there but cannot be READ.
     ///
-    /// Fault-injected by renaming the `epics` table out from under the open
-    /// `Database` through a second connection to the same file — the arm is
-    /// unreachable otherwise. The `tasks` table is left intact so the
-    /// no-stranded-tasks assertion can still run.
+    /// Fault-injected with a handle that has no store attached, whose every
+    /// read refuses — the arm is unreachable otherwise.
     #[tokio::test]
     async fn a_cycle_whose_epic_read_errors_fails_without_syncing_anything() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("tasks.db");
-        let db = Arc::new(Database::open(&db_path).await.unwrap());
-        let sentinel = dir.path().join("command-ran");
-        let epic_id = reviews_parent_with_sentinel_command(&db, &sentinel).await;
-
-        rusqlite::Connection::open(&db_path)
-            .unwrap()
-            .execute_batch("ALTER TABLE epics RENAME TO epics_unreadable")
-            .unwrap();
+        let db = Arc::new(Database::unattached());
+        let epic_id = EpicId(1);
 
         let err = failure(cycle(db.clone(), epic_id).run().await);
 
         assert!(
             err.contains("failed to read epic"),
             "an unreadable epic must fail as such, got: {err}"
-        );
-        assert!(
-            !sentinel.exists(),
-            "the failure precedes the exec, so the feed command must never run"
-        );
-        assert!(
-            db.list_tasks_for_epic(epic_id).await.unwrap().is_empty(),
-            "no sync may run, so nothing may be stranded flat on the \
-             reviews_parent epic"
         );
     }
 

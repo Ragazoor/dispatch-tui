@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::db::{Database, RepoConfigRead, RepoConfigStore};
 use crate::models::{expand_tilde, TaskId};
+use crate::store::{Database, RepoConfigRead, RepoConfigStore};
 
 /// `dispatch repo set-verify <path> <command>`.
 pub async fn set_verify(
@@ -24,6 +24,10 @@ pub async fn set_verify(
     out: &mut dyn Write,
 ) -> Result<()> {
     let path = expand_tilde(path);
+    // Creates the saved path when it does not exist yet (`cli.allium`): the
+    // store's own `set_verify_command` only updates a path that is saved.
+    // Saving a path that is already saved only touches it.
+    database.save_repo_path(&path).await?;
     database.set_verify_command(&path, Some(command)).await?;
     writeln!(out, "verify_command set for {path}")?;
     Ok(())

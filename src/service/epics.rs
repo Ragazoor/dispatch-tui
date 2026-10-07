@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use crate::db::{self, EpicPatch};
 use crate::models::{completed_at_for_status_transition, Epic, EpicId, Task, TaskStatus};
+use crate::store::{self, EpicPatch};
 
 use super::{validate_feed_interval, FieldUpdate, ServiceError};
 
@@ -14,7 +14,7 @@ use super::{validate_feed_interval, FieldUpdate, ServiceError};
 /// the create path. One helper means one answer. Never a routed substitute —
 /// see `resolve_routed_epic`.
 pub async fn require_epic_accepting_work(
-    db: &dyn db::EpicRead,
+    db: &dyn store::EpicRead,
     epic_id: EpicId,
 ) -> Result<Epic, ServiceError> {
     db.get_epic(epic_id)
@@ -146,17 +146,20 @@ fn count_progress(tasks: &[&Task]) -> (usize, usize) {
 // ---------------------------------------------------------------------------
 
 pub struct EpicService {
-    pub db: Arc<dyn db::TaskAndEpicStore>,
+    pub db: Arc<dyn store::TaskAndEpicStore>,
     /// The local half, held only for the repo-group cleanup rule: deleting an
     /// empty `RepoGroup` sub-epic re-scopes its learnings onto the parent
     /// first. Separate from `db` because the two sit on opposite sides of the
     /// store seam — see "The store seam" in `docs/conventions.md`.
-    learnings: Arc<dyn db::LearningStore>,
+    learnings: Arc<dyn store::LearningStore>,
     clock: Arc<dyn crate::service::Clock>,
 }
 
 impl EpicService {
-    pub fn new(db: Arc<dyn db::TaskAndEpicStore>, learnings: Arc<dyn db::LearningStore>) -> Self {
+    pub fn new(
+        db: Arc<dyn store::TaskAndEpicStore>,
+        learnings: Arc<dyn store::LearningStore>,
+    ) -> Self {
         Self {
             db,
             learnings,
@@ -692,7 +695,7 @@ impl SubtreeBlockers {
 /// recurse unboxed, since the compiler would need an infinitely-sized future
 /// type.
 fn collect_subtree_blockers<'a>(
-    db: &'a dyn db::TaskAndEpicStore,
+    db: &'a dyn store::TaskAndEpicStore,
     epic_id: EpicId,
     out: &'a mut SubtreeBlockers,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ServiceError>> + Send + 'a>> {
@@ -718,8 +721,8 @@ fn collect_subtree_blockers<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{Database, EpicCrud, EpicRead};
     use crate::models::MIN_FEED_INTERVAL_SECS;
+    use crate::store::{Database, EpicCrud, EpicRead};
 
     fn base_params(epic_id: EpicId) -> UpdateEpicParams {
         UpdateEpicParams {
@@ -1555,18 +1558,18 @@ mod tests {
 
     #[tokio::test]
     async fn progress_aggregates_descendants_for_grouped_epic() {
-        use crate::db::{EpicCrud as _, TaskCrud as _};
+        use crate::store::{EpicCrud as _, TaskCrud as _};
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone(), db.clone());
         let root = db.create_epic("root", "", None).await.unwrap();
-        db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+        db.patch_epic(root.id, &crate::store::EpicPatch::new().group_by_repo(true))
             .await
             .unwrap();
         let sub = db
             .create_repo_group_sub_epic(root.id, "alpha")
             .await
             .unwrap();
-        db.create_task(crate::db::CreateTaskRequest {
+        db.create_task(crate::store::CreateTaskRequest {
             title: "t",
             description: "",
             repo_path: "/x/alpha",

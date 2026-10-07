@@ -3,11 +3,11 @@ use crate::models::test_tmux_window;
 
 // `db` is the concrete `Arc<Database>` in this fixture (see `test_db`), so the
 // store traits must be in scope for their methods to resolve on it.
-use crate::db::{
-    CreateTaskRequest, Database, EpicCrud, EpicRead, SettingsStore, TaskCrud, TaskPatch,
-};
 use crate::dispatch::mock_sequence::DispatchScript;
 use crate::process::MockProcessRunner;
+use crate::store::{
+    CreateTaskRequest, Database, EpicCrud, EpicRead, SettingsStore, TaskCrud, TaskPatch,
+};
 use crate::tui::commands::SettingsCommand;
 
 /// Timeout for async receive assertions in tests.
@@ -159,7 +159,7 @@ async fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
 
 /// One in-memory SQLite database, shared by every service the fixture builds.
 ///
-/// Returns the concrete `Arc<Database>` rather than `Arc<dyn db::TaskStore>` so
+/// Returns the concrete `Arc<Database>` rather than `Arc<dyn store::TaskStore>` so
 /// `make_runtime` can derive every trait object it needs from the *same*
 /// handle; giving one service its own database hides every cross-entity
 /// behaviour between them.
@@ -171,7 +171,7 @@ pub(super) async fn test_db() -> Arc<Database> {
 /// the shared store does not share (a patch on a missing id errors here and is
 /// a silent no-op there; a store refuses to delete a task that is not done).
 pub(super) async fn test_db_unattached() -> Arc<Database> {
-    Arc::new(Database::open_in_memory_unattached().await.unwrap())
+    Arc::new(Database::open_in_memory().await.unwrap())
 }
 
 /// Persist `cmd` as `epic_id`'s feed command.
@@ -219,7 +219,7 @@ pub(super) async fn set_feed_command(
 ) {
     db.patch_epic(
         epic_id,
-        &crate::db::EpicPatch::new().feed_command(Some(cmd)),
+        &crate::store::EpicPatch::new().feed_command(Some(cmd)),
     )
     .await
     .expect("failed to set feed command");
@@ -231,8 +231,10 @@ pub(super) async fn make_runtime(
     runner: Arc<dyn ProcessRunner>,
 ) -> TuiRuntime {
     let (feed_tx, _) = mpsc::unbounded_channel();
-    let store: Arc<dyn db::TaskStore> = db.clone();
-    let board_reads = crate::sync::tests::sqlite_reads::board_reads_of(&db);
+    let store: Arc<dyn store::TaskStore> = db.clone();
+    let board_reads = db
+        .board_reads()
+        .expect("a memory-attached handle serves its own board reads");
     let feed_board_reads = board_reads.clone();
     let feed_runner = crate::feed::FeedRunner::new(
         store.clone(),
@@ -298,7 +300,7 @@ async fn test_runtime_over(db: Arc<Database>) -> (TuiRuntime, App) {
 
 /// Helper: create_task + get_task in one step (replaces removed trait method).
 async fn create_task_returning(
-    db: &dyn db::TaskStore,
+    db: &dyn store::TaskStore,
     title: &str,
     description: &str,
     repo_path: &str,
@@ -376,7 +378,10 @@ async fn exec_delete_task_removes_from_db() {
     .await;
     let id = app.tasks()[0].id;
     rt.db_write()
-        .patch_task(id, &db::TaskPatch::new().status(models::TaskStatus::Done))
+        .patch_task(
+            id,
+            &store::TaskPatch::new().status(models::TaskStatus::Done),
+        )
         .await
         .unwrap();
     rt.exec_delete_task(id).await;
@@ -436,7 +441,7 @@ async fn exec_persist_task_preserves_sub_status() {
     rt.db_write()
         .patch_task(
             id,
-            &db::TaskPatch::new()
+            &store::TaskPatch::new()
                 .status(models::TaskStatus::Review)
                 .sub_status(models::SubStatus::Approved)
                 .url(Some(&url)),
@@ -483,7 +488,7 @@ async fn exec_persist_task_does_not_overwrite_last_pre_tool_use_at() {
     rt.db_write()
         .patch_task(
             id,
-            &db::TaskPatch::new()
+            &store::TaskPatch::new()
                 .status(models::TaskStatus::Running)
                 .sub_status(models::SubStatus::Active)
                 .last_pre_tool_use_at(Some(hook_ts)),
@@ -541,7 +546,10 @@ async fn exec_persist_task_writes_back_done_transition_completed_at_immediately(
     // mirrors how the service fetches "prior" independently of what the TUI
     // happens to hold in memory.
     rt.db_write()
-        .patch_task(id, &db::TaskPatch::new().status(models::TaskStatus::Review))
+        .patch_task(
+            id,
+            &store::TaskPatch::new().status(models::TaskStatus::Review),
+        )
         .await
         .unwrap();
 
@@ -609,7 +617,7 @@ async fn exec_persist_task_leaving_done_keeps_completed_at_and_sort_order() {
     rt.db_write()
         .patch_task(
             id,
-            &db::TaskPatch::new()
+            &store::TaskPatch::new()
                 .status(models::TaskStatus::Done)
                 .completed_at(Some(finished))
                 .sort_order(Some(7)),
@@ -684,7 +692,7 @@ async fn exec_persist_task_write_back_does_not_clobber_fresher_board_fields() {
     rt.db_write()
         .patch_task(
             id,
-            &db::TaskPatch::new()
+            &store::TaskPatch::new()
                 .status(models::TaskStatus::Review)
                 .last_pre_tool_use_at(Some(hook_ts)),
         )
@@ -792,7 +800,7 @@ async fn exec_seed_activity_writes_only_timestamp() {
     rt.db_write()
         .patch_task(
             id,
-            &db::TaskPatch::new()
+            &store::TaskPatch::new()
                 .status(models::TaskStatus::Running)
                 .sub_status(models::SubStatus::NeedsInput),
         )
