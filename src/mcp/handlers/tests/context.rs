@@ -1175,6 +1175,11 @@ async fn unrecognised_or_missing_uris_are_invalid_params_naming_the_uri() {
         "dispatch://learnings/424242",
         "dispatch://task/",
         "dispatch://task/self/extra",
+        "dispatch://task/abc",
+        "dispatch://task/-1",
+        "dispatch://task/007",
+        "dispatch://task/1.5",
+        "dispatch://task/999999",
         "dispatch://nothing",
         "skill://no-such-skill/SKILL.md",
         "skill://wrap-up/references/no-such-file.md",
@@ -1302,6 +1307,72 @@ async fn task_self_without_a_caller_task_says_the_caller_has_no_task() {
     );
 }
 
+/// rule-success.ResolveContextUri (task): any caller reads any task by id and
+/// gets get_task's rendering, as text/plain, on both entry points.
+#[tokio::test]
+async fn reading_a_task_by_id_serves_get_tasks_rendering_to_any_caller() {
+    let state = test_state().await;
+    let me = new_task(&state, "Asker 1c4").await;
+    let other = new_task(&state, "Other task title 5be2").await;
+    let uri = format!("dispatch://task/{}", other.0);
+
+    let get = call_as(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "get_task", "arguments": { "task_id": other.0 } })),
+        CallerIdentity::Task(me),
+    )
+    .await;
+    let expected = extract_response_text(&get);
+
+    for identity in [CallerIdentity::Task(me), CallerIdentity::Session] {
+        let resp = resources_read(&state, Ok(identity.clone()), &uri).await;
+        let item = read_content(&resp, &uri);
+        assert_eq!(item["mimeType"], "text/plain");
+        assert_eq!(item["text"], json!(expected));
+        assert!(!item["text"].as_str().unwrap().contains("Asker 1c4"));
+
+        let twin = call_as(
+            &state,
+            "tools/call",
+            Some(json!({ "name": "read_context", "arguments": { "uri": uri } })),
+            identity,
+        )
+        .await;
+        assert_eq!(extract_response_text(&twin), expected);
+    }
+}
+
+/// A task read by id is not listed, for any caller: the listing offers only
+/// the caller's own task.
+#[tokio::test]
+async fn tasks_by_id_are_not_listed() {
+    let state = test_state().await;
+    let me = new_task(&state, "Me").await;
+    let other = new_task(&state, "Other task title 5be2").await;
+    for identity in [CallerIdentity::Task(me), CallerIdentity::Session] {
+        let listed = uris(&list_all(&state, identity).await);
+        assert!(
+            !listed.contains(&format!("dispatch://task/{}", other.0)),
+            "task by id must not be listed"
+        );
+    }
+}
+
+/// RejectUnresolvedContextUri: a task that was deleted reads as unknown.
+#[tokio::test]
+async fn a_deleted_task_by_id_is_invalid_params() {
+    let state = test_state().await;
+    let me = new_task(&state, "Asker").await;
+    let gone = deleted_task(&state, "Gone soon").await;
+    assert_unknown_on_both(
+        &state,
+        CallerIdentity::Task(me),
+        &format!("dispatch://task/{}", gone.0),
+    )
+    .await;
+}
+
 /// context_uri_resolves is evaluated at read time: a caller whose task has
 /// been deleted reads task/self as unknown.
 #[tokio::test]
@@ -1406,7 +1477,7 @@ async fn listing_and_reading_leave_tasks_epics_and_learnings_untouched() {
 // NeverServedDataIsUnreachable
 // ---------------------------------------------------------------------------
 
-/// NeverServedDataIsUnreachable: no URI reaches another task, an epic, a
+/// NeverServedDataIsUnreachable: no URI reaches an epic, a
 /// trajectory, usage data, the host identity, a store path or a repository
 /// file — whatever the caller.
 #[tokio::test]
@@ -1422,8 +1493,6 @@ async fn never_served_data_is_unreachable_under_any_uri() {
     let data_dir = state.data_dir.display().to_string();
 
     let probes = vec![
-        format!("dispatch://task/{}", other.0),
-        format!("dispatch://task/{}", me.0),
         format!("dispatch://tasks/{}", other.0),
         "dispatch://tasks".to_string(),
         format!("dispatch://epic/{}", epic.id.0),
@@ -1454,7 +1523,7 @@ async fn never_served_data_is_unreachable_under_any_uri() {
         }
     }
 
-    // The listing offers nothing outside the four shapes, and no other task.
+    // The listing offers nothing outside the listable shapes, and no other task.
     let listed = list_all(&state, CallerIdentity::Task(me)).await;
     for entry in &listed {
         let uri = entry["uri"].as_str().unwrap();
@@ -1463,7 +1532,7 @@ async fn never_served_data_is_unreachable_under_any_uri() {
             || (uri.starts_with("skill://") && !uri.contains(".."));
         assert!(
             shaped,
-            "listed URI {uri} is outside the four resource shapes"
+            "listed URI {uri} is outside the listable resource shapes"
         );
         assert!(
             !entry.to_string().contains("Other task title 5be2"),

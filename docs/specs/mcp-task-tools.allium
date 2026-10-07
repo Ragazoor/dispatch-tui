@@ -1461,8 +1461,8 @@ rule SetVerifyCommandViaMcp {
 --
 -- The dispatch MCP server (the one the TUI process runs) offers read-only
 -- context to its callers as MCP resources: the agent-facing skills and their
--- reference files, the validated learnings, and the caller's own task. Four
--- URI shapes, nothing else:
+-- reference files, the validated learnings, the caller's own task, and any
+-- task by id. Five URI shapes, nothing else:
 --
 --   kind        URI                                 resolves when
 --   ----------  ----------------------------------  --------------------------
@@ -1478,6 +1478,25 @@ rule SetVerifyCommandViaMcp {
 --   own_task    dispatch://task/self                the caller is a dispatched
 --                                                   agent (caller_identity
 --                                                   Task(t)) and task t exists
+--   task        dispatch://task/<id>                a core/Task with that id
+--                                                   exists; <id> is canonical
+--                                                   decimal, no leading zeros
+--
+-- A task URI is read by id and never listed: the listing offers only the
+-- caller's own task, so a caller finds another task's id elsewhere (an epic,
+-- a sibling, get_task) and reads it here. It serves the same text get_task
+-- returns for that task, whoever the caller is. dispatch://task/self is the
+-- literal word "self", never an id, so the two shapes cannot overlap.
+--
+-- Decided in #28716 and deliberately not built:
+--   • the io.modelcontextprotocol/skills extension (skills/list, skills/get):
+--     the MCP client matrix does not list Claude Code as supporting it
+--     (checked 2026-10-07; only mcpc is full, Inspector and others partial).
+--     Revisit when Claude Code is listed. Skills stay ordinary skill://
+--     resources until then.
+--   • repo docs and Allium specs as resources: agents read them from their
+--     own worktree, which is always the right branch; a served copy could
+--     come from another.
 --
 -- context_uri_kind(uri) classifies a URI by its shape alone, or as
 -- unrecognised for every other URI — any other scheme, any other dispatch://
@@ -1488,7 +1507,7 @@ rule SetVerifyCommandViaMcp {
 -- unknown rather than being followed.
 --
 -- context_uri_resolves(uri, caller_identity) is exactly that table: it is
--- true for a URI of one of the four kinds that meets its condition, and false
+-- true for a URI of one of the five kinds that meets its condition, and false
 -- for every other URI. It is evaluated at read time, so a learning deleted or
 -- archived after it was listed, or a caller whose task has since been deleted,
 -- reads as unknown.
@@ -1568,9 +1587,9 @@ rule ListContextResourcesViaMcp {
         --      this listing. Archived and rejected learnings are not listed.
         --      mimeType text/plain; name a short title cut from the
         --      learning's summary; description the summary's first line.
-        -- No other task appears, under any URI. The listing is the same set
-        -- ResolveContextUri accepts at the moment of the call: everything
-        -- listed is readable, and nothing readable is left unlisted.
+        -- No other task appears in the listing. Everything listed is readable;
+        -- the one readable set left unlisted is task URIs by id (see "task"
+        -- above).
         --
         -- Pagination. resources/list returns at most
         -- config.context_list_page_size entries per call. When more remain,
@@ -1670,6 +1689,9 @@ rule ResolveContextUri {
         else if kind = own_task:
             ContextServed(via: via, uri: uri, mime_type: "text/plain",
                           text: task_detail_text(caller_identity.task_id))
+        else if kind = task:
+            ContextServed(via: via, uri: uri, mime_type: "text/plain",
+                          text: task_detail_text(task_id_of(uri)))
 
     @guidance
         -- What each kind serves:
@@ -1683,6 +1705,10 @@ rule ResolveContextUri {
         --     including [Verify command] and any "Wrap-up: refused" line.
         --     The URI takes no id: "self" is always the caller, resolved from
         --     transport identity, never from anything in the request.
+        --   • task — the same task_detail_text rendering, for the task the id
+        --     names. Any caller may read any task. The rendering is
+        --     get_task's, so it carries no trajectory, usage data or host
+        --     identity.
         -- Read-only: no rule fires on a served read, and a learning read this
         -- way records no core/Retrieval (ContextReadsAreNotRetrievals).
 }
@@ -1707,7 +1733,7 @@ rule RejectUnresolvedContextUri {
         -- including a skill reference path that escapes the skill's
         -- directory), a skill or reference file the built-in copy does not
         -- have, a learning id that never existed, was deleted, or is archived
-        -- or rejected, and dispatch://task/self from a caller without a task.
+        -- or rejected, a task id that names no task, and dispatch://task/self from a caller without a task.
         -- The refusal does not say WHICH of those it was beyond naming the
         -- URI, with one exception: dispatch://task/self from a caller
         -- without a task says so plainly — the caller is not a dispatched
@@ -1756,9 +1782,9 @@ surface McpContextResources {
         -- io.modelcontextprotocol/skills extension is not declared.
 
     @guarantee ListedMeansReadable
-        -- At any one moment, the URIs resources/list returns to a caller,
-        -- across all its pages, are exactly the URIs resources/read and
-        -- read_context resolve for that caller. A listed URI can stop
+        -- At any one moment, every URI resources/list returns to a caller,
+        -- across all its pages, resolves for that caller on resources/read
+        -- and read_context. Task URIs by id resolve without being listed. A listed URI can stop
         -- resolving later (a learning archived or deleted), and then reads as
         -- unknown.
 
@@ -1800,7 +1826,8 @@ surface McpContextResources {
     @guarantee SelfIsAlwaysTheCaller
         -- dispatch://task/self names the caller's own task, as the transport
         -- identifies the caller, and nothing a request carries can point it
-        -- at another task. No URI names any other task.
+        -- at another task. Another task is reachable only by its own
+        -- dispatch://task/<id> URI.
 
     @guarantee ContextResourcesAreReadOnly
         -- No list or read changes domain state: no task, epic or learning is
@@ -1822,15 +1849,16 @@ surface McpContextResources {
         --   • feature-usage data (what query_usage aggregates)
         --   • the host's identity, or the host file it lives in
         --   • database or store paths and addresses
-        --   • any task other than the caller's own, and any epic
+        --   • any epic, and any task's trajectory (a task is served only as
+        --     get_task renders it)
         --   • repository files — docs, specs, plans, source — and any file
         --     outside a built-in skill's own directory
         --   • learnings that are not validated (archived or rejected)
-        -- This holds by construction: context_uri_resolves recognises four
+        -- This holds by construction: context_uri_resolves recognises five
         -- URI shapes and nothing else, none of them maps to any of the data
         -- above, a skill reference path that escapes its skill's directory
-        -- is unrecognised, and the own_task shape serves get_task's
-        -- rendering of the caller's task, which carries none of it. Adding a
+        -- is unrecognised, and the task shapes serve get_task's
+        -- rendering of a task, which carries none of it. Adding a
         -- resource kind is a change to this spec, not to a handler alone.
 
     @guarantee UnknownUrisAreInvalidParams

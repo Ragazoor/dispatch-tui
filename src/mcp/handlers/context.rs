@@ -2,9 +2,9 @@
 //! twin `read_context` (`McpContextResources` in
 //! `docs/specs/mcp-task-tools.allium`).
 //!
-//! Four URI shapes are served, nothing else: `skill://<name>/SKILL.md`,
-//! `skill://<name>/references/<file>.md`, `dispatch://learnings/<id>` and
-//! `dispatch://task/self`. Everything here is read-only: no write, no
+//! Five URI shapes are served, nothing else: `skill://<name>/SKILL.md`,
+//! `skill://<name>/references/<file>.md`, `dispatch://learnings/<id>`,
+//! `dispatch://task/self` and `dispatch://task/<id>` (read by id, never listed). Everything here is read-only: no write, no
 //! retrieval record, no notification.
 //!
 //! Skill text comes from the copy of `plugin/skills` built into the binary
@@ -128,7 +128,7 @@ fn built_in_skills() -> &'static [BuiltInSkill] {
 // URI shapes
 // ---------------------------------------------------------------------------
 
-/// A URI that has one of the four recognised shapes. Whether it resolves is a
+/// A URI that has one of the five recognised shapes. Whether it resolves is a
 /// separate question, answered at read time.
 #[derive(Debug, PartialEq, Eq)]
 enum ContextUri {
@@ -136,6 +136,7 @@ enum ContextUri {
     SkillRef { name: String, file: String },
     Learning(i64),
     OwnTask,
+    Task(i64),
 }
 
 /// The listing's stable order: own task, skills by name (SKILL.md before its
@@ -154,18 +155,25 @@ fn is_plain_segment(s: &str) -> bool {
     !s.is_empty() && s != "." && s != ".." && !s.contains(['/', '\\', '%', '\0'])
 }
 
+/// A canonical decimal id: digits only, no leading zeros, so every readable
+/// URI is one the listing (or a task's own link) emits.
+fn parse_canonical_id(id: &str) -> Option<i64> {
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) || id.starts_with('0') {
+        return None;
+    }
+    id.parse().ok()
+}
+
 /// Classify a URI by its shape alone (`context_uri_kind`).
 fn parse_context_uri(uri: &str) -> Option<ContextUri> {
     if uri == TASK_SELF_URI {
         return Some(ContextUri::OwnTask);
     }
     if let Some(id) = uri.strip_prefix("dispatch://learnings/") {
-        // Canonical form only, so every readable learning URI is one the
-        // listing emits: no leading zeros.
-        if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) || id.starts_with('0') {
-            return None;
-        }
-        return id.parse::<i64>().ok().map(ContextUri::Learning);
+        return parse_canonical_id(id).map(ContextUri::Learning);
+    }
+    if let Some(id) = uri.strip_prefix("dispatch://task/") {
+        return parse_canonical_id(id).map(ContextUri::Task);
     }
     let rest = uri.strip_prefix("skill://")?;
     let (name, path) = rest.split_once('/')?;
@@ -191,6 +199,9 @@ impl ContextUri {
     fn sort_key(&self) -> SortKey {
         match self {
             ContextUri::OwnTask => SortKey::OwnTask,
+            // Never listed, so a cursor naming one resumes where the own
+            // task would sit.
+            ContextUri::Task(_) => SortKey::OwnTask,
             ContextUri::Skill { name } => SortKey::Skill(name.clone(), None),
             ContextUri::SkillRef { name, file } => SortKey::Skill(name.clone(), Some(file.clone())),
             ContextUri::Learning(id) => SortKey::Learning(*id),
@@ -258,6 +269,22 @@ fn learning_text(summary: &str, detail: Option<&str>) -> String {
     }
 }
 
+/// `get_task`'s text for a task; a missing task is refused with `missing`.
+async fn task_text(
+    state: &McpState,
+    id: crate::models::TaskId,
+    missing: impl FnOnce() -> String,
+) -> Result<(&'static str, String), ReadError> {
+    match state.task_svc.get_task(id).await {
+        Ok(task) => Ok((
+            MIME_TEXT,
+            super::tasks::task_detail_text(state, &task).await,
+        )),
+        Err(crate::service::ServiceError::NotFound(_)) => Err(ReadError::Unresolved(missing())),
+        Err(e) => Err(ReadError::Internal(e.to_string())),
+    }
+}
+
 /// Resolve `uri` for `identity` and produce `(mimeType, text)`.
 async fn resolve_context(
     state: &McpState,
@@ -291,20 +318,14 @@ async fn resolve_context(
                 _ => Err(unresolved()),
             }
         }
+        ContextUri::Task(id) => {
+            task_text(state, crate::models::TaskId(id), || unresolved_message(uri)).await
+        }
         ContextUri::OwnTask => {
             let CallerIdentity::Task(task_id) = identity else {
                 return Err(ReadError::Unresolved(no_own_task_message(uri)));
             };
-            match state.task_svc.get_task(*task_id).await {
-                Ok(task) => Ok((
-                    MIME_TEXT,
-                    super::tasks::task_detail_text(state, &task).await,
-                )),
-                Err(crate::service::ServiceError::NotFound(_)) => {
-                    Err(ReadError::Unresolved(no_own_task_message(uri)))
-                }
-                Err(e) => Err(ReadError::Internal(e.to_string())),
-            }
+            task_text(state, *task_id, || no_own_task_message(uri)).await
         }
     }
 }

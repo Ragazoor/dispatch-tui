@@ -93,7 +93,7 @@ The server offers read-only context as MCP resources (`resources/list`, `resourc
 
 **Error envelopes.** A missing or malformed identity is `-32600` on `resources/list`, `resources/read` and `read_context` (`initialize` and `tools/list` stay identity-free). A URI that does not resolve is `-32602` naming the URI on `resources/read`, and the same message as an `isError` tool result on `read_context`. An invalid cursor is `-32602`; an internal failure is `-32603` (`isError` on `read_context`).
 
-**Never served.** No URI reaches another task, an epic, a trajectory, usage data, `host.json`, the store, or a repository file; unapproved or deleted learnings read as unknown. Reads record no retrieval and write nothing, so `rate_learning` still requires a retrieval.
+**Never served.** No URI reaches an epic, a trajectory, usage data, `host.json`, the store, or a repository file; unapproved or deleted learnings read as unknown. Reads record no retrieval and write nothing, so `rate_learning` still requires a retrieval.
 
 ## Notifications
 
