@@ -151,7 +151,11 @@ pub fn read_selected_source(worktree_path: &str) -> Option<String> {
     let path = selected_source_path(worktree_path)?;
     let body = std::fs::read(&path).ok()?;
     match serde_json::from_slice::<Option<String>>(&body) {
-        Ok(commit) => commit.filter(|id| !id.is_empty()),
+        // The id reaches git's argument list, so anything that is not a
+        // hex object id (a leading `-` most of all) reads as unstaged work.
+        Ok(commit) => {
+            commit.filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_hexdigit()))
+        }
         Err(_) => {
             tracing::warn!(
                 path = %path.display(),
@@ -180,6 +184,18 @@ mod tests {
         write_selected_source(&worktree, Some(id)).unwrap();
 
         assert_eq!(read_selected_source(&worktree).as_deref(), Some(id));
+    }
+
+    /// The id is handed to git as an argument, so a recorded value that is not
+    /// a hex object id (an option such as `--output=x`) is not trusted.
+    #[test]
+    fn a_selected_source_that_is_not_a_hex_id_reads_as_unstaged_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let (worktree, _) = make_linked_worktree(dir.path(), "42-fix");
+
+        write_selected_source(&worktree, Some("--output=/tmp/x")).unwrap();
+
+        assert_eq!(read_selected_source(&worktree), None);
     }
 
     /// Selecting "unstaged work" again replaces the commit rather than
