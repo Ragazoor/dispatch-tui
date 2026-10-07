@@ -411,3 +411,79 @@ fn a_real_store_is_brought_up_published_to_and_stopped() {
         ManagedAddressState::NothingListening
     );
 }
+
+// ---------------------------------------------------------------------------
+// managed_store_failed_to_save: the store's log, since this board took it on
+// ---------------------------------------------------------------------------
+
+const FAILURE_LINE: &str = "2026-10-05T06:03:35Z ERROR crates/durability/src/imp/local.rs:338: error flushing commitlog: No space left on device (os error 28)\n";
+
+fn append(path: &Path, text: &str) {
+    use std::io::Write;
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .unwrap();
+    file.write_all(text.as_bytes()).unwrap();
+}
+
+#[test]
+fn a_failure_line_written_after_the_board_began_is_seen() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ports(
+        Arc::new(KillOnlyRunner),
+        Arc::new(FailingSpawner),
+        free_address(),
+        dir.path(),
+        TIMEOUT,
+    );
+    let log = dir.path().join("logs").join("managed-store.log");
+
+    assert!(!store.managed_store_failed_to_save());
+    append(&log, "ordinary line\n");
+    assert!(!store.managed_store_failed_to_save());
+    append(&log, FAILURE_LINE);
+    assert!(store.managed_store_failed_to_save());
+}
+
+#[test]
+fn a_failure_line_from_before_the_board_began_is_ignored() {
+    let dir = tempfile::tempdir().unwrap();
+    append(
+        &dir.path().join("logs").join("managed-store.log"),
+        FAILURE_LINE,
+    );
+    let store = ports(
+        Arc::new(KillOnlyRunner),
+        Arc::new(FailingSpawner),
+        free_address(),
+        dir.path(),
+        TIMEOUT,
+    );
+
+    assert!(!store.managed_store_failed_to_save());
+}
+
+#[test]
+fn starting_the_store_moves_the_mark_past_the_old_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("logs").join("managed-store.log");
+    let store = ports(
+        Arc::new(KillOnlyRunner),
+        Arc::new(ShellSpawner("exec sleep 300")),
+        ping_server(),
+        dir.path(),
+        TIMEOUT,
+    );
+    append(&log, FAILURE_LINE);
+    assert!(store.managed_store_failed_to_save());
+
+    assert_eq!(store.start_managed_store(), Ok(()));
+    assert!(
+        !store.managed_store_failed_to_save(),
+        "a restarted store is not failing for the line it was restarted over"
+    );
+    assert!(store.stop_managed_store());
+}

@@ -660,6 +660,46 @@ fn select_store_target(
     )
 }
 
+/// `RestartTheManagedStoreWhenItStopsSaving`: every health interval, ask the
+/// managed store this board holds whether it is still saving, and tell the
+/// board when it had to be restarted. Ends with the board's message channel.
+fn watch_managed_store(
+    store: Arc<crate::spacetime::managed_store::ManagedStore>,
+    msg_tx: mpsc::UnboundedSender<Message>,
+) {
+    use crate::spacetime::managed_store::{HealthOutcome, MANAGED_STORE_HEALTH_INTERVAL};
+    tokio::spawn(async move {
+        let mut ticker = interval(MANAGED_STORE_HEALTH_INTERVAL);
+        ticker.tick().await; // the first tick is immediate
+        loop {
+            ticker.tick().await;
+            if msg_tx.is_closed() {
+                return;
+            }
+            let checked = store.clone();
+            let Ok(outcome) = tokio::task::spawn_blocking(move || checked.check_health()).await
+            else {
+                continue;
+            };
+            let text = match outcome {
+                HealthOutcome::Healthy => continue,
+                HealthOutcome::Restarted => {
+                    "The local store had stopped saving (disk full?) and was restarted. \
+                     Changes made since it failed were lost."
+                        .to_string()
+                }
+                HealthOutcome::RestartFailed(reason) => {
+                    format!("The local store stopped saving and could not be restarted: {reason}")
+                }
+            };
+            tracing::warn!("{text}");
+            let _ = msg_tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                text,
+            )));
+        }
+    });
+}
+
 /// Read terminal events on a dedicated blocking thread. Keys go to `key_tx`;
 /// resizes and focus changes become system messages on `msg_tx`. The thread
 /// idles while `input_paused` is set (e.g. an external editor owns the
@@ -774,6 +814,9 @@ pub async fn run_tui(
     // opening an external editor) via the input_paused flag.
     let input_paused = Arc::new(AtomicBool::new(false));
     spawn_input_thread(key_tx, runtime.msg_tx.clone(), input_paused);
+    if let Some(store) = target.managed() {
+        watch_managed_store(store.clone(), runtime.msg_tx.clone());
+    }
 
     // Tick interval (2 seconds)
     let mut tick_interval = interval(TICK_INTERVAL);

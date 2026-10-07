@@ -56,6 +56,12 @@ pub const MANAGED_DATABASE_NAME: &str = "dispatch";
 pub const MANAGED_STORE_START_TIMEOUT: Duration = Duration::from_secs(15);
 /// `startup.allium`'s `config.managed_store_stop_timeout`.
 pub const MANAGED_STORE_STOP_TIMEOUT: Duration = Duration::from_secs(5);
+/// `startup.allium`'s `config.managed_store_health_interval`.
+pub const MANAGED_STORE_HEALTH_INTERVAL: Duration = Duration::from_secs(10);
+/// What SpacetimeDB logs when it cannot write its commit log (a full disk).
+/// The store keeps its process and port after it, so the log is the only place
+/// the failure shows.
+const COMMITLOG_FAILURE_MARKER: &str = "error flushing commitlog";
 /// The file, in the managed store's own data directory (the `spacetime`
 /// directory beside dispatch's database), that holds the hash of the module
 /// last published to the managed store.
@@ -76,6 +82,18 @@ pub enum ModulePublishOutcome {
     Published,
     NeedsManualMigration { error: String },
     PublishFailed { error: String },
+}
+
+/// What one health check did. `startup.allium`'s
+/// `RestartTheManagedStoreWhenItStopsSaving`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HealthOutcome {
+    /// Nothing to do: not held, or still saving.
+    Healthy,
+    /// The store had stopped saving and was stopped and started again.
+    Restarted,
+    /// The store had stopped saving and the start that followed failed.
+    RestartFailed(String),
 }
 
 /// Which store this launch uses. `Named` is never managed
@@ -282,6 +300,9 @@ pub trait ManagedStorePorts: Send + Sync {
     fn publish_embedded_module(&self) -> ModulePublishOutcome;
     /// True when it stopped within the stop timeout.
     fn stop_managed_store(&self) -> bool;
+    /// Whether the store's log records a failed commit-log write since this
+    /// board took the store on. Reads the log only.
+    fn managed_store_failed_to_save(&self) -> bool;
 }
 
 /// Where the published module's hash is kept.
@@ -530,6 +551,11 @@ pub struct SpacetimeManagedStore {
     stop_timeout: Duration,
     /// The store this board spawned, if it spawned one.
     child: Mutex<Option<Child>>,
+    /// How much of the store's log was already written when this board took
+    /// the store on (or last started it). Only what follows is read for a
+    /// failure, so a failure an earlier restart already answered is not
+    /// answered again.
+    log_mark: Mutex<u64>,
 }
 
 impl SpacetimeManagedStore {
@@ -539,6 +565,7 @@ impl SpacetimeManagedStore {
         layout: ManagedStoreLayout,
         wasm: &'static [u8],
     ) -> Self {
+        let log_mark = std::fs::metadata(&layout.log_path).map_or(0, |m| m.len());
         Self {
             runner,
             spawner,
@@ -548,6 +575,7 @@ impl SpacetimeManagedStore {
             start_timeout: MANAGED_STORE_START_TIMEOUT,
             stop_timeout: MANAGED_STORE_STOP_TIMEOUT,
             child: Mutex::new(None),
+            log_mark: Mutex::new(log_mark),
         }
     }
 
@@ -630,6 +658,7 @@ impl ManagedStorePorts for SpacetimeManagedStore {
     }
 
     fn start_managed_store(&self) -> Result<(), String> {
+        *lock(&self.log_mark) = std::fs::metadata(&self.layout.log_path).map_or(0, |m| m.len());
         let child = self
             .spawner
             .spawn(
@@ -688,6 +717,23 @@ impl ManagedStorePorts for SpacetimeManagedStore {
             publisher = publisher.with_config_path(config);
         }
         publisher.publish()
+    }
+
+    fn managed_store_failed_to_save(&self) -> bool {
+        use std::io::{Seek, SeekFrom};
+        let mut mark = lock(&self.log_mark);
+        let Ok(mut file) = std::fs::File::open(&self.layout.log_path) else {
+            return false;
+        };
+        let len = file.metadata().map_or(0, |m| m.len());
+        // A log shorter than the mark was replaced: read it from the start.
+        let from = if len < *mark { 0 } else { *mark };
+        let mut fresh = Vec::new();
+        if file.seek(SeekFrom::Start(from)).is_err() || file.read_to_end(&mut fresh).is_err() {
+            return false;
+        }
+        *mark = from + fresh.len() as u64;
+        String::from_utf8_lossy(&fresh).contains(COMMITLOG_FAILURE_MARKER)
     }
 
     /// SIGTERM to the store this board spawned and to whatever else listens on
@@ -835,6 +881,22 @@ impl ManagedStore {
             server: format!("http://{MANAGED_STORE_ADDRESS}"),
             database: MANAGED_DATABASE_NAME.to_string(),
         })
+    }
+
+    /// `RestartTheManagedStoreWhenItStopsSaving`. A store this board does not
+    /// hold is never looked at. Blocks for up to the stop and start timeouts
+    /// when it restarts, so call it off the async threads.
+    pub fn check_health(&self) -> HealthOutcome {
+        if !self.held_by_this_board() || !self.ports.managed_store_failed_to_save() {
+            return HealthOutcome::Healthy;
+        }
+        if !self.ports.stop_managed_store() {
+            tracing::warn!("the managed store did not stop within its timeout");
+        }
+        match self.ports.start_managed_store() {
+            Ok(()) => HealthOutcome::Restarted,
+            Err(reason) => HealthOutcome::RestartFailed(reason),
+        }
     }
 
     /// `managed_store_held_by_this_board`.

@@ -479,6 +479,14 @@ contract ManagedStoreHost {
     -- through the CLI.
     stop_managed_store: () -> Boolean
 
+    -- Whether the managed store's own log records, since this board took the
+    -- store on (adopted it or started it), that it could not write its commit
+    -- log (a full disk, say). A store in that state keeps its process and its
+    -- port and answers HTTP, so probe_managed_address cannot tell it from a
+    -- healthy one; every write to it goes unsaved until it is restarted.
+    -- Reads the log only and never asks the store anything.
+    managed_store_failed_to_save: () -> Boolean
+
     @invariant StartingDoesNotTieTheStoreToTheTerminal
         -- The started store is not a child of the board's terminal: closing
         -- the pane, detaching tmux or the board's own window being retired
@@ -766,6 +774,10 @@ config {
     -- gives up on it, and how long stopping it may hold up the board's exit.
     managed_store_start_timeout: Duration = 15.seconds
     managed_store_stop_timeout: Duration = 5.seconds
+
+    -- How often a running board asks whether the managed store it holds is
+    -- still saving (RestartTheManagedStoreWhenItStopsSaving).
+    managed_store_health_interval: Duration = 10.seconds
 }
 
 ------------------------------------------------------------
@@ -1576,6 +1588,40 @@ rule StartTheManagedStoreWhenNothingAnswers {
         -- NO RETRY. As with the first connection, a store that did not come up
         -- is better answered now, with its own error attached, than behind a
         -- spinner.
+}
+
+rule RestartTheManagedStoreWhenItStopsSaving {
+    -- Fires every config.managed_store_health_interval while the board runs.
+    when: ManagedStoreHealthDue(operator)
+    requires:
+        managed_store_held_by_this_board()
+        managed_store_failed_to_save()
+
+    ensures:
+        stop_managed_store()
+        start_managed_store()
+        BoardWarned(operator)
+
+    @guidance
+        -- Found on Oct 5: the disk filled for a moment, the store stopped
+        -- saving, and the board kept writing into it for about two days
+        -- because the store still answered HTTP. The board's only check was
+        -- the one at launch.
+        --
+        -- ONLY A STORE THIS BOARD HOLDS. A named store is never checked,
+        -- stopped or restarted (ANamedStoreIsNeverManaged).
+        --
+        -- A RESTART, NOT A REPAIR. The data the store saved before the failure
+        -- is replayed on start; writes made after it were never saved and are
+        -- lost, which is why the board is told rather than left to find out.
+        -- The warning is shown whether or not the restart worked, and names the
+        -- store's log when it did not.
+        --
+        -- ONCE PER FAILURE. The failure is a line in the log, so the check
+        -- looks only at what was written after the start it last made; a store
+        -- that fails again is restarted again, a store that is still failing
+        -- is not restarted in a loop. The board's connection recovers through
+        -- sync.allium's RetryAfterBackoff.
 }
 
 rule ConnectWhenTheManagedModuleIsCurrent {

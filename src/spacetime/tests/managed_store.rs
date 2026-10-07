@@ -20,10 +20,10 @@ use proptest::prelude::*;
 use crate::process::MockProcessRunner;
 use crate::spacetime::managed_store::{
     address_action, after_publish, module_action, module_hash, probe_address, select_store,
-    AddressAction, FileModuleHashRecord, ManagedAddressState, ManagedStore, ManagedStorePorts,
-    ManagedStoreReady, ModuleAction, ModuleHashRecord, ModulePublishOutcome, SpacetimeCliPublisher,
-    StoreSelection, MANAGED_DATABASE_NAME, MANAGED_STORE_ADDRESS, MANAGED_STORE_START_TIMEOUT,
-    MANAGED_STORE_STOP_TIMEOUT, MODULE_HASH_FILE,
+    AddressAction, FileModuleHashRecord, HealthOutcome, ManagedAddressState, ManagedStore,
+    ManagedStorePorts, ManagedStoreReady, ModuleAction, ModuleHashRecord, ModulePublishOutcome,
+    SpacetimeCliPublisher, StoreSelection, MANAGED_DATABASE_NAME, MANAGED_STORE_ADDRESS,
+    MANAGED_STORE_START_TIMEOUT, MANAGED_STORE_STOP_TIMEOUT, MODULE_HASH_FILE,
 };
 use crate::startup::StartupAbort;
 
@@ -41,6 +41,7 @@ enum Call {
     DatabaseExists,
     Publish,
     Stop,
+    FailedToSave,
 }
 
 struct FakePorts {
@@ -49,6 +50,7 @@ struct FakePorts {
     database_exists: bool,
     publish: ModulePublishOutcome,
     stop_in_time: bool,
+    failed_to_save: bool,
     calls: Mutex<Vec<Call>>,
 }
 
@@ -60,6 +62,7 @@ impl FakePorts {
             database_exists: true,
             publish: ModulePublishOutcome::Published,
             stop_in_time: true,
+            failed_to_save: false,
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -97,6 +100,10 @@ impl ManagedStorePorts for FakePorts {
     fn stop_managed_store(&self) -> bool {
         self.log(Call::Stop);
         self.stop_in_time
+    }
+    fn managed_store_failed_to_save(&self) -> bool {
+        self.log(Call::FailedToSave);
+        self.failed_to_save
     }
 }
 
@@ -1008,5 +1015,88 @@ fn an_unresolvable_address_is_nothing_listening() {
     assert_eq!(
         probe_address("not-an-address", Duration::from_millis(200)),
         ManagedAddressState::NothingListening
+    );
+}
+
+// ---------------------------------------------------------------------------
+// RestartTheManagedStoreWhenItStopsSaving
+// ---------------------------------------------------------------------------
+
+fn held_store(ports: &Arc<FakePorts>) -> ManagedStore {
+    let store = store(ports, &Arc::new(FakeHashes::new(Some(EMBEDDED))));
+    store.bring_up().unwrap();
+    store
+}
+
+#[test]
+fn a_store_that_is_still_saving_is_left_alone() {
+    let ports = Arc::new(FakePorts::new(ManagedAddressState::StoreAnswering));
+    let store = held_store(&ports);
+    let before = ports.count(Call::Start);
+
+    assert_eq!(store.check_health(), HealthOutcome::Healthy);
+    assert_eq!(ports.count(Call::Stop), 0);
+    assert_eq!(ports.count(Call::Start), before);
+}
+
+#[test]
+fn a_held_store_that_stopped_saving_is_stopped_then_started() {
+    let mut fake = FakePorts::new(ManagedAddressState::StoreAnswering);
+    fake.failed_to_save = true;
+    let ports = Arc::new(fake);
+    let store = held_store(&ports);
+
+    assert_eq!(store.check_health(), HealthOutcome::Restarted);
+    let calls = ports.calls();
+    let stop = calls.iter().position(|c| *c == Call::Stop).unwrap();
+    let start = calls.iter().position(|c| *c == Call::Start).unwrap();
+    assert!(stop < start, "stop before start: {calls:?}");
+}
+
+#[test]
+fn a_restart_that_cannot_start_the_store_says_why() {
+    let mut fake = FakePorts::new(ManagedAddressState::StoreAnswering);
+    fake.failed_to_save = true;
+    fake.start = Err("did not serve HTTP".to_string());
+    let ports = Arc::new(fake);
+    let store = held_store(&ports);
+
+    assert_eq!(
+        store.check_health(),
+        HealthOutcome::RestartFailed("did not serve HTTP".to_string())
+    );
+}
+
+#[test]
+fn a_store_this_board_does_not_hold_is_never_checked() {
+    let mut fake = FakePorts::new(ManagedAddressState::StoreAnswering);
+    fake.failed_to_save = true;
+    let ports = Arc::new(fake);
+    // No bring_up: nothing is held.
+    let store = store(&ports, &Arc::new(FakeHashes::new(Some(EMBEDDED))));
+
+    assert_eq!(store.check_health(), HealthOutcome::Healthy);
+    assert_eq!(ports.count(Call::FailedToSave), 0);
+    assert_eq!(ports.count(Call::Stop), 0);
+}
+
+#[test]
+fn a_restarted_store_is_still_stopped_when_the_board_exits() {
+    let mut fake = FakePorts::new(ManagedAddressState::StoreAnswering);
+    fake.failed_to_save = true;
+    let ports = Arc::new(fake);
+    let store = held_store(&ports);
+    store.check_health();
+    let stops = ports.count(Call::Stop);
+
+    assert!(store.stop_on_exit());
+    assert_eq!(ports.count(Call::Stop), stops + 1);
+}
+
+#[test]
+fn the_health_interval_matches_the_spec_default() {
+    assert_eq!(
+        crate::spacetime::managed_store::MANAGED_STORE_HEALTH_INTERVAL,
+        Duration::from_secs(10)
     );
 }
