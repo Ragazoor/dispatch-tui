@@ -1,3 +1,4 @@
+mod context;
 mod epics;
 mod hooks;
 mod keybindings;
@@ -1197,6 +1198,7 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("set_managed_feed_config", json!({})),
         ("query_usage", json!({})),
         ("list_keybindings", json!({})),
+        ("read_context", json!({"uri": "dispatch://task/self"})),
         ("override_poll_owner", json!({"task_id": 1})),
     ];
 

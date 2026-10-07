@@ -315,11 +315,7 @@ pub(crate) async fn handle_get_task(
 
     match state.task_svc.get_task(parsed.task_id).await {
         Ok(task) => {
-            let (epic_titles, verify_command) = tokio::join!(
-                super::build_epic_titles(state),
-                crate::dispatch::fetch_verify_command(&*state.db, &task.repo_path)
-            );
-            let text = super::format_task_detail(&task, &epic_titles, verify_command.as_deref());
+            let text = super::task_detail_text(state, &task).await;
             JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
         }
         Err(e) => service_err_to_response(id, e),

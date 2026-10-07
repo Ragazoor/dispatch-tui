@@ -282,7 +282,7 @@ pub(super) struct QueryUsageArgs {
 // Response formatting (presentation layer)
 // ---------------------------------------------------------------------------
 
-async fn build_epic_titles(state: &McpState) -> HashMap<EpicId, String> {
+pub(super) async fn build_epic_titles(state: &McpState) -> HashMap<EpicId, String> {
     state
         .db
         .list_epics()
@@ -291,6 +291,16 @@ async fn build_epic_titles(state: &McpState) -> HashMap<EpicId, String> {
         .into_iter()
         .map(|e| (e.id, e.title))
         .collect()
+}
+
+/// The text `get_task` returns for `task`; `dispatch://task/self` serves the
+/// same rendering (`task_detail_text` in the spec).
+pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
+    let (epic_titles, verify_command) = tokio::join!(
+        build_epic_titles(state),
+        crate::dispatch::fetch_verify_command(&*state.db, &task.repo_path)
+    );
+    format_task_detail(task, &epic_titles, verify_command.as_deref())
 }
 
 fn format_task_detail(

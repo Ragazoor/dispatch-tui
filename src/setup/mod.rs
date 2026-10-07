@@ -22,6 +22,7 @@ use crate::tmux;
 
 pub(crate) use config::dispatch_entry_identifying;
 pub use config::{has_dispatch_entry, merge_mcp_config, remove_mcp_config, MergeResult};
+pub(crate) use plugins::built_in_skills_dir;
 pub use plugins::{remove_plugin, seed_feed_epics};
 
 // ---------------------------------------------------------------------------

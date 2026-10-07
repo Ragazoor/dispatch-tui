@@ -78,6 +78,23 @@ MCP handlers in `src/mcp/handlers/` return JSON-RPC error objects using two code
 
 Use `JsonRpcResponse::err(id, -32602, msg)` for anything the caller can fix; use `-32603` for anything they can't.
 
+## Context resources
+
+The server offers read-only context as MCP resources (`resources/list`, `resources/read`), declared beside `tools` in `initialize` (no `subscribe`, no `listChanged`, no skills extension). Logic lives in `src/mcp/handlers/context.rs`; the behaviour is `McpContextResources` in `docs/specs/mcp-task-tools.allium`.
+
+| URI | Serves |
+|-----|--------|
+| `skill://<name>/SKILL.md` | the skill file from the copy built into the binary (`src/setup/plugins.rs::built_in_skills_dir`), never the installed copy |
+| `skill://<name>/references/<file>.md` | a file from that skill's `references/` directory |
+| `dispatch://learnings/<id>` | an approved learning's summary then detail |
+| `dispatch://task/self` | the caller's own task, rendered as `get_task` does (`src/mcp/handlers/tasks/mod.rs::task_detail_text`) |
+
+**Tool twin.** Claude Code does not pull resources into an agent's context by itself, so `read_context(uri)` returns the same text. Listing is paged (50 entries, opaque position-based `nextCursor`) in a fixed order: own task, skills by name, learnings by id.
+
+**Error envelopes.** A missing or malformed identity is `-32600` on `resources/list`, `resources/read` and `read_context` (`initialize` and `tools/list` stay identity-free). A URI that does not resolve is `-32602` naming the URI on `resources/read`, and the same message as an `isError` tool result on `read_context`. An invalid cursor is `-32602`; an internal failure is `-32603` (`isError` on `read_context`).
+
+**Never served.** No URI reaches another task, an epic, a trajectory, usage data, `host.json`, the store, or a repository file; unapproved or deleted learnings read as unknown. Reads record no retrieval and write nothing, so `rate_learning` still requires a retrieval.
+
 ## Notifications
 
 JSON-RPC 2.0 §4.1 forbids replying to a Notification (a request with no `id`). The MCP streamable-HTTP transport maps this to `HTTP 202 Accepted` with an empty body. `handle_mcp` short-circuits any request where `id.is_none()` to a 202 — including unknown methods. Claude Code sends `notifications/initialized` after every `initialize`; replying to it (even with an error) makes its strict response schema reject `id: null` and aborts the MCP session.

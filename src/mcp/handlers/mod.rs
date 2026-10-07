@@ -3,6 +3,7 @@
 #[macro_use]
 mod args;
 
+mod context;
 mod dispatch;
 mod epics;
 mod hooks;

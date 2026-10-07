@@ -14,6 +14,12 @@ use crate::db::{Database, EpicCrud, EpicPatch, EpicRead};
 // plugin/ is automatically picked up — no manual registration required.
 pub(super) static PLUGIN_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/plugin");
 
+/// The built-in copy of `plugin/skills`, for serving skills as MCP resources.
+/// Read from the embedded tree, never from the installed copy.
+pub(crate) fn built_in_skills_dir() -> Option<&'static Dir<'static>> {
+    PLUGIN_DIR.get_dir("skills")
+}
+
 // ---------------------------------------------------------------------------
 // Plugin installation
 // ---------------------------------------------------------------------------

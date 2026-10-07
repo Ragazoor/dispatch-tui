@@ -13,6 +13,7 @@ use crate::mcp::trajectory;
 use crate::mcp::McpState;
 use chrono::Utc;
 
+use super::context;
 use super::epics;
 use super::keybindings;
 use super::learnings;
@@ -584,6 +585,20 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
         }
 ;
 
+    async "read_context" => context::handle_read_context,
+        "Return the text of one dispatch context resource, the same text the resources/read method gives for that URI. Pass skill://<name>/SKILL.md for an agent-facing skill or skill://<name>/references/<file>.md for a reference file beside it, dispatch://learnings/<id> for a validated learning from the knowledge base, or dispatch://task/self for your own task exactly as get_task renders it. Use it to pull a skill, a reference or a learning into your context when you only have its URI; it does not search, and it does not list what exists. An unknown URI, an unvalidated or deleted learning, or dispatch://task/self from a caller that is not a dispatched agent is refused with an error naming the URI.",
+        {
+            "type": "object",
+            "properties": {
+                "uri": {
+                    "type": "string",
+                    "description": "The resource URI to read: skill://<name>/SKILL.md, skill://<name>/references/<file>.md, dispatch://learnings/<id> or dispatch://task/self."
+                }
+            },
+            "required": ["uri"]
+        }
+;
+
     async "list_keybindings" => keybindings::handle_list_keybindings,
         "List every key the dispatch board, the agent-tree and diff panes, and tmux answer to, grouped by input mode (namespace), straight from the table the key handlers read. Each row has its keys, the context it applies under (when it has one), the action id, a description and a note where a key is easy to misread. Read-only.",
         {
@@ -619,7 +634,8 @@ fn negotiate_initialize(id: Option<Value>, params: Option<Value>) -> JsonRpcResp
         json!({
             "protocolVersion": negotiated,
             "capabilities": {
-                "tools": {}
+                "tools": {},
+                "resources": {}
             },
             "serverInfo": {
                 "name": "dispatch",
@@ -730,6 +746,12 @@ pub async fn handle_mcp(
         "initialize" => negotiate_initialize(id, req.params),
         "ping" => JsonRpcResponse::ok(id, json!({})),
         "tools/list" => JsonRpcResponse::ok(id, tool_definitions()),
+        "resources/list" => {
+            context::handle_resources_list(&state, id, &identity_result, req.params).await
+        }
+        "resources/read" => {
+            context::handle_resources_read(&state, id, &identity_result, req.params).await
+        }
         "tools/call" => handle_tools_call(&state, id, &identity_result, req.params).await,
         other => JsonRpcResponse::err(id, METHOD_NOT_FOUND, format!("Method not found: {other}")),
     };

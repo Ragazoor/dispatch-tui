@@ -4,7 +4,11 @@
 -- Scope: MCP tools for task management (create, get, update, list,
 --        dispatch, subscribe/unsubscribe-to-task, query-usage,
 --        set-verify-command) and the CLI plan-attachment surface; the
---        standard every tool description and agent-facing skill is held to.
+--        standard every tool description and agent-facing skill is held to;
+--        context via MCP — the read-only resources the dispatch MCP server
+--        offers (skills and their references/ files, validated learnings,
+--        the caller's own task) through
+--        resources/list, resources/read and their tool twin read_context.
 -- Excludes: Task lifecycle (see tasks.allium); dispatch/retry (see dispatch.allium);
 --           MCP epic tools (see epics.allium); learnings tools (see learnings.allium);
 --           the task-watcher domain rules underlying subscribe_to_task/
@@ -13,6 +17,16 @@
 --           HookPeerMessageSent in agent-health.allium.
 
 use "./core.allium" as core
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- Most entries one resources/list page returns; further entries are
+    -- reached through nextCursor (ListContextResourcesViaMcp).
+    context_list_page_size: Integer = 50
+}
 
 ------------------------------------------------------------
 -- Rules
@@ -76,6 +90,13 @@ use "./core.allium" as core
 -- branches (pr-workflow.allium: WrapUpPr, ExitSession); /retro, /allium-loop
 -- and /learnings keep their core flow in SKILL.md and move their long tails
 -- the same way.
+--
+-- The same SKILL.md files, and the references/ files beside them, are also
+-- served as MCP resources (see "MCP context resources" below), from the copy
+-- built into dispatch out of plugin/skills — never from the installed copy
+-- under ~/.claude/plugins/. So a skill's copy reaches an agent by two routes,
+-- both carry the text in plugin/skills, and a branch that names a references/
+-- file can be followed over MCP too.
 
 -- == MCP Task Tools ==
 
@@ -1434,6 +1455,385 @@ rule SetVerifyCommandViaMcp {
         -- the description, not a second opinion.
         -- Handled by handle_set_verify_command in
         -- src/mcp/handlers/tasks/verify.rs.
+}
+
+-- == MCP context resources ==
+--
+-- The dispatch MCP server (the one the TUI process runs) offers read-only
+-- context to its callers as MCP resources: the agent-facing skills and their
+-- reference files, the validated learnings, and the caller's own task. Four
+-- URI shapes, nothing else:
+--
+--   kind        URI                                 resolves when
+--   ----------  ----------------------------------  --------------------------
+--   skill       skill://<name>/SKILL.md             <name> is the frontmatter
+--                                                   name of a skill in
+--                                                   dispatch's built-in copy
+--                                                   of plugin/skills
+--   skill_ref   skill://<name>/references/<file>.md that skill's built-in copy
+--                                                   has references/<file>.md
+--   learning    dispatch://learnings/<id>           a core/Learning with that
+--                                                   id exists and is validated
+--                                                   (status = approved)
+--   own_task    dispatch://task/self                the caller is a dispatched
+--                                                   agent (caller_identity
+--                                                   Task(t)) and task t exists
+--
+-- context_uri_kind(uri) classifies a URI by its shape alone, or as
+-- unrecognised for every other URI — any other scheme, any other dispatch://
+-- path, a malformed id. An unrecognised URI never resolves. A skill_ref
+-- <file> is a single file name inside the skill's references/ directory: a
+-- path containing `..`, an absolute path, or anything else that would name a
+-- file outside that skill's directory is unrecognised, so it resolves as
+-- unknown rather than being followed.
+--
+-- context_uri_resolves(uri, caller_identity) is exactly that table: it is
+-- true for a URI of one of the four kinds that meets its condition, and false
+-- for every other URI. It is evaluated at read time, so a learning deleted or
+-- archived after it was listed, or a caller whose task has since been deleted,
+-- reads as unknown.
+--
+-- Agents are first-class MCP users: Claude Code does not load MCP resources
+-- into an agent's context by itself today, so every resource is also reachable
+-- through a tool, read_context, which returns the same text. A read carries
+-- `via` — resources_read or read_context — naming the entry point it arrived
+-- through; it chooses the response envelope — for a success and for a
+-- refusal — and nothing else. The two entry
+-- points share one identity check, one resolution (ResolveContextUri) and one
+-- refusal (RejectUnresolvedContextUri), so they cannot disagree about who may
+-- read, which URIs exist, or what they say.
+--
+-- Caller identity. resources/list, resources/read and read_context all
+-- consume caller identity (dispatch://task/self and the listing depend on it),
+-- so all three reject a missing or malformed identity with JSON-RPC -32600,
+-- echoing the request's id — the same answer every tools/call gives (see
+-- CreateTaskViaMcp's guidance). caller_identity_valid(caller_identity) below
+-- is that check. initialize and tools/list stay identity-free.
+--
+-- Nothing here writes: no resource read mutates domain state, and the server
+-- sends no resource notifications (no list_changed, no subscribe/updated).
+
+rule DeclareResourcesCapability {
+    when: McpInitialize(caller_identity)
+
+    ensures: McpCapabilitiesDeclared(tools: true, resources: true)
+
+    @guidance
+        -- initialize's response declares two capabilities: tools (as today)
+        -- and resources. The resources capability declares neither
+        -- `subscribe` nor `listChanged` — the server sends no resource
+        -- notifications (ContextResourcesAreReadOnly). It does NOT declare
+        -- the io.modelcontextprotocol/skills extension; serving skills
+        -- through that extension is a later task (#28716). Until then a
+        -- skill is an ordinary resource with a skill:// URI.
+        -- initialize stays identity-free, as CreateTaskViaMcp's guidance
+        -- describes: the declared capabilities do not depend on the caller.
+}
+
+rule ListContextResourcesViaMcp {
+    when: McpListResources(caller_identity, cursor?)
+
+    requires: caller_identity_valid(caller_identity)
+    requires: cursor = null or context_list_cursor_valid(cursor)
+
+    let has_own_task =
+        caller_identity.kind = task and core/Task.exists(caller_identity.task_id)
+
+    ensures: ContextResourcesListed(
+        caller_identity: caller_identity,
+        skills: built_in_skills(),
+        learnings: core/Learnings where status = approved,
+        lists_own_task: has_own_task,
+        cursor: cursor,
+        page_size: config.context_list_page_size
+    )
+
+    @guidance
+        -- The full listing, in this fixed order:
+        --   1. dispatch://task/self, only when the caller is a dispatched
+        --      agent whose task exists. A Session caller does not see it.
+        --      mimeType text/plain; name "Your task"; description the task's
+        --      title.
+        --   2. the skills, by skill name ascending. Each skill contributes its
+        --      skill://<name>/SKILL.md entry, then one
+        --      skill://<name>/references/<file>.md entry per file in its
+        --      references/ directory, by file name ascending. All are
+        --      mimeType text/markdown. SKILL.md's entry is named <name> and
+        --      described by the frontmatter description; a reference entry is
+        --      named "<name>: <file>" with no description.
+        --   3. one dispatch://learnings/<id> entry per validated learning, by
+        --      id ascending — ALL of them, with no filtering by the caller's
+        --      repo, epic or task. The scope a learning carries governs
+        --      dispatch-prompt injection (learnings.allium: Scope Model), not
+        --      this listing. Archived and rejected learnings are not listed.
+        --      mimeType text/plain; name a short title cut from the
+        --      learning's summary; description the summary's first line.
+        -- No other task appears, under any URI. The listing is the same set
+        -- ResolveContextUri accepts at the moment of the call: everything
+        -- listed is readable, and nothing readable is left unlisted.
+        --
+        -- Pagination. resources/list returns at most
+        -- config.context_list_page_size entries per call. When more remain,
+        -- the result carries nextCursor; the caller passes it back as
+        -- params.cursor to get the next page, and the last page carries no
+        -- nextCursor. The cursor is opaque to the caller. It records a
+        -- position in the order above, not an offset, so an entry added or
+        -- removed between pages (a learning recorded, archived or deleted)
+        -- causes no other entry to be skipped or repeated: each page resumes
+        -- after the last entry the previous page returned. A cursor the
+        -- server did not issue, or cannot decode, is refused with -32602.
+        --
+        -- A missing or malformed caller identity is refused with -32600 (see
+        -- "Caller identity" above). Listing is read-only: it records no
+        -- core/Retrieval and touches no learning's counters.
+}
+
+rule ReadContextResourceViaMcp {
+    when: McpReadResource(caller_identity, uri)
+
+    requires: caller_identity_valid(caller_identity)
+
+    ensures: ContextReadRequested(
+        caller_identity: caller_identity,
+        uri: uri,
+        via: resources_read
+    )
+
+    @guidance
+        -- resources/read(uri). The response carries one content item for the
+        -- URI, with the text and mimeType ResolveContextUri produces. A
+        -- missing or malformed caller identity is refused with -32600 before
+        -- the URI is looked at.
+}
+
+rule ReadContextViaMcp {
+    when: McpReadContext(caller_identity, uri)
+
+    requires: caller_identity_valid(caller_identity)
+
+    ensures: ContextReadRequested(
+        caller_identity: caller_identity,
+        uri: uri,
+        via: read_context
+    )
+
+    @guidance
+        -- read_context(uri) — uri is REQUIRED. The tool twin of
+        -- resources/read: its success result is a text content block
+        -- carrying exactly the text resources/read returns for the same URI
+        -- and caller. It is refused under exactly the conditions
+        -- resources/read is, with the same message text, but in the
+        -- existing tool-error envelope: a refused URI (unrecognised, unknown,
+        -- no own task) or an internal failure comes back as a tool result
+        -- with isError: true carrying that message, not as a JSON-RPC error
+        -- — the tools/call dispatcher wraps every tool error that way, and
+        -- read_context is no exception. The one JSON-RPC error it gives is
+        -- -32600 for a missing or malformed identity, which tools/call
+        -- rejects before any tool runs, so before that wrap. It exists because
+        -- Claude Code cannot pull an MCP resource into an agent's context by
+        -- itself today, and agents are first-class MCP users: a capability
+        -- reachable only as a resource is one an agent cannot use.
+        -- Description standard (Tool descriptions, above): the description
+        -- says that read_context returns the text of a dispatch context
+        -- resource and names the URI shapes; it does not restate the
+        -- resolution table or the error codes.
+        -- Being a tools/call, a read_context call is counted in feature usage
+        -- like every other tool (QueryUsageViaMcp). That counter is not
+        -- domain state; ContextResourcesAreReadOnly is about the resources.
+}
+
+rule ResolveContextUri {
+    when: ContextReadRequested(caller_identity, uri, via)
+
+    requires: context_uri_resolves(uri, caller_identity)
+
+    let kind = context_uri_kind(uri)
+
+    ensures:
+        if kind = skill:
+            ContextServed(via: via, uri: uri, mime_type: "text/markdown",
+                          text: built_in_skill_text(skill_name_of(uri)))
+        else if kind = skill_ref:
+            ContextServed(via: via, uri: uri, mime_type: "text/markdown",
+                          text: built_in_skill_reference_text(
+                              skill_name_of(uri), reference_file_of(uri)))
+        else if kind = learning:
+            ContextServed(via: via, uri: uri, mime_type: "text/plain",
+                          text: learning_resource_text(learning_id_of(uri)))
+        else if kind = own_task:
+            ContextServed(via: via, uri: uri, mime_type: "text/plain",
+                          text: task_detail_text(caller_identity.task_id))
+
+    @guidance
+        -- What each kind serves:
+        --   • skill / skill_ref — the file from the built-in copy, byte for
+        --     byte (SKILL.md with its frontmatter).
+        --   • learning — the learning's text: its summary, then its detail
+        --     when it has one. Nothing else of the row is part of the text.
+        --   • own_task — the same task detail GetTaskViaMcp returns for the
+        --     caller's own task (task_detail_text is that rendering, so the
+        --     two cannot drift): every line get_task renders, in its order,
+        --     including [Verify command] and any "Wrap-up: refused" line.
+        --     The URI takes no id: "self" is always the caller, resolved from
+        --     transport identity, never from anything in the request.
+        -- Read-only: no rule fires on a served read, and a learning read this
+        -- way records no core/Retrieval (ContextReadsAreNotRetrievals).
+}
+
+rule RejectUnresolvedContextUri {
+    when: ContextReadRequested(caller_identity, uri, via)
+
+    requires: not context_uri_resolves(uri, caller_identity)
+
+    ensures: ContextReadRejected(via: via, uri: uri,
+                                 message: unresolved_context_uri_message(uri, caller_identity))
+
+    @guidance
+        -- Every URI that does not resolve is refused on both entry points
+        -- with one message, which names the URI. Only the envelope depends on
+        -- via:
+        --   resources_read — a JSON-RPC error, -32602 (invalid params).
+        --   read_context   — a tool result with isError: true whose text is
+        --                    the message (the existing tool-error
+        --                    convention; see ReadContextViaMcp).
+        -- That covers an unrecognised URI (any other scheme or path,
+        -- including a skill reference path that escapes the skill's
+        -- directory), a skill or reference file the built-in copy does not
+        -- have, a learning id that never existed, was deleted, or is archived
+        -- or rejected, and dispatch://task/self from a caller without a task.
+        -- The refusal does not say WHICH of those it was beyond naming the
+        -- URI, with one exception: dispatch://task/self from a caller
+        -- without a task says so plainly — the caller is not a dispatched
+        -- agent, so it has no own task to read — because that caller can do
+        -- nothing with a bare "unknown resource".
+        -- A learning that is unvalidated and one that never existed get the
+        -- same answer, so the refusal reveals nothing about learnings that
+        -- are not served.
+        -- resources/read uses -32602 deliberately, not the -32001 not-found
+        -- code the task tools use for an unknown task_id: here the URI IS the
+        -- parameter, and one code covers every way it can fail to name a
+        -- resource.
+        -- An internal failure while producing a resolvable resource's text
+        -- (a store read that fails, for instance) is -32603 on resources/read,
+        -- never -32602, because the caller asked for something that exists;
+        -- on read_context it is an isError result carrying the same message.
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+-- Any client of the dispatch MCP server: a dispatched agent (caller_identity
+-- Task(t)) or a session (caller_identity Session). Code, not a person.
+actor McpClient {
+    identified_by: McpCaller where connected = true
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- The context resources boundary. See "MCP context resources" in Rules.
+surface McpContextResources {
+    facing client: McpClient
+
+    provides:
+        McpInitialize(client)
+        McpListResources(client, cursor?)
+        McpReadResource(client, uri)
+        McpReadContext(client, uri)
+
+    @guarantee ResourcesCapabilityIsDeclared
+        -- initialize declares the resources capability beside tools, and
+        -- resources/list and resources/read are answered. The
+        -- io.modelcontextprotocol/skills extension is not declared.
+
+    @guarantee ListedMeansReadable
+        -- At any one moment, the URIs resources/list returns to a caller,
+        -- across all its pages, are exactly the URIs resources/read and
+        -- read_context resolve for that caller. A listed URI can stop
+        -- resolving later (a learning archived or deleted), and then reads as
+        -- unknown.
+
+    @guarantee ListingPagesHaveNoGapsOrRepeats
+        -- The listing has one stable order — the own task, then skills by
+        -- name (each SKILL.md before its references, by file name), then
+        -- learnings by id ascending — and a cursor resumes after the last
+        -- entry it was issued for. Paging through to the end returns every
+        -- entry that existed throughout exactly once, whatever changes
+        -- between pages. An invalid cursor is -32602.
+
+    @guarantee TheToolTwinServesTheSameText
+        -- For every URI and caller identity — present, missing or malformed —
+        -- read_context succeeds exactly when resources/read does and returns
+        -- the same text, and is refused under exactly the same conditions
+        -- with the same message text. Only the error envelope differs:
+        --   condition                      resources/read   read_context
+        --   -----------------------------  ---------------  -----------------
+        --   missing or malformed identity  -32600           -32600
+        --   URI does not resolve           -32602           isError result
+        --   internal failure               -32603           isError result
+        -- read_context follows the existing tool-error convention (every
+        -- tool error is a tool result with isError: true); identity is the
+        -- exception because tools/call rejects it before any tool runs.
+
+    @guarantee IdentityIsRequired
+        -- resources/list, resources/read and read_context each refuse a
+        -- missing or malformed caller identity with -32600, as tools/call
+        -- does. initialize and tools/list do not consult identity.
+
+    @guarantee SkillsComeFromTheBuiltInCopy
+        -- A skill resource's text — SKILL.md or a references/ file — is the
+        -- file in dispatch's built-in copy of plugin/skills, the repo's source
+        -- of truth. The installed copy under ~/.claude/plugins/ is never
+        -- read, so what an agent reads cannot depend on what happens to be
+        -- installed on the host. No skill URI reaches a file outside its
+        -- skill's directory.
+
+    @guarantee SelfIsAlwaysTheCaller
+        -- dispatch://task/self names the caller's own task, as the transport
+        -- identifies the caller, and nothing a request carries can point it
+        -- at another task. No URI names any other task.
+
+    @guarantee ContextResourcesAreReadOnly
+        -- No list or read changes domain state: no task, epic or learning is
+        -- written, no core/Retrieval is recorded, and the server sends no
+        -- resource notifications. There is no resource write method.
+
+    @guarantee ContextReadsAreNotRetrievals
+        -- Reading a learning as a context resource records no
+        -- core/Retrieval, so it does not make that learning rateable:
+        -- rate_learning still requires a retrieval (learnings.allium:
+        -- RateLearningViaMcp), which only the dispatch prompt's injection
+        -- and query_learnings record. An agent that wants to rate a learning
+        -- it found here reaches it through query_learnings first.
+
+    @guarantee NeverServedDataIsUnreachable
+        -- These are never served, under any URI, by resources/list,
+        -- resources/read or read_context, whatever the caller:
+        --   • agent trajectories (the recorded tool-call history of a task)
+        --   • feature-usage data (what query_usage aggregates)
+        --   • the host's identity, or the host file it lives in
+        --   • database or store paths and addresses
+        --   • any task other than the caller's own, and any epic
+        --   • repository files — docs, specs, plans, source — and any file
+        --     outside a built-in skill's own directory
+        --   • learnings that are not validated (archived or rejected)
+        -- This holds by construction: context_uri_resolves recognises four
+        -- URI shapes and nothing else, none of them maps to any of the data
+        -- above, a skill reference path that escapes its skill's directory
+        -- is unrecognised, and the own_task shape serves get_task's
+        -- rendering of the caller's task, which carries none of it. Adding a
+        -- resource kind is a change to this spec, not to a handler alone.
+
+    @guarantee UnknownUrisAreInvalidParams
+        -- A URI that does not resolve — unrecognised, escaping a skill's
+        -- directory, deleted, archived, rejected, out of scope, or task/self
+        -- with no caller task — is refused with a message naming the URI.
+        -- resources/read answers with JSON-RPC -32602; read_context answers
+        -- with an isError tool result carrying the same message. An internal
+        -- failure serving a resolvable URI is -32603 on resources/read and an
+        -- isError result on read_context.
 }
 
 ------------------------------------------------------------
