@@ -7,8 +7,6 @@
 //! it when it is first published, not on the address: two stores over two
 //! data directories can take turns on one address.
 
-use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -67,34 +65,33 @@ pub fn parse_database_identity(body: &str) -> Option<String> {
     normalize_identity(identity)
 }
 
-/// Ask the store at `server` for the identity of `database`, over plain HTTP.
-/// `None` when it cannot be asked: an `https://` address (not supported yet —
-/// see the open question in startup.allium), nothing listening, no such
-/// database, or a reply without an identity. Blocking; bounded by `timeout`
-/// per step. `StoreIdentityPin.store_database_identity`.
+/// Ask the store at `server` for the identity of `database`: over plain HTTP
+/// for `http://`, over TLS for `https://`. `None` when it cannot be asked:
+/// nothing listening, no such database, a certificate the board does not
+/// trust, or a reply without an identity. Blocking; bounded by `timeout` for
+/// the whole exchange. `StoreIdentityPin.store_database_identity`.
 pub fn fetch_store_database_identity(
     server: &str,
     database: &str,
     timeout: Duration,
 ) -> Option<String> {
-    let authority = server.trim().strip_prefix("http://")?.trim_end_matches('/');
-    let target = authority.to_socket_addrs().ok()?.next()?;
-    let mut stream = TcpStream::connect_timeout(&target, timeout).ok()?;
-    stream.set_read_timeout(Some(timeout)).ok()?;
-    stream.set_write_timeout(Some(timeout)).ok()?;
-    let request = format!(
-        "GET /v1/database/{database} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n"
-    );
-    stream.write_all(request.as_bytes()).ok()?;
-    let mut reply = Vec::new();
-    stream.read_to_end(&mut reply).ok()?;
-    let reply = String::from_utf8_lossy(&reply);
-    let (head, body) = reply.split_once("\r\n\r\n")?;
-    let status = head.split_whitespace().nth(1)?;
-    if status != "200" {
+    let server = server.trim().trim_end_matches('/');
+    if !server.starts_with("http://") && !server.starts_with("https://") {
         return None;
     }
-    parse_database_identity(body)
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut reply = agent
+        .get(format!("{server}/v1/database/{database}"))
+        .call()
+        .ok()?;
+    if reply.status() != 200 {
+        return None;
+    }
+    parse_database_identity(&reply.body_mut().read_to_string().ok()?)
 }
 
 /// `ConnectWhenTheStoreIsTheOneThisInstallUses` and

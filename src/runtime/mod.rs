@@ -402,7 +402,7 @@ pub async fn open_cli_store(db_path: &Path, server: Option<String>) -> Result<Cl
 }
 
 /// The production [`StoreParts::store_identity`]: the shared database's
-/// identity on `server`, over plain HTTP.
+/// identity on `server`, over HTTP or TLS to match its address.
 fn store_database_identity(server: &str) -> Option<String> {
     crate::startup::fetch_store_database_identity(
         server,

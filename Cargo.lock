@@ -889,6 +889,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tui-tree-widget",
+ "ureq",
  "uuid",
 ]
 

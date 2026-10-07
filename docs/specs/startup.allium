@@ -543,9 +543,11 @@ contract StoreAddressRecord {
 contract StoreIdentityPin {
     -- The identity of config.managed_database_name on the store this launch
     -- chose, read from the store itself before the first connection is made,
-    -- else null. Null when the store cannot be asked: it does not answer, or
-    -- its address is one the board cannot ask over plain HTTP (an https://
-    -- store — see the open question).
+    -- else null. Null when the store cannot be asked: it does not answer, it
+    -- has no such database, or (https:// only) its certificate is not one the
+    -- board trusts. An http:// store is asked over plain HTTP and an https://
+    -- store over TLS, so the address scheme does not decide whether a store is
+    -- checked (task #28722).
     --
     -- THE DATABASE'S OWN IDENTITY, NOT THE ADDRESS. The address says where a
     -- store listens, not which data it holds: two stores over two data
@@ -1703,8 +1705,9 @@ rule ConnectWhenTheStoreIsTheOneThisInstallUses {
         -- pinned: the steady state. Nothing is pinned yet: the first launch
         -- on this --db, which PinTheStoreOnceItAnswers then pins. The store
         -- could not be asked: the connection that follows fails on its own
-        -- if the store is down (AbortWhenTheStoreCannotBeReached), and an
-        -- https:// store goes through unchecked — see the open question. Or
+        -- if the store is down (AbortWhenTheStoreCannotBeReached), and a store
+        -- whose TLS certificate the board does not trust goes through
+        -- unchecked, with a warning. Or
         -- the operator passed --accept-store-switch, having read the abort
         -- below and decided the new database is the one they mean.
 }
@@ -2380,4 +2383,4 @@ open question "Task #4982: RecordTheNamedStoreOnceItAnswers treats a store recor
 
 open question "STILL PLACEHOLDERS (task #12296 measured nothing beyond a near-empty data directory, where a start-and-publish took well under a second): config.managed_store_start_timeout (15 seconds) and config.managed_store_stop_timeout (5 seconds) are placeholders, not measured values. What does a cold `spacetime start` over a large data directory actually take, and how long may a quit be held up waiting for the store to stop?"
 
-open question "Task #28710 left this for later: StoreIdentityPin.store_database_identity asks the store over plain HTTP, so an https:// store answers null and AbortWhenTheStoreIsNotTheOneThisInstallUses never fires for it — a launch onto a different remote TLS store goes through unchecked (with a warning). Should the identity be read over TLS too, or through the connection itself, so every store is checked?"
+open question "Task #28722 read the identity over TLS for an https:// store, with the bundled web PKI roots. A store behind a certificate only the operating system trusts (a corporate CA) answers null, so its launches go through unchecked, with a warning. Should the board trust the operating system's roots for this read, matching whichever roots the store connection itself trusts?"

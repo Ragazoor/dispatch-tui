@@ -38,7 +38,7 @@ fn a_first_launch_with_nothing_pinned_connects() {
 
 #[test]
 fn a_store_that_cannot_be_asked_connects_unchecked() {
-    // An https:// store, or one that is down: the connection that follows
+    // A store that cannot be asked (down, or an untrusted certificate): the connection that follows
     // fails on its own if it is down (AbortWhenTheStoreCannotBeReached).
     assert!(check_store_pin(None, Some(MANAGED), false, "https://remote:443").is_ok());
 }
@@ -220,11 +220,37 @@ fn nothing_listening_reads_as_none() {
 }
 
 #[test]
-fn an_https_store_is_not_asked() {
-    // No listener exists for this name; the answer must come back without a
-    // connection attempt, because plain HTTP cannot ask a TLS store.
+fn an_https_store_is_asked_over_tls() {
+    // The listener is no TLS server: it only records the first byte the board
+    // sends. A TLS handshake opens with 0x16 (handshake record); plain HTTP
+    // would open with "G". The fetch must end with None, not hang.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = format!("https://{}", listener.local_addr().unwrap());
+    let handle = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut first = [0u8; 1];
+        let n = stream.read(&mut first).unwrap_or(0);
+        (n, first[0])
+    });
+    let found = fetch_store_database_identity(&address, "dispatch", Duration::from_secs(5));
+    let (n, first) = handle.join().unwrap();
     assert_eq!(
-        fetch_store_database_identity("https://store.invalid", "dispatch", Duration::from_secs(1)),
+        found, None,
+        "a store that does not speak TLS has no identity"
+    );
+    assert_eq!((n, first), (1, 0x16), "the board must open a TLS handshake");
+}
+
+#[test]
+fn an_https_store_that_does_not_answer_reads_as_none() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = format!("https://{}", listener.local_addr().unwrap());
+    drop(listener);
+    assert_eq!(
+        fetch_store_database_identity(&address, "dispatch", Duration::from_secs(1)),
         None
     );
 }

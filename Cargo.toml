@@ -36,6 +36,9 @@ axum = "0.8"
 # dependency graph — the same argument `hmac-sha256` above is here on.
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
+# Blocking GET of the store database identity, http:// and https:// alike
+# (store_pin.rs). Already in the build through hf-hub, with rustls.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 http-body-util = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
