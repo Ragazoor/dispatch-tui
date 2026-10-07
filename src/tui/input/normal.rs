@@ -22,10 +22,10 @@ impl App {
         if let Some(cmds) = self.run_normal_board(b, key, label) {
             return cmds;
         }
-        if let Some(cmds) = self.run_normal_epic(b, key, label) {
+        if let Some(cmds) = self.run_normal_epic(b, label) {
             return cmds;
         }
-        self.run_normal_task(b, key, label).unwrap_or_default()
+        self.run_normal_task(b, label).unwrap_or_default()
     }
 
     /// Board-wide actions: navigation, reordering, selection, folding, filters, search and view toggles.
@@ -108,12 +108,7 @@ impl App {
     }
 
     /// Epic actions. `None` when the action is not one of them.
-    fn run_normal_epic(
-        &mut self,
-        b: &KeyBinding,
-        _key: KeyEvent,
-        label: &str,
-    ) -> Option<Vec<Command>> {
+    fn run_normal_epic(&mut self, b: &KeyBinding, label: &str) -> Option<Vec<Command>> {
         use crate::tui::messages::{EpicMessage, TaskMessage};
         let action = b.action;
         let keyed = |app: &mut App, msg: Message| app.dispatch_keyed(msg, action, label);
@@ -165,12 +160,7 @@ impl App {
     }
 
     /// Task actions. `None` when the action is not one of them.
-    fn run_normal_task(
-        &mut self,
-        b: &KeyBinding,
-        _key: KeyEvent,
-        label: &str,
-    ) -> Option<Vec<Command>> {
+    fn run_normal_task(&mut self, b: &KeyBinding, label: &str) -> Option<Vec<Command>> {
         use crate::tui::messages::{InputMessage, TaskMessage};
         let action = b.action;
         let keyed = |app: &mut App, msg: Message| app.dispatch_keyed(msg, action, label);

@@ -34,7 +34,7 @@ fn overlay_rect(area: Rect, zoomed: bool) -> Rect {
 }
 
 /// Metadata lines shown above the description: repo, epic, link and plan.
-fn header_lines(app: &App, task: &Task) -> Vec<Line<'static>> {
+fn metadata_lines(app: &App, task: &Task) -> Vec<Line<'static>> {
     let label_style = Style::default().fg(MUTED);
     let value_style = Style::default().fg(FG);
     let mut header_lines: Vec<Line<'static>> = Vec::with_capacity(4);
@@ -90,7 +90,7 @@ pub(in crate::tui::ui::kanban) fn render_task_detail_overlay(
 
     let overlay_area = overlay_rect(area, zoomed);
 
-    let header_lines = header_lines(app, &task);
+    let header_lines = metadata_lines(app, &task);
     let header_height = header_lines.len() as u16 + 1; // +1 for separator line
 
     // ── Compute body area and scroll clamping ────────────────────────────────

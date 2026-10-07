@@ -579,6 +579,10 @@ pub(in crate::tui) fn resolve_picker_selection(
     }
 }
 
+/// A card of a flattened column, decorated once with its sort keys:
+/// (section, epic-group key, card key, task).
+type FlatCard<'a> = (Option<ColumnSection>, CardOrderKey, CardOrderKey, &'a Task);
+
 impl App {
     pub fn new(tasks: Vec<Task>) -> Self {
         let mut app = App {
@@ -1682,18 +1686,17 @@ impl App {
         // per *comparison* — and the chunking below needs the same section
         // answer the sort used.
         let group_keys = self.flattened_group_keys(status, &tasks, &epic_lookup);
-        let mut sorted_tasks: Vec<(Option<ColumnSection>, CardOrderKey, CardOrderKey, &'a Task)> =
-            tasks
-                .into_iter()
-                .map(|t| {
-                    (
-                        ColumnSection::for_task(t),
-                        group_keys.key_for(t, &epic_lookup),
-                        CardOrderKey::for_task(t, status),
-                        t,
-                    )
-                })
-                .collect();
+        let mut sorted_tasks: Vec<FlatCard<'a>> = tasks
+            .into_iter()
+            .map(|t| {
+                (
+                    ColumnSection::for_task(t),
+                    group_keys.key_for(t, &epic_lookup),
+                    CardOrderKey::for_task(t, status),
+                    t,
+                )
+            })
+            .collect();
 
         // The card's own key is hoisted for the same reason the section and
         // the group key are: `sort_by_key` calls its key function once per
@@ -1743,7 +1746,7 @@ impl App {
     fn push_epic_groups<'a>(
         &self,
         status: TaskStatus,
-        run: &[(Option<ColumnSection>, CardOrderKey, CardOrderKey, &'a Task)],
+        run: &[FlatCard<'a>],
         epic_lookup: &HashMap<EpicId, &'a Epic>,
         items: &mut Vec<ColumnItem<'a>>,
     ) {

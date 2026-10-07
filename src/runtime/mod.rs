@@ -481,11 +481,9 @@ async fn open_with_cli_identity(db_path: &Path) -> Result<(store::Database, Stri
 
 /// The host identity read at launch, on a blocking thread.
 ///
-/// ONE read of the host identity, used twice: the board needs its own
-/// host id and the writer needs it for the claim. The abort is the
-/// strict one on purpose — see the long note at the `set_local_host_id`
-/// call for why a board that cannot read its own identity must
-/// not draw.
+/// ONE read of the host identity: the board needs its own host id and the
+/// writer needs it for the claim. The abort is the strict one on purpose —
+/// a board that cannot read its own identity must not draw.
 ///
 /// Mint (or read back) this install's Host identity — see
 /// host.allium: MintHostIdentity. A failure here is NOT best-effort:
@@ -1277,7 +1275,6 @@ impl TuiRuntime {
         build_store: fn(store::Database, &str) -> StoreParts,
         accept_store_switch: bool,
     ) -> Result<Bootstrap> {
-        //
         let mcp_listener = claim_agent_port(port).await?;
         let data_dir = data_dir_of(db_path).to_path_buf();
         let (host_id, host_label) = read_launch_identity(&data_dir).await?;
@@ -1762,6 +1759,8 @@ async fn persist_host_label(
     Ok(())
 }
 
+/// Claim the agent port before the board takes the screen.
+///
 /// The agent port is claimed first, so a launch that is going to abort
 /// on a port somebody else holds mints no host file
 /// (`CheckHostLabelAfterStartupConfigResolves`: `requires:
@@ -1771,8 +1770,6 @@ async fn persist_host_label(
 /// — `startup.allium`'s `AbortWhenTheAgentPortIsTaken`. Bound inside the
 /// spawned task instead, the failure would land on a stderr the drawn
 /// board has already covered, leaving a board no agent can reach.
-///
-/// Claim the agent port before the board takes the screen.
 async fn claim_agent_port(port: u16) -> Result<tokio::net::TcpListener> {
     mcp::bind(port).await.map_err(|e| {
         tracing::error!("agent port {port} unavailable: {e}");
@@ -1783,6 +1780,8 @@ async fn claim_agent_port(port: u16) -> Result<tokio::net::TcpListener> {
     })
 }
 
+/// Resolve the host's label, prompting if it is unset, and persist a new one.
+///
 /// startup.allium: CheckHostLabel and its remaining children. Runs
 /// here — after the port claim above, before the terminal is touched
 /// (`EnterAlternateScreen` is in `run_tui`, after this function
@@ -1797,8 +1796,6 @@ async fn claim_agent_port(port: u16) -> Result<tokio::net::TcpListener> {
 /// label that is already set, so entering it would cost a blocking-pool
 /// hop and a `/proc` read (the prompt's default, evaluated eagerly as an
 /// argument) only to discard both.
-///
-/// Resolve the host's label, prompting if it is unset, and persist a new one.
 async fn name_the_host(label: Option<String>, database: &store::Database) -> Result<()> {
     let resolved = if label.is_none() {
         let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
