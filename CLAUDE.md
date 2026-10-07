@@ -28,7 +28,7 @@ cargo run -- tui
 
 **The lib target runs in ~10s; a cold full run (including compile) is ~80s.** Run it in the foreground — don't background it. In a *fresh worktree* the first compile is slower than that and a cold `cargo test` can pass 120s, which is Claude Code's default Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
 
-**Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. Always pass `--engine llvm`: the default engine scores ~1.8 points lower than CI's floor assumes. Keep `spacetime` off `PATH`, as the floor was measured that way. Other caveats are in [docs/testing.md](docs/testing.md).
+**Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. Always pass `--engine llvm`: the default engine scores ~1.8 points lower than CI's floor assumes. The two live-SpacetimeDB test files skip themselves under tarpaulin, so `spacetime` may stay on `PATH`. Other caveats are in [docs/testing.md](docs/testing.md).
 
 Everything else about tests — the per-target command list, snapshot workflow, where a new test belongs, the no-wall-clock-sleep rule, coverage — is in [docs/testing.md](docs/testing.md).
 
@@ -98,7 +98,7 @@ The `dispatch` MCP server's tool descriptions say what each tool does; call `too
 
 ## Agent Working Directory
 
-Dispatched agents always work from their worktree folder. Every prompt includes an instruction to stay in the worktree and not `cd` to the parent repo. The tmux window's *starting* cwd is test-covered: `dispatch_agent_opens_tmux_window_in_worktree_not_parent_repo` in `src/dispatch/tests.rs` asserts the window opens inside the task worktree, never the bare parent repo. Runtime `cd`-escape prevention — an agent later `cd`ing out of the worktree — remains prompt-instruction only, with no test asserting against it.
+Dispatched agents always work from their worktree folder. Every prompt includes an instruction to stay in the worktree and not `cd` to the parent repo. The tmux window's *starting* cwd is test-covered: `src/dispatch/tests/agent_launch.rs::dispatch_agent_opens_tmux_window_in_worktree_not_parent_repo` asserts the window opens inside the task worktree, never the bare parent repo. Runtime `cd`-escape prevention — an agent later `cd`ing out of the worktree — remains prompt-instruction only, with no test asserting against it.
 
 <!-- allow-phantom-symbol: file_path names a Claude Code tool parameter, not a repo symbol -->
 **A second, easier way to leave the worktree: an absolute Read/Edit/Write `file_path` missing the `.worktrees/<id>-<slug>/` segment.** The parent repo's path and the worktree's path both look like valid absolute paths and differ only by that one segment, but using the former silently edits the parent checkout instead of the worktree — the tool reports success and even Read echoes the change back, so nothing looks wrong until a shell command (`git status`, `cargo build`) run against the *worktree* path shows no change. If the parent checkout has any auto-commit/snapshot tooling watching it, a stray edit like this can land on shared `main` before anyone notices. Always build `file_path` from the worktree's own absolute path (e.g. from `pwd`), never assume the parent repo's path with the task ID spliced in.
@@ -130,7 +130,7 @@ Read these on demand:
 Subsystem entry points (no dedicated doc page — read the source):
 
 - `src/feed/mod.rs` — feed system: `FeedRunner` poll loop, exec/parse/ingest pipeline that upserts tasks from external commands
-- `src/cli/` — CLI subcommand implementations (`agent_tree`, `caller_headers`, `statusline`)
+- `src/cli/` — CLI subcommand implementations, one module per subcommand (`ls src/cli/`)
 - `src/mcp/trajectory.rs` — agent trajectory capture (records the agent's tool-call history for a task)
 - `src/repo_sync.rs` — local-first repo sync: `ahead_behind` drift measurement and `sync_repo` (fetch, merge `origin/<base>`, push). See `docs/specs/repo-sync.allium`
 - `src/sync/` — the shared store: the connection loop, the identity handshake, and **where the board's cards come from**. `board_reads::BoardReads` is that seam, served by the subscription (`SubscriptionBoardReads`), or by the in-memory store a test handle owns. See `docs/specs/sync.allium`

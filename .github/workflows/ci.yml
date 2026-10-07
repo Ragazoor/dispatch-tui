@@ -67,9 +67,8 @@ jobs:
       # docs/specs/spacetime-memory-store.allium's ConformanceIsCiGated
       # guarantee true rather than aspirational. Deliberately NOT added to the
       # Coverage job: tarpaulin's instrumentation breaks the `spacetime
-      # publish` these tests shell out to (task #4909) — installing it there
-      # would turn a documented, pre-existing skip into a hard failure on
-      # every coverage run.
+      # publish` these tests shell out to (task #4909), so they skip
+      # themselves under `cfg(tarpaulin)`; it is not installed there.
       - name: Install spacetime CLI
         run: |
           curl -sSf https://install.spacetimedb.com | sh -s -- -y

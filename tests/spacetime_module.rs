@@ -13,13 +13,14 @@
 //! rather than a hope: with it, a change the store cannot automigrate aborts
 //! instead of quietly destroying the database and reporting success.
 //!
-//! **Skipped when `spacetime` is not on `PATH`.** CI's Test job installs it
+//! **Skipped when `spacetime` is not on `PATH`, or under tarpaulin** (which
+//! sets `cfg(tarpaulin)`; its instrumentation breaks `spacetime publish`,
+//! task #4909). CI's Test job installs it
 //! and hard-fails the job if the install doesn't land at the pinned version
 //! (see `.github/workflows/ci.yml`'s "Pin and verify the spacetime CLI
 //! version" step) — that is docs/specs/spacetime-memory-store.allium's
 //! `ConformanceIsCiGated` guarantee. The Coverage job deliberately does not
-//! install it (tarpaulin conflicts with `spacetime publish`, task #4909), so
-//! this test still takes its skip there. Unlike tmux, this file's own
+//! install it, and the tarpaulin skip covers a local run with it on `PATH`. Unlike tmux, this file's own
 //! availability check has no hard-fail arm of its own — the enforcement
 //! lives in that earlier CI step rather than in this test — see
 //! `tests/tmux_harness/mod.rs` for the pattern this deliberately departs from.
@@ -31,7 +32,8 @@
 mod common;
 
 use common::spacetime_instance::{
-    column, describe, module_path, no_rows, spacetime_available_or_skip, Instance,
+    column, describe, instance_tests_should_run, module_path, no_rows, spacetime_available_or_skip,
+    Instance,
 };
 use dispatch_tui::process::{ProcessRunner, RealProcessRunner};
 use dispatch_tui::sync::{SharedRows, SpacetimeSdkConnector, StoreConnector, SubscriptionRequest};
@@ -129,6 +131,14 @@ fn schema_version_row(instance: &Instance) -> Vec<i64> {
 }
 
 /// Publishing the same module over itself is accepted and changes nothing.
+#[test]
+fn instance_tests_skip_under_tarpaulin_even_with_the_cli_present() {
+    assert!(!instance_tests_should_run(true, true));
+    assert!(!instance_tests_should_run(true, false));
+    assert!(!instance_tests_should_run(false, false));
+    assert!(instance_tests_should_run(false, true));
+}
+
 #[test]
 fn publishing_the_module_twice_automigrates() {
     if !spacetime_available_or_skip() {

@@ -18,7 +18,17 @@ use std::time::{Duration, Instant};
 /// returns as soon as the port answers.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Whether a test that needs a live instance should run.
+///
+/// Pure so the tarpaulin arm can be tested without running under tarpaulin.
+pub fn instance_tests_should_run(under_tarpaulin: bool, cli_present: bool) -> bool {
+    !under_tarpaulin && cli_present
+}
+
 pub fn spacetime_available_or_skip() -> bool {
+    // Tarpaulin's instrumentation breaks `spacetime publish` (task #4909), so
+    // skip there even when the CLI is on PATH. The Test job still runs these.
+    let under_tarpaulin = cfg!(tarpaulin);
     let present = Command::new("spacetime")
         .arg("--version")
         .stdout(Stdio::null())
@@ -26,10 +36,12 @@ pub fn spacetime_available_or_skip() -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
-    if !present {
+    if under_tarpaulin {
+        eprintln!("skipping: running under tarpaulin");
+    } else if !present {
         eprintln!("skipping: spacetime not available on PATH");
     }
-    present
+    instance_tests_should_run(under_tarpaulin, present)
 }
 
 /// A port nothing is listening on, released immediately so the server can take

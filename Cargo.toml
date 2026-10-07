@@ -103,6 +103,11 @@ test-support = ["dep:dispatch-spacetime-module"]
 [profile.dev]
 debug = "line-tables-only"
 
+[lints.rust]
+# `tarpaulin` is set by cargo-tarpaulin; tests/common/spacetime_instance.rs
+# skips live-instance tests under it.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
+
 [lints.clippy]
 # Added by task #602 (2026-05-07): surfaces accidental panics in production paths
 unwrap_used = "warn"
