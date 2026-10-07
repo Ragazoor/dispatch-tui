@@ -39,6 +39,7 @@ fn test_store(database: crate::db::Database, _host: &str) -> StoreParts {
             settled_identity.clone(),
         )),
         settled_identity,
+        store_identity: |_| None,
     }
 }
 
@@ -142,7 +143,7 @@ async fn a_launch_with_no_host_file_mints_one_and_leaves_the_legacy_database_alo
     let before = footprint(&db_path);
 
     let result =
-        TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store).await;
+        TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false).await;
 
     match result {
         Ok(_) => panic!("a freshly minted host is unnamed and nobody can name it here"),
@@ -182,7 +183,7 @@ async fn a_launch_with_an_unparseable_host_file_aborts_and_keeps_it() {
     let before = footprint(&db_path);
 
     let result =
-        TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store).await;
+        TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false).await;
 
     match result {
         Ok(_) => panic!("a damaged host file must abort the launch"),
@@ -216,18 +217,13 @@ async fn a_launch_with_a_named_host_file_never_opens_the_legacy_database() {
     );
     let before = footprint(&db_path);
 
-    let bootstrap = match TuiRuntime::bootstrap_with(
-        &db_path,
-        0,
-        &paths,
-        TEST_STORE.into(),
-        test_store,
-    )
-    .await
-    {
-        Ok(b) => b,
-        Err(err) => panic!("a named host file must let the board start: {err}"),
-    };
+    let bootstrap =
+        match TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
+            .await
+        {
+            Ok(b) => b,
+            Err(err) => panic!("a named host file must let the board start: {err}"),
+        };
 
     assert_eq!(
         footprint(&db_path),

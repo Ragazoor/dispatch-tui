@@ -225,6 +225,10 @@ pub struct App {
     /// when absent or unreadable — the steady state for non-subscription auth.
     /// Derived live, never persisted (dispatch.allium: TokenBudgetIndicator).
     pub(in crate::tui) budget: Option<crate::models::budget::BudgetSnapshot>,
+    /// The address of the store this board is connected to, drawn on the top
+    /// row in every state (sync.allium: ConnectionIndicator,
+    /// `TheStoreIsAlwaysNamed`). `None` only before bootstrap sets it.
+    pub(in crate::tui) store_server: Option<String>,
     pub(in crate::tui) ticks_since_budget_poll: u64,
     /// Derived layout state (epic stats, anchor cache, task index, and their
     /// fingerprints) computed from `board.tasks`/`board.epics`. See
@@ -600,6 +604,7 @@ impl App {
             dispatching: HashMap::new(),
             spinner_tick: 0,
             budget: None,
+            store_server: None,
             ticks_since_budget_poll: 0,
             layout: LayoutCache::default(),
             dirty: true,
@@ -817,6 +822,17 @@ impl App {
     /// "Visibility Convention" section in CLAUDE.md.
     pub fn set_notifications_enabled(&mut self, enabled: bool) {
         self.notifications_enabled = enabled;
+    }
+
+    /// Bootstrap-only carve-out, like [`Self::set_notifications_enabled`]:
+    /// the store address is fixed for the board's lifetime.
+    pub fn set_store_server(&mut self, server: Option<String>) {
+        self.store_server = server;
+    }
+
+    /// The store address the top row names.
+    pub fn store_server(&self) -> Option<&str> {
+        self.store_server.as_deref()
     }
 
     pub fn set_repo_filter(&mut self, filter: HashSet<String>) {

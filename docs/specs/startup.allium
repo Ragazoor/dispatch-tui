@@ -243,6 +243,12 @@ contract SessionLauncher {
     -- Whether this process is already inside a tmux session.
     inside_tmux_session: () -> Boolean
 
+    -- Remove DISPATCH_SPACETIME_SERVER from dispatch's session's environment,
+    -- if it is set there. Processes already running keep their own copy; only
+    -- what tmux starts there from now on is affected. Removing a value that
+    -- is not set is not a failure.
+    forget_session_store_server: () -> Boolean
+
     -- Whether a session of this name exists right now.
     session_exists: (session: String) -> Boolean
 
@@ -529,6 +535,54 @@ contract StoreAddressRecord {
         -- tell it.
 }
 
+-- Which store DATABASE this install's boards have been using, so a launch
+-- that reaches a different one is stopped before it writes anything there
+-- (task #28710). Stated as a contract because one half is a file on disk and
+-- the other is a question asked of the store over the network, and either can
+-- fail to answer.
+contract StoreIdentityPin {
+    -- The identity of config.managed_database_name on the store this launch
+    -- chose, read from the store itself before the first connection is made,
+    -- else null. Null when the store cannot be asked: it does not answer, or
+    -- its address is one the board cannot ask over plain HTTP (an https://
+    -- store — see the open question).
+    --
+    -- THE DATABASE'S OWN IDENTITY, NOT THE ADDRESS. The address says where a
+    -- store listens, not which data it holds: two stores over two data
+    -- directories can take turns on one address, and one store can move to
+    -- another address. The identity SpacetimeDB gives a database when it is
+    -- first published is what stays with the data.
+    store_database_identity: () -> String?
+
+    -- The identity recorded beside this launch's --db database file by the
+    -- last board that reached its store, else null (a first launch, or one
+    -- whose record was removed). A blank record is null too.
+    pinned_store_identity: () -> String?
+
+    -- Record `identity` beside the --db database file, replacing whatever was
+    -- there. True when the record was kept.
+    pin_store_identity: (identity: String) -> Boolean
+
+    -- Whether the operator passed --accept-store-switch on this launch: they
+    -- have seen that the store holds a different database and mean to use it.
+    store_switch_accepted: () -> Boolean
+
+    @invariant ThePinBelongsToItsDatabase
+        -- The record sits in the same folder as the database file the board
+        -- was started with, like StoreAddressRecord, so a board on a
+        -- throwaway --db pins nothing next to the operator's real one.
+
+    @invariant ThePinIsLocal
+        -- The record is this install's own, never a shared row: which
+        -- database this machine has been writing to is the very thing a
+        -- different store cannot be trusted to say.
+
+    @invariant ThePinOutlivesTheBoard
+        -- Unlike StoreAddressRecord, the pin is NOT removed when the board
+        -- exits. It answers "which database did this install last use", which
+        -- is exactly what the next launch must compare against.
+}
+
 ------------------------------------------------------------
 -- Enumerations
 ------------------------------------------------------------
@@ -613,6 +667,7 @@ enum StartupAbortReason {
     | module_needs_manual_migration -- the embedded module differs from the managed store's, and the store would accept it only by deleting data
     | module_publish_failed       -- the embedded module differs from the managed store's, and publishing it failed for any other reason
     | store_unavailable           -- the first connection to the store failed: unreachable, refused, timed out, not subscribable, or it identified this install as somebody else
+    | store_switched              -- the store holds a different database from the one this install's boards last used, and the operator did not pass --accept-store-switch
 }
 
 -- Why there is no longer a store_unconfigured. It was a launch that never said
@@ -1366,7 +1421,7 @@ rule ConnectToTheNamedStoreOnceTheHostIsNamed {
     when: HostLabelResolved(operator)
     requires: explicit_store_server() != null
 
-    ensures: StoreConnectionAttemptedAtStartup(operator)
+    ensures: StoreChosenAtStartup(operator)
 
     @guidance
         -- A STORE THE OPERATOR NAMED IS CONNECTED TO AS IT IS. Dispatch starts
@@ -1527,7 +1582,7 @@ rule ConnectWhenTheManagedModuleIsCurrent {
         recorded_module_hash() = embedded_module_hash()
         managed_database_exists()
 
-    ensures: StoreConnectionAttemptedAtStartup(operator)
+    ensures: StoreChosenAtStartup(operator)
 
     @guidance
         -- The steady state: the store already runs the module this binary
@@ -1581,7 +1636,7 @@ rule ConnectOnceTheModuleIsPublished {
 
     ensures:
         recorded_module_hash() = embedded_module_hash()
-        StoreConnectionAttemptedAtStartup(operator)
+        StoreChosenAtStartup(operator)
 
     @guidance
         -- The hash is recorded only after the store accepted the module, so a
@@ -1624,6 +1679,96 @@ rule AbortWhenTheModulePublishFails {
         -- The board does not connect to a store it could not bring up to date:
         -- that store's module may not match the tables this binary subscribes
         -- to, and the failure would surface later and less legibly.
+}
+
+rule ConnectWhenTheStoreIsTheOneThisInstallUses {
+    when: StoreChosenAtStartup(operator)
+    let found = store_database_identity()
+    let pinned = pinned_store_identity()
+    requires:
+        found = null or pinned = null or found = pinned
+            or store_switch_accepted()
+
+    ensures: StoreConnectionAttemptedAtStartup(operator)
+
+    @guidance
+        -- THE CHECK COMES BEFORE THE FIRST CONNECTION, because the first
+        -- connection already writes: it registers this host in the store
+        -- (sync.allium: RegisterHostOnConnect), and every change the board
+        -- makes after it lands there too. A board that connected first and
+        -- compared afterwards would already have put rows into the wrong
+        -- database.
+        --
+        -- FOUR WAYS THROUGH. The store's database is the one this install
+        -- pinned: the steady state. Nothing is pinned yet: the first launch
+        -- on this --db, which PinTheStoreOnceItAnswers then pins. The store
+        -- could not be asked: the connection that follows fails on its own
+        -- if the store is down (AbortWhenTheStoreCannotBeReached), and an
+        -- https:// store goes through unchecked — see the open question. Or
+        -- the operator passed --accept-store-switch, having read the abort
+        -- below and decided the new database is the one they mean.
+}
+
+rule AbortWhenTheStoreIsNotTheOneThisInstallUses {
+    when: StoreChosenAtStartup(operator)
+    let found = store_database_identity()
+    let pinned = pinned_store_identity()
+    requires:
+        found != null
+        pinned != null
+        found != pinned
+        not store_switch_accepted()
+
+    ensures: StartupAborted(reason: store_switched)
+
+    @guidance
+        -- WHY THIS EXISTS (task #28710). A board on a named store published
+        -- its address into the tmux session's environment; a later managed
+        -- board in the same session left it there; and a board restarted in
+        -- that session a day later inherited it and connected to the old
+        -- store. It drew a full board — the old store still held every task
+        -- from before the move — so nothing looked wrong, and two days of
+        -- work went into a database the next launch no longer used.
+        -- ClearTheSessionStoreAddressOnAManagedLaunch closes that one path;
+        -- this rule closes the class: whatever chose the store, a launch
+        -- that reaches a different database from the last one does not draw.
+        --
+        -- THE MESSAGE NAMES BOTH. The store's address and the database it
+        -- found, the database this install last used, and the flag that
+        -- accepts the switch. The operator decides which database is theirs;
+        -- the launch cannot know whether the switch is a mistake or a move.
+        --
+        -- A store this launch started or adopted is stopped with it
+        -- (StopTheManagedStoreWhenStartupAborts). Nothing was connected to,
+        -- so nothing was written to the store.
+}
+
+rule PinTheStoreOnceItAnswers {
+    when: StoreReachedAtStartup(operator)
+    -- The identity read before connecting, not read again: the pin then names
+    -- exactly the database the check approved.
+    let found = store_database_identity()
+    requires: found != null
+
+    ensures: StoreIdentityPinned(operator, kept: pin_store_identity(found))
+
+    @guidance
+        -- READ ONCE. The identity pinned is the one the check above compared
+        -- (ConnectWhenTheStoreIsTheOneThisInstallUses), not a second read
+        -- after the connection: a store swapped between the two must not get
+        -- pinned unchecked, and a check that could not read the identity pins
+        -- nothing rather than something it never compared.
+        --
+        -- Pinned only once the first connection has succeeded, for the
+        -- reason RecordTheNamedStoreOnceItAnswers gives: a store that never
+        -- answered must not become what later launches are measured against.
+        -- Every board pins, managed or named, and an accepted switch is
+        -- pinned here too, so the flag is needed on one launch, not every
+        -- launch after it.
+        --
+        -- A pin that cannot be written does not stop the launch: the board
+        -- is on the store it checked, and the cost is that the next launch
+        -- reads an older pin, or none, and checks against that.
 }
 
 rule StopTheManagedStoreWhenTheBoardExits {
@@ -1741,6 +1886,36 @@ rule ForgetAStaleStoreRecordOnAManagedLaunch {
         -- The board itself never reads the record (ManagedStoreHost:
         -- explicit_store_server), so a stale one cannot make this launch
         -- read as having named a store; clearing it is for the commands.
+}
+
+rule ClearTheSessionStoreAddressOnAManagedLaunch {
+    when: LaunchBoard(operator)
+    requires: explicit_store_server() = null
+
+    ensures: SessionStoreAddressForgotten(operator, done: forget_session_store_server())
+
+    @guidance
+        -- A BOARD ON A NAMED STORE PUBLISHES ITS ADDRESS ON ITS TMUX SESSION
+        -- (RecordTheNamedStoreOnceItAnswers: THE SESSION ENVIRONMENT STAYS),
+        -- and every process tmux starts there from then on inherits it —
+        -- including a board a later launch restarts in that session
+        -- (RestartTheBoardInTheExistingSession), which tmux starts with the
+        -- session's environment, not the launching shell's. An address left
+        -- there therefore turns a later launch that named nothing into one
+        -- that named the old store, and unsetting it in the operator's shell
+        -- does not help. That is how task #28710 lost two days of work.
+        --
+        -- So a launch that named no store clears it, and the PROCESS THAT
+        -- HANDS OFF TO TMUX does so, before tmux starts the board in the
+        -- session (LaunchBoardBySupplyingASession,
+        -- RestartTheBoardInTheExistingSession). Clearing it in the board would
+        -- be too late: the board tmux starts has already inherited the
+        -- address, reads it as a store the operator named, and so never takes
+        -- the managed path at all. The managed board clears it again once it
+        -- is wired into its session, which covers a launch made from inside
+        -- tmux. Best-effort: a session that is not there, or will not answer,
+        -- holds nothing to clear, and
+        -- AbortWhenTheStoreIsNotTheOneThisInstallUses still stands behind it.
 }
 
 rule ForgetTheStoreRecordWhenTheBoardExits {
@@ -2036,12 +2211,17 @@ surface BoardLaunchCommand {
     -- (BringUpTheManagedStoreOnceTheHostIsNamed), which needs the `spacetime`
     -- CLI on PATH (AbortWhenTheManagedStoreHasNoCli). With either, that store
     -- is used as it is (ANamedStoreIsNeverManaged).
+    --
+    -- `--accept-store-switch` lets one launch proceed onto a store whose
+    -- database differs from the one this install last used
+    -- (AbortWhenTheStoreIsNotTheOneThisInstallUses).
 
     contracts:
         demands ConfigDriftEngine
         demands SessionLauncher
         demands ManagedStoreHost
         demands StoreAddressRecord
+        demands StoreIdentityPin
 
     provides:
         LaunchBoard(operator)
@@ -2083,6 +2263,13 @@ surface BoardLaunchCommand {
     @guarantee ArgumentsSurviveTheSessionHandoff
         -- The database path and port the operator passed are the ones the board
         -- comes up with, whether or not a session had to be created to hold it.
+
+    @guarantee ALaunchNeverMovesToAnotherDatabaseSilently
+        -- Whatever names the store — the flag, the environment, a value left
+        -- in the tmux session, or nothing — a board never draws over a store
+        -- database other than the one this install last used unless the
+        -- operator passed --accept-store-switch on that launch. Work is never
+        -- split across two databases without the operator having said so.
 
     @guarantee NoSeparateSetupCommand
         -- There is no second command to run before this one. The drift check
@@ -2192,3 +2379,5 @@ open question "ACCEPTED (task #12296) as an edge the operator reaches only on pu
 open question "Task #4982: RecordTheNamedStoreOnceItAnswers treats a store record that cannot be written (or removed, in the two forget rules) as a logged, non-fatal failure — the board does not read the record, and the cost is only that commands outside the session must name the store, as before. That mirrors record_module_hash's best-effort and the session-environment publication's. Is best-effort the intended answer, or should an unwritable record be reported to the operator (or abort, given the database folder beside it is the board's own substrate)?"
 
 open question "STILL PLACEHOLDERS (task #12296 measured nothing beyond a near-empty data directory, where a start-and-publish took well under a second): config.managed_store_start_timeout (15 seconds) and config.managed_store_stop_timeout (5 seconds) are placeholders, not measured values. What does a cold `spacetime start` over a large data directory actually take, and how long may a quit be held up waiting for the store to stop?"
+
+open question "Task #28710 left this for later: StoreIdentityPin.store_database_identity asks the store over plain HTTP, so an https:// store answers null and AbortWhenTheStoreIsNotTheOneThisInstallUses never fires for it — a launch onto a different remote TLS store goes through unchecked (with a warning). Should the identity be read over TLS too, or through the connection itself, so every store is checked?"

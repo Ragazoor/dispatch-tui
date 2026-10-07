@@ -130,22 +130,27 @@ fn publish_board_port(session: &str, port: u16, runner: &dyn ProcessRunner) {
     }
 }
 
-/// [`publish_store_server`] for a named store only.
+/// [`publish_store_server`] for a named store; for a managed one, the address
+/// is *removed* from the session instead.
 ///
-/// A managed board publishes nothing: a store address on the session would make
-/// a relaunch in that session read as if the operator had *named* a store, so
-/// it would neither start nor stop the managed one
-/// (`startup.allium`: `StopTheManagedStoreWhenTheBoardExits`). Subcommands
-/// started there fall back to the managed address themselves
-/// (`startup::store_server_or_managed`).
+/// A store address on the session makes a relaunch in that session read as if
+/// the operator had *named* that store, so a managed board publishes none of
+/// its own -- and clears one an earlier named board left there
+/// (`startup.allium`: `ClearTheSessionStoreAddressOnAManagedLaunch`, task
+/// #28710: a board restarted in such a session ran on the old store for two
+/// days). Subcommands started there fall back to the managed address
+/// themselves (`startup::store_server_or_managed`).
 fn publish_store_server_for(
     target: &StoreTarget,
     session: &str,
     server: &str,
     runner: &dyn ProcessRunner,
 ) {
-    if matches!(target, StoreTarget::Named(_)) {
-        publish_store_server(session, server, runner);
+    match target {
+        StoreTarget::Named(_) => publish_store_server(session, server, runner),
+        StoreTarget::Managed(_) => {
+            crate::startup::forget_session_store_server(session, runner);
+        }
     }
 }
 
@@ -305,6 +310,11 @@ pub struct StoreParts {
     /// deliberately NOT a `SharedWriter` method (see `db::SharedWriter`'s doc
     /// comment), so it needs its own handle to the transport.
     pub reducer_caller: Arc<dyn crate::sync::ReducerCaller>,
+    /// Ask the store at an address for its database's identity, before any
+    /// connection (`startup.allium`: `StoreIdentityPin.store_database_identity`).
+    /// Blocking. A seam so the bootstrap tests can name the database without a
+    /// server.
+    pub store_identity: fn(&str) -> Option<String>,
 }
 
 impl StoreParts {
@@ -343,6 +353,7 @@ impl StoreParts {
             )),
         }));
         Self {
+            store_identity: store_database_identity,
             database,
             rows,
             board_reads,
@@ -388,6 +399,68 @@ pub async fn open_cli_store(db_path: &Path, server: Option<String>) -> Result<Cl
         database: parts.database,
         _session: session,
     })
+}
+
+/// The production [`StoreParts::store_identity`]: the shared database's
+/// identity on `server`, over plain HTTP.
+fn store_database_identity(server: &str) -> Option<String> {
+    crate::startup::fetch_store_database_identity(
+        server,
+        crate::sync::SHARED_DATABASE_NAME,
+        crate::startup::STORE_IDENTITY_TIMEOUT,
+    )
+}
+
+/// `startup.allium`: `ConnectWhenTheStoreIsTheOneThisInstallUses` /
+/// `AbortWhenTheStoreIsNotTheOneThisInstallUses`, run before the first
+/// connection, which already writes. Returns the identity found, for
+/// [`pin_store_after_connect`].
+async fn check_store_identity(
+    parts: &StoreParts,
+    db_path: &Path,
+    server: &str,
+    accept_store_switch: bool,
+) -> Result<Option<String>> {
+    let probe = parts.store_identity;
+    let address = server.to_string();
+    let pin_db = db_path.to_path_buf();
+    // One deadline over the whole probe: its own timeouts are per step, and a
+    // name lookup has none. Past it the store counts as unaskable.
+    let probed = tokio::time::timeout(
+        crate::startup::STORE_IDENTITY_TIMEOUT * 2,
+        tokio::task::spawn_blocking(move || {
+            (
+                probe(&address),
+                crate::startup::pinned_store_identity(&pin_db),
+            )
+        }),
+    )
+    .await;
+    let (found, pinned) = match probed {
+        Ok(joined) => joined?,
+        Err(_elapsed) => (None, crate::startup::pinned_store_identity(db_path)),
+    };
+    if found.is_none() {
+        tracing::warn!(
+            server,
+            "could not read the store's database identity; connecting without the store pin check"
+        );
+    }
+    crate::startup::check_store_pin(
+        found.as_deref(),
+        pinned.as_deref(),
+        accept_store_switch,
+        server,
+    )?;
+    Ok(found)
+}
+
+/// `startup.allium`: `PinTheStoreOnceItAnswers`. Best-effort: a pin that
+/// cannot be written is logged by `pin_store_identity` and the launch goes on.
+fn pin_store_after_connect(db_path: &Path, found: Option<&str>) {
+    if let Some(identity) = found {
+        crate::startup::pin_store_identity(db_path, identity);
+    }
 }
 
 /// The data directory `--db` names: where `host.json`, `app.log` and the store
@@ -657,6 +730,7 @@ pub async fn run_tui(
     port: u16,
     paths: &StartupPaths,
     spacetime_server: Option<String>,
+    accept_store_switch: bool,
 ) -> Result<()> {
     // Defence in depth. `src/main.rs` puts the process inside a session before
     // this is reached, so on the real path this never fires — but the board's
@@ -692,7 +766,8 @@ pub async fn run_tui(
         target.managed().cloned(),
         target.is_named().then(|| db_path.to_path_buf()),
     );
-    let bootstrapped = TuiRuntime::bootstrap_for(db_path, port, paths, target.clone()).await;
+    let bootstrapped =
+        TuiRuntime::bootstrap_for(db_path, port, paths, target.clone(), accept_store_switch).await;
     let Bootstrap {
         store_server: server,
         mut app,
@@ -1051,8 +1126,17 @@ impl TuiRuntime {
         port: u16,
         paths: &StartupPaths,
         target: StoreTarget,
+        accept_store_switch: bool,
     ) -> Result<Bootstrap> {
-        Self::bootstrap_inner(db_path, port, paths, target, StoreParts::build).await
+        Self::bootstrap_inner(
+            db_path,
+            port,
+            paths,
+            target,
+            StoreParts::build,
+            accept_store_switch,
+        )
+        .await
     }
 
     /// [`Self::bootstrap`], with the store's wiring supplied by the caller.
@@ -1068,6 +1152,7 @@ impl TuiRuntime {
         paths: &StartupPaths,
         server: String,
         build_store: fn(db::Database, &str) -> StoreParts,
+        accept_store_switch: bool,
     ) -> Result<Bootstrap> {
         Self::bootstrap_inner(
             db_path,
@@ -1075,6 +1160,7 @@ impl TuiRuntime {
             paths,
             StoreTarget::Named(server),
             build_store,
+            accept_store_switch,
         )
         .await
     }
@@ -1088,6 +1174,7 @@ impl TuiRuntime {
         paths: &StartupPaths,
         target: StoreTarget,
         build_store: fn(db::Database, &str) -> StoreParts,
+        accept_store_switch: bool,
     ) -> Result<Bootstrap> {
         // ONE read of the host identity, used twice: the board needs its own
         // host id and the writer needs it for the claim. The abort is the
@@ -1183,7 +1270,13 @@ impl TuiRuntime {
         // every setting the loaders read — is a shared row, and would read
         // nothing from a store that had not answered yet.
         let server = resolve_store_server(&target).await?;
+        // Before connecting: the first connection already writes, so a store
+        // holding a different database from the one this install last used is
+        // refused here (`AbortWhenTheStoreIsNotTheOneThisInstallUses`, task
+        // #28710).
+        let found = check_store_identity(&parts, db_path, &server, accept_store_switch).await?;
         let session = connect_first(server.clone(), &parts, Some(&*parts.reducer_caller)).await?;
+        pin_store_after_connect(db_path, found.as_deref());
         // Only an address that answered is worth recording; failing to write
         // it is a warning, not an abort.
         record_store_server_for(&target, db_path, &server);
@@ -1224,7 +1317,8 @@ impl TuiRuntime {
             }
         });
 
-        let app = hydrate_app(tasks, &host_id, &database, &*runner).await;
+        let mut app = hydrate_app(tasks, &host_id, &database, &*runner).await;
+        app.set_store_server(Some(store_server.clone()));
 
         // WHERE THIS BOARD'S CARDS COME FROM: the subscription, always. There
         // is deliberately no fallback to the local copy when the store is down:

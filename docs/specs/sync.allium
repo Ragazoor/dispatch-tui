@@ -1692,6 +1692,17 @@ surface ConnectionIndicator {
     @guarantee ConnectedIsQuiet
         -- The healthy state is the overwhelmingly common one, and an indicator
         -- that draws attention to it teaches people to ignore the indicator.
+        -- Quiet means no alarm colour and nothing that changes, not nothing
+        -- at all: see TheStoreIsAlwaysNamed.
+
+    @guarantee TheStoreIsAlwaysNamed
+        -- connection.server is on screen in every status, connected included,
+        -- in the same plain style as the rest of the status bar. A board
+        -- connected to the wrong store looks exactly like a healthy one — full
+        -- of tasks, updating, quiet — and the address is the one thing that
+        -- tells them apart at a glance (task #28710: a board ran on an old
+        -- store for two days with nothing on screen to say so). The operator
+        -- chose this over showing it only for a named store.
 
     @guarantee EveryFailureNamesItself
         -- `disconnected` and `failed` both carry a reason an operator can act

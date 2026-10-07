@@ -47,6 +47,13 @@ enum Commands {
         /// MCP server port
         #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_tui::DEFAULT_PORT)]
         port: u16,
+        /// Start even though the store holds a different database from the
+        /// one this install last used, and use that database from now on.
+        ///
+        /// Without it such a launch stops before writing anything. See
+        /// docs/specs/startup.allium: AbortWhenTheStoreIsNotTheOneThisInstallUses.
+        #[arg(long)]
+        accept_store_switch: bool,
     },
     /// Attach a plan file to an existing task
     Plan {
@@ -345,13 +352,23 @@ fn init_app_log_subscriber(data_dir: &std::path::Path) -> Result<()> {
 /// inside the session. Failing to obtain a session, or being asked to restart
 /// a board from a pane inside that very board's window, aborts — see
 /// `docs/specs/startup.allium`'s `StartupAbortsOnlyOnAnUnusableSubstrate`.
-fn enter_tmux_session_if_needed() -> Result<()> {
+fn enter_tmux_session_if_needed(spacetime_server: Option<String>) -> Result<()> {
     let exe = std::env::current_exe().context("cannot resolve the dispatch executable")?;
     let argv = startup::current_invocation(&exe, std::env::args().skip(1));
     let runner = dispatch_tui::process::RealProcessRunner::default();
     let ctx = startup::read_launch_context(&runner);
 
-    match startup::plan_launch(ctx, argv) {
+    let plan = startup::plan_launch(ctx, argv);
+    // `ClearTheSessionStoreAddressOnAManagedLaunch`: the board tmux starts on
+    // the two handoff paths takes the session's environment, so a launch that
+    // named no store removes any address left there before handing off (task
+    // #28710).
+    if let startup::LaunchPlan::EnterSession { session, .. }
+    | startup::LaunchPlan::RestartInSession { session, .. } = &plan
+    {
+        startup::forget_session_store_server_before_handoff(spacetime_server, session, &runner);
+    }
+    match plan {
         // The board tmux just started, in a window created for it. The launch
         // that created that window already retired the previous board; retiring
         // again would close this window and this board with it.
@@ -371,7 +388,12 @@ fn enter_tmux_session_if_needed() -> Result<()> {
     }
 }
 
-async fn cmd_tui(db: &std::path::Path, port: u16, spacetime_server: Option<String>) -> Result<()> {
+async fn cmd_tui(
+    db: &std::path::Path,
+    port: u16,
+    spacetime_server: Option<String>,
+    accept_store_switch: bool,
+) -> Result<()> {
     let data_dir = runtime::data_dir_of(db);
     init_app_log_subscriber(data_dir)?;
 
@@ -410,7 +432,7 @@ async fn cmd_tui(db: &std::path::Path, port: u16, spacetime_server: Option<Strin
         Err(e) => eprintln!("Warning: the dispatch configuration check panicked: {e}"),
     }
 
-    runtime::run_tui(db, port, &paths, spacetime_server).await
+    runtime::run_tui(db, port, &paths, spacetime_server, accept_store_switch).await
 }
 
 async fn cmd_agent_tree(db: &std::path::Path, board_port: u16, task_id: i64) -> Result<()> {
@@ -771,7 +793,7 @@ fn main() -> Result<()> {
             cli.spacetime_server.clone(),
             dispatch_tui::spacetime::managed_store::spacetime_cli_on_path,
         )?;
-        enter_tmux_session_if_needed()?;
+        enter_tmux_session_if_needed(cli.spacetime_server.clone())?;
     }
 
     match cli.command {
@@ -817,7 +839,10 @@ async fn run_async(
     command: Commands,
 ) -> Result<()> {
     match command {
-        Commands::Tui { port } => cmd_tui(db, port, store_server).await?,
+        Commands::Tui {
+            port,
+            accept_store_switch,
+        } => cmd_tui(db, port, store_server, accept_store_switch).await?,
         // Hooks reach the running board, never the database — `db` is
         // deliberately unused on all four arms. See `HookDelivery` in
         // `docs/specs/agent-health.allium`.

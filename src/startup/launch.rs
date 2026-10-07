@@ -180,6 +180,13 @@ pub enum StartupAbort {
     /// identified this install as somebody else. `startup.allium`'s
     /// `AbortWhenTheStoreCannotBeReached`. Carries the attempt's own reason.
     StoreUnavailable { reason: String },
+    /// The store holds a different database from the one this install's
+    /// boards last used. `AbortWhenTheStoreIsNotTheOneThisInstallUses`.
+    StoreSwitched {
+        address: String,
+        pinned: String,
+        found: String,
+    },
 }
 
 /// The environment variable that names the shared store, beside the
@@ -217,11 +224,18 @@ pub fn store_server_or_managed(server: Option<String>) -> String {
 /// The record's file name, in the same folder as the database file.
 const STORE_RECORD_FILE: &str = "store-server";
 
-fn store_record_path(db_path: &std::path::Path) -> std::path::PathBuf {
+/// `file` in the same folder as the database file `db_path` names: where the
+/// store record and the store pin live (`TheRecordBelongsToItsDatabase`,
+/// `ThePinBelongsToItsDatabase`).
+pub(super) fn beside_database(db_path: &std::path::Path, file: &str) -> std::path::PathBuf {
     db_path
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."))
-        .join(STORE_RECORD_FILE)
+        .join(file)
+}
+
+fn store_record_path(db_path: &std::path::Path) -> std::path::PathBuf {
+    beside_database(db_path, STORE_RECORD_FILE)
 }
 
 /// The address a board on `db_path` recorded beside it, else `None`. Blank is
@@ -348,6 +362,18 @@ impl StartupAbort {
                 "dispatch could not publish its database module to the local store: {reason}. \
                  The board has not started, and the store was stopped. Run `dispatch tui` \
                  again once the cause is fixed."
+            ),
+            Self::StoreSwitched {
+                address,
+                pinned,
+                found,
+            } => format!(
+                "The store at {address} holds a different database ({found}) from the one this \
+                 install last used ({pinned}). The board has not started, so nothing was written \
+                 to it, and a local store dispatch started for this launch was stopped. If the \
+                 store was chosen by mistake -- an old DISPATCH_SPACETIME_SERVER, \
+                 say -- unset it and run `dispatch tui` again. If you mean to move to this \
+                 database, run `dispatch tui --accept-store-switch` once."
             ),
             Self::StoreUnavailable { reason } => format!(
                 "Could not connect to the shared store: {reason}. The board draws only what \

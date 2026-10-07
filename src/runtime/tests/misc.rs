@@ -812,6 +812,7 @@ mod bootstrap {
                 settled_identity.clone(),
             )),
             settled_identity,
+            store_identity: |_| None,
         }
     }
 
@@ -837,8 +838,15 @@ mod bootstrap {
     async fn bootstrap_aborts_when_the_store_cannot_be_reached() {
         let (_dir, db_path, paths) = fixture().await;
 
-        match TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), unreachable_store)
-            .await
+        match TuiRuntime::bootstrap_with(
+            &db_path,
+            0,
+            &paths,
+            TEST_STORE.into(),
+            unreachable_store,
+            false,
+        )
+        .await
         {
             Ok(_) => panic!("a board whose store is unreachable must not start"),
             Err(err) => assert_eq!(
@@ -849,6 +857,143 @@ mod bootstrap {
                 .message()
             ),
         }
+    }
+
+    // -- StoreIdentityPin (task #28710) ------------------------------------
+
+    const PINNED_DB: &str = "c200298fac876590c951a7e10328c408fb4664de2bd945a55a0eff22ff8e1f77";
+    const OTHER_DB: &str = "c200a1ada23f68e494f28f6a791a2afe105f5a0056e01e6762e3d3618a893ccb";
+
+    /// A reachable store whose database is PINNED_DB.
+    fn store_holding_pinned_db(database: crate::db::Database, host: &str) -> StoreParts {
+        StoreParts {
+            store_identity: |_| Some(PINNED_DB.to_string()),
+            ..test_store(database, host)
+        }
+    }
+
+    /// A store whose database is OTHER_DB, behind a connector with no scripted
+    /// answers: any connection attempt panics, so a test that passes proves
+    /// the launch never connected.
+    fn store_holding_other_db_never_connect(
+        database: crate::db::Database,
+        _host: &str,
+    ) -> StoreParts {
+        StoreParts {
+            store_identity: |_| Some(OTHER_DB.to_string()),
+            ..test_store_with(database, ScriptedConnector::new(vec![]))
+        }
+    }
+
+    /// A reachable store whose database is OTHER_DB.
+    fn store_holding_other_db(database: crate::db::Database, host: &str) -> StoreParts {
+        StoreParts {
+            store_identity: |_| Some(OTHER_DB.to_string()),
+            ..test_store(database, host)
+        }
+    }
+
+    /// startup.allium: PinTheStoreOnceItAnswers. A first launch pins the
+    /// database it reached.
+    #[tokio::test]
+    async fn bootstrap_pins_the_store_database_once_it_answers() {
+        let (_dir, db_path, paths) = fixture().await;
+
+        let _bootstrap = TuiRuntime::bootstrap_with(
+            &db_path,
+            0,
+            &paths,
+            TEST_STORE.into(),
+            store_holding_pinned_db,
+            false,
+        )
+        .await
+        .expect("a first launch has nothing pinned and must start");
+
+        assert_eq!(
+            crate::startup::pinned_store_identity(&db_path).as_deref(),
+            Some(PINNED_DB)
+        );
+    }
+
+    /// startup.allium: AbortWhenTheStoreIsNotTheOneThisInstallUses. A store
+    /// holding a different database aborts the launch BEFORE the first
+    /// connection, which would already write (the connector here panics on any
+    /// attempt), and the pin is left as it was.
+    #[tokio::test]
+    async fn bootstrap_refuses_a_store_holding_a_different_database() {
+        let (_dir, db_path, paths) = fixture().await;
+        assert!(crate::startup::pin_store_identity(&db_path, PINNED_DB));
+
+        let result = TuiRuntime::bootstrap_with(
+            &db_path,
+            0,
+            &paths,
+            TEST_STORE.into(),
+            store_holding_other_db_never_connect,
+            false,
+        )
+        .await;
+
+        match result {
+            Ok(_) => panic!("a different database must not be connected to"),
+            Err(err) => assert_eq!(
+                err.downcast::<crate::startup::StartupAbort>().ok(),
+                Some(crate::startup::StartupAbort::StoreSwitched {
+                    address: TEST_STORE.to_string(),
+                    pinned: PINNED_DB.to_string(),
+                    found: OTHER_DB.to_string(),
+                })
+            ),
+        }
+        assert_eq!(
+            crate::startup::pinned_store_identity(&db_path).as_deref(),
+            Some(PINNED_DB)
+        );
+    }
+
+    /// startup.allium: ConnectWhenTheStoreIsTheOneThisInstallUses (an
+    /// accepted switch) and PinTheStoreOnceItAnswers: --accept-store-switch
+    /// lets one launch through, and the new database is pinned so the next
+    /// launch needs no flag.
+    #[tokio::test]
+    async fn bootstrap_accepts_a_switch_when_told_to_and_repins() {
+        let (_dir, db_path, paths) = fixture().await;
+        assert!(crate::startup::pin_store_identity(&db_path, PINNED_DB));
+
+        let result = TuiRuntime::bootstrap_with(
+            &db_path,
+            0,
+            &paths,
+            TEST_STORE.into(),
+            store_holding_other_db,
+            true,
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "an accepted switch must start: {:?}",
+            result.err()
+        );
+        assert_eq!(
+            crate::startup::pinned_store_identity(&db_path).as_deref(),
+            Some(OTHER_DB)
+        );
+    }
+
+    /// The board draws its store's address (sync.allium: ConnectionIndicator,
+    /// TheStoreIsAlwaysNamed), so bootstrap hands it to the App.
+    #[tokio::test]
+    async fn bootstrap_gives_the_app_its_store_address() {
+        let (_dir, db_path, paths) = fixture().await;
+
+        let bootstrap =
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
+                .await
+                .expect("bootstrap must succeed");
+
+        assert_eq!(bootstrap.app.store_server(), Some(TEST_STORE));
     }
 
     /// The record a board leaves beside its database (task #4982,
@@ -865,7 +1010,7 @@ mod bootstrap {
         let (_dir, db_path, paths) = fixture().await;
 
         let _bootstrap =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
                 .await
                 .expect("bootstrap must succeed against a reachable named store");
 
@@ -881,9 +1026,15 @@ mod bootstrap {
     async fn bootstrap_records_nothing_when_the_named_store_cannot_be_reached() {
         let (_dir, db_path, paths) = fixture().await;
 
-        let result =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), unreachable_store)
-                .await;
+        let result = TuiRuntime::bootstrap_with(
+            &db_path,
+            0,
+            &paths,
+            TEST_STORE.into(),
+            unreachable_store,
+            false,
+        )
+        .await;
 
         assert!(result.is_err(), "an unreachable store must abort startup");
         assert!(
@@ -902,7 +1053,8 @@ mod bootstrap {
         std::fs::create_dir(store_record(&db_path)).unwrap();
 
         let result =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store).await;
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
+                .await;
 
         assert!(
             result.is_ok(),
@@ -950,7 +1102,7 @@ mod bootstrap {
         let (_dir, db_path, paths) = fixture().await;
 
         let bootstrap =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
                 .await
                 .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -985,7 +1137,7 @@ mod bootstrap {
         let (dir, db_path, paths) = fixture().await;
 
         let bootstrap =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
                 .await
                 .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -1017,7 +1169,7 @@ mod bootstrap {
     async fn bootstrap_writes_nothing_into_the_supplied_claude_dir() {
         let (_dir, db_path, paths) = fixture().await;
 
-        TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
+        TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
             .await
             .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -1044,7 +1196,7 @@ mod bootstrap {
         let (_dir, db_path, paths) = fixture().await;
 
         let bootstrap =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
                 .await
                 .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -1120,7 +1272,7 @@ mod bootstrap {
         let (_dir, db_path, paths) = fixture().await;
 
         let bootstrap =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
                 .await
                 .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -1193,16 +1345,42 @@ mod store_address_publication {
     use super::*;
 
     #[test]
-    fn a_managed_board_publishes_no_store_address_on_its_session() {
-        // A published address would make a relaunch in that session look like
-        // a named store: it would neither start nor stop the managed one.
+    fn a_managed_board_clears_any_store_address_on_its_session() {
+        // startup.allium: ClearTheSessionStoreAddressOnAManagedLaunch. An
+        // address a named board left there would make a relaunch in that
+        // session look like a named store (task #28710). The managed board
+        // publishes none of its own and removes whatever is there.
+        let dir = std::env::temp_dir().join("dispatch-publish-test-unused");
+        let target = StoreTarget::Managed(Arc::new(
+            crate::spacetime::managed_store::ManagedStore::for_launch(dir.clone(), &dir),
+        ));
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+
+        publish_store_server_for(&target, "dispatch", "http://127.0.0.1:3000", &mock);
+
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "set-environment",
+                "-u",
+                "-t",
+                "=dispatch",
+                "DISPATCH_SPACETIME_SERVER"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_managed_board_with_no_session_touches_nothing() {
         let dir = std::env::temp_dir().join("dispatch-publish-test-unused");
         let target = StoreTarget::Managed(Arc::new(
             crate::spacetime::managed_store::ManagedStore::for_launch(dir.clone(), &dir),
         ));
         let mock = MockProcessRunner::new(vec![]);
 
-        publish_store_server_for(&target, "dispatch", "http://127.0.0.1:3000", &mock);
+        publish_store_server_for(&target, "", "http://127.0.0.1:3000", &mock);
 
         assert!(mock.recorded_calls().is_empty());
     }

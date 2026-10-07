@@ -269,6 +269,10 @@ mod tests {
     struct FakeSpawner {
         seen: Mutex<Option<(String, PathBuf)>>,
         pid: Mutex<Option<ProcessGroup>>,
+        /// The fake store's stdout. It reaches end-of-file only once every
+        /// process in the group has exited, which is how a test waits for the
+        /// stop without sleeping.
+        output: Mutex<Option<std::process::ChildStdout>>,
         fail: bool,
         answer_on_start: bool,
     }
@@ -306,14 +310,17 @@ mod tests {
                     }
                 });
             }
-            let child = Command::new("sleep")
-                .arg("60")
+            // Prints only if nothing stops it, so a test that reads its
+            // output to the end learns both that it exited and how.
+            let mut child = Command::new("sh")
+                .args(["-c", "sleep 600; echo survived"])
                 .stdin(Stdio::null())
-                .stdout(Stdio::null())
+                .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .process_group(0)
                 .spawn()?;
             *self.pid.lock().unwrap() = Some(ProcessGroup(child.id()));
+            *self.output.lock().unwrap() = child.stdout.take();
             Ok(child)
         }
     }
@@ -327,13 +334,6 @@ mod tests {
 
     fn memory_store(_: &str) -> Arc<dyn SharedStore> {
         Arc::new(MemoryStore::new())
-    }
-
-    fn alive(pid: u32) -> bool {
-        // A zombie still has a /proc entry but is not running.
-        std::fs::read_to_string(format!("/proc/{pid}/stat"))
-            .map(|s| !s.contains(") Z "))
-            .unwrap_or(false)
     }
 
     #[tokio::test]
@@ -372,14 +372,17 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("did not start within"));
-        let pid = spawner.pid.lock().unwrap().as_ref().unwrap().0;
-        for _ in 0..50 {
-            if !alive(pid) {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        panic!("the fake store process was left running");
+        // End-of-file arrives when the whole group has exited: at once if the
+        // code under test stopped it, and with "survived" only if it did not.
+        let mut output = spawner.output.lock().unwrap().take().unwrap();
+        let printed = tokio::task::spawn_blocking(move || {
+            let mut text = String::new();
+            output.read_to_string(&mut text).map(|_| text)
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(printed, "", "the fake store process was left running");
     }
 
     #[tokio::test]

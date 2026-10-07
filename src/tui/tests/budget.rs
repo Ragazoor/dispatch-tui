@@ -355,3 +355,39 @@ mod render_glue {
         );
     }
 }
+
+/// sync.allium: ConnectionIndicator, `TheStoreIsAlwaysNamed` (task #28710).
+/// The address of the store the board is connected to is on the top row in
+/// every state, in the plain muted style of the other badges.
+mod store_address_indicator {
+    use crate::tui::tests::helpers::{buffer_line, make_app, render_to_buffer};
+    use crate::tui::ui::palette::MUTED;
+
+    #[test]
+    fn the_top_row_names_the_store() {
+        let mut app = make_app();
+        app.set_store_server(Some("http://127.0.0.1:3000".to_string()));
+        let buf = render_to_buffer(&mut app, 160, 40);
+        let row = buffer_line(&buf, 0);
+        assert!(row.contains("127.0.0.1:3000"), "got {row:?}");
+    }
+
+    #[test]
+    fn the_store_address_is_plain_not_an_alarm() {
+        let mut app = make_app();
+        app.set_store_server(Some("http://127.0.0.1:3001".to_string()));
+        let buf = render_to_buffer(&mut app, 160, 40);
+        let row = buffer_line(&buf, 0);
+        let col = row.find("127.0.0.1:3001").expect("address on the top row");
+        let cell = &buf[(col as u16, 0)];
+        assert_eq!(cell.fg, MUTED, "the address is drawn muted");
+    }
+
+    #[test]
+    fn a_board_without_a_store_address_draws_no_badge() {
+        let mut app = make_app();
+        let buf = render_to_buffer(&mut app, 160, 40);
+        let row = buffer_line(&buf, 0);
+        assert!(!row.contains("store "), "got {row:?}");
+    }
+}

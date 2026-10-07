@@ -1132,3 +1132,17 @@ fn caller_headers_emits_session_even_inside_a_worktree() {
         "the helper must never claim a task identity: {v}"
     );
 }
+
+/// startup.allium: AbortWhenTheStoreIsNotTheOneThisInstallUses — the flag
+/// that accepts a store switch is part of the launch command (surface
+/// BoardLaunchCommand), documented where the operator will look for it.
+#[test]
+fn tui_accepts_the_store_switch_flag() {
+    let out = binary().args(["tui", "--help"]).output().unwrap();
+    assert!(out.status.success());
+    let help = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        help.contains("--accept-store-switch"),
+        "`dispatch tui --help` must offer --accept-store-switch:\n{help}"
+    );
+}

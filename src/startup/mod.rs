@@ -11,11 +11,13 @@ mod config;
 mod host;
 mod launch;
 mod retire;
+mod store_pin;
 
 pub use config::*;
 pub use host::*;
 pub use launch::*;
 pub use retire::*;
+pub use store_pin::*;
 
 #[cfg(test)]
 mod tests;
@@ -27,3 +29,6 @@ mod store_server_tests;
 
 #[cfg(test)]
 mod store_record_tests;
+
+#[cfg(test)]
+mod store_pin_tests;

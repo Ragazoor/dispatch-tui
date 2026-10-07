@@ -291,6 +291,16 @@ pub(in crate::tui::ui) fn feed_role_label(role: FeedRole) -> Option<String> {
 
 pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, area: Rect) {
     let mut parts: Vec<Span> = Vec::new();
+    // The store this board is connected to, in every state and in the same
+    // muted style as the other badges (sync.allium: ConnectionIndicator,
+    // `TheStoreIsAlwaysNamed`). A board on the wrong store otherwise looks
+    // exactly like a healthy one (task #28710).
+    if let Some(server) = app.store_server.as_deref() {
+        parts.push(Span::styled(
+            format!("store {}  ", store_address_label(server)),
+            Style::default().fg(MUTED),
+        ));
+    }
     // Auto dispatch indicator — only in epic view
     if let ViewMode::Epic { epic_id, .. } = app.view_mode() {
         if let Some(epic) = app.epics().iter().find(|e| e.id == *epic_id) {
@@ -533,6 +543,16 @@ pub(in crate::tui) fn caret_line(
         spans.push(Span::styled(after, base));
     }
     Line::from(spans)
+}
+
+/// The store address as the top row shows it: the scheme and a trailing slash
+/// are noise next to the host and port that tell two stores apart.
+fn store_address_label(server: &str) -> &str {
+    let trimmed = server.trim().trim_end_matches('/');
+    trimmed
+        .strip_prefix("http://")
+        .or_else(|| trimmed.strip_prefix("https://"))
+        .unwrap_or(trimmed)
 }
 
 #[cfg(test)]
