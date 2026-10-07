@@ -153,8 +153,8 @@ enum Commands {
     /// same reason the tree is one, so tmux moves the cursor between them.
     ///
     /// Takes the task id rather than a worktree path so the two panes cannot
-    /// disagree about which worktree they are looking at, and so both resolve
-    /// the baseline from the same base branch.
+    /// disagree about which worktree they are looking at, and so both read
+    /// the same selected source.
     AgentDiff {
         /// Task ID whose open diffs to render
         task_id: i64,

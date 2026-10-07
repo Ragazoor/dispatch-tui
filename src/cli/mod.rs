@@ -19,6 +19,7 @@ use ratatui::Terminal;
 pub mod agent_diff;
 pub mod agent_tree;
 pub mod agent_tree_agents;
+pub mod agent_tree_commits;
 pub mod caller_headers;
 pub mod commands;
 pub mod statusline;

@@ -81,6 +81,7 @@ use "./observability.allium" as observability
 --   board_confirm_trust_repo_quick_dispatch  board.confirm.trust_repo_quick_dispatch
 --   board_confirm_repo_sync               board.confirm.repo_sync
 --   agent_tree_tree              agent_tree.tree              companion pane, file-tree section
+--   agent_tree_commits           agent_tree.commits           companion pane, Commits section
 --   agent_tree_agents            agent_tree.agents            companion pane, Agents section
 --   agent_diff                   agent_diff                   the agent-tree diff pane
 --   tmux_global                  tmux.global                  prefixed tmux bindings
@@ -104,9 +105,13 @@ use "./observability.allium" as observability
 -- board.repo_filter's Backspace/Delete is not text editing: it runs
 -- repo_filter_delete_repo_path and stays recorded.
 --
--- The panes' rows (agent_tree.tree, agent_tree.agents, agent_diff). The
--- companion pane's two sections share the pane-wide keys — both act in
--- whichever section has focus — and differ in what Space/Enter and h/l do:
+-- The panes' rows (agent_tree.tree, agent_tree.commits, agent_tree.agents,
+-- agent_diff). The companion pane's three sections share the pane-wide keys
+-- — all act in whichever section has focus — and differ in what Space/Enter
+-- and h/l do. toggle_focus (Tab) cycles focus tree -> commits -> agents ->
+-- tree (agent-tree.allium: SwitchAgentTreeFocus). The commits section adds no
+-- new key: Space/Enter take a section-specific meaning there exactly as they
+-- already do in the agents section, so no key collides with another row:
 --   agent_tree.tree
 --     exit_pane                  q, Ctrl+C
 --     toggle_focus               Tab
@@ -121,6 +126,20 @@ use "./observability.allium" as observability
 --     expand_directory           l, Right       context on_directory
 --     toggle_diff                Space, Enter   context on_file
 --     toggle_directory           Space, Enter   context on_directory
+--   agent_tree.commits
+--     exit_pane, toggle_focus, toggle_all_diffs, navigate_row,
+--     navigate_row_first, navigate_row_last, navigate_half_page — the same
+--     keys as in agent_tree.tree
+--     select_source              Space, Enter   selects the row under the
+--                                               cursor ("unstaged work" or a
+--                                               commit) as what the tree and
+--                                               diff pane show
+--                                               (agent-tree.allium:
+--                                               SelectAgentTreeSource); on the
+--                                               row already selected, or with
+--                                               no row, it does nothing and
+--                                               records nothing
+--     h, l, Left and Right have no row here and do nothing.
 --   agent_tree.agents
 --     exit_pane, toggle_focus, toggle_all_diffs, navigate_row,
 --     navigate_row_first, navigate_row_last, navigate_half_page — the same
@@ -169,7 +188,8 @@ enum KeyNamespace {
     board_confirm_move_to_epic | board_confirm_reparent_epic |
     board_confirm_delete_repo_path | board_confirm_trust_repo |
     board_confirm_trust_repo_quick_dispatch | board_confirm_repo_sync |
-    agent_tree_tree | agent_tree_agents | agent_diff | tmux_global
+    agent_tree_tree | agent_tree_commits | agent_tree_agents | agent_diff |
+    tmux_global
 }
 
 -- Who receives a key in a namespace. Every namespace but tmux_global is
@@ -683,15 +703,16 @@ surface KeyInput {
         -- (agent-health.allium: HookEventsPushALiveRefresh does not apply).
         --
         -- A pane sends only presses that take effect: a press with no row,
-        -- or a jump_to_agent with no other agent under the cursor, sends
-        -- nothing. The sends run beside the pane's render loop, so a slow
+        -- a jump_to_agent with no other agent under the cursor, or a
+        -- select_source on the row already selected, sends nothing. The sends run beside the pane's render loop, so a slow
         -- board never delays a key, and the pane waits for outstanding sends
         -- before it exits, so the closing press is not lost. A board that
         -- cannot be reached drops the press, with a warning from the pane,
         -- as an unreachable board drops an observed hook event
         -- (agent-health.allium: EventIsDroppedWhenTheBoardIsDown); the press
         -- itself still takes effect in the pane. Their namespaces
-        -- (agent_tree.tree, agent_tree.agents, agent_diff) have rows like the
+        -- (agent_tree.tree, agent_tree.commits, agent_tree.agents, agent_diff)
+        -- have rows like the
         -- board's — see the pane inventory under KeyNamespace.
 
     @guarantee PaneStartupScreenIsOutsideUsage

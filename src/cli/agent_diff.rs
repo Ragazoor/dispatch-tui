@@ -20,7 +20,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::backend::Backend;
 use ratatui::layout::Rect;
@@ -30,7 +30,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{Frame, Terminal};
 
 use crate::agent_tree::parse_untracked;
-use crate::cli::agent_tree::{fork_point, run_git, REFRESH_INTERVAL};
+use crate::cli::agent_tree::{run_git, GIT_TIMEOUT, REFRESH_INTERVAL};
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::tui::ui::palette::{FG, GREEN, RED, YELLOW};
 
@@ -53,9 +53,6 @@ pub const DIFF_MAX_BYTES: usize = 1_048_576;
 /// `DiffRefusal`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffRefusal {
-    /// Not in the index, so a diff against the baseline cannot see it. Git's
-    /// own advice is to stage it, and that is what the placeholder repeats.
-    Untracked,
     /// Git reports the change without line contents.
     Binary,
     /// The diff exceeds [`DIFF_MAX_BYTES`].
@@ -66,7 +63,6 @@ impl DiffRefusal {
     /// The one line shown in place of the file's contents.
     pub fn message(self) -> &'static str {
         match self {
-            Self::Untracked => "new file, not yet staged — `git add` it to see its diff",
             Self::Binary => "binary file",
             Self::TooLarge => "diff too large to display",
         }
@@ -115,54 +111,78 @@ fn is_binary_notice(diff: &str) -> bool {
     diff.lines().any(|line| line.starts_with("Binary files "))
 }
 
-/// One open file's diff against `baseline`, or `None` when there is nothing to
-/// show for it.
+/// One open file's diff for the selected source, or `None` when there is
+/// nothing to show for it — the spec's `git_file_diff(root, commit, path)`.
 ///
-/// `None` is not an error and not a placeholder. The open set holds paths, and
-/// a path can stop being reported by git between the press that opened it and
-/// this call — the agent reverted the file, or committed and reset. The path
-/// stays open, because the agent may change the file again and the user did not
-/// ask for it to be closed; it simply renders nothing meanwhile. See the spec's
-/// `OpenDiffPathsMaySurviveTheirFiles`.
+/// `commit = None` is unstaged work: the working tree against the INDEX,
+/// naming no revision — and, for a path in `untracked`, the whole file as
+/// additions (RefreshAgentTreeDiff's "Untracked files"). `commit = Some(id)`
+/// is that commit against its first parent (the empty tree for a root
+/// commit). Rename detection is off in both.
 ///
-/// `untracked` is the tick's whole untracked listing, taken once by the caller
-/// rather than probed per path: an untracked file is invisible to a diff
-/// against the index, so asking git for its diff would return empty and be
-/// indistinguishable from the reverted case above.
-///
-/// The baseline is the caller's, and it must be the same one the tree resolved
-/// — a diff taken against a different baseline than the badge beside it would
-/// show the user two answers to one question.
+/// `None` is not an error and not a placeholder: a path git no longer reports
+/// for this source renders nothing and stays open
+/// (`OpenDiffPathsMaySurviveTheirFiles`). Binary and over-size diffs — an
+/// untracked file's contents included — come back as a [`DiffRefusal`].
 pub fn file_diff(
     root: &Path,
-    baseline: &str,
+    commit: Option<&str>,
     path: &Path,
     untracked: &BTreeSet<PathBuf>,
     runner: &dyn ProcessRunner,
 ) -> Result<Option<FileDiff>> {
-    if untracked.contains(path) {
-        return Ok(Some(FileDiff::new(
-            path,
-            FileDiffContent::Refused(DiffRefusal::Untracked),
-        )));
-    }
-
     let root = root.to_string_lossy().into_owned();
     let path_arg = path.to_string_lossy().into_owned();
-    // `--` separates the revision from the pathspec, so a path that looks like a
-    // ref ("main", "HEAD") is still read as a path.
-    let diff = run_git(
-        runner,
-        &[
-            "-C",
-            &root,
-            "diff",
-            "--no-renames",
-            baseline,
-            "--",
-            &path_arg,
-        ],
-    )?;
+
+    let diff = match commit {
+        // An untracked file is invisible to a diff against the index, so its
+        // diff is taken against nothing: every line an addition. `--no-index`
+        // exits 1 when the sides differ, which is the whole point here.
+        None if untracked.contains(path) => {
+            let output = runner
+                .run_with_timeout(
+                    "git",
+                    &[
+                        "-C",
+                        &root,
+                        "diff",
+                        "--no-index",
+                        "--no-renames",
+                        "--",
+                        "/dev/null",
+                        &path_arg,
+                    ],
+                    GIT_TIMEOUT,
+                )
+                .context("could not run git")?;
+            match output.status.code() {
+                Some(0 | 1) => String::from_utf8_lossy(&output.stdout).into_owned(),
+                _ => return Err(crate::cli::agent_tree::git_error(&output)),
+            }
+        }
+        // `--` separates the revision from the pathspec, so a path that looks
+        // like a ref ("main", "HEAD") is still read as a path.
+        None => run_git(
+            runner,
+            &["-C", &root, "diff", "--no-renames", "--", &path_arg],
+        )?,
+        // `git show` diffs a commit against its first parent, and a root
+        // commit against the empty tree; `--format=` suppresses the header.
+        Some(commit) => run_git(
+            runner,
+            &[
+                "-C",
+                &root,
+                "show",
+                "--first-parent",
+                "--format=",
+                "--no-renames",
+                commit,
+                "--",
+                &path_arg,
+            ],
+        )?,
+    };
 
     if diff.trim().is_empty() {
         return Ok(None);
@@ -189,7 +209,7 @@ pub fn file_diff(
 ///
 /// The argv and the parsing are the tree's, not a second copy
 /// ([`crate::agent_tree::parse_untracked`]). The tree's `[Added]` badge and this
-/// pane's "not yet staged" placeholder are answers to the SAME question about
+/// pane's whole-file-additions diff of it are answers to the SAME question about
 /// the same file, so a flag added to one query and not the other would leave the
 /// two panes disagreeing about a path — the same drift `git_changes` guards
 /// against by making its two diffs share a baseline.
@@ -300,7 +320,8 @@ pub struct DiffLine {
     pub text: String,
 }
 
-/// Build the document for `open` against `baseline`.
+/// Build the document for `open` against the selected source (`commit`: `None`
+/// for unstaged work).
 ///
 /// Order is the order of `open`, which is a `BTreeSet` of relative paths and so
 /// is TREE order — the tree is the index the user reads this pane through, so
@@ -311,14 +332,14 @@ pub struct DiffLine {
 /// while keeping the last good document on screen.
 pub fn build_document(
     root: &Path,
-    baseline: &str,
+    commit: Option<&str>,
     open: &[PathBuf],
     untracked: &BTreeSet<PathBuf>,
     runner: &dyn ProcessRunner,
 ) -> Result<Vec<DiffLine>> {
     let mut files = Vec::new();
     for path in open {
-        if let Some(diff) = file_diff(root, baseline, path, untracked, runner)? {
+        if let Some(diff) = file_diff(root, commit, path, untracked, runner)? {
             files.push(diff);
         }
     }
@@ -531,41 +552,65 @@ pub fn render(frame: &mut Frame, area: Rect, lines: &[DiffLine], state: &mut Dif
     frame.render_widget(Paragraph::new(visible).block(block), area);
 }
 
-/// A cheap fingerprint of what the open files currently look like to git.
-///
-/// One `--numstat` over every open path, which git answers from the index
-/// without materialising a patch. Comparing it tick to tick is what lets the
-/// pane skip the per-file diffs — the expensive part — when nothing has moved,
-/// so the steady-state cost of a one-second poll is two short git processes
-/// however many files are open. The same "only rebuild when the answer
-/// changes" short-circuit the tree already applies to its own query.
-///
-/// Untracked paths never appear here and do not need to: their placeholder is
-/// the same whatever the file says. A path that becomes tracked DOES change
-/// this output, which is the transition that has to be caught.
+/// A cheap fingerprint of what the open files currently look like to git for
+/// the selected source, so a pass where nothing moved can skip the per-file
+/// diffs (RefreshAgentTreeDiff's "Steady-state cost"). For unstaged work it
+/// must also see an open untracked path's contents change and its leaving the
+/// untracked listing, which the line counts alone cannot.
 fn open_files_fingerprint(
     root: &Path,
-    baseline: &str,
+    commit: Option<&str>,
     open: &[PathBuf],
     runner: &dyn ProcessRunner,
 ) -> Result<String> {
-    let root = root.to_string_lossy().into_owned();
+    let root_arg = root.to_string_lossy().into_owned();
     let paths: Vec<String> = open
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
-    let mut args: Vec<&str> = vec![
-        "-C",
-        &root,
-        "diff",
-        "--numstat",
-        "--no-renames",
-        "-z",
-        baseline,
-        "--",
-    ];
+
+    let mut args: Vec<&str> = vec!["-C", &root_arg];
+    match commit {
+        // Unstaged work: the working tree against the index, naming no
+        // revision — the same comparison the tree's counts answer.
+        None => args.extend(["diff", "--numstat", "--no-renames", "-z", "--"]),
+        Some(commit) => args.extend([
+            "show",
+            "--first-parent",
+            "--format=",
+            "--numstat",
+            "--no-renames",
+            "-z",
+            commit,
+            "--",
+        ]),
+    }
     args.extend(paths.iter().map(String::as_str));
-    run_git(runner, &args)
+    let mut fingerprint = run_git(runner, &args)?;
+
+    if commit.is_none() {
+        // The counts never see an untracked path. Which open paths are
+        // untracked, and each one's size and modification time, stand in for
+        // its contents: a growing new file moves them, and staging one takes
+        // it out of the listing.
+        let untracked = untracked_paths(root, open, runner)?;
+        for path in &untracked {
+            fingerprint.push_str(&format!("\0untracked {}", path.display()));
+            match std::fs::metadata(root.join(path)) {
+                Ok(meta) => {
+                    let mtime = meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_nanos())
+                        .unwrap_or(0);
+                    fingerprint.push_str(&format!(" {} {mtime}", meta.len()));
+                }
+                Err(_) => fingerprint.push_str(" missing"),
+            }
+        }
+    }
+    Ok(fingerprint)
 }
 
 /// What the last successful refresh saw, so the next one can tell whether
@@ -575,6 +620,9 @@ struct LastSeen {
     /// The open paths as the tree last published them, ORDER INCLUDED — a
     /// reorder is a reason to rebuild, because the document is rendered in it.
     open: Vec<PathBuf>,
+    /// The source the document was built for; a selection change is a reason
+    /// to rebuild even when nothing else moved.
+    source: Option<String>,
     fingerprint: String,
 }
 
@@ -587,7 +635,6 @@ struct LastSeen {
 /// make it flicker empty exactly when the user most wants to read it.
 fn refresh(
     root: &Path,
-    base_branch: &str,
     runner: &dyn ProcessRunner,
     last: &mut LastSeen,
     lines: &mut Vec<DiffLine>,
@@ -602,7 +649,7 @@ fn refresh(
         return;
     }
 
-    match rebuild(root, base_branch, &open, runner, last) {
+    match rebuild(root, &open, runner, last) {
         Ok(fresh) => {
             state.notice = None;
             if let Some(fresh) = fresh {
@@ -612,7 +659,6 @@ fn refresh(
         Err(e) => {
             tracing::warn!(
                 root = %root.display(),
-                base_branch,
                 // `{e:#}` so the log carries the cause (timeout, spawn failure), not
                 // just the outermost context.
                 error = format_args!("{e:#}"),
@@ -634,19 +680,27 @@ fn refresh(
 /// lines or fails, and `refresh` decides what a failure looks like to the user.
 fn rebuild(
     root: &Path,
-    base_branch: &str,
     open: &[PathBuf],
     runner: &dyn ProcessRunner,
     last: &mut LastSeen,
 ) -> Result<Option<Vec<DiffLine>>> {
-    let baseline = fork_point(&root.to_string_lossy(), base_branch, runner)?;
-    let fingerprint = open_files_fingerprint(root, &baseline, open, runner)?;
-    if open == last.open && fingerprint == last.fingerprint {
+    // The source is the tree's selection, read from where the open set is
+    // (AgentTreeSourceIsOneSelection). Whether it moved since the last pass is
+    // part of the short-circuit below.
+    let source = crate::agent_tree_open_set::read_selected_source(&root.to_string_lossy());
+    let fingerprint = open_files_fingerprint(root, source.as_deref(), open, runner)?;
+    if open == last.open && source == last.source && fingerprint == last.fingerprint {
         return Ok(None);
     }
-    let untracked = untracked_paths(root, open, runner)?;
-    let lines = build_document(root, &baseline, open, &untracked, runner)?;
+    // A commit has no untracked files.
+    let untracked = if source.is_none() {
+        untracked_paths(root, open, runner)?
+    } else {
+        BTreeSet::new()
+    };
+    let lines = build_document(root, source.as_deref(), open, &untracked, runner)?;
     last.open = open.to_vec();
+    last.source = source;
     last.fingerprint = fingerprint;
     Ok(Some(lines))
 }
@@ -654,7 +708,6 @@ fn rebuild(
 fn run_loop<B: Backend>(
     terminal: &mut Terminal<B>,
     root: &Path,
-    base_branch: &str,
     runner: &dyn ProcessRunner,
     usage: &mut crate::cli::PaneUsage,
 ) -> Result<()> {
@@ -667,7 +720,7 @@ fn run_loop<B: Backend>(
     // empty bordered pane is a better answer than whatever tmux left in the
     // cell.
     terminal.draw(|frame| render(frame, frame.area(), &lines, &mut state))?;
-    refresh(root, base_branch, runner, &mut last, &mut lines, &mut state);
+    refresh(root, runner, &mut last, &mut lines, &mut state);
 
     loop {
         terminal.draw(|frame| render(frame, frame.area(), &lines, &mut state))?;
@@ -691,7 +744,7 @@ fn run_loop<B: Backend>(
             continue;
         }
 
-        refresh(root, base_branch, runner, &mut last, &mut lines, &mut state);
+        refresh(root, runner, &mut last, &mut lines, &mut state);
     }
 }
 
@@ -699,8 +752,8 @@ fn run_loop<B: Backend>(
 /// agent-tree pane currently has open.
 ///
 /// Takes the task id rather than a worktree path so the two panes cannot
-/// disagree about which worktree they are looking at, and so this pane resolves
-/// the baseline from the same `base_branch` the tree does.
+/// disagree about which worktree they are looking at, and so this pane reads
+/// the same selected source the tree publishes.
 pub async fn run(board_port: u16, task_id: i64) -> Result<()> {
     let source = crate::cli::BoardPaneSource { port: board_port };
     let mut usage = crate::cli::PaneUsage::new(board_port, task_id);
@@ -708,14 +761,10 @@ pub async fn run(board_port: u16, task_id: i64) -> Result<()> {
         &source,
         task_id,
         crate::keybindings::KeyNamespace::AgentDiff,
-        |terminal, root, base_branch| {
-            run_loop(
-                terminal,
-                &root,
-                &base_branch,
-                &RealProcessRunner::default(),
-                &mut usage,
-            )
+        // The diff pane needs no base branch: its source is the tree's
+        // selection (AgentTreeSourceIsOneSelection).
+        |terminal, root, _base_branch| {
+            run_loop(terminal, &root, &RealProcessRunner::default(), &mut usage)
         },
     );
     // An exit through an error path leaves sends outstanding.
@@ -744,7 +793,8 @@ mod tests {
     use crate::cli::agent_tree::GIT_TIMEOUT;
     use crate::process::MockProcessRunner;
 
-    const BASELINE: &str = "1111111111111111111111111111111111111111";
+    /// A commit the user has selected in the tree's commits section.
+    const COMMIT: &str = "3333333333333333333333333333333333333333";
 
     fn no_untracked() -> BTreeSet<PathBuf> {
         BTreeSet::new()
@@ -762,7 +812,7 @@ mod tests {
 
         let diff = file_diff(
             Path::new("/wt"),
-            BASELINE,
+            None,
             Path::new("a.rs"),
             &no_untracked(),
             &runner,
@@ -773,15 +823,18 @@ mod tests {
         assert_eq!(diff.content, FileDiffContent::Shown(A_PATCH.to_owned()));
     }
 
-    /// The same baseline the tree resolved, and `--` so a path that looks like
-    /// a ref is still read as a path.
+    /// Unstaged work is the working tree against the INDEX, so the diff names
+    /// no revision — the same comparison the tree's badge answers
+    /// (RefreshAgentTreeDiff's "The same baseline, asked the same way"). `--`
+    /// still separates the pathspec, so a path that looks like a ref is read
+    /// as a path.
     #[test]
-    fn the_diff_is_taken_against_the_callers_baseline() {
+    fn unstaged_work_is_diffed_against_the_index_naming_no_revision() {
         let runner = diff_rig(A_PATCH);
 
         file_diff(
             Path::new("/wt"),
-            BASELINE,
+            None,
             Path::new("main"),
             &no_untracked(),
             &runner,
@@ -790,32 +843,32 @@ mod tests {
 
         assert_eq!(
             runner.flattened_calls(),
-            vec![format!("git -C /wt diff --no-renames {BASELINE} -- main")]
+            vec!["git -C /wt diff --no-renames -- main".to_string()]
         );
     }
 
-    /// An untracked file is invisible to a diff against the index, so it is not
-    /// even asked about — a diff would come back empty and be indistinguishable
-    /// from a file the agent reverted.
+    /// With a commit selected, the one diff asked for names that commit,
+    /// keeps rename detection off, and still bounds the path with `--`.
     #[test]
-    fn an_untracked_file_is_refused_without_running_git() {
-        let runner = MockProcessRunner::new(vec![]);
+    fn a_selected_commits_diff_names_the_commit_and_the_path() {
+        let runner = diff_rig(A_PATCH);
 
         let diff = file_diff(
             Path::new("/wt"),
-            BASELINE,
-            Path::new("new.rs"),
-            &untracked_set(&["new.rs"]),
+            Some(COMMIT),
+            Path::new("main"),
+            &no_untracked(),
             &runner,
         )
         .unwrap()
         .unwrap();
 
-        assert_eq!(
-            diff.content,
-            FileDiffContent::Refused(DiffRefusal::Untracked)
-        );
-        assert!(runner.flattened_calls().is_empty());
+        assert_eq!(diff.content, FileDiffContent::Shown(A_PATCH.to_owned()));
+        let calls = runner.flattened_calls();
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert!(calls[0].contains(COMMIT), "{calls:?}");
+        assert!(calls[0].contains("--no-renames"), "{calls:?}");
+        assert!(calls[0].ends_with("-- main"), "{calls:?}");
     }
 
     #[test]
@@ -826,7 +879,7 @@ mod tests {
 
         let diff = file_diff(
             Path::new("/wt"),
-            BASELINE,
+            None,
             Path::new("logo.png"),
             &no_untracked(),
             &runner,
@@ -847,7 +900,7 @@ mod tests {
 
         let diff = file_diff(
             Path::new("/wt"),
-            BASELINE,
+            None,
             Path::new("x.rs"),
             &no_untracked(),
             &runner,
@@ -868,7 +921,7 @@ mod tests {
 
         let diff = file_diff(
             Path::new("/wt"),
-            BASELINE,
+            None,
             Path::new("big.rs"),
             &no_untracked(),
             &runner,
@@ -882,16 +935,16 @@ mod tests {
         );
     }
 
-    /// A path the user opened and the agent then reverted. Not an error, not a
-    /// placeholder, and NOT a reason to close it — see
-    /// OpenDiffPathsMaySurviveTheirFiles in docs/specs/agent-tree.allium.
+    /// A path the user opened and the agent then reverted, staged or
+    /// committed. Not an error, not a placeholder, and NOT a reason to close
+    /// it — see OpenDiffPathsMaySurviveTheirFiles in docs/specs/agent-tree.allium.
     #[test]
     fn a_path_git_no_longer_reports_shows_nothing_at_all() {
         let runner = diff_rig("");
 
         let diff = file_diff(
             Path::new("/wt"),
-            BASELINE,
+            None,
             Path::new("reverted.rs"),
             &no_untracked(),
             &runner,
@@ -907,7 +960,7 @@ mod tests {
 
         let err = file_diff(
             Path::new("/wt"),
-            BASELINE,
+            None,
             Path::new("a.rs"),
             &no_untracked(),
             &runner,
@@ -922,7 +975,7 @@ mod tests {
         let runner = diff_rig(A_PATCH);
         file_diff(
             Path::new("/wt"),
-            BASELINE,
+            None,
             Path::new("a.rs"),
             &no_untracked(),
             &runner,
@@ -957,8 +1010,7 @@ mod tests {
     }
 
     /// The pathspec is the open set, so a path git does not report back is
-    /// tracked — which is what makes the placeholder a statement about the
-    /// file rather than about the query.
+    /// tracked.
     #[test]
     fn a_tracked_open_path_is_absent_from_the_untracked_answer() {
         let runner = diff_rig("");
@@ -967,15 +1019,159 @@ mod tests {
     }
 }
 
+/// `file_diff` against a real repository: what the unstaged and one-commit
+/// comparisons actually answer, which a mock can only assume.
+#[cfg(test)]
+mod real_git_tests {
+    use super::*;
+    use crate::cli::agent_tree::test_repo::TestRepo;
+    use crate::process::RealProcessRunner;
+
+    fn diff_of(
+        repo: &TestRepo,
+        commit: Option<&str>,
+        path: &str,
+        untracked: &[&str],
+    ) -> Option<FileDiff> {
+        file_diff(
+            repo.root(),
+            commit,
+            Path::new(path),
+            &untracked_set(untracked),
+            &RealProcessRunner::default(),
+        )
+        .expect("file_diff")
+    }
+
+    fn body(diff: Option<FileDiff>) -> String {
+        match diff.map(|d| d.content) {
+            Some(FileDiffContent::Shown(body)) => body,
+            other => panic!("expected a shown diff, got {other:?}"),
+        }
+    }
+
+    /// RefreshAgentTreeDiff's "Untracked files": an open untracked path is a
+    /// diff against nothing — every line an addition. Not a refusal, and no
+    /// advice to stage it: in this view staging would remove it.
+    #[test]
+    fn an_untracked_file_is_shown_whole_as_additions() {
+        let repo = TestRepo::new();
+        repo.write("new.rs", "one\ntwo\n");
+
+        let body = body(diff_of(&repo, None, "new.rs", &["new.rs"]));
+
+        let added: Vec<&str> = body
+            .lines()
+            .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+            .collect();
+        assert_eq!(added, vec!["+one", "+two"], "{body}");
+        assert!(!body
+            .lines()
+            .any(|l| l.starts_with('-') && !l.starts_with("---")));
+    }
+
+    /// Both refusals apply to an untracked file's contents as to any diff.
+    #[test]
+    fn an_untracked_binary_file_is_refused_as_binary() {
+        let repo = TestRepo::new();
+        repo.write_bytes("logo.png", b"\x89PNG\0\x01\x02\x03\0binary");
+
+        let diff = diff_of(&repo, None, "logo.png", &["logo.png"]).expect("a refusal");
+
+        assert_eq!(diff.content, FileDiffContent::Refused(DiffRefusal::Binary));
+    }
+
+    #[test]
+    fn an_untracked_file_too_large_to_show_is_refused() {
+        let repo = TestRepo::new();
+        repo.write("huge.txt", &"x\n".repeat(DIFF_MAX_BYTES));
+
+        let diff = diff_of(&repo, None, "huge.txt", &["huge.txt"]).expect("a refusal");
+
+        assert_eq!(
+            diff.content,
+            FileDiffContent::Refused(DiffRefusal::TooLarge)
+        );
+    }
+
+    /// Unstaged work shows the unstaged hunk only — never staged lines under
+    /// a row that exists because of an unstaged one.
+    #[test]
+    fn only_the_unstaged_hunk_of_a_file_is_shown() {
+        let repo = TestRepo::new();
+        repo.write("seed.txt", "seed\nstaged line\n");
+        repo.git(&["add", "seed.txt"]);
+        repo.append("seed.txt", "unstaged line\n");
+
+        let body = body(diff_of(&repo, None, "seed.txt", &[]));
+
+        assert!(body.contains("+unstaged line"), "{body}");
+        assert!(!body.contains("+staged line"), "{body}");
+    }
+
+    /// A file whose whole change is staged has nothing to show for unstaged
+    /// work — the same answer as a reverted one.
+    #[test]
+    fn a_fully_staged_file_has_nothing_to_show() {
+        let repo = TestRepo::new();
+        repo.write("seed.txt", "seed\nstaged line\n");
+        repo.git(&["add", "seed.txt"]);
+
+        assert_eq!(diff_of(&repo, None, "seed.txt", &[]), None);
+    }
+
+    /// A selected commit's diff is that commit against its parent, whatever
+    /// the working tree holds meanwhile.
+    #[test]
+    fn a_selected_commits_diff_is_that_commit_against_its_parent() {
+        let repo = TestRepo::new();
+        repo.write("a.rs", "a1\n");
+        repo.commit_all("first");
+        repo.write("a.rs", "a1\na2\n");
+        let second = repo.commit_all("second");
+        repo.write("a.rs", "work in progress\n");
+
+        let body = body(diff_of(&repo, Some(&second), "a.rs", &[]));
+
+        assert!(body.contains("+a2"), "{body}");
+        assert!(!body.contains("work in progress"), "{body}");
+    }
+
+    /// A root commit is diffed against the empty tree.
+    #[test]
+    fn a_root_commits_file_is_diffed_against_nothing() {
+        let repo = TestRepo::new();
+        let root_commit = repo.git(&["rev-list", "--max-parents=0", "HEAD"]);
+
+        let body = body(diff_of(&repo, Some(root_commit.trim()), "seed.txt", &[]));
+
+        assert!(body.contains("+seed"), "{body}");
+    }
+
+    /// A path the selected commit did not touch contributes nothing
+    /// (OpenDiffPathsMaySurviveTheirFiles: "the user selected a source that
+    /// does not touch it").
+    #[test]
+    fn a_path_the_selected_commit_did_not_touch_shows_nothing() {
+        let repo = TestRepo::new();
+        repo.write("a.rs", "a\n");
+        let commit = repo.commit_all("add a");
+
+        assert_eq!(diff_of(&repo, Some(&commit), "seed.txt", &[]), None);
+    }
+}
+
 #[cfg(test)]
 mod document_tests {
     use super::*;
     use crate::process::MockProcessRunner;
 
-    const BASELINE: &str = "1111111111111111111111111111111111111111";
-
     fn patch(path: &str) -> String {
         format!("diff --git a/{path} b/{path}\n@@ -1 +1 @@\n-old\n+new\n")
+    }
+
+    fn binary(path: &str) -> String {
+        format!("diff --git a/{path} b/{path}\nBinary files a/{path} and b/{path} differ\n")
     }
 
     fn rig(outputs: &[&str]) -> MockProcessRunner {
@@ -1009,7 +1205,7 @@ mod document_tests {
 
         let doc = build_document(
             Path::new("/wt"),
-            BASELINE,
+            None,
             &open_set(&["a.rs", "src/lib.rs"]),
             &BTreeSet::new(),
             &runner,
@@ -1023,9 +1219,7 @@ mod document_tests {
     /// The document follows the order the TREE published, and does not sort.
     /// Tree order is not path order — a folder's own files sort ahead of its
     /// subfolders (`RowsPutAFoldersOwnFilesFirst`), so `z.rs` has a row above
-    /// `src/lib.rs` while sorting after it lexicographically. This pane cannot
-    /// re-derive that from paths alone, so the order it is handed is the
-    /// answer.
+    /// `src/lib.rs` while sorting after it lexicographically.
     ///
     /// The input is deliberately an order no sort of these paths produces.
     #[test]
@@ -1034,7 +1228,7 @@ mod document_tests {
 
         let doc = build_document(
             Path::new("/wt"),
-            BASELINE,
+            None,
             &open_set(&["a.rs", "z.rs", "src/lib.rs"]),
             &BTreeSet::new(),
             &runner,
@@ -1044,43 +1238,45 @@ mod document_tests {
         assert_eq!(headings(&doc), vec!["a.rs", "z.rs", "src/lib.rs"]);
     }
 
+    /// A refusal renders its reason in place of contents. There are exactly
+    /// two refusals now — binary and too large — and no "not yet staged"
+    /// placeholder (DiffRefusal).
     #[test]
     fn a_refused_file_renders_its_reason_in_place_of_contents() {
-        let runner = rig(&[]);
+        let runner = rig(&[&binary("logo.png")]);
 
         let doc = build_document(
             Path::new("/wt"),
-            BASELINE,
-            &open_set(&["new.rs"]),
-            &untracked_set(&["new.rs"]),
+            None,
+            &open_set(&["logo.png"]),
+            &BTreeSet::new(),
             &runner,
         )
         .unwrap();
 
         let lines = texts(&doc);
-        assert_eq!(lines[0], "new.rs");
-        assert!(lines[1].contains("not yet staged"), "got {lines:?}");
+        assert_eq!(lines, vec!["logo.png", DiffRefusal::Binary.message()]);
+        assert_eq!(doc[1].kind, DiffLineKind::Refusal);
     }
 
     /// One refused file must not cost the user the diffs either side of it —
     /// which is why a refusal rides on the file rather than on the pane.
     #[test]
     fn a_refusal_does_not_stop_the_files_around_it_rendering() {
-        let runner = rig(&[&patch("a.rs"), &patch("z.rs")]);
+        let runner = rig(&[&patch("a.rs"), &binary("logo.png"), &patch("z.rs")]);
 
         let doc = build_document(
             Path::new("/wt"),
-            BASELINE,
-            &open_set(&["a.rs", "new.rs", "z.rs"]),
-            &untracked_set(&["new.rs"]),
+            None,
+            &open_set(&["a.rs", "logo.png", "z.rs"]),
+            &BTreeSet::new(),
             &runner,
         )
         .unwrap();
 
-        assert_eq!(headings(&doc), vec!["a.rs", "new.rs", "z.rs"]);
+        assert_eq!(headings(&doc), vec!["a.rs", "logo.png", "z.rs"]);
         let lines = texts(&doc);
-        // The refusal sits between the two patches, and both patches rendered.
-        assert!(lines.iter().any(|l| l.contains("not yet staged")));
+        assert!(lines.iter().any(|l| l == DiffRefusal::Binary.message()));
         assert_eq!(
             lines.iter().filter(|l| l.starts_with("@@")).count(),
             2,
@@ -1096,7 +1292,7 @@ mod document_tests {
 
         let doc = build_document(
             Path::new("/wt"),
-            BASELINE,
+            None,
             &open_set(&["a.rs", "b.rs"]),
             &BTreeSet::new(),
             &runner,
@@ -1109,8 +1305,7 @@ mod document_tests {
     #[test]
     fn an_empty_open_set_builds_an_empty_document() {
         let runner = rig(&[]);
-        let doc =
-            build_document(Path::new("/wt"), BASELINE, &[], &BTreeSet::new(), &runner).unwrap();
+        let doc = build_document(Path::new("/wt"), None, &[], &BTreeSet::new(), &runner).unwrap();
         assert!(doc.is_empty());
     }
 
@@ -1119,7 +1314,7 @@ mod document_tests {
         let runner = rig(&[&patch("a.rs")]);
         let doc = build_document(
             Path::new("/wt"),
-            BASELINE,
+            None,
             &open_set(&["a.rs"]),
             &BTreeSet::new(),
             &runner,
@@ -1155,7 +1350,7 @@ mod document_tests {
         let runner = MockProcessRunner::new(vec![MockProcessRunner::fail("fatal: bad object")]);
         assert!(build_document(
             Path::new("/wt"),
-            BASELINE,
+            None,
             &open_set(&["a.rs"]),
             &BTreeSet::new(),
             &runner,
@@ -1167,166 +1362,297 @@ mod document_tests {
 #[cfg(test)]
 mod refresh_tests {
     use super::*;
-    use crate::agent_tree_open_set::write_open_set;
-    use crate::process::MockProcessRunner;
+    use crate::agent_tree_open_set::{read_open_set, write_open_set, write_selected_source};
+    use crate::cli::agent_tree::test_repo::TestRepo;
+    use crate::process::{MockProcessRunner, RealProcessRunner};
     use crate::worktree_admin::tests::make_linked_worktree;
 
-    const SHA: &str = "1111111111111111111111111111111111111111";
-    const PATCH: &str = "diff --git a/a.rs b/a.rs\n@@ -1 +1 @@\n-old\n+new\n";
-
-    fn ok(stdout: &str) -> Result<std::process::Output> {
-        MockProcessRunner::ok_with_stdout(stdout.as_bytes())
-    }
-
-    /// The git answers one full rebuild of a single open file reads: two
-    /// merge-bases, the fingerprint, the untracked listing and the diff.
-    fn full_rebuild(fingerprint: &str) -> Vec<Result<std::process::Output>> {
-        vec![ok(SHA), ok(SHA), ok(fingerprint), ok(""), ok(PATCH)]
-    }
-
-    /// The git answers a pass that finds nothing moved reads.
-    fn fingerprint_only(fingerprint: &str) -> Vec<Result<std::process::Output>> {
-        vec![ok(SHA), ok(SHA), ok(fingerprint)]
-    }
-
+    /// A diff pane over a real worktree, refreshed with real git.
     struct Pane {
-        _dir: tempfile::TempDir,
-        root: String,
+        repo: TestRepo,
         last: LastSeen,
         lines: Vec<DiffLine>,
         state: DiffState,
     }
 
     impl Pane {
-        fn new(open: &[&str]) -> Self {
-            let dir = tempfile::tempdir().unwrap();
-            let (root, _) = make_linked_worktree(dir.path(), "task");
-            let pane = Self {
-                _dir: dir,
-                root,
+        fn new() -> Self {
+            Self {
+                repo: TestRepo::new(),
                 last: LastSeen::default(),
                 lines: Vec::new(),
                 state: DiffState::new(),
-            };
-            pane.open(open);
-            pane
+            }
         }
 
+        /// Publish the open set, as the tree does.
         fn open(&self, open: &[&str]) {
             let paths: Vec<PathBuf> = open.iter().map(PathBuf::from).collect();
-            write_open_set(&self.root, &paths).unwrap();
+            write_open_set(&self.repo.root_str(), &paths).unwrap();
         }
 
-        fn refresh(&mut self, runner: &MockProcessRunner) {
+        /// Publish the selected source, as the tree does.
+        fn select(&self, commit: Option<&str>) {
+            write_selected_source(&self.repo.root_str(), commit).unwrap();
+        }
+
+        fn refresh_with(&mut self, runner: &dyn ProcessRunner) {
             refresh(
-                Path::new(&self.root),
-                "main",
+                self.repo.root(),
                 runner,
                 &mut self.last,
                 &mut self.lines,
                 &mut self.state,
             );
         }
+
+        fn refresh(&mut self) {
+            self.refresh_with(&RealProcessRunner::default());
+        }
+
+        fn text(&self) -> String {
+            self.lines
+                .iter()
+                .map(|l| l.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+
+    /// Real git, with every argv recorded — for the steady-state cost.
+    #[derive(Default)]
+    struct Recording {
+        inner: RealProcessRunner,
+        calls: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl Recording {
+        fn take(&self) -> Vec<String> {
+            std::mem::take(&mut *self.calls.lock().unwrap())
+        }
+    }
+
+    impl ProcessRunner for Recording {
+        fn run(&self, program: &str, args: &[&str]) -> Result<std::process::Output> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("{program} {}", args.join(" ")));
+            self.inner.run(program, args)
+        }
+
+        fn run_with_timeout(
+            &self,
+            program: &str,
+            args: &[&str],
+            timeout: std::time::Duration,
+        ) -> Result<std::process::Output> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("{program} {}", args.join(" ")));
+            self.inner.run_with_timeout(program, args, timeout)
+        }
     }
 
     #[test]
     fn an_empty_open_set_blanks_the_pane_without_asking_git() {
-        let mut pane = Pane::new(&[]);
-        pane.lines = vec![DiffLine {
+        let dir = tempfile::tempdir().unwrap();
+        let (root, _) = make_linked_worktree(dir.path(), "task");
+        let mut last = LastSeen::default();
+        let mut lines = vec![DiffLine {
             kind: DiffLineKind::Context,
             text: "stale".into(),
         }];
-        pane.state.notice = Some("old".into());
+        let mut state = DiffState::new();
+        state.notice = Some("old".into());
         let runner = MockProcessRunner::new(vec![]);
-        pane.refresh(&runner);
-        assert!(pane.lines.is_empty());
-        assert_eq!(pane.state.notice, None);
+
+        refresh(Path::new(&root), &runner, &mut last, &mut lines, &mut state);
+
+        assert!(lines.is_empty());
+        assert_eq!(state.notice, None);
         assert!(runner.recorded_calls().is_empty());
     }
 
+    /// By default the pane shows unstaged work.
     #[test]
-    fn a_first_refresh_builds_the_document() {
-        let mut pane = Pane::new(&["a.rs"]);
-        pane.refresh(&MockProcessRunner::new(full_rebuild("1\t1\ta.rs")));
-        assert!(pane.lines.iter().any(|l| l.text == "a.rs"));
+    fn a_first_refresh_builds_the_document_of_unstaged_work() {
+        let mut pane = Pane::new();
+        pane.repo.append("seed.txt", "more\n");
+        pane.open(&["seed.txt"]);
+
+        pane.refresh();
+
         assert!(pane
             .lines
             .iter()
-            .any(|l| l.kind == DiffLineKind::Added && l.text.contains("new")));
+            .any(|l| l.kind == DiffLineKind::Heading && l.text == "seed.txt"));
+        assert!(pane
+            .lines
+            .iter()
+            .any(|l| l.kind == DiffLineKind::Added && l.text == "+more"));
         assert_eq!(pane.state.notice, None);
     }
 
+    /// An open untracked file shows its whole contents as additions.
     #[test]
-    fn a_refresh_where_nothing_moved_skips_the_diff() {
-        let mut pane = Pane::new(&["a.rs"]);
-        pane.refresh(&MockProcessRunner::new(full_rebuild("1\t1\ta.rs")));
-        let before = pane.lines.len();
-        let runner = MockProcessRunner::new(fingerprint_only("1\t1\ta.rs"));
-        pane.refresh(&runner);
-        assert_eq!(pane.lines.len(), before);
-        assert_eq!(runner.recorded_calls().len(), 3);
-    }
+    fn an_open_untracked_file_shows_its_whole_contents() {
+        let mut pane = Pane::new();
+        pane.repo.write("new.rs", "one\n");
+        pane.open(&["new.rs"]);
 
-    #[test]
-    fn a_changed_fingerprint_rebuilds() {
-        let mut pane = Pane::new(&["a.rs"]);
-        pane.refresh(&MockProcessRunner::new(full_rebuild("1\t1\ta.rs")));
-        let runner = MockProcessRunner::new(full_rebuild("2\t1\ta.rs"));
-        pane.refresh(&runner);
-        assert_eq!(runner.recorded_calls().len(), 5);
-        assert_eq!(pane.last.fingerprint, "2\t1\ta.rs");
-    }
+        pane.refresh();
 
-    #[test]
-    fn a_reordered_open_set_rebuilds_even_when_git_says_nothing_changed() {
-        let mut pane = Pane::new(&["a.rs", "b.rs"]);
-        let two_files = vec![ok(SHA), ok(SHA), ok("fp"), ok(""), ok(PATCH), ok(PATCH)];
-        pane.refresh(&MockProcessRunner::new(two_files));
-        pane.open(&["b.rs", "a.rs"]);
-        let again = vec![ok(SHA), ok(SHA), ok("fp"), ok(""), ok(PATCH), ok(PATCH)];
-        let runner = MockProcessRunner::new(again);
-        pane.refresh(&runner);
-        assert_eq!(runner.recorded_calls().len(), 6);
-        assert_eq!(
-            pane.last.open,
-            vec![PathBuf::from("b.rs"), PathBuf::from("a.rs")]
+        assert!(
+            pane.lines.iter().any(|l| l.text == "+one"),
+            "{}",
+            pane.text()
         );
     }
 
+    /// The counts cannot see an untracked file change, so its contents are
+    /// part of the fingerprint: a growing new file must not freeze at its
+    /// first read.
+    #[test]
+    fn a_growing_untracked_file_is_re_read() {
+        let mut pane = Pane::new();
+        pane.repo.write("new.rs", "one\n");
+        pane.open(&["new.rs"]);
+        pane.refresh();
+
+        pane.repo.append("new.rs", "two\n");
+        pane.refresh();
+
+        assert!(
+            pane.lines.iter().any(|l| l.text == "+two"),
+            "{}",
+            pane.text()
+        );
+    }
+
+    /// Staging a new file and editing nothing further moves it from untracked
+    /// to absent, with an empty count answer both before and after. It must
+    /// leave the pane rather than keep its whole-file diff on screen.
+    #[test]
+    fn staging_an_open_untracked_file_takes_it_out_of_the_pane() {
+        let mut pane = Pane::new();
+        pane.repo.write("new.rs", "one\n");
+        pane.open(&["new.rs"]);
+        pane.refresh();
+        assert!(!pane.lines.is_empty());
+
+        pane.repo.git(&["add", "new.rs"]);
+        pane.refresh();
+
+        assert!(pane.lines.is_empty(), "{}", pane.text());
+    }
+
+    /// AgentTreeSourceIsOneSelection: the pane reads the selection from where
+    /// it reads the open set and follows it — to a commit and back again —
+    /// even though nothing in the worktree moved in between.
+    #[test]
+    fn the_pane_follows_the_selected_source() {
+        let mut pane = Pane::new();
+        pane.repo.write("a.rs", "a1\n");
+        pane.repo.commit_all("first");
+        pane.repo.write("a.rs", "a1\na2\n");
+        let second = pane.repo.commit_all("second");
+        pane.repo.write("a.rs", "a1\na2\nwork in progress\n");
+        pane.open(&["a.rs"]);
+
+        pane.refresh();
+        assert!(pane.text().contains("+work in progress"), "{}", pane.text());
+        assert!(!pane.text().contains("+a2"), "{}", pane.text());
+
+        pane.select(Some(&second));
+        pane.refresh();
+        assert!(pane.text().contains("+a2"), "{}", pane.text());
+        assert!(!pane.text().contains("work in progress"), "{}", pane.text());
+
+        pane.select(None);
+        pane.refresh();
+        assert!(pane.text().contains("+work in progress"), "{}", pane.text());
+    }
+
+    /// A path the agent committed since it was opened shows nothing — and
+    /// stays open (OpenDiffPathsMaySurviveTheirFiles).
+    #[test]
+    fn a_path_committed_since_it_was_opened_shows_nothing_and_stays_open() {
+        let mut pane = Pane::new();
+        pane.repo.append("seed.txt", "more\n");
+        pane.open(&["seed.txt"]);
+        pane.refresh();
+        assert!(!pane.lines.is_empty());
+
+        pane.repo.commit_all("commit it");
+        pane.refresh();
+
+        assert!(pane.lines.is_empty(), "{}", pane.text());
+        assert_eq!(
+            read_open_set(&pane.repo.root_str()),
+            vec![PathBuf::from("seed.txt")]
+        );
+    }
+
+    /// The steady-state cost: a pass where nothing moved re-reads no contents,
+    /// so it runs fewer git commands than the pass that built the document,
+    /// and leaves the document as it was.
+    #[test]
+    fn a_refresh_where_nothing_moved_skips_the_diff() {
+        let mut pane = Pane::new();
+        pane.repo.append("seed.txt", "more\n");
+        pane.open(&["seed.txt"]);
+        let runner = Recording::default();
+
+        pane.refresh_with(&runner);
+        let building = runner.take();
+        let built = pane.lines.clone();
+        pane.refresh_with(&runner);
+        let steady = runner.take();
+
+        assert_eq!(pane.lines, built);
+        assert!(
+            steady.len() < building.len(),
+            "steady {steady:?} vs building {building:?}"
+        );
+    }
+
+    /// A failed git query leaves the document untouched and says so, the same
+    /// way the tree keeps its last good tree.
     #[test]
     fn a_failed_git_query_keeps_the_last_document_and_sets_a_notice() {
-        let mut pane = Pane::new(&["a.rs"]);
-        pane.refresh(&MockProcessRunner::new(full_rebuild("fp")));
-        let kept = pane.lines.len();
-        let runner = MockProcessRunner::new(vec![
-            MockProcessRunner::fail("index.lock exists"),
-            MockProcessRunner::fail("index.lock exists"),
-        ]);
-        pane.refresh(&runner);
-        assert_eq!(pane.lines.len(), kept);
-        assert!(pane.state.notice.is_some());
+        let dir = tempfile::tempdir().unwrap();
+        let (root, _) = make_linked_worktree(dir.path(), "task");
+        write_open_set(&root, &[PathBuf::from("a.rs")]).unwrap();
+        let mut last = LastSeen::default();
+        let kept = vec![DiffLine {
+            kind: DiffLineKind::Context,
+            text: "the last good document".into(),
+        }];
+        let mut lines = kept.clone();
+        let mut state = DiffState::new();
+        let runner = MockProcessRunner::new(vec![MockProcessRunner::fail(
+            "fatal: unable to read index.lock",
+        )]);
+
+        refresh(Path::new(&root), &runner, &mut last, &mut lines, &mut state);
+
+        assert_eq!(lines, kept);
+        let notice = state.notice.expect("a notice");
+        assert!(notice.contains("index.lock"), "{notice}");
     }
 
     #[test]
     fn the_notice_clears_on_the_next_good_pass() {
-        let mut pane = Pane::new(&["a.rs"]);
+        let mut pane = Pane::new();
+        pane.repo.append("seed.txt", "more\n");
+        pane.open(&["seed.txt"]);
         pane.state.notice = Some("earlier failure".into());
-        pane.refresh(&MockProcessRunner::new(full_rebuild("fp")));
-        assert_eq!(pane.state.notice, None);
-    }
 
-    #[test]
-    fn the_fingerprint_query_names_the_baseline_and_every_open_path() {
-        let runner = MockProcessRunner::new(vec![ok("x")]);
-        let open = vec![PathBuf::from("a.rs"), PathBuf::from("b.rs")];
-        let got = open_files_fingerprint(Path::new("/w"), SHA, &open, &runner).unwrap();
-        assert_eq!(got, "x");
-        let calls = runner.flattened_calls();
-        assert!(calls[0].contains("diff --numstat"), "{calls:?}");
-        assert!(
-            calls[0].contains(SHA) && calls[0].ends_with("-- a.rs b.rs"),
-            "{calls:?}"
-        );
+        pane.refresh();
+
+        assert_eq!(pane.state.notice, None);
     }
 }
 

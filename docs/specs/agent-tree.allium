@@ -4,18 +4,24 @@
 -- Scope: The agent file tree panel — a companion pane living inside each
 --        agent's own tmux window that shows which files in that agent's
 --        worktree have changed.
--- Includes: The git query that answers "what changed" (a diff of the worktree
---           against this branch's fork point from the task's base branch, plus
---           untracked files, plus how many lines each changed file gained and
---           lost); the companion pane's lifecycle (split at agent-window
+-- Includes: The git query that answers "what changed" — by default a diff of
+--           the worktree against the index (the agent's UNSTAGED work only)
+--           plus untracked files, and, when the user has selected one of the
+--           agent's commits, that one commit against its parent; in both
+--           cases with how many lines each changed file gained and lost (see
+--           AgentTreeShowsUnstagedWorkOnly and AgentTreeSourceIsOneSelection);
+--           the companion pane's lifecycle (split at agent-window
 --           creation, global toggle keybinding bound alongside the board TUI,
 --           kill-pane + re-split); the tree/badge rendering rules
 --           (worktree-rooted tree, Added/Modified/Deleted badges, line counts,
 --           auto-expanded directories); and the DIFF PANE the tree opens
 --           beneath itself to show the contents of the change (its open set,
---           its own lifecycle, and its rendering caps); and the AGENTS SECTION
---           beneath the tree, which lists every task with a live agent window
---           and jumps to the selected one's window.
+--           its own lifecycle, and its rendering caps); the COMMITS SECTION
+--           beneath the tree, which lists the agent's own commits since the
+--           fork point from the task's base branch and selects which change
+--           the tree and diff pane show; and the AGENTS SECTION beneath that,
+--           which lists every task with a live agent window and jumps to the
+--           selected one's window.
 -- Excludes: Task-activity classification and the activity-signal hook (see
 --           agent-health.allium — HookPreToolUse fires for both PreToolUse and
 --           PostToolUse and is NOT modified by anything in this spec);
@@ -26,7 +32,10 @@
 --           in a different window, with a different lifecycle);
 --           agent-window creation itself (see dispatch.allium); repository
 --           synchronisation and drift measurement, which run their own git
---           commands for a different purpose (see repo-sync.allium).
+--           commands for a different purpose (see repo-sync.allium); and,
+--           deliberately, any view of the whole branch's work at once and any
+--           view of STAGED changes — the tree shows unstaged work or one
+--           commit, never a combined diff (see AgentTreeShowsUnstagedWorkOnly).
 --
 -- GIT IS THE SOLE SOURCE OF TRUTH. The pane runs git against the worktree and
 -- renders what git reports; it stores nothing, remembers nothing between
@@ -57,6 +66,11 @@
 -- and never writes to it. That does not bend the git rule: the rule is about
 -- what the pane says about FILES, and the agents section says nothing about
 -- files. See AgentsSectionListsLiveAgents.
+--
+-- The COMMITS SECTION does not bend it either: its rows come from git, and
+-- the one thing it adds that git does not hold — which row the user selected —
+-- is view state of the same kind as the open set, decided by a keypress and
+-- never by the repository (AgentTreeSourceIsOneSelection).
 
 use "./core.allium" as core
 
@@ -64,7 +78,8 @@ use "./core.allium" as core
 -- Enumerations
 ------------------------------------------------------------
 
--- What git says happened to a file, relative to the base. Also the badge
+-- What git says happened to a file, relative to the selected source's
+-- baseline — the index for unstaged work, the parent for a commit. Also the badge
 -- vocabulary: a rendered node's badge is a FileChange, so there is exactly one
 -- enum for both, and a badge cannot say anything git did not.
 --
@@ -80,12 +95,16 @@ enum TreeNodeKind { file | directory }
 -- contents. Each value is a fact about the file, not a failure of the pane:
 -- the pane rendered exactly what it could, and says which of these it hit.
 --
---   untracked -- the file is not in the index, so there is no diff to take.
---                Git's own advice is to stage it, and that is what the pane
---                repeats. See UntrackedFilesHaveNoLineCounts.
 --   binary    -- git reports the change without line contents.
 --   too_large -- the diff exceeds config.agent_tree_diff_max_bytes.
-enum DiffRefusal { untracked | binary | too_large }
+--
+-- There is no "untracked" refusal. It used to exist, with a placeholder
+-- repeating git's advice to stage the file; against an index baseline that
+-- advice removed the file from the pane instead of revealing it. An untracked
+-- file's diff is now its whole contents as additions (RefreshAgentTreeDiff's
+-- "Untracked files"), and both refusals above apply to those contents exactly
+-- as they apply to any other diff.
+enum DiffRefusal { binary | too_large }
 
 -- Which of the two writers set the pane's current notice. The pane shows one
 -- notice at a time in one line of border, so the two have to share a field —
@@ -102,12 +121,18 @@ enum DiffRefusal { untracked | binary | too_large }
 -- by the next successful read. agent_jump is a keypress's writer, like
 -- diff_open: a failed jump to another agent's window, which survives every
 -- refresh until the next key.
-enum NoticeSource { git_query | diff_open | agent_list | agent_jump }
+--
+-- The commits section added one more, of the timer's shape: commit_list, a
+-- failed read of the agent's commits, cleared by the next successful read.
+-- Selecting a commit has no failure of its own to report — it only names a
+-- row already on screen — so it adds no keypress writer.
+enum NoticeSource { git_query | diff_open | agent_list | agent_jump | commit_list }
 
--- Which of the pane's two sections the pane's keys act on. The tree and the
--- agents section each keep their own cursor; focus decides which one a motion
--- moves and what Space and Enter do. See SwitchAgentTreeFocus.
-enum AgentTreeFocus { tree | agents }
+-- Which of the pane's three sections the pane's keys act on. The tree, the
+-- commits section and the agents section each keep their own cursor; focus
+-- decides which one a motion moves and what Space and Enter do. See
+-- SwitchAgentTreeFocus.
+enum AgentTreeFocus { tree | commits | agents }
 
 ------------------------------------------------------------
 -- Value Types
@@ -124,8 +149,8 @@ value GitFileChange {
 
     -- How many lines this path gained and lost against the baseline, as git
     -- counted them. Null for an UNTRACKED path and only for an untracked path:
-    -- a diff against the baseline cannot see a file that is not in the index,
-    -- so there is no count to report and none is invented (see
+    -- a diff against the index cannot see a file that is not in it, so there
+    -- is no count to report and none is invented (see
     -- UntrackedFilesHaveNoLineCounts). A tracked path always has both, and
     -- both may be zero — a permission-only change is a real change with no
     -- lines moved.
@@ -203,7 +228,7 @@ value AgentTreeNode {
     --
     -- A directory's sum SKIPS descendants that have no counts rather than
     -- treating them as zero, and is itself null only when no descendant has
-    -- any. Counting an unstaged file as "+0 -0" would read as "nothing
+    -- any. Counting an untracked file as "+0 -0" would read as "nothing
     -- changed in there", which is the one thing that is certainly false.
     --
     -- A directory's sum is always DERIVED, whether or not its row draws it.
@@ -222,9 +247,21 @@ value AgentTreeNode {
 -- What the board tells a companion pane's renderer about its task. Null in
 -- PaneView.task until the board's rows hold the task, which is how "not
 -- arrived yet" and "arrived without a worktree" stay two different answers.
+--
+-- base_branch no longer decides what the TREE shows by default — that is the
+-- worktree against its index (AgentTreeShowsUnstagedWorkOnly). It decides only
+-- which commits the commits section lists (AgentTreeBaselineIsTaskBaseBranch).
 value PaneTask {
     worktree: String?     -- the directory the tree is rooted at; null when the task has none
-    base_branch: String   -- the NAME the baseline is resolved from (AgentTreeBaselineIsTaskBaseBranch)
+    base_branch: String   -- the NAME the commit range's fork point is resolved from (AgentTreeBaselineIsTaskBaseBranch)
+}
+
+-- One of the agent's own commits, as the commits section lists it: a commit
+-- reachable from HEAD and not from the fork point. Like GitFileChange it is
+-- re-read from git on every pass and persisted nowhere.
+value AgentCommit {
+    id:      String   -- the full commit id; what a selection is keyed by
+    subject: String   -- the first line of the commit message, as git prints it
 }
 
 -- One answer from the board to a pane: its task, when the board's rows hold
@@ -286,10 +323,12 @@ entity AgentTreePane {
     -- task-agent window; a window with no task gets no pane at all — see
     -- SplitAgentTreePaneOnAgentLaunch's "Only task windows get a pane" note.
     --
-    -- The task supplies two things the git query needs and nothing else can:
-    -- its worktree (pane.root) and its base_branch. The latter is the NAME the
-    -- baseline is resolved from, not the baseline itself — see
-    -- AgentTreeBaselineIsTaskBaseBranch.
+    -- The task supplies two things the git queries need and nothing else can:
+    -- its worktree (pane.root) and its base_branch. The worktree is all the
+    -- default view needs, since its baseline is the worktree's own index
+    -- (AgentTreeShowsUnstagedWorkOnly). The base branch is the NAME the
+    -- commits section's fork point is resolved from, not the fork point
+    -- itself — see AgentTreeBaselineIsTaskBaseBranch.
     task: core/Task
 
     -- Absolute directory the tree is rooted at: always the task's worktree path
@@ -322,15 +361,18 @@ entity AgentTreePane {
     -- changes yet — both render an empty tree.
     rendered_changes: [GitFileChange]
 
-    -- Which files' diffs the user has opened, relative to root. The ONLY
-    -- state in this spec that the user builds up rather than git supplying:
-    -- everything else the pane shows is re-derived from a git query every
-    -- tick. It is a set, not a cursor — the pane shows every open file's diff
+    -- Which files' diffs the user has opened, relative to root. One of the
+    -- two pieces of state in this spec that the user builds up rather than
+    -- git supplying (the other is selected_commit); everything else the pane
+    -- shows is re-derived from a git query every tick. It is a set, not a cursor — the pane shows every open file's diff
     -- at once, which is what makes ToggleAllAgentTreeFileDiffs a bulk version
     -- of the single-file toggle rather than a separate mode.
     --
     -- It holds PATHS, not nodes, so it survives a refresh that rebuilds every
-    -- node. A path whose file stops being reported by git simply stops
+    -- node — and it survives a change of selected source too: a path open
+    -- under unstaged work stays open when a commit is selected, and shows
+    -- that commit's diff of the path if the commit touched it. A path whose
+    -- file stops being reported by git simply stops
     -- matching anything and contributes no diff; it is not an error, and it is
     -- not pruned either (see OpenDiffPathsMaySurviveTheirFiles).
     --
@@ -353,9 +395,11 @@ entity AgentTreePane {
     diff_pane: core/TmuxPane?
 
     -- Why the last thing the pane tried to do failed, shown in this pane's own
-    -- border until the next keypress. Two things set it: a failed diff-pane
-    -- split (see AgentTreeDiffPaneFailureIsVisible) and a failed git query
-    -- (see AgentTreeGitFailureKeepsLastGoodTree). The only thing the pane ever
+    -- border until the next keypress. Its writers are listed under
+    -- NoticeSource: among them a failed diff-pane split (see
+    -- AgentTreeDiffPaneFailureIsVisible), a failed git query (see
+    -- AgentTreeGitFailureKeepsLastGoodTree) and a failed commit-list read
+    -- (see AgentTreeCommitListFailureKeepsLastList). The only thing the pane ever
     -- reports to the user, and while it is set the pane's border is drawn in
     -- the error colour (see AgentTreeNoticeRedensBorder).
     error_notice: String?
@@ -366,7 +410,8 @@ entity AgentTreePane {
     notice_source: NoticeSource when error_notice != null
 
     -- Which section the pane's keys act on. Starts on the tree, because the
-    -- tree is what the pane is for; Tab moves it (SwitchAgentTreeFocus).
+    -- tree is what the pane is for; Tab cycles it through tree, commits and
+    -- agents (SwitchAgentTreeFocus).
     -- Per-process view state like the cursor, and modelled here only because
     -- it decides which rule a Space or Enter reaches.
     focus: AgentTreeFocus
@@ -387,11 +432,39 @@ entity AgentTreePane {
     -- task list, nor a slow answer from the board delay the tree.
     last_agents_listed_at: Timestamp
 
+    -- The commits the commits section lists: what the last SUCCESSFUL read
+    -- of the agent's own commits returned — the newest
+    -- config.agent_tree_commits_max_listed commits reachable from HEAD
+    -- and not from the fork point (AgentTreeBaselineIsTaskBaseBranch), newest
+    -- first. A failed read leaves it alone
+    -- (AgentTreeCommitListFailureKeepsLastList). Empty before the first read,
+    -- and empty is also the honest answer for an agent that has not
+    -- committed yet. The section's fixed top row, "unstaged work", is not in
+    -- this list: it is not a commit, and it is always there.
+    listed_commits: [AgentCommit]
+
+    -- The commits section's own redraw stamp, separate from the tree's and
+    -- the agents section's for the same reason those two are separate.
+    last_commits_listed_at: Timestamp
+
+    -- Which change the tree and the diff pane show: null for unstaged work
+    -- (the default, and the state every fresh renderer starts in), or the
+    -- id of one listed commit. Keyed by commit ID rather than by row, so a
+    -- new commit arriving above it does not move the selection onto a
+    -- different commit. Always null or the id of a commit in listed_commits
+    -- (SelectedCommitIsListed): when a read finds the selected commit gone —
+    -- the agent rebased, amended or reset it away — the selection falls back
+    -- to unstaged work (RefreshAgentTreeCommitList).
+    --
+    -- View state, like open_diff_paths, and shared with the diff pane the
+    -- same way and in the same direction — see OpenSetIsNotWorktreeState.
+    selected_commit: String?
+
     -- Whether the tree's renderer has read its task back from the board
     -- yet. pane.task is what the pane is FOR; this is whether the
     -- process drawing it has found out. A renderer starts waiting, and
-    -- everything else it does — git, the agents section, every key but the
-    -- exit key — waits with it. See "Companion Pane Startup" below for why a
+    -- everything else it does — git, the commits and agents sections, every
+    -- key but the exit key — waits with it. See "Companion Pane Startup" below for why a
     -- task that certainly exists can be unreadable for a moment.
     task_resolution: waiting | resolved | unresolved
 
@@ -464,11 +537,12 @@ config {
 
     -- Redraw cadence. Each tick runs the git query (see AgentTreeGitQuery) and
     -- rebuilds only if its answer changed, so the visible cost of a one-second
-    -- poll is five short-lived git processes per open pane — six when the
-    -- baseline resolution has two candidates to rank. That is well below the
-    -- point where a follow-along view feels laggy: the added processes are
-    -- merge-base probes, which read refs and objects and nothing else, and
-    -- git's own index caching makes a repeated no-change query cheap. Not tied
+    -- poll is three short-lived git processes per open pane for unstaged
+    -- work, two while a commit is selected. That is well below the point
+    -- where a follow-along view feels laggy: neither form resolves a branch,
+    -- and git's own index caching makes a repeated no-change query cheap. The
+    -- fork-point resolution lives on the commits section's own timer
+    -- (config.agent_tree_commits_refresh_interval), not on this one. Not tied
     -- to the board TUI's tick_interval — the two processes are independent.
     agent_tree_refresh_interval: Duration = 1.second
 
@@ -483,13 +557,18 @@ config {
     -- the pane can ignore a keypress. Five seconds is generous for a name-only
     -- diff and short enough that a wedged git reads as a hiccup.
     --
-    -- The bound is per command and a tick runs up to six of them, so the
-    -- arithmetic worst case is six times this. Only three of the six can
-    -- realistically reach it: an index lock is by far the commonest cause of a
-    -- slow query, and only the two diffs and the untracked listing touch the
-    -- index.
-    -- The baseline resolution's merge-base probes take no lock, so they do not
-    -- move the practical ceiling.
+    -- The bound is per command. A tree tick runs at most three, so its worst
+    -- case is three times this, and all three can realistically reach it: an
+    -- index lock is by far the commonest cause of a slow query, and both
+    -- diffs and the untracked listing read the index. (A commit selected,
+    -- the tick runs two, and neither reads the index.)
+    --
+    -- A commits-section read runs up to four: the fork-point resolution's
+    -- merge-base probes (one per candidate ref, so two at most), the
+    -- ancestry probe ranking them, and the commit listing. Its arithmetic
+    -- worst case is four times this, but none of the four takes the index
+    -- lock, so the practical ceiling is far lower. It runs beside the key
+    -- loop, like the agents read, so it never delays a keypress at all.
     agent_tree_git_timeout: Duration = 5.seconds
 
     -- The tmux key (pressed after the tmux prefix) that toggles the companion
@@ -519,6 +598,28 @@ config {
     -- rendering runs inline in a single-threaded loop that also has to answer
     -- keypresses, so an unbounded diff is an unbounded freeze.
     agent_tree_diff_max_bytes: Integer = 1048576
+
+    -- How often the commits section re-reads the agent's commits. The same
+    -- cadence as the tree: a commit should appear in the list about when the
+    -- tree empties of the work that went into it, or the user sees the work
+    -- vanish with nowhere visible for it to have gone.
+    agent_tree_commits_refresh_interval: Duration = 1.second
+
+    -- The most rows the commits section takes from the pane, its fixed
+    -- "unstaged work" row included. It grows with the number of commits up
+    -- to this cap and scrolls beyond it, exactly as the agents section does
+    -- (config.agent_tree_agents_max_rows). How many commits are READ is
+    -- config.agent_tree_commits_max_listed, below.
+    agent_tree_commits_max_rows: Integer = 6
+
+    -- The most commits the commits section lists: the newest this many
+    -- since the fork point. Older commits are NOT listed — not as a
+    -- truncation marker, not on scroll — and so cannot be selected. Bounded
+    -- because the read repeats every second: a long-lived branch, or a fork
+    -- point resolved far back from a stale base branch, would otherwise make
+    -- each read list the whole history. Fifty is far more than an agent's
+    -- session normally commits, and the section scrolls through all of them.
+    agent_tree_commits_max_listed: Integer = 50
 
     -- How often the agents section re-reads the board's task list. The same
     -- cadence as the tree: agents start and finish on the scale of minutes,
@@ -630,6 +731,10 @@ rule SplitAgentTreePaneOnAgentLaunch {
         last_agents_listed_at: now - config.agent_tree_agents_refresh_interval,
         focus: tree,
         listed_agents: [],
+        last_commits_listed_at: now - config.agent_tree_commits_refresh_interval,
+        listed_commits: [],
+        -- Unstaged work is the default source (AgentTreeShowsUnstagedWorkOnly).
+        selected_commit: null,
         -- The renderer starts before its task is necessarily readable; see
         -- "Companion Pane Startup".
         task_resolution: waiting,
@@ -697,7 +802,7 @@ rule SplitAgentTreePaneOnAgentLaunch {
         -- Only task windows get a pane: AgentLaunched is the only trigger that
         -- ever creates a companion pane, and AgentTreePane.task is required
         -- rather than optional. A window with no task has no worktree to root a
-        -- tree at and no base branch to diff against; `dispatch agent-tree`
+        -- tree at and no base branch to list commits from; `dispatch agent-tree`
         -- takes a REQUIRED task id (src/cli/agent_tree.rs), so there is no id to
         -- launch it with in the first place. Such a pane would also be covered
         -- by neither pane-teardown rule below, since both key off a Task.
@@ -882,6 +987,13 @@ rule ShowAgentTreePane {
     -- board straight away, rather than one interval after it appears.
     ensures: pane.listed_agents = []
     ensures: pane.last_agents_listed_at = now - config.agent_tree_agents_refresh_interval
+
+    -- And the same for the commits section — and the selection goes back to
+    -- unstaged work. It is view state, and like focus it does not survive a
+    -- hide: a pane always reopens on what the agent is doing now.
+    ensures: pane.listed_commits = []
+    ensures: pane.last_commits_listed_at = now - config.agent_tree_commits_refresh_interval
+    ensures: pane.selected_commit = null
 
     -- A fresh renderer is a fresh process, so it resolves its task afresh
     -- and gets its own startup wait, whatever the last renderer reached.
@@ -1109,7 +1221,7 @@ rule AgentTreeDiffPaneTaskNeverArrives {
 
 rule RefreshAgentTree {
     -- A shown pane redraws on a timer, asking git afresh each time what has
-    -- changed in the worktree.
+    -- changed — in the worktree's unstaged work, or in the selected commit.
     when: pane: AgentTreePane.last_rendered_at + config.agent_tree_refresh_interval <= now
 
     -- Hidden panes have no renderer process. The timestamp is not advanced
@@ -1117,16 +1229,18 @@ rule RefreshAgentTree {
     -- happens immediately on show.
     requires: pane.status = shown
 
-    -- The renderer knows its worktree and base branch. Until it does there is
-    -- nothing to ask git about (see "Companion Pane Startup").
+    -- The renderer knows its worktree. Until it does there is nothing to ask
+    -- git about (see "Companion Pane Startup").
     requires: pane.task_resolution = resolved
 
     -- The git query succeeded. A failed query is the other rule
     -- (AgentTreeGitFailureKeepsLastGoodTree), and the two are mutually
     -- exclusive on this guard so exactly one of them fires per tick.
-    requires: git_changes(pane.root, pane.task.base_branch).ok
+    -- selected_commit is the source: null asks about unstaged work, a commit
+    -- id asks about that commit (AgentTreeSourceIsOneSelection).
+    requires: git_changes(pane.root, pane.selected_commit).ok
 
-    let changes = git_changes(pane.root, pane.task.base_branch).value
+    let changes = git_changes(pane.root, pane.selected_commit).value
 
     ensures: pane.last_rendered_at = now
     ensures: pane.rendered_changes = changes
@@ -1179,38 +1293,57 @@ rule RefreshAgentTree {
 
     @guidance
         -- == AgentTreeGitQuery: what "asking git" means ==
-        -- Four steps, all run against pane.root and each bounded by
-        -- config.agent_tree_git_timeout:
+        -- Two forms, decided by pane.selected_commit. Every step runs against
+        -- pane.root and is bounded by config.agent_tree_git_timeout, and
+        -- neither form resolves a branch: the fork point belongs to the
+        -- commits section alone (AgentTreeBaselineIsTaskBaseBranch).
         --
-        --   1. Resolve the baseline: this worktree's fork point from
-        --      pane.task.base_branch, taking BOTH the local branch of that
-        --      name and its remote-tracking counterpart into account. See
-        --      AgentTreeBaselineIsTaskBaseBranch for why one of the two alone
-        --      is not enough.
-        --   2. A name-and-status diff of the WORKING TREE against that
-        --      baseline, with rename detection off.
-        --   3. A per-file added/removed line count of the same working-tree
-        --      diff, against the same baseline.
-        --   4. A listing of untracked files, honouring the repo's ignore
+        -- UNSTAGED WORK (selected_commit = null, the default). Three steps;
+        -- the baseline is the worktree's own index, so there is nothing to
+        -- resolve first (AgentTreeShowsUnstagedWorkOnly):
+        --
+        --   1. A name-and-status diff of the WORKING TREE against the INDEX,
+        --      with rename detection off.
+        --   2. A per-file added/removed line count of the same working-tree
+        --      diff, against the same index.
+        --   3. A listing of untracked files, honouring the repo's ignore
         --      rules.
         --
-        -- Step 3 is a SEPARATE ask, not a richer form of step 2, and the two
+        -- ONE COMMIT (selected_commit = a commit id). Two steps, both a diff
+        -- of the commit against its PARENT, with rename detection off:
+        --
+        --   1. Name and status.
+        --   2. Per-file added/removed line counts.
+        --
+        -- No untracked listing: a commit has no untracked files, so in this
+        -- form every text file carries counts. The parent is the commit's
+        -- FIRST parent when it has several — a merge commit is shown as what
+        -- it brought onto this branch, which is the question a branch's own
+        -- history answers. A commit with no parent is diffed against the empty
+        -- tree, so every file it holds is badged added. (A root commit cannot
+        -- normally be listed, since it is reachable from any fork point; the
+        -- rule is stated so the query has an answer for every id it can be
+        -- handed.) The working tree and the index play no part, so an agent
+        -- editing files while a commit is selected changes nothing on screen
+        -- until the user selects unstaged work again.
+        --
+        -- Step 2 is a SEPARATE ask, not a richer form of step 1, and the two
         -- must agree on the baseline and on rename detection or a row's badge
-        -- and its counts would describe different comparisons. It reports
-        -- nothing for the untracked paths step 4 finds, which is where
+        -- and its counts would describe different comparisons. In the
+        -- unstaged form it reports nothing for the untracked paths step 3
+        -- finds, which is where
         -- UntrackedFilesHaveNoLineCounts comes from — not from a decision this
         -- pane made, but from what a diff against the index can see. It also
         -- reports no counts for a binary file, and that is the same fact
         -- reaching the user by the same route.
         --
-        -- A path present in step 2 but missing from step 3, or carrying a
+        -- A path present in step 1 but missing from step 2, or carrying a
         -- count that will not parse, is rendered with no counts rather than
         -- with a guess — the soft-fail-decoding convention again, and the same
         -- reasoning as CollapsedGitStatusLetters: one unreadable field must
         -- not cost the user the row.
         --
-        -- Steps 2, 3 and 4 ask git for NUL-delimited output; step 1 emits
-        -- commit ids, which need none. Git's default is to C-quote
+        -- Every step of both forms asks git for NUL-delimited output. Git's default is to C-quote
         -- any path containing a non-ASCII byte, so a file whose name holds an
         -- accented letter comes back C-quoted, with the letter replaced by its
         -- octal escapes — which would be rendered as that literal string and
@@ -1218,16 +1351,25 @@ rule RefreshAgentTree {
         -- or a newline unambiguous, and means no field may be trimmed: every
         -- byte between delimiters is part of the filename.
         --
-        -- The second covers every tracked change the agent has made for this
-        -- task, committed or not — that is the point of diffing the working
-        -- tree against the fork point rather than against HEAD. An agent that
-        -- commits mid-session does not watch its work vanish from the pane.
-        -- The fourth covers files the agent created and has not staged, which
-        -- a diff cannot see.
+        -- In the unstaged form, the first step covers every change to a
+        -- tracked file the agent has made and not yet staged — the work in
+        -- progress, and only that. Staged and committed changes are absent by
+        -- design: the index is the baseline, so whatever reached it is no
+        -- longer "ongoing" (see AgentTreeShowsUnstagedWorkOnly); committed
+        -- work is reached through the commits section instead. The third
+        -- step covers files the agent created and has not staged, which a
+        -- diff cannot see.
+        --
+        -- Against the index, a file's badge describes its UNSTAGED change, not
+        -- its history. A new file that was staged and then edited again is
+        -- badged modified, not added — the index already holds it, and what
+        -- is unstaged is an edit to that. A tracked file removed from disk is
+        -- badged deleted until the deletion is staged, and then disappears.
         --
         -- == CollapsedGitStatusLetters ==
         -- Git's status letters map onto FileChange as:
-        --   A, and every untracked path from the second command -> added
+        --   A, and every untracked path from the unstaged form's
+        --   third step                                          -> added
         --   D                                                   -> deleted
         --   M, T (type change), and anything else recognised     -> modified
         -- A letter this mapping does not recognise is skipped rather than
@@ -1242,16 +1384,24 @@ rule RefreshAgentTree {
         -- both true and exactly what the user wants to see in a file tree.
         --
         -- == ChangePrecedence: when both queries name one path ==
-        -- The two overlap. `git rm --cached foo` leaves foo reported as a
-        -- deletion by the diff AND listed as untracked, because it is out of
-        -- the index but still on disk. The badge is resolved by precedence —
-        -- added beats deleted beats modified — and NOT by which query ran
-        -- first. Added wins that particular collision because the file is
-        -- there, which is the more useful of the two true statements; deleted
-        -- beats modified because a deletion is the more consequential fact and
-        -- the one a file tree exists to show. Stating it as precedence rather
-        -- than as "the later query wins" is what stops the order of two
-        -- commands from silently deciding a badge.
+        -- Against the index the two listings are DISJOINT: the diff reports
+        -- only paths the index holds, and the untracked listing only paths it
+        -- does not, so no path can be named by both. The case that used to
+        -- collide shows this. `git rm --cached foo` takes foo out of the index
+        -- and leaves it on disk; the diff no longer sees foo at all, the
+        -- untracked listing does, and foo is badged added with no counts —
+        -- correctly, since to git it is now an untracked file. A staged
+        -- deletion that also removed the file from disk (`git rm foo`) is in
+        -- neither listing and is not shown: it is staged work.
+        --
+        -- The precedence is kept anyway, as a merge rule that makes the
+        -- outcome independent of command order should a path ever reach both
+        -- lists — added beats deleted beats modified, and NOT whichever query
+        -- ran last. Added wins because a file that is listed as present is
+        -- there; deleted beats modified because a deletion is the more
+        -- consequential fact and the one a file tree exists to show. It costs
+        -- nothing and decides no case git produces today. The commit form has
+        -- only one listing, so the question does not arise there.
         --
         -- == The four rendering rules, in one place ==
         --   1. ROOT. The tree is rooted at the pane's root — the task's
@@ -1310,7 +1460,8 @@ rule RefreshAgentTree {
         --      surface's RowsPutAFoldersOwnFilesFirst.
         --
         -- == Black boxes ==
-        -- git_changes(root, base) runs the four steps above and returns
+        -- git_changes(root, commit) runs the unstaged form above when commit
+        -- is null and the one-commit form when it is a commit id, and returns
         -- either the parsed set of GitFileChanges or a failure.
         -- changed_tree(changes) derives (path, kind) entries for every changed
         -- path and each of its ancestor directories, deduplicated, then merges
@@ -1363,16 +1514,18 @@ rule RefreshAgentTree {
 }
 
 rule AgentTreeGitFailureKeepsLastGoodTree {
-    -- The same timer tick, when git could not answer: NEITHER ref of the base
-    -- branch exists (one of the two is enough — see
-    -- AgentTreeBaselineIsTaskBaseBranch), the index is locked, the worktree is
-    -- gone, git is not on PATH, or the query overran
-    -- config.agent_tree_git_timeout.
+    -- The same timer tick, when git could not answer: the index is locked,
+    -- the worktree is gone or no longer a git worktree, git is not on PATH,
+    -- or the query overran config.agent_tree_git_timeout — or, with a commit
+    -- selected, git could not read that commit. A missing or stale base
+    -- branch is NOT among them: the tree's query names no branch, and a
+    -- base branch that will not resolve fails the commits section instead
+    -- (AgentTreeCommitListFailureKeepsLastList), leaving the tree working.
     when: pane: AgentTreePane.last_rendered_at + config.agent_tree_refresh_interval <= now
 
     requires: pane.status = shown
     requires: pane.task_resolution = resolved
-    requires: not git_changes(pane.root, pane.task.base_branch).ok
+    requires: not git_changes(pane.root, pane.selected_commit).ok
 
     -- Stamped anyway, so the next tick is a normal tick rather than an
     -- immediate retry: a persistently broken git must not spin.
@@ -1383,7 +1536,7 @@ rule AgentTreeGitFailureKeepsLastGoodTree {
     -- input to the tree, and this rule does not touch it.
     ensures: pane.rendered_changes = old(pane.rendered_changes)
 
-    ensures: pane.error_notice = git_failure_reason(pane.root, pane.task.base_branch)
+    ensures: pane.error_notice = git_failure_reason(pane.root, pane.selected_commit)
     ensures: pane.notice_source = git_query
     ensures: pane.status = shown
 
@@ -1478,9 +1631,9 @@ rule OpenAgentTreeFileDiff {
         --
         -- == Nothing is read from disk ==
         -- The pane does not open the file, stat it, or check it exists. The
-        -- diff comes from git, which answers about the baseline and the index
-        -- as well as the working tree, so a path that is gone from disk still
-        -- has a diff. The file_exists check the editor rules needed has no
+        -- diff comes from git, which answers about the index as well as the
+        -- working tree, so a path that is gone from disk but still in the
+        -- index has a diff. The file_exists check the editor rules needed has no
         -- counterpart here and is not an omission.
 }
 
@@ -1686,20 +1839,36 @@ rule RefreshAgentTreeDiff {
                     -- Exactly one of these is non-null. Git either printed the
                     -- change or said why it would not, and the pane shows
                     -- whichever it got (see DiffBodyExcludesRefusal).
-                    body:    git_file_diff(pane.root, pane.task.base_branch, path).body,
-                    refusal: git_file_diff(pane.root, pane.task.base_branch, path).refusal
+                    -- The source is the tree's selection, read the same way
+                    -- the open set is: null for unstaged work, else the
+                    -- selected commit (AgentTreeSourceIsOneSelection).
+                    body:    git_file_diff(pane.root, pane.selected_commit, path).body,
+                    refusal: git_file_diff(pane.root, pane.selected_commit, path).refusal
                 }
             )
 
     @guidance
         -- == The same baseline, asked the same way ==
-        -- file_diff resolves the baseline exactly as AgentTreeGitQuery's step 1
-        -- does, and diffs the working tree against it exactly as step 2 does.
-        -- It has to: a diff taken against a different baseline than the badge
-        -- beside it would show the user two answers to one question. The
-        -- baseline is re-derived here rather than passed across from the tree,
-        -- because the two panes are separate processes and a value handed
-        -- between them is a value that can go stale.
+        -- file_diff asks about the SAME source the tree is showing, the same
+        -- way the tree's query does (AgentTreeGitQuery), with rename detection
+        -- off. For unstaged work it diffs the working tree against the INDEX,
+        -- naming no revision; for a selected commit it diffs that commit
+        -- against its first parent (or the empty tree, for a root commit). It
+        -- has to: a diff taken against a different baseline than the badge
+        -- beside it would show the user two answers to one question — a body
+        -- of staged or committed hunks under a row that exists only because
+        -- of an unstaged one, or the reverse. So the badge, the counts and the
+        -- diff always answer one question, whichever the user selected.
+        --
+        -- The pane is handed the SELECTION, not an answer: it reads which
+        -- source is selected from where it reads the open set
+        -- (OpenSetIsNotWorktreeState), and asks git itself rather than having
+        -- changes passed across from the tree, because the two panes are
+        -- separate processes and a value handed between them is a value that
+        -- can go stale. A selection change therefore reaches this pane on its
+        -- next tick, as an open-set change already does; for up to one
+        -- config.agent_tree_refresh_interval after a switch the two panes may
+        -- show different sources, and that lag is accepted.
         --
         -- == Order ==
         -- Diffs are rendered in the order the paths appear in the TREE, not in
@@ -1716,19 +1885,38 @@ rule RefreshAgentTreeDiff {
         -- the ordering rule — one over nodes, one over paths — owes a test
         -- that the two agree; dispatch has both and pins them together.
         --
+        -- == Untracked files ==
+        -- In the unstaged-work view an open UNTRACKED path — a new file, or one
+        -- taken out of the index by `git rm --cached` — is shown as a diff
+        -- against nothing: every line of the file as an addition, under the
+        -- same path heading as any other diff. A diff against the index cannot
+        -- see the file, so this is the one diff the pane takes against an empty
+        -- side rather than against the source's baseline; it is still git's
+        -- diff output and still read-only. It is not a refusal, and the pane
+        -- no longer advises staging the file: in this view staging it would
+        -- remove it from the pane.
+        --
+        -- The tree row for the same file still carries no counts
+        -- (UntrackedFilesHaveNoLineCounts). That is deliberate: the tree's
+        -- counts come from one numstat of the worktree against the index, and
+        -- an untracked file is outside it. The diff pane shows the file's
+        -- contents; the tree does not count them.
+        --
         -- == Refusals ==
         -- A file is rendered as a placeholder rather than as contents in
-        -- exactly three cases, and each is a DiffRefusal value carried on the
-        -- FileDiff rather than a notice on the tree: the path is untracked, so
-        -- git has nothing to diff; git reports it binary; or its diff exceeds
-        -- config.agent_tree_diff_max_bytes. A refusal is a fact about that one
+        -- exactly two cases, and each is a DiffRefusal value carried on the
+        -- FileDiff rather than a notice on the tree: git reports it binary, or
+        -- its diff exceeds config.agent_tree_diff_max_bytes. Both apply to an
+        -- untracked file's contents as to any other diff — a new binary file
+        -- is refused as binary, a huge new file as too_large. A refusal is a fact about that one
         -- file and must not cost the user the other diffs in the pane, which is
         -- why it is not routed through error_notice.
         --
         -- == A path with nothing to show is not an error ==
         -- The open set holds paths, and a path can stop being reported by git
         -- between the press that opened it and this tick — the agent reverted
-        -- the file, or committed and reset. Such a path contributes no entry
+        -- the file, staged it, or committed it — or the user selected a source
+        -- that does not touch it. Such a path contributes no entry
         -- and no placeholder. It is not pruned from the open set either: the
         -- agent may change the file again, and the user did not ask for it to
         -- be closed. See OpenDiffPathsMaySurviveTheirFiles.
@@ -1738,19 +1926,33 @@ rule RefreshAgentTreeDiff {
         -- tick would otherwise pay it once a second forever. So the pass first
         -- asks for the open paths' line counts — one command git answers from
         -- the index without materialising a patch — and re-reads the contents
-        -- only when that answer, or the open set itself, has moved since the
-        -- last pass. The steady-state cost of the poll is therefore two short
-        -- git processes however many files are open.
+        -- only when that answer, the open set, or the selected source has
+        -- moved since the last pass. The steady-state cost of the poll is
+        -- therefore a few short git processes however many files are open. A
+        -- selected commit never changes, so with one selected only the open
+        -- set or a new selection can trigger a re-read.
         --
         -- The same short-circuit RefreshAgentTree applies to its own query, and
         -- it has the same one behavioural consequence worth stating: the user's
         -- scroll position survives a tick precisely because nothing is rebuilt
         -- on a no-change tick.
         --
-        -- An untracked path never appears in that answer and does not need to:
-        -- its placeholder is the same whatever the file says. A path that
-        -- BECOMES tracked does change it, which is the transition that has to
-        -- be caught.
+        -- (The rest of this heading concerns the unstaged source only.)
+        -- An untracked path never appears in that count answer, so the counts
+        -- alone cannot see it change. Two things have to be caught for it.
+        -- Its CONTENTS: the agent keeps writing a new file, and the diff pane
+        -- shows all of it, so an open untracked path's contents changing must
+        -- trigger a re-read like a count change does. And its LEAVING the
+        -- untracked listing: staging a new file and editing nothing further
+        -- moves it from untracked to absent, and the count answer is empty for
+        -- it both before and after. So whether each open path is untracked,
+        -- and some cheap fingerprint of each open untracked path's contents
+        -- (its size and modification time suffice), are part of what the pass
+        -- compares, alongside the counts, the open set and the source;
+        -- otherwise a staged file would keep its whole-file diff on screen
+        -- indefinitely, and a growing new file would freeze at its first
+        -- read. A path that is staged and THEN edited does move the counts,
+        -- and is caught either way.
         --
         -- == Failure is the tree's story, not the pane's ==
         -- A git failure here leaves the last good diffs on screen, the same way
@@ -1758,10 +1960,12 @@ rule RefreshAgentTreeDiff {
         -- two panes fail independently because they run independently.
         --
         -- == Black box ==
-        -- git_file_diff(root, base, path) resolves the baseline, takes the
-        -- working-tree diff of that one path against it, and returns either the
-        -- body or the DiffRefusal that stopped it — never both and never
-        -- neither.
+        -- git_file_diff(root, commit, path) takes the diff of that one path
+        -- for the source — the working tree against the index when commit is
+        -- null, the commit against its first parent otherwise — and returns
+        -- either the body or the DiffRefusal that stopped it, never both and
+        -- never neither. For an untracked path under the null source the body
+        -- is the whole file as additions (see "Untracked files" above).
 }
 
 rule ClearAgentTreeErrorNotice {
@@ -1783,6 +1987,165 @@ rule ClearAgentTreeErrorNotice {
         -- AgentTreeKeyPressed covers every key on the AgentTreeCompanionPane
         -- surface, the exit key included — clearing state on the way out is
         -- harmless, and the alternative is enumerating exceptions.
+}
+
+-- == Commits Section ==
+--
+-- Beneath the tree, above the agents section, the pane lists the agent's own
+-- commits: the newest config.agent_tree_commits_max_listed commits on HEAD
+-- since the fork point from the task's base
+-- branch, newest first, under a fixed top row "unstaged work". Selecting a row
+-- decides what the tree and the diff pane show. "unstaged work" is selected
+-- whenever a renderer starts, so by default the pane shows the work in
+-- progress (AgentTreeShowsUnstagedWorkOnly); a commit row shows that one
+-- commit against its parent. This is how committed work stays reachable now
+-- that committing empties the default view.
+
+rule RefreshAgentTreeCommitList {
+    -- A shown pane re-reads the agent's commits on its own timer.
+    when: pane: AgentTreePane.last_commits_listed_at + config.agent_tree_commits_refresh_interval <= now
+
+    requires: pane.status = shown
+    -- The commits section starts with the rest of the pane, once the task is
+    -- resolved; a pane that never resolves never lists commits.
+    requires: pane.task_resolution = resolved
+    requires: git_branch_commits(pane.root, pane.task.base_branch).ok
+
+    let commits = git_branch_commits(pane.root, pane.task.base_branch).value
+
+    ensures: pane.last_commits_listed_at = now
+    ensures: pane.listed_commits = commits
+
+    -- The selection survives a read that still lists its commit, and falls
+    -- back to unstaged work when the read no longer does. Kept by id, so a
+    -- new commit arriving above it leaves it on the same commit.
+    ensures: pane.selected_commit =
+        if old(pane.selected_commit) != null
+           and commits.any(c => c.id = old(pane.selected_commit)):
+            old(pane.selected_commit)
+        else: null
+
+    -- A working read clears its own stale notice and nothing else, exactly
+    -- as RefreshAgentTree does for git.
+    ensures: pane.error_notice =
+        if old(pane.notice_source) = commit_list: null
+        else: old(pane.error_notice)
+
+    @guidance
+        -- == What the list is ==
+        -- git_branch_commits(root, base) resolves the fork point from base
+        -- exactly as AgentTreeBaselineIsTaskBaseBranch describes, then lists
+        -- the commits reachable from HEAD and not from that fork point,
+        -- newest first, as (id, subject) pairs — at most
+        -- config.agent_tree_commits_max_listed of them, the newest. Older
+        -- commits in the range are not listed at all, and the section does
+        -- not mark that any were left out. A selected commit that a run of
+        -- newer commits pushes past the limit has left the list, so the
+        -- selection falls back to unstaged work exactly as for a rewritten
+        -- commit. Not ok when the fork point
+        -- cannot be resolved (neither ref of the base branch exists, or a
+        -- ranking comparison could not be made), when git cannot run, or when
+        -- a step overran config.agent_tree_git_timeout.
+        --
+        -- The range includes merge commits the agent made, and any commits a
+        -- merge brought in that are not on the base branch. Merging the base
+        -- branch itself into the task branch moves the fork point forward,
+        -- so the base branch's commits never appear, before or after.
+        --
+        -- == Falling back ==
+        -- A selected commit disappears when the agent rebases, amends,
+        -- resets or otherwise rewrites it away. The tree must not go on
+        -- showing a commit the branch no longer holds — it is no longer the
+        -- agent's work, and its row is gone, so nothing on screen would say
+        -- what the tree is showing. Unstaged work is the one source that
+        -- always exists, so that is where the selection goes. The tree and
+        -- the diff pane follow on their own next ticks.
+        --
+        -- The fallback is silent: no notice. The list itself shows what
+        -- happened — the row is gone and "unstaged work" is marked selected.
+        --
+        -- == The cursor follows its commit ==
+        -- As in the agents section, a read that changes the list keeps the
+        -- commits cursor on the row it was on by commit id, not by index, and
+        -- stays at its row index (clamped to the last row) when that commit
+        -- has gone. The cursor and the
+        -- selection are separate: moving the cursor selects nothing.
+        --
+        -- == Latency ==
+        -- The read runs beside the renderer's key loop, like the agents
+        -- read, so the fork-point resolution never delays a keypress.
+}
+
+rule AgentTreeCommitListFailureKeepsLastList {
+    -- The same tick, when the commits could not be read.
+    when: pane: AgentTreePane.last_commits_listed_at + config.agent_tree_commits_refresh_interval <= now
+
+    requires: pane.status = shown
+    requires: pane.task_resolution = resolved
+    requires: not git_branch_commits(pane.root, pane.task.base_branch).ok
+
+    -- Stamped anyway, so a persistently broken read does not spin.
+    ensures: pane.last_commits_listed_at = now
+    ensures: pane.listed_commits = old(pane.listed_commits)
+    ensures: pane.selected_commit = old(pane.selected_commit)
+    ensures: pane.error_notice = git_branch_commits_failure_reason(pane.root, pane.task.base_branch)
+    ensures: pane.notice_source = commit_list
+    ensures: pane.status = shown
+
+    @guidance
+        -- The same reasoning as AgentTreeGitFailureKeepsLastGoodTree: a stale
+        -- list that says it is stale beats an empty one that cannot say why,
+        -- and "the agent has made no commits" and "I could not find out" must
+        -- never read the same.
+        --
+        -- The selection is kept rather than dropped: a failed read says
+        -- nothing about whether the commit still exists, and the tree's own
+        -- query of a selected commit does not depend on the fork point, so it
+        -- goes on working.
+        --
+        -- When neither ref of the base branch resolves, the message names the
+        -- LOCAL branch — see AgentTreeBaselineIsTaskBaseBranch.
+        --
+        -- A failure here touches only this section. The tree, which in its
+        -- default view resolves no branch at all, keeps working.
+}
+
+rule SelectAgentTreeSource {
+    -- Space or Enter on a row of the commits section selects that row as
+    -- the source the tree and the diff pane show: the "unstaged work" row
+    -- selects unstaged work, a commit row selects that commit.
+    when: SelectAgentTreeSource(user, pane, commit)
+
+    requires: pane.focus = commits
+
+    -- commit is null for the "unstaged work" row, or a listed commit's id.
+    requires: commit = null or pane.listed_commits.any(c => c.id = commit)
+
+    -- Selecting what is already selected is a no-op, not a rebuild.
+    requires: commit != pane.selected_commit
+
+    ensures: pane.selected_commit = commit
+
+    -- The tree switches now, not on the next tick, and starts from nothing:
+    -- the old source's tree is never drawn under the new source's name,
+    -- even if the first query of the new source fails.
+    ensures: pane.rendered_changes = []
+    ensures: pane.last_rendered_at = now - config.agent_tree_refresh_interval
+
+    @guidance
+        -- The open set is left alone (open_diff_paths): a path open under
+        -- one source stays open under the next, and shows that source's diff
+        -- of the path if it has one and nothing if it does not
+        -- (OpenDiffPathsMaySurviveTheirFiles). Clearing it would make
+        -- comparing one file across two commits cost a re-open per switch.
+        --
+        -- Focus stays in the commits section, so stepping through commits is
+        -- a one-handed loop of motion and Space, the same shape as browsing
+        -- diffs in the tree.
+        --
+        -- Selecting changes only what the pane shows. Nothing is checked out,
+        -- reset or staged, and the worktree and HEAD are exactly as they were
+        -- (ReadOnlyObservation).
 }
 
 -- == Agents Section ==
@@ -1878,20 +2241,31 @@ rule AgentTreeAgentListFailureKeepsLastList {
 }
 
 rule SwitchAgentTreeFocus {
-    -- Tab moves the pane's keys between the tree and the agents section.
+    -- Tab moves the pane's keys on to the next section, top to bottom and
+    -- round again: tree, then commits, then agents, then tree.
     when: SwitchAgentTreeFocus(user, pane)
 
     requires: pane.status = shown
 
     ensures: pane.focus =
-        if old(pane.focus) = tree: agents
+        if old(pane.focus) = tree: commits
+        else if old(pane.focus) = commits: agents
         else: tree
 
     @guidance
-        -- A toggle, not a cycle, because there are exactly two sections. Tab
-        -- works whether or not the agents section has any rows: an empty
-        -- section is a real place to be, and refusing the key would read as a
-        -- broken key.
+        -- A cycle in screen order, now that there are three sections. It was
+        -- a toggle while there were two, and the cycle is that toggle's
+        -- natural extension: the same key, the same direction down the pane.
+        -- Tab is the ONLY focus key, deliberately. There is no Shift+Tab to
+        -- cycle backwards and no key that focuses a section directly: with
+        -- three sections, at most two presses reach any of them, and every
+        -- extra key would be one more row in three namespaces for a pane
+        -- whose keys are meant to stay few.
+        --
+        -- Tab works whether or not a section has any rows: an empty section
+        -- is a real place to be, and skipping it would read as a broken key.
+        -- (The commits section is never empty anyway — "unstaged work" is
+        -- always its top row.)
 }
 
 rule JumpToAgentWindow {
@@ -2019,15 +2393,19 @@ invariant NodeDiffOpenMatchesOpenSet {
 }
 
 -- An untracked file never carries line counts, and it is the only kind of
--- file that never can. This is not a display choice: a diff against the
--- baseline cannot see a path that is not in the index, so there is no number
+-- file that never can. Untracked files appear only in the unstaged-work view,
+-- whose baseline IS the index, and a diff against it cannot see a path the
+-- index does not hold —
+-- an untracked file, or one taken out by `git rm --cached` — so there is no number
 -- to show and the pane declines to invent one. Showing "+0 -0" for a file the
 -- agent just wrote would be the single most misleading row the pane could
 -- draw.
 --
--- The same fact reaches the diff pane as DiffRefusal.untracked, which is why
--- the placeholder there repeats git's own advice to stage the file rather than
--- reporting an error.
+-- The diff pane is not bound by this: it shows an untracked file's whole
+-- contents as additions (RefreshAgentTreeDiff's "Untracked files"). The tree
+-- row stays without counts deliberately — its counts are the numstat of the
+-- worktree against the index, which does not include the file, and the pane
+-- does not invent a second way of counting for one kind of row.
 invariant UntrackedFilesHaveNoLineCounts {
     for n in AgentTreeNodes:
         (n.kind = file and change_for_node(n) = added and not is_tracked_node(n))
@@ -2073,6 +2451,19 @@ invariant NoSingleChildDirectoryChains {
 invariant DiffBodyExcludesRefusal {
     for d in FileDiffs:
         (d.body = null) = (d.refusal != null)
+}
+
+-- The tree never shows a commit the commits section does not list. Either
+-- the selection is unstaged work, or it names a commit on screen in the list,
+-- so the marked row always says what the tree and the diff pane are showing.
+-- Held by the rules that write either field: a fresh renderer starts with
+-- neither, a selection can only name a listed row (SelectAgentTreeSource), a
+-- successful read falls back when it drops the selected commit
+-- (RefreshAgentTreeCommitList), and a failed read changes neither.
+invariant SelectedCommitIsListed {
+    for p in AgentTreePanes:
+        p.selected_commit = null
+            or p.listed_commits.any(c => c.id = p.selected_commit)
 }
 
 -- A pane is always rooted at its task's worktree — never at the parent repo,
@@ -2136,6 +2527,8 @@ surface AgentTreeCompanionPane {
         pane.open_diff_paths
         pane.error_notice
         pane.focus
+        pane.listed_commits
+        pane.selected_commit
         pane.listed_agents
         pane.task_resolution
         pane.startup_failure when pane.task_resolution = unresolved
@@ -2203,10 +2596,13 @@ surface AgentTreeCompanionPane {
         -- meaning for the state the user can see.
         ToggleAllAgentTreeFileDiffs(user, pane)           -- a
 
-        -- The agents section. Tab moves focus between it and the tree; while
-        -- it has focus, Space and Enter jump rather than toggle. See
-        -- AgentKeysFollowFocus for what every other key does there.
+        -- The commits and agents sections. Tab cycles focus tree -> commits
+        -- -> agents -> tree. With the commits section focused, Space and Enter
+        -- select the row under the cursor as the tree's source; with the
+        -- agents section focused, they jump. See AgentKeysFollowFocus for
+        -- what every other key does there.
         SwitchAgentTreeFocus(user, pane)                  -- Tab
+        SelectAgentTreeSource(user, pane, commit)         -- Space, Enter (commits focus)
         JumpToAgentWindow(user, pane, target)             -- Space, Enter (agents focus)
 
     @guarantee PanesReadThroughTheBoard
@@ -2241,7 +2637,7 @@ surface AgentTreeCompanionPane {
 
     @guarantee AgentTreePaneSaysWhatItIsWaitingFor
         -- Until its task resolves, the pane draws one line in place of the
-        -- tree and the agents section: `waiting for task <id>`. It is never
+        -- tree and the commits and agents sections: `waiting for task <id>`. It is never
         -- blank, so a slow store or a restarting board reads as a wait rather than as a broken or
         -- empty pane. In the common case the task resolves at once and the
         -- line is never seen (AgentTreePaneResolvesItsTask).
@@ -2259,16 +2655,17 @@ surface AgentTreeCompanionPane {
         -- pane's exit_pane row, looked up in the table, so Alt+q does nothing,
         -- and the press records no usage (keybindings.allium:
         -- PaneStartupScreenIsOutsideUsage). Every other key is ignored, since there is
-        -- no tree, no agents list and no open set for it to act on. The pane
+        -- no tree, no commits or agents list and no open set for it to act on. The pane
         -- never closes itself — see "Companion Pane Startup" for the race
         -- that made it do so.
 
     @guarantee AgentsSectionSitsBelowTheTree
         -- The agents section is a band across the bottom of the pane, under
-        -- the tree, with its own titled top border ("Agents (Tab)"). The
-        -- "(Tab)" is the only place the pane names the key that reaches the
-        -- section, and it reads the same whichever section has focus: Tab is
-        -- a toggle, so the one key both enters and leaves. Without it the
+        -- the tree and the commits section, with its own titled top border
+        -- ("Agents (Tab)"). The "(Tab)" is the only place the pane names the
+        -- key that reaches the section, and it reads the same whichever
+        -- section has focus: Tab cycles through every section, so the one key
+        -- both enters and leaves. Without it the
         -- section was reachable but undiscoverable (task #4977). It is as tall
         -- as the number of listed agents, capped at
         -- config.agent_tree_agents_max_rows, and the tree keeps every row the
@@ -2277,11 +2674,56 @@ surface AgentTreeCompanionPane {
         -- one empty row, so Tab always has somewhere visible to go.
         --
         -- The focused section's border is drawn in the focus colour and the
-        -- other's in the ordinary border colour, so the user can always see
+        -- others' in the ordinary border colour, so the user can always see
         -- which section the next key will act on. A notice still reddens the
-        -- pane's border (AgentTreeNoticeRedensBorder) — both sections' — and
+        -- pane's border (AgentTreeNoticeRedensBorder) — every section's — and
         -- wins over focus. Its text stays where it always was, on the tree's
-        -- bottom border, which now sits directly above the agents section.
+        -- bottom border, which now sits directly above the commits section.
+
+    @guarantee CommitsSectionSitsBetweenTreeAndAgents
+        -- The commits section is a band beneath the tree and above the
+        -- agents section, with its own titled top border ("Commits (Tab)"),
+        -- drawn and focused exactly as the agents section is. It is as tall
+        -- as its rows — the "unstaged work" row plus one per listed commit —
+        -- capped at config.agent_tree_commits_max_rows, and scrolls past the
+        -- cap to keep its cursor in view. It always has at least the
+        -- "unstaged work" row, so it is never empty.
+        --
+        -- "unstaged work" is the top row, then commits newest first, so the
+        -- default sits next to the most recent work and the list reads
+        -- downward into the past, as `git log` does.
+
+    @guarantee CompanionPaneIsHumanOnly
+        -- The companion pane, its commits section included, is deliberately
+        -- for the human watching the agent and has NO MCP twin. This is an
+        -- explicit exception to the convention that interactive capabilities
+        -- get one. Everything the pane shows is a read-only view of git
+        -- state an agent can query directly — the unstaged diff, a commit's
+        -- diff, the commit range — and the selection is a view choice with
+        -- no effect outside this pane. A tool that mirrored it would expose
+        -- the pane's view state, not any capability the agent lacks.
+
+    @guarantee CommitRowShowsShortIdAndSubject
+        -- Each commit row reads `<short id> <subject>`, clipped at the pane
+        -- edge like every other row here. The short id is the commit id's
+        -- leading characters, enough to recognise it beside `git log`; the
+        -- selection itself is keyed by the full id.
+        --
+        -- The SELECTED row — the source the tree and the diff pane are
+        -- showing — carries a marker in every state, focused or not, so the
+        -- user can always see which source they are looking at. That is
+        -- separate from the cursor highlight, which is drawn only in the
+        -- focused section like the agents section's: moving the cursor
+        -- selects nothing until Space or Enter.
+
+    @guarantee TreeTitleNamesItsSource
+        -- The tree's title says which source the tree is showing: the pane
+        -- root alone for unstaged work, and the selected commit's short id
+        -- beside it when a commit is selected. A tree showing a commit looks
+        -- exactly like a tree showing unstaged work row for row, so without
+        -- this the user could take a finished commit for work in progress —
+        -- or the reverse — whenever the commits section was scrolled or
+        -- focus was elsewhere.
 
     @guarantee AgentRowShowsIdAndTitle
         -- Each agent row reads `#<id> <title>`, clipped at the pane edge like
@@ -2299,25 +2741,29 @@ surface AgentTreeCompanionPane {
         -- Tab back returns the user to where they were.
 
     @guarantee AgentKeysFollowFocus
-        -- With the agents section focused, the cursor motions — j/k, Up/Down,
-        -- gg, G, Ctrl-D, Ctrl-U — move the agents cursor, with the same clamp
-        -- and half-page rules they have in the tree (half a page is half the
-        -- section's visible height). h/l and Left/Right do nothing there:
-        -- there is nothing to expand. q and Ctrl-C exit the renderer, and `a`
-        -- still toggles every file diff, from either section — both act on the
-        -- pane as a whole, not on a cursor.
+        -- With the commits or the agents section focused, the cursor motions
+        -- — j/k, Up/Down, gg, G, Ctrl-D, Ctrl-U — move that section's cursor,
+        -- with the same clamp and half-page rules they have in the tree (half
+        -- a page is half the section's visible height). h/l and Left/Right do
+        -- nothing in either: there is nothing to expand. q and Ctrl-C exit
+        -- the renderer, and `a` still toggles every file diff, from any
+        -- section — both act on the pane as a whole, not on a cursor.
         --
         -- Every key the pane handles, Tab included, still clears a notice
         -- (ClearAgentTreeErrorNotice).
 
     @guarantee CompanionPaneKeysAreTableRows
         -- The keys listed under provides are rows of the keybinding table
-        -- (keybindings.allium), in two namespaces: agent_tree.tree while the
-        -- tree has focus and agent_tree.agents while the agents section does.
-        -- The pane-wide keys (q, Ctrl-C, Tab, a) are rows of both. A press is
+        -- (keybindings.allium), in three namespaces: agent_tree.tree while the
+        -- tree has focus, agent_tree.commits while the commits section does,
+        -- and agent_tree.agents while the agents section does. The pane-wide
+        -- keys (q, Ctrl-C, Tab, a) are rows of all three, and no key in the
+        -- commits namespace means anything new: Space/Enter is select_source
+        -- there as it is jump_to_agent in the agents namespace, so focus, not
+        -- a new key, decides the meaning. A press is
         -- looked up in the focused section's namespace and runs that row's
         -- action; a press no applicable row lists does nothing — h/l and
-        -- Left/Right in the agents section, l/Right on a file, and Space/Enter
+        -- Left/Right in the commits and agents sections, l/Right on a file, and Space/Enter
         -- with a stale or empty selection all land here. A press with Ctrl or
         -- Alt held matches only a row listing that modified form, so Ctrl-D
         -- moves half a page and Alt-j does nothing.
@@ -2327,7 +2773,9 @@ surface AgentTreeCompanionPane {
         -- over the board's port, and the board records it
         -- (keybindings.allium: PanesRecordUsageLikeTheBoard). Space or Enter
         -- in the agents section on the pane's own task, or on no row, does
-        -- nothing (JumpToAgentWindow) and records nothing.
+        -- nothing (JumpToAgentWindow) and records nothing; so does Space or
+        -- Enter in the commits section on the row already selected
+        -- (SelectAgentTreeSource).
 
     @guarantee AgentTreeGgChordNeverExpires
         -- `gg` is a two-key chord, and unlike the board's `gg` (core.allium's
@@ -2464,19 +2912,97 @@ surface AgentTreeCompanionPane {
         -- inventing a second source to supply it is the thing this guarantee
         -- forbids.
 
-    @guarantee AgentTreeBaselineIsTaskBaseBranch
-        -- "Changed" always means "changed relative to this worktree's fork
-        -- point from the task's base branch" — never relative to HEAD alone,
-        -- and never relative to a base tip. Two consequences the user depends
-        -- on:
+    @guarantee AgentTreeShowsUnstagedWorkOnly
+        -- By default — whenever "unstaged work" is the selected source, which
+        -- it is whenever a renderer starts — "changed" means "changed in the
+        -- working tree relative to the index": the agent's UNSTAGED work and
+        -- nothing else. The default view is of what the agent is doing now,
+        -- not an account of everything on the branch, and the tree, its line
+        -- counts and the diff pane all answer that same question. What
+        -- follows for the user:
         --
-        --   * Committing does not empty the pane. An agent that commits
-        --     mid-session still sees its own work, because the baseline is
-        --     behind the commit.
-        --   * Other people's work on the base branch never appears. The
-        --     baseline is the fork point, not the current base tip, so commits
-        --     that landed on the base branch after this task branched are not
-        --     the agent's changes and are not shown as such.
+        --   * Staged changes are not shown. A file staged and not changed
+        --     again is absent from the tree; staging a whole edit empties its
+        --     row. A staged deletion that also removed the file from disk is
+        --     not shown either. No source shows staged work: it is neither
+        --     unstaged nor a commit.
+        --   * Committed work is not shown in this view. Committing empties the
+        --     tree of everything that went into the commit — and the commit
+        --     appears in the commits section, from which the user can select
+        --     it to see exactly that work again (AgentTreeSourceIsOneSelection).
+        --   * Untracked files ARE shown, as added and without counts
+        --     (UntrackedFilesHaveNoLineCounts) — they are unstaged by
+        --     definition. That includes a file taken out of the index with
+        --     `git rm --cached`, which is still on disk.
+        --   * Other people's work on the base branch never appears: whatever
+        --     reached this branch by commit or merge is already in the index.
+        --
+        -- == This REVERSES an earlier guarantee ==
+        -- The tree used to be measured from this worktree's fork point from
+        -- the task's base branch, and AgentTreeBaselineIsTaskBaseBranch then
+        -- promised "Committing does not empty the pane": an agent that
+        -- committed mid-session kept seeing its work in the tree. That
+        -- promise is withdrawn deliberately. Committing now DOES empty the
+        -- default view, and staging does too, because the user asked to watch
+        -- ongoing work rather than the branch's accumulated diff — an agent
+        -- that commits as it goes would otherwise bury the edit it is making
+        -- right now under every edit it has finished. What committing no
+        -- longer does is make the work unreachable: it moves from the tree to
+        -- a row of the commits section.
+        --
+        -- == No combined branch view ==
+        -- There is no source that shows the whole branch's diff at once, and
+        -- no toggle back to the old fork-point tree. That is a deliberate
+        -- exclusion, not an omission. The branch's full change set is what
+        -- the board's review flow and the pull request are for; here the user
+        -- reads the branch one commit at a time, which is how the agent made
+        -- it.
+        --
+        -- The baseline is re-derived from git on every tick, like everything
+        -- else the pane shows, which keeps AgentTreeIsGitDerived true of it:
+        -- the index is read as it stands, and nothing about it is remembered
+        -- between refreshes.
+
+    @guarantee AgentTreeSourceIsOneSelection
+        -- The tree and the diff pane always show the SAME source, and exactly
+        -- one: unstaged work, or one commit from the commits section against
+        -- its parent. pane.selected_commit is that selection, and both panes
+        -- read it — the tree directly, the diff pane from where it reads the
+        -- open set — so a row's badge, its counts and its diff can never come
+        -- from two different comparisons (RefreshAgentTreeDiff's "The same
+        -- baseline, asked the same way"). The diff pane may lag a selection
+        -- change by one refresh interval, as it already lags an open-set
+        -- change; it never settles on a different source.
+        --
+        -- The selection is the user's, made by a keypress
+        -- (SelectAgentTreeSource), and is keyed by commit id. The repository
+        -- can take it away — a rebase, amend or reset that drops the commit
+        -- from the branch — and then it falls back to unstaged work
+        -- (RefreshAgentTreeCommitList); nothing else changes it. A new commit
+        -- does not move it, and a fresh renderer always starts on unstaged
+        -- work.
+        --
+        -- Selecting a commit is a READ, like everything else here
+        -- (ReadOnlyObservation): it changes what the pane shows and nothing
+        -- in the worktree, the index or HEAD.
+
+    @guarantee AgentTreeBaselineIsTaskBaseBranch
+        -- Governs ONE thing: which commits the commits section lists. "The
+        -- agent's commits" always means "commits reachable from HEAD and not
+        -- from this worktree's fork point from the task's base branch" —
+        -- never relative to HEAD alone, and never relative to a base tip. It
+        -- used to define what the TREE showed as well; that is now unstaged
+        -- work or one selected commit (AgentTreeShowsUnstagedWorkOnly,
+        -- AgentTreeSourceIsOneSelection), and no tree query resolves a branch.
+        -- What the user depends on:
+        --
+        --   * The agent's commits on this branch are listed, up to the newest
+        --     config.agent_tree_commits_max_listed, so recently committed
+        --     work stays reachable. Older ones are not listed.
+        --   * Other people's work on the base branch never appears. The fork
+        --     point is not the current base tip, so commits that landed on
+        --     the base branch after this task branched are not the agent's
+        --     and are not listed as such.
         --
         -- == Resolving the fork point: a base branch names up to two refs ==
         -- task.base_branch is a NAME, and a repo can hold two refs under it:
@@ -2484,7 +3010,7 @@ surface AgentTreeCompanionPane {
         -- apart in both directions during normal operation, and dispatch
         -- branches a worktree from whichever of the two was ahead at the
         -- moment it provisioned (see dispatch.allium's start-point selection).
-        -- So neither ref alone is a safe baseline:
+        -- So neither ref alone is a safe place to start the range:
         --
         --   * Local behind remote — the human never checked the base branch
         --     out, or has not pulled it in weeks. The worktree was branched
@@ -2499,7 +3025,7 @@ surface AgentTreeCompanionPane {
         --     way, only mirrored.
         --
         -- Both errors are the same error and it is the one this guarantee
-        -- exists to forbid, so the baseline is resolved against BOTH refs: the
+        -- exists to forbid, so the fork point is resolved against BOTH refs: the
         -- fork point is taken against each ref that resolves, and the one
         -- nearer HEAD wins. A ref that does not resolve is simply not a
         -- candidate — a base branch the human never checked out locally is
@@ -2524,10 +3050,10 @@ surface AgentTreeCompanionPane {
         -- candidate; a comparison git failed to answer — because it could not
         -- run, or overran config.agent_tree_git_timeout — would then keep the
         -- local candidate too, silently reinstating the very mis-attribution
-        -- this guarantee forbids and presenting it as a correct tree. So an
-        -- unanswerable comparison fails the whole query instead, and the tick
-        -- takes AgentTreeGitFailureKeepsLastGoodTree: last good tree, notice,
-        -- red border.
+        -- this guarantee forbids and presenting it as a correct list. So an
+        -- unanswerable comparison fails the whole read instead, and the tick
+        -- takes AgentTreeCommitListFailureKeepsLastList: last good list,
+        -- notice, red border.
         --
         -- When neither ref resolves and the query fails, the message the user
         -- sees is the LOCAL branch's. That is the name they put on the task, so
@@ -2549,8 +3075,8 @@ surface AgentTreeCompanionPane {
         --
         -- The whole resolution is re-derived from git on every tick and
         -- nothing about it is remembered between refreshes, which is what
-        -- keeps AgentTreeIsGitDerived true of the baseline as well as of the
-        -- changes. The alternative — recording at provision time which ref the
+        -- keeps AgentTreeIsGitDerived true of the commit range as well as of
+        -- the changes. The alternative — recording at provision time which ref the
         -- worktree was branched from — was rejected for that reason: it makes
         -- the pane depend on dispatch-time bookkeeping that no later git
         -- command can confirm or repair, and it says nothing at all about a
@@ -2579,9 +3105,12 @@ surface AgentTreeCompanionPane {
         -- opening it, cannot change what the agent does or what the board
         -- shows.
         --
-        -- The git commands this pane runs are read-only by construction — the
-        -- baseline resolution's merge-base probes, a diff and a file listing.
-        -- Nothing here fetches, commits, stages, checks out or writes to the
+        -- The git commands this pane runs are read-only by construction — two
+        -- diffs of the worktree against the index and a file listing for
+        -- unstaged work; two diffs of a commit against its parent for a
+        -- selected commit; and, for the commits section, the fork-point
+        -- resolution's merge-base and ancestry probes and a commit listing.
+        -- Selecting a commit checks nothing out. Nothing here fetches, commits, stages, checks out or writes to the
         -- index, and an agent's own git operations must never be disturbed by
         -- the pane observing them.
         --
@@ -2593,7 +3122,8 @@ surface AgentTreeCompanionPane {
         -- needed a carve-out stated here. The carve-out is gone with it.
         --
         -- One write does exist and it is outside the worktree: the tree records
-        -- its open set where the diff pane can read it. It goes in the
+        -- its open set, and its selected source, where the diff pane can read
+        -- them. It goes in the
         -- worktree's git administrative directory, which git never reports and
         -- which `git worktree remove` deletes with the worktree, so it can
         -- never appear in the tree, in a diff, or in anything the agent might
@@ -2607,8 +3137,9 @@ surface AgentTreeCompanionPane {
         -- the toggle keybinding.
 
     @guarantee OpenSetIsNotWorktreeState
-        -- The set of files whose diffs are open is the user's, not the
-        -- repository's, and it is kept where the repository cannot see it: the
+        -- The set of files whose diffs are open, and the selected source
+        -- (pane.selected_commit), are the user's, not the repository's, and
+        -- they are kept where the repository cannot see them: the
         -- worktree's own git administrative directory. Three properties follow
         -- and all three are required, not merely convenient.
         --
@@ -2623,20 +3154,23 @@ surface AgentTreeCompanionPane {
         --   * It is per worktree, so two agents' panes cannot read each
         --     other's.
         --
-        -- It is written by the tree and read by the diff pane, in that
+        -- Both are written by the tree and read by the diff pane, in that
         -- direction only. The diff pane never writes it, which is what keeps
         -- the tree the single place a toggle is decided even though two
         -- processes can see the file.
         --
         -- It is not durable state and nothing reads it back after the tree
         -- exits: KillAgentTreeDiffPaneWithItsTree empties the set, so a file
-        -- left behind by a killed renderer describes nothing.
+        -- left behind by a killed renderer describes nothing. A fresh renderer
+        -- writes unstaged work as the selection before the diff pane can be
+        -- split, so a stale selection is never read either.
 
     @guarantee OpenDiffPathsMaySurviveTheirFiles
         -- A path stays in the open set even when git stops reporting the file —
-        -- the agent reverted it, or committed and reset. It renders nothing
-        -- while that lasts, and starts rendering again by itself if the agent
-        -- changes the file once more.
+        -- the agent reverted it, staged it, or committed it, or the user
+        -- selected a source that does not touch it. It renders nothing while
+        -- that lasts, and starts rendering again by itself if the agent
+        -- changes the file once more or the user selects a source that does.
         --
         -- Pruning it instead would mean the pane quietly un-asking a question
         -- the user asked, and would make a file the agent is actively editing
@@ -2647,7 +3181,9 @@ surface AgentTreeCompanionPane {
         -- The pane's initial state is shown, so an agent window opens with the
         -- tree already visible. Everything the pane displays is derived from a
         -- git query, so it survives its own restart: toggling off and on
-        -- rebuilds the same badges, because it asks the same question again.
+        -- rebuilds the same unstaged-work badges, because it asks the same
+        -- question again. A selected commit does not survive it — a fresh
+        -- renderer starts on unstaged work (ShowAgentTreePane).
         --
         -- The cursor position and the user's manual expansions do NOT survive a
         -- restart. They live in the renderer process and are modelled nowhere in
@@ -2758,7 +3294,9 @@ surface AgentTreeDiffPane {
     @guarantee DiffPaneIsGitDerivedToo
         -- Everything this pane shows comes from git, exactly as the tree's
         -- badges do (AgentTreeIsGitDerived). It reads the open set to know
-        -- WHICH files to ask about, and nothing else: the paths come from the
+        -- WHICH files to ask about, and the selected source to know WHICH
+        -- comparison to ask for (AgentTreeSourceIsOneSelection), and nothing
+        -- else: the paths come from the
         -- tree, the contents never do. So the two panes cannot disagree about
         -- what changed, and a diff cannot outlive the fact behind it — the next
         -- tick asks again.

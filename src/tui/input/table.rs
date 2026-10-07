@@ -361,7 +361,11 @@ impl App {
             | N::BoardConfirmTrustRepo
             | N::BoardConfirmTrustRepoQuickDispatch
             | N::BoardConfirmRepoSync => self.run_confirm(action.ends_with("_yes"), label),
-            N::AgentTreeTree | N::AgentTreeAgents | N::AgentDiff | N::TmuxGlobal => vec![],
+            N::AgentTreeTree
+            | N::AgentTreeCommits
+            | N::AgentTreeAgents
+            | N::AgentDiff
+            | N::TmuxGlobal => vec![],
         }
     }
 

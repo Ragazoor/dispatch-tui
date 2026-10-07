@@ -1275,14 +1275,16 @@ fn q_after_a_lone_g_still_exits() {
     assert_eq!(rig.press(KeyCode::Char('q')), KeyAction::Exit);
 }
 
-// ---- git_changes: baseline resolution, diff, untracked listing --------
+// ---- git_changes: unstaged work (AgentTreeShowsUnstagedWorkOnly) ------
 
 use crate::process::MockProcessRunner;
 
-/// Fork point of HEAD with the LOCAL base branch, in every rig below.
+/// Fork point of HEAD with the LOCAL base branch, in the commit-list rigs.
 const LOCAL_FORK: &str = "1111111111111111111111111111111111111111";
 /// Fork point of HEAD with the REMOTE-TRACKING base ref.
 const REMOTE_FORK: &str = "2222222222222222222222222222222222222222";
+/// A commit the user has selected in the commits section.
+const COMMIT: &str = "3333333333333333333333333333333333333333";
 
 /// A `-z` stream: NUL after every field, exactly as git emits it.
 fn nul(fields: &[&str]) -> String {
@@ -1294,10 +1296,11 @@ fn sha(commit: &str) -> Result<std::process::Output> {
     MockProcessRunner::ok_with_stdout(format!("{commit}\n").as_bytes())
 }
 
-/// The diff, its line counts, and the untracked listing, in call order.
-/// `diff` alternates status and path; `numstat` holds whole
-/// `added\tremoved\tpath` records; `untracked` is bare paths.
-fn changes_out_counted(
+/// The unstaged form's three answers, in call order: the diff against the
+/// index, its line counts, and the untracked listing. `diff` alternates
+/// status and path; `numstat` holds whole `added\tremoved\tpath` records;
+/// `untracked` is bare paths.
+fn unstaged_out_counted(
     diff: &[&str],
     numstat: &[&str],
     untracked: &[&str],
@@ -1309,93 +1312,60 @@ fn changes_out_counted(
     ]
 }
 
-/// The common case: no line counts queued, so every path renders without
-/// them. Rigs that care about counts use [`changes_out_counted`].
-fn changes_out(diff: &[&str], untracked: &[&str]) -> Vec<Result<std::process::Output>> {
-    changes_out_counted(diff, &[], untracked)
-}
-
-/// The two fork-point probes answering `local` and `remote`, then the diff
-/// and the untracked listing. Covers every rig whose probes need no
-/// ranking — either they agree, or one of them failed.
-fn probe_rig(
-    local: Result<std::process::Output>,
-    remote: Result<std::process::Output>,
-    diff: &[&str],
-    untracked: &[&str],
-) -> MockProcessRunner {
-    let mut queued = vec![local, remote];
-    queued.extend(changes_out(diff, untracked));
-    MockProcessRunner::new(queued)
-}
-
-/// Every git command succeeds, with both base refs agreeing on the fork
-/// point — the ordinary case, where no ancestry probe is needed.
+/// Every unstaged-work command succeeds, with no line counts queued. There
+/// is nothing to resolve first — the baseline is the index — so a rig needs
+/// no merge-base answers at all.
 fn git_rig(diff: &[&str], untracked: &[&str]) -> MockProcessRunner {
-    probe_rig(sha(LOCAL_FORK), sha(LOCAL_FORK), diff, untracked)
+    MockProcessRunner::new(unstaged_out_counted(diff, &[], untracked))
 }
 
-/// Neither base ref resolves, so the baseline cannot be found and the query
-/// fails before the diff. Nothing is queued past the two probes, so a third
-/// call would panic — which is what
-/// `a_failed_baseline_resolution_runs_no_further_commands` relies on.
+/// The first diff fails, so the query fails. Nothing is queued past it, so
+/// a second call would panic — which is what
+/// `a_failing_diff_does_not_run_the_untracked_listing` relies on.
 fn failing_git_rig(stderr: &str) -> MockProcessRunner {
+    MockProcessRunner::new(vec![MockProcessRunner::fail(stderr)])
+}
+
+/// The one-commit form's two answers: name-and-status, then counts.
+fn commit_rig(diff: &[&str], numstat: &[&str]) -> MockProcessRunner {
     MockProcessRunner::new(vec![
-        MockProcessRunner::fail(stderr),
-        MockProcessRunner::fail(stderr),
+        MockProcessRunner::ok_with_stdout(nul(diff).as_bytes()),
+        MockProcessRunner::ok_with_stdout(nul(numstat).as_bytes()),
     ])
 }
 
-/// The two probes disagree, and `local_is_ancestor` says which way. Git
-/// answers `merge-base --is-ancestor` with an exit code, not stdout: 0 for
-/// yes, 1 for no.
-fn diverged_rig(local_is_ancestor: bool, diff: &[&str]) -> MockProcessRunner {
-    let verdict = if local_is_ancestor {
-        MockProcessRunner::ok()
-    } else {
-        MockProcessRunner::fail_with_code(1, "")
-    };
-    let mut queued = vec![sha(LOCAL_FORK), sha(REMOTE_FORK), verdict];
-    queued.extend(changes_out(diff, &[]));
-    MockProcessRunner::new(queued)
-}
-
-/// The spec's AgentTreeGitQuery, in full: probe both refs the base branch
-/// name can denote, then diff the working tree against the fork point they
-/// agree on. Agreement is the ordinary case, and it costs no ancestry
-/// probe — there is nothing to rank.
+/// The spec's AgentTreeGitQuery, unstaged form, in full: the working tree
+/// against the INDEX — naming no revision — then its counts, then the
+/// untracked listing. No branch is resolved, so no merge-base probe runs: a
+/// stale or missing base branch cannot fail the tree any more.
 #[test]
-fn git_changes_probes_both_base_refs_then_diffs_from_the_fork_point() {
+fn unstaged_work_diffs_the_working_tree_against_the_index_and_resolves_no_branch() {
     let runner = git_rig(&["M", "src/a.rs"], &[]);
-    let changes = git_changes(Path::new("/wt"), "main", &runner).expect("ok");
+    let changes = git_changes(Path::new("/wt"), None, &runner).expect("ok");
 
     assert_eq!(changes, vec![modified("src/a.rs")]);
     assert_eq!(
         runner.flattened_calls(),
         vec![
-            "git -C /wt merge-base HEAD main".to_string(),
-            "git -C /wt merge-base HEAD origin/main".to_string(),
-            format!("git -C /wt diff --name-status --no-renames -z {LOCAL_FORK}"),
-            format!("git -C /wt diff --numstat --no-renames -z {LOCAL_FORK}"),
+            "git -C /wt diff --name-status --no-renames -z".to_string(),
+            "git -C /wt diff --numstat --no-renames -z".to_string(),
             "git -C /wt ls-files --others --exclude-standard -z".to_string(),
         ]
     );
 }
 
-/// The counts query is a SEPARATE ask against the SAME baseline and the
-/// same rename setting. If the two ever drifted apart, a row's badge and
-/// its numbers would be answering different questions.
+/// The counts query is a SEPARATE ask against the SAME baseline (the index)
+/// and the same rename setting. If the two ever drifted apart, a row's badge
+/// and its numbers would be answering different questions.
 #[test]
 fn git_changes_counts_lines_against_the_same_baseline_as_the_badges() {
-    let mut queued = vec![sha(LOCAL_FORK), sha(LOCAL_FORK)];
-    queued.extend(changes_out_counted(
+    let runner = MockProcessRunner::new(unstaged_out_counted(
         &["M", "src/a.rs"],
         &["12\t3\tsrc/a.rs"],
         &[],
     ));
-    let runner = MockProcessRunner::new(queued);
 
-    let changes = git_changes(Path::new("/wt"), "main", &runner).expect("ok");
+    let changes = git_changes(Path::new("/wt"), None, &runner).expect("ok");
 
     assert_eq!(
         changes[0].counts,
@@ -1411,164 +1381,23 @@ fn git_changes_counts_lines_against_the_same_baseline_as_the_badges() {
 /// hole with a zero — see the spec's UntrackedFilesHaveNoLineCounts.
 #[test]
 fn an_untracked_path_comes_back_with_no_line_counts() {
-    let mut queued = vec![sha(LOCAL_FORK), sha(LOCAL_FORK)];
-    queued.extend(changes_out_counted(&[], &[], &["brand_new.rs"]));
-    let runner = MockProcessRunner::new(queued);
+    let runner = MockProcessRunner::new(unstaged_out_counted(&[], &[], &["brand_new.rs"]));
 
-    let changes = git_changes(Path::new("/wt"), "main", &runner).expect("ok");
+    let changes = git_changes(Path::new("/wt"), None, &runner).expect("ok");
 
     assert_eq!(changes, vec![added("brand_new.rs")]);
     assert_eq!(changes[0].counts, None);
 }
 
-/// The bug this resolution exists for. A base branch the human has not
-/// pulled in weeks leaves the LOCAL ref behind its remote, while the
-/// worktree was branched from the remote one. Measuring from the local
-/// fork point would badge every upstream commit since as the agent's work.
-///
-/// Local fork point is an ancestor of the remote one, so the remote wins.
-#[test]
-fn a_local_base_behind_its_remote_diffs_from_the_remote_fork_point() {
-    let runner = diverged_rig(true, &["M", "src/a.rs"]);
-    git_changes(Path::new("/wt"), "main", &runner).expect("ok");
-
-    let calls = runner.flattened_calls();
-    assert_eq!(
-        calls[2],
-        format!("git -C /wt merge-base --is-ancestor {LOCAL_FORK} {REMOTE_FORK}")
-    );
-    assert_eq!(
-        calls[3],
-        format!("git -C /wt diff --name-status --no-renames -z {REMOTE_FORK}")
-    );
-}
-
-/// The mirror image, and dispatch's own default: wrap-up fast-forwards the
-/// local base branch without pushing, so the local ref is AHEAD and the
-/// worktree was branched from it. Preferring the remote ref unconditionally
-/// would mis-attribute in exactly the same way.
-///
-/// The same exit code covers the case where the two refs have truly
-/// diverged and neither fork point is an ancestor of the other: the spec
-/// settles that one by fixed rule, and the rule is that the local ref wins.
-#[test]
-fn a_local_base_ahead_of_its_remote_diffs_from_the_local_fork_point() {
-    let runner = diverged_rig(false, &["M", "src/a.rs"]);
-    git_changes(Path::new("/wt"), "main", &runner).expect("ok");
-
-    assert_eq!(
-        runner.flattened_calls()[3],
-        format!("git -C /wt diff --name-status --no-renames -z {LOCAL_FORK}")
-    );
-}
-
-/// A base branch the human never checked out locally is ordinary — it is
-/// the case dispatch's own start-point selection calls normal. The pane
-/// must keep working on the remote ref alone, not fail.
-#[test]
-fn a_missing_local_base_branch_still_resolves_from_the_remote_ref() {
-    let runner = probe_rig(
-        MockProcessRunner::fail("fatal: Not a valid object name main\n"),
-        sha(REMOTE_FORK),
-        &["M", "src/a.rs"],
-        &[],
-    );
-
-    let changes = git_changes(Path::new("/wt"), "main", &runner).expect("ok");
-    assert_eq!(changes, vec![modified("src/a.rs")]);
-    assert_eq!(
-        runner.flattened_calls()[2],
-        format!("git -C /wt diff --name-status --no-renames -z {REMOTE_FORK}"),
-        "one candidate needs no ranking, so no ancestry probe runs"
-    );
-}
-
-/// The other half: a repo with no remote-tracking ref for the base branch
-/// — a purely local base, or a remote never fetched — resolves from the
-/// local branch alone.
-#[test]
-fn a_missing_remote_base_ref_still_resolves_from_the_local_branch() {
-    let runner = probe_rig(
-        sha(LOCAL_FORK),
-        MockProcessRunner::fail("fatal: Not a valid object name origin/main\n"),
-        &["M", "src/a.rs"],
-        &[],
-    );
-
-    let changes = git_changes(Path::new("/wt"), "main", &runner).expect("ok");
-    assert_eq!(changes, vec![modified("src/a.rs")]);
-    assert_eq!(
-        runner.flattened_calls()[2],
-        format!("git -C /wt diff --name-status --no-renames -z {LOCAL_FORK}")
-    );
-}
-
-/// Git answers `--is-ancestor` with exit 0 or 1 and nothing else. Any
-/// other exit means it did not answer at all, and a probe that did not
-/// answer must not be read as "no" — "no" keeps the LOCAL fork point, which
-/// is exactly the mis-attribution AgentTreeBaselineIsTaskBaseBranch exists
-/// to forbid, and it would be shown as a correct tree with no red border.
-/// Fail the query instead, so the failure rule fires.
-#[test]
-fn an_ancestry_probe_that_cannot_answer_fails_the_query() {
-    let runner = MockProcessRunner::new(vec![
-        sha(LOCAL_FORK),
-        sha(REMOTE_FORK),
-        MockProcessRunner::fail_with_code(128, "fatal: unable to read index.lock\n"),
-    ]);
-    let err = git_changes(Path::new("/wt"), "main", &runner)
-        .expect_err("must fail")
-        .to_string();
-    assert!(err.contains("index.lock"), "got {err}");
-    assert_eq!(
-        runner.recorded_calls().len(),
-        3,
-        "nothing may run after a baseline we could not rank"
-    );
-}
-
-/// A probe that exits zero but says nothing is not a baseline. An empty
-/// string handed to `git diff` means something else entirely, so the ref is
-/// soft-failed out of the running instead — here leaving the remote one to
-/// answer alone.
-#[test]
-fn a_probe_that_returns_no_commit_is_not_a_candidate() {
-    let runner = probe_rig(
-        MockProcessRunner::ok_with_stdout(b"\n"),
-        sha(REMOTE_FORK),
-        &["M", "src/a.rs"],
-        &[],
-    );
-
-    let changes = git_changes(Path::new("/wt"), "main", &runner).expect("ok");
-    assert_eq!(changes, vec![modified("src/a.rs")]);
-    assert_eq!(
-        runner.flattened_calls()[2],
-        format!("git -C /wt diff --name-status --no-renames -z {REMOTE_FORK}")
-    );
-}
-
-/// Only when NEITHER ref resolves is there no baseline, and only then does
-/// the query fail.
-#[test]
-fn neither_base_ref_resolving_fails_the_query() {
-    let runner = failing_git_rig("fatal: Not a valid object name nosuchbranch\n");
-    let err = git_changes(Path::new("/wt"), "nosuchbranch", &runner)
-        .expect_err("must fail")
-        .to_string();
-    assert!(err.contains("nosuchbranch"), "got {err}");
-}
-
 /// Git C-quotes any path with a non-ASCII byte, and separates the status
 /// from the path with a tab, unless `-z` is passed — so `src/é.rs` would
-/// arrive as the literal `"src/\303\251.rs"`, a name that renders wrong and
-/// opens nothing. Both path-emitting queries must pass it; the fork-point
-/// probes emit commit ids, which have no such problem.
+/// arrive as the literal `"src/\303\251.rs"`. Every step of both forms asks
+/// for NUL-delimited output.
 #[test]
-fn both_path_emitting_queries_ask_for_nul_delimited_output() {
+fn every_unstaged_query_asks_for_nul_delimited_output() {
     let runner = git_rig(&[], &[]);
-    git_changes(Path::new("/wt"), "main", &runner).expect("ok");
-    for call in &runner.flattened_calls()[2..] {
+    git_changes(Path::new("/wt"), None, &runner).expect("ok");
+    for call in runner.flattened_calls() {
         assert!(
             call.split(' ').any(|arg| arg == "-z"),
             "without -z, quoting breaks non-ASCII names; got {call}"
@@ -1581,7 +1410,7 @@ fn both_path_emitting_queries_ask_for_nul_delimited_output() {
 #[test]
 fn a_non_ascii_path_survives_parsing_and_tree_building() {
     let runner = git_rig(&["M", "src/é.rs"], &["docs/naïve.md"]);
-    let changes = git_changes(Path::new("/wt"), "main", &runner).expect("ok");
+    let changes = git_changes(Path::new("/wt"), None, &runner).expect("ok");
     assert_eq!(changes, vec![modified("src/é.rs"), added("docs/naïve.md")]);
 
     let tree = build_tree(&root(), &changes);
@@ -1596,40 +1425,19 @@ fn a_non_ascii_path_survives_parsing_and_tree_building() {
 }
 
 /// Every query is bounded, so a git blocked on an index lock the agent
-/// itself holds cannot wedge the renderer's single-threaded loop. The
-/// fork-point probes are queries like any other and are bounded too — the
-/// baseline resolution must not become an unbounded hole in that promise.
+/// itself holds cannot wedge the renderer's single-threaded loop. A tree
+/// tick runs at most three commands (config.agent_tree_git_timeout).
 #[test]
-fn every_git_query_is_bounded_by_a_timeout() {
-    let runner = diverged_rig(true, &[]);
-    git_changes(Path::new("/wt"), "main", &runner).expect("ok");
-    assert_eq!(runner.recorded_timeouts(), vec![Some(GIT_TIMEOUT); 6]);
-}
-
-/// The diff is taken against the working tree, so a committed change is
-/// still reported. That is the whole reason the baseline is the fork point
-/// rather than HEAD — see AgentTreeBaselineIsTaskBaseBranch.
-///
-/// Both probes are built from the task's own base branch name, so a task
-/// based on anything but `main` is measured against what it actually
-/// branched from.
-#[test]
-fn git_changes_uses_the_tasks_own_base_branch() {
+fn every_unstaged_query_is_bounded_by_a_timeout() {
     let runner = git_rig(&[], &[]);
-    git_changes(Path::new("/wt"), "develop", &runner).expect("ok");
-    assert_eq!(
-        &runner.flattened_calls()[..2],
-        [
-            "git -C /wt merge-base HEAD develop".to_string(),
-            "git -C /wt merge-base HEAD origin/develop".to_string(),
-        ]
-    );
+    git_changes(Path::new("/wt"), None, &runner).expect("ok");
+    assert_eq!(runner.recorded_timeouts(), vec![Some(GIT_TIMEOUT); 3]);
 }
 
 #[test]
 fn git_changes_reports_untracked_files_as_added() {
     let runner = git_rig(&["M", "a.rs"], &["new.rs", "docs/draft.md"]);
-    let changes = git_changes(Path::new("/wt"), "main", &runner).expect("ok");
+    let changes = git_changes(Path::new("/wt"), None, &runner).expect("ok");
     assert_eq!(
         changes,
         vec![modified("a.rs"), added("new.rs"), added("docs/draft.md")]
@@ -1639,55 +1447,530 @@ fn git_changes_reports_untracked_files_as_added() {
 #[test]
 fn git_changes_reports_deletions() {
     let runner = git_rig(&["D", "src/old.rs"], &[]);
-    let changes = git_changes(Path::new("/wt"), "main", &runner).expect("ok");
+    let changes = git_changes(Path::new("/wt"), None, &runner).expect("ok");
     assert_eq!(changes, vec![deleted("src/old.rs")]);
 }
 
 #[test]
 fn git_changes_on_a_clean_worktree_reports_nothing() {
     let runner = git_rig(&[], &[]);
-    assert!(git_changes(Path::new("/wt"), "main", &runner)
+    assert!(git_changes(Path::new("/wt"), None, &runner)
         .expect("ok")
         .is_empty());
 }
 
 /// A failing git surfaces its own first stderr line, because that line is
 /// what reaches the user's border and has to say something actionable.
-/// With two probes to fail, the line the user sees is the LOCAL branch's —
-/// that is the name they typed on the task.
 #[test]
 fn git_changes_fails_with_gits_own_message() {
+    let runner = failing_git_rig("fatal: unable to read index.lock\n");
+    let err = git_changes(Path::new("/wt"), None, &runner)
+        .expect_err("must fail")
+        .to_string();
+    assert!(err.contains("index.lock"), "got {err}");
+}
+
+/// A failing diff short-circuits: the counts and the listing must not run
+/// against a repo that just refused to diff.
+#[test]
+fn a_failing_diff_does_not_run_the_untracked_listing() {
+    let runner = failing_git_rig("fatal: unable to read index.lock\n");
+    let _ = git_changes(Path::new("/wt"), None, &runner);
+    assert_eq!(runner.recorded_calls().len(), 1);
+}
+
+// ---- git_changes: one selected commit (AgentTreeSourceIsOneSelection) --
+
+/// ONE COMMIT: two steps, both the commit against its parent with rename
+/// detection off and NUL-delimited output, and no untracked listing — a
+/// commit has no untracked files. No branch is resolved for this form
+/// either.
+#[test]
+fn a_selected_commit_is_diffed_in_two_nul_delimited_rename_free_queries() {
+    let runner = commit_rig(&["M", "a.rs"], &["3\t1\ta.rs"]);
+    git_changes(Path::new("/wt"), Some(COMMIT), &runner).expect("ok");
+
+    let calls = runner.flattened_calls();
+    assert_eq!(calls.len(), 2, "two steps, no untracked listing: {calls:?}");
+    for call in &calls {
+        let args: Vec<&str> = call.split(' ').collect();
+        assert!(args.contains(&"-z"), "{call}");
+        assert!(args.contains(&"--no-renames"), "{call}");
+        assert!(call.contains(COMMIT), "the query names the commit: {call}");
+        assert!(!call.contains("ls-files"), "{call}");
+        assert!(!call.contains("merge-base"), "{call}");
+    }
+    assert!(calls[0].contains("--name-status"), "{calls:?}");
+    assert!(calls[1].contains("--numstat"), "{calls:?}");
+}
+
+/// In the commit form every text file carries counts — there is no
+/// untracked path for which a count could be missing.
+#[test]
+fn a_selected_commits_files_all_carry_counts() {
+    let runner = commit_rig(
+        &["M", "a.rs", "A", "new.rs"],
+        &["3\t1\ta.rs", "5\t0\tnew.rs"],
+    );
+    let changes = git_changes(Path::new("/wt"), Some(COMMIT), &runner).expect("ok");
+    assert_eq!(
+        changes,
+        vec![
+            counted("a.rs", FileChange::Modified, 3, 1),
+            counted("new.rs", FileChange::Added, 5, 0),
+        ]
+    );
+}
+
+#[test]
+fn every_commit_query_is_bounded_by_a_timeout() {
+    let runner = commit_rig(&[], &[]);
+    git_changes(Path::new("/wt"), Some(COMMIT), &runner).expect("ok");
+    assert_eq!(runner.recorded_timeouts(), vec![Some(GIT_TIMEOUT); 2]);
+}
+
+/// A commit git cannot read fails the query with git's own words
+/// (AgentTreeGitFailureKeepsLastGoodTree: "with a commit selected, git
+/// could not read that commit").
+#[test]
+fn a_commit_git_cannot_read_fails_the_query() {
+    let runner = MockProcessRunner::new(vec![MockProcessRunner::fail(
+        "fatal: bad object 3333333333333333333333333333333333333333\n",
+    )]);
+    let err = git_changes(Path::new("/wt"), Some(COMMIT), &runner)
+        .expect_err("must fail")
+        .to_string();
+    assert!(err.contains("bad object"), "got {err}");
+}
+
+// ---- git_changes against a real repository ------------------------------
+
+use super::test_repo::TestRepo;
+use crate::process::RealProcessRunner;
+
+fn real_changes(repo: &TestRepo, commit: Option<&str>) -> Vec<GitFileChange> {
+    git_changes(repo.root(), commit, &RealProcessRunner::default()).expect("git_changes")
+}
+
+/// Staged changes are not shown: a file staged and not changed again is
+/// absent (AgentTreeShowsUnstagedWorkOnly).
+#[test]
+fn a_staged_change_is_not_shown() {
+    let repo = TestRepo::new();
+    repo.write("seed.txt", "seed\nstaged\n");
+    repo.git(&["add", "seed.txt"]);
+
+    assert_eq!(real_changes(&repo, None), vec![]);
+}
+
+/// Against the index, a row counts only the UNSTAGED part of a file.
+#[test]
+fn only_the_unstaged_part_of_a_file_is_counted() {
+    let repo = TestRepo::new();
+    repo.write("seed.txt", "seed\nstaged\n");
+    repo.git(&["add", "seed.txt"]);
+    repo.append("seed.txt", "unstaged 1\nunstaged 2\n");
+
+    assert_eq!(
+        real_changes(&repo, None),
+        vec![counted("seed.txt", FileChange::Modified, 2, 0)]
+    );
+}
+
+/// Committing empties the default view of everything that went into the
+/// commit — the reversal of the old "Committing does not empty the pane".
+#[test]
+fn committed_work_leaves_the_default_view() {
+    let repo = TestRepo::new();
+    repo.write("src/a.rs", "fn a() {}\n");
+    repo.commit_all("add a");
+
+    assert_eq!(real_changes(&repo, None), vec![]);
+}
+
+#[test]
+fn an_untracked_file_is_shown_as_added_with_no_counts() {
+    let repo = TestRepo::new();
+    repo.write("new.rs", "one\ntwo\n");
+
+    assert_eq!(real_changes(&repo, None), vec![added("new.rs")]);
+}
+
+/// `git rm --cached` takes a file out of the index and leaves it on disk:
+/// to git it is now untracked, so it is badged added with no counts — and
+/// named once, since the two listings are disjoint against the index
+/// (ChangePrecedence).
+#[test]
+fn a_file_taken_out_of_the_index_is_untracked_not_deleted() {
+    let repo = TestRepo::new();
+    repo.git(&["rm", "-q", "--cached", "seed.txt"]);
+
+    assert_eq!(real_changes(&repo, None), vec![added("seed.txt")]);
+}
+
+/// A new file staged and then edited again is badged modified, not added:
+/// the index already holds it, and what is unstaged is an edit to that.
+#[test]
+fn a_new_file_staged_then_edited_again_is_modified() {
+    let repo = TestRepo::new();
+    repo.write("n.rs", "one\n");
+    repo.git(&["add", "n.rs"]);
+    repo.append("n.rs", "two\n");
+
+    assert_eq!(
+        real_changes(&repo, None),
+        vec![counted("n.rs", FileChange::Modified, 1, 0)]
+    );
+}
+
+/// A tracked file removed from disk is badged deleted until the deletion is
+/// staged, and then disappears — a staged deletion is staged work.
+#[test]
+fn a_deletion_is_shown_until_it_is_staged() {
+    let repo = TestRepo::new();
+    std::fs::remove_file(repo.root().join("seed.txt")).expect("rm");
+    assert_eq!(
+        real_changes(&repo, None),
+        vec![counted("seed.txt", FileChange::Deleted, 0, 1)]
+    );
+
+    repo.git(&["rm", "-q", "seed.txt"]);
+    assert_eq!(real_changes(&repo, None), vec![]);
+}
+
+/// A selected commit shows exactly that commit against its parent, with
+/// counts, whatever the working tree and the index hold meanwhile.
+#[test]
+fn a_selected_commit_shows_exactly_that_commit_against_its_parent() {
+    let repo = TestRepo::new();
+    repo.write("a.rs", "a1\n");
+    repo.commit_all("first");
+    repo.write("a.rs", "a1\na2\n");
+    repo.write("b.rs", "b\n");
+    let second = repo.commit_all("second");
+    // Work in progress the commit view must not see.
+    repo.write("a.rs", "changed again\n");
+    repo.write("untracked.rs", "x\n");
+
+    let status_before = repo.git(&["status", "--porcelain"]);
+
+    assert_eq!(
+        real_changes(&repo, Some(&second)),
+        vec![
+            counted("a.rs", FileChange::Modified, 1, 0),
+            counted("b.rs", FileChange::Added, 1, 0),
+        ]
+    );
+    // ReadOnlyObservation: showing a commit checks nothing out.
+    assert_eq!(repo.head(), second);
+    assert_eq!(repo.git(&["status", "--porcelain"]), status_before);
+}
+
+/// A commit with no parent is diffed against the empty tree, so every file
+/// it holds is badged added.
+#[test]
+fn a_root_commit_is_diffed_against_the_empty_tree() {
+    let repo = TestRepo::new();
+    let root_commit = repo.git(&["rev-list", "--max-parents=0", "HEAD"]);
+
+    assert_eq!(
+        real_changes(&repo, Some(root_commit.trim())),
+        vec![counted("seed.txt", FileChange::Added, 1, 0)]
+    );
+}
+
+/// A merge commit is shown against its FIRST parent: what it brought onto
+/// this branch.
+#[test]
+fn a_merge_commit_is_shown_against_its_first_parent() {
+    let repo = TestRepo::new();
+    repo.commit_on_main("from_main.txt", "upstream work");
+    repo.write("t.rs", "task\n");
+    repo.commit_all("task work");
+    repo.git(&["merge", "-q", "--no-ff", "main", "-m", "merge main"]);
+    let merge = repo.head();
+
+    assert_eq!(
+        real_changes(&repo, Some(&merge)),
+        vec![counted("from_main.txt", FileChange::Added, 1, 0)]
+    );
+}
+
+// ---- git_branch_commits: the commits section's read --------------------
+
+/// The fork-point resolution is KEPT, for this list alone: both refs the
+/// base branch can denote are probed, and the listing is taken from the
+/// fork point they agree on (AgentTreeBaselineIsTaskBaseBranch).
+#[test]
+fn the_commit_list_resolves_the_fork_point_from_both_base_refs() {
+    let runner = MockProcessRunner::new(vec![
+        sha(LOCAL_FORK),
+        sha(LOCAL_FORK),
+        MockProcessRunner::ok_with_stdout(b""),
+    ]);
+    let commits = git_branch_commits(Path::new("/wt"), "main", &runner).expect("ok");
+
+    assert!(commits.is_empty());
+    let calls = runner.flattened_calls();
+    assert_eq!(
+        &calls[..2],
+        [
+            "git -C /wt merge-base HEAD main".to_string(),
+            "git -C /wt merge-base HEAD origin/main".to_string(),
+        ]
+    );
+    assert_eq!(calls.len(), 3, "one listing after the probes: {calls:?}");
+    assert!(calls[2].contains(LOCAL_FORK), "{calls:?}");
+}
+
+/// Both probes are built from the task's own base branch name.
+#[test]
+fn the_commit_list_uses_the_tasks_own_base_branch() {
+    let runner = MockProcessRunner::new(vec![
+        sha(LOCAL_FORK),
+        sha(LOCAL_FORK),
+        MockProcessRunner::ok_with_stdout(b""),
+    ]);
+    git_branch_commits(Path::new("/wt"), "develop", &runner).expect("ok");
+    assert_eq!(
+        &runner.flattened_calls()[..2],
+        [
+            "git -C /wt merge-base HEAD develop".to_string(),
+            "git -C /wt merge-base HEAD origin/develop".to_string(),
+        ]
+    );
+}
+
+/// Neither ref resolving fails the read, with the LOCAL branch's message —
+/// the name the user put on the task — and nothing further runs.
+#[test]
+fn neither_base_ref_resolving_fails_the_commit_list_with_the_local_branchs_message() {
     let runner = MockProcessRunner::new(vec![
         MockProcessRunner::fail("fatal: Not a valid object name nosuchbranch\n"),
         MockProcessRunner::fail("fatal: Not a valid object name origin/nosuchbranch\n"),
     ]);
-    let err = git_changes(Path::new("/wt"), "nosuchbranch", &runner)
+    let err = git_branch_commits(Path::new("/wt"), "nosuchbranch", &runner)
         .expect_err("must fail")
         .to_string();
     assert!(err.contains("nosuchbranch"), "got {err}");
     assert!(!err.contains("origin/"), "got {err}");
-}
-
-/// A baseline we could not resolve short-circuits — neither the diff nor
-/// the listing may run against a repo we already know we cannot read.
-#[test]
-fn a_failed_baseline_resolution_runs_no_further_commands() {
-    let runner = failing_git_rig("fatal: not a git repository\n");
-    let _ = git_changes(Path::new("/wt"), "main", &runner);
     assert_eq!(runner.recorded_calls().len(), 2);
 }
 
-/// A failing diff short-circuits too: the listing must not run against a
-/// repo that just refused to diff.
+/// A ranking probe that could not answer fails the read rather than
+/// silently keeping the local fork point.
 #[test]
-fn a_failing_diff_does_not_run_the_untracked_listing() {
+fn an_ancestry_probe_that_cannot_answer_fails_the_commit_list() {
+    let runner = MockProcessRunner::new(vec![
+        sha(LOCAL_FORK),
+        sha(REMOTE_FORK),
+        MockProcessRunner::fail_with_code(128, "fatal: unable to read pack\n"),
+    ]);
+    let err = git_branch_commits(Path::new("/wt"), "main", &runner)
+        .expect_err("must fail")
+        .to_string();
+    assert!(err.contains("unable to read pack"), "got {err}");
+    assert_eq!(runner.recorded_calls().len(), 3);
+}
+
+/// The two probes disagree, and the local fork point is an ancestor of the
+/// remote one: the remote one is nearer HEAD and wins.
+#[test]
+fn a_local_base_behind_its_remote_lists_from_the_remote_fork_point() {
+    let runner = MockProcessRunner::new(vec![
+        sha(LOCAL_FORK),
+        sha(REMOTE_FORK),
+        MockProcessRunner::ok(),
+        MockProcessRunner::ok_with_stdout(b""),
+    ]);
+    git_branch_commits(Path::new("/wt"), "main", &runner).expect("ok");
+    let calls = runner.flattened_calls();
+    assert_eq!(
+        calls[2],
+        format!("git -C /wt merge-base --is-ancestor {LOCAL_FORK} {REMOTE_FORK}")
+    );
+    assert!(calls[3].contains(REMOTE_FORK), "{calls:?}");
+    assert!(!calls[3].contains(LOCAL_FORK), "{calls:?}");
+}
+
+/// The mirror image, and the truly-diverged case: the local ref wins.
+#[test]
+fn a_local_base_ahead_of_its_remote_lists_from_the_local_fork_point() {
+    let runner = MockProcessRunner::new(vec![
+        sha(LOCAL_FORK),
+        sha(REMOTE_FORK),
+        MockProcessRunner::fail_with_code(1, ""),
+        MockProcessRunner::ok_with_stdout(b""),
+    ]);
+    git_branch_commits(Path::new("/wt"), "main", &runner).expect("ok");
+    let calls = runner.flattened_calls();
+    assert!(calls[3].contains(LOCAL_FORK), "{calls:?}");
+}
+
+/// A base branch never checked out locally is ordinary: the read keeps
+/// working on the remote ref alone, with no ranking probe.
+#[test]
+fn a_missing_local_base_branch_still_lists_from_the_remote_ref() {
+    let runner = MockProcessRunner::new(vec![
+        MockProcessRunner::fail("fatal: Not a valid object name main\n"),
+        sha(REMOTE_FORK),
+        MockProcessRunner::ok_with_stdout(b""),
+    ]);
+    git_branch_commits(Path::new("/wt"), "main", &runner).expect("ok");
+    let calls = runner.flattened_calls();
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    assert!(calls[2].contains(REMOTE_FORK), "{calls:?}");
+}
+
+/// A repo with no remote-tracking ref lists from the local branch alone.
+#[test]
+fn a_missing_remote_base_ref_still_lists_from_the_local_branch() {
+    let runner = MockProcessRunner::new(vec![
+        sha(LOCAL_FORK),
+        MockProcessRunner::fail("fatal: Not a valid object name origin/main\n"),
+        MockProcessRunner::ok_with_stdout(b""),
+    ]);
+    git_branch_commits(Path::new("/wt"), "main", &runner).expect("ok");
+    let calls = runner.flattened_calls();
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    assert!(calls[2].contains(LOCAL_FORK), "{calls:?}");
+}
+
+/// A probe that exits zero but names no commit is not a candidate.
+#[test]
+fn a_probe_that_returns_no_commit_is_not_a_fork_point_candidate() {
+    let runner = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"\n"),
+        sha(REMOTE_FORK),
+        MockProcessRunner::ok_with_stdout(b""),
+    ]);
+    git_branch_commits(Path::new("/wt"), "main", &runner).expect("ok");
+    assert!(runner.flattened_calls()[2].contains(REMOTE_FORK));
+}
+
+/// A commits-section read runs up to four commands, every one bounded.
+#[test]
+fn every_commit_list_query_is_bounded_by_a_timeout() {
+    let runner = MockProcessRunner::new(vec![
+        sha(LOCAL_FORK),
+        sha(REMOTE_FORK),
+        MockProcessRunner::ok(),
+        MockProcessRunner::ok_with_stdout(b""),
+    ]);
+    git_branch_commits(Path::new("/wt"), "main", &runner).expect("ok");
+    assert_eq!(runner.recorded_timeouts(), vec![Some(GIT_TIMEOUT); 4]);
+}
+
+/// A listing git refuses fails the read; it must not read as "no commits".
+#[test]
+fn a_failed_listing_fails_the_commit_list() {
     let runner = MockProcessRunner::new(vec![
         sha(LOCAL_FORK),
         sha(LOCAL_FORK),
-        MockProcessRunner::fail("fatal: unable to read index.lock\n"),
+        MockProcessRunner::fail("fatal: your current branch appears to be broken\n"),
     ]);
-    let _ = git_changes(Path::new("/wt"), "main", &runner);
-    assert_eq!(runner.recorded_calls().len(), 3);
+    let err = git_branch_commits(Path::new("/wt"), "main", &runner)
+        .expect_err("a failed listing must not read as an empty list")
+        .to_string();
+    assert!(err.contains("broken"), "got {err}");
+}
+
+fn real_commits(repo: &TestRepo) -> Vec<AgentCommit> {
+    git_branch_commits(repo.root(), "main", &RealProcessRunner::default()).expect("commits")
+}
+
+fn agent_commit(id: &str, subject: &str) -> AgentCommit {
+    AgentCommit {
+        id: id.to_string(),
+        subject: subject.to_string(),
+    }
+}
+
+/// The agent's commits since the fork point, newest first, as (full id,
+/// subject) pairs.
+#[test]
+fn the_commit_list_is_the_agents_commits_newest_first() {
+    let repo = TestRepo::new();
+    repo.write("a.rs", "a\n");
+    let first = repo.commit_all("first change");
+    repo.write("b.rs", "b\n");
+    let second = repo.commit_all("second change: naïve résumé");
+
+    assert_eq!(
+        real_commits(&repo),
+        vec![
+            agent_commit(&second, "second change: naïve résumé"),
+            agent_commit(&first, "first change"),
+        ]
+    );
+    assert_eq!(second.len(), 40, "selection is keyed by the FULL id");
+}
+
+/// An agent that has not committed yet lists nothing — the honest answer.
+#[test]
+fn an_agent_with_no_commits_lists_none() {
+    let repo = TestRepo::new();
+    assert_eq!(real_commits(&repo), vec![]);
+}
+
+/// Other people's work on the base branch never appears: commits that land
+/// on it after the fork are not the agent's.
+#[test]
+fn commits_landing_on_the_base_branch_after_the_fork_are_not_listed() {
+    let repo = TestRepo::new();
+    repo.commit_on_main("upstream.txt", "upstream work");
+    repo.write("a.rs", "a\n");
+    let mine = repo.commit_all("my work");
+
+    assert_eq!(real_commits(&repo), vec![agent_commit(&mine, "my work")]);
+}
+
+/// Merging the base branch in moves the fork point forward, so the base
+/// branch's commits never appear — while the merge commit the agent made
+/// is the agent's own, and is listed.
+#[test]
+fn merging_the_base_branch_in_never_lists_its_commits() {
+    let repo = TestRepo::new();
+    repo.commit_on_main("upstream.txt", "upstream work");
+    repo.write("a.rs", "a\n");
+    let mine = repo.commit_all("my work");
+    repo.git(&["merge", "-q", "--no-ff", "main", "-m", "merge main"]);
+    let merge = repo.head();
+
+    let ids: Vec<String> = real_commits(&repo).into_iter().map(|c| c.id).collect();
+    assert_eq!(ids, vec![merge, mine]);
+}
+
+/// Only the newest config.agent_tree_commits_max_listed commits are listed;
+/// older ones are not, and no marker says so.
+#[test]
+fn only_the_newest_fifty_commits_are_listed() {
+    let repo = TestRepo::new();
+    for n in 1..=55 {
+        repo.git(&["commit", "-q", "--allow-empty", "-m", &format!("c{n}")]);
+    }
+
+    let commits = real_commits(&repo);
+    assert_eq!(commits.len(), crate::cli::agent_tree_commits::MAX_LISTED);
+    assert_eq!(commits.first().map(|c| c.subject.as_str()), Some("c55"));
+    assert_eq!(commits.last().map(|c| c.subject.as_str()), Some("c6"));
+}
+
+/// The stale-local-base case the two-ref resolution exists for: the
+/// worktree was branched from the remote-tracking ref, which is ahead of a
+/// local base the human never pulled. The upstream commit between the two
+/// is not the agent's and must not be listed.
+#[test]
+fn a_remote_base_ahead_of_a_stale_local_one_moves_the_fork_point() {
+    let repo = TestRepo::new();
+    let upstream = repo.commit_on_main("upstream.txt", "upstream work");
+    repo.git_main(&["update-ref", "refs/remotes/origin/main", &upstream]);
+    repo.git_main(&["reset", "-q", "--hard", "HEAD~1"]);
+    repo.git(&["reset", "-q", "--hard", "origin/main"]);
+    repo.write("a.rs", "a\n");
+    let mine = repo.commit_all("my work");
+
+    assert_eq!(real_commits(&repo), vec![agent_commit(&mine, "my work")]);
 }
 
 // ---- refresh: failure keeps the last good tree ------------------------
@@ -1702,12 +1985,12 @@ fn a_failed_git_query_keeps_the_last_good_tree_and_sets_a_notice() {
     let mut tree = build_tree(&root(), &[]);
 
     let good = git_rig(&["M", "src/a.rs"], &[]);
-    refresh(&root(), "main", &good, &mut tree, &mut state);
+    refresh(&root(), &good, &mut tree, &mut state);
     assert!(tree.node_at(&["src", "a.rs"]).is_some());
     assert!(state.notice.is_none());
 
     let bad = failing_git_rig("fatal: unable to read index.lock\n");
-    refresh(&root(), "main", &bad, &mut tree, &mut state);
+    refresh(&root(), &bad, &mut tree, &mut state);
 
     assert!(
         tree.node_at(&["src", "a.rs"]).is_some(),
@@ -1728,8 +2011,8 @@ async fn a_git_query_that_could_not_run_logs_its_cause() {
         let mut tree = build_tree(&root(), &[]);
         let timeout =
             || Err(anyhow::anyhow!("git timed out after 10s").context("could not run git"));
-        let timed_out = MockProcessRunner::new(vec![timeout(), timeout()]);
-        refresh(&root(), "main", &timed_out, &mut tree, &mut state);
+        let timed_out = MockProcessRunner::new(vec![timeout()]);
+        refresh(&root(), &timed_out, &mut tree, &mut state);
     })
     .await;
 
@@ -1744,28 +2027,33 @@ fn a_recovering_git_query_clears_its_own_notice() {
     let mut tree = build_tree(&root(), &[]);
 
     let bad = failing_git_rig("fatal: unable to read index.lock\n");
-    refresh(&root(), "main", &bad, &mut tree, &mut state);
+    refresh(&root(), &bad, &mut tree, &mut state);
     assert!(state.notice.is_some());
 
     let good = git_rig(&["M", "a.rs"], &[]);
-    refresh(&root(), "main", &good, &mut tree, &mut state);
+    refresh(&root(), &good, &mut tree, &mut state);
     assert!(state.notice.is_none());
 }
 
 /// ...but it must not swallow the answer to a keypress the user made half a
-/// second ago. The two notices share one field and one line of border, so
-/// the source is what keeps them apart — see NoticeSource in the spec.
+/// second ago, nor the commits section's own complaint. The notices share
+/// one field and one line of border, so the source is what keeps them apart
+/// — see NoticeSource in the spec.
 #[test]
-fn a_successful_git_query_leaves_a_diff_notice_alone() {
-    let mut state = RenderState::new();
-    let mut tree = build_tree(&root(), &[]);
-    state.notice = Some(Notice::diff("could not split the diff pane"));
+fn a_successful_git_query_leaves_other_writers_notices_alone() {
+    for other in [
+        Notice::diff("could not split the diff pane"),
+        Notice::commit_list("not a valid object name main"),
+    ] {
+        let mut state = RenderState::new();
+        let mut tree = build_tree(&root(), &[]);
+        state.notice = Some(other.clone());
 
-    let good = git_rig(&["M", "a.rs"], &[]);
-    refresh(&root(), "main", &good, &mut tree, &mut state);
+        let good = git_rig(&["M", "a.rs"], &[]);
+        refresh(&root(), &good, &mut tree, &mut state);
 
-    let notice = state.notice.as_ref().expect("diff notice must survive");
-    assert!(matches!(notice, Notice::Diff(_)), "got {notice:?}");
+        assert_eq!(state.notice, Some(other));
+    }
 }
 
 /// A revert un-badges the file with no bookkeeping: git stops reporting it,
@@ -1777,15 +2065,37 @@ fn a_reverted_file_disappears_from_the_tree() {
     let mut tree = build_tree(&root(), &[]);
 
     let dirty = git_rig(&["M", "a.rs"], &[]);
-    refresh(&root(), "main", &dirty, &mut tree, &mut state);
+    refresh(&root(), &dirty, &mut tree, &mut state);
     assert!(tree.node_at(&["a.rs"]).is_some());
 
     let clean = git_rig(&[], &[]);
-    refresh(&root(), "main", &clean, &mut tree, &mut state);
+    refresh(&root(), &clean, &mut tree, &mut state);
     assert!(
         tree.node_at(&["a.rs"]).is_none(),
         "a reverted file must leave the tree"
     );
+}
+
+/// RefreshAgentTree asks about the SELECTED source: with a commit selected
+/// the tick runs the one-commit form — naming that commit, with no
+/// untracked listing — and the tree shows that commit's files.
+#[test]
+fn a_refresh_with_a_commit_selected_shows_that_commit() {
+    let mut state = RenderState::new();
+    state.selected_commit = Some(COMMIT.to_string());
+    let mut tree = build_tree(&root(), &[]);
+
+    let runner = commit_rig(&["A", "src/new.rs"], &["4\t0\tsrc/new.rs"]);
+    refresh(&root(), &runner, &mut tree, &mut state);
+
+    assert_eq!(
+        tree.node_at(&["src", "new.rs"]).and_then(|n| n.badge),
+        Some(FileChange::Added)
+    );
+    for call in runner.flattened_calls() {
+        assert!(call.contains(COMMIT), "{call}");
+        assert!(!call.contains("ls-files"), "{call}");
+    }
 }
 
 // ---- Snapshots ---------------------------------------------------------
@@ -2075,20 +2385,35 @@ fn the_pane_starts_with_the_tree_focused() {
     assert_eq!(RenderState::new().focus, Focus::Tree);
 }
 
+/// SwitchAgentTreeFocus: a cycle in screen order — tree, then commits,
+/// then agents, then tree again.
 #[test]
-fn tab_moves_focus_to_the_agents_section_and_back() {
+fn tab_cycles_focus_tree_then_commits_then_agents_then_tree() {
     let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(1, false)]);
     assert_eq!(rig.press(KeyCode::Tab), KeyAction::Continue);
+    assert_eq!(rig.state.focus, Focus::Commits);
+    rig.press(KeyCode::Tab);
     assert_eq!(rig.state.focus, Focus::Agents);
     rig.press(KeyCode::Tab);
     assert_eq!(rig.state.focus, Focus::Tree);
 }
 
+/// An empty section is a real place to be: Tab never skips one.
 #[test]
-fn tab_works_with_no_agents_listed() {
+fn tab_works_with_no_commits_or_agents_listed() {
     let mut rig = KeyRig::new(&[modified("a.rs")]);
     rig.press(KeyCode::Tab);
+    assert_eq!(rig.state.focus, Focus::Commits);
+    rig.press(KeyCode::Tab);
     assert_eq!(rig.state.focus, Focus::Agents);
+}
+
+/// Tab is the ONLY focus key: Shift+Tab (BackTab) does not cycle backwards.
+#[test]
+fn back_tab_does_not_move_focus() {
+    let mut rig = KeyRig::new(&[modified("a.rs")]);
+    rig.press_with(KeyCode::BackTab, KeyModifiers::SHIFT);
+    assert_eq!(rig.state.focus, Focus::Tree);
 }
 
 #[test]
@@ -2099,6 +2424,9 @@ fn tab_clears_a_notice() {
     assert_eq!(rig.state.notice, None);
 }
 
+// The agents-section tests below set focus directly: they are about the
+// section, not about how Tab reaches it (SwitchAgentTreeFocus, above).
+
 #[test]
 fn with_the_agents_section_focused_j_and_k_move_its_cursor_not_the_trees() {
     let mut rig = KeyRig::with_agents(
@@ -2106,7 +2434,7 @@ fn with_the_agents_section_focused_j_and_k_move_its_cursor_not_the_trees() {
         vec![agent(1, false), agent(2, false)],
     );
     let tree_before = rig.selected();
-    rig.press(KeyCode::Tab);
+    rig.state.focus = Focus::Agents;
     rig.press(KeyCode::Char('j'));
     assert_eq!(rig.state.agents.selected().unwrap().id, TaskId(2));
     rig.press(KeyCode::Up);
@@ -2120,7 +2448,7 @@ fn with_the_agents_section_focused_gg_and_capital_g_jump_its_cursor() {
         &[modified("a.rs")],
         vec![agent(1, false), agent(2, false), agent(3, false)],
     );
-    rig.press(KeyCode::Tab);
+    rig.state.focus = Focus::Agents;
     rig.press(KeyCode::Char('G'));
     assert_eq!(rig.state.agents.selected().unwrap().id, TaskId(3));
     rig.press(KeyCode::Char('g'));
@@ -2135,7 +2463,7 @@ fn with_the_agents_section_focused_gg_and_capital_g_jump_its_cursor() {
 #[test]
 fn space_on_another_agent_jumps_to_its_window() {
     let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, false)]);
-    rig.press(KeyCode::Tab);
+    rig.state.focus = Focus::Agents;
     assert_eq!(
         rig.press(KeyCode::Char(' ')),
         KeyAction::JumpTo(test_tmux_window("task-7"))
@@ -2149,7 +2477,7 @@ fn space_on_another_agent_jumps_to_its_window() {
 #[test]
 fn space_on_the_panes_own_task_does_nothing() {
     let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, true)]);
-    rig.press(KeyCode::Tab);
+    rig.state.focus = Focus::Agents;
     assert_eq!(rig.press(KeyCode::Char(' ')), KeyAction::Continue);
     assert_eq!(rig.state.notice, None);
 }
@@ -2158,7 +2486,7 @@ fn space_on_the_panes_own_task_does_nothing() {
 fn space_with_the_agents_section_focused_never_toggles_a_diff() {
     let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, true)]);
     rig.press(KeyCode::Char('j'));
-    rig.press(KeyCode::Tab);
+    rig.state.focus = Focus::Agents;
     rig.press(KeyCode::Char(' '));
     assert!(rig.state.open_diffs().is_empty());
 }
@@ -2166,7 +2494,7 @@ fn space_with_the_agents_section_focused_never_toggles_a_diff() {
 #[test]
 fn a_still_toggles_every_diff_with_the_agents_section_focused() {
     let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, false)]);
-    rig.press(KeyCode::Tab);
+    rig.state.focus = Focus::Agents;
     assert_eq!(rig.press(KeyCode::Char('a')), KeyAction::DiffSetChanged);
     assert!(rig.state.is_diff_open(Path::new("a.rs")));
 }
@@ -2174,7 +2502,7 @@ fn a_still_toggles_every_diff_with_the_agents_section_focused() {
 #[test]
 fn q_still_exits_with_the_agents_section_focused() {
     let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, false)]);
-    rig.press(KeyCode::Tab);
+    rig.state.focus = Focus::Agents;
     assert_eq!(rig.press(KeyCode::Char('q')), KeyAction::Exit);
 }
 
@@ -2184,7 +2512,7 @@ fn h_and_l_do_nothing_with_the_agents_section_focused() {
     let opened = rig.state.tree_state.opened().clone();
     rig.press(KeyCode::Char('j'));
     let selected = rig.selected();
-    rig.press(KeyCode::Tab);
+    rig.state.focus = Focus::Agents;
     rig.press(KeyCode::Char('h'));
     rig.press(KeyCode::Left);
     rig.press(KeyCode::Char('l'));
@@ -2214,6 +2542,7 @@ fn a_working_agent_read_clears_only_its_own_notice() {
         Notice::git("index.lock"),
         Notice::diff("split failed"),
         Notice::agent_jump("no window"),
+        Notice::commit_list("no base branch"),
     ] {
         state.notice = Some(other.clone());
         state.adopt_agent_list(Ok(vec![]));
@@ -2223,7 +2552,11 @@ fn a_working_agent_read_clears_only_its_own_notice() {
 
 #[test]
 fn a_working_git_query_leaves_agent_notices_alone() {
-    for other in [Notice::agent_list("locked"), Notice::agent_jump("gone")] {
+    for other in [
+        Notice::agent_list("locked"),
+        Notice::agent_jump("gone"),
+        Notice::commit_list("no base branch"),
+    ] {
         let mut state = RenderState::new();
         state.notice = Some(other.clone());
         state.clear_git_notice();
@@ -2371,7 +2704,7 @@ fn pressing_each_key_of_each_pane_row_records_the_rows_action() {
 /// section: Ctrl+j is not `j`, Ctrl+a is not `a`, Ctrl+q is not `q`.
 #[test]
 fn a_modified_press_with_no_row_does_nothing_in_the_pane() {
-    for focus in [Focus::Tree, Focus::Agents] {
+    for focus in [Focus::Tree, Focus::Commits, Focus::Agents] {
         for key in ["Ctrl+J", "Ctrl+A", "Ctrl+Q", "Ctrl+G", "Ctrl+L"] {
             let mut rig = KeyRig::with_agents(&three_node_changes(), vec![agent(1, false)]);
             rig.state.focus = focus;
@@ -2404,6 +2737,667 @@ fn unbound_and_contextless_presses_record_nothing() {
     rig.press(KeyCode::Char('l'));
     rig.press(KeyCode::Char(' '));
     assert!(rig.state.usage.is_empty(), "{:?}", rig.state.usage);
+    // h/l/Left/Right have no row in the commits section, and Space/Enter on
+    // the row already selected ("unstaged work", the default) does nothing.
+    rig.state.focus = Focus::Commits;
+    for code in [
+        KeyCode::Char('h'),
+        KeyCode::Char('l'),
+        KeyCode::Left,
+        KeyCode::Right,
+        KeyCode::Char(' '),
+        KeyCode::Enter,
+    ] {
+        rig.press(code);
+    }
+    assert!(rig.state.usage.is_empty(), "{:?}", rig.state.usage);
+}
+
+// ---- commits section (docs/specs/agent-tree.allium: Commits Section) ----
+
+use crate::cli::agent_tree_commits::{CommitsSection, MAX_ROWS as COMMITS_MAX_ROWS};
+
+/// A 40-hex commit id whose first seven characters are unique per `n`, so a
+/// short id names exactly one listed commit.
+fn commit_id(n: u32) -> String {
+    format!("{:07x}{}", 0x0abc_0000 + n, "e".repeat(33))
+}
+
+fn commit(n: u32) -> AgentCommit {
+    AgentCommit {
+        id: commit_id(n),
+        subject: format!("commit {n}"),
+    }
+}
+
+/// Commits in the order given — newest first, as git lists them.
+fn commits(ns: &[u32]) -> Vec<AgentCommit> {
+    ns.iter().map(|n| commit(*n)).collect()
+}
+
+impl KeyRig {
+    fn with_commits(changes: &[GitFileChange], listed: Vec<AgentCommit>) -> Self {
+        let mut rig = Self::new(changes);
+        rig.state.adopt_commit_list(Ok(listed));
+        rig.draw();
+        rig
+    }
+
+    fn cursor_commit(&self) -> Option<String> {
+        self.state.commits.cursor_commit().map(|c| c.id.clone())
+    }
+}
+
+/// The commits section's config: re-read every second, at most six rows on
+/// screen, at most fifty commits listed.
+#[test]
+fn the_commits_sections_config_defaults() {
+    use crate::cli::agent_tree_commits::{COMMITS_REFRESH_INTERVAL, MAX_LISTED};
+    assert_eq!(COMMITS_REFRESH_INTERVAL, std::time::Duration::from_secs(1));
+    assert_eq!(COMMITS_MAX_ROWS, 6);
+    assert_eq!(MAX_LISTED, 50);
+}
+
+/// ShowAgentTreePane / SplitAgentTreePaneOnAgentLaunch: a fresh renderer
+/// starts on unstaged work, with nothing listed yet.
+#[test]
+fn the_pane_starts_on_unstaged_work_with_no_commits_listed() {
+    let state = RenderState::new();
+    assert_eq!(state.selected_commit, None);
+    assert!(state.commits.commits().is_empty());
+}
+
+// -- RefreshAgentTreeCommitList / AgentTreeCommitListFailureKeepsLastList --
+
+#[test]
+fn a_working_commit_read_replaces_the_list() {
+    let mut state = RenderState::new();
+    state.adopt_commit_list(Ok(commits(&[2, 1])));
+    assert_eq!(state.commits.commits(), commits(&[2, 1]).as_slice());
+
+    state.adopt_commit_list(Ok(commits(&[3, 2, 1])));
+    assert_eq!(state.commits.commits(), commits(&[3, 2, 1]).as_slice());
+}
+
+/// The selection is keyed by commit id, so a new commit arriving above it
+/// leaves it on the same commit.
+#[test]
+fn a_new_commit_above_the_selection_does_not_move_it() {
+    let mut state = RenderState::new();
+    state.adopt_commit_list(Ok(commits(&[2, 1])));
+    state.selected_commit = Some(commit_id(1));
+
+    state.adopt_commit_list(Ok(commits(&[3, 2, 1])));
+
+    assert_eq!(state.selected_commit, Some(commit_id(1)));
+}
+
+/// A selected commit the agent rebased, amended or reset away falls back to
+/// unstaged work — silently: the list shows what happened.
+#[test]
+fn a_selected_commit_that_vanishes_falls_back_to_unstaged_work_silently() {
+    let mut state = RenderState::new();
+    state.adopt_commit_list(Ok(commits(&[2, 1])));
+    state.selected_commit = Some(commit_id(2));
+
+    state.adopt_commit_list(Ok(commits(&[9, 1])));
+
+    assert_eq!(state.selected_commit, None);
+    assert_eq!(state.notice, None, "the fallback raises no notice");
+}
+
+/// A stale list that says it is stale beats an empty one: a failed read
+/// keeps the list AND the selection, and says why.
+#[test]
+fn a_failed_commit_read_keeps_the_list_and_the_selection_and_says_why() {
+    let mut state = RenderState::new();
+    state.adopt_commit_list(Ok(commits(&[2, 1])));
+    state.selected_commit = Some(commit_id(1));
+
+    state.adopt_commit_list(Err("fatal: Not a valid object name main".to_string()));
+
+    assert_eq!(state.commits.commits(), commits(&[2, 1]).as_slice());
+    assert_eq!(state.selected_commit, Some(commit_id(1)));
+    assert_eq!(
+        state.notice,
+        Some(Notice::commit_list("fatal: Not a valid object name main"))
+    );
+}
+
+/// A working read clears its own stale notice and nothing else.
+#[test]
+fn a_working_commit_read_clears_only_its_own_notice() {
+    let mut state = RenderState::new();
+    state.notice = Some(Notice::commit_list("no base branch"));
+    state.adopt_commit_list(Ok(vec![]));
+    assert_eq!(state.notice, None);
+
+    for other in [
+        Notice::git("index.lock"),
+        Notice::diff("split failed"),
+        Notice::agent_list("db locked"),
+        Notice::agent_jump("no window"),
+    ] {
+        state.notice = Some(other.clone());
+        state.adopt_commit_list(Ok(vec![]));
+        assert_eq!(state.notice, Some(other));
+    }
+}
+
+/// Row 0 is "unstaged work"; the cursor starts there.
+#[test]
+fn the_commits_cursor_starts_on_unstaged_work() {
+    let mut section = CommitsSection::new();
+    section.set_commits(commits(&[2, 1]));
+    assert_eq!(section.cursor_commit(), None);
+}
+
+/// The cursor follows its commit by id, not by index.
+#[test]
+fn the_commits_cursor_follows_its_commit_when_a_new_one_arrives() {
+    let mut section = CommitsSection::new();
+    section.set_commits(commits(&[2, 1]));
+    section.down();
+    section.down();
+    assert_eq!(section.cursor_commit(), Some(&commit(1)));
+
+    section.set_commits(commits(&[3, 2, 1]));
+
+    assert_eq!(section.cursor_commit(), Some(&commit(1)));
+}
+
+/// ...and clamps to the last row when that commit has gone.
+#[test]
+fn the_commits_cursor_clamps_to_the_last_row_when_its_commit_has_gone() {
+    let mut section = CommitsSection::new();
+    section.set_commits(commits(&[3, 2, 1]));
+    section.bottom();
+    assert_eq!(section.cursor_commit(), Some(&commit(1)));
+
+    section.set_commits(commits(&[3, 2]));
+
+    assert_eq!(section.cursor_commit(), Some(&commit(2)));
+}
+
+// -- keys with the commits section focused (AgentKeysFollowFocus) --------
+
+#[test]
+fn with_the_commits_section_focused_j_and_k_move_its_cursor_not_the_trees() {
+    let mut rig = KeyRig::with_commits(&[modified("a.rs"), modified("b.rs")], commits(&[2, 1]));
+    let tree_before = rig.selected();
+    rig.state.focus = Focus::Commits;
+
+    rig.press(KeyCode::Char('j'));
+    assert_eq!(rig.cursor_commit(), Some(commit_id(2)));
+    rig.press(KeyCode::Down);
+    assert_eq!(rig.cursor_commit(), Some(commit_id(1)));
+    rig.press(KeyCode::Char('k'));
+    assert_eq!(rig.cursor_commit(), Some(commit_id(2)));
+    rig.press(KeyCode::Up);
+    assert_eq!(rig.cursor_commit(), None, "back on unstaged work");
+    assert_eq!(rig.selected(), tree_before);
+}
+
+#[test]
+fn with_the_commits_section_focused_gg_capital_g_and_half_pages_jump_its_cursor() {
+    let mut rig = KeyRig::with_commits(&[modified("a.rs")], commits(&[3, 2, 1]));
+    rig.state.focus = Focus::Commits;
+
+    rig.press(KeyCode::Char('G'));
+    assert_eq!(rig.cursor_commit(), Some(commit_id(1)));
+    rig.press(KeyCode::Char('g'));
+    rig.press(KeyCode::Char('g'));
+    assert_eq!(rig.cursor_commit(), None);
+    rig.press_ctrl(KeyCode::Char('d'));
+    assert!(
+        rig.cursor_commit().is_some(),
+        "Ctrl-D moved off the top row"
+    );
+    rig.press_ctrl(KeyCode::Char('u'));
+    assert_eq!(rig.cursor_commit(), None);
+}
+
+/// The cursor and the selection are separate: moving selects nothing.
+#[test]
+fn moving_the_commits_cursor_selects_nothing() {
+    let mut rig = KeyRig::with_commits(&[modified("a.rs")], commits(&[2, 1]));
+    rig.state.focus = Focus::Commits;
+    rig.press(KeyCode::Char('j'));
+    rig.press(KeyCode::Char('G'));
+    assert_eq!(rig.state.selected_commit, None);
+}
+
+/// SelectAgentTreeSource: Space or Enter on a commit row selects that
+/// commit, and the loop is told the source changed.
+#[test]
+fn space_and_enter_on_a_commit_row_select_it_as_the_source() {
+    for (code, detail) in [(KeyCode::Char(' '), " "), (KeyCode::Enter, "Enter")] {
+        let mut rig = KeyRig::with_commits(&[modified("a.rs")], commits(&[2, 1]));
+        rig.state.focus = Focus::Commits;
+        rig.press(KeyCode::Char('j'));
+        rig.state.usage.clear();
+
+        assert_eq!(rig.press(code), KeyAction::SourceChanged, "{detail}");
+        assert_eq!(rig.state.selected_commit, Some(commit_id(2)), "{detail}");
+        assert_eq!(
+            recorded_usage(&rig.state),
+            vec![("select_source".to_string(), Some(detail.to_string()))]
+        );
+    }
+}
+
+/// The "unstaged work" row selects unstaged work.
+#[test]
+fn space_on_the_unstaged_work_row_selects_unstaged_work_again() {
+    let mut rig = KeyRig::with_commits(&[modified("a.rs")], commits(&[2, 1]));
+    rig.state.focus = Focus::Commits;
+    rig.press(KeyCode::Char('j'));
+    rig.press(KeyCode::Char(' '));
+    assert_eq!(rig.state.selected_commit, Some(commit_id(2)));
+
+    rig.press(KeyCode::Char('g'));
+    rig.press(KeyCode::Char('g'));
+    assert_eq!(rig.press(KeyCode::Char(' ')), KeyAction::SourceChanged);
+    assert_eq!(rig.state.selected_commit, None);
+}
+
+/// Selecting what is already selected is a no-op, not a rebuild, and
+/// records no usage.
+#[test]
+fn selecting_the_row_already_selected_does_nothing_and_records_nothing() {
+    let mut rig = KeyRig::with_commits(&[modified("a.rs")], commits(&[2, 1]));
+    rig.state.focus = Focus::Commits;
+    rig.press(KeyCode::Char('j'));
+    rig.press(KeyCode::Char(' '));
+    rig.state.usage.clear();
+
+    assert_eq!(rig.press(KeyCode::Char(' ')), KeyAction::Continue);
+    assert_eq!(rig.press(KeyCode::Enter), KeyAction::Continue);
+    assert_eq!(rig.state.selected_commit, Some(commit_id(2)));
+    assert!(rig.state.usage.is_empty(), "{:?}", rig.state.usage);
+}
+
+/// The open set is left alone (a path open under one source stays open
+/// under the next), and focus stays in the commits section so stepping
+/// through commits is a loop of motion and Space.
+#[test]
+fn selecting_a_source_leaves_the_open_set_and_the_focus_alone() {
+    let mut rig = KeyRig::with_commits(&[modified("a.rs")], commits(&[1]));
+    rig.press(KeyCode::Char('j'));
+    rig.press(KeyCode::Char(' '));
+    assert!(rig.state.is_diff_open(Path::new("a.rs")));
+    assert_eq!(
+        rig.state.selected_commit, None,
+        "Space selects a source only with the commits section focused"
+    );
+
+    rig.state.focus = Focus::Commits;
+    rig.press(KeyCode::Char('j'));
+    rig.press(KeyCode::Char(' '));
+
+    assert_eq!(rig.state.selected_commit, Some(commit_id(1)));
+    assert!(rig.state.is_diff_open(Path::new("a.rs")));
+    assert_eq!(rig.state.focus, Focus::Commits);
+}
+
+#[test]
+fn h_l_left_and_right_do_nothing_with_the_commits_section_focused() {
+    let mut rig = KeyRig::with_commits(&[modified("src/a.rs")], commits(&[2, 1]));
+    let opened = rig.state.tree_state.opened().clone();
+    rig.press(KeyCode::Char('j'));
+    let selected = rig.selected();
+    rig.state.focus = Focus::Commits;
+    rig.press(KeyCode::Char('j'));
+    for code in [
+        KeyCode::Char('h'),
+        KeyCode::Left,
+        KeyCode::Char('l'),
+        KeyCode::Right,
+    ] {
+        assert_eq!(rig.press(code), KeyAction::Continue);
+    }
+    assert_eq!(rig.state.tree_state.opened(), &opened);
+    assert_eq!(rig.selected(), selected);
+    assert_eq!(rig.cursor_commit(), Some(commit_id(2)));
+}
+
+/// The pane-wide keys act from the commits section too.
+#[test]
+fn a_and_q_still_act_with_the_commits_section_focused() {
+    let mut rig = KeyRig::with_commits(&[modified("a.rs")], commits(&[1]));
+    rig.state.focus = Focus::Commits;
+    assert_eq!(rig.press(KeyCode::Char('a')), KeyAction::DiffSetChanged);
+    assert!(rig.state.is_diff_open(Path::new("a.rs")));
+    assert_eq!(rig.press(KeyCode::Char('q')), KeyAction::Exit);
+}
+
+/// The tree switches now, not on the next tick, and starts from nothing:
+/// the old source's tree is never drawn under the new source's name. The
+/// selection is published where the diff pane reads it.
+#[test]
+fn selecting_a_source_empties_the_tree_at_once_and_publishes_the_selection() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (worktree, _) = crate::worktree_admin::tests::make_linked_worktree(dir.path(), "task");
+    let root = PathBuf::from(&worktree);
+    let mut tree = build_tree(&root, &[modified("a.rs")]);
+    let mut state = RenderState::new();
+    state.selected_commit = Some(commit_id(1));
+
+    adopt_selected_source(&root, &mut tree, &mut state);
+
+    assert_eq!(tree, build_tree(&root, &[]));
+    assert_eq!(
+        crate::agent_tree_open_set::read_selected_source(&worktree),
+        Some(commit_id(1))
+    );
+}
+
+/// press_every_row_key / RecordedActionMatchesRow for the commits section.
+/// The namespace's rows are exactly the pane-wide keys plus select_source:
+/// q, Ctrl+C, Tab, a, j, Down, k, Up, gg, G, Ctrl+D, Ctrl+U, Space, Enter.
+#[test]
+fn pressing_each_key_of_each_commits_row_records_the_rows_action() {
+    let mut pressed = 0;
+    for binding in bindings_in(KeyNamespace::AgentTreeCommits) {
+        assert!(!binding.keys.contains(&ANY_OTHER_KEY));
+        for key in binding.keys {
+            let mut rig = KeyRig::with_commits(&three_node_changes(), commits(&[2, 1]));
+            rig.state.focus = Focus::Commits;
+            // On a commit that is not selected, so select_source takes effect.
+            rig.press(KeyCode::Char('j'));
+            rig.state.usage.clear();
+            if *key == "gg" {
+                rig.press(KeyCode::Char('g'));
+                assert!(rig.state.usage.is_empty(), "first g is pending input");
+                rig.press(KeyCode::Char('g'));
+            } else {
+                let ev = crate::cli::test_key_event(key);
+                handle_key(&mut rig.state, &rig.tree, ev);
+            }
+            pressed += 1;
+            let detail = match *key {
+                "Space" => " ".to_string(),
+                k if k.starts_with("Ctrl+") => k[5..].to_lowercase(),
+                k => k.to_string(),
+            };
+            assert_eq!(
+                recorded_usage(&rig.state),
+                vec![(binding.action.to_string(), Some(detail))],
+                "agent_tree.commits {key}"
+            );
+        }
+    }
+    assert_eq!(pressed, 14);
+}
+
+// -- CommitsSectionSitsBetweenTreeAndAgents / CommitRowShowsShortIdAndSubject
+
+fn render_pane_buffer(
+    state: &mut RenderState,
+    tree: &TreeNode,
+    height: u16,
+) -> ratatui::buffer::Buffer {
+    let mut terminal = Terminal::new(TestBackend::new(40, height)).expect("terminal");
+    terminal
+        .draw(|frame| render_pane(frame, frame.area(), tree, state, "wt"))
+        .expect("draw");
+    terminal.backend().buffer().clone()
+}
+
+fn line_index(out: &str, needle: &str) -> usize {
+    out.lines()
+        .position(|l| l.contains(needle))
+        .unwrap_or_else(|| panic!("no line contains {needle:?}:\n{out}"))
+}
+
+/// The y of the first row containing `needle`.
+fn row_of(buffer: &ratatui::buffer::Buffer, needle: &str) -> u16 {
+    let out = buffer_to_string(buffer);
+    u16::try_from(line_index(&out, needle)).expect("row fits")
+}
+
+/// Every cell of row `y`, symbol and style — what the user sees, colour and
+/// emphasis included.
+fn row_cells(buffer: &ratatui::buffer::Buffer, y: u16) -> Vec<(String, ratatui::style::Style)> {
+    let area = *buffer.area();
+    (area.left()..area.right())
+        .map(|x| (buffer[(x, y)].symbol().to_string(), buffer[(x, y)].style()))
+        .collect()
+}
+
+#[test]
+fn the_commits_section_sits_between_the_tree_and_the_agents_section() {
+    let tree = build_tree(&root(), &[modified("a.rs")]);
+    let mut state = RenderState::new();
+    state.sync_expansion(&tree);
+    state.adopt_agent_list(Ok(vec![agent(4941, false)]));
+
+    let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 16));
+
+    let tree_row = line_index(&out, "a.rs");
+    let header = line_index(&out, "Commits (Tab)");
+    let unstaged = line_index(&out, "unstaged work");
+    let agents = line_index(&out, "Agents (Tab)");
+    assert!(
+        tree_row < header && header < unstaged && unstaged < agents,
+        "{out}"
+    );
+}
+
+/// "unstaged work" is always the top row, so the section is never empty.
+#[test]
+fn the_commits_section_shows_unstaged_work_with_no_commits() {
+    let tree = build_tree(&root(), &[]);
+    let mut state = RenderState::new();
+    let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 16));
+    assert!(out.contains("unstaged work"), "{out}");
+}
+
+/// Each commit row reads `<short id> <subject>`, newest first beneath
+/// "unstaged work".
+#[test]
+fn a_commit_row_reads_its_short_id_then_its_subject_newest_first() {
+    let tree = build_tree(&root(), &[]);
+    let mut state = RenderState::new();
+    state.adopt_commit_list(Ok(commits(&[2, 1])));
+
+    let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 20));
+
+    let unstaged = line_index(&out, "unstaged work");
+    let newer = line_index(&out, "commit 2");
+    let older = line_index(&out, "commit 1");
+    assert!(unstaged < newer && newer < older, "{out}");
+    let row = out.lines().nth(newer).expect("row");
+    let id_at = row.find(&commit_id(2)[..7]).expect(row);
+    let subject_at = row.find("commit 2").expect(row);
+    assert!(id_at < subject_at, "{row}");
+}
+
+/// As tall as its rows — "unstaged work" plus one per commit — capped at
+/// config.agent_tree_commits_max_rows.
+#[test]
+fn the_commits_section_grows_with_its_commits_up_to_its_cap() {
+    for (listed, rows) in [(0u32, 1usize), (1, 2), (10, COMMITS_MAX_ROWS)] {
+        let tree = build_tree(&root(), &[]);
+        let mut state = RenderState::new();
+        if listed > 0 {
+            state.adopt_commit_list(Ok((1..=listed).rev().map(commit).collect()));
+        }
+        let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 30));
+        let header = line_index(&out, "Commits (Tab)");
+        let agents = line_index(&out, "Agents (Tab)");
+        assert_eq!(agents - header - 2, rows, "{listed} commits:\n{out}");
+    }
+}
+
+/// Past the cap the section scrolls to keep its cursor in view.
+#[test]
+fn the_commits_section_scrolls_to_keep_its_cursor_in_view() {
+    let tree = build_tree(&root(), &[]);
+    let mut state = RenderState::new();
+    state.adopt_commit_list(Ok((1..=10).rev().map(commit).collect()));
+    state.focus = Focus::Commits;
+    render_pane_buffer(&mut state, &tree, 30);
+    handle_key(
+        &mut state,
+        &tree,
+        KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE),
+    );
+
+    let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 30));
+    assert!(
+        out.contains("commit 1"),
+        "the oldest commit must scroll into view:\n{out}"
+    );
+}
+
+/// The SELECTED row carries a marker in every state — here with focus on
+/// the tree, where the commits section draws no cursor at all.
+#[test]
+fn the_selected_source_is_marked_whatever_has_focus() {
+    let tree = build_tree(&root(), &[]);
+    let draw = |selected: Option<String>| {
+        let mut state = RenderState::new();
+        state.adopt_commit_list(Ok(commits(&[1])));
+        state.selected_commit = selected;
+        let buffer = render_pane_buffer(&mut state, &tree, 20);
+        (
+            row_cells(&buffer, row_of(&buffer, "unstaged work")),
+            row_cells(&buffer, row_of(&buffer, "commit 1")),
+        )
+    };
+    let (unstaged_selected, commit_unselected) = draw(None);
+    let (unstaged_unselected, commit_selected) = draw(Some(commit_id(1)));
+
+    assert_ne!(unstaged_selected, unstaged_unselected, "unstaged work row");
+    assert_ne!(commit_selected, commit_unselected, "commit row");
+}
+
+/// TreeTitleNamesItsSource: the root alone for unstaged work, the selected
+/// commit's short id beside it for a commit.
+#[test]
+fn the_tree_title_names_the_selected_commit() {
+    let tree = build_tree(&root(), &[modified("a.rs")]);
+    let short = &commit_id(1)[..7];
+
+    let mut state = RenderState::new();
+    let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 16));
+    let title = out.lines().next().expect("title row");
+    assert!(title.contains("wt") && !title.contains(short), "{title}");
+
+    let mut state = RenderState::new();
+    state.selected_commit = Some(commit_id(1));
+    let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 16));
+    let title = out.lines().next().expect("title row");
+    assert!(title.contains("wt") && title.contains(short), "{title}");
+}
+
+/// Drawn and focused exactly as the agents section is: the focus colour on
+/// its border when focused, red when a notice is up (AgentTreeNoticeRedensBorder
+/// — every section's border).
+#[test]
+fn the_commits_sections_border_shows_focus_and_reddens_with_a_notice() {
+    use crate::tui::ui::palette::CYAN;
+    let tree = build_tree(&root(), &[]);
+
+    let mut state = RenderState::new();
+    state.focus = Focus::Commits;
+    let buffer = render_pane_buffer(&mut state, &tree, 20);
+    let y = row_of(&buffer, "Commits (Tab)");
+    assert_eq!(buffer[(0, y)].style().fg, Some(CYAN));
+
+    let mut state = RenderState::new();
+    state.notice = Some(Notice::commit_list("no base branch"));
+    let buffer = render_pane_buffer(&mut state, &tree, 20);
+    let y = row_of(&buffer, "Commits (Tab)");
+    assert_eq!(buffer[(0, y)].style().fg, Some(RED));
+}
+
+// -- SelectedCommitIsListed, as a property over key and read sequences ----
+
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    #[derive(Debug, Clone)]
+    enum Op {
+        /// A working read listing the pool's commits where the mask is set.
+        Read(Vec<bool>),
+        FailedRead,
+        Down,
+        Up,
+        Top,
+        Bottom,
+        Select,
+    }
+
+    fn op() -> impl Strategy<Value = Op> {
+        prop_oneof![
+            proptest::collection::vec(any::<bool>(), 5).prop_map(Op::Read),
+            Just(Op::FailedRead),
+            Just(Op::Down),
+            Just(Op::Up),
+            Just(Op::Top),
+            Just(Op::Bottom),
+            Just(Op::Select),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        /// Whatever the user presses and whatever git reads back, the
+        /// selection is unstaged work or a commit the section lists.
+        #[test]
+        fn the_selection_is_always_unstaged_work_or_a_listed_commit(
+            ops in proptest::collection::vec(op(), 1..24)
+        ) {
+            let pool = commits(&[5, 4, 3, 2, 1]);
+            let mut rig = KeyRig::new(&[]);
+            rig.state.focus = Focus::Commits;
+            for op in ops {
+                match op {
+                    Op::Read(mask) => {
+                        let listed = pool
+                            .iter()
+                            .zip(&mask)
+                            .filter(|(_, keep)| **keep)
+                            .map(|(c, _)| c.clone())
+                            .collect();
+                        rig.state.adopt_commit_list(Ok(listed));
+                    }
+                    Op::FailedRead => rig.state.adopt_commit_list(Err("git failed".into())),
+                    Op::Down => {
+                        rig.press(KeyCode::Char('j'));
+                    }
+                    Op::Up => {
+                        rig.press(KeyCode::Char('k'));
+                    }
+                    Op::Top => {
+                        rig.press(KeyCode::Char('g'));
+                        rig.press(KeyCode::Char('g'));
+                    }
+                    Op::Bottom => {
+                        rig.press(KeyCode::Char('G'));
+                    }
+                    Op::Select => {
+                        rig.press(KeyCode::Char(' '));
+                    }
+                }
+                let listed = rig.state.commits.commits();
+                let holds = match &rig.state.selected_commit {
+                    None => true,
+                    Some(id) => listed.iter().any(|c| &c.id == id),
+                };
+                prop_assert!(
+                    holds,
+                    "selected {:?} not in {:?}",
+                    rig.state.selected_commit,
+                    listed
+                );
+            }
+        }
+    }
 }
 
 // ---- PanesReadThroughTheBoard: the agents section's read (task #4982)

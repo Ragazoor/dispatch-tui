@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-/// What git says happened to a file, relative to this worktree's fork point
-/// from the task's base branch. Doubles as the badge vocabulary — see the
+/// What git says happened to a file, relative to the selected source's
+/// baseline: the index for unstaged work, the parent for a commit. Doubles as the badge vocabulary — see the
 /// spec's `FileChange` enum, which is deliberately one enum for both so a
 /// badge cannot claim something git did not say.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +31,7 @@ pub enum TreeNodeKind {
     Directory,
 }
 
-/// How many lines one path gained and lost against the baseline — the spec's
+/// How many lines one path gained and lost against the source's baseline — the spec's
 /// `LineCounts` value type.
 ///
 /// One struct rather than two `Option<u32>` fields because git either counts a
@@ -206,7 +206,8 @@ pub fn parse_untracked(output: &str) -> Vec<GitFileChange> {
         .collect()
 }
 
-/// Parse the output of `git diff --numstat --no-renames -z <baseline>`: one
+/// Parse the output of `git diff --numstat --no-renames -z` (or the same
+/// asked of one commit): one
 /// NUL-terminated record per path, holding `<added>\t<removed>\t<path>`.
 ///
 /// A path git could not count carries `-` in both number fields — that is how

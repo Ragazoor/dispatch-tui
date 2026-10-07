@@ -470,7 +470,11 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
         N::BoardConfirmRepoSync => one(draft_app(InputMode::ConfirmRepoSync {
             repo_path: "/repo/a".to_string(),
         })),
-        N::AgentTreeTree | N::AgentTreeAgents | N::AgentDiff | N::TmuxGlobal => {
+        N::AgentTreeTree
+        | N::AgentTreeCommits
+        | N::AgentTreeAgents
+        | N::AgentDiff
+        | N::TmuxGlobal => {
             panic!("{} is not received by the board", ns.name())
         }
     }

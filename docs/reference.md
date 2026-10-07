@@ -9,7 +9,7 @@ it. There is no key list in this document to drift out of date:
 - **In the TUI**: press `?` for the overlay, generated from the table and grouped by mode.
 - **From an agent**: call the `list_keybindings` MCP tool, optionally with a `namespace`
   (`board.normal`, `board.detail`, `board.search`, `board.picker`, `board.confirm`,
-  `agent_tree.tree`, `agent_tree.agents`, `agent_diff`, `tmux.global`, …). Each row
+  `agent_tree.tree`, `agent_tree.commits`, `agent_tree.agents`, `agent_diff`, `tmux.global`, …). Each row
   carries its keys, the context it applies in, its action id and any warning (for
   example, that `G` jumps to the last row and does not enter an epic).
 
@@ -20,8 +20,18 @@ the bare key's row. See `docs/specs/keybindings.allium`.
 
 Pressed inside the pane itself (no tmux prefix) while it has tmux focus. The pane is
 its own process — its keys never reach the board TUI, and all of them act on the
-pane's own view only. The keys are the `agent_tree.tree` and `agent_tree.agents` rows
-of the table.
+pane's own view only. The keys are the `agent_tree.tree`, `agent_tree.commits` and
+`agent_tree.agents` rows of the table. Tab cycles the keys through the file tree, the
+**Commits** section and the **Agents** section.
+
+By default the tree and the diff pane show only your agent's **unstaged** work: the
+working tree against the index, plus untracked files (shown as added, without counts).
+Staged and committed work is not shown there. The **Commits** section lists the
+agent's own commits since its fork point from the base branch (newest 50), under an
+`unstaged work` row; Space or Enter on a row selects it as what the tree and the diff
+pane show, and the selected row carries a `●` marker. A selected commit is shown
+against its first parent, and the tree's title names it. If the branch drops the
+selected commit, the pane falls back to unstaged work.
 
 The **Agents** section lists every task with a live agent window, as `#<id> <title>`.
 Your own task is dimmed and marked `●`.
@@ -45,9 +55,9 @@ edge rather than wrapped — the pane is narrow, and one long line would otherwi
 several files off screen. Nothing here can open or close a file: the open set is
 decided in the tree and only in the tree.
 
-Three things show a one-line stand-in instead of contents, and each is a fact about the
-file: it is untracked, so a diff against the index cannot see it (stage it with `git
-add`); git reports it binary; or its diff is over 1 MB.
+The diff pane follows the tree's selected source. An untracked file is shown whole, as
+additions. Two things show a one-line stand-in instead of contents, and each is a fact
+about the file: git reports it binary, or its diff is over 1 MB.
 
 The cursor position, the manual expansions and the set of open diffs all live in that
 process, so none of them survives closing and reopening the pane. Use `Prefix+e` to

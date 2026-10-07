@@ -240,6 +240,7 @@ fn no_pane_renderer_source_opens_the_store() {
         "src/cli/agent_tree.rs",
         "src/cli/agent_diff.rs",
         "src/cli/agent_tree_agents.rs",
+        "src/cli/agent_tree_commits.rs",
     ];
     const FORBIDDEN: &[&str] = &["open_cli_store", "crate::db::", "TaskRead", "Database"];
     for file in FILES {

@@ -571,11 +571,93 @@ fn lookup_never_answers_a_modified_press_with_the_catch_all() {
     assert_eq!(plain.map(|b| b.action), Some("dismiss_error"));
 }
 
+/// keybindings.allium's pane inventory: agent_tree.commits sits between the
+/// tree's and the agents section's namespaces, under its published name.
+#[test]
+fn the_commits_namespace_sits_between_the_tree_and_the_agents_section() {
+    let at = |n: KeyNamespace| KeyNamespace::ALL.iter().position(|x| *x == n).unwrap();
+    assert_eq!(KeyNamespace::AgentTreeCommits.name(), "agent_tree.commits");
+    assert_eq!(
+        at(KeyNamespace::AgentTreeCommits),
+        at(KeyNamespace::AgentTreeTree) + 1
+    );
+    assert_eq!(
+        at(KeyNamespace::AgentTreeAgents),
+        at(KeyNamespace::AgentTreeCommits) + 1
+    );
+}
+
+/// The commits section adds no new key: its pane-wide rows are the tree's,
+/// key for key, so focus — not a new key — decides what a press means.
+#[test]
+fn the_commits_namespace_shares_the_pane_wide_keys_with_the_tree() {
+    for action in [
+        "exit_pane",
+        "toggle_focus",
+        "toggle_all_diffs",
+        "navigate_row",
+        "navigate_row_first",
+        "navigate_row_last",
+        "navigate_half_page",
+    ] {
+        let keys = |ns: KeyNamespace| -> Vec<&str> {
+            bindings_in(ns)
+                .filter(|b| b.action == action)
+                .flat_map(|b| b.keys.iter().copied())
+                .collect()
+        };
+        let tree = keys(KeyNamespace::AgentTreeTree);
+        assert!(!tree.is_empty(), "{action}");
+        assert_eq!(keys(KeyNamespace::AgentTreeCommits), tree, "{action}");
+    }
+}
+
+/// Space/Enter is select_source in the commits namespace, with no context,
+/// as it is jump_to_agent in the agents namespace.
+#[test]
+fn select_source_is_space_and_enter_in_the_commits_namespace() {
+    let rows: Vec<&KeyBinding> = bindings_in(KeyNamespace::AgentTreeCommits)
+        .filter(|b| b.action == "select_source")
+        .collect();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].keys, &["Space", "Enter"]);
+    assert_eq!(rows[0].context, None);
+}
+
+/// h, l, Left and Right have no row in the commits namespace, and nothing
+/// but the pane-wide rows and select_source is there at all.
+#[test]
+fn the_commits_namespace_has_only_the_pane_wide_rows_and_select_source() {
+    let actions: Vec<&str> = bindings_in(KeyNamespace::AgentTreeCommits)
+        .map(|b| b.action)
+        .collect();
+    assert_eq!(
+        actions,
+        vec![
+            "exit_pane",
+            "toggle_focus",
+            "toggle_all_diffs",
+            "navigate_row",
+            "navigate_row_first",
+            "navigate_row_last",
+            "navigate_half_page",
+            "select_source",
+        ]
+    );
+    for key in ["h", "l", "Left", "Right"] {
+        assert!(
+            !bindings_in(KeyNamespace::AgentTreeCommits).any(|b| b.keys.contains(&key)),
+            "{key}"
+        );
+    }
+}
+
 /// Row lists for the panes: the modified keys that act have rows.
 #[test]
 fn pane_modified_keys_have_rows() {
     for ns in [
         KeyNamespace::AgentTreeTree,
+        KeyNamespace::AgentTreeCommits,
         KeyNamespace::AgentTreeAgents,
         KeyNamespace::AgentDiff,
     ] {

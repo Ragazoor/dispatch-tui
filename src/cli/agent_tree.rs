@@ -32,6 +32,9 @@ use crate::agent_tree::{
     GitFileChange, TreeNode, TreeNodeKind,
 };
 use crate::cli::agent_tree_agents::{border_style, render_agents, AgentRow, AgentsSection};
+use crate::cli::agent_tree_commits::{
+    render_commits, short_id, AgentCommit, CommitsSection, COMMITS_REFRESH_INTERVAL,
+};
 use crate::models::{TaskId, TmuxWindow};
 use crate::process::{stderr_str, ProcessRunner, RealProcessRunner};
 use crate::tui::ui::palette::{FG, GREEN, MUTED, RED, YELLOW};
@@ -49,13 +52,11 @@ pub(crate) const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 /// these run inline in this loop, so the timeout bounds how long this pane can
 /// ignore a keypress.
 ///
-/// The bound is PER COMMAND, and a tick runs up to six of them
-/// ([`git_changes`]), so the arithmetic worst case is six times this. Only
-/// three of the six can realistically reach it: the two `diff`s and `ls-files`
-/// touch the index, and a lock the agent's own git holds is by far the
-/// commonest cause of a slow query. The three `merge-base` probes walk refs and
-/// objects only and take no lock, so the practical ceiling is unchanged by the
-/// baseline resolution.
+/// The bound is PER COMMAND, and a tree tick runs at most three of them
+/// ([`git_changes`]): the two `diff`s and `ls-files` touch the index, and a lock
+/// the agent's own git holds is by far the commonest cause of a slow query. The
+/// commits section's fork-point resolution ([`git_branch_commits`], up to four
+/// commands) runs on its own worker, never in this loop.
 pub(crate) const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A one-line failure notice, tagged with which of its writers set it.
@@ -82,6 +83,10 @@ pub enum Notice {
     /// Another agent's window could not be selected. The answer to a keypress,
     /// like `Diff`, so no timer clears it (`AgentTreeAgentJumpFailureIsVisible`).
     AgentJump(String),
+    /// The agent's commits could not be read for the commits section. The
+    /// commits timer's own writer: the next working read clears it
+    /// (`RefreshAgentTreeCommitList`, `AgentTreeCommitListFailureKeepsLastList`).
+    CommitList(String),
 }
 
 impl Notice {
@@ -101,21 +106,29 @@ impl Notice {
         Self::AgentJump(text.into())
     }
 
+    pub fn commit_list(text: impl Into<String>) -> Self {
+        Self::CommitList(text.into())
+    }
+
     pub fn text(&self) -> &str {
         match self {
-            Self::Git(text) | Self::Diff(text) | Self::AgentList(text) | Self::AgentJump(text) => {
-                text
-            }
+            Self::Git(text)
+            | Self::Diff(text)
+            | Self::AgentList(text)
+            | Self::AgentJump(text)
+            | Self::CommitList(text) => text,
         }
     }
 }
 
-/// Which of the pane's two sections the keys act on — the spec's
-/// `AgentTreeFocus`. Tab toggles it (`SwitchAgentTreeFocus`).
+/// Which of the pane's three sections the keys act on — the spec's
+/// `AgentTreeFocus`. Tab cycles it tree -> commits -> agents
+/// (`SwitchAgentTreeFocus`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Focus {
     #[default]
     Tree,
+    Commits,
     Agents,
 }
 
@@ -331,8 +344,8 @@ fn merge_base(root: &str, git_ref: &str, runner: &dyn ProcessRunner) -> Result<S
         .trim()
         .to_string();
     // Git prints a commit id whenever it exits zero, so this is defensive
-    // rather than reachable — but an empty string would be handed to `git diff`
-    // as its baseline, where it means something else entirely. Soft-fail into
+    // rather than reachable — but an empty string would be handed to `git log`
+    // as the range start, where it means something else entirely. Soft-fail into
     // "this ref is not a candidate" instead.
     if sha.is_empty() {
         return Err(anyhow!("git: no common ancestor of HEAD and {git_ref}"));
@@ -350,9 +363,9 @@ fn merge_base(root: &str, git_ref: &str, runner: &dyn ProcessRunner) -> Result<S
 /// That distinction is load-bearing. "No" keeps the LOCAL fork point, so
 /// reading an unanswered probe as "no" would silently reinstate exactly the
 /// mis-attribution `AgentTreeBaselineIsTaskBaseBranch` exists to forbid — and
-/// present it as a correct tree, with no notice and no red border. A failure
-/// instead reaches `AgentTreeGitFailureKeepsLastGoodTree`, which keeps the last
-/// good tree and says so.
+/// present it as a correct list, with no notice and no red border. A failure
+/// instead reaches `AgentTreeCommitListFailureKeepsLastList`, which keeps the last
+/// list and says so.
 fn is_ancestor(
     root: &str,
     ancestor: &str,
@@ -380,8 +393,9 @@ fn is_ancestor(
     }
 }
 
-/// Resolve the baseline the tree measures against: this worktree's fork point
-/// from `base_branch` — step 1 of the spec's `AgentTreeGitQuery`.
+/// Resolve this worktree's fork point from `base_branch`, which bounds the
+/// commits section's list ([`git_branch_commits`]). The tree itself no longer
+/// resolves any branch (`AgentTreeShowsUnstagedWorkOnly`).
 ///
 /// A base branch is a NAME, and a repo can hold two refs under it: the local
 /// branch and its remote-tracking counterpart. Dispatch branches a worktree
@@ -398,12 +412,12 @@ fn is_ancestor(
 /// definition of it — deliberately the same one `select_start_point` reaches
 /// through, so the two cannot disagree about which ref a worktree branched
 /// from. In a repo whose remote is named anything else that ref never
-/// resolves, and the baseline falls back to the local branch alone, with the
+/// resolves, and the fork point falls back to the local branch alone, with the
 /// stale-branch mis-attribution that implies.
 ///
 /// A ref that does not resolve is simply not a candidate: a base branch never
 /// checked out locally is ordinary and must leave the pane working. Only when
-/// NEITHER resolves is there no baseline, and then the LOCAL branch's error is
+/// NEITHER resolves is there no fork point, and then the LOCAL branch's error is
 /// the one returned — that is the name the user put on the task, so it is the
 /// one they can act on. A ranking probe that could not answer is a different
 /// thing and fails the whole query; see [`is_ancestor`].
@@ -434,98 +448,126 @@ pub(crate) fn fork_point(
     }
 }
 
-/// Run the git queries behind the tree and return everything they reported,
-/// with paths relative to `root`.
+/// Run the git queries behind the tree for one source and return everything
+/// they reported, with paths relative to `root` — the spec's
+/// `AgentTreeGitQuery`.
 ///
-/// The sequence is the spec's `AgentTreeGitQuery`:
+/// `commit = None` is UNSTAGED WORK (the default): the working tree against
+/// the index — `git diff --name-status --no-renames -z` and
+/// `git diff --numstat --no-renames -z`, naming no revision — plus
+/// `git ls-files --others --exclude-standard -z` for untracked files, which
+/// come back Added with no counts (`AgentTreeShowsUnstagedWorkOnly`,
+/// `UntrackedFilesHaveNoLineCounts`).
 ///
-///   1. [`fork_point`] — resolve the baseline from the task's base branch.
-///   2. `git diff --name-status --no-renames -z <fork point>` — every tracked
-///      change against that baseline, committed or not, because the diff is
-///      taken against the WORKING TREE. An agent that commits mid-session does
-///      not watch its work vanish.
-///   3. `git diff --numstat --no-renames -z <fork point>` — how many lines
-///      each of those paths gained and lost. A separate ask against the same
-///      baseline and the same rename setting, not a richer form of step 2:
-///      drift between the two would leave a row's badge and its numbers
-///      answering different questions.
-///   4. `git ls-files --others --exclude-standard -z` — files the agent created
-///      and has not staged, which a diff cannot see. All of them are Added,
-///      and none of them carries counts — step 3 cannot see a path that is not
-///      in the index.
-///
-/// Rename detection is off (`--no-renames`): with it on a rename is one entry
-/// naming two paths, which the three-value [`FileChange`] vocabulary cannot
-/// express. Off, git reports the same rename as a delete plus an add — which is
-/// both true and what a file tree should show.
-///
-/// `-z` on both path-emitting queries is load-bearing, not a style choice:
-/// git's default output C-quotes any path containing a non-ASCII byte and
-/// separates fields with a tab, so `src/é.rs` would arrive as
-/// `"src/\303\251.rs"` and render as that literal string. See
-/// [`parse_name_status`] for the full reasoning.
-///
-/// A path both path-listing queries name (`git rm --cached foo`) is resolved by
-/// `build_tree` on precedence, not on the order the two run in — and so are its
-/// counts, which the diff supplies and the untracked listing never does.
-///
-/// Every command is read-only: nothing here fetches, commits, stages or writes
-/// to the index, which is what keeps the pane's `ReadOnlyObservation` guarantee
-/// true while it runs git against a worktree an agent is actively using.
+/// `commit = Some(id)` is ONE COMMIT against its first parent (the empty tree
+/// for a root commit): two NUL-delimited, rename-free diffs and no untracked
+/// listing. Neither form resolves a branch.
 pub fn git_changes(
     root: &Path,
-    base_branch: &str,
+    commit: Option<&str>,
     runner: &dyn ProcessRunner,
 ) -> Result<Vec<GitFileChange>> {
     let root = root.to_string_lossy().into_owned();
-    let baseline = fork_point(&root, base_branch, runner)?;
 
-    let diff = run_git(
-        runner,
-        &[
-            "-C",
-            &root,
-            "diff",
-            "--name-status",
-            "--no-renames",
-            "-z",
-            &baseline,
-        ],
-    )?;
-    // The SAME baseline and the same rename setting as the diff above. The two
-    // are one comparison asked twice, and if they ever drifted apart a row's
-    // badge and its numbers would be answering different questions.
-    let numstat = run_git(
-        runner,
-        &[
-            "-C",
-            &root,
-            "diff",
-            "--numstat",
-            "--no-renames",
-            "-z",
-            &baseline,
-        ],
-    )?;
-    let untracked = run_git(
-        runner,
-        &[
-            "-C",
-            &root,
-            "ls-files",
-            "--others",
-            "--exclude-standard",
-            "-z",
-        ],
-    )?;
+    let (diff, numstat) = match commit {
+        None => (
+            run_git(
+                runner,
+                &["-C", &root, "diff", "--name-status", "--no-renames", "-z"],
+            )?,
+            // The SAME comparison and the same rename setting as the diff
+            // above: one question asked twice, so a row's badge and its
+            // numbers cannot answer different ones.
+            run_git(
+                runner,
+                &["-C", &root, "diff", "--numstat", "--no-renames", "-z"],
+            )?,
+        ),
+        // `git show --first-parent --format=` is the commit against its first
+        // parent, and a root commit against the empty tree.
+        Some(commit) => (
+            run_git(
+                runner,
+                &[
+                    "-C",
+                    &root,
+                    "show",
+                    "--first-parent",
+                    "--format=",
+                    "--name-status",
+                    "--no-renames",
+                    "-z",
+                    commit,
+                ],
+            )?,
+            run_git(
+                runner,
+                &[
+                    "-C",
+                    &root,
+                    "show",
+                    "--first-parent",
+                    "--format=",
+                    "--numstat",
+                    "--no-renames",
+                    "-z",
+                    commit,
+                ],
+            )?,
+        ),
+    };
 
     let mut changes = parse_name_status(&diff);
     attach_line_counts(&mut changes, &parse_numstat(&numstat));
-    // Appended after the counts are attached, and deliberately: an untracked
-    // path is not in the index, so the numstat query never saw it and there is
-    // nothing to attach. See the spec's UntrackedFilesHaveNoLineCounts.
-    changes.extend(parse_untracked(&untracked));
+    if commit.is_none() {
+        // Appended after the counts are attached, and deliberately: an
+        // untracked path is not in the index, so the numstat query never saw
+        // it and there is nothing to attach (UntrackedFilesHaveNoLineCounts).
+        let untracked = run_git(
+            runner,
+            &[
+                "-C",
+                &root,
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "-z",
+            ],
+        )?;
+        changes.extend(parse_untracked(&untracked));
+    }
     Ok(changes)
+}
+
+/// The agent's own commits for the commits section: the newest
+/// [`crate::cli::agent_tree_commits::MAX_LISTED`] commits reachable from HEAD
+/// and not from this worktree's [`fork_point`] from `base_branch`, newest
+/// first — the spec's `git_branch_commits` (`RefreshAgentTreeCommitList`,
+/// `AgentTreeBaselineIsTaskBaseBranch`).
+pub fn git_branch_commits(
+    root: &Path,
+    base_branch: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<Vec<crate::cli::agent_tree_commits::AgentCommit>> {
+    let root = root.to_string_lossy().into_owned();
+    let fork = fork_point(&root, base_branch, runner)?;
+    let range = format!("{fork}..HEAD");
+    let max = format!("--max-count={}", crate::cli::agent_tree_commits::MAX_LISTED);
+    let listing = run_git(
+        runner,
+        &["-C", &root, "log", &max, "--format=%H %s", &range],
+    )?;
+    Ok(listing
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let (id, subject) = line.split_once(' ').unwrap_or((line, ""));
+            AgentCommit {
+                id: id.to_string(),
+                subject: subject.to_string(),
+            }
+        })
+        .collect())
 }
 
 /// Run one git command, returning its stdout or an error carrying git's own
@@ -549,7 +591,7 @@ pub(crate) fn run_git(runner: &dyn ProcessRunner, args: &[&str]) -> Result<Strin
 /// Git's own first line of stderr, as an error. Shared by every caller here
 /// because that line is what reaches the user's border and all of them need it
 /// to say the same kind of thing.
-fn git_error(output: &std::process::Output) -> anyhow::Error {
+pub(crate) fn git_error(output: &std::process::Output) -> anyhow::Error {
     let stderr = stderr_str(output);
     let detail = stderr
         .lines()
@@ -619,6 +661,12 @@ pub struct RenderState {
     pub focus: Focus,
     /// The agents section beneath the tree, with its own cursor.
     pub agents: AgentsSection,
+    /// The commits section between the tree and the agents section, with its
+    /// own cursor.
+    pub commits: CommitsSection,
+    /// Which change the tree and the diff pane show: `None` for unstaged work,
+    /// or the id of one listed commit — the spec's `pane.selected_commit`.
+    pub selected_commit: Option<String>,
     /// Keypress usage events for presses that took effect, waiting for the
     /// loop to write them through the pane's store connection.
     pub usage: Vec<crate::models::UsageEvent>,
@@ -635,6 +683,8 @@ impl RenderState {
             viewport_rows: 0,
             focus: Focus::Tree,
             agents: AgentsSection::new(),
+            commits: CommitsSection::new(),
+            selected_commit: None,
             usage: Vec::new(),
         }
     }
@@ -734,6 +784,28 @@ impl RenderState {
                 }
             }
             Err(reason) => self.notice = Some(Notice::AgentList(reason)),
+        }
+    }
+
+    /// Take one read of the agent's commits — the spec's
+    /// `RefreshAgentTreeCommitList` and `AgentTreeCommitListFailureKeepsLastList`.
+    pub fn adopt_commit_list(&mut self, read: Result<Vec<AgentCommit>, String>) {
+        match read {
+            Ok(commits) => {
+                // Kept by id: a new commit above the selection leaves it on
+                // the same commit, and one the branch no longer holds falls
+                // back to unstaged work, silently.
+                if let Some(id) = &self.selected_commit {
+                    if !commits.iter().any(|c| &c.id == id) {
+                        self.selected_commit = None;
+                    }
+                }
+                self.commits.set_commits(commits);
+                if matches!(self.notice, Some(Notice::CommitList(_))) {
+                    self.notice = None;
+                }
+            }
+            Err(reason) => self.notice = Some(Notice::CommitList(reason)),
         }
     }
 
@@ -926,9 +998,14 @@ pub fn render(
     }
 }
 
-/// Render the whole pane: the tree above, the agents section in a band across
-/// the bottom (`AgentsSectionSitsBelowTheTree`). The section takes one row per
-/// agent up to its cap; the tree keeps the rest.
+/// Render the whole pane: the tree above, the commits section beneath it and
+/// the agents section in a band across the bottom
+/// (`CommitsSectionSitsBetweenTreeAndAgents`, `AgentsSectionSitsBelowTheTree`).
+/// Each section takes one row per entry up to its cap; the tree keeps the rest.
+///
+/// The tree's title names its source (`TreeTitleNamesItsSource`): the pane
+/// root alone for unstaged work, the selected commit's short id beside it for a
+/// commit.
 pub fn render_pane(
     frame: &mut Frame,
     area: Rect,
@@ -937,19 +1014,42 @@ pub fn render_pane(
     title: &str,
 ) {
     let agents_height = state.agents.height().min(area.height);
+    let commits_height = state.commits.height().min(area.height - agents_height);
     let tree_area = Rect {
-        height: area.height - agents_height,
+        height: area.height - agents_height - commits_height,
+        ..area
+    };
+    let commits_area = Rect {
+        y: area.y + tree_area.height,
+        height: commits_height,
         ..area
     };
     let agents_area = Rect {
-        y: area.y + tree_area.height,
+        y: commits_area.y + commits_height,
         height: agents_height,
         ..area
     };
-    render(frame, tree_area, root, state, title);
-    let focused = state.focus == Focus::Agents;
+    let tree_title = match &state.selected_commit {
+        Some(id) => format!("{title} {}", short_id(id)),
+        None => title.to_string(),
+    };
+    render(frame, tree_area, root, state, &tree_title);
     let alert = state.notice.is_some();
-    render_agents(frame, agents_area, &mut state.agents, focused, alert);
+    render_commits(
+        frame,
+        commits_area,
+        &mut state.commits,
+        state.selected_commit.as_deref(),
+        state.focus == Focus::Commits,
+        alert,
+    );
+    render_agents(
+        frame,
+        agents_area,
+        &mut state.agents,
+        state.focus == Focus::Agents,
+        alert,
+    );
 }
 
 /// Select `window`, reporting a failure in the pane's notice — the spec's
@@ -982,6 +1082,10 @@ pub enum KeyAction {
     /// `handle_key` for the same reason as `DiffSetChanged` — tmux belongs to
     /// the loop.
     JumpTo(TmuxWindow),
+    /// Space or Enter in the commits section selected a different source
+    /// (`SelectAgentTreeSource`). The loop drops the old source's tree,
+    /// publishes the selection and re-queries — see [`adopt_selected_source`].
+    SourceChanged,
 }
 
 /// Every FILE path in the tree, relative to the root, as the open set holds
@@ -1077,10 +1181,11 @@ fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyA
     };
 
     // The table decides which action this press runs: the pane-wide keys are
-    // rows in both sections (AgentKeysFollowFocus), the cursor keys rows of
+    // rows in all three sections (AgentKeysFollowFocus), the cursor keys rows of
     // the focused one. A press with no row does nothing.
     let ns = match state.focus {
         Focus::Tree => KeyNamespace::AgentTreeTree,
+        Focus::Commits => KeyNamespace::AgentTreeCommits,
         Focus::Agents => KeyNamespace::AgentTreeAgents,
     };
     let Some(row) = lookup(KEY_BINDINGS, ns, &name, |c| {
@@ -1129,7 +1234,8 @@ fn run_tree_action(
         "exit_pane" => KeyAction::Exit,
         "toggle_focus" => {
             state.focus = match state.focus {
-                Focus::Tree => Focus::Agents,
+                Focus::Tree => Focus::Commits,
+                Focus::Commits => Focus::Agents,
                 Focus::Agents => Focus::Tree,
             };
             KeyAction::Continue
@@ -1152,6 +1258,8 @@ fn run_tree_action(
             match (ns, down) {
                 (KeyNamespace::AgentTreeAgents, true) => state.agents.down(),
                 (KeyNamespace::AgentTreeAgents, false) => state.agents.up(),
+                (KeyNamespace::AgentTreeCommits, true) => state.commits.down(),
+                (KeyNamespace::AgentTreeCommits, false) => state.commits.up(),
                 (_, true) => {
                     state.tree_state.key_down();
                 }
@@ -1164,6 +1272,8 @@ fn run_tree_action(
         "navigate_row_first" => {
             if ns == KeyNamespace::AgentTreeAgents {
                 state.agents.top();
+            } else if ns == KeyNamespace::AgentTreeCommits {
+                state.commits.top();
             } else {
                 state.tree_state.select_first();
             }
@@ -1172,6 +1282,8 @@ fn run_tree_action(
         "navigate_row_last" => {
             if ns == KeyNamespace::AgentTreeAgents {
                 state.agents.bottom();
+            } else if ns == KeyNamespace::AgentTreeCommits {
+                state.commits.bottom();
             } else {
                 state.tree_state.select_last();
             }
@@ -1182,6 +1294,8 @@ fn run_tree_action(
             match (ns, down) {
                 (KeyNamespace::AgentTreeAgents, true) => state.agents.half_page_down(),
                 (KeyNamespace::AgentTreeAgents, false) => state.agents.half_page_up(),
+                (KeyNamespace::AgentTreeCommits, true) => state.commits.half_page_down(),
+                (KeyNamespace::AgentTreeCommits, false) => state.commits.half_page_up(),
                 (_, true) => {
                     state.tree_state.select_relative(|current| {
                         current.map_or(0, |c| c.saturating_add(half_page))
@@ -1219,6 +1333,17 @@ fn run_tree_action(
             KeyAction::Continue
         }
         "jump_to_agent" => return state.agents.jump_target().map(KeyAction::JumpTo),
+        // Space or Enter in the commits section: the row under the cursor
+        // becomes the source. The row already selected is a no-op, so it
+        // records nothing (SelectAgentTreeSource).
+        "select_source" => {
+            let target = state.commits.cursor_commit().map(|c| c.id.clone());
+            if target == state.selected_commit {
+                return None;
+            }
+            state.selected_commit = target;
+            KeyAction::SourceChanged
+        }
         _ => return None,
     };
     Some(result)
@@ -1308,6 +1433,23 @@ fn tear_down_diff_pane(
     publish_open_set(context, tree, state, runner);
 }
 
+/// The loop's answer to [`KeyAction::SourceChanged`]: the tree switches now
+/// and starts from nothing — the old source's tree is never drawn under the
+/// new source's name — and the selection is published where the diff pane
+/// reads it (`SelectAgentTreeSource`, `AgentTreeSourceIsOneSelection`).
+pub(crate) fn adopt_selected_source(root: &Path, tree: &mut TreeNode, state: &mut RenderState) {
+    *tree = build_tree(root, &[]);
+    // The diff pane reads the selection from beside the open set. A failure
+    // is the direct answer to a keypress, like a failed diff-pane split.
+    if let Err(e) = crate::agent_tree_open_set::write_selected_source(
+        &root.to_string_lossy(),
+        state.selected_commit.as_deref(),
+    ) {
+        tracing::warn!(root = %root.display(), error = %format!("{e:#}"), "failed to record the selected source");
+        state.notice = Some(Notice::diff(format!("{e:#}")));
+    }
+}
+
 /// Take a freshly built tree as the one on screen, re-syncing expansion only
 /// when it actually differs.
 ///
@@ -1344,11 +1486,65 @@ fn drain_agent_reads(agent_reads: &AgentReads, state: &mut RenderState) {
     }
 }
 
+/// Reads of the agent's commits for the commits section, one per
+/// `COMMITS_REFRESH_INTERVAL`, produced off the render loop: resolving the fork
+/// point runs up to four git commands, which must never delay a keypress.
+pub(crate) type CommitReads = std::sync::mpsc::Receiver<Result<Vec<AgentCommit>, String>>;
+
+/// Take every read that has arrived since the last pass, each in turn so a
+/// failure followed by a recovery leaves no stale notice behind. When a read
+/// moved the selection (the selected commit left the branch) the tree switches
+/// to unstaged work and the new selection is published, exactly as for a
+/// keypress.
+fn drain_commit_reads(
+    commit_reads: &CommitReads,
+    root: &Path,
+    tree: &mut TreeNode,
+    state: &mut RenderState,
+) -> bool {
+    let before = state.selected_commit.clone();
+    while let Ok(read) = commit_reads.try_recv() {
+        state.adopt_commit_list(read);
+    }
+    let moved = state.selected_commit != before;
+    if moved {
+        adopt_selected_source(root, tree, state);
+    }
+    moved
+}
+
+/// Read the agent's commits on their own timer from a worker thread and send
+/// each read to the render loop. Only news is sent, and a failure always is.
+/// The thread ends when the loop drops its receiver.
+fn spawn_commit_list_poller(root: PathBuf, base_branch: String) -> CommitReads {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let runner = RealProcessRunner::default();
+        let mut last_sent: Option<Vec<AgentCommit>> = None;
+        loop {
+            let read =
+                git_branch_commits(&root, &base_branch, &runner).map_err(|e| format!("{e:#}"));
+            let news = match &read {
+                Ok(commits) => last_sent.as_ref() != Some(commits),
+                Err(_) => true,
+            };
+            if news {
+                last_sent = read.as_ref().ok().cloned();
+                if tx.send(read).is_err() {
+                    return;
+                }
+            }
+            std::thread::sleep(COMMITS_REFRESH_INTERVAL);
+        }
+    });
+    rx
+}
+
 fn run_loop<B: Backend>(
     terminal: &mut Terminal<B>,
-    base_branch: &str,
     context: &DiffPaneContext<'_>,
     agent_reads: &AgentReads,
+    commit_reads: &CommitReads,
     runner: &dyn ProcessRunner,
     usage: &mut crate::cli::PaneUsage,
 ) -> Result<()> {
@@ -1365,10 +1561,13 @@ fn run_loop<B: Backend>(
     // in that cell. One frame of an empty bordered pane is a better answer than
     // a stale one; the query below fills it in immediately after.
     terminal.draw(|frame| render_pane(frame, frame.area(), &tree, &mut state, &title))?;
-    refresh(root, base_branch, runner, &mut tree, &mut state);
+    refresh(root, runner, &mut tree, &mut state);
 
     loop {
         drain_agent_reads(agent_reads, &mut state);
+        if drain_commit_reads(commit_reads, root, &mut tree, &mut state) {
+            refresh(root, runner, &mut tree, &mut state);
+        }
         terminal.draw(|frame| render_pane(frame, frame.area(), &tree, &mut state, &title))?;
 
         if event::poll(REFRESH_INTERVAL)? {
@@ -1391,12 +1590,16 @@ fn run_loop<B: Backend>(
                     publish_open_set(context, &tree, &mut state, runner);
                 }
                 KeyAction::JumpTo(window) => jump_to_agent(&window, &mut state, runner),
+                KeyAction::SourceChanged => {
+                    adopt_selected_source(root, &mut tree, &mut state);
+                    refresh(root, runner, &mut tree, &mut state);
+                }
             }
             continue;
         }
 
         // Poll timed out with no key event: the ~1s timer tick.
-        refresh(root, base_branch, runner, &mut tree, &mut state);
+        refresh(root, runner, &mut tree, &mut state);
     }
 }
 
@@ -1411,14 +1614,10 @@ fn run_loop<B: Backend>(
 /// The unchanged-result short-circuit is a performance optimisation with one
 /// behavioural consequence worth stating: the user's manual expansion state
 /// survives a tick precisely because nothing is rebuilt on it.
-fn refresh(
-    root: &Path,
-    base_branch: &str,
-    runner: &dyn ProcessRunner,
-    tree: &mut TreeNode,
-    state: &mut RenderState,
-) {
-    match git_changes(root, base_branch, runner) {
+fn refresh(root: &Path, runner: &dyn ProcessRunner, tree: &mut TreeNode, state: &mut RenderState) {
+    // The source is the selection: unstaged work, or one commit
+    // (AgentTreeSourceIsOneSelection).
+    match git_changes(root, state.selected_commit.as_deref(), runner) {
         Ok(fresh) => {
             state.clear_git_notice();
             // Compared as TREES, not as change lists. The tree is what the user
@@ -1430,7 +1629,7 @@ fn refresh(
         Err(e) => {
             tracing::warn!(
                 root = %root.display(),
-                base_branch,
+                selected_commit = state.selected_commit.as_deref(),
                 // `{e:#}` so the log carries the cause (timeout, spawn failure), not
                 // just the outermost context.
                 error = format_args!("{e:#}"),
@@ -1448,8 +1647,9 @@ fn refresh(
 
 /// Entry point for `dispatch agent-tree <task_id>`. Standalone ratatui loop
 /// — not part of the board TUI's `App`/message loop (see the module-level
-/// doc comment). Resolves the task's worktree and base branch from the DB once,
-/// then re-queries git on a 1-second timer.
+/// doc comment). Resolves the task's worktree and base branch from the board once,
+/// then re-queries git on a 1-second timer and lists the agent's commits on a
+/// worker thread.
 pub async fn run(db_path: &Path, board_port: u16, task_id: i64) -> Result<()> {
     // The task and the live-agent list come from the running board, which
     // already holds them (`PanesReadThroughTheBoard`).
@@ -1466,15 +1666,21 @@ pub async fn run(db_path: &Path, board_port: u16, task_id: i64) -> Result<()> {
             // the manual expansions, and a set left behind by a killed renderer
             // describes nothing — see the AgentTreeCompanionPane surface's guidance.
             let _ = crate::agent_tree_open_set::clear_open_set(&root.to_string_lossy());
+            // The selection starts on unstaged work like everything else, so
+            // one a killed renderer left behind must not point the diff pane
+            // at a commit this renderer is not showing.
+            let _ =
+                crate::agent_tree_open_set::write_selected_source(&root.to_string_lossy(), None);
+            let commit_reads = spawn_commit_list_poller(root.clone(), base_branch);
             run_loop(
                 terminal,
-                &base_branch,
                 &DiffPaneContext {
                     root: &root,
                     db_path,
                     task_id,
                 },
                 &agent_reads,
+                &commit_reads,
                 &RealProcessRunner::default(),
                 &mut usage,
             )
@@ -1556,5 +1762,7 @@ fn spawn_agent_list_poller(
     (rx, handle)
 }
 
+#[cfg(test)]
+pub(crate) mod test_repo;
 #[cfg(test)]
 mod tests;
