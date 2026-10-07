@@ -1292,14 +1292,14 @@ rule MoveTaskToEpic {
 -- independent of both (TeardownIsOwedWheneverThereIsSomethingToRelease). Pinned
 -- on the primitive by src/dispatch/tests/agent_launch.rs::teardown_task_kills_window_when_there_is_no_worktree
 -- and teardown_task_with_neither_worktree_nor_window_runs_no_commands, and on the
--- feed wrapper by src/feed/mod.rs::cleanup_kills_window_only_when_there_is_no_worktree
+-- feed wrapper by src/feed/tests.rs::cleanup_kills_window_only_when_there_is_no_worktree
 -- and cleanup_of_a_stateless_row_runs_no_commands.
 -- Coverage of the feed path: the src/feed/mod.rs cleanup_* tests
 -- (cleanup_removes_worktree_and_kills_window,
 -- cleanup_kills_window_only_when_there_is_no_worktree,
 -- cleanup_of_a_stateless_row_runs_no_commands, cleanup_continues_after_a_failure,
 -- cleanup_serialises_same_repo_removals), plus
--- src/feed/mod.rs::tick_removed_task_tears_down_its_worktree and
+-- src/feed/tests.rs::tick_removed_task_tears_down_its_worktree and
 -- src/runtime/tests/feeds.rs::exec_trigger_epic_feed_removed_task_tears_down_its_worktree
 -- for the wiring on each feed path.
 --

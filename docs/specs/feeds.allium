@@ -1107,7 +1107,7 @@ rule FeedTick {
         -- (the handler emits Refresh),
         -- src/runtime/tests/feeds.rs::mcp_refresh_invalidates_feed_runner_cache_after_enabling_a_feed
         -- (Refresh invalidates), and
-        -- src/feed/mod.rs::tick_re_queries_after_epic_changed_invalidation.
+        -- src/feed/tests.rs::tick_re_queries_after_epic_changed_invalidation.
         --
         -- == Host scoping ==
         --
@@ -1296,7 +1296,7 @@ rule SerialisedFeedCycle {
         --
         -- Coverage: src/feed/guard.rs unit tests (exclusivity per epic, release
         -- on drop, independence across epics, release when the holder panics);
-        -- src/feed/mod.rs::tick_skips_an_epic_whose_cycle_is_already_in_flight
+        -- src/feed/tests.rs::tick_skips_an_epic_whose_cycle_is_already_in_flight
         -- and
         -- src/runtime/tests/feeds.rs::exec_trigger_epic_feed_reports_already_refreshing_while_a_cycle_is_in_flight
         -- (each request surface drops and writes nothing while a claim is
@@ -2169,7 +2169,7 @@ rule RoleRoutedFeedSync {
         -- (the report reaches the outcome on both sync paths);
         -- src/store/tests/tasks_feed/additive_and_stale.rs::delete_stale_subtree_feed_tasks_never_reports_manual_tasks
         -- (the removed-rows report on the stale-delete path);
-        -- src/feed/mod.rs::tick_removed_task_tears_down_its_worktree
+        -- src/feed/tests.rs::tick_removed_task_tears_down_its_worktree
         -- and src/runtime/tests/feeds.rs::exec_trigger_epic_feed_removed_task_tears_down_its_worktree
         -- (the teardown is actually wired up, once per feed path); and the
         -- src/feed/mod.rs cleanup_* tests for the helper itself
@@ -2388,7 +2388,7 @@ rule FeedCommandStderrOnSuccess {
         -- exec_feed_command_truncates_multi_byte_stderr_without_panicking and
         -- exec_feed_command_reports_stderr_of_exactly_the_cap_complete (the
         -- capture and the 2000-character cap);
-        -- src/feed/mod.rs::tick_stderr_on_zero_exit_does_not_suppress_sync
+        -- src/feed/tests.rs::tick_stderr_on_zero_exit_does_not_suppress_sync
         -- (one item alongside stderr still syncs — additively).
 }
 
@@ -2485,13 +2485,13 @@ rule DegradedEmptyEmission {
         -- (the manual trigger reports a failure) and
         -- exec_trigger_epic_feed_degraded_empty_emission_does_not_delete_existing_tasks
         -- (the manual path ran no sync at all, not merely a quiet one);
-        -- src/feed/mod.rs::tick_degraded_empty_emission_does_not_delete_existing_tasks
+        -- src/feed/tests.rs::tick_degraded_empty_emission_does_not_delete_existing_tasks
         -- (auto-poll leaves pre-existing subtree tasks untouched — the direct
         -- regression test for the reported wipe). The false-positive boundary
         -- is pinned by the existing tests that must stay green unmodified:
         -- src/runtime/tests/feeds.rs::exec_trigger_epic_feed_zero_items (a quiet
         -- empty run still reconciles) and
-        -- src/feed/mod.rs::tick_stderr_on_zero_exit_does_not_suppress_sync
+        -- src/feed/tests.rs::tick_stderr_on_zero_exit_does_not_suppress_sync
         -- (one item alongside stderr still syncs — additively, per
         -- DegradedNonEmptyEmission, but it is not suppressed).
 }
@@ -2638,7 +2638,7 @@ rule DegradedNonEmptyEmission {
         -- removals", not "no writes");
         -- src/tui/tests/epics/feed_trigger.rs::feed_refreshed_degraded_says_it_removed_nothing
         -- (the status line names the withheld removals);
-        -- src/feed/mod.rs::tick_partially_degraded_emission_does_not_delete_or_tear_down
+        -- src/feed/tests.rs::tick_partially_degraded_emission_does_not_delete_or_tear_down
         -- (auto-poll end to end, asserting the MockProcessRunner saw no
         -- `git worktree remove`) and the manual counterpart
         -- src/runtime/tests/feeds.rs::exec_trigger_epic_feed_partially_degraded_emission_does_not_delete.
