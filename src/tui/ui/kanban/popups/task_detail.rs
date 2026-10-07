@@ -8,6 +8,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::models::Task;
 use crate::tui::ui::palette::{BORDER, FG, MUTED, MUTED_LIGHT};
 use crate::tui::{App, ViewMode};
 
@@ -15,43 +16,28 @@ use crate::tui::ui::shared::{open_overlay, rounded_block};
 
 use super::super::wrapped_line_count;
 
-pub(in crate::tui::ui::kanban) fn render_task_detail_overlay(
-    frame: &mut Frame,
-    app: &mut App,
-    area: Rect,
-) {
-    let (task_id, scroll, zoomed) = match &app.board.view_mode {
-        ViewMode::TaskDetail {
-            task_id,
-            scroll,
-            zoomed,
-            ..
-        } => (*task_id, *scroll, *zoomed),
-        _ => return,
-    };
-
-    let Some(task) = app.board.tasks.iter().find(|t| t.id == task_id).cloned() else {
-        return;
-    };
-
-    // Compute overlay area
+/// The overlay's rectangle: the bottom half of the screen, or all of it above
+/// the status bar when zoomed.
+fn overlay_rect(area: Rect, zoomed: bool) -> Rect {
     let overlay_height = if zoomed {
         area.height.saturating_sub(1) // full height minus status bar
     } else {
         area.height / 2
     };
     let overlay_y = area.bottom().saturating_sub(overlay_height + 1); // above status bar
-    let overlay_area = Rect {
+    Rect {
         x: area.x,
         y: overlay_y,
         width: area.width,
         height: overlay_height,
-    };
+    }
+}
 
-    // ── Header lines (metadata) ──────────────────────────────────────────────
+/// Metadata lines shown above the description: repo, epic, link and plan.
+fn header_lines(app: &App, task: &Task) -> Vec<Line<'static>> {
     let label_style = Style::default().fg(MUTED);
     let value_style = Style::default().fg(FG);
-    let mut header_lines: Vec<Line> = Vec::with_capacity(4);
+    let mut header_lines: Vec<Line<'static>> = Vec::with_capacity(4);
     let mut field = |label: &'static str, value: String| {
         header_lines.push(Line::from(vec![
             Span::styled(label, label_style),
@@ -80,6 +66,31 @@ pub(in crate::tui::ui::kanban) fn render_task_detail_overlay(
         field("Plan:  ", plan_path.clone());
     }
 
+    header_lines
+}
+
+pub(in crate::tui::ui::kanban) fn render_task_detail_overlay(
+    frame: &mut Frame,
+    app: &mut App,
+    area: Rect,
+) {
+    let (task_id, scroll, zoomed) = match &app.board.view_mode {
+        ViewMode::TaskDetail {
+            task_id,
+            scroll,
+            zoomed,
+            ..
+        } => (*task_id, *scroll, *zoomed),
+        _ => return,
+    };
+
+    let Some(task) = app.board.tasks.iter().find(|t| t.id == task_id).cloned() else {
+        return;
+    };
+
+    let overlay_area = overlay_rect(area, zoomed);
+
+    let header_lines = header_lines(app, &task);
     let header_height = header_lines.len() as u16 + 1; // +1 for separator line
 
     // ── Compute body area and scroll clamping ────────────────────────────────

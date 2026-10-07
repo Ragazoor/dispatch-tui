@@ -19,15 +19,30 @@ impl App {
         key: KeyEvent,
         label: &str,
     ) -> Vec<Command> {
+        if let Some(cmds) = self.run_normal_board(b, key, label) {
+            return cmds;
+        }
+        if let Some(cmds) = self.run_normal_epic(b, key, label) {
+            return cmds;
+        }
+        self.run_normal_task(b, key, label).unwrap_or_default()
+    }
+
+    /// Board-wide actions: navigation, reordering, selection, folding, filters, search and view toggles.
+    fn run_normal_board(
+        &mut self,
+        b: &KeyBinding,
+        key: KeyEvent,
+        label: &str,
+    ) -> Option<Vec<Command>> {
         use crate::tui::messages::{
-            EpicMessage, InputMessage, RepoFilterMessage, RepoSyncMessage, SplitMessage,
-            SystemMessage, TaskMessage,
+            EpicMessage, RepoFilterMessage, RepoSyncMessage, SplitMessage, SystemMessage,
+            TaskMessage,
         };
         let action = b.action;
         let keyed = |app: &mut App, msg: Message| app.dispatch_keyed(msg, action, label);
-        match action {
+        Some(match action {
             "quit" => keyed(self, Message::System(SystemMessage::Quit)),
-            "exit_epic" => keyed(self, Message::Epic(EpicMessage::Exit)),
             "navigate_column" => {
                 let d = if matches!(key.code, KeyCode::Char('h') | KeyCode::Left) {
                     -1
@@ -48,26 +63,16 @@ impl App {
             "navigate_row_last" => keyed(self, Message::NavigateRowLast),
             "reorder_task_down" => keyed(self, Message::Task(TaskMessage::ReorderItem(1))),
             "reorder_task_up" => keyed(self, Message::Task(TaskMessage::ReorderItem(-1))),
-            "create_task" => keyed(self, Message::Input(InputMessage::StartNewTask)),
-            "copy_task" => keyed(self, Message::Input(InputMessage::CopyTask)),
             "toggle_notifications" => {
                 keyed(self, Message::System(SystemMessage::ToggleNotifications))
             }
-            "create_epic" => keyed(self, Message::Epic(EpicMessage::StartNew)),
             "filter_repos" => keyed(self, Message::RepoFilter(RepoFilterMessage::Start)),
             "search_tasks" => {
                 self.search.saved = Some(self.search.query.clone());
                 self.input.mode = InputMode::SearchTasks;
                 vec![key_event(action, label)]
             }
-            "move_task_forward" => {
-                self.move_key(MoveDirection::Forward, "move_task_forward", label)
-            }
-            "move_task_backward" => {
-                self.move_key(MoveDirection::Backward, "move_task_backward", label)
-            }
             "open_repo_sync_prompt" => keyed(self, Message::RepoSync(RepoSyncMessage::OpenPrompt)),
-            "open_pr_url" => self.dispatch_handler_keyed(Self::handle_key_open_pr, action, label),
             "select_all" => keyed(self, Message::SelectAllColumn),
             "toggle_section_collapse" => keyed(self, Message::ToggleSectionCollapse),
             "toggle_epic_fold" => keyed(self, Message::ToggleEpicFold),
@@ -79,15 +84,42 @@ impl App {
                 cmds.push(key_event(action, label));
                 cmds
             }
-            "open_task_detail" => {
-                let Some(task) = self.selected_task() else {
-                    return vec![];
-                };
-                let id = task.id;
-                let mut cmds = self.update(Message::Task(TaskMessage::OpenDetail(id)));
-                cmds.push(key_event(action, label));
-                cmds
+            "filter_active" => keyed(
+                self,
+                Message::RepoFilter(RepoFilterMessage::ToggleOnlyActive),
+            ),
+            "toggle_flattened" => keyed(self, Message::Task(TaskMessage::ToggleFlattened)),
+            "toggle_help" => keyed(self, Message::System(SystemMessage::ToggleHelp)),
+            "toggle_split_mode" => keyed(self, Message::Split(SplitMessage::Toggle)),
+            "detach_tmux" => {
+                self.dispatch_prompting_handler_keyed(Self::handle_key_detach, action, label)
             }
+            "refresh_feed" => {
+                self.dispatch_handler_keyed(Self::handle_key_feed_refresh, action, label)
+            }
+            "clear_search" => {
+                self.search.query.clear();
+                self.sync_board_selection();
+                vec![key_event(action, label)]
+            }
+            "clear_selection" => keyed(self, Message::ClearSelection),
+            _ => return None,
+        })
+    }
+
+    /// Epic actions. `None` when the action is not one of them.
+    fn run_normal_epic(
+        &mut self,
+        b: &KeyBinding,
+        _key: KeyEvent,
+        label: &str,
+    ) -> Option<Vec<Command>> {
+        use crate::tui::messages::{EpicMessage, TaskMessage};
+        let action = b.action;
+        let keyed = |app: &mut App, msg: Message| app.dispatch_keyed(msg, action, label);
+        Some(match action {
+            "exit_epic" => keyed(self, Message::Epic(EpicMessage::Exit)),
+            "create_epic" => keyed(self, Message::Epic(EpicMessage::StartNew)),
             "exit_all_epics" => keyed(self, Message::Epic(EpicMessage::ExitAll)),
             "jump_to_task_epic" => match self.selected_task().and_then(|t| t.epic_id) {
                 Some(id) => keyed(self, Message::Epic(EpicMessage::JumpTo(id))),
@@ -105,6 +137,62 @@ impl App {
                 Some(id) => keyed(self, Message::Epic(EpicMessage::Enter(id))),
                 None => vec![],
             },
+            "toggle_auto_dispatch" | "toggle_group_by_repo" => match self.current_epic_id() {
+                Some(id) => {
+                    let msg = if action == "toggle_auto_dispatch" {
+                        EpicMessage::ToggleAutoDispatch(id)
+                    } else {
+                        EpicMessage::ToggleGroupByRepo(id)
+                    };
+                    keyed(self, Message::Epic(msg))
+                }
+                None => vec![],
+            },
+            "reparent_epic" => match self.selected_epic_id() {
+                Some(id) => keyed(self, Message::Epic(EpicMessage::StartReparent(id))),
+                None => vec![],
+            },
+            "move_task_to_epic" => match self.selected_task() {
+                // `m` on a task card moves it to another epic (or detaches it).
+                Some(task) => {
+                    let id = task.id;
+                    keyed(self, Message::Task(TaskMessage::StartMoveToEpic(id)))
+                }
+                None => vec![],
+            },
+            _ => return None,
+        })
+    }
+
+    /// Task actions. `None` when the action is not one of them.
+    fn run_normal_task(
+        &mut self,
+        b: &KeyBinding,
+        _key: KeyEvent,
+        label: &str,
+    ) -> Option<Vec<Command>> {
+        use crate::tui::messages::{InputMessage, TaskMessage};
+        let action = b.action;
+        let keyed = |app: &mut App, msg: Message| app.dispatch_keyed(msg, action, label);
+        Some(match action {
+            "create_task" => keyed(self, Message::Input(InputMessage::StartNewTask)),
+            "copy_task" => keyed(self, Message::Input(InputMessage::CopyTask)),
+            "move_task_forward" => {
+                self.move_key(MoveDirection::Forward, "move_task_forward", label)
+            }
+            "move_task_backward" => {
+                self.move_key(MoveDirection::Backward, "move_task_backward", label)
+            }
+            "open_pr_url" => self.dispatch_handler_keyed(Self::handle_key_open_pr, action, label),
+            "open_task_detail" => {
+                let Some(task) = self.selected_task() else {
+                    return Some(vec![]);
+                };
+                let id = task.id;
+                let mut cmds = self.update(Message::Task(TaskMessage::OpenDetail(id)));
+                cmds.push(key_event(action, label));
+                cmds
+            }
             "activate_unavailable"
             | "jump_to_tmux"
             | "swap_split_pane"
@@ -120,50 +208,8 @@ impl App {
                 cmds.push(key_event(action, label));
                 cmds
             }
-            "toggle_auto_dispatch" | "toggle_group_by_repo" => match self.current_epic_id() {
-                Some(id) => {
-                    let msg = if action == "toggle_auto_dispatch" {
-                        EpicMessage::ToggleAutoDispatch(id)
-                    } else {
-                        EpicMessage::ToggleGroupByRepo(id)
-                    };
-                    keyed(self, Message::Epic(msg))
-                }
-                None => vec![],
-            },
-            "filter_active" => keyed(
-                self,
-                Message::RepoFilter(RepoFilterMessage::ToggleOnlyActive),
-            ),
-            "toggle_flattened" => keyed(self, Message::Task(TaskMessage::ToggleFlattened)),
-            "toggle_help" => keyed(self, Message::System(SystemMessage::ToggleHelp)),
-            "toggle_split_mode" => keyed(self, Message::Split(SplitMessage::Toggle)),
-            "detach_tmux" => {
-                self.dispatch_prompting_handler_keyed(Self::handle_key_detach, action, label)
-            }
-            "refresh_feed" => {
-                self.dispatch_handler_keyed(Self::handle_key_feed_refresh, action, label)
-            }
-            "reparent_epic" => match self.selected_epic_id() {
-                Some(id) => keyed(self, Message::Epic(EpicMessage::StartReparent(id))),
-                None => vec![],
-            },
-            "move_task_to_epic" => match self.selected_task() {
-                // `m` on a task card moves it to another epic (or detaches it).
-                Some(task) => {
-                    let id = task.id;
-                    keyed(self, Message::Task(TaskMessage::StartMoveToEpic(id)))
-                }
-                None => vec![],
-            },
-            "clear_search" => {
-                self.search.query.clear();
-                self.sync_board_selection();
-                vec![key_event(action, label)]
-            }
-            "clear_selection" => keyed(self, Message::ClearSelection),
-            _ => vec![],
-        }
+            _ => return None,
+        })
     }
 
     /// `'p'` — open the selected task's PR URL in the browser.

@@ -479,6 +479,92 @@ async fn open_with_cli_identity(db_path: &Path) -> Result<(store::Database, Stri
     Ok((placeholder_database(data_dir), identity.host_id))
 }
 
+/// The host identity read at launch, on a blocking thread.
+///
+/// ONE read of the host identity, used twice: the board needs its own
+/// host id and the writer needs it for the claim. The abort is the
+/// strict one on purpose — see the long note at the `set_local_host_id`
+/// call for why a board that cannot read its own identity must
+/// not draw.
+///
+/// Mint (or read back) this install's Host identity — see
+/// host.allium: MintHostIdentity. A failure here is NOT best-effort:
+/// it aborts the launch (startup.allium:
+/// AbortWhenTheHostIdentityStoreIsUnusable) rather than leaving
+/// `local_host_id` empty and drawing anyway. Tolerating it does not
+/// degrade, it corrupts — the claim SQL in db/queries/tasks.rs applies
+/// `is_locally_owned`'s two arms (nobody holds this task, or this
+/// machine does), and an undetermined identity fails only the second
+/// arm, so the claim still succeeds on every never-dispatched task —
+/// exactly the ones a first dispatch acts on. A worktree then gets
+/// provisioned while the host stamp is skipped for want of an id: a
+/// silent, durable violation of core.allium's `HostTracksWorktree`. A
+/// board that cannot complete one settings read at startup is not
+/// going to stay useful either way, so this fails loudly here instead.
+async fn read_launch_identity(data_dir: &Path) -> Result<(String, Option<String>)> {
+    let dir = data_dir.to_path_buf();
+    let identity =
+        tokio::task::spawn_blocking(move || crate::host_file::resolve_for_launch(&dir)).await??;
+    Ok((identity.host_id, identity.label))
+}
+
+/// What starts once the first connection answers: seed and provision the feed
+/// epics, backfill embeddings, and serve agents.
+async fn start_services_after_connect(
+    database: &Arc<store::Database>,
+    data_dir: &Path,
+    emb_svc: Arc<EmbeddingService>,
+    mcp_listener: tokio::net::TcpListener,
+    mcp_deps: mcp::McpDeps,
+    mcp_notify_tx: mpsc::UnboundedSender<mcp::McpEvent>,
+) {
+    // Seed the example feed epic for a store that has none, and provision
+    // the managed feed-epic tree from the reviews/CVE config. Both create
+    // shared rows, which needs the identity settled just above
+    // (sync.allium: CreatesRequireASettledIdentity) — which is why they
+    // run here rather than when the database opens. Idempotent and
+    // best-effort: a failure here must not block startup.
+    seed_and_provision_feeds(database, data_dir).await;
+
+    // Backfill embeddings for any learnings that were created before the model
+    // was available. Fire-and-forget: partial work is retried on next startup.
+    // After the connection, because the learnings it backfills are the
+    // store's.
+    spawn_embedding_backfill(database.clone(), emb_svc);
+
+    // Serve agents now that their reads have something to answer from.
+    // The port was claimed above, before the board could take the screen;
+    // a connection that arrived in between waited in the listen backlog.
+    tokio::spawn(async move {
+        if let Err(e) = mcp::serve_on(mcp_listener, mcp_deps, mcp_notify_tx).await {
+            eprintln!("MCP server error: {e}");
+        }
+    });
+}
+
+/// The first connection: resolve the store's address, refuse a store this
+/// install does not use, connect, and record the address that answered.
+/// Returns the address and the open session.
+async fn connect_to_store(
+    target: &StoreTarget,
+    db_path: &Path,
+    parts: &StoreParts,
+    accept_store_switch: bool,
+) -> Result<(String, crate::sync::SyncSession)> {
+    let server = resolve_store_server(target).await?;
+    // Before connecting: the first connection already writes, so a store
+    // holding a different database from the one this install last used is
+    // refused here (`AbortWhenTheStoreIsNotTheOneThisInstallUses`, task
+    // #28710).
+    let found = check_store_identity(parts, db_path, &server, accept_store_switch).await?;
+    let session = connect_first(server.clone(), parts, Some(&*parts.reducer_caller)).await?;
+    pin_store_after_connect(db_path, found.as_deref());
+    // Only an address that answered is worth recording; failing to write
+    // it is a warning, not an abort.
+    record_store_server_for(target, db_path, &server);
+    Ok((server, session))
+}
+
 /// The first connection, shared by the board and the CLI: connect, settle the
 /// identity, apply the initial subscription — or abort with the attempt's
 /// reason (`startup.allium`: `AbortWhenTheStoreCannotBeReached`). With a
@@ -1191,29 +1277,10 @@ impl TuiRuntime {
         build_store: fn(store::Database, &str) -> StoreParts,
         accept_store_switch: bool,
     ) -> Result<Bootstrap> {
-        // ONE read of the host identity, used twice: the board needs its own
-        // host id and the writer needs it for the claim. The abort is the
-        // strict one on purpose — see the long note at the `set_local_host_id`
-        // call below for why a board that cannot read its own identity must
-        // not draw.
         //
-        // The agent port is claimed first, so a launch that is going to abort
-        // on a port somebody else holds mints no host file
-        // (`CheckHostLabelAfterStartupConfigResolves`: `requires:
-        // agent_port_available`, then `FirstRun`). Claimed here, before the
-        // board takes the screen, so a port another
-        // process still holds aborts the launch where the operator can read it
-        // — `startup.allium`'s `AbortWhenTheAgentPortIsTaken`. Bound inside the
-        // spawned task instead, the failure would land on a stderr the drawn
-        // board has already covered, leaving a board no agent can reach.
         let mcp_listener = claim_agent_port(port).await?;
         let data_dir = data_dir_of(db_path).to_path_buf();
-        let identity = {
-            let dir = data_dir.clone();
-            tokio::task::spawn_blocking(move || crate::host_file::resolve_for_launch(&dir))
-                .await??
-        };
-        let (host_id, host_label) = (identity.host_id, identity.label);
+        let (host_id, host_label) = read_launch_identity(&data_dir).await?;
         let database = placeholder_database(&data_dir);
         // Routed at construction: which backing a read or write goes to cannot
         // change under a caller. Nothing connects yet — that is
@@ -1245,37 +1312,7 @@ impl TuiRuntime {
         let (mcp_notify_tx, mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
         let feed_notify_tx = mcp_notify_tx.clone();
 
-        // Mint (or read back) this install's Host identity — see
-        // host.allium: MintHostIdentity. A failure here is NOT best-effort:
-        // it aborts the launch (startup.allium:
-        // AbortWhenTheHostIdentityStoreIsUnusable) rather than leaving
-        // `local_host_id` empty and drawing anyway. Tolerating it does not
-        // degrade, it corrupts — the claim SQL in db/queries/tasks.rs applies
-        // `is_locally_owned`'s two arms (nobody holds this task, or this
-        // machine does), and an undetermined identity fails only the second
-        // arm, so the claim still succeeds on every never-dispatched task —
-        // exactly the ones a first dispatch acts on. A worktree then gets
-        // provisioned while the host stamp is skipped for want of an id: a
-        // silent, durable violation of core.allium's `HostTracksWorktree`. A
-        // board that cannot complete one settings read at startup is not
-        // going to stay useful either way, so this fails loudly here instead.
-        let label = host_label;
-
-        // startup.allium: CheckHostLabel and its remaining children. Runs
-        // here — after the port claim above, before the terminal is touched
-        // (`EnterAlternateScreen` is in `run_tui`, after this function
-        // returns) — so the operator answers on an ordinary terminal and,
-        // unlike the configuration-drift check, an unnamed host aborts the
-        // whole launch rather than degrading: `TheBoardNeverDrawsForAnUnnamedHost`
-        // has no non-fatal counterpart. Blocking (may wait on stdin), so it
-        // runs on a blocking thread rather than inline on this async runtime.
-        //
-        // Skipped outright once the host has a label, which is every launch
-        // after the first: `resolve_host_label`'s first act is to return on a
-        // label that is already set, so entering it would cost a blocking-pool
-        // hop and a `/proc` read (the prompt's default, evaluated eagerly as an
-        // argument) only to discard both.
-        name_the_host(label, &database).await?;
+        name_the_host(host_label, &database).await?;
 
         // THE FIRST CONNECTION, before anything reads a shared row and before
         // the board draws. startup.allium: ConnectToTheStoreOnceTheHostIsNamed
@@ -1284,18 +1321,8 @@ impl TuiRuntime {
         // with, the example feed epic, the managed feeds, the repo paths and
         // every setting the loaders read — is a shared row, and would read
         // nothing from a store that had not answered yet.
-        let server = resolve_store_server(&target).await?;
-        // Before connecting: the first connection already writes, so a store
-        // holding a different database from the one this install last used is
-        // refused here (`AbortWhenTheStoreIsNotTheOneThisInstallUses`, task
-        // #28710).
-        let found = check_store_identity(&parts, db_path, &server, accept_store_switch).await?;
-        let session = connect_first(server.clone(), &parts, Some(&*parts.reducer_caller)).await?;
-        pin_store_after_connect(db_path, found.as_deref());
-        // Only an address that answered is worth recording; failing to write
-        // it is a warning, not an abort.
-        record_store_server_for(&target, db_path, &server);
-        let store_server = server;
+        let (store_server, session) =
+            connect_to_store(&target, db_path, &parts, accept_store_switch).await?;
         let sync_store: Arc<dyn crate::sync::SyncStore> = database.clone();
 
         let emb_svc = finish_embedding_load(emb_load).await?;
@@ -1309,28 +1336,15 @@ impl TuiRuntime {
 
         let tasks = database.list_all().await?;
 
-        // Seed the example feed epic for a store that has none, and provision
-        // the managed feed-epic tree from the reviews/CVE config. Both create
-        // shared rows, which needs the identity settled just above
-        // (sync.allium: CreatesRequireASettledIdentity) — which is why they
-        // run here rather than when the database opens. Idempotent and
-        // best-effort: a failure here must not block startup.
-        seed_and_provision_feeds(&database, &data_dir).await;
-
-        // Backfill embeddings for any learnings that were created before the model
-        // was available. Fire-and-forget: partial work is retried on next startup.
-        // After the connection, because the learnings it backfills are the
-        // store's.
-        spawn_embedding_backfill(database.clone(), emb_svc.clone());
-
-        // Serve agents now that their reads have something to answer from.
-        // The port was claimed above, before the board could take the screen;
-        // a connection that arrived in between waited in the listen backlog.
-        tokio::spawn(async move {
-            if let Err(e) = mcp::serve_on(mcp_listener, mcp_deps, mcp_notify_tx).await {
-                eprintln!("MCP server error: {e}");
-            }
-        });
+        start_services_after_connect(
+            &database,
+            &data_dir,
+            emb_svc.clone(),
+            mcp_listener,
+            mcp_deps,
+            mcp_notify_tx,
+        )
+        .await;
 
         let mut app = hydrate_app(tasks, &host_id, &database, &*runner).await;
         app.set_store_server(Some(store_server.clone()));
@@ -1748,6 +1762,16 @@ async fn persist_host_label(
     Ok(())
 }
 
+/// The agent port is claimed first, so a launch that is going to abort
+/// on a port somebody else holds mints no host file
+/// (`CheckHostLabelAfterStartupConfigResolves`: `requires:
+/// agent_port_available`, then `FirstRun`). Claimed here, before the
+/// board takes the screen, so a port another
+/// process still holds aborts the launch where the operator can read it
+/// — `startup.allium`'s `AbortWhenTheAgentPortIsTaken`. Bound inside the
+/// spawned task instead, the failure would land on a stderr the drawn
+/// board has already covered, leaving a board no agent can reach.
+///
 /// Claim the agent port before the board takes the screen.
 async fn claim_agent_port(port: u16) -> Result<tokio::net::TcpListener> {
     mcp::bind(port).await.map_err(|e| {
@@ -1759,6 +1783,21 @@ async fn claim_agent_port(port: u16) -> Result<tokio::net::TcpListener> {
     })
 }
 
+/// startup.allium: CheckHostLabel and its remaining children. Runs
+/// here — after the port claim above, before the terminal is touched
+/// (`EnterAlternateScreen` is in `run_tui`, after this function
+/// returns) — so the operator answers on an ordinary terminal and,
+/// unlike the configuration-drift check, an unnamed host aborts the
+/// whole launch rather than degrading: `TheBoardNeverDrawsForAnUnnamedHost`
+/// has no non-fatal counterpart. Blocking (may wait on stdin), so it
+/// runs on a blocking thread rather than inline on this async runtime.
+///
+/// Skipped outright once the host has a label, which is every launch
+/// after the first: `resolve_host_label`'s first act is to return on a
+/// label that is already set, so entering it would cost a blocking-pool
+/// hop and a `/proc` read (the prompt's default, evaluated eagerly as an
+/// argument) only to discard both.
+///
 /// Resolve the host's label, prompting if it is unset, and persist a new one.
 async fn name_the_host(label: Option<String>, database: &store::Database) -> Result<()> {
     let resolved = if label.is_none() {

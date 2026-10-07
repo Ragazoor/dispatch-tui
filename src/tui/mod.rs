@@ -1661,21 +1661,29 @@ impl App {
             .collect();
 
         if self.is_flattened_for_status(status) {
-            let epic_lookup = crate::models::epic_id_lookup(&self.board.epics);
+            return self.flattened_column_items(status, tasks);
+        }
+        self.hierarchical_column_items(status, tasks, placements, pass)
+    }
 
-            // Sort: (section_priority, epic_sort_key, task_sort_key, task_id).
-            // Orphan tasks (epic not in board) sort last within each section.
-            // The section and the epic key are resolved once per card and
-            // carried through, since `sort_by_key` calls its key function once
-            // per *comparison* — and the chunking below needs the same section
-            // answer the sort used.
-            let group_keys = self.flattened_group_keys(status, &tasks, &epic_lookup);
-            let mut sorted_tasks: Vec<(
-                Option<ColumnSection>,
-                CardOrderKey,
-                CardOrderKey,
-                &'a Task,
-            )> = tasks
+    /// Flattened column: cards sorted by section, then epic group, then card
+    /// key, with section and epic headers interleaved.
+    fn flattened_column_items<'a>(
+        &'a self,
+        status: TaskStatus,
+        tasks: Vec<&'a Task>,
+    ) -> Vec<ColumnItem<'a>> {
+        let epic_lookup = crate::models::epic_id_lookup(&self.board.epics);
+
+        // Sort: (section_priority, epic_sort_key, task_sort_key, task_id).
+        // Orphan tasks (epic not in board) sort last within each section.
+        // The section and the epic key are resolved once per card and
+        // carried through, since `sort_by_key` calls its key function once
+        // per *comparison* — and the chunking below needs the same section
+        // answer the sort used.
+        let group_keys = self.flattened_group_keys(status, &tasks, &epic_lookup);
+        let mut sorted_tasks: Vec<(Option<ColumnSection>, CardOrderKey, CardOrderKey, &'a Task)> =
+            tasks
                 .into_iter()
                 .map(|t| {
                     (
@@ -1687,80 +1695,106 @@ impl App {
                 })
                 .collect();
 
-            // The card's own key is hoisted for the same reason the section and
-            // the group key are: `sort_by_key` calls its key function once per
-            // COMPARISON, so anything built inside the closure is paid
-            // O(n log n) times instead of n.
-            sorted_tasks.sort_by_key(|&(section, epic_sk, card_sk, t)| {
-                (section_sort_priority(section), epic_sk, card_sk, t.id.0)
-            });
+        // The card's own key is hoisted for the same reason the section and
+        // the group key are: `sort_by_key` calls its key function once per
+        // COMPARISON, so anything built inside the closure is paid
+        // O(n log n) times instead of n.
+        sorted_tasks.sort_by_key(|&(section, epic_sk, card_sk, t)| {
+            (section_sort_priority(section), epic_sk, card_sk, t.id.0)
+        });
 
-            // One pass over contiguous section runs: emit the section's header,
-            // then — unless the section is folded — its epic headers, orphan
-            // separator and cards. A folded section contributes its header and
-            // nothing else; the epic header and the separator are decoration on
-            // cards that are not being drawn.
-            let mut items: Vec<ColumnItem<'a>> = Vec::with_capacity(sorted_tasks.len());
-            for run in sorted_tasks.chunk_by(|(a, _, _, _), (b, _, _, _)| a == b) {
-                let Some(section) = run[0].0 else {
-                    // A column with no sections (Backlog, Done): no header, and
-                    // nothing to fold.
-                    items.extend(run.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
-                    continue;
-                };
-                let at = SectionRef::new(status, section);
-                if self.section_renders_collapsed(status, section) {
-                    items.push(ColumnItem::FoldedSection(FoldedHeader {
-                        at,
-                        hidden: run.len(),
-                    }));
-                    continue;
-                }
-                items.push(ColumnItem::SubstatusLabel(at));
-
-                // One pass over contiguous epic-id runs within the section:
-                // groups are already adjacent because `group_keys` sorted by
-                // epic key before card key. A folded group contributes its
-                // header alone; an open one contributes the epic header (when
-                // the epic resolves) followed by its cards, and an orphan
-                // separator when the run transitions away from an epic group.
-                let mut current_epic_id: Option<EpicId> = None;
-                for group in run.chunk_by(|(_, _, _, a), (_, _, _, b)| a.epic_id == b.epic_id) {
-                    let t0 = group[0].3;
-                    let Some(eid) = t0.epic_id else {
-                        if current_epic_id.is_some() {
-                            items.push(ColumnItem::OrphanSeparator);
-                            current_epic_id = None;
-                        }
-                        items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
-                        continue;
-                    };
-                    let Some(&epic) = epic_lookup.get(&eid) else {
-                        // The epic named by this group does not resolve (e.g.
-                        // filtered out of the current view): fall back to
-                        // plain cards, exactly as the single-pass builder did.
-                        items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
-                        continue;
-                    };
-                    current_epic_id = Some(eid);
-                    let fold_ref = EpicFoldRef::new(status, eid);
-                    if self.epic_group_renders_folded(fold_ref) {
-                        items.push(ColumnItem::FoldedEpic(FoldedEpicHeader {
-                            at: fold_ref,
-                            epic,
-                            hidden: group.len(),
-                        }));
-                    } else {
-                        items.push(ColumnItem::EpicHeader(epic));
-                        items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
-                    }
-                }
+        // One pass over contiguous section runs: emit the section's header,
+        // then — unless the section is folded — its epic headers, orphan
+        // separator and cards. A folded section contributes its header and
+        // nothing else; the epic header and the separator are decoration on
+        // cards that are not being drawn.
+        let mut items: Vec<ColumnItem<'a>> = Vec::with_capacity(sorted_tasks.len());
+        for run in sorted_tasks.chunk_by(|(a, _, _, _), (b, _, _, _)| a == b) {
+            let Some(section) = run[0].0 else {
+                // A column with no sections (Backlog, Done): no header, and
+                // nothing to fold.
+                items.extend(run.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
+                continue;
+            };
+            let at = SectionRef::new(status, section);
+            if self.section_renders_collapsed(status, section) {
+                items.push(ColumnItem::FoldedSection(FoldedHeader {
+                    at,
+                    hidden: run.len(),
+                }));
+                continue;
             }
+            items.push(ColumnItem::SubstatusLabel(at));
 
-            return items;
+            // One pass over contiguous epic-id runs within the section:
+            // groups are already adjacent because `group_keys` sorted by
+            // epic key before card key. A folded group contributes its
+            // header alone; an open one contributes the epic header (when
+            // the epic resolves) followed by its cards, and an orphan
+            // separator when the run transitions away from an epic group.
+            self.push_epic_groups(status, run, &epic_lookup, &mut items);
         }
 
-        // --- Hierarchical path ---
+        items
+    }
+
+    /// Emit the epic headers, orphan separator and cards of one open section
+    /// run of a flattened column.
+    fn push_epic_groups<'a>(
+        &self,
+        status: TaskStatus,
+        run: &[(Option<ColumnSection>, CardOrderKey, CardOrderKey, &'a Task)],
+        epic_lookup: &HashMap<EpicId, &'a Epic>,
+        items: &mut Vec<ColumnItem<'a>>,
+    ) {
+        // One pass over contiguous epic-id runs within the section:
+        // groups are already adjacent because `group_keys` sorted by
+        // epic key before card key. A folded group contributes its
+        // header alone; an open one contributes the epic header (when
+        // the epic resolves) followed by its cards, and an orphan
+        // separator when the run transitions away from an epic group.
+        let mut current_epic_id: Option<EpicId> = None;
+        for group in run.chunk_by(|(_, _, _, a), (_, _, _, b)| a.epic_id == b.epic_id) {
+            let t0 = group[0].3;
+            let Some(eid) = t0.epic_id else {
+                if current_epic_id.is_some() {
+                    items.push(ColumnItem::OrphanSeparator);
+                    current_epic_id = None;
+                }
+                items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
+                continue;
+            };
+            let Some(&epic) = epic_lookup.get(&eid) else {
+                // The epic named by this group does not resolve (e.g.
+                // filtered out of the current view): fall back to
+                // plain cards, exactly as the single-pass builder did.
+                items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
+                continue;
+            };
+            current_epic_id = Some(eid);
+            let fold_ref = EpicFoldRef::new(status, eid);
+            if self.epic_group_renders_folded(fold_ref) {
+                items.push(ColumnItem::FoldedEpic(FoldedEpicHeader {
+                    at: fold_ref,
+                    epic,
+                    hidden: group.len(),
+                }));
+            } else {
+                items.push(ColumnItem::EpicHeader(epic));
+                items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
+            }
+        }
+    }
+
+    /// Hierarchical column: tasks and epic cards sorted together by section,
+    /// with a header per section run.
+    fn hierarchical_column_items<'a>(
+        &'a self,
+        status: TaskStatus,
+        tasks: Vec<&'a Task>,
+        placements: Option<&EpicPlacementMap>,
+        pass: &EpicSearchPass<'a>,
+    ) -> Vec<ColumnItem<'a>> {
         //
         // Decorate, sort, chunk. Each card's section AND ordering key are
         // resolved exactly once, up front, and carried through the sort:
