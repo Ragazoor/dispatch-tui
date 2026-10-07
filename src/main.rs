@@ -352,22 +352,13 @@ fn init_app_log_subscriber(data_dir: &std::path::Path) -> Result<()> {
 /// inside the session. Failing to obtain a session, or being asked to restart
 /// a board from a pane inside that very board's window, aborts — see
 /// `docs/specs/startup.allium`'s `StartupAbortsOnlyOnAnUnusableSubstrate`.
-fn enter_tmux_session_if_needed(spacetime_server: Option<String>) -> Result<()> {
+fn enter_tmux_session_if_needed() -> Result<()> {
     let exe = std::env::current_exe().context("cannot resolve the dispatch executable")?;
     let argv = startup::current_invocation(&exe, std::env::args().skip(1));
     let runner = dispatch_tui::process::RealProcessRunner::default();
     let ctx = startup::read_launch_context(&runner);
 
     let plan = startup::plan_launch(ctx, argv);
-    // `ClearTheSessionStoreAddressOnAManagedLaunch`: the board tmux starts on
-    // the two handoff paths takes the session's environment, so a launch that
-    // named no store removes any address left there before handing off (task
-    // #28710).
-    if let startup::LaunchPlan::EnterSession { session, .. }
-    | startup::LaunchPlan::RestartInSession { session, .. } = &plan
-    {
-        startup::forget_session_store_server_before_handoff(spacetime_server, session, &runner);
-    }
     match plan {
         // The board tmux just started, in a window created for it. The launch
         // that created that window already retired the previous board; retiring
@@ -793,7 +784,7 @@ fn main() -> Result<()> {
             cli.spacetime_server.clone(),
             dispatch_tui::spacetime::managed_store::spacetime_cli_on_path,
         )?;
-        enter_tmux_session_if_needed(cli.spacetime_server.clone())?;
+        enter_tmux_session_if_needed()?;
     }
 
     match cli.command {

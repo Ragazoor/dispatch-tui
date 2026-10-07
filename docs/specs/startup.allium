@@ -243,11 +243,11 @@ contract SessionLauncher {
     -- Whether this process is already inside a tmux session.
     inside_tmux_session: () -> Boolean
 
-    -- Remove DISPATCH_SPACETIME_SERVER from dispatch's session's environment,
-    -- if it is set there. Processes already running keep their own copy; only
-    -- what tmux starts there from now on is affected. Removing a value that
-    -- is not set is not a failure.
-    forget_session_store_server: () -> Boolean
+    -- Set DISPATCH_BOARD_STORE in dispatch's session's environment to
+    -- `address`, replacing any value. Processes already running keep their
+    -- own copy; only what tmux starts there from now on is affected. True
+    -- when it was set.
+    publish_board_store: (address: String) -> Boolean
 
     -- Whether a session of this name exists right now.
     session_exists: (session: String) -> Boolean
@@ -1732,7 +1732,7 @@ rule AbortWhenTheStoreIsNotTheOneThisInstallUses {
         -- store. It drew a full board — the old store still held every task
         -- from before the move — so nothing looked wrong, and two days of
         -- work went into a database the next launch no longer used.
-        -- ClearTheSessionStoreAddressOnAManagedLaunch closes that one path;
+        -- PublishTheBoardsStoreOnItsSession closed that one path;
         -- this rule closes the class: whatever chose the store, a launch
         -- that reaches a different database from the last one does not draw.
         --
@@ -1844,11 +1844,12 @@ rule RecordTheNamedStoreOnceItAnswers {
         -- session and nowhere else; outside that session it fell back to the
         -- managed address, which on a named-store machine is nobody's store.
         --
-        -- THE SESSION ENVIRONMENT STAYS. A board on a named store still sets
-        -- DISPATCH_SPACETIME_SERVER on its own tmux session, and that is how
-        -- the agent windows and the commands run in them find it. The record
-        -- is the fallback for processes outside the session, and the
-        -- environment, where it is set, comes before it.
+        -- THE SESSION ENVIRONMENT STAYS, UNDER ITS OWN NAME. A board sets
+        -- DISPATCH_BOARD_STORE (not the operator's DISPATCH_SPACETIME_SERVER)
+        -- on its own tmux session (PublishTheBoardsStoreOnItsSession), and that
+        -- is how the agent windows and the commands run in them find it. The
+        -- record is the fallback for processes outside the session, and the
+        -- variable, where it is set, comes before it.
         --
         -- ONLY ONCE THE FIRST CONNECTION HAS SUCCEEDED. An address that never
         -- answered is not recorded: a typo on the command line must not become
@@ -1891,34 +1892,43 @@ rule ForgetAStaleStoreRecordOnAManagedLaunch {
         -- read as having named a store; clearing it is for the commands.
 }
 
-rule ClearTheSessionStoreAddressOnAManagedLaunch {
-    when: LaunchBoard(operator)
-    requires: explicit_store_server() = null
+rule PublishTheBoardsStoreOnItsSession {
+    when: StoreReachedAtStartup(operator)
 
-    ensures: SessionStoreAddressForgotten(operator, done: forget_session_store_server())
+    ensures: BoardStorePublished(operator, done: publish_board_store(configured_store_server()))
 
     @guidance
-        -- A BOARD ON A NAMED STORE PUBLISHES ITS ADDRESS ON ITS TMUX SESSION
-        -- (RecordTheNamedStoreOnceItAnswers: THE SESSION ENVIRONMENT STAYS),
-        -- and every process tmux starts there from then on inherits it —
-        -- including a board a later launch restarts in that session
-        -- (RestartTheBoardInTheExistingSession), which tmux starts with the
-        -- session's environment, not the launching shell's. An address left
-        -- there therefore turns a later launch that named nothing into one
-        -- that named the old store, and unsetting it in the operator's shell
-        -- does not help. That is how task #28710 lost two days of work.
+        -- THE BOARD'S ADDRESS HAS ITS OWN VARIABLE (task #28729). The board
+        -- publishes the store it is on as DISPATCH_BOARD_STORE, on its tmux
+        -- session, so the agent windows, the panes and any `dispatch` command
+        -- an agent runs there reach the same store without being told. Only
+        -- those commands read it (cli.allium:
+        -- CliCommandsReachTheStoreWithoutManagingIt); `dispatch tui` never
+        -- does. The operator's input, --spacetime-server and
+        -- DISPATCH_SPACETIME_SERVER, is a different variable the board never
+        -- writes.
         --
-        -- So a launch that named no store clears it, and the PROCESS THAT
-        -- HANDS OFF TO TMUX does so, before tmux starts the board in the
-        -- session (LaunchBoardBySupplyingASession,
-        -- RestartTheBoardInTheExistingSession). Clearing it in the board would
-        -- be too late: the board tmux starts has already inherited the
-        -- address, reads it as a store the operator named, and so never takes
-        -- the managed path at all. The managed board clears it again once it
-        -- is wired into its session, which covers a launch made from inside
-        -- tmux. Best-effort: a session that is not there, or will not answer,
-        -- holds nothing to clear, and
-        -- AbortWhenTheStoreIsNotTheOneThisInstallUses still stands behind it.
+        -- WHY TWO. The board used to publish under the operator's own
+        -- variable. A board restarted in that session then read its
+        -- predecessor's address as a store the operator had named, and ran on
+        -- an old store for two days (task #28710). That was patched by
+        -- clearing the variable on every managed launch; with the board's
+        -- address in a variable the board itself never reads, there is nothing
+        -- to clear, and that rule is gone.
+        --
+        -- MANAGED BOARDS PUBLISH TOO. A managed board publishes the managed
+        -- address, so a value an earlier named board left on the session is
+        -- overwritten rather than trusted by the commands run there.
+        --
+        -- LEFT OVER BY OLDER BOARDS. A session an older board published
+        -- DISPATCH_SPACETIME_SERVER on keeps it until the session is
+        -- recreated, and `dispatch tui` still reads it there as the operator's
+        -- choice. AbortWhenTheStoreIsNotTheOneThisInstallUses stands behind
+        -- that case; nothing clears it any more.
+        --
+        -- Best-effort: a session that is not there or will not answer leaves
+        -- the commands to fall back to the record and then the managed
+        -- address.
 }
 
 rule ForgetTheStoreRecordWhenTheBoardExits {

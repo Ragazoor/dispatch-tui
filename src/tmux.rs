@@ -1013,24 +1013,6 @@ pub fn set_session_environment(
     Ok(())
 }
 
-/// Remove `key` from `session`'s environment, so what tmux starts there from
-/// now on no longer inherits it. The inverse of [`set_session_environment`],
-/// targeted the same exact way. Removing a key that is not set is not an
-/// error.
-pub fn unset_session_environment(
-    session: &str,
-    key: &str,
-    runner: &dyn ProcessRunner,
-) -> Result<()> {
-    let target = format!("={session}");
-    run_checked(
-        runner,
-        &["set-environment", "-u", "-t", &target, key],
-        "set-environment",
-    )?;
-    Ok(())
-}
-
 /// Remove a tmux key binding (previously registered with `bind-key`).
 pub fn unbind_key(key: &str, runner: &dyn ProcessRunner) -> Result<()> {
     run_checked(runner, &["unbind-key", key], "unbind-key")?;

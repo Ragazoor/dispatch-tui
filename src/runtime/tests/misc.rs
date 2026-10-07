@@ -1344,19 +1344,14 @@ mod startup_paths {
 mod store_address_publication {
     use super::*;
 
+    /// startup.allium: PublishTheBoardsStoreOnItsSession. The address goes
+    /// under the board's own variable, never the operator's
+    /// DISPATCH_SPACETIME_SERVER, which `dispatch tui` reads (task #28729).
     #[test]
-    fn a_managed_board_clears_any_store_address_on_its_session() {
-        // startup.allium: ClearTheSessionStoreAddressOnAManagedLaunch. An
-        // address a named board left there would make a relaunch in that
-        // session look like a named store (task #28710). The managed board
-        // publishes none of its own and removes whatever is there.
-        let dir = std::env::temp_dir().join("dispatch-publish-test-unused");
-        let target = StoreTarget::Managed(Arc::new(
-            crate::spacetime::managed_store::ManagedStore::for_launch(dir.clone(), &dir),
-        ));
+    fn a_board_publishes_its_store_under_the_board_variable() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
 
-        publish_store_server_for(&target, "dispatch", "http://127.0.0.1:3000", &mock);
+        publish_store_server("dispatch", "http://store.example:3000", &mock);
 
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1);
@@ -1364,37 +1359,35 @@ mod store_address_publication {
             calls[0].1,
             vec![
                 "set-environment",
-                "-u",
                 "-t",
                 "=dispatch",
-                "DISPATCH_SPACETIME_SERVER"
+                "DISPATCH_BOARD_STORE",
+                "http://store.example:3000"
             ]
         );
     }
 
+    /// A managed board publishes the managed address too, overwriting what an
+    /// earlier named board left, and never unsets anything.
     #[test]
-    fn a_managed_board_with_no_session_touches_nothing() {
-        let dir = std::env::temp_dir().join("dispatch-publish-test-unused");
-        let target = StoreTarget::Managed(Arc::new(
-            crate::spacetime::managed_store::ManagedStore::for_launch(dir.clone(), &dir),
-        ));
-        let mock = MockProcessRunner::new(vec![]);
-
-        publish_store_server_for(&target, "", "http://127.0.0.1:3000", &mock);
-
-        assert!(mock.recorded_calls().is_empty());
-    }
-
-    #[test]
-    fn a_named_store_is_published_on_the_session() {
-        let target = StoreTarget::Named("http://store.example:3000".into());
+    fn a_managed_board_overwrites_rather_than_clears() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
 
-        publish_store_server_for(&target, "dispatch", "http://store.example:3000", &mock);
+        publish_store_server("dispatch", "http://127.0.0.1:3000", &mock);
 
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].1[0], "set-environment");
+        assert!(!calls[0].1.contains(&"-u".to_string()));
+        assert_eq!(calls[0].1[3], "DISPATCH_BOARD_STORE");
+    }
+
+    #[test]
+    fn a_board_with_no_session_touches_nothing() {
+        let mock = MockProcessRunner::new(vec![]);
+
+        publish_store_server("", "http://127.0.0.1:3000", &mock);
+
+        assert!(mock.recorded_calls().is_empty());
     }
 }
 

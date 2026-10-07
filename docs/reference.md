@@ -195,7 +195,7 @@ exactly as it is and never started, published to or stopped, even when it is
 the managed address spelled out; that is how a team, or a dev run, opts out.
 The other subcommands that read or write shared rows — `repo`,
 `prune-repo-paths` and `plan` — never manage anything. They find the store in
-this order: the flag, the environment variable, the address a board on the same
+this order: the flag, the environment variable, `DISPATCH_BOARD_STORE` (set inside the board's tmux session), the address a board on the same
 `--db` recorded in the `store-server` file beside it (written once a *named*
 store answers, removed when the board exits), then `http://127.0.0.1:3000`,
 where a running board keeps its managed store. The agent-tree and diff panes
@@ -211,9 +211,12 @@ refuses changes, and reconnects with backoff — no fallback to disk, for the
 reasons `docs/specs/sync.allium` gives.
 
 **The board passes the address on.** At startup it sets
-`DISPATCH_SPACETIME_SERVER` (named store only) and `DISPATCH_PORT` in its tmux
+`DISPATCH_BOARD_STORE` (the store it is on, managed or named) and `DISPATCH_PORT` in its tmux
 session's environment, so the agent windows and panes it opens — and any `dispatch` command an agent runs there —
-reach the same store without being told.
+reach the same store without being told. `DISPATCH_BOARD_STORE` is the board's
+and `DISPATCH_SPACETIME_SERVER` is the operator's: subcommands read both,
+`dispatch tui` reads only the operator's, so a restarted board never
+inherits its predecessor's store (task #28729).
 
 It is a flag or environment variable rather than a setting because which store
 a board uses is a property of how it was launched: the address has to be known

@@ -153,6 +153,7 @@ fn the_flag_wins_over_the_environment_and_the_record() {
         cli_store_server(
             Some("http://flag:3000".into()),
             Some("http://env:3000".into()),
+            Some("http://board:3000".into()),
             &db
         ),
         "http://flag:3000"
@@ -166,7 +167,7 @@ fn the_environment_wins_over_the_record() {
     write_record(&db, "http://recorded:3000\n");
 
     assert_eq!(
-        cli_store_server(None, Some("http://env:3000".into()), &db),
+        cli_store_server(None, Some("http://env:3000".into()), None, &db),
         "http://env:3000"
     );
 }
@@ -179,13 +180,16 @@ fn the_record_wins_over_the_managed_address() {
     let db = db_in(&dir);
     write_record(&db, "http://recorded:3000\n");
 
-    assert_eq!(cli_store_server(None, None, &db), "http://recorded:3000");
+    assert_eq!(
+        cli_store_server(None, None, None, &db),
+        "http://recorded:3000"
+    );
 }
 
 #[test]
 fn nothing_named_or_recorded_reaches_the_managed_address() {
     let dir = tempfile::tempdir().unwrap();
-    assert_eq!(cli_store_server(None, None, &db_in(&dir)), MANAGED);
+    assert_eq!(cli_store_server(None, None, None, &db_in(&dir)), MANAGED);
 }
 
 /// `named_store`: "--spacetime-server, else DISPATCH_SPACETIME_SERVER;
@@ -198,6 +202,7 @@ fn a_blank_flag_falls_through_to_the_environment() {
         cli_store_server(
             Some("  ".into()),
             Some("http://env:3000".into()),
+            None,
             &db_in(&dir)
         ),
         "http://env:3000"
@@ -211,7 +216,7 @@ fn a_blank_environment_falls_through_to_the_record() {
     write_record(&db, "http://recorded:3000\n");
 
     assert_eq!(
-        cli_store_server(Some(String::new()), Some(" \n".into()), &db),
+        cli_store_server(Some(String::new()), Some(" \n".into()), None, &db),
         "http://recorded:3000"
     );
 }
@@ -222,5 +227,46 @@ fn a_blank_record_falls_through_to_the_managed_address() {
     let db = db_in(&dir);
     write_record(&db, "\n");
 
-    assert_eq!(cli_store_server(None, None, &db), MANAGED);
+    assert_eq!(cli_store_server(None, None, None, &db), MANAGED);
+}
+
+// -- the board's published address (DISPATCH_BOARD_STORE) ------------------
+
+/// cli.allium: the operator's variable comes before the board's.
+#[test]
+fn the_operators_environment_wins_over_the_boards_address() {
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(
+        cli_store_server(
+            None,
+            Some("http://env:3000".into()),
+            Some("http://board:3000".into()),
+            &db_in(&dir)
+        ),
+        "http://env:3000"
+    );
+}
+
+#[test]
+fn the_boards_address_wins_over_the_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = db_in(&dir);
+    write_record(&db, "http://recorded:3000\n");
+
+    assert_eq!(
+        cli_store_server(None, None, Some("http://board:3000".into()), &db),
+        "http://board:3000"
+    );
+}
+
+#[test]
+fn a_blank_boards_address_falls_through_to_the_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = db_in(&dir);
+    write_record(&db, "http://recorded:3000\n");
+
+    assert_eq!(
+        cli_store_server(None, None, Some("  ".into()), &db),
+        "http://recorded:3000"
+    );
 }

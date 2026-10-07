@@ -117,38 +117,3 @@ pub fn check_store_pin(
         found,
     })
 }
-
-/// Remove the store address from `session`'s environment, so what tmux starts
-/// there from now on does not inherit it. Best-effort: false (and a warning)
-/// when tmux will not answer, or when there is no session to name.
-pub fn forget_session_store_server(
-    session: &str,
-    runner: &dyn crate::process::ProcessRunner,
-) -> bool {
-    if session.is_empty() {
-        return false;
-    }
-    match crate::tmux::unset_session_environment(session, super::STORE_SERVER_ENV, runner) {
-        Ok(()) => true,
-        Err(e) => {
-            tracing::warn!("could not clear the store address from the tmux session: {e:#}");
-            false
-        }
-    }
-}
-
-/// `ClearTheSessionStoreAddressOnAManagedLaunch`, in the process that hands
-/// off to tmux. A launch that named no store removes the address from
-/// `session`'s environment BEFORE tmux starts the board there: the board tmux
-/// starts takes the session's environment, not this shell's, so an address an
-/// earlier named board left would otherwise make it a named-store board, which
-/// never reaches the board's own clean-up (task #28710). False when a store
-/// was named, else [`forget_session_store_server`]'s answer.
-pub fn forget_session_store_server_before_handoff(
-    explicit: Option<String>,
-    session: &str,
-    runner: &dyn crate::process::ProcessRunner,
-) -> bool {
-    crate::spacetime::managed_store::normalize_server(explicit).is_none()
-        && forget_session_store_server(session, runner)
-}

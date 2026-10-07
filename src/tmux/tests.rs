@@ -685,28 +685,6 @@ fn bind_key_issues_correct_tmux_args() {
     );
 }
 
-/// startup.allium: ClearTheSessionStoreAddressOnAManagedLaunch. A managed
-/// board removes a named store's address from its session, by exact name, so
-/// a board restarted there later does not inherit it.
-#[test]
-fn unset_session_environment_targets_the_session_exactly() {
-    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
-    unset_session_environment("dispatch", "DISPATCH_SPACETIME_SERVER", &mock).unwrap();
-    let calls = mock.recorded_calls();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].0, "tmux");
-    assert_eq!(
-        calls[0].1,
-        vec![
-            "set-environment",
-            "-u",
-            "-t",
-            "=dispatch",
-            "DISPATCH_SPACETIME_SERVER"
-        ]
-    );
-}
-
 /// The store address is published on the board's own session, by exact
 /// name, so every pane and window the board starts afterwards inherits it
 /// (startup.allium: ConnectToTheStoreOnceTheHostIsNamed).
@@ -715,7 +693,7 @@ fn set_session_environment_targets_the_session_exactly() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
     set_session_environment(
         "dispatch",
-        "DISPATCH_SPACETIME_SERVER",
+        "DISPATCH_BOARD_STORE",
         "http://127.0.0.1:3000",
         &mock,
     )
@@ -729,7 +707,7 @@ fn set_session_environment_targets_the_session_exactly() {
             "set-environment",
             "-t",
             "=dispatch",
-            "DISPATCH_SPACETIME_SERVER",
+            "DISPATCH_BOARD_STORE",
             "http://127.0.0.1:3000"
         ]
     );

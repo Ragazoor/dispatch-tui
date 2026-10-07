@@ -97,7 +97,9 @@ pub(super) fn group_base_branches_by_repo(
     map
 }
 
-/// Publish the store address on the board's own tmux session, so the
+/// Publish the store address on the board's own tmux session, under the
+/// board's own variable (`BOARD_STORE_ENV`, never the operator's
+/// `DISPATCH_SPACETIME_SERVER`, which `dispatch tui` reads: task #28729), so the
 /// processes the board starts there — agent windows, the agent-tree and diff
 /// panes, a `dispatch` command an agent runs — reach the same store without
 /// being told. Best-effort like the rest of the tmux setup: a process that
@@ -110,7 +112,7 @@ fn publish_store_server(session: &str, server: &str, runner: &dyn ProcessRunner)
         return;
     }
     if let Err(e) =
-        tmux::set_session_environment(session, crate::startup::STORE_SERVER_ENV, server, runner)
+        tmux::set_session_environment(session, crate::startup::BOARD_STORE_ENV, server, runner)
     {
         tracing::warn!("could not publish the store address on the tmux session: {e:#}");
     }
@@ -127,30 +129,6 @@ fn publish_board_port(session: &str, port: u16, runner: &dyn ProcessRunner) {
         tmux::set_session_environment(session, "DISPATCH_PORT", &port.to_string(), runner)
     {
         tracing::warn!("could not publish the board port on the tmux session: {e:#}");
-    }
-}
-
-/// [`publish_store_server`] for a named store; for a managed one, the address
-/// is *removed* from the session instead.
-///
-/// A store address on the session makes a relaunch in that session read as if
-/// the operator had *named* that store, so a managed board publishes none of
-/// its own -- and clears one an earlier named board left there
-/// (`startup.allium`: `ClearTheSessionStoreAddressOnAManagedLaunch`, task
-/// #28710: a board restarted in such a session ran on the old store for two
-/// days). Subcommands started there fall back to the managed address
-/// themselves (`startup::store_server_or_managed`).
-fn publish_store_server_for(
-    target: &StoreTarget,
-    session: &str,
-    server: &str,
-    runner: &dyn ProcessRunner,
-) {
-    match target {
-        StoreTarget::Named(_) => publish_store_server(session, server, runner),
-        StoreTarget::Managed(_) => {
-            crate::startup::forget_session_store_server(session, runner);
-        }
     }
 }
 
@@ -382,12 +360,14 @@ pub struct CliStore {
 /// shared rows (`repo`, `plan`, the agent-tree and diff panes): with the store
 /// mandatory, the local database no longer holds them.
 pub async fn open_cli_store(db_path: &Path, server: Option<String>) -> Result<CliStore> {
-    // Flag, then environment, then the record a board left beside this
+    // Flag, then the operator's environment, then the address the board
+    // published on its session, then the record a board left beside this
     // database, then the managed address (`CliCommandsReachTheStoreWithoutManagingIt`).
     // The environment is read here too, so a blank flag falls through to it.
     let server = crate::startup::cli_store_server(
         server,
         std::env::var(crate::startup::STORE_SERVER_ENV).ok(),
+        std::env::var(crate::startup::BOARD_STORE_ENV).ok(),
         db_path,
     );
     let (database, host_id) = open_with_cli_identity(db_path).await?;
@@ -782,7 +762,7 @@ pub async fn run_tui(
 
     let mut terminal = enter_tui_terminal()?;
     let tmux_runner = runtime.runner.clone();
-    let tmux_wiring = wire_tmux_for_tui(&target, &server, port, &*tmux_runner);
+    let tmux_wiring = wire_tmux_for_tui(&server, port, &*tmux_runner);
 
     // Create two channels:
     //    - key_rx: raw crossterm KeyEvents from the blocking poll thread
@@ -864,12 +844,7 @@ struct TmuxWiring {
 /// Set up the tmux keybinding (Prefix+Space → jump back to this window) and
 /// publish the store address and board port. Best-effort: failures don't
 /// prevent the TUI from starting.
-fn wire_tmux_for_tui(
-    target: &StoreTarget,
-    server: &str,
-    port: u16,
-    tmux_runner: &dyn ProcessRunner,
-) -> TmuxWiring {
+fn wire_tmux_for_tui(server: &str, port: u16, tmux_runner: &dyn ProcessRunner) -> TmuxWiring {
     // One probe for the session and the window name together, rather than one
     // each: they are read for the same purpose and a window renamed between two
     // calls would be described by neither answer. See
@@ -883,7 +858,7 @@ fn wire_tmux_for_tui(
         .as_ref()
         .map_or(String::new(), |c| c.session_name.clone());
     setup_tmux_for_tui(&session, self_pane.as_deref(), tmux_runner);
-    publish_store_server_for(target, &session, server, tmux_runner);
+    publish_store_server(&session, server, tmux_runner);
     publish_board_port(&session, port, tmux_runner);
     TmuxWiring {
         session,

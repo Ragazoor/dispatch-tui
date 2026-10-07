@@ -170,6 +170,7 @@ fn a_command_with_nothing_named_reaches_the_store_recorded_beside_its_database()
 
     let out = binary()
         .env_remove("DISPATCH_SPACETIME_SERVER")
+        .env_remove("DISPATCH_BOARD_STORE")
         .args(["--db", db.to_str().unwrap(), "repo", "list"])
         .output()
         .unwrap();
@@ -215,6 +216,34 @@ fn the_environment_wins_over_the_recorded_store() {
         stderr.contains(env_port) && !stderr.contains(recorded_port),
         "the environment's address ({from_env}) must be the one tried, not the \
          record's ({recorded}), got: {stderr}"
+    );
+}
+
+/// The board's address, published on its tmux session, is followed by a
+/// command run there, and comes before the record.
+#[test]
+fn the_boards_published_address_wins_over_the_recorded_store() {
+    let dir = tempfile::tempdir().unwrap();
+    write_host_file(dir.path());
+    let db = dir.path().join("dispatch.db");
+    let recorded = dead_store_address();
+    let from_board = dead_store_address();
+    std::fs::write(dir.path().join("store-server"), format!("{recorded}\n")).unwrap();
+
+    let out = binary()
+        .env_remove("DISPATCH_SPACETIME_SERVER")
+        .env("DISPATCH_BOARD_STORE", &from_board)
+        .args(["--db", db.to_str().unwrap(), "repo", "list"])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "stderr: {stderr}");
+    let board_port = from_board.rsplit(':').next().unwrap();
+    let recorded_port = recorded.rsplit(':').next().unwrap();
+    assert!(
+        stderr.contains(board_port) && !stderr.contains(recorded_port),
+        "the board's address ({from_board}) must be the one tried, got: {stderr}"
     );
 }
 

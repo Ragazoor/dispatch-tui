@@ -189,10 +189,16 @@ pub enum StartupAbort {
     },
 }
 
-/// The environment variable that names the shared store, beside the
-/// `--spacetime-server` flag. The board also publishes it on its own tmux
-/// session, so the panes and agent windows it starts reach the same store.
+/// The operator's environment variable that names the shared store, beside the
+/// `--spacetime-server` flag. Only the operator sets it; a board never writes it.
 pub const STORE_SERVER_ENV: &str = "DISPATCH_SPACETIME_SERVER";
+
+/// The address a board publishes on its own tmux session, so the panes and
+/// agent windows it starts reach the same store. Read by subcommands only
+/// (`cli_store_server`), never by `dispatch tui`, so an address an earlier
+/// board left on the session cannot read as a store the operator named
+/// (`startup.allium`: `PublishTheBoardsStoreOnItsSession`, task #28729).
+pub const BOARD_STORE_ENV: &str = "DISPATCH_BOARD_STORE";
 
 /// The store a subcommand connects to: the one named, or -- when none is --
 /// the managed store's address. A short-lived subcommand (`repo`, `plan`, the
@@ -271,17 +277,20 @@ pub fn forget_store_server(db_path: &std::path::Path) -> bool {
 }
 
 /// The store a short-lived subcommand connects to, first answer wins: the
-/// flag, the environment variable, the record beside `db_path`, the managed
+/// flag, the operator's environment variable, the address the board published
+/// on its session (`board`), the record beside `db_path`, the managed
 /// address. Blank counts as absent at every step. `cli.allium`:
 /// `CliCommandsReachTheStoreWithoutManagingIt`.
 pub fn cli_store_server(
     flag: Option<String>,
     env: Option<String>,
+    board: Option<String>,
     db_path: &std::path::Path,
 ) -> String {
     use crate::spacetime::managed_store::normalize_server;
     let named = normalize_server(flag)
         .or_else(|| normalize_server(env))
+        .or_else(|| normalize_server(board))
         .or_else(|| recorded_store_server(db_path));
     store_server_or_managed(named)
 }
