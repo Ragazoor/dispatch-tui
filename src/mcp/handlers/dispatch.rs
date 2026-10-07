@@ -586,7 +586,7 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
 ;
 
     async "read_context" => context::handle_read_context,
-        "Return the text of one dispatch context resource, the same text the resources/read method gives for that URI. Pass skill://<name>/SKILL.md for an agent-facing skill or skill://<name>/references/<file>.md for a reference file beside it, dispatch://learnings/<id> for a validated learning from the knowledge base, or dispatch://task/self for your own task exactly as get_task renders it. Use it to pull a skill, a reference or a learning into your context when you only have its URI; it does not search, and it does not list what exists. An unknown URI, an unvalidated or deleted learning, or dispatch://task/self from a caller that is not a dispatched agent is refused with an error naming the URI.",
+        "Return the text of one dispatch context resource, the same text the resources/read method gives for that URI. Pass skill://<name>/SKILL.md for an agent-facing skill or skill://<name>/references/<file>.md for a reference file beside it, dispatch://learnings/<id> for a validated learning from the knowledge base, or dispatch://task/self for your own task exactly as get_task renders it. Use it to pull a skill, a reference or a learning into your context when you only have its URI; it does not search, and it does not list what exists. An unknown URI is refused with an error naming it.",
         {
             "type": "object",
             "properties": {

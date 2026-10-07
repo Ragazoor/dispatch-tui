@@ -69,7 +69,7 @@ Do not add new ad-hoc state machines on `McpState` without documenting them here
 
 ## MCP Error Codes
 
-MCP handlers in `src/mcp/handlers/` return JSON-RPC error objects using two codes:
+MCP handlers in `src/mcp/handlers/` return JSON-RPC error objects using two codes (the context resource methods also answer `-32600` for a missing or malformed caller identity):
 
 | Code | Meaning | When to use |
 |------|---------|-------------|
@@ -101,7 +101,7 @@ JSON-RPC 2.0 §4.1 forbids replying to a Notification (a request with no `id`). 
 
 ## Debugging MCP handlers
 
-The MCP server listens on port 3142 by default (override with `DISPATCH_PORT`), on the `/mcp` path — posting to the bare origin gives a 404. `tools/call` also needs a caller-identity header: exactly one of `X-Caller-Task-Id` or `X-Caller-Kind`, never both. When a handler misbehaves you can reproduce it without going through Claude Code:
+The MCP server listens on port 3142 by default (override with `DISPATCH_PORT`), on the `/mcp` path — posting to the bare origin gives a 404. `tools/call`, `resources/list` and `resources/read` also need a caller-identity header: exactly one of `X-Caller-Task-Id` or `X-Caller-Kind`, never both. When a handler misbehaves you can reproduce it without going through Claude Code:
 
 ```bash
 # Tail server logs while the TUI runs (logs go to stderr; redirect when launching)

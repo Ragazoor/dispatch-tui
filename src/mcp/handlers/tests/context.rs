@@ -1187,6 +1187,37 @@ async fn unrecognised_or_missing_uris_are_invalid_params_naming_the_uri() {
     }
 }
 
+/// A built-in skill whose frontmatter the listing cannot parse would vanish
+/// silently, so every directory under plugin/skills must be listed.
+#[tokio::test]
+async fn every_built_in_skill_directory_is_listed() {
+    let state = test_state().await;
+    let uris: Vec<String> = list_all(&state, CallerIdentity::Session)
+        .await
+        .iter()
+        .map(|r| r["uri"].as_str().unwrap().to_string())
+        .collect();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("plugin/skills");
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let name = entry.unwrap().file_name().to_string_lossy().to_string();
+        let uri = format!("skill://{name}/SKILL.md");
+        assert!(uris.contains(&uri), "{uri} missing from listing: {uris:?}");
+    }
+}
+
+/// ListedMeansReadable: a learning is readable only at the URI the listing
+/// emits, so a zero-padded id is not an alias for it.
+#[tokio::test]
+async fn a_zero_padded_learning_id_is_not_an_alias_of_the_listed_uri() {
+    let state = test_state().await;
+    let id = approved_learning(&state, "Padded").await;
+    let padded = format!("dispatch://learnings/00{}", id.0);
+    assert_unknown_on_both(&state, CallerIdentity::Session, &padded).await;
+    let listed = learning_uri(id);
+    let resp = resources_read(&state, Ok(CallerIdentity::Session), &listed).await;
+    read_content(&resp, &listed);
+}
+
 /// SkillsComeFromTheBuiltInCopy / NeverServedDataIsUnreachable: a skill path
 /// that escapes its skill's directory is unrecognised, not followed.
 #[tokio::test]

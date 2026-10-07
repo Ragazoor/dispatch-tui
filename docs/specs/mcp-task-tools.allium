@@ -1581,7 +1581,9 @@ rule ListContextResourcesViaMcp {
         -- removed between pages (a learning recorded, archived or deleted)
         -- causes no other entry to be skipped or repeated: each page resumes
         -- after the last entry the previous page returned. A cursor the
-        -- server did not issue, or cannot decode, is refused with -32602.
+        -- server cannot decode into a position in the listing order is refused
+        -- with -32602 (cursors are not signed, so one the server never issued
+        -- but that names a valid position is accepted).
         --
         -- A missing or malformed caller identity is refused with -32600 (see
         -- "Caller identity" above). Listing is read-only: it records no
@@ -1640,6 +1642,11 @@ rule ReadContextViaMcp {
         -- Being a tools/call, a read_context call is counted in feature usage
         -- like every other tool (QueryUsageViaMcp). That counter is not
         -- domain state; ContextResourcesAreReadOnly is about the resources.
+        -- For a task caller, tools/call also appends the call and its result
+        -- text to the agent's trajectory, like every tool; resources/read
+        -- records nothing. The trajectory is not domain state either.
+        -- read_context rejects unknown arguments like every other tool;
+        -- TheToolTwinServesTheSameText is about the URI, not extra arguments.
 }
 
 rule ResolveContextUri {
@@ -1828,7 +1835,7 @@ surface McpContextResources {
 
     @guarantee UnknownUrisAreInvalidParams
         -- A URI that does not resolve — unrecognised, escaping a skill's
-        -- directory, deleted, archived, rejected, out of scope, or task/self
+        -- directory, deleted, archived, rejected, or task/self
         -- with no caller task — is refused with a message naming the URI.
         -- resources/read answers with JSON-RPC -32602; read_context answers
         -- with an isError tool result carrying the same message. An internal

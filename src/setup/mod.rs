@@ -632,8 +632,7 @@ fn report_plugin_install(plugin_base: &Path) {
         "Plugin: installed dispatch plugin to {}/",
         plugin_base.display()
     );
-    let skills: Vec<String> = plugins::PLUGIN_DIR
-        .get_dir("skills")
+    let skills: Vec<String> = plugins::built_in_skills_dir()
         .map(|d| {
             let mut names: Vec<String> = d
                 .dirs()

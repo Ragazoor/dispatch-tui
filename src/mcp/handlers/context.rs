@@ -160,7 +160,9 @@ fn parse_context_uri(uri: &str) -> Option<ContextUri> {
         return Some(ContextUri::OwnTask);
     }
     if let Some(id) = uri.strip_prefix("dispatch://learnings/") {
-        if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
+        // Canonical form only, so every readable learning URI is one the
+        // listing emits: no leading zeros.
+        if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) || id.starts_with('0') {
             return None;
         }
         return id.parse::<i64>().ok().map(ContextUri::Learning);
