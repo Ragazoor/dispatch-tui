@@ -285,15 +285,7 @@ fn has_script_mode(path: &Path) -> bool {
 /// Lowercase hex SHA-256 of `content` — the exact string stored as a manifest
 /// value.
 pub fn script_digest(content: &str) -> String {
-    use std::fmt::Write;
-    hmac_sha256::Hash::hash(content.as_bytes()).iter().fold(
-        String::with_capacity(64),
-        |mut acc, b| {
-            // Writing to a String cannot fail.
-            let _ = write!(acc, "{b:02x}");
-            acc
-        },
-    )
+    crate::models::hex::encode(&hmac_sha256::Hash::hash(content.as_bytes()))
 }
 
 /// The pre-overwrite copy's path: the script's own path plus

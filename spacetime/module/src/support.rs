@@ -46,7 +46,7 @@ pub(crate) const DONE: &str = "done";
 
 pub(crate) const BACKLOG: &str = "backlog";
 
-pub(crate) const KNOWN_STATUSES: [&str; 4] = [BACKLOG, "running", "review", DONE];
+pub(crate) const KNOWN_STATUSES: [&str; 4] = [BACKLOG, RUNNING, REVIEW, DONE];
 
 /// Refuse a task or epic row whose status is not one of [`KNOWN_STATUSES`].
 ///

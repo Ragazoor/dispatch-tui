@@ -197,13 +197,10 @@ pub fn after_publish(outcome: &ModulePublishOutcome) -> Result<(), StartupAbort>
 /// The hash `embedded_module_hash` / `recorded_module_hash` compare: a sha256
 /// of the module `.wasm` bytes, as `sha256:<hex>`.
 pub fn module_hash(wasm: &[u8]) -> String {
-    let digest = hmac_sha256::Hash::hash(wasm);
-    let mut hex = String::with_capacity("sha256:".len() + digest.len() * 2);
-    hex.push_str("sha256:");
-    for byte in digest {
-        hex.push_str(&format!("{byte:02x}"));
-    }
-    hex
+    format!(
+        "sha256:{}",
+        crate::models::hex::encode(&hmac_sha256::Hash::hash(wasm))
+    )
 }
 
 /// Whether a `spacetime` executable is on `PATH`. The managed store is started,

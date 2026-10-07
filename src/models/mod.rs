@@ -27,6 +27,8 @@ mod ids;
 // bring it into scope with `use crate::define_str_enum;`.
 mod string_enum;
 
+pub mod hex;
+
 mod paths;
 pub use paths::{
     expand_tilde, extract_github_repo, repo_name_from_path, repo_name_from_url, UNKNOWN_REPO_GROUP,

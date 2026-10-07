@@ -1544,3 +1544,19 @@ async fn never_served_data_is_unreachable_under_any_uri() {
         );
     }
 }
+
+/// Every listed entry reads: the listing and the read share one path to the
+/// task and learning stores, so neither can name something the other refuses.
+#[tokio::test]
+async fn every_listed_entry_is_readable() {
+    let state = test_state().await;
+    let task = new_task(&state, "Caller task").await;
+    approved_learning(&state, "First learning").await;
+    approved_learning(&state, "Second learning").await;
+
+    for entry in list_all(&state, CallerIdentity::Task(task)).await {
+        let uri = entry["uri"].as_str().unwrap().to_string();
+        let resp = resources_read(&state, Ok(CallerIdentity::Task(task)), &uri).await;
+        read_content(&resp, &uri);
+    }
+}

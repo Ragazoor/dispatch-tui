@@ -840,7 +840,7 @@ pub(crate) fn recalculate_one(ctx: &ReducerContext, epic: &Epic) {
 /// Everything a claim writes to the row it wins.
 pub(crate) fn apply_claim(ctx: &ReducerContext, task: Task) -> Task {
     Task {
-        status: "running".into(),
+        status: RUNNING.into(),
         sub_status: "active".into(),
         // Seeded so the dispatch watchdog measures from the claim rather than
         // from whenever the agent first says something. An unseeded claim looks
@@ -933,7 +933,7 @@ pub fn release_backlog_claim(ctx: &ReducerContext, id: i64) -> Result<(), String
     let Some(task) = ctx.db.tasks().id().find(id) else {
         return Err(format!("task {id} no longer exists"));
     };
-    if task.status != "running" {
+    if task.status != RUNNING {
         return Err(format!("task {id} is not claimed"));
     }
     if !task.worktree.is_empty() {

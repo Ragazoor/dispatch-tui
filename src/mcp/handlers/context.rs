@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::identity::{CallerIdentity, IdentityError};
 use crate::mcp::McpState;
-use crate::models::{LearningId, LearningStatus};
+use crate::models::{hex, LearningId, LearningStatus, TaskId};
 
 use super::types::{parse_args, JsonRpcResponse, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST};
 
@@ -134,9 +134,9 @@ fn built_in_skills() -> &'static [BuiltInSkill] {
 enum ContextUri {
     Skill { name: String },
     SkillRef { name: String, file: String },
-    Learning(i64),
+    Learning(LearningId),
     OwnTask,
-    Task(i64),
+    Task(TaskId),
 }
 
 /// The listing's stable order: own task, skills by name (SKILL.md before its
@@ -170,10 +170,10 @@ fn parse_context_uri(uri: &str) -> Option<ContextUri> {
         return Some(ContextUri::OwnTask);
     }
     if let Some(id) = uri.strip_prefix("dispatch://learnings/") {
-        return parse_canonical_id(id).map(ContextUri::Learning);
+        return parse_canonical_id(id).map(|n| ContextUri::Learning(LearningId(n)));
     }
     if let Some(id) = uri.strip_prefix("dispatch://task/") {
-        return parse_canonical_id(id).map(ContextUri::Task);
+        return parse_canonical_id(id).map(|n| ContextUri::Task(TaskId(n)));
     }
     let rest = uri.strip_prefix("skill://")?;
     let (name, path) = rest.split_once('/')?;
@@ -204,7 +204,7 @@ impl ContextUri {
             ContextUri::Task(_) => SortKey::OwnTask,
             ContextUri::Skill { name } => SortKey::Skill(name.clone(), None),
             ContextUri::SkillRef { name, file } => SortKey::Skill(name.clone(), Some(file.clone())),
-            ContextUri::Learning(id) => SortKey::Learning(*id),
+            ContextUri::Learning(id) => SortKey::Learning(id.0),
         }
     }
 }
@@ -216,18 +216,11 @@ impl ContextUri {
 /// An opaque cursor: the hex of the last returned entry's URI. It records a
 /// position in the stable order, not an offset.
 fn encode_cursor(uri: &str) -> String {
-    uri.bytes().map(|b| format!("{b:02x}")).collect()
+    hex::encode(uri.as_bytes())
 }
 
 fn decode_cursor(cursor: &str) -> Option<SortKey> {
-    if cursor.is_empty() || !cursor.len().is_multiple_of(2) || !cursor.is_ascii() {
-        return None;
-    }
-    let bytes: Option<Vec<u8>> = (0..cursor.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&cursor[i..i + 2], 16).ok())
-        .collect();
-    let uri = String::from_utf8(bytes?).ok()?;
+    let uri = String::from_utf8(hex::decode(cursor)?).ok()?;
     parse_context_uri(&uri).map(|u| u.sort_key())
 }
 
@@ -272,7 +265,7 @@ fn learning_text(summary: &str, detail: Option<&str>) -> String {
 /// `get_task`'s text for a task; a missing task is refused with `missing`.
 async fn task_text(
     state: &McpState,
-    id: crate::models::TaskId,
+    id: TaskId,
     missing: impl FnOnce() -> String,
 ) -> Result<(&'static str, String), ReadError> {
     match state.task_svc.get_task(id).await {
@@ -305,22 +298,14 @@ async fn resolve_context(
             .and_then(|s| s.references.iter().find(|(f, _)| *f == file))
             .map(|(_, text)| (MIME_MARKDOWN, text.to_string()))
             .ok_or_else(unresolved),
-        ContextUri::Learning(id) => {
-            let learning = state
-                .db
-                .get_learning(LearningId(id))
-                .await
-                .map_err(|e| ReadError::Internal(e.to_string()))?;
-            match learning {
-                Some(l) if l.status == LearningStatus::Approved => {
-                    Ok((MIME_TEXT, learning_text(&l.summary, l.detail.as_deref())))
-                }
-                _ => Err(unresolved()),
+        ContextUri::Learning(id) => match state.learning_svc.get_learning(id).await {
+            Ok(l) if l.status == LearningStatus::Approved => {
+                Ok((MIME_TEXT, learning_text(&l.summary, l.detail.as_deref())))
             }
-        }
-        ContextUri::Task(id) => {
-            task_text(state, crate::models::TaskId(id), || unresolved_message(uri)).await
-        }
+            Ok(_) | Err(crate::service::ServiceError::NotFound(_)) => Err(unresolved()),
+            Err(e) => Err(ReadError::Internal(e.to_string())),
+        },
+        ContextUri::Task(id) => task_text(state, id, || unresolved_message(uri)).await,
         ContextUri::OwnTask => {
             let CallerIdentity::Task(task_id) = identity else {
                 return Err(ReadError::Unresolved(no_own_task_message(uri)));
@@ -353,13 +338,8 @@ async fn list_entries(
     let mut entries: Vec<(SortKey, Value)> = Vec::new();
 
     if let CallerIdentity::Task(task_id) = identity {
-        if let Some(task) = state
-            .db
-            .get_task(*task_id)
-            .await
-            .map_err(|e| e.to_string())?
-        {
-            entries.push((
+        match state.task_svc.get_task(*task_id).await {
+            Ok(task) => entries.push((
                 SortKey::OwnTask,
                 json!({
                     "uri": TASK_SELF_URI,
@@ -367,7 +347,9 @@ async fn list_entries(
                     "description": task.title,
                     "mimeType": MIME_TEXT,
                 }),
-            ));
+            )),
+            Err(crate::service::ServiceError::NotFound(_)) => {}
+            Err(e) => return Err(e.to_string()),
         }
     }
 
@@ -393,8 +375,11 @@ async fn list_entries(
         }
     }
 
+    // The learnings filter has no id cursor, and the store sorts by recency,
+    // not id, so a page cannot be cut in the query. All approved learnings
+    // are loaded and ordered here.
     let mut learnings = state
-        .db
+        .learning_svc
         .list_learnings(crate::db::LearningFilter {
             status: Some(LearningStatus::Approved),
             ..Default::default()
