@@ -2,7 +2,7 @@
 
 ## Key Bindings
 
-The keybinding table (`src/keybindings.rs`) is the one place every key is declared, and
+The keybinding table (`src/keybindings/table.rs::KEY_BINDINGS`) is the one place every key is declared, and
 the board, the agent-tree and diff panes, the `?` help overlay and the MCP tool all read
 it. There is no key list in this document to drift out of date:
 

@@ -98,7 +98,7 @@ to look.
 | `src/startup/` | What happens between `dispatch tui` and the first frame: `config.rs` (configuration drift check), `host.rs` (host-label gate), `launch.rs` (obtain the tmux session), `retire.rs` (retire the previous board window), `store_pin.rs` (the `store-identity` pin that stops a launch reaching the wrong store). See `docs/specs/startup.allium` |
 | `src/startup_abort.rs` | `StartupAbort`, every reason the board stops before it draws. A leaf module, so `host_file` and `spacetime::managed_store` return it without depending on `startup`; the operator wording (`StartupAbort::message`) stays in `src/startup/launch.rs` |
 | `src/host_file/` | `host.json`, this install's identity file, written whole by rename. See `docs/specs/host.allium` |
-| `src/keybindings.rs`, `src/keybindings/` | The keybinding table: the one place every key is declared, read by the key handlers, the `?` overlay and `list_keybindings`. See `docs/specs/keybindings.allium` |
+| `src/keybindings.rs`, `src/keybindings/` | The keybinding table (`KEY_BINDINGS`, in `src/keybindings/table.rs`): the one place every key is declared, read by the key handlers, the `?` overlay and `list_keybindings`. See `docs/specs/keybindings.allium` |
 | `src/backoff.rs` | Exponential backoff shared by the PR poller and the board's store connection |
 | `src/board_event.rs` | `BoardEvent`, the change notifications the MCP server and feed runner send the board runtime |
 | `src/sync/rows.rs` | `SharedRows` — what the subscription has delivered, decoded and ordered exactly as each SQL `ORDER BY` orders it, plus the change signal that redraws the board without polling. Not a cache: no read-through, cleared on disconnect |

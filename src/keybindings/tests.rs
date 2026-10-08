@@ -1,7 +1,10 @@
 //! Well-formedness of the real table (`KeybindingDriftGate.TableIsWellFormed`
 //! in `docs/specs/keybindings.allium`), asserted over `KEY_BINDINGS` itself.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+use super::table::row;
 use super::*;
+use KeyContext as C;
+use KeyNamespace as N;
 
 #[test]
 fn every_row_has_a_key_and_a_one_line_description() {
