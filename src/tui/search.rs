@@ -3,6 +3,7 @@
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 
+use super::columns::BoardView;
 use super::*;
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -250,11 +251,11 @@ pub(in crate::tui) struct EpicSearchPass<'a>(OnceCell<Option<EpicSearchIndex<'a>
 impl<'a> EpicSearchPass<'a> {
     /// Whether the epic survives this pass's search filter, building the index
     /// on the first call. With no query live, every epic is admitted.
-    pub(in crate::tui) fn admits(&self, app: &'a App, epic_id: EpicId) -> bool {
+    pub(in crate::tui) fn admits(&self, view: BoardView<'a>, epic_id: EpicId) -> bool {
         self.0
-            .get_or_init(|| app.search_active().then(|| app.epic_search_index()))
+            .get_or_init(|| view.search_active().then(|| view.epic_search_index()))
             .as_ref()
-            .is_none_or(|idx| app.epic_search_matches_indexed(idx, epic_id))
+            .is_none_or(|idx| view.epic_search_matches_indexed(idx, epic_id))
     }
 }
 

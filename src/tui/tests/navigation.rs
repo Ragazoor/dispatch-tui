@@ -8,16 +8,16 @@ use std::time::{Duration, Instant};
 #[test]
 fn tasks_by_status_filters() {
     let app = make_app();
-    let backlog = app.tasks_by_status(TaskStatus::Backlog);
+    let backlog = app.view().tasks_by_status(TaskStatus::Backlog);
     assert_eq!(backlog.len(), 2);
     assert_eq!(backlog[0].id, TaskId(1));
     assert_eq!(backlog[1].id, TaskId(2));
 
-    let running = app.tasks_by_status(TaskStatus::Running);
+    let running = app.view().tasks_by_status(TaskStatus::Running);
     assert_eq!(running.len(), 1);
     assert_eq!(running[0].id, TaskId(3));
 
-    let review = app.tasks_by_status(TaskStatus::Review);
+    let review = app.view().tasks_by_status(TaskStatus::Review);
     assert_eq!(review.len(), 0);
 }
 
@@ -2143,7 +2143,7 @@ fn test_selection_preserved_when_task_above_cursor_moves() {
     // Anchor follows task 2 — stays in Backlog (nav col 1) at row 0.
     assert_eq!(app.selection().column(), 1);
     assert_eq!(app.selection().row(1), 0);
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(matches!(items[0], ColumnItem::Task(t) if t.id == TaskId(2)));
 }
 
@@ -2169,7 +2169,7 @@ fn test_selection_follows_task_to_new_column() {
     assert_eq!(app.selection().row(2), 0);
     // Running is a sectioned column, so its first item is the section header.
     // The cursor's row 0 is the first *selectable* item, which is the task.
-    let items = app.column_items_for_status(TaskStatus::Running);
+    let items = app.view().column_items_for_status(TaskStatus::Running);
     let first_selectable = items
         .iter()
         .find(|i| i.is_selectable())
@@ -2221,7 +2221,7 @@ fn test_selection_preserved_on_same_data_refresh() {
     )));
 
     assert_eq!(app.selection().row(1), 1);
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(matches!(items[1], ColumnItem::Task(t) if t.id == TaskId(2)));
 }
 

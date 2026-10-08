@@ -4,11 +4,41 @@ use std::sync::Arc;
 
 use super::*;
 
+/// A read-only look at the board's layout: the six sub-states a column
+/// computation reads, and nothing it could write. Built by [`App::view`].
+///
+/// Everything here is a pure function of those six, so a query that needs only
+/// them cannot reach the rest of `App` (input, status, agents, the runtime
+/// handles).
+#[derive(Clone, Copy)]
+pub(in crate::tui) struct BoardView<'a> {
+    pub(in crate::tui) board: &'a BoardState,
+    pub(in crate::tui) filter: &'a FilterState,
+    pub(in crate::tui) search: &'a SearchState,
+    pub(in crate::tui) folds: &'a SectionFoldState,
+    pub(in crate::tui) epic_folds: &'a EpicFoldState,
+    pub(in crate::tui) layout: &'a LayoutCache,
+}
+
 impl App {
+    /// The read-only layout view; see [`BoardView`].
+    pub(in crate::tui) fn view(&self) -> BoardView<'_> {
+        BoardView {
+            board: &self.board,
+            filter: &self.filter,
+            search: &self.search,
+            folds: &self.folds,
+            epic_folds: &self.epic_folds,
+            layout: &self.layout,
+        }
+    }
+}
+
+impl<'a> BoardView<'a> {
     /// Whether flattened mode applies to `status`. The exempt columns live on
     /// [`TaskStatus::UNFLATTENED`], so this is only the mode half of the
     /// question; nothing here restates which columns those are.
-    pub(in crate::tui) fn is_flattened_for_status(&self, status: TaskStatus) -> bool {
+    pub(in crate::tui) fn is_flattened_for_status(self, status: TaskStatus) -> bool {
         self.board.flattened && !status.is_unflattened()
     }
 
@@ -16,24 +46,24 @@ impl App {
     /// folded inside its epic's card. The one owner of that rule: the board
     /// view filter admits exactly these, and callers that need to reach a
     /// hidden task (by entering its epic) negate it.
-    pub(in crate::tui) fn shown_on_main_board(&self, task: &Task) -> bool {
+    pub(in crate::tui) fn shown_on_main_board(self, task: &Task) -> bool {
         self.is_flattened_for_status(task.status) || task.epic_id.is_none()
     }
 
     /// The warm placement map, or `None` when the cache is cold **or stale**.
     ///
     /// `cached_epic_stats()` populates it, but that takes `&mut self` and most
-    /// readers here have only `&self`, so a miss falls back to computing rather
+    /// readers here have only `self`, so a miss falls back to computing rather
     /// than filling the cache. In practice the render pass warms it at the top
     /// of every frame, so the fallback is the exception.
     ///
     /// The fingerprint check is not optional here, which is why this is not a
     /// bare field read. `cached_epic_stats()` is where the cache normally
-    /// self-heals, and a `&self` reader cannot call it — so without this check a
+    /// self-heals, and a `self` reader cannot call it — so without this check a
     /// caller would be served a map built before the last board or filter
     /// change. Stale *stats* only misorder a column; stale *placement* decides
     /// which columns a card appears in at all, so it makes cards vanish.
-    pub(in crate::tui) fn cached_placements(&self) -> Option<Arc<EpicPlacementMap>> {
+    pub(in crate::tui) fn cached_placements(self) -> Option<Arc<EpicPlacementMap>> {
         if self.layout.layout_cache_fingerprint != Some(self.compute_layout_fingerprint()) {
             return None;
         }
@@ -45,7 +75,7 @@ impl App {
     /// and one that does not still gets an answer rather than silently
     /// disagreeing with the board about where a card is.
     pub(in crate::tui) fn placements_or_compute<'m>(
-        &self,
+        self,
         placements: Option<&'m EpicPlacementMap>,
     ) -> std::borrow::Cow<'m, EpicPlacementMap> {
         match placements {
@@ -56,14 +86,14 @@ impl App {
 
     /// The board-wide filters, resolved against the current query and filter
     /// state. Build one per pass and share it; see [`BoardFilters`].
-    pub(in crate::tui) fn board_filters(&self) -> BoardFilters<'_> {
-        BoardFilters::new(&self.filter, &self.search.query)
+    pub(in crate::tui) fn board_filters(self) -> BoardFilters<'a> {
+        BoardFilters::new(self.filter, &self.search.query)
     }
 
     /// Return tasks visible in the current view.
     /// Board view: standalone tasks only (epic_id is None).
     /// Epic view: only subtasks of the active epic.
-    pub fn tasks_for_current_view(&self) -> Vec<&Task> {
+    pub fn tasks_for_current_view(self) -> Vec<&'a Task> {
         // Built once per call, not per task: this is the render hot path.
         let filters = self.board_filters();
         match self.effective_view_mode() {
@@ -121,7 +151,7 @@ impl App {
     /// [`Self::cached_epic_stats`]. Placement moves with the search query and
     /// the filters as well as with the board, which is why
     /// `compute_layout_fingerprint` folds those in.
-    pub(in crate::tui) fn compute_epic_placements(&self) -> EpicPlacementMap {
+    pub(in crate::tui) fn compute_epic_placements(self) -> EpicPlacementMap {
         let filters = self.board_filters();
         let parent_of: HashMap<EpicId, Option<EpicId>> = self
             .board
@@ -178,7 +208,7 @@ impl App {
 
     /// Return tasks for a given status in the current view.
     #[cfg(test)]
-    pub fn tasks_by_status(&self, status: TaskStatus) -> Vec<&Task> {
+    pub fn tasks_by_status(self, status: TaskStatus) -> Vec<&'a Task> {
         self.tasks_for_current_view()
             .into_iter()
             .filter(|t| t.status == status)
@@ -188,7 +218,7 @@ impl App {
     /// Pre-compute subtask stats for all epics using a pre-built children map.
     /// The `children_map` argument avoids rebuilding the adjacency map per epic.
     pub(in crate::tui) fn compute_epic_stats_with_map(
-        &self,
+        self,
         children_map: &HashMap<EpicId, Vec<EpicId>>,
     ) -> EpicStatsMap {
         self.board
@@ -201,93 +231,6 @@ impl App {
                 )
             })
             .collect()
-    }
-
-    /// Pre-compute subtask stats for all epics. Call once per render frame.
-    pub fn compute_epic_stats(&self) -> EpicStatsMap {
-        // Build the parent→children map once so each for_epic call is O(depth)
-        // rather than O(epics) — total cost goes from O(epics²) to O(epics).
-        let children_map = crate::models::build_children_map(&self.board.epics);
-        self.compute_epic_stats_with_map(&children_map)
-    }
-
-    /// Return an `Arc`-wrapped `EpicStatsMap`, computing and caching on first call.
-    ///
-    /// Cloning the returned `Arc` is O(1) (atomic ref-count); the underlying
-    /// `HashMap` is not copied.  Also populates `children_map_cache`,
-    /// `column_anchor_cache`, and `epic_filter_cache` on first call so that
-    /// rendering and navigation handlers can do O(1) lookups without re-scanning.
-    ///
-    /// Call `invalidate_layout_cache()` whenever `board.tasks` or `board.epics`
-    /// are mutated to force a fresh computation on the next call. This is an
-    /// optimization, not a correctness requirement: this method compares a
-    /// fingerprint of the current board against the one captured when the
-    /// cache was last populated, and self-heals (rebuilds) on mismatch even
-    /// if invalidation was never called. See `compute_layout_fingerprint()`.
-    pub(in crate::tui) fn cached_epic_stats(&mut self) -> Arc<EpicStatsMap> {
-        let fingerprint = self.compute_layout_fingerprint();
-        if self.layout.epic_stats_cache.is_some()
-            && self.layout.layout_cache_fingerprint != Some(fingerprint)
-        {
-            self.invalidate_layout_cache();
-        }
-        if let Some(arc) = &self.layout.epic_stats_cache {
-            return Arc::clone(arc);
-        }
-        // Build the children map once; store it so callers can reuse it.
-        let children_map = crate::models::build_children_map(&self.board.epics);
-        let stats = Arc::new(self.compute_epic_stats_with_map(&children_map));
-
-        // Build epic_filter_cache: (epic_repo_matches, epic_matches) per epic,
-        // using the already-built children_map so descendant traversal is O(1) per epic.
-        // Computed before children_map is moved into children_map_cache.
-        let filter_cache: HashMap<EpicId, (bool, bool)> = {
-            let tasks = &self.board.tasks;
-            let filter = &self.filter;
-            self.board
-                .epics
-                .iter()
-                .map(|e| {
-                    let epic_ids = crate::models::descendant_epic_ids_with_map(e.id, &children_map);
-                    let repo_matches = epic_repo_matches_for_ids(tasks, filter, &epic_ids);
-                    let active_matches = if !filter.only_active {
-                        true
-                    } else {
-                        epic_active_matches_for_ids(tasks, &epic_ids)
-                    };
-                    (e.id, (repo_matches, active_matches))
-                })
-                .collect()
-        };
-        self.layout.epic_filter_cache = Some(filter_cache);
-        self.layout.children_map_cache = Some(children_map);
-
-        // Build column_anchor_cache: sorted selectable items per status.
-        // Hoist tasks_for_current_view() and the search pass out of the loop
-        // so each is computed once, not once per status.
-        let view_tasks = self.tasks_for_current_view();
-        let pass = self.epic_search_pass();
-        let placements = self.compute_epic_placements();
-        let mut anchor_cache: HashMap<TaskStatus, Vec<ColumnAnchor>> = HashMap::new();
-        for &status in TaskStatus::ALL.iter() {
-            let anchors: Vec<ColumnAnchor> = self
-                .column_items_for_status_with_view_tasks(
-                    status,
-                    Some(&placements),
-                    &view_tasks,
-                    &pass,
-                )
-                .into_iter()
-                .filter_map(|item| item.anchor())
-                .collect();
-            anchor_cache.insert(status, anchors);
-        }
-        self.layout.column_anchor_cache = Some(anchor_cache);
-
-        self.layout.epic_placements_cache = Some(Arc::new(placements));
-        self.layout.epic_stats_cache = Some(Arc::clone(&stats));
-        self.layout.layout_cache_fingerprint = Some(fingerprint);
-        stats
     }
 
     /// Fingerprint of the board state feeding `epic_stats_cache`,
@@ -314,7 +257,7 @@ impl App {
     /// plenty for a non-adversarial in-memory fingerprint) so
     /// `cached_epic_stats()` can call it unconditionally on every
     /// invocation, including the cache-hit fast path.
-    pub(in crate::tui) fn compute_layout_fingerprint(&self) -> u64 {
+    pub(in crate::tui) fn compute_layout_fingerprint(self) -> u64 {
         let mut acc = fnv_seed();
         acc = fnv_fold(acc, self.board.tasks.len() as u64);
         for t in &self.board.tasks {
@@ -378,24 +321,13 @@ impl App {
     /// same-length wholesale replacement of `board.tasks` with a different
     /// id set (a length-only check would wrongly consider the old index
     /// still valid).
-    pub(in crate::tui) fn compute_task_ids_fingerprint(&self) -> u64 {
+    pub(in crate::tui) fn compute_task_ids_fingerprint(self) -> u64 {
         let mut acc = fnv_seed();
         acc = fnv_fold(acc, self.board.tasks.len() as u64);
         for t in &self.board.tasks {
             acc = fnv_fold(acc, t.id.0 as u64);
         }
         acc
-    }
-
-    /// Discard all layout caches so the next `cached_epic_stats()` call
-    /// recomputes from the current board state. Handlers that mutate
-    /// `board.tasks`/`board.epics` should still call this (directly or via
-    /// `sync_board_selection`) as a perf optimization — it forces an
-    /// immediate rebuild rather than waiting for the next
-    /// `cached_epic_stats()` call to detect the fingerprint mismatch — but it
-    /// is no longer required for correctness.
-    pub(in crate::tui) fn invalidate_layout_cache(&mut self) {
-        self.layout.invalidate();
     }
 
     /// Build a list of items (tasks + epics) for a column in the current view.
@@ -407,7 +339,7 @@ impl App {
     /// [`Self::column_items_for_status_with_placements`] with a pre-computed map
     /// whenever `compute_epic_placements()` can be called at the same site.
     #[cfg(test)]
-    pub(crate) fn column_items_for_status(&self, status: TaskStatus) -> Vec<ColumnItem<'_>> {
+    pub(crate) fn column_items_for_status(self, status: TaskStatus) -> Vec<ColumnItem<'a>> {
         self.column_items_for_status_with_placements(status, None)
     }
 
@@ -419,8 +351,8 @@ impl App {
     /// visible work in, which is what the placement map answers ("Epic Card
     /// Placement"). Sub-status groups cards into sections *within* the column,
     /// which [`Self::column_items_for_status_with_view_tasks`] emits as headers.
-    pub fn column_items_for_status_with_placements<'a>(
-        &'a self,
+    pub fn column_items_for_status_with_placements(
+        self,
         status: TaskStatus,
         placements: Option<&EpicPlacementMap>,
     ) -> Vec<ColumnItem<'a>> {
@@ -433,8 +365,8 @@ impl App {
     /// list and search pass, allowing `tasks_for_current_view()` and
     /// `epic_search_pass()` to be called once and reused across all columns (e.g. in
     /// `ColumnLayout::build`).
-    pub(in crate::tui) fn column_items_for_status_with_view_tasks<'a>(
-        &'a self,
+    pub(in crate::tui) fn column_items_for_status_with_view_tasks(
+        self,
         status: TaskStatus,
         placements: Option<&EpicPlacementMap>,
         view_tasks: &[&'a Task],
@@ -454,8 +386,8 @@ impl App {
 
     /// Flattened column: cards sorted by section, then epic group, then card
     /// key, with section and epic headers interleaved.
-    pub(in crate::tui) fn flattened_column_items<'a>(
-        &'a self,
+    pub(in crate::tui) fn flattened_column_items(
+        self,
         status: TaskStatus,
         tasks: Vec<&'a Task>,
     ) -> Vec<ColumnItem<'a>> {
@@ -525,8 +457,8 @@ impl App {
 
     /// Emit the epic headers, orphan separator and cards of one open section
     /// run of a flattened column.
-    pub(in crate::tui) fn push_epic_groups<'a>(
-        &self,
+    pub(in crate::tui) fn push_epic_groups(
+        self,
         status: TaskStatus,
         run: &[FlatCard<'a>],
         epic_lookup: &HashMap<EpicId, &'a Epic>,
@@ -573,8 +505,8 @@ impl App {
 
     /// Hierarchical column: tasks and epic cards sorted together by section,
     /// with a header per section run.
-    pub(in crate::tui) fn hierarchical_column_items<'a>(
-        &'a self,
+    pub(in crate::tui) fn hierarchical_column_items(
+        self,
         status: TaskStatus,
         tasks: Vec<&'a Task>,
         placements: Option<&EpicPlacementMap>,
@@ -665,7 +597,7 @@ impl App {
     /// `completed_at` either, for the same reason. The reasoning for all of it
     /// is in "Done Column Ordering" in `docs/specs/board-layout.allium`.
     pub(in crate::tui) fn flattened_group_keys(
-        &self,
+        self,
         status: TaskStatus,
         tasks: &[&Task],
         epic_lookup: &HashMap<EpicId, &Epic>,
@@ -701,7 +633,7 @@ impl App {
     /// this recomputes, because a caller that answered `None` instead would
     /// report "no section" for a card the board draws under a header.
     pub(in crate::tui) fn epic_column_section(
-        &self,
+        self,
         epic: &Epic,
         status: TaskStatus,
         placements: Option<&EpicPlacementMap>,
@@ -722,7 +654,7 @@ impl App {
     /// so "expand a folded section holding a match" and "ignore folds while a
     /// query is live" are the same rule (board-layout.allium: "Collapsed Sections").
     pub(in crate::tui) fn section_renders_collapsed(
-        &self,
+        self,
         status: TaskStatus,
         section: ColumnSection,
     ) -> bool {
@@ -731,7 +663,7 @@ impl App {
 
     /// Whether `ref_` draws folded *right now*, on the same terms as
     /// `section_renders_collapsed` (board-layout.allium: "Epic Folding").
-    pub(in crate::tui) fn epic_group_renders_folded(&self, ref_: EpicFoldRef) -> bool {
+    pub(in crate::tui) fn epic_group_renders_folded(self, ref_: EpicFoldRef) -> bool {
         self.column_has_rendered_fold(ref_.status)
             && self.epic_folds.is_folded(ref_.status, ref_.epic)
     }
@@ -752,7 +684,7 @@ impl App {
     /// with a single status in hand (`handle_navigate_row`). A caller that needs
     /// several statuses in one action should use [`Self::column_item_counts`],
     /// which derives both once for all of them.
-    pub(in crate::tui) fn column_item_count(&self, status: TaskStatus) -> usize {
+    pub(in crate::tui) fn column_item_count(self, status: TaskStatus) -> usize {
         let view_tasks = self.tasks_for_current_view();
         let cached = self.cached_placements();
         let placements = self.placements_or_compute(cached.as_deref());
@@ -762,8 +694,8 @@ impl App {
     /// [`Self::column_item_count`] against pre-computed view tasks and search
     /// pass, so counting every column in one action scans the board once and
     /// builds one index rather than one of each per column.
-    pub(in crate::tui) fn column_item_count_with<'a>(
-        &'a self,
+    pub(in crate::tui) fn column_item_count_with(
+        self,
         status: TaskStatus,
         view_tasks: &[&'a Task],
         pass: &EpicSearchPass<'a>,
@@ -794,7 +726,7 @@ impl App {
     /// [`Self::clamp_selection`], which needs all four counts in one action and
     /// interleaves `selection_mut()` writes — so it takes the counts up front
     /// rather than holding a board borrow across the writes.
-    pub(in crate::tui) fn column_item_counts(&self) -> [usize; TaskStatus::COLUMN_COUNT] {
+    pub(in crate::tui) fn column_item_counts(self) -> [usize; TaskStatus::COLUMN_COUNT] {
         let view_tasks = self.tasks_for_current_view();
         let pass = self.epic_search_pass();
         let cached = self.cached_placements();
@@ -802,5 +734,329 @@ impl App {
         std::array::from_fn(|i| {
             self.column_item_count_with(TaskStatus::ALL[i], &view_tasks, &pass, &placements)
         })
+    }
+
+    /// When in an overlay (TaskDetail), returns the board mode
+    /// beneath (Board or Epic) by peeling away `previous` links. Returns
+    /// [`BoardViewMode`] rather than `&ViewMode` so callers get an exhaustive
+    /// 2-variant match with no `unreachable!` fallback for the overlay variants.
+    pub(in crate::tui) fn effective_view_mode(self) -> BoardViewMode<'a> {
+        let mut current = &self.board.view_mode;
+        loop {
+            match current {
+                ViewMode::Board(sel) => return BoardViewMode::Board(sel),
+                ViewMode::Epic {
+                    epic_id, selection, ..
+                } => {
+                    return BoardViewMode::Epic {
+                        epic_id: *epic_id,
+                        selection,
+                    }
+                }
+                ViewMode::TaskDetail { previous, .. } => current = previous,
+            }
+        }
+    }
+
+    /// Returns whether the given epic should be shown under the current repo filter.
+    /// An epic matches if:
+    /// - No repo filter is active, OR
+    /// - The epic has no subtasks (always show empty epics), OR
+    /// - At least one subtask's repo_path matches the filter.
+    ///
+    pub(in crate::tui) fn epic_repo_matches(self, epic_id: EpicId) -> bool {
+        if let Some(ref cache) = self.layout.epic_filter_cache {
+            if let Some(&(repo_matches, _)) = cache.get(&epic_id) {
+                return repo_matches;
+            }
+        }
+        let epic_ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
+        epic_repo_matches_for_ids(&self.board.tasks, self.filter, &epic_ids)
+    }
+
+    pub(in crate::tui) fn epic_matches(self, epic_id: EpicId) -> bool {
+        if let Some(ref cache) = self.layout.epic_filter_cache {
+            if let Some(&(_, active_matches)) = cache.get(&epic_id) {
+                return active_matches;
+            }
+        }
+        if !self.filter.only_active {
+            return true;
+        }
+        let epic_ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
+        epic_active_matches_for_ids(&self.board.tasks, &epic_ids)
+    }
+
+    /// Build the per-pass search index for the current board and query. Doing
+    /// this is only worthwhile behind a `search_active()` check — it always
+    /// pays the O(tasks + epics) build cost.
+    pub(in crate::tui) fn epic_search_index(self) -> EpicSearchIndex<'a> {
+        #[cfg(test)]
+        EPIC_SEARCH_INDEX_BUILDS.with(|c| c.set(c.get() + 1));
+        let query_lower = self.search.query.to_lowercase();
+        // Parsed once per pass, not per epic: this is the render hot path.
+        let id_digits = id_digits_query(&self.search.query);
+        EpicSearchIndex {
+            task_owners: epic_ids_owning_matching_task(
+                &self.board.tasks,
+                self.filter,
+                &query_lower,
+                id_digits,
+            ),
+            by_id: crate::models::epic_id_lookup(&self.board.epics),
+            children: crate::models::build_children_map(&self.board.epics),
+            query_lower,
+            id_digits,
+        }
+    }
+
+    /// Whether the epic should be shown under the active board-search query,
+    /// answered from a prebuilt [`EpicSearchIndex`].
+    ///
+    /// `E`'s own title/id match needs no extra gating: callers (see
+    /// [`Self::visible_epics_for_effective_view`]) already require
+    /// `epic_matches(E) && epic_repo_matches(E)` before this predicate runs.
+    /// A descendant sub-epic or descendant task only counts toward `E`'s
+    /// match when it would itself be visible under the repo and only-active
+    /// filters — a descendant the board hides cannot keep `E`'s card alive,
+    /// since the card would then be a dead end. See board_search_filter in
+    /// `docs/specs/board-layout.allium`.
+    ///
+    /// Deliberately uncached across renders, unlike [`Self::epic_matches`] and
+    /// [`Self::epic_repo_matches`]: see the note on [`EpicSearchIndex`].
+    pub(in crate::tui) fn epic_search_matches_indexed(
+        self,
+        index: &EpicSearchIndex<'_>,
+        epic_id: EpicId,
+    ) -> bool {
+        if index.own_match_by_id(epic_id) {
+            return true;
+        }
+
+        let epic_ids = crate::models::descendant_epic_ids_with_map(epic_id, &index.children);
+
+        let sub_epic_matches = epic_ids.iter().any(|&id| {
+            id != epic_id
+                && index.own_match_by_id(id)
+                && self.epic_matches(id)
+                && self.epic_repo_matches(id)
+        });
+        if sub_epic_matches {
+            return true;
+        }
+
+        epic_ids.iter().any(|id| index.task_owners.contains(id))
+    }
+
+    /// Whether the epic should be shown under the active board-search query.
+    ///
+    /// Single-epic convenience: builds a one-shot [`EpicSearchIndex`] and
+    /// delegates to [`Self::epic_search_matches_indexed`]. The empty-query fast
+    /// path keeps a non-searching caller free.
+    ///
+    /// Test-only. Every production caller filters many epics in one pass and so
+    /// builds the index once — see [`Self::visible_epics_for_effective_view`];
+    /// building a fresh index per epic is exactly the O(epics x tasks) shape
+    /// that pass exists to avoid. It survives for the per-epic assertions in
+    /// `src/tui/tests/search.rs`, which
+    /// `visible_epic_cards_agree_with_the_single_epic_predicate` ties back to
+    /// the view pass so the two paths cannot drift.
+    #[cfg(test)]
+    pub(in crate::tui) fn epic_search_matches(&self, epic_id: EpicId) -> bool {
+        if !self.search_active() {
+            return true;
+        }
+        self.epic_search_matches_indexed(&self.epic_search_index(), epic_id)
+    }
+
+    /// An empty [`EpicSearchPass`] for one pass over the board. Build this once
+    /// per frame / per action, next to `tasks_for_current_view()`, and thread it
+    /// into every column build in that pass.
+    pub(in crate::tui) fn epic_search_pass(self) -> EpicSearchPass<'a> {
+        EpicSearchPass::default()
+    }
+
+    /// Epics visible in the current board/epic view, filtered by the active
+    /// repo / only-active filters and the board-search query: root epics (no
+    /// parent) in `Board` mode, direct children of the current epic in `Epic`
+    /// mode. Shared by `column_items_for_status_with_view_tasks`,
+    /// and `column_item_count_with` so an epic-visibility rule change is made
+    /// in one place instead of two.
+    ///
+    /// This answers *which* epics have a card at all. *Where* each one's cards
+    /// land is a separate question, answered by `compute_epic_placements`: an
+    /// epic visible here can hold a card in all four columns at once.
+    ///
+    /// `pass` carries the search index for the whole pass (see
+    /// [`Self::epic_search_pass`]), shared across every column in it — which is
+    /// what keeps a frame at one O(tasks) scan rather than one per epic *and*
+    /// one per column.
+    ///
+    /// `'p` is the borrow of the pass, kept separate from `'a` (the board borrow
+    /// the yielded epics carry) so a caller can drop the pass while the items it
+    /// produced live on.
+    pub(in crate::tui) fn visible_epics_for_effective_view<'p>(
+        self,
+        pass: &'p EpicSearchPass<'a>,
+    ) -> impl Iterator<Item = &'a Epic> + 'p {
+        let parent = match self.effective_view_mode() {
+            BoardViewMode::Board(_) => None,
+            BoardViewMode::Epic { epic_id, .. } => Some(epic_id),
+        };
+        self.board
+            .epics
+            .iter()
+            .filter(move |e| e.parent_epic_id == parent)
+            .filter(move |e| {
+                self.epic_matches(e.id) && self.epic_repo_matches(e.id) && pass.admits(self, e.id)
+            })
+    }
+
+    /// Epics eligible as reparent targets for `target`.
+    ///
+    /// Excludes the target epic and its descendants (cycle prevention), epics
+    /// in `Done` status, and epics filtered out by the active repo /
+    /// only-active filters (using the same predicates the board uses to decide
+    /// epic visibility).
+    pub(in crate::tui) fn reparent_target_epics(self, target: EpicId) -> Vec<&'a Epic> {
+        let excluded = crate::models::descendant_epic_ids(target, &self.board.epics);
+        self.board
+            .epics
+            .iter()
+            .filter(|e| {
+                !excluded.contains(&e.id)
+                    && e.status != TaskStatus::Done
+                    && self.epic_matches(e.id)
+                    && self.epic_repo_matches(e.id)
+            })
+            .collect()
+    }
+
+    /// Epics eligible as move-to-epic targets for a task.
+    ///
+    /// Unlike [`Self::reparent_target_epics`], there is no descendant exclusion
+    /// (a task can never be an ancestor of an epic, so no cycle is possible).
+    /// Excludes epics in `Done` status and epics hidden by the active repo /
+    /// only-active filters, using the same visibility predicates the board
+    /// uses.
+    pub(in crate::tui) fn move_task_target_epics(self) -> Vec<&'a Epic> {
+        self.board
+            .epics
+            .iter()
+            .filter(|e| {
+                e.status != TaskStatus::Done
+                    && self.epic_matches(e.id)
+                    && self.epic_repo_matches(e.id)
+            })
+            .collect()
+    }
+
+    /// True when a board-search query is active (non-empty).
+    pub(in crate::tui) fn search_active(self) -> bool {
+        !self.search.query.is_empty()
+    }
+
+    /// Whether any fold — a section fold or an epic fold — actually takes
+    /// effect in this column right now.
+    ///
+    /// Not just "a fold is recorded here": a live search query overrides every
+    /// fold, so during one this is false and the column renders as if nothing
+    /// were folded. The override is stated here and read by both the render
+    /// path and the item count, so the two cannot disagree about it.
+    pub(in crate::tui) fn column_has_rendered_fold(self, status: TaskStatus) -> bool {
+        !self.search_active() && (self.folds.any_in(status) || self.epic_folds.any_in(status))
+    }
+}
+
+impl App {
+    /// Return an `Arc`-wrapped `EpicStatsMap`, computing and caching on first call.
+    ///
+    /// Cloning the returned `Arc` is O(1) (atomic ref-count); the underlying
+    /// `HashMap` is not copied.  Also populates `children_map_cache`,
+    /// `column_anchor_cache`, and `epic_filter_cache` on first call so that
+    /// rendering and navigation handlers can do O(1) lookups without re-scanning.
+    ///
+    /// Call `invalidate_layout_cache()` whenever `board.tasks` or `board.epics`
+    /// are mutated to force a fresh computation on the next call. This is an
+    /// optimization, not a correctness requirement: this method compares a
+    /// fingerprint of the current board against the one captured when the
+    /// cache was last populated, and self-heals (rebuilds) on mismatch even
+    /// if invalidation was never called. See `compute_layout_fingerprint()`.
+    pub(in crate::tui) fn cached_epic_stats(&mut self) -> Arc<EpicStatsMap> {
+        let fingerprint = self.view().compute_layout_fingerprint();
+        if self.layout.epic_stats_cache.is_some()
+            && self.layout.layout_cache_fingerprint != Some(fingerprint)
+        {
+            self.invalidate_layout_cache();
+        }
+        if let Some(arc) = &self.layout.epic_stats_cache {
+            return Arc::clone(arc);
+        }
+        // Build the children map once; store it so callers can reuse it.
+        let children_map = crate::models::build_children_map(&self.board.epics);
+        let stats = Arc::new(self.view().compute_epic_stats_with_map(&children_map));
+
+        // Build epic_filter_cache: (epic_repo_matches, epic_matches) per epic,
+        // using the already-built children_map so descendant traversal is O(1) per epic.
+        // Computed before children_map is moved into children_map_cache.
+        let filter_cache: HashMap<EpicId, (bool, bool)> = {
+            let tasks = &self.board.tasks;
+            let filter = &self.filter;
+            self.board
+                .epics
+                .iter()
+                .map(|e| {
+                    let epic_ids = crate::models::descendant_epic_ids_with_map(e.id, &children_map);
+                    let repo_matches = epic_repo_matches_for_ids(tasks, filter, &epic_ids);
+                    let active_matches = if !filter.only_active {
+                        true
+                    } else {
+                        epic_active_matches_for_ids(tasks, &epic_ids)
+                    };
+                    (e.id, (repo_matches, active_matches))
+                })
+                .collect()
+        };
+        self.layout.epic_filter_cache = Some(filter_cache);
+        self.layout.children_map_cache = Some(children_map);
+
+        // Build column_anchor_cache: sorted selectable items per status.
+        // Hoist tasks_for_current_view() and the search pass out of the loop
+        // so each is computed once, not once per status.
+        let view_tasks = self.view().tasks_for_current_view();
+        let pass = self.view().epic_search_pass();
+        let placements = self.view().compute_epic_placements();
+        let mut anchor_cache: HashMap<TaskStatus, Vec<ColumnAnchor>> = HashMap::new();
+        for &status in TaskStatus::ALL.iter() {
+            let anchors: Vec<ColumnAnchor> = self
+                .view()
+                .column_items_for_status_with_view_tasks(
+                    status,
+                    Some(&placements),
+                    &view_tasks,
+                    &pass,
+                )
+                .into_iter()
+                .filter_map(|item| item.anchor())
+                .collect();
+            anchor_cache.insert(status, anchors);
+        }
+        self.layout.column_anchor_cache = Some(anchor_cache);
+
+        self.layout.epic_placements_cache = Some(Arc::new(placements));
+        self.layout.epic_stats_cache = Some(Arc::clone(&stats));
+        self.layout.layout_cache_fingerprint = Some(fingerprint);
+        stats
+    }
+
+    /// Discard all layout caches so the next `cached_epic_stats()` call
+    /// recomputes from the current board state. Handlers that mutate
+    /// `board.tasks`/`board.epics` should still call this (directly or via
+    /// `sync_board_selection`) as a perf optimization — it forces an
+    /// immediate rebuild rather than waiting for the next
+    /// `cached_epic_stats()` call to detect the fingerprint mismatch — but it
+    /// is no longer required for correctness.
+    pub(in crate::tui) fn invalidate_layout_cache(&mut self) {
+        self.layout.invalidate();
     }
 }

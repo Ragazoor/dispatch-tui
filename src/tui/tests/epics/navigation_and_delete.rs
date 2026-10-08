@@ -84,7 +84,7 @@ fn column_items_board_view_includes_epics() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.epics = vec![make_epic(10)]; // epic with no subtasks = Backlog
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert_eq!(items.len(), 2); // 1 task + 1 epic
                                 // Same priority (5), so task (id=1) sorts before epic (id=10)
     assert!(matches!(items[0], ColumnItem::Task(_)));
@@ -101,7 +101,7 @@ fn column_items_epic_view_no_epics() {
     };
     app.board.epics = vec![make_epic(10)];
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(items.iter().all(|i| matches!(i, ColumnItem::Task(_))));
 }
 

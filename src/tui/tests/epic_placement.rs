@@ -12,7 +12,8 @@ fn epic_columns(app: &App, epic_id: i64) -> Vec<TaskStatus> {
         .iter()
         .copied()
         .filter(|&status| {
-            app.column_items_for_status(status)
+            app.view()
+                .column_items_for_status(status)
                 .iter()
                 .any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(epic_id)))
         })
@@ -209,7 +210,7 @@ fn a_running_copy_with_no_blocked_task_sits_in_active() {
 
 /// The section header the epic card for `epic_id` renders under in `status`.
 fn epic_section(app: &App, status: TaskStatus, epic_id: i64) -> Option<ColumnSection> {
-    let items = app.column_items_for_status(status);
+    let items = app.view().column_items_for_status(status);
     let mut current: Option<ColumnSection> = None;
     for item in &items {
         match item {
@@ -250,7 +251,7 @@ fn flattened_done_column_surfaces_descendant_tasks_and_drops_the_epic_card() {
     let mut app = app_with_epic_spread_over_all_columns();
     app.board.flattened = true;
 
-    let items = app.column_items_for_status(TaskStatus::Done);
+    let items = app.view().column_items_for_status(TaskStatus::Done);
     assert!(
         items
             .iter()
@@ -268,7 +269,7 @@ fn flattened_backlog_keeps_its_epic_cards() {
     let mut app = app_with_epic_spread_over_all_columns();
     app.board.flattened = true;
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
         items
             .iter()
@@ -306,11 +307,11 @@ fn a_stale_placement_cache_is_not_served() {
 
     // Warm the cache, then move the task without invalidating.
     let _ = app.cached_epic_stats();
-    assert!(app.cached_placements().is_some(), "cache is warm");
+    assert!(app.view().cached_placements().is_some(), "cache is warm");
     app.board.tasks[0].status = TaskStatus::Review;
 
     assert!(
-        app.cached_placements().is_none(),
+        app.view().cached_placements().is_none(),
         "a board change must make the warm map unreadable"
     );
     assert_eq!(
@@ -328,14 +329,14 @@ fn a_search_query_change_invalidates_the_placement_cache() {
     app.board.epics.push(make_epic_with_title(1, "Roadmap"));
 
     let _ = app.cached_epic_stats();
-    assert!(app.cached_placements().is_some(), "cache is warm");
+    assert!(app.view().cached_placements().is_some(), "cache is warm");
 
     // The query matches the epic's title but not its task, so placement falls
     // back to Backlog — a different answer from the cached one.
     app.search.query = "Roadmap".to_string();
 
     assert!(
-        app.cached_placements().is_none(),
+        app.view().cached_placements().is_none(),
         "a query change must make the warm map unreadable"
     );
     assert_eq!(epic_columns(&app, 1), vec![TaskStatus::Backlog]);
@@ -350,12 +351,12 @@ fn a_completed_at_change_invalidates_the_placement_cache() {
     app.board.epics.push(make_epic(1));
 
     let _ = app.cached_epic_stats();
-    assert!(app.cached_placements().is_some(), "cache is warm");
+    assert!(app.view().cached_placements().is_some(), "cache is warm");
 
     app.board.tasks[0].completed_at = chrono::DateTime::from_timestamp(1_700_000_000, 0);
 
     assert!(
-        app.cached_placements().is_none(),
+        app.view().cached_placements().is_none(),
         "a subtask completion must make the warm map unreadable"
     );
 }
@@ -368,12 +369,12 @@ fn an_epics_own_completed_at_change_invalidates_the_placement_cache() {
     app.board.epics.push(make_epic(1));
 
     let _ = app.cached_epic_stats();
-    assert!(app.cached_placements().is_some(), "cache is warm");
+    assert!(app.view().cached_placements().is_some(), "cache is warm");
 
     app.board.epics[0].completed_at = chrono::DateTime::from_timestamp(1_700_000_000, 0);
 
     assert!(
-        app.cached_placements().is_none(),
+        app.view().cached_placements().is_none(),
         "an epic completion must make the warm map unreadable"
     );
 }
@@ -389,12 +390,12 @@ fn an_only_active_change_invalidates_the_placement_cache() {
     app.board.epics.push(make_epic(1));
 
     let _ = app.cached_epic_stats();
-    assert!(app.cached_placements().is_some(), "cache is warm");
+    assert!(app.view().cached_placements().is_some(), "cache is warm");
 
     app.filter.only_active = true;
 
     assert!(
-        app.cached_placements().is_none(),
+        app.view().cached_placements().is_none(),
         "a filter change must make the warm map unreadable"
     );
 }

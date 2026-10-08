@@ -148,7 +148,7 @@ impl App {
         let repo_path = draft.repo_path.clone();
         self.input.mode = InputMode::Normal;
         self.status.clear();
-        let epic_id = match self.effective_view_mode() {
+        let epic_id = match self.view().effective_view_mode() {
             BoardViewMode::Epic { epic_id, .. } => Some(epic_id),
             BoardViewMode::Board(_) => None,
         };

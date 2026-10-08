@@ -80,7 +80,7 @@ fn board_view_excludes_sub_epics() {
     sub.parent_epic_id = Some(EpicId(10));
     app.board.epics = vec![make_epic(10), sub];
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     // Only root epic (id=10) should appear; sub-epic (id=20) must not
     let epic_ids: Vec<i64> = items
         .iter()
@@ -106,7 +106,7 @@ fn epic_view_includes_sub_epics_as_column_items() {
         EpicId(10),
     )));
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     // sub-epic (id=20) should appear as an Epic column item
     let epic_ids: Vec<i64> = items
         .iter()
@@ -270,7 +270,7 @@ fn test_epic_anchor_preserved_on_refresh() {
         epics.clone(),
     )));
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     let epic_row = items
         .iter()
         .position(|i| matches!(i, ColumnItem::Epic(_)))
@@ -279,7 +279,7 @@ fn test_epic_anchor_preserved_on_refresh() {
         app.update(Message::NavigateRow(1));
     }
     assert!(matches!(
-        app.column_items_for_status(TaskStatus::Backlog)[app.selection().row(1)],
+        app.view().column_items_for_status(TaskStatus::Backlog)[app.selection().row(1)],
         ColumnItem::Epic(_)
     ));
 
@@ -293,7 +293,7 @@ fn test_epic_anchor_preserved_on_refresh() {
 
     // Still on the epic
     assert!(matches!(
-        app.column_items_for_status(TaskStatus::Backlog)[app.selection().row(1)],
+        app.view().column_items_for_status(TaskStatus::Backlog)[app.selection().row(1)],
         ColumnItem::Epic(_)
     ));
 }
@@ -351,7 +351,7 @@ fn test_selection_survives_flatten_toggle() {
 
     app.update(Message::NavigateRow(1)); // row 1 — Epic(1)
     app.update(Message::NavigateRow(1)); // row 2 — Task(2)
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     let pre_id: TaskId = match &items[app.selection().row(0)] {
         ColumnItem::Task(t) => t.id,
         _ => panic!("expected task at cursor"),
@@ -364,7 +364,7 @@ fn test_selection_survives_flatten_toggle() {
         crate::tui::messages::TaskMessage::ToggleFlattened,
     ));
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     let post_id: TaskId = match &items[app.selection().row(0)] {
         ColumnItem::Task(t) => t.id,
         _ => panic!("expected task at cursor"),

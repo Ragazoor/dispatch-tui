@@ -367,17 +367,19 @@ fn column_items_with_precomputed_tasks_matches_standard_path() {
         make_task(2, TaskStatus::Running),
         make_task(3, TaskStatus::Backlog),
     ]);
-    let placements = app.compute_epic_placements();
-    let view_tasks = app.tasks_for_current_view();
-    let pass = app.epic_search_pass();
+    let placements = app.view().compute_epic_placements();
+    let view_tasks = app.view().tasks_for_current_view();
+    let pass = app.view().epic_search_pass();
 
-    let via_precomputed = app.column_items_for_status_with_view_tasks(
+    let via_precomputed = app.view().column_items_for_status_with_view_tasks(
         TaskStatus::Backlog,
         Some(&placements),
         &view_tasks,
         &pass,
     );
-    let via_standard = app.column_items_for_status_with_placements(TaskStatus::Backlog, None);
+    let via_standard = app
+        .view()
+        .column_items_for_status_with_placements(TaskStatus::Backlog, None);
 
     assert_eq!(
         via_precomputed.len(),
@@ -492,7 +494,7 @@ fn epic_filter_cache_repo_matches_agrees_with_direct_call_no_filter() {
         .unwrap();
     assert_eq!(
         cached.0,
-        app.epic_repo_matches(EpicId(10)),
+        app.view().epic_repo_matches(EpicId(10)),
         "cached repo_matches must equal direct epic_repo_matches"
     );
 }
@@ -515,7 +517,7 @@ fn epic_filter_cache_active_matches_agrees_with_direct_call_no_filter() {
         .unwrap();
     assert_eq!(
         cached.1,
-        app.epic_matches(EpicId(10)),
+        app.view().epic_matches(EpicId(10)),
         "cached active_matches must equal direct epic_matches"
     );
 }

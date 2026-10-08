@@ -309,6 +309,7 @@ fn search_narrows_board_to_matching_titles() {
 
     let titles: Vec<String> = s
         .app
+        .view()
         .tasks_for_current_view()
         .iter()
         .map(|t| t.title.clone())

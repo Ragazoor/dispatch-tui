@@ -53,8 +53,8 @@ fn only_the_column_holding_a_fold_reports_one() {
     let mut app = App::new(vec![]);
     app.folds
         .toggle(TaskStatus::Review, ColumnSection::Approved);
-    assert!(app.column_has_rendered_fold(TaskStatus::Review));
-    assert!(!app.column_has_rendered_fold(TaskStatus::Running));
+    assert!(app.view().column_has_rendered_fold(TaskStatus::Review));
+    assert!(!app.view().column_has_rendered_fold(TaskStatus::Running));
 }
 
 /// The predicate is about folds that *take effect*, so a live query — which
@@ -66,7 +66,7 @@ fn a_live_search_query_means_no_column_has_a_rendered_fold() {
     app.folds
         .toggle(TaskStatus::Review, ColumnSection::Approved);
     app.search.query = "anything".to_string();
-    assert!(!app.column_has_rendered_fold(TaskStatus::Review));
+    assert!(!app.view().column_has_rendered_fold(TaskStatus::Review));
     assert!(
         app.folds
             .is_collapsed(TaskStatus::Review, ColumnSection::Approved),

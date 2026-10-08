@@ -20,7 +20,7 @@ impl App {
         let (min_col, max_col) = (1isize, TaskStatus::COLUMN_COUNT as isize);
         // One board scan for both the destination-column emptiness test below
         // and the closing clamp, instead of one each.
-        let counts = self.column_item_counts();
+        let counts = self.view().column_item_counts();
         let old_col = self.selection().column();
         let new_col = (old_col as isize + delta).clamp(min_col, max_col) as usize;
         let column_changed = new_col != old_col;
@@ -53,7 +53,7 @@ impl App {
             Some(s) => s,
             None => return vec![],
         };
-        let count = self.column_item_count(status);
+        let count = self.view().column_item_count(status);
 
         if self.selection().on_select_all {
             // On the toggle row
@@ -91,7 +91,7 @@ impl App {
         let Some(status) = TaskStatus::from_column_index(col - 1) else {
             return vec![];
         };
-        let count = self.column_item_count(status);
+        let count = self.view().column_item_count(status);
         if count == 0 {
             return vec![];
         }
@@ -110,7 +110,7 @@ impl App {
         let Some(status) = TaskStatus::from_column_index(col - 1) else {
             return vec![];
         };
-        let count = self.column_item_count(status);
+        let count = self.view().column_item_count(status);
         if count == 0 {
             return vec![];
         }
@@ -133,9 +133,10 @@ impl App {
         // below. Both take `Option<&EpicPlacementMap>`, and a cold cache makes
         // `cached_placements()` return `None` — so asking twice would build the
         // whole map twice on one keypress and throw the first away.
-        let cached = self.cached_placements();
-        let placements = self.placements_or_compute(cached.as_deref());
+        let cached = self.view().cached_placements();
+        let placements = self.view().placements_or_compute(cached.as_deref());
         let items: Vec<_> = self
+            .view()
             .column_items_for_status_with_placements(status, Some(&placements))
             .into_iter()
             .filter(|i| i.is_selectable())

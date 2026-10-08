@@ -16,8 +16,10 @@ impl App {
             return None;
         }
         let status = TaskStatus::from_column_index(col - 1)?;
-        let cached = self.cached_placements();
-        let items = self.column_items_for_status_with_placements(status, cached.as_deref());
+        let cached = self.view().cached_placements();
+        let items = self
+            .view()
+            .column_items_for_status_with_placements(status, cached.as_deref());
         let row = self.selection().row(col);
         items.into_iter().filter(|i| i.is_selectable()).nth(row)
     }
@@ -44,7 +46,7 @@ impl App {
     pub fn clamp_selection(&mut self) {
         // Counts first, mutation second: the search pass borrows the board, so
         // it cannot be held across `selection_mut()`. One pass for all columns.
-        self.clamp_selection_to(self.column_item_counts());
+        self.clamp_selection_to(self.view().column_item_counts());
     }
 
     /// [`Self::clamp_selection`] against counts already taken from
@@ -105,7 +107,7 @@ impl App {
         // Board data has changed; discard stale stats and recompute below.
         self.invalidate_layout_cache();
 
-        let anchor = match self.effective_view_mode() {
+        let anchor = match self.view().effective_view_mode() {
             BoardViewMode::Board(sel) | BoardViewMode::Epic { selection: sel, .. } => sel.anchor,
         };
 

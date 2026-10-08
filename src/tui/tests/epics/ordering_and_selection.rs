@@ -96,7 +96,7 @@ fn column_items_sorted_by_sort_order() {
     t2.sort_order = Some(100);
     app.board.tasks = vec![t1, t2];
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert_eq!(items.len(), 2);
     match &items[0] {
         ColumnItem::Task(t) => assert_eq!(t.title, "Second"),
@@ -119,7 +119,7 @@ fn column_items_null_sort_order_uses_id() {
     t2.sort_order = None;
     app.board.tasks = vec![t1, t2];
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     match &items[0] {
         ColumnItem::Task(t) => assert_eq!(t.title, "Low ID"),
         _ => panic!("expected task"),
@@ -139,7 +139,7 @@ fn done_column_sorts_by_completion_recency_via_completed_at() {
     newer.completed_at = chrono::DateTime::from_timestamp(1_700_000_100, 0);
     app.board.tasks = vec![older, newer];
 
-    let items = app.column_items_for_status(TaskStatus::Done);
+    let items = app.view().column_items_for_status(TaskStatus::Done);
     assert_eq!(items.len(), 2);
     match &items[0] {
         ColumnItem::Task(t) => assert_eq!(

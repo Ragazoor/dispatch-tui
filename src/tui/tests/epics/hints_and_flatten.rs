@@ -170,7 +170,7 @@ fn tasks_for_current_view_board_excludes_epic_tasks() {
     subtask.epic_id = Some(EpicId(10));
     app.board.tasks = vec![standalone, subtask];
 
-    let visible = app.tasks_for_current_view();
+    let visible = app.view().tasks_for_current_view();
     assert_eq!(visible.len(), 1);
     assert_eq!(visible[0].id, TaskId(1));
 }
@@ -189,7 +189,7 @@ fn tasks_for_current_view_epic_shows_only_subtasks() {
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
 
-    let visible = app.tasks_for_current_view();
+    let visible = app.view().tasks_for_current_view();
     assert_eq!(visible.len(), 1);
     assert_eq!(visible[0].id, TaskId(2));
 }
@@ -231,7 +231,7 @@ fn flattened_board_is_recursive_through_nested_epics() {
     app.board.flattened = true;
 
     // Backlog is NOT flattened: the root epic card shows, not the individual task
-    let backlog = app.column_items_for_status(TaskStatus::Backlog);
+    let backlog = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
         backlog
             .iter()
@@ -246,7 +246,7 @@ fn flattened_board_is_recursive_through_nested_epics() {
     );
 
     // Running IS flattened: t_leaf bubbles up from the nested epic
-    let running = app.column_items_for_status(TaskStatus::Running);
+    let running = app.view().column_items_for_status(TaskStatus::Running);
     assert!(running
         .iter()
         .any(|i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(2))));
@@ -262,7 +262,7 @@ fn flattened_board_hides_epic_cards_in_active_columns_only() {
 
     // Running/Review columns: epic cards are hidden (tasks surface via EpicHeader)
     for status in [TaskStatus::Running, TaskStatus::Review] {
-        let items = app.column_items_for_status(status);
+        let items = app.view().column_items_for_status(status);
         assert!(
             items.iter().all(|i| matches!(
                 i,
@@ -278,7 +278,7 @@ fn flattened_board_hides_epic_cards_in_active_columns_only() {
     // Backlog column: epic cards remain visible (backlog is excluded from
     // flattening). Done is excluded too, but
     // `flattened_board_shows_epic_cards_in_done` owns that assertion.
-    let backlog_items = app.column_items_for_status(TaskStatus::Backlog);
+    let backlog_items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
         backlog_items
             .iter()
@@ -357,7 +357,10 @@ fn toggle_flattened_clamps_selection_in_backlog() {
         crate::tui::messages::TaskMessage::ToggleFlattened,
     ));
     assert!(!app.board.flattened);
-    let count = app.column_items_for_status(TaskStatus::Backlog).len();
+    let count = app
+        .view()
+        .column_items_for_status(TaskStatus::Backlog)
+        .len();
     assert!(count > 0);
     assert!(app.selected_row()[0] < count);
 }

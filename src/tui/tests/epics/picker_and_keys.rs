@@ -9,7 +9,7 @@ fn epic_repo_matches_no_filter_always_true() {
     let mut app = make_app();
     app.board.epics = vec![make_epic(1)];
     // No filter active → always true regardless of tasks
-    assert!(app.epic_repo_matches(EpicId(1)));
+    assert!(app.view().epic_repo_matches(EpicId(1)));
 }
 
 #[test]
@@ -18,7 +18,7 @@ fn epic_repo_matches_empty_epic_with_active_filter_true() {
     app.board.epics = vec![make_epic(1)];
     // Filter active but no tasks → empty epic is always shown
     app.filter.repos = std::collections::HashSet::from(["/other/repo".to_string()]);
-    assert!(app.epic_repo_matches(EpicId(1)));
+    assert!(app.view().epic_repo_matches(EpicId(1)));
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn epic_repo_matches_with_matching_task_true() {
     task.repo_path = "/my/repo".to_string();
     app.board.tasks = vec![task];
     app.filter.repos = std::collections::HashSet::from(["/my/repo".to_string()]);
-    assert!(app.epic_repo_matches(EpicId(1)));
+    assert!(app.view().epic_repo_matches(EpicId(1)));
 }
 
 #[test]
@@ -42,7 +42,7 @@ fn epic_repo_matches_with_no_matching_task_false() {
     task.repo_path = "/other/repo".to_string();
     app.board.tasks = vec![task];
     app.filter.repos = std::collections::HashSet::from(["/my/repo".to_string()]);
-    assert!(!app.epic_repo_matches(EpicId(1)));
+    assert!(!app.view().epic_repo_matches(EpicId(1)));
 }
 
 #[test]
@@ -322,7 +322,8 @@ fn epic_with(id: i64, status: TaskStatus, parent: Option<i64>) -> crate::models:
 }
 
 fn target_ids(app: &App, target: EpicId) -> Vec<i64> {
-    app.reparent_target_epics(target)
+    app.view()
+        .reparent_target_epics(target)
         .iter()
         .map(|e| e.id.0)
         .collect()
@@ -513,7 +514,7 @@ fn flattened_board_drops_epic_cards_from_done() {
     app.board.tasks = vec![done_subtask];
     app.board.flattened = true;
 
-    let items = app.column_items_for_status(TaskStatus::Done);
+    let items = app.view().column_items_for_status(TaskStatus::Done);
     assert!(
         !items
             .iter()

@@ -60,7 +60,7 @@ fn flattened_board_respects_repo_filter() {
     app.board.flattened = true;
     app.filter.repos = vec!["/included".to_string()].into_iter().collect();
 
-    let visible = app.tasks_for_current_view();
+    let visible = app.view().tasks_for_current_view();
     let ids: std::collections::HashSet<_> = visible.iter().map(|t| t.id).collect();
     assert!(ids.contains(&TaskId(1)));
     assert!(!ids.contains(&TaskId(2)));
@@ -70,7 +70,7 @@ fn flattened_board_respects_repo_filter() {
 fn repo_filter_empty_shows_all_tasks() {
     let app = make_app();
     // repo_filter is empty by default => all tasks visible
-    let visible = app.tasks_for_current_view();
+    let visible = app.view().tasks_for_current_view();
     assert_eq!(visible.len(), 4); // tasks 1,2,3,4 — every status is visible, including Done
 }
 
@@ -84,7 +84,7 @@ fn repo_filter_hides_non_matching_tasks() {
     app.board.tasks = vec![t1, t2];
     app.filter.repos.insert("/repo-a".to_string());
 
-    let visible = app.tasks_for_current_view();
+    let visible = app.view().tasks_for_current_view();
     assert_eq!(visible.len(), 1);
     assert_eq!(visible[0].id, TaskId(1));
 }
@@ -107,7 +107,7 @@ fn repo_filter_applies_to_epics_in_column_items() {
     app.board.tasks = vec![task_a, task_b];
     app.filter.repos.insert("/repo-a".to_string());
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert_eq!(items.len(), 1); // only epic A
 }
 
@@ -201,7 +201,7 @@ fn repo_filter_exclude_hides_matching_tasks() {
     app.filter.repos.insert("/repo-a".to_string());
     app.filter.mode = RepoFilterMode::Exclude;
 
-    let visible = app.tasks_for_current_view();
+    let visible = app.view().tasks_for_current_view();
     assert_eq!(visible.len(), 1);
     assert_eq!(visible[0].id, TaskId(2));
 }
@@ -216,7 +216,7 @@ fn repo_filter_exclude_empty_shows_all() {
     app.board.tasks = vec![t1, t2];
     app.filter.mode = RepoFilterMode::Exclude;
 
-    let visible = app.tasks_for_current_view();
+    let visible = app.view().tasks_for_current_view();
     assert_eq!(visible.len(), 2);
 }
 
@@ -239,7 +239,7 @@ fn repo_filter_exclude_applies_to_epics() {
     app.filter.repos.insert("/repo-a".to_string());
     app.filter.mode = RepoFilterMode::Exclude;
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert_eq!(items.len(), 1);
     match &items[0] {
         ColumnItem::Epic(e) => assert_eq!(e.id, EpicId(2)),
@@ -963,7 +963,7 @@ fn only_active_filter_hides_tasks_without_tmux_window() {
     app.board.tasks = vec![t1, t2, t3];
     app.filter.only_active = true;
 
-    let visible = app.tasks_for_current_view();
+    let visible = app.view().tasks_for_current_view();
     let ids: Vec<_> = visible.iter().map(|t| t.id.0).collect();
     assert_eq!(ids, vec![1], "only task with tmux_window should be visible");
 }
@@ -977,7 +977,7 @@ fn only_active_filter_off_shows_all_tasks() {
     t2.tmux_window = None;
     app.board.tasks = vec![t1, t2];
 
-    let visible = app.tasks_for_current_view();
+    let visible = app.view().tasks_for_current_view();
     assert_eq!(visible.len(), 2);
 }
 
@@ -1022,7 +1022,7 @@ fn only_active_filter_hides_epic_with_no_active_tasks() {
     app.board.tasks = vec![t];
     app.filter.only_active = true;
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
         items.iter().all(|i| !matches!(i, ColumnItem::Epic(_))),
         "epic with no active tasks should be hidden when only_active is set"
@@ -1041,7 +1041,7 @@ fn only_active_filter_shows_epic_with_active_task() {
     app.board.tasks = vec![t];
     app.filter.only_active = true;
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
         items
             .iter()
@@ -1058,7 +1058,7 @@ fn only_active_filter_off_shows_epics_without_active_tasks() {
     app.board.epics = vec![epic];
     app.filter.only_active = false;
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
         items
             .iter()
@@ -1083,7 +1083,7 @@ fn only_active_filter_column_item_count_excludes_inactive_epics() {
     app.board.tasks = vec![t];
     app.filter.only_active = true;
 
-    let count = app.column_item_count(TaskStatus::Backlog);
+    let count = app.view().column_item_count(TaskStatus::Backlog);
     assert_eq!(
         count, 1,
         "only the epic with an active task should be counted"
@@ -1111,7 +1111,7 @@ fn only_active_filter_shows_root_epic_when_grandchild_task_is_active() {
     app.board.tasks = vec![t];
     app.filter.only_active = true;
 
-    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
         items
             .iter()

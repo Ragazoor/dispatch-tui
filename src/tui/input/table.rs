@@ -134,13 +134,13 @@ impl App {
         use KeyContext as C;
         let in_epic = matches!(self.board.view_mode, ViewMode::Epic { .. });
         match context {
-            C::SearchActive => self.search_active(),
+            C::SearchActive => self.view().search_active(),
             C::InsideEpicView => in_epic,
-            C::EpicViewNoSearch => in_epic && !self.search_active(),
+            C::EpicViewNoSearch => in_epic && !self.view().search_active(),
             C::TopLevel => !in_epic,
             C::WithSelection => {
                 !in_epic
-                    && !self.search_active()
+                    && !self.view().search_active()
                     && (self.has_selection() || self.selection().on_select_all)
             }
             C::OnColumnSelectAll => self.selection().on_select_all,

@@ -74,7 +74,7 @@ impl App {
                 // An epic card's section is per column, so the column the
                 // cursor is in is part of the question.
                 let status = TaskStatus::from_column_index(self.selection().column() - 1)?;
-                let cached = self.cached_placements();
+                let cached = self.view().cached_placements();
                 self.item_section(&item, status, cached.as_deref())
             }
         }
@@ -91,12 +91,13 @@ impl App {
         status: TaskStatus,
         section: crate::models::ColumnSection,
     ) -> Option<ColumnAnchor> {
-        let cached = self.cached_placements();
+        let cached = self.view().cached_placements();
         let placements = match cached {
             Some(ref p) => std::sync::Arc::clone(p),
-            None => std::sync::Arc::new(self.compute_epic_placements()),
+            None => std::sync::Arc::new(self.view().compute_epic_placements()),
         };
-        self.column_items_for_status_with_placements(status, Some(&placements))
+        self.view()
+            .column_items_for_status_with_placements(status, Some(&placements))
             .into_iter()
             .find(|item| self.item_section(item, status, Some(&placements)) == Some(section))
             .and_then(|item| item.anchor())
@@ -113,7 +114,7 @@ impl App {
     ) -> Option<crate::models::ColumnSection> {
         match item {
             ColumnItem::Task(t) => crate::models::ColumnSection::for_task(t),
-            ColumnItem::Epic(e) => self.epic_column_section(e, status, placements),
+            ColumnItem::Epic(e) => self.view().epic_column_section(e, status, placements),
             ColumnItem::FoldedSection(_)
             | ColumnItem::FoldedEpic(_)
             | ColumnItem::SubstatusLabel(_)
@@ -163,7 +164,7 @@ impl App {
             ColumnItem::Task(t) => {
                 let epic_id = t.epic_id?;
                 let status = TaskStatus::from_column_index(self.selection().column() - 1)?;
-                if !self.is_flattened_for_status(status) {
+                if !self.view().is_flattened_for_status(status) {
                     return None;
                 }
                 self.board.epics.iter().find(|e| e.id == epic_id)?;
@@ -180,9 +181,10 @@ impl App {
         status: TaskStatus,
         epic: EpicId,
     ) -> Option<ColumnAnchor> {
-        let cached = self.cached_placements();
-        let placements = self.placements_or_compute(cached.as_deref());
-        self.column_items_for_status_with_placements(status, Some(&placements))
+        let cached = self.view().cached_placements();
+        let placements = self.view().placements_or_compute(cached.as_deref());
+        self.view()
+            .column_items_for_status_with_placements(status, Some(&placements))
             .into_iter()
             .find_map(|item| match item {
                 ColumnItem::Task(t) if t.epic_id == Some(epic) => item.anchor(),
@@ -210,8 +212,10 @@ impl App {
         let Some(status) = TaskStatus::from_column_index(col - 1) else {
             return vec![];
         };
-        let placements = self.compute_epic_placements();
-        let items = self.column_items_for_status_with_placements(status, Some(&placements));
+        let placements = self.view().compute_epic_placements();
+        let items = self
+            .view()
+            .column_items_for_status_with_placements(status, Some(&placements));
         let mut task_ids = Vec::new();
         let mut epic_ids = Vec::new();
         for item in &items {

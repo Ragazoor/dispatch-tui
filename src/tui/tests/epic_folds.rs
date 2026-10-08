@@ -49,8 +49,8 @@ fn the_same_epic_in_two_columns_folds_independently() {
 fn only_the_column_holding_a_fold_reports_one() {
     let mut app = App::new(vec![]);
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
-    assert!(app.column_has_rendered_fold(TaskStatus::Running));
-    assert!(!app.column_has_rendered_fold(TaskStatus::Review));
+    assert!(app.view().column_has_rendered_fold(TaskStatus::Running));
+    assert!(!app.view().column_has_rendered_fold(TaskStatus::Review));
 }
 
 /// The same override Collapsed Sections gets: a live query forces every fold
@@ -60,7 +60,7 @@ fn a_live_search_query_means_no_column_has_a_rendered_fold() {
     let mut app = App::new(vec![]);
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
     app.search.query = "anything".to_string();
-    assert!(!app.column_has_rendered_fold(TaskStatus::Running));
+    assert!(!app.view().column_has_rendered_fold(TaskStatus::Running));
     assert!(
         app.epic_folds.is_folded(TaskStatus::Running, EpicId(10)),
         "and the recorded fold is untouched"
@@ -113,7 +113,9 @@ fn folding_an_epic_hides_its_cards_but_keeps_its_header() {
     app.board.flattened = true;
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
 
-    let items = app.column_items_for_status_with_placements(TaskStatus::Running, None);
+    let items = app
+        .view()
+        .column_items_for_status_with_placements(TaskStatus::Running, None);
     let task_ids: Vec<i64> = items
         .iter()
         .filter_map(|i| match i {
@@ -155,7 +157,9 @@ fn folding_an_epic_hides_it_across_every_section_in_the_column() {
     app.board.flattened = true;
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
 
-    let items = app.column_items_for_status_with_placements(TaskStatus::Running, None);
+    let items = app
+        .view()
+        .column_items_for_status_with_placements(TaskStatus::Running, None);
     assert!(
         !items.iter().any(|i| matches!(i, ColumnItem::Task(_))),
         "both sections' cards are hidden: {items:?}"
@@ -182,7 +186,9 @@ fn an_orphan_tasks_card_is_unaffected_by_any_epic_fold() {
     app.board.flattened = true;
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
 
-    let items = app.column_items_for_status_with_placements(TaskStatus::Running, None);
+    let items = app
+        .view()
+        .column_items_for_status_with_placements(TaskStatus::Running, None);
     assert!(items
         .iter()
         .any(|i| matches!(i, ColumnItem::Task(t) if t.id.0 == 2)));
@@ -204,7 +210,9 @@ fn an_epic_fold_does_nothing_in_an_unflattened_column() {
     app.board.flattened = false;
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
 
-    let items = app.column_items_for_status_with_placements(TaskStatus::Running, None);
+    let items = app
+        .view()
+        .column_items_for_status_with_placements(TaskStatus::Running, None);
     assert!(
         !items.iter().any(|i| matches!(i, ColumnItem::FoldedEpic(_))),
         "hierarchical mode never renders a folded epic header: {items:?}"
@@ -389,14 +397,18 @@ fn a_folded_section_hides_a_folded_epics_header_too() {
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
     app.folds.toggle(TaskStatus::Running, ColumnSection::Active);
 
-    let items = app.column_items_for_status_with_placements(TaskStatus::Running, None);
+    let items = app
+        .view()
+        .column_items_for_status_with_placements(TaskStatus::Running, None);
     assert!(
         !items.iter().any(|i| matches!(i, ColumnItem::FoldedEpic(_))),
         "the section's own folded header stands in for everything in the run: {items:?}"
     );
 
     app.folds.toggle(TaskStatus::Running, ColumnSection::Active);
-    let items = app.column_items_for_status_with_placements(TaskStatus::Running, None);
+    let items = app
+        .view()
+        .column_items_for_status_with_placements(TaskStatus::Running, None);
     assert!(
         items
             .iter()
@@ -419,7 +431,9 @@ fn a_live_search_query_reopens_a_folded_epic_holding_a_match() {
     app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
     app.search.query = "findme".to_string();
 
-    let items = app.column_items_for_status_with_placements(TaskStatus::Running, None);
+    let items = app
+        .view()
+        .column_items_for_status_with_placements(TaskStatus::Running, None);
     assert!(
         items
             .iter()

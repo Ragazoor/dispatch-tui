@@ -17,7 +17,7 @@ fn test_task_repo(id: i64, title: &str, repo: &str) -> Task {
 fn new_app_has_inactive_search() {
     let app = App::new(vec![]);
     assert_eq!(app.search.query, "");
-    assert!(!app.search_active());
+    assert!(!app.view().search_active());
 }
 
 #[test]
@@ -32,6 +32,7 @@ fn search_query_filters_by_title_fuzzy() {
     // s…r…c…h in order), so the single-match assertion below is meaningful.
     app.search.query = "srch".to_string();
     let titles: Vec<&str> = app
+        .view()
         .tasks_for_current_view()
         .iter()
         .map(|t| t.title.as_str())
@@ -43,7 +44,7 @@ fn search_query_filters_by_title_fuzzy() {
 fn empty_search_query_is_noop() {
     let mut app = App::new(vec![test_task(1, "alpha"), test_task(2, "beta")]);
     app.search.query = "".to_string();
-    assert_eq!(app.tasks_for_current_view().len(), 2);
+    assert_eq!(app.view().tasks_for_current_view().len(), 2);
 }
 
 #[test]
@@ -56,6 +57,7 @@ fn search_query_matches_task_id_prefix() {
     ]);
     app.search.query = "38".to_string();
     let mut ids: Vec<i64> = app
+        .view()
         .tasks_for_current_view()
         .iter()
         .map(|t| t.id.0)
@@ -69,6 +71,7 @@ fn search_query_matches_task_id_with_hash_prefix() {
     let mut app = App::new(vec![test_task(3837, "alpha"), test_task(9, "beta")]);
     app.search.query = "#3837".to_string();
     let ids: Vec<i64> = app
+        .view()
         .tasks_for_current_view()
         .iter()
         .map(|t| t.id.0)
@@ -85,6 +88,7 @@ fn search_query_id_match_unions_with_title_match() {
     ]);
     app.search.query = "3837".to_string();
     let mut ids: Vec<i64> = app
+        .view()
         .tasks_for_current_view()
         .iter()
         .map(|t| t.id.0)
@@ -99,7 +103,7 @@ fn search_query_non_numeric_does_not_id_match() {
     // "38a" has a non-digit payload, so no id matching happens and neither
     // title is a subsequence match.
     app.search.query = "38a".to_string();
-    assert!(app.tasks_for_current_view().is_empty());
+    assert!(app.view().tasks_for_current_view().is_empty());
 }
 
 #[test]
@@ -108,7 +112,7 @@ fn search_query_bare_hash_does_not_id_match() {
     // A lone "#" leaves an empty digit payload: title-only matching, and no
     // title contains '#'.
     app.search.query = "#".to_string();
-    assert!(app.tasks_for_current_view().is_empty());
+    assert!(app.view().tasks_for_current_view().is_empty());
 }
 
 #[test]
@@ -116,6 +120,7 @@ fn search_query_id_prefix_is_not_a_substring_match() {
     let mut app = App::new(vec![test_task(1385, "alpha"), test_task(38, "beta")]);
     app.search.query = "38".to_string();
     let ids: Vec<i64> = app
+        .view()
         .tasks_for_current_view()
         .iter()
         .map(|t| t.id.0)
@@ -133,6 +138,7 @@ fn search_id_match_composes_with_repo_filter() {
     app.filter.mode = RepoFilterMode::Include;
     app.search.query = "383".to_string();
     let ids: Vec<i64> = app
+        .view()
         .tasks_for_current_view()
         .iter()
         .map(|t| t.id.0)
@@ -150,6 +156,7 @@ fn search_composes_with_repo_filter() {
     app.filter.mode = RepoFilterMode::Include;
     app.search.query = "alpha".to_string();
     let ids: Vec<i64> = app
+        .view()
         .tasks_for_current_view()
         .iter()
         .map(|t| t.id.0)
@@ -172,7 +179,7 @@ fn epic_child(id: i64, epic: i64, title: &str) -> Task {
 fn epic_search_matches_empty_query_matches_every_epic() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![make_epic_with_title(1, "Billing rework")];
-    assert!(app.epic_search_matches(EpicId(1)));
+    assert!(app.view().epic_search_matches(EpicId(1)));
 }
 
 #[test]
@@ -183,8 +190,8 @@ fn epic_search_matches_own_title_fuzzy() {
         make_epic_with_title(2, "Billing rework"),
     ];
     app.search.query = "lgn".to_string();
-    assert!(app.epic_search_matches(EpicId(1)));
-    assert!(!app.epic_search_matches(EpicId(2)));
+    assert!(app.view().epic_search_matches(EpicId(1)));
+    assert!(!app.view().epic_search_matches(EpicId(2)));
 }
 
 #[test]
@@ -196,10 +203,10 @@ fn epic_search_matches_own_id_prefix() {
         make_epic_with_title(1385, "gamma"),
     ];
     app.search.query = "38".to_string();
-    assert!(app.epic_search_matches(EpicId(38)));
-    assert!(app.epic_search_matches(EpicId(380)));
+    assert!(app.view().epic_search_matches(EpicId(38)));
+    assert!(app.view().epic_search_matches(EpicId(380)));
     // Prefix, not substring: 1385 contains "38" but does not start with it.
-    assert!(!app.epic_search_matches(EpicId(1385)));
+    assert!(!app.view().epic_search_matches(EpicId(1385)));
 }
 
 #[test]
@@ -207,7 +214,7 @@ fn epic_search_matches_own_id_with_hash_prefix() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![make_epic_with_title(38, "alpha")];
     app.search.query = "#38".to_string();
-    assert!(app.epic_search_matches(EpicId(38)));
+    assert!(app.view().epic_search_matches(EpicId(38)));
 }
 
 #[test]
@@ -216,7 +223,7 @@ fn epic_search_matches_descendant_task_title() {
     app.board.epics = vec![make_epic_with_title(1, "Billing rework")];
     app.search.query = "login".to_string();
     // The epic's own title has no match; its subtask carries it.
-    assert!(app.epic_search_matches(EpicId(1)));
+    assert!(app.view().epic_search_matches(EpicId(1)));
 }
 
 #[test]
@@ -224,7 +231,7 @@ fn epic_search_matches_descendant_task_id() {
     let mut app = App::new(vec![epic_child(3837, 1, "alpha")]);
     app.board.epics = vec![make_epic_with_title(1, "Billing rework")];
     app.search.query = "3837".to_string();
-    assert!(app.epic_search_matches(EpicId(1)));
+    assert!(app.view().epic_search_matches(EpicId(1)));
 }
 
 #[test]
@@ -235,7 +242,7 @@ fn epic_search_matches_descendant_sub_epic_title() {
     app.board.epics = vec![make_epic_with_title(1, "Billing rework"), child];
     app.search.query = "login".to_string();
     // Root epic kept because a sub-epic in its subtree matches.
-    assert!(app.epic_search_matches(EpicId(1)));
+    assert!(app.view().epic_search_matches(EpicId(1)));
 }
 
 #[test]
@@ -245,7 +252,7 @@ fn epic_search_matches_grandchild_task_title() {
     child.parent_epic_id = Some(EpicId(1));
     app.board.epics = vec![make_epic_with_title(1, "Root"), child];
     app.search.query = "login".to_string();
-    assert!(app.epic_search_matches(EpicId(1)));
+    assert!(app.view().epic_search_matches(EpicId(1)));
 }
 
 #[test]
@@ -253,7 +260,7 @@ fn epic_search_matches_no_match_anywhere_is_false() {
     let mut app = App::new(vec![epic_child(10, 1, "Update invoices")]);
     app.board.epics = vec![make_epic_with_title(1, "Billing rework")];
     app.search.query = "login".to_string();
-    assert!(!app.epic_search_matches(EpicId(1)));
+    assert!(!app.view().epic_search_matches(EpicId(1)));
 }
 
 #[test]
@@ -265,8 +272,8 @@ fn epic_search_matches_ignores_task_in_a_different_epic() {
     ];
     app.search.query = "login".to_string();
     // Epic 2 is not a descendant of epic 1 (no parent link).
-    assert!(!app.epic_search_matches(EpicId(1)));
-    assert!(app.epic_search_matches(EpicId(2)));
+    assert!(!app.view().epic_search_matches(EpicId(1)));
+    assert!(app.view().epic_search_matches(EpicId(2)));
 }
 
 // ---------------------------------------------------------------------------
@@ -288,7 +295,7 @@ fn epic_search_matches_task_hidden_by_repo_filter_is_not_a_dead_end() {
     app.filter.repos.insert("/repo/a".to_string());
     app.filter.mode = RepoFilterMode::Include;
     app.search.query = "login".to_string();
-    assert!(!app.epic_search_matches(EpicId(1)));
+    assert!(!app.view().epic_search_matches(EpicId(1)));
 }
 
 #[test]
@@ -304,7 +311,7 @@ fn epic_search_matches_task_inside_filtered_repo_keeps_the_epic() {
     app.filter.repos.insert("/repo/a".to_string());
     app.filter.mode = RepoFilterMode::Include;
     app.search.query = "login".to_string();
-    assert!(app.epic_search_matches(EpicId(1)));
+    assert!(app.view().epic_search_matches(EpicId(1)));
 }
 
 #[test]
@@ -320,7 +327,7 @@ fn epic_search_matches_task_hidden_by_only_active_is_not_a_dead_end() {
     app.board.epics = vec![make_epic_with_title(1, "Billing rework")];
     app.filter.only_active = true;
     app.search.query = "login".to_string();
-    assert!(!app.epic_search_matches(EpicId(1)));
+    assert!(!app.view().epic_search_matches(EpicId(1)));
 }
 
 #[test]
@@ -338,7 +345,7 @@ fn epic_search_matches_hidden_sub_epic_does_not_keep_parent_visible() {
     app.filter.repos.insert("/repo/a".to_string());
     app.filter.mode = RepoFilterMode::Include;
     app.search.query = "login".to_string();
-    assert!(!app.epic_search_matches(EpicId(1)));
+    assert!(!app.view().epic_search_matches(EpicId(1)));
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +363,7 @@ fn epic_matched_by_own_title_still_strictly_filters_subtasks_in_view() {
     app.search.query = "login".to_string();
     // The epic is surfaced by its own title, but its only subtask does not
     // match the query — the epic view shows no tasks, which may be none.
-    assert!(app.tasks_for_current_view().is_empty());
+    assert!(app.view().tasks_for_current_view().is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -370,7 +377,7 @@ fn epic_search_query_non_numeric_does_not_id_match() {
     // "38a" has a non-digit payload, so no id matching happens and the title
     // is not a subsequence match either.
     app.search.query = "38a".to_string();
-    assert!(!app.epic_search_matches(EpicId(3837)));
+    assert!(!app.view().epic_search_matches(EpicId(3837)));
 }
 
 #[test]
@@ -380,7 +387,7 @@ fn epic_search_query_bare_hash_does_not_id_match() {
     // A lone "#" leaves an empty digit payload: title-only matching, and the
     // title does not contain '#'.
     app.search.query = "#".to_string();
-    assert!(!app.epic_search_matches(EpicId(3837)));
+    assert!(!app.view().epic_search_matches(EpicId(3837)));
 }
 
 #[test]
@@ -392,6 +399,7 @@ fn epic_and_task_id_namespaces_are_independent() {
     app.search.query = "1".to_string();
     assert_eq!(visible_epic_ids(&app), vec![1]);
     let ids: Vec<i64> = app
+        .view()
         .tasks_for_current_view()
         .iter()
         .map(|t| t.id.0)
@@ -407,7 +415,7 @@ fn epic_search_matches_does_not_read_the_layout_cache() {
     app.board.epics = vec![make_epic_with_title(1, "Login redesign")];
     let _ = app.cached_epic_stats(); // populates layout.epic_filter_cache
     app.search.query = "zzz".to_string();
-    assert!(!app.epic_search_matches(EpicId(1)));
+    assert!(!app.view().epic_search_matches(EpicId(1)));
 }
 
 #[test]
@@ -556,7 +564,9 @@ fn visible_epic_cards_agree_with_the_single_epic_predicate() {
         .into_iter()
         .filter(|&id| {
             let eid = EpicId(id);
-            app.epic_matches(eid) && app.epic_repo_matches(eid) && app.epic_search_matches(eid)
+            app.view().epic_matches(eid)
+                && app.view().epic_repo_matches(eid)
+                && app.view().epic_search_matches(eid)
         })
         .collect();
     assert_eq!(via_predicate, vec![1]);
@@ -605,6 +615,7 @@ fn search_does_not_narrow_the_move_task_epic_picker() {
     ];
     app.search.query = "login".to_string();
     let mut ids: Vec<i64> = app
+        .view()
         .move_task_target_epics()
         .iter()
         .map(|e| e.id.0)
@@ -672,7 +683,9 @@ fn flattened_columns_build_no_search_index() {
     app.board.flattened = true;
     let builds = count_index_builds(|| {
         for status in [TaskStatus::Running, TaskStatus::Review] {
-            let _ = app.column_items_for_status_with_placements(status, None);
+            let _ = app
+                .view()
+                .column_items_for_status_with_placements(status, None);
         }
     });
     assert_eq!(builds, 0, "a flattened column consults no epic index");
@@ -705,6 +718,7 @@ fn search_does_not_narrow_the_reparent_epic_picker() {
     app.search.query = "login".to_string();
     // Reparent targets for epic 3: everything except itself, unfiltered by search.
     let mut ids: Vec<i64> = app
+        .view()
         .reparent_target_epics(EpicId(3))
         .iter()
         .map(|e| e.id.0)

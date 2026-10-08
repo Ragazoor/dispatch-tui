@@ -22,7 +22,8 @@ fn done_at(id: i64, epic_id: Option<i64>, seconds: i64) -> crate::models::Task {
 
 /// The Done column's cards, in render order, as `("task"|"epic", id)`.
 fn done_cards(app: &App) -> Vec<(&'static str, i64)> {
-    app.column_items_for_status(TaskStatus::Done)
+    app.view()
+        .column_items_for_status(TaskStatus::Done)
         .into_iter()
         .filter_map(|i| match i {
             ColumnItem::Task(t) => Some(("task", t.id.0)),
@@ -170,6 +171,7 @@ fn the_done_key_does_not_reach_other_columns() {
     app.board.epics.push(make_epic(10));
 
     let backlog: Vec<i64> = app
+        .view()
         .column_items_for_status(TaskStatus::Backlog)
         .into_iter()
         .filter_map(|i| match i {
@@ -289,6 +291,7 @@ fn a_flattened_orphan_still_sorts_last_outside_done() {
     app.board.flattened = true;
 
     let running: Vec<i64> = app
+        .view()
         .column_items_for_status(TaskStatus::Running)
         .into_iter()
         .filter_map(|i| match i {

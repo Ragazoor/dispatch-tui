@@ -173,14 +173,15 @@ impl<'a> ColumnLayout<'a> {
         // per-status inside column_items_for_status_with_placements. The
         // placement map comes from the layout cache the render pass warmed a
         // moment ago; the fallback is for a caller that has not.
-        let view_tasks = app.tasks_for_current_view();
-        let pass = app.epic_search_pass();
+        let view_tasks = app.view().tasks_for_current_view();
+        let pass = app.view().epic_search_pass();
         let placements = app
+            .view()
             .cached_placements()
-            .unwrap_or_else(|| std::sync::Arc::new(app.compute_epic_placements()));
+            .unwrap_or_else(|| std::sync::Arc::new(app.view().compute_epic_placements()));
         let columns = std::array::from_fn(|i| {
             let status = TaskStatus::ALL[i];
-            app.column_items_for_status_with_view_tasks(
+            app.view().column_items_for_status_with_view_tasks(
                 status,
                 Some(&placements),
                 &view_tasks,
@@ -303,7 +304,7 @@ pub struct EpicPlacement {
 
 impl EpicPlacement {
     /// Credit one *already-admitted* task to this epic. The visibility filter —
-    /// repo, only-active, search — belongs to `App::compute_epic_placements`,
+    /// repo, only-active, search — belongs to `BoardView::compute_epic_placements`,
     /// which is the only caller, so that the predicate has one owner rather
     /// than half of it living here.
     pub(in crate::tui) fn record(&mut self, task: &crate::models::Task) {
@@ -319,7 +320,7 @@ impl EpicPlacement {
     }
 
     /// Draw an epic with no admitted task anywhere in Backlog, so it stays
-    /// reachable. Applied once by `App::compute_epic_placements` after the walk,
+    /// reachable. Applied once by `BoardView::compute_epic_placements` after the walk,
     /// which is what lets every reader below be a plain lookup.
     ///
     /// Applied to every epic, with no exception: every epic row that exists is
@@ -484,7 +485,7 @@ impl CardOrderKey {
 /// forgotten; see `App::compute_layout_fingerprint()`.
 #[derive(Debug, Default)]
 pub(in crate::tui) struct LayoutCache {
-    /// Cached result of `compute_epic_stats()`, wrapped in an `Arc` so that
+    /// Cached result of `compute_epic_stats_with_map()`, wrapped in an `Arc` so that
     /// `cached_epic_stats()` returns a reference-counted handle (O(1) clone)
     /// rather than cloning the full `HashMap` on every call.
     pub(in crate::tui) epic_stats_cache: Option<std::sync::Arc<EpicStatsMap>>,
@@ -499,7 +500,7 @@ pub(in crate::tui) struct LayoutCache {
     pub(in crate::tui) epic_placements_cache: Option<std::sync::Arc<EpicPlacementMap>>,
     /// Parent→children adjacency map over `board.epics`. Built once alongside
     /// `epic_stats_cache` in `cached_epic_stats()`; passed into
-    /// `compute_epic_stats()` so the map is not rebuilt for each epic.
+    /// `compute_epic_stats_with_map()` so the map is not rebuilt for each epic.
     pub(in crate::tui) children_map_cache: Option<HashMap<EpicId, Vec<EpicId>>>,
     /// Pre-sorted selectable items (tasks + epics) per status in display order.
     /// Built once alongside `epic_stats_cache`; `update_anchor_from_current`

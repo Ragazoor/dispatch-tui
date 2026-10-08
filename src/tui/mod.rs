@@ -409,28 +409,6 @@ impl App {
         self.board.view_mode.selection_mut()
     }
 
-    /// When in an overlay (TaskDetail), returns the board mode
-    /// beneath (Board or Epic) by peeling away `previous` links. Returns
-    /// [`BoardViewMode`] rather than `&ViewMode` so callers get an exhaustive
-    /// 2-variant match with no `unreachable!` fallback for the overlay variants.
-    pub(in crate::tui) fn effective_view_mode(&self) -> BoardViewMode<'_> {
-        let mut current = &self.board.view_mode;
-        loop {
-            match current {
-                ViewMode::Board(sel) => return BoardViewMode::Board(sel),
-                ViewMode::Epic {
-                    epic_id, selection, ..
-                } => {
-                    return BoardViewMode::Epic {
-                        epic_id: *epic_id,
-                        selection,
-                    }
-                }
-                ViewMode::TaskDetail { previous, .. } => current = previous,
-            }
-        }
-    }
-
     // Read-only accessors for code outside the tui module
     pub fn tasks(&self) -> &[Task] {
         &self.board.tasks
@@ -645,215 +623,6 @@ impl App {
         }
     }
 
-    /// Returns whether the given epic should be shown under the current repo filter.
-    /// An epic matches if:
-    /// - No repo filter is active, OR
-    /// - The epic has no subtasks (always show empty epics), OR
-    /// - At least one subtask's repo_path matches the filter.
-    ///
-    pub(in crate::tui) fn epic_repo_matches(&self, epic_id: EpicId) -> bool {
-        if let Some(ref cache) = self.layout.epic_filter_cache {
-            if let Some(&(repo_matches, _)) = cache.get(&epic_id) {
-                return repo_matches;
-            }
-        }
-        let epic_ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
-        epic_repo_matches_for_ids(&self.board.tasks, &self.filter, &epic_ids)
-    }
-
-    pub(in crate::tui) fn epic_matches(&self, epic_id: EpicId) -> bool {
-        if let Some(ref cache) = self.layout.epic_filter_cache {
-            if let Some(&(_, active_matches)) = cache.get(&epic_id) {
-                return active_matches;
-            }
-        }
-        if !self.filter.only_active {
-            return true;
-        }
-        let epic_ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
-        epic_active_matches_for_ids(&self.board.tasks, &epic_ids)
-    }
-
-    /// Build the per-pass search index for the current board and query. Doing
-    /// this is only worthwhile behind a `search_active()` check — it always
-    /// pays the O(tasks + epics) build cost.
-    pub(in crate::tui) fn epic_search_index(&self) -> EpicSearchIndex<'_> {
-        #[cfg(test)]
-        EPIC_SEARCH_INDEX_BUILDS.with(|c| c.set(c.get() + 1));
-        let query_lower = self.search.query.to_lowercase();
-        // Parsed once per pass, not per epic: this is the render hot path.
-        let id_digits = id_digits_query(&self.search.query);
-        EpicSearchIndex {
-            task_owners: epic_ids_owning_matching_task(
-                &self.board.tasks,
-                &self.filter,
-                &query_lower,
-                id_digits,
-            ),
-            by_id: crate::models::epic_id_lookup(&self.board.epics),
-            children: crate::models::build_children_map(&self.board.epics),
-            query_lower,
-            id_digits,
-        }
-    }
-
-    /// Whether the epic should be shown under the active board-search query,
-    /// answered from a prebuilt [`EpicSearchIndex`].
-    ///
-    /// `E`'s own title/id match needs no extra gating: callers (see
-    /// [`Self::visible_epics_for_effective_view`]) already require
-    /// `epic_matches(E) && epic_repo_matches(E)` before this predicate runs.
-    /// A descendant sub-epic or descendant task only counts toward `E`'s
-    /// match when it would itself be visible under the repo and only-active
-    /// filters — a descendant the board hides cannot keep `E`'s card alive,
-    /// since the card would then be a dead end. See board_search_filter in
-    /// `docs/specs/board-layout.allium`.
-    ///
-    /// Deliberately uncached across renders, unlike [`Self::epic_matches`] and
-    /// [`Self::epic_repo_matches`]: see the note on [`EpicSearchIndex`].
-    pub(in crate::tui) fn epic_search_matches_indexed(
-        &self,
-        index: &EpicSearchIndex<'_>,
-        epic_id: EpicId,
-    ) -> bool {
-        if index.own_match_by_id(epic_id) {
-            return true;
-        }
-
-        let epic_ids = crate::models::descendant_epic_ids_with_map(epic_id, &index.children);
-
-        let sub_epic_matches = epic_ids.iter().any(|&id| {
-            id != epic_id
-                && index.own_match_by_id(id)
-                && self.epic_matches(id)
-                && self.epic_repo_matches(id)
-        });
-        if sub_epic_matches {
-            return true;
-        }
-
-        epic_ids.iter().any(|id| index.task_owners.contains(id))
-    }
-
-    /// Whether the epic should be shown under the active board-search query.
-    ///
-    /// Single-epic convenience: builds a one-shot [`EpicSearchIndex`] and
-    /// delegates to [`Self::epic_search_matches_indexed`]. The empty-query fast
-    /// path keeps a non-searching caller free.
-    ///
-    /// Test-only. Every production caller filters many epics in one pass and so
-    /// builds the index once — see [`Self::visible_epics_for_effective_view`];
-    /// building a fresh index per epic is exactly the O(epics x tasks) shape
-    /// that pass exists to avoid. It survives for the per-epic assertions in
-    /// `src/tui/tests/search.rs`, which
-    /// `visible_epic_cards_agree_with_the_single_epic_predicate` ties back to
-    /// the view pass so the two paths cannot drift.
-    #[cfg(test)]
-    pub(in crate::tui) fn epic_search_matches(&self, epic_id: EpicId) -> bool {
-        if !self.search_active() {
-            return true;
-        }
-        self.epic_search_matches_indexed(&self.epic_search_index(), epic_id)
-    }
-
-    /// An empty [`EpicSearchPass`] for one pass over the board. Build this once
-    /// per frame / per action, next to `tasks_for_current_view()`, and thread it
-    /// into every column build in that pass.
-    pub(in crate::tui) fn epic_search_pass(&self) -> EpicSearchPass<'_> {
-        EpicSearchPass::default()
-    }
-
-    /// Epics visible in the current board/epic view, filtered by the active
-    /// repo / only-active filters and the board-search query: root epics (no
-    /// parent) in `Board` mode, direct children of the current epic in `Epic`
-    /// mode. Shared by `column_items_for_status_with_view_tasks`,
-    /// and `column_item_count_with` so an epic-visibility rule change is made
-    /// in one place instead of two.
-    ///
-    /// This answers *which* epics have a card at all. *Where* each one's cards
-    /// land is a separate question, answered by `compute_epic_placements`: an
-    /// epic visible here can hold a card in all four columns at once.
-    ///
-    /// `pass` carries the search index for the whole pass (see
-    /// [`Self::epic_search_pass`]), shared across every column in it — which is
-    /// what keeps a frame at one O(tasks) scan rather than one per epic *and*
-    /// one per column.
-    ///
-    /// `'p` is the borrow of the pass, kept separate from `'a` (the board borrow
-    /// the yielded epics carry) so a caller can drop the pass while the items it
-    /// produced live on.
-    pub(in crate::tui) fn visible_epics_for_effective_view<'a, 'p>(
-        &'a self,
-        pass: &'p EpicSearchPass<'a>,
-    ) -> impl Iterator<Item = &'a Epic> + 'p {
-        let parent = match self.effective_view_mode() {
-            BoardViewMode::Board(_) => None,
-            BoardViewMode::Epic { epic_id, .. } => Some(epic_id),
-        };
-        self.board
-            .epics
-            .iter()
-            .filter(move |e| e.parent_epic_id == parent)
-            .filter(move |e| {
-                self.epic_matches(e.id) && self.epic_repo_matches(e.id) && pass.admits(self, e.id)
-            })
-    }
-
-    /// Epics eligible as reparent targets for `target`.
-    ///
-    /// Excludes the target epic and its descendants (cycle prevention), epics
-    /// in `Done` status, and epics filtered out by the active repo /
-    /// only-active filters (using the same predicates the board uses to decide
-    /// epic visibility).
-    pub(in crate::tui) fn reparent_target_epics(&self, target: EpicId) -> Vec<&Epic> {
-        let excluded = crate::models::descendant_epic_ids(target, &self.board.epics);
-        self.board
-            .epics
-            .iter()
-            .filter(|e| {
-                !excluded.contains(&e.id)
-                    && e.status != TaskStatus::Done
-                    && self.epic_matches(e.id)
-                    && self.epic_repo_matches(e.id)
-            })
-            .collect()
-    }
-
-    /// Epics eligible as move-to-epic targets for a task.
-    ///
-    /// Unlike [`Self::reparent_target_epics`], there is no descendant exclusion
-    /// (a task can never be an ancestor of an epic, so no cycle is possible).
-    /// Excludes epics in `Done` status and epics hidden by the active repo /
-    /// only-active filters, using the same visibility predicates the board
-    /// uses.
-    pub(in crate::tui) fn move_task_target_epics(&self) -> Vec<&Epic> {
-        self.board
-            .epics
-            .iter()
-            .filter(|e| {
-                e.status != TaskStatus::Done
-                    && self.epic_matches(e.id)
-                    && self.epic_repo_matches(e.id)
-            })
-            .collect()
-    }
-
-    /// True when a board-search query is active (non-empty).
-    pub(in crate::tui) fn search_active(&self) -> bool {
-        !self.search.query.is_empty()
-    }
-
-    /// Whether any fold — a section fold or an epic fold — actually takes
-    /// effect in this column right now.
-    ///
-    /// Not just "a fold is recorded here": a live search query overrides every
-    /// fold, so during one this is false and the column renders as if nothing
-    /// were folded. The override is stated here and read by both the render
-    /// path and the item count, so the two cannot disagree about it.
-    pub(in crate::tui) fn column_has_rendered_fold(&self, status: TaskStatus) -> bool {
-        !self.search_active() && (self.folds.any_in(status) || self.epic_folds.any_in(status))
-    }
-
     /// Replace the whole folded set, as the startup restore does. Not a
     /// toggle: it installs what storage held rather than editing it.
     pub fn set_section_folds(&mut self, folds: SectionFoldState) {
@@ -878,7 +647,7 @@ impl App {
     /// Whether the cursor is in a column flattened mode applies to.
     pub(in crate::tui) fn cursor_in_flattened_column(&self) -> bool {
         self.selected_column_status()
-            .is_some_and(|s| self.is_flattened_for_status(s))
+            .is_some_and(|s| self.view().is_flattened_for_status(s))
     }
 
     pub(in crate::tui) fn find_task(&self, id: TaskId) -> Option<&Task> {
@@ -889,7 +658,7 @@ impl App {
         // Rebuild index if missing or stale (e.g. direct board.tasks mutation in
         // tests, or a wholesale same-length replacement of board.tasks with a
         // different id set — a length-only check would miss that).
-        let fingerprint = self.compute_task_ids_fingerprint();
+        let fingerprint = self.view().compute_task_ids_fingerprint();
         if self.layout.task_index.is_none()
             || self.layout.task_index_fingerprint != Some(fingerprint)
         {

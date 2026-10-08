@@ -655,7 +655,7 @@ impl Default for ViewMode {
 // ---------------------------------------------------------------------------
 
 /// `ViewMode` narrowed to the two variants that carry board-column layout:
-/// `Board` and `Epic`. Returned by `App::effective_view_mode()`, which peels
+/// `Board` and `Epic`. Returned by `BoardView::effective_view_mode()`, which peels
 /// away the `TaskDetail` overlay variant. Column-builder
 /// callers match exhaustively on this with no `unreachable!` fallback.
 pub(in crate::tui) enum BoardViewMode<'a> {

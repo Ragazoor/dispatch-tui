@@ -158,8 +158,9 @@ pub(in crate::tui) fn make_epic_with_title(id: i64, title: &str) -> Epic {
 /// view-pass path (`visible_epics_for_effective_view`), not the per-epic
 /// predicate. Shared so a signature change to that pass touches one call site.
 pub(in crate::tui) fn visible_epic_ids(app: &super::App) -> Vec<i64> {
-    let pass = app.epic_search_pass();
+    let pass = app.view().epic_search_pass();
     let mut ids: Vec<i64> = app
+        .view()
         .visible_epics_for_effective_view(&pass)
         .map(|e| e.id.0)
         .collect();
@@ -171,7 +172,11 @@ pub(in crate::tui) fn visible_epic_ids(app: &super::App) -> Vec<i64> {
 /// [`visible_epic_ids`] for `tasks_for_current_view`. A set rather than a sorted
 /// list because callers ask about membership, not order.
 pub(in crate::tui) fn visible_task_ids(app: &super::App) -> std::collections::HashSet<TaskId> {
-    app.tasks_for_current_view().iter().map(|t| t.id).collect()
+    app.view()
+        .tasks_for_current_view()
+        .iter()
+        .map(|t| t.id)
+        .collect()
 }
 
 /// Helper: create an app with one task + one epic in Backlog, cursor on the epic.
