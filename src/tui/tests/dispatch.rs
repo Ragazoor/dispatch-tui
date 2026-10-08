@@ -39,8 +39,7 @@ fn dispatch_only_backlog_tasks() {
 
 #[test]
 fn tick_checks_window_for_review_task_with_live_window() {
-    let task = make_task(5, TaskStatus::Review);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(5, TaskStatus::Review)]);
 
     let cmds = app.update(Message::System(SystemMessage::Tick));
 
@@ -55,8 +54,7 @@ fn tick_checks_window_for_review_task_with_live_window() {
 
 #[test]
 fn dispatch_from_running_is_noop() {
-    let task = make_task(4, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     let cmds = app.update(Message::Task(TaskMessage::Dispatch(
         TaskId(4),
         DispatchMode::Dispatch,
@@ -66,8 +64,7 @@ fn dispatch_from_running_is_noop() {
 
 #[test]
 fn dispatch_from_review_is_noop() {
-    let task = make_task(5, TaskStatus::Review);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(5, TaskStatus::Review)]);
     let cmds = app.update(Message::Task(TaskMessage::Dispatch(
         TaskId(5),
         DispatchMode::Dispatch,
@@ -839,8 +836,7 @@ fn pr_closed_no_notification_when_disabled() {
 
 #[test]
 fn pr_closed_ignores_non_review_task() {
-    let task = make_task(1, TaskStatus::Done);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Done)]);
 
     let cmds = app.update(Message::Pr(PrMessage::Closed(TaskId(1))));
 
@@ -1542,8 +1538,7 @@ fn claimed_task_still_renders_the_dispatching_indicator() {
 
 #[test]
 fn window_gone_ignored_for_split_pinned_task() {
-    let task = make_task(4, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
 
     // Pin task 4 in split mode
     app.board.split.active = true;
@@ -2224,8 +2219,7 @@ fn space_on_crashed_running_with_window_jumps() {
 
 #[test]
 fn space_on_review_with_window_jumps() {
-    let task = make_task(5, TaskStatus::Review);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(5, TaskStatus::Review)]);
     app.selection_mut().set_column(3); // Review column
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));
     assert!(

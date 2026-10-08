@@ -603,10 +603,7 @@ mod tests {
         ));
 
         let id = svc
-            .create_task(CreateTaskParams::fixture(
-                "delegated".to_string(),
-                "/repo".to_string(),
-            ))
+            .create_task(CreateTaskParams::fixture("delegated", "/repo".to_string()))
             .await
             .unwrap();
 
@@ -626,7 +623,7 @@ mod tests {
         let svc: Arc<dyn EpicServiceApi> = Arc::new(EpicService::new(store.clone()));
 
         let epic = svc
-            .create_epic(CreateEpicParams::fixture("delegated epic".to_string()))
+            .create_epic(CreateEpicParams::fixture("delegated epic"))
             .await
             .unwrap();
 

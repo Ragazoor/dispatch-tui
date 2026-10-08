@@ -11,7 +11,7 @@ async fn create_task_returning_gives_full_task() {
         .create_task_returning(CreateTaskParams {
             description: "desc".into(),
             tag: Some(TaskTag::Feature),
-            ..CreateTaskParams::fixture("Full task", "/repo".to_string())
+            ..CreateTaskParams::fixture("Full task", "/repo")
         })
         .await
         .unwrap();
@@ -31,7 +31,7 @@ async fn create_task_with_auto_run_plan_true_persists() {
         .create_task_returning(CreateTaskParams {
             description: "d".to_string(),
             auto_run_plan: true,
-            ..CreateTaskParams::fixture("T".to_string(), "/r".to_string())
+            ..CreateTaskParams::fixture("T", "/r".to_string())
         })
         .await
         .unwrap();
@@ -52,7 +52,7 @@ async fn create_task_returning_with_epic() {
     let task = tsvc
         .create_task_returning(CreateTaskParams {
             epic_id: Some(epic.id),
-            ..CreateTaskParams::fixture("Sub", "/repo".to_string())
+            ..CreateTaskParams::fixture("Sub", "/repo")
         })
         .await
         .unwrap();
@@ -76,7 +76,7 @@ async fn create_task_returning_sets_all_optional_fields_atomically() {
             epic_id: Some(epic.id),
             sort_order: Some(3),
             tag: Some(TaskTag::Feature),
-            ..CreateTaskParams::fixture("Atomic", "/repo".to_string())
+            ..CreateTaskParams::fixture("Atomic", "/repo")
         })
         .await
         .unwrap();
@@ -94,7 +94,7 @@ async fn delete_task_removes_it() {
     let svc = task_svc(&db);
 
     let id = svc
-        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
+        .create_task(CreateTaskParams::fixture("T", "/repo"))
         .await
         .unwrap();
     // The store only deletes a finished task.
@@ -124,7 +124,7 @@ async fn update_task_sets_worktree_and_tmux_window() {
     let svc = task_svc(&db);
 
     let id = svc
-        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
+        .create_task(CreateTaskParams::fixture("T", "/repo"))
         .await
         .unwrap();
 
@@ -153,7 +153,7 @@ async fn update_task_clears_worktree() {
     let svc = task_svc(&db);
 
     let id = svc
-        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
+        .create_task(CreateTaskParams::fixture("T", "/repo"))
         .await
         .unwrap();
 
@@ -192,7 +192,7 @@ async fn update_task_allows_done_status() {
     let svc = task_svc(&db);
 
     let id = svc
-        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
+        .create_task(CreateTaskParams::fixture("T", "/repo"))
         .await
         .unwrap();
 
@@ -362,13 +362,13 @@ async fn list_tasks_filters_by_epic_id() {
     let id1 = svc
         .create_task(CreateTaskParams {
             epic_id: Some(epic.id),
-            ..CreateTaskParams::fixture("In epic", "/repo".to_string())
+            ..CreateTaskParams::fixture("In epic", "/repo")
         })
         .await
         .unwrap();
 
     let _id2 = svc
-        .create_task(CreateTaskParams::fixture("No epic", "/repo".to_string()))
+        .create_task(CreateTaskParams::fixture("No epic", "/repo"))
         .await
         .unwrap();
 
@@ -388,11 +388,11 @@ async fn list_tasks_filters_by_repo_paths() {
     let db = test_db().await;
     let svc = task_svc(&db);
 
-    svc.create_task(CreateTaskParams::fixture("Repo A", "/repo/a".to_string()))
+    svc.create_task(CreateTaskParams::fixture("Repo A", "/repo/a"))
         .await
         .unwrap();
 
-    svc.create_task(CreateTaskParams::fixture("Repo B", "/repo/b".to_string()))
+    svc.create_task(CreateTaskParams::fixture("Repo B", "/repo/b"))
         .await
         .unwrap();
 
@@ -413,11 +413,11 @@ async fn list_tasks_excludes_caller_task() {
     let svc = task_svc(&db);
 
     let id1 = svc
-        .create_task(CreateTaskParams::fixture("T1", "/repo".to_string()))
+        .create_task(CreateTaskParams::fixture("T1", "/repo"))
         .await
         .unwrap();
 
-    svc.create_task(CreateTaskParams::fixture("T2", "/repo".to_string()))
+    svc.create_task(CreateTaskParams::fixture("T2", "/repo"))
         .await
         .unwrap();
 

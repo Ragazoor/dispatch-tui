@@ -87,7 +87,7 @@ async fn update_task_toctou_last_write_wins() {
     let svc_b = task_svc(&db);
 
     let id = svc_a
-        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
+        .create_task(CreateTaskParams::fixture("T", "/repo"))
         .await
         .unwrap();
 
@@ -130,7 +130,7 @@ async fn update_task_sub_status_validated_against_persisted_status() {
     let svc_b = task_svc(&db);
 
     let id = svc_a
-        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
+        .create_task(CreateTaskParams::fixture("T", "/repo"))
         .await
         .unwrap();
 
@@ -569,7 +569,7 @@ async fn record_hook_event_noop_for_non_running_task() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc
-        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
+        .create_task(CreateTaskParams::fixture("T", "/repo"))
         .await
         .unwrap();
 
@@ -1754,7 +1754,7 @@ async fn phoenix_task(db: &Arc<dyn store::TaskStore>, epic_id: Option<EpicId>) -
             wrap_up_mode: Some(crate::models::WrapUpMode::Done),
             auto_run_plan: true,
             phoenix: true,
-            ..CreateTaskParams::fixture("Weekly dep audit", "/repo".to_string())
+            ..CreateTaskParams::fixture("Weekly dep audit", "/repo")
         })
         .await
         .unwrap();
@@ -2458,13 +2458,15 @@ async fn epic_ensure_deletable_names_the_lowest_id_blocking_task_across_sub_epic
     let root = epics.create_epic(mk(None)).await.unwrap();
     let sub = epics.create_epic(mk(Some(root.id))).await.unwrap();
     // The lower id lives in the sub-epic, the higher one directly in the root.
-    let mut p = make_task_params("/repo");
-    p.title = "Deep blocker".into();
-    let deep = tasks.create_task(p).await.unwrap();
+    let deep = tasks
+        .create_task(CreateTaskParams::fixture("Deep blocker", "/repo"))
+        .await
+        .unwrap();
     db.set_task_epic_id(deep, Some(sub.id)).await.unwrap();
-    let mut p = make_task_params("/repo");
-    p.title = "Shallow blocker".into();
-    let shallow = tasks.create_task(p).await.unwrap();
+    let shallow = tasks
+        .create_task(CreateTaskParams::fixture("Shallow blocker", "/repo"))
+        .await
+        .unwrap();
     db.set_task_epic_id(shallow, Some(root.id)).await.unwrap();
 
     let err = epics.ensure_deletable(root.id).await.unwrap_err();

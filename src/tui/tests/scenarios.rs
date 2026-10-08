@@ -205,17 +205,14 @@ fn scenario_lowercase_m_is_no_longer_bound_to_move() {
 // ---------------------------------------------------------------------------
 
 fn make_feed_epic(id: i64) -> crate::models::Epic {
-    let mut e = make_epic(id);
-    e.feed_command = Some("echo '[]'".to_string());
-    e
+    crate::models::EpicBuilder::new(id)
+        .feed_command(Some("echo '[]'"))
+        .build()
 }
 
 fn make_app_with_feed_epic_selected() -> super::App {
-    use super::App;
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut app = make_app_with_epic_selected();
     app.board.epics = vec![make_feed_epic(10)];
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 1);
     app
 }
 

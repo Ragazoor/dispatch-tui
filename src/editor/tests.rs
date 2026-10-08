@@ -54,8 +54,8 @@ const FEED_INTERVAL_FAST_SECS: i64 = 60;
 
 fn make_epic(title: &str, description: &str) -> Epic {
     EpicBuilder::new(1)
-        .title(title.to_string())
-        .description(description.to_string())
+        .title(title)
+        .description(description)
         .auto_dispatch(true)
         .build()
 }

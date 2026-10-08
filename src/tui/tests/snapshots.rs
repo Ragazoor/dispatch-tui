@@ -346,7 +346,7 @@ fn snapshot_input_epic_title_form() {
 
 fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> crate::models::Epic {
     crate::models::EpicBuilder::new(id)
-        .title(title.to_string())
+        .title(title)
         .sort_order(Some(sort_order))
         .feed_command(Some(&format!("feed-{title}")))
         .feed_interval_secs(Some(30))

@@ -22,7 +22,7 @@ async fn update_task_worktree_set_persists() {
     let id = svc
         .create_task(CreateTaskParams {
             description: "d".into(),
-            ..CreateTaskParams::fixture("t", "/repo".to_string())
+            ..CreateTaskParams::fixture("t", "/repo")
         })
         .await
         .unwrap();
@@ -48,7 +48,7 @@ async fn update_task_worktree_clear_sets_null() {
     let id = svc
         .create_task(CreateTaskParams {
             description: "d".into(),
-            ..CreateTaskParams::fixture("t", "/repo".to_string())
+            ..CreateTaskParams::fixture("t", "/repo")
         })
         .await
         .unwrap();
@@ -83,7 +83,7 @@ async fn update_task_pr_url_set_and_clear() {
     let id = svc
         .create_task(CreateTaskParams {
             description: "d".into(),
-            ..CreateTaskParams::fixture("t", "/repo".to_string())
+            ..CreateTaskParams::fixture("t", "/repo")
         })
         .await
         .unwrap();

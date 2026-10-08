@@ -1020,8 +1020,7 @@ fn confirm_detach_tmux_emits_a_draining_subagent_clear() {
 
 #[test]
 fn confirm_detach_tmux_y_detaches() {
-    let task = make_task(3, TaskStatus::Review);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Review)]);
     app.input.mode = InputMode::ConfirmDetachTmux(vec![TaskId(3)]);
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     // Should produce KillTmuxWindow + PatchSubStatus commands

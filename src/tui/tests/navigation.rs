@@ -316,8 +316,7 @@ fn error_sets_error_popup() {
 
 #[test]
 fn move_backward_from_running_detaches_but_keeps_worktree() {
-    let task = make_task(4, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
 
     let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
         id: TaskId(4),
@@ -395,8 +394,7 @@ fn single_move_to_done_records_the_task_in_pending_done() {
 
 #[test]
 fn move_forward_to_done_with_live_window_enters_confirm_mode() {
-    let task = make_task(5, TaskStatus::Review);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(5, TaskStatus::Review)]);
 
     let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
         id: TaskId(5),
@@ -411,8 +409,7 @@ fn move_forward_to_done_with_live_window_enters_confirm_mode() {
 
 #[test]
 fn space_key_with_live_window_jumps() {
-    let task = make_task(4, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.selection_mut().set_column(2); // Running = nav col 2
     let cmds = app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(
@@ -1828,8 +1825,7 @@ fn tick_without_split_does_not_check_pane() {
 
 #[test]
 fn tick_skips_capture_for_split_pinned_task() {
-    let task = make_task(4, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
 
     // Pin task 4 in split mode
     app.board.split.active = true;

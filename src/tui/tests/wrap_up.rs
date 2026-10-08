@@ -216,8 +216,7 @@ fn w_key_is_inert_on_epic() {
 
 #[test]
 fn status_bar_no_longer_shows_wrap_up_hint_for_review_task() {
-    let task = make_task(1, TaskStatus::Review);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Review)]);
     // Navigate to Review column (index 2)
     for _ in 0..2 {
         app.update(Message::NavigateColumn(1));

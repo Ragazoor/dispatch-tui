@@ -345,8 +345,7 @@ async fn wrap_up_rebase_returns_exit_token() {
 
 #[tokio::test]
 async fn wrap_up_done_returns_exit_token() {
-    let (state, db) =
-        test_state_with_overrides(Arc::new(MockProcessRunner::new(vec![])), None, None).await;
+    let (state, db) = test_state_with_db().await;
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -539,8 +538,7 @@ async fn wrap_up_pr_response_contains_token_and_no_retro_instruction() {
 async fn make_state_with_runner(
     runner: Arc<dyn ProcessRunner>,
 ) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
-    let (state, db) = test_state_with_overrides(runner, None, None).await;
-    (state, db)
+    test_state_with_overrides(runner, None, None).await
 }
 
 /// A runner scripted for one clean `finish_task`: the preflight reads pass, no
@@ -1805,9 +1803,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
 
 #[tokio::test]
 async fn wrap_up_done_defers_done_transition_to_exit_session() {
-    use crate::process::MockProcessRunner;
-    let runner: Arc<dyn crate::process::ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let (state, db) = test_state_with_overrides(runner, None, None).await;
+    let (state, db) = test_state_with_db().await;
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -1893,8 +1889,7 @@ async fn wrap_up_done_recalculates_epic_status() {
     // wrap_up(done) on an epic's only running subtask must NOT advance the
     // epic yet (status is deferred to exit_session); the closing call is
     // what auto-advances the epic to Done.
-    let (state, db) =
-        test_state_with_overrides(Arc::new(MockProcessRunner::new(vec![])), None, None).await;
+    let (state, db) = test_state_with_db().await;
 
     let epic = db.create_epic("E", "", None).await.unwrap();
     let task_id = db

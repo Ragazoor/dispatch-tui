@@ -7,7 +7,7 @@
 //! `CreateTaskRequest { plan: Some("p.md"), ..CreateTaskRequest::fixture("T", "/repo") }`.
 
 use super::CreateTaskRequest;
-use crate::models::TaskStatus;
+use crate::models::{TaskStatus, DEFAULT_BASE_BRANCH};
 
 impl<'a> CreateTaskRequest<'a> {
     /// A backlog task on `main` with no plan, epic, tag or flags.
@@ -18,7 +18,7 @@ impl<'a> CreateTaskRequest<'a> {
             repo_path,
             plan: None,
             status: TaskStatus::Backlog,
-            base_branch: "main",
+            base_branch: DEFAULT_BASE_BRANCH,
             epic_id: None,
             sort_order: None,
             tag: None,

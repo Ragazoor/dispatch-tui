@@ -66,7 +66,7 @@ async fn make_epic(svc: &EpicService, title: &str) -> crate::models::Epic {
 async fn make_task(svc: &TaskService, epic_id: Option<EpicId>) -> TaskId {
     svc.create_task(CreateTaskParams {
         epic_id,
-        ..CreateTaskParams::fixture("T", "/repo".to_string())
+        ..CreateTaskParams::fixture("T", "/repo")
     })
     .await
     .unwrap()

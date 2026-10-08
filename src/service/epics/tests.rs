@@ -150,7 +150,7 @@ async fn create_epic_returns_the_post_patch_epic() {
             sort_order: Some(42),
             feed_command: Some("gh api repos/x/pulls".to_string()),
             feed_interval_secs: Some(300),
-            ..CreateEpicParams::fixture("E".to_string())
+            ..CreateEpicParams::fixture("E")
         })
         .await
         .unwrap();
@@ -166,7 +166,7 @@ fn create_params_with_interval(interval: Option<i64>) -> CreateEpicParams {
     CreateEpicParams {
         feed_command: Some("true".to_string()),
         feed_interval_secs: interval,
-        ..CreateEpicParams::fixture("E".to_string())
+        ..CreateEpicParams::fixture("E")
     }
 }
 

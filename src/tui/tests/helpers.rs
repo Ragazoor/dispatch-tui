@@ -151,10 +151,7 @@ pub(in crate::tui) fn make_epic(id: i64) -> Epic {
 }
 
 pub(in crate::tui) fn make_epic_with_title(id: i64, title: &str) -> Epic {
-    Epic {
-        title: title.to_string(),
-        ..make_epic(id)
-    }
+    EpicBuilder::new(id).title(title).build()
 }
 
 /// Ids of the epic cards the current view would render, ascending — the

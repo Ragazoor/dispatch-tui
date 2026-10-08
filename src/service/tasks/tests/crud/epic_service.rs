@@ -260,7 +260,7 @@ async fn list_epics_with_progress() {
     task_svc
         .create_task(CreateTaskParams {
             epic_id: Some(epic.id),
-            ..CreateTaskParams::fixture("Sub1", "/repo".to_string())
+            ..CreateTaskParams::fixture("Sub1", "/repo")
         })
         .await
         .unwrap();
@@ -291,14 +291,14 @@ async fn list_epics_with_progress_multiple_epics() {
     let t1 = task_svc
         .create_task(CreateTaskParams {
             epic_id: Some(e1.id),
-            ..CreateTaskParams::fixture("T1", "/repo".to_string())
+            ..CreateTaskParams::fixture("T1", "/repo")
         })
         .await
         .unwrap();
     task_svc
         .create_task(CreateTaskParams {
             epic_id: Some(e1.id),
-            ..CreateTaskParams::fixture("T2", "/repo".to_string())
+            ..CreateTaskParams::fixture("T2", "/repo")
         })
         .await
         .unwrap();
@@ -306,7 +306,7 @@ async fn list_epics_with_progress_multiple_epics() {
     task_svc
         .create_task(CreateTaskParams {
             epic_id: Some(e2.id),
-            ..CreateTaskParams::fixture("T3", "/repo".to_string())
+            ..CreateTaskParams::fixture("T3", "/repo")
         })
         .await
         .unwrap();
@@ -341,7 +341,7 @@ async fn update_task_status_recalculates_epic() {
     let task_id = task_svc
         .create_task(CreateTaskParams {
             epic_id: Some(epic.id),
-            ..CreateTaskParams::fixture("Sub", "/repo".to_string())
+            ..CreateTaskParams::fixture("Sub", "/repo")
         })
         .await
         .unwrap();
@@ -369,7 +369,7 @@ async fn get_epic_with_subtasks() {
     task_svc
         .create_task(CreateTaskParams {
             epic_id: Some(epic.id),
-            ..CreateTaskParams::fixture("Sub", "/repo".to_string())
+            ..CreateTaskParams::fixture("Sub", "/repo")
         })
         .await
         .unwrap();

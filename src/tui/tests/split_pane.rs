@@ -61,8 +61,7 @@ fn toggle_split_mode_emits_exit_command() {
 
 #[test]
 fn toggle_split_exit_restores_pinned_task_window() {
-    let task = make_task(3, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(3));
@@ -77,8 +76,7 @@ fn toggle_split_exit_restores_pinned_task_window() {
 fn capital_s_is_inert_outside_split_mode() {
     // [S] was retired; Space now owns the swap. The key must have no arm at
     // all — no commands, no status hint, no mode change.
-    let task = make_task(4, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.selection_mut().set_column(2);
     let mode_before = app.input.mode.clone();
     let cmds = app.handle_key(make_key(KeyCode::Char('S')));
@@ -93,8 +91,7 @@ fn capital_s_is_inert_outside_split_mode() {
 
 #[test]
 fn capital_s_is_inert_in_split_mode() {
-    let task = make_task(4, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.selection_mut().set_column(2);
@@ -109,8 +106,7 @@ fn capital_s_is_inert_in_split_mode() {
 
 #[test]
 fn space_in_split_mode_emits_swap_command() {
-    let task = make_task(4, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     // No pinned task — different from already-pinned case
@@ -131,8 +127,7 @@ fn space_in_split_mode_emits_swap_command() {
 fn space_in_split_mode_never_jumps_to_a_window() {
     // The whole point of the rebinding: with the pane open, Space brings the
     // agent to the board rather than taking the user away to its window.
-    let task = make_task(4, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.selection_mut().set_column(2);
@@ -150,8 +145,7 @@ fn space_in_split_mode_never_jumps_to_a_window() {
 fn space_in_split_mode_on_backlog_task_still_dispatches() {
     // Split mode overrides only the jump branch. A task with no window has
     // nothing to swap in, so the status routing is untouched.
-    let task = make_task(4, TaskStatus::Backlog);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Backlog)]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.selection_mut().set_column(1);
@@ -168,8 +162,7 @@ fn space_in_split_mode_on_backlog_task_still_dispatches() {
 
 #[test]
 fn space_without_split_mode_emits_jump_command() {
-    let task = make_task(4, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(cmds.iter().any(|c| matches!(
@@ -182,8 +175,7 @@ fn space_without_split_mode_emits_jump_command() {
 fn space_on_pinned_split_task_emits_focus_split_pane() {
     // When the selected task IS the pinned split-pane task, its standalone
     // window no longer exists — [space] must focus the right pane instead.
-    let task = make_task(4, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(4));
@@ -346,8 +338,7 @@ fn a_swap_report_does_not_settle_an_entry() {
 /// never raised — leaving split mode active over a live orphan pane.
 #[test]
 fn a_toggle_that_exits_split_mode_keeps_the_pane_id_until_tmux_confirms() {
-    let task = make_task(3, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(3));
@@ -427,8 +418,7 @@ fn tick_checks_window_for_non_pinned_tasks_in_split_mode() {
 
 #[test]
 fn toggle_split_with_selected_tmux_task_emits_enter_with_task() {
-    let task = make_task(3, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.selection_mut().set_column(2); // Running column
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('s'))));
     assert_eq!(cmds.len(), 1);
@@ -476,8 +466,7 @@ fn handle_key_normal_toggle_split_mode() {
 
 #[test]
 fn confirm_quit_with_active_split_emits_exit_split_mode() {
-    let task = make_task(3, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
 
     // Set up active split with a pinned task
     app.board.split.active = true;
@@ -618,8 +607,7 @@ fn pr_merged_respawns_split_pane() {
 
 #[test]
 fn confirm_done_respawns_split_pane() {
-    let task = make_task(1, TaskStatus::Review);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Review)]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%5".to_string());
     app.board.split.pinned_task_id = Some(TaskId(1));
@@ -1441,8 +1429,7 @@ fn a_held_toggle_and_a_held_quit_exit_once_between_them() {
 #[test]
 fn quitting_with_no_entry_in_flight_exits_immediately() {
     // The ordinary path must keep working: no entry, no wait.
-    let task = make_task(3, TaskStatus::Running);
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(3));
