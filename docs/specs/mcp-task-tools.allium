@@ -550,6 +550,51 @@ rule PrFinalisationReflectionNudge {
         -- unconditional (see learnings.allium: WrapUpRateLearningNudge).
 }
 
+rule UpdateTasksViaMcp {
+    when: McpUpdateTasks(caller_identity, task_ids, fields)
+
+    -- fields is the update_task field set (status, sub_status, plan_path,
+    -- title, description, repo_path, sort_order, url, url_type, tag, epic_id,
+    -- base_branch, wrap_up_mode, auto_run_plan, phoenix): every argument of
+    -- update_task except task_id, with the same meaning.
+
+    requires: task_ids.count > 0
+
+    -- Each id is handled exactly as one update_task call with that task_id and
+    -- the same fields would be, independently of the others.
+    ensures:
+        for t in task_ids:
+            McpUpdateTask(task: t, caller_identity: caller_identity, fields: fields)
+    ensures: BulkUpdateReported(task_ids: task_ids)
+
+    @guidance
+        -- == One call per task, reported per task ==
+        -- update_tasks exists because changing one field across an epic tree
+        -- took one update_task call per task (about 250 for one base_branch
+        -- change). It adds no rules of its own: each id goes through
+        -- UpdateTaskViaMcp, or MarkTaskDoneViaMcp for status = done, with all
+        -- of their guards. It is not atomic. A failure on one task does not
+        -- stop or roll back the others.
+        --
+        -- The response is a success even when some tasks fail. It has one line
+        -- per id, in the order given: the line update_task would have answered
+        -- ("Task N updated (fields)") or "Task N failed: <error message>",
+        -- then a final "Updated X of Y tasks." A repeated id is handled once.
+        --
+        -- == Selection is explicit ids only ==
+        -- There is no epic_id/recursive selection here. The caller lists the
+        -- ids with list_tasks (epic_id, recursive, status, base_branch) and
+        -- passes them. That keeps one way to select, and the caller's status
+        -- filter on list_tasks decides whether done and running tasks are
+        -- included. Every named task is updated, whatever its status.
+        --
+        -- An empty task_ids, a task_ids that is not an array of ids, or a
+        -- task_id argument is rejected as invalid params (-32602) before any
+        -- task is touched. A call with no field set is too: every task would
+        -- fail the same way.
+        -- Handled by handle_update_tasks in src/mcp/handlers/tasks/crud.rs.
+}
+
 rule CreateTaskViaMcp {
     when: McpCreateTask(caller_identity,
                         title, repo_path, epic_id, description?, plan?,
@@ -788,7 +833,7 @@ rule GetTaskViaMcp {
 
 rule ListTasksViaMcp {
     when: McpListTasks(caller_identity,
-                       epic_id?, repo_paths?, status?)
+                       epic_id?, repo_paths?, status?, recursive?, base_branch?)
 
     -- caller_identity comes from the HTTP transport (see CreateTaskViaMcp).
 
@@ -796,10 +841,30 @@ rule ListTasksViaMcp {
         caller_identity: caller_identity,
         epic_id: epic_id,
         repo_paths: repo_paths,
-        status: status
+        status: status,
+        recursive: recursive,
+        base_branch: base_branch
     )
 
     @guidance
+        -- == recursive widens the epic scope to the whole subtree ==
+        -- recursive (default false) applies to the epic scope in effect,
+        -- explicit or auto-derived (below): with it, a task matches when its
+        -- epic is the scope epic or any descendant of it (core/Epic
+        -- parent_epic_id chain), not only the scope epic itself. Without it
+        -- the walk had to be done by hand, one get_epic per guessed id, and a
+        -- missed sub-epic silently left its tasks out of a bulk change.
+        -- recursive = true with no epic scope in effect (a session caller with
+        -- no epic_id, or an agent with no epic that passed repo_paths) is
+        -- rejected as invalid params (-32602): the board-wide list is already
+        -- every task, so the flag would mean nothing.
+        --
+        -- == base_branch filters by exact match and every row shows it ==
+        -- base_branch, when set, keeps only tasks whose base_branch equals it
+        -- exactly. It is not a scope filter: it does not disable auto-scoping.
+        -- Every output row carries " | Base: <base_branch>", so a caller can
+        -- see which tasks need a change before making it.
+        --
         -- When the caller is Task(t) and none of epic_id/repo_paths
         -- are set, auto-derive scope from the caller:
         --   caller.epic_id != null → filter by epic_id = caller.epic_id
@@ -817,6 +882,7 @@ rule ListTasksViaMcp {
         -- epic_id simply means "no narrowing", and a wrong guess costs the
         -- caller one over-broad list rather than a mis-parented task.
         -- Output line per task: title, status/sub_status, tag, epic, then
+        --   | Base: <base_branch>
         --   | <label>: <url.url>  (omitted when url is null), where <label>
         --     is the typed label derived from url.url_type: "PR #N" / "Issue #N"
         --     / "Security Alert" / "Link"

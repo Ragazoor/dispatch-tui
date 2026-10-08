@@ -825,5 +825,6 @@ pub(super) fn extract_created_task_id(resp: &JsonRpcResponse) -> crate::models::
 }
 
 mod base_branch;
+mod epic_tree;
 mod mock_service;
 mod sub_status;

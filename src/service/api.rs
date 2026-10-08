@@ -422,6 +422,12 @@ macro_rules! epic_service_api {
                 &self
             ) -> Result<Vec<($crate::models::Epic, usize, usize)>, $crate::service::ServiceError>;
 
+            async fn list_epics_with_progress_under(
+                &self,
+                parent: Option<$crate::models::EpicId>,
+                recursive: bool
+            ) -> Result<Vec<($crate::models::Epic, usize, usize)>, $crate::service::ServiceError>;
+
             async fn update_epic(
                 &self,
                 params: $crate::service::UpdateEpicParams

@@ -25,6 +25,7 @@ mod wrap_up;
 
 pub(super) use crud::{
     handle_create_task, handle_get_task, handle_list_tasks, handle_query_usage, handle_update_task,
+    handle_update_tasks,
 };
 pub(super) use dispatch::handle_dispatch_task;
 pub(super) use verify::handle_set_verify_command;
@@ -156,6 +157,26 @@ mcp_args! {
     };
 }
 
+/// The `update_tasks` input schema: `update_task`'s, with `task_ids` in place
+/// of `task_id`, so the two field sets cannot drift apart.
+pub(super) fn update_tasks_schema() -> serde_json::Value {
+    let mut schema = update_task_schema();
+    if let Some(props) = schema["properties"].as_object_mut() {
+        props.remove("task_id");
+        props.insert(
+            "task_ids".into(),
+            serde_json::json!({
+                "type": "array",
+                "items": { "type": "integer" },
+                "minItems": 1,
+                "description": "The tasks to update. Each is updated independently, whatever its status."
+            }),
+        );
+    }
+    schema["required"] = serde_json::json!(["task_ids"]);
+    schema
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct GetTaskArgs {
@@ -172,6 +193,10 @@ pub(super) struct ListTasksArgs {
     pub(super) epic_id: Option<EpicId>,
     #[serde(default)]
     pub(super) repo_paths: Option<Vec<String>>,
+    #[serde(default)]
+    pub(super) recursive: bool,
+    #[serde(default)]
+    pub(super) base_branch: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -418,13 +443,14 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str)
         format!(" | Goal: {goal}")
     };
     format!(
-        "- [{}] {} ({}/{}){}{}{}{}",
+        "- [{}] {} ({}/{}){}{} | Base: {}{}{}",
         t.id,
         t.title,
         t.status.as_str(),
         t.sub_status.as_str(),
         tag_indicator,
         epic_indicator,
+        t.base_branch,
         pr_part,
         goal_part,
     )

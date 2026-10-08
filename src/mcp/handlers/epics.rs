@@ -37,6 +37,15 @@ pub(super) struct GetEpicArgs {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(super) struct ListEpicsArgs {
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_id")]
+    pub(super) parent_epic_id: Option<EpicId>,
+    #[serde(default)]
+    pub(super) recursive: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct UpdateEpicArgs {
     #[serde(deserialize_with = "deserialize_flexible_id")]
     pub(super) epic_id: EpicId,
@@ -161,11 +170,19 @@ pub(super) async fn handle_list_epics(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
-    _args: Value,
+    args: Value,
 ) -> JsonRpcResponse {
-    tracing::info!("MCP list_epics");
+    let parsed = match parse_args::<ListEpicsArgs>(&id, args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    tracing::info!(parent_epic_id = ?parsed.parent_epic_id, recursive = parsed.recursive, "MCP list_epics");
 
-    match state.epic_svc.list_epics_with_progress().await {
+    match state
+        .epic_svc
+        .list_epics_with_progress_under(parsed.parent_epic_id, parsed.recursive)
+        .await
+    {
         Ok(epics) => {
             if epics.is_empty() {
                 return JsonRpcResponse::ok(
@@ -182,9 +199,20 @@ pub(super) async fn handle_list_epics(
                     } else {
                         String::new()
                     };
+                    let parent_indicator = match e.parent_epic_id {
+                        Some(p) => format!(" (parent:{p})"),
+                        None => String::new(),
+                    };
                     format!(
-                        "- [{}] {} ({}/{} done){}{}: {}",
-                        e.id, e.title, done, total, plan_indicator, status_indicator, e.description
+                        "- [{}] {} ({}/{} done){}{}{}: {}",
+                        e.id,
+                        e.title,
+                        done,
+                        total,
+                        plan_indicator,
+                        status_indicator,
+                        parent_indicator,
+                        e.description
                     )
                 })
                 .collect();

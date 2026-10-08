@@ -84,6 +84,26 @@ impl JsonRpcResponse {
             }),
         }
     }
+
+    /// The text a tool call answered with, or its error message. Reads both
+    /// failure shapes: a protocol `error` and a [`tool_error`] result with
+    /// `isError: true`. For a handler that reports another handler's reply
+    /// inline (`update_tasks` over `update_task`).
+    pub(super) fn into_text(self) -> Result<String, String> {
+        if let Some(err) = self.error {
+            return Err(err.message);
+        }
+        let result = self.result.unwrap_or_default();
+        let text = result["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        if result["isError"].as_bool() == Some(true) {
+            Err(text)
+        } else {
+            Ok(text)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

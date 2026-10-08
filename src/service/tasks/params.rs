@@ -264,7 +264,11 @@ pub struct CreateTaskParams {
 pub struct ListTasksFilter {
     pub statuses: Option<Vec<TaskStatus>>,
     pub epic_id: Option<EpicId>,
+    /// With `epic_id`, also match tasks of every descendant epic.
+    pub recursive: bool,
     pub repo_paths: Option<Vec<String>>,
+    /// Exact match on `base_branch`.
+    pub base_branch: Option<String>,
     pub exclude_task_id: Option<TaskId>,
 }
 

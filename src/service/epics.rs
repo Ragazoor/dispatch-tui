@@ -337,13 +337,44 @@ impl EpicService {
     pub async fn list_epics_with_progress(
         &self,
     ) -> Result<Vec<(Epic, usize, usize)>, ServiceError> {
+        self.list_epics_with_progress_under(None, false).await
+    }
+
+    /// [`list_epics_with_progress`](Self::list_epics_with_progress) narrowed
+    /// to `parent`'s direct children, or with `recursive` to its whole subtree
+    /// (never `parent` itself). `parent = None` lists every epic, and
+    /// `recursive` without a parent is a validation error: the full list is
+    /// already every epic. See `ListEpicsViaMcp` in `docs/specs/epics.allium`.
+    pub async fn list_epics_with_progress_under(
+        &self,
+        parent: Option<EpicId>,
+        recursive: bool,
+    ) -> Result<Vec<(Epic, usize, usize)>, ServiceError> {
+        if recursive && parent.is_none() {
+            return Err(ServiceError::Validation(
+                "recursive needs parent_epic_id: without it every epic is already listed".into(),
+            ));
+        }
         let epics = self.list_epics().await?;
+        let children = crate::models::build_children_map(&epics);
+        let keep: Option<std::collections::HashSet<EpicId>> = match parent {
+            None => None,
+            Some(p) if !epics.iter().any(|e| e.id == p) => {
+                return Err(ServiceError::NotFound(format!("Epic {p} not found")));
+            }
+            Some(p) if recursive => {
+                let mut subtree = crate::models::descendant_epic_ids_with_map(p, &children);
+                subtree.remove(&p);
+                Some(subtree)
+            }
+            Some(p) => Some(children.get(&p).into_iter().flatten().copied().collect()),
+        };
         let all_subtasks = self.db.list_all_tasks_with_epic_id().await?;
         let tasks_by_epic = Self::group_tasks_by_epic(&all_subtasks);
-        let children = crate::models::build_children_map(&epics);
 
         let result = epics
             .into_iter()
+            .filter(|e| keep.as_ref().is_none_or(|k| k.contains(&e.id)))
             .map(|e| {
                 let (done, total) = Self::epic_progress(&e, &tasks_by_epic, &children);
                 (e, done, total)

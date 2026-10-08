@@ -1012,18 +1012,31 @@ impl TaskService {
     pub async fn list_tasks(&self, filter: ListTasksFilter) -> Result<Vec<Task>, ServiceError> {
         let tasks = self.db.list_all().await?;
 
+        let epic_scope: Option<std::collections::HashSet<EpicId>> = match filter.epic_id {
+            Some(eid) if filter.recursive => Some(crate::models::descendant_epic_ids(
+                eid,
+                &self.db.list_epics().await?,
+            )),
+            Some(eid) => Some(std::iter::once(eid).collect()),
+            None => None,
+        };
+
         let filtered: Vec<_> = tasks
             .into_iter()
             .filter(|t| match &filter.statuses {
                 Some(statuses) => statuses.contains(&t.status),
                 None => true,
             })
-            .filter(|t| match filter.epic_id {
-                Some(eid) => t.epic_id == Some(eid),
+            .filter(|t| match &epic_scope {
+                Some(scope) => t.epic_id.is_some_and(|eid| scope.contains(&eid)),
                 None => true,
             })
             .filter(|t| match &filter.repo_paths {
                 Some(paths) => paths.iter().any(|p| p == &t.repo_path),
+                None => true,
+            })
+            .filter(|t| match &filter.base_branch {
+                Some(branch) => &t.base_branch == branch,
                 None => true,
             })
             .filter(|t| match filter.exclude_task_id {

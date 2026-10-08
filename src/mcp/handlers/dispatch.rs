@@ -133,6 +133,15 @@ phoenix. At least one field besides task_id must be provided; every field left o
         // Generated from the `mcp_args!` field list in `tasks::mod`.
         (tasks::update_task_schema());
 
+    async "update_tasks" => tasks::handle_update_tasks,
+        "Update many tasks with one call. Takes task_ids plus update_task's fields: status, \
+sub_status, title, description, repo_path, plan_path, sort_order, url, url_type, tag, epic_id, \
+base_branch, wrap_up_mode, auto_run_plan and phoenix. Applies them to each task exactly as \
+update_task would, including its guards. Every named task is \
+updated whatever its status; pick the ids with list_tasks (epic_id, recursive, status, base_branch). \
+Not atomic: the reply has one line per task, success or failure, then a count.",
+        (tasks::update_tasks_schema());
+
     async "get_task" => tasks::handle_get_task,
         "Get the details of a task by ID.",
         {
@@ -206,7 +215,7 @@ usually the right answer.",
         };
 
     async "list_tasks" => tasks::handle_list_tasks,
-        "List tasks on the kanban board. Filters are ANDed. When called by a dispatched agent, results auto-scope to the agent's epic and exclude the agent's own task; passing explicit epic_id/repo_paths disables auto-scoping. When called from a non-dispatched session, no auto-scoping. Output includes each task's url under its own type label — 'PR', 'Issue', 'Security Alert' or 'Link', with the number appended where there is one — and the plan goal, when available.",
+        "List tasks on the kanban board. Filters are ANDed. When called by a dispatched agent, results auto-scope to the agent's epic and exclude the agent's own task; passing explicit epic_id/repo_paths disables auto-scoping. When called from a non-dispatched session, no auto-scoping. Output includes each task's base branch, its url under its own type label — 'PR', 'Issue', 'Security Alert' or 'Link', with the number appended where there is one — and the plan goal, when available.",
         {
             "type": "object",
             "properties": {
@@ -225,6 +234,14 @@ usually the right answer.",
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Filter to tasks whose repo_path is in this list."
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "With an epic scope (epic_id, or your own epic when auto-scoped), also include tasks of every descendant epic. Rejected when no epic scope is in effect."
+                },
+                "base_branch": {
+                    "type": "string",
+                    "description": "The base branch for rebase and PR operations (e.g. 'main', 'develop'). Lists only tasks whose base_branch is exactly this."
                 }
             }
         };
@@ -258,11 +275,17 @@ out. It does not return the subtasks themselves — call list_tasks with epic_id
         };
 
     async "list_epics" => epics::handle_list_epics,
-        "List every epic on the kanban board. Takes no arguments and applies no filtering or \
-auto-scoping — sub-epics come back as ordinary rows alongside their parents rather than nested \
-under them. Use it to find an epic's ID when you only know its title. For one epic's detail or \
-its subtask counts, call get_epic instead.",
-        { "type": "object", "properties": {} };
+        "List epics on the kanban board, one row each, with each sub-epic's parent id. With no \
+arguments it lists every epic. Pass parent_epic_id for that epic's direct children, plus \
+recursive=true for its whole subtree. Use it to find an epic's ID when you only know its title. \
+For one epic's detail or its subtask counts, call get_epic instead.",
+        {
+            "type": "object",
+            "properties": {
+                "parent_epic_id": { "type": "integer", "description": "List only the sub-epics of this epic." },
+                "recursive": { "type": "boolean", "description": "With parent_epic_id, list every descendant rather than only direct children." }
+            }
+        };
 
     async "update_epic" => epics::handle_update_epic,
         "Update an epic in place. Accepts title, description, status, plan_path, sort_order, \

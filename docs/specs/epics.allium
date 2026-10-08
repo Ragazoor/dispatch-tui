@@ -548,21 +548,36 @@ rule GetEpicViaMcp {
 }
 
 rule ListEpicsViaMcp {
-    when: McpListEpics()
+    when: McpListEpics(parent_epic_id?, recursive?)
 
-    -- Returns all Epic records with per-epic subtask progress
-    -- (done_count, total_count).
-    ensures: EpicsListed()
+    requires:
+        if parent_epic_id != null: core/Epic.exists(parent_epic_id)
+    -- recursive narrows nothing on its own: the unfiltered list is already
+    -- every epic.
+    requires:
+        if recursive = true: parent_epic_id != null
+
+    -- Returns Epic records with per-epic subtask progress
+    -- (done_count, total_count): every epic when parent_epic_id is null; the
+    -- epics whose parent is parent_epic_id when recursive is false; every
+    -- descendant of parent_epic_id (not parent_epic_id itself) when it is true.
+    ensures: EpicsListed(parent_epic_id: parent_epic_id, recursive: recursive)
 
     @guidance
-        -- Takes no arguments. Returns every epic in the database along
-        -- with done/total subtask counts for each. The response is one line per epic carrying the
+        -- Both arguments are optional. With neither it returns every epic in
+        -- the database along with done/total subtask counts for each. An
+        -- unknown parent_epic_id is not found (-32001); recursive without
+        -- parent_epic_id is invalid params (-32602).
+        -- The response is one line per epic carrying the
         -- epic id, the title, the progress fraction, then a plan indicator
         -- (when a plan is attached) followed by a status indicator (when
-        -- the status is not backlog), and finally the description. The id
+        -- the status is not backlog), then " (parent:<id>)" when the epic has
+        -- a parent, and finally the description. The parent is on every row so
+        -- a caller can rebuild the tree from one call instead of one get_epic
+        -- per epic. The id
         -- is included because it is how the caller addresses the epic in
         -- follow-up calls (get_epic, update_epic, create_task).
-        -- An empty database returns an informational "No epics found"
+        -- An empty result returns an informational "No epics found"
         -- message rather than an error.
 }
 

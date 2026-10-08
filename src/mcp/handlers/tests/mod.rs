@@ -1152,21 +1152,23 @@ fn subset_enum_consts_have_every_intended_variant() {
 /// per-field/per-value behaviour of each struct is covered by that handler's
 /// own tests elsewhere in this suite.
 ///
-/// `list_epics` and `get_managed_feed_config` are intentionally absent: both
-/// take zero arguments and their handlers never parse `args` at all, so there
-/// is no struct for `deny_unknown_fields` to guard.
+/// `get_managed_feed_config` is intentionally absent: it takes zero arguments
+/// and its handler never parses `args` at all, so there is no struct for
+/// `deny_unknown_fields` to guard.
 #[tokio::test]
 async fn every_tool_with_args_rejects_unknown_field() {
     let state = test_state().await;
 
     let payloads: &[(&str, Value)] = &[
         ("update_task", json!({"task_id": 1})),
+        ("update_tasks", json!({"task_ids": [1]})),
         ("get_task", json!({"task_id": 1})),
         (
             "create_task",
             json!({"title": "t", "repo_path": "/r", "epic_id": null}),
         ),
         ("list_tasks", json!({})),
+        ("list_epics", json!({})),
         ("create_epic", json!({"title": "t"})),
         ("get_epic", json!({"epic_id": 1})),
         ("update_epic", json!({"epic_id": 1})),
@@ -1202,7 +1204,7 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("override_poll_owner", json!({"task_id": 1})),
     ];
 
-    let no_arg_tools = ["list_epics", "get_managed_feed_config"];
+    let no_arg_tools = ["get_managed_feed_config"];
     let covered: std::collections::BTreeSet<&str> = payloads
         .iter()
         .map(|(n, _)| *n)

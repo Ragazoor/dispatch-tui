@@ -86,6 +86,105 @@ pub(crate) async fn handle_update_task(
     }
 }
 
+// ---------------------------------------------------------------------------
+// update_tasks
+// ---------------------------------------------------------------------------
+
+/// `update_tasks`: `update_task` applied to each of `task_ids` in turn, with
+/// the same field set, reported per task. Not atomic — a failure on one task
+/// neither stops nor rolls back the others. See `UpdateTasksViaMcp` in
+/// `docs/specs/mcp-task-tools.allium`.
+pub(crate) async fn handle_update_tasks(
+    state: &McpState,
+    id: Option<Value>,
+    identity: &CallerIdentity,
+    args: Value,
+) -> JsonRpcResponse {
+    let Value::Object(mut fields) = args else {
+        return JsonRpcResponse::err(
+            id,
+            INVALID_PARAMS,
+            "arguments must be an object".to_string(),
+        );
+    };
+    if fields.contains_key("task_id") {
+        return JsonRpcResponse::err(
+            id,
+            INVALID_PARAMS,
+            "update_tasks takes task_ids, not task_id".to_string(),
+        );
+    }
+    let task_ids = match fields
+        .remove("task_ids")
+        .map(serde_json::from_value::<Vec<BulkTaskId>>)
+    {
+        Some(Ok(ids)) if !ids.is_empty() => ids,
+        Some(Ok(_)) => {
+            return JsonRpcResponse::err(
+                id,
+                INVALID_PARAMS,
+                "task_ids must not be empty".to_string(),
+            )
+        }
+        Some(Err(e)) => {
+            return JsonRpcResponse::err(id, INVALID_PARAMS, format!("Invalid task_ids: {e}"))
+        }
+        None => {
+            return JsonRpcResponse::err(id, INVALID_PARAMS, "task_ids is required".to_string())
+        }
+    };
+    if fields.is_empty() {
+        return JsonRpcResponse::err(
+            id,
+            INVALID_PARAMS,
+            "update_tasks needs at least one field to set besides task_ids".to_string(),
+        );
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let task_ids: Vec<TaskId> = task_ids
+        .into_iter()
+        .map(|BulkTaskId(t)| t)
+        .filter(|t| seen.insert(*t))
+        .collect();
+
+    // Every task gets the same fields, so a field set the parser rejects
+    // would fail each task identically: reject it once, before any write.
+    let mut probe = fields.clone();
+    probe.insert("task_id".into(), json!(task_ids[0].0));
+    if let Err(resp) = parse_args::<UpdateTaskArgs>(&id, Value::Object(probe)) {
+        return resp;
+    }
+    tracing::info!(count = task_ids.len(), "MCP update_tasks");
+
+    let mut lines = Vec::with_capacity(task_ids.len() + 1);
+    let mut updated = 0;
+    for task_id in &task_ids {
+        let mut one = fields.clone();
+        one.insert("task_id".into(), json!(task_id.0));
+        match handle_update_task(state, id.clone(), identity, Value::Object(one))
+            .await
+            .into_text()
+        {
+            Ok(text) => {
+                updated += 1;
+                lines.push(text);
+            }
+            Err(message) => lines.push(format!("Task {task_id} failed: {message}")),
+        }
+    }
+    lines.push(format!("Updated {updated} of {} tasks.", task_ids.len()));
+    JsonRpcResponse::ok(
+        id,
+        json!({"content": [{"type": "text", "text": lines.join("\n")}]}),
+    )
+}
+
+/// One element of `update_tasks`' `task_ids`, accepting an id as a number or
+/// a numeric string like every other id argument.
+#[derive(serde::Deserialize)]
+struct BulkTaskId(#[serde(deserialize_with = "super::deserialize_flexible_id")] TaskId);
+
 /// Every `UpdateTaskArgs` field other than `task_id`/`status` that the caller
 /// actually set. Used by [`handle_mark_task_done`] to enforce
 /// `MarkTaskDoneViaMcp`'s "status=\"done\" must be the only field set" guard
@@ -375,13 +474,22 @@ pub(crate) async fn handle_list_tasks(
 
     let status_filter: Option<Vec<TaskStatus>> = parsed.status.map(StatusFilter::into_vec);
     let epic_id = parsed.epic_id.or(derived_epic_id);
+    if parsed.recursive && epic_id.is_none() {
+        return JsonRpcResponse::err(
+            id,
+            INVALID_PARAMS,
+            "recursive needs an epic scope: pass epic_id".to_string(),
+        );
+    }
 
     let filtered = match state
         .task_svc
         .list_tasks(ListTasksFilter {
             statuses: status_filter,
             epic_id,
+            recursive: parsed.recursive,
             repo_paths: parsed.repo_paths,
+            base_branch: parsed.base_branch,
             exclude_task_id,
         })
         .await
