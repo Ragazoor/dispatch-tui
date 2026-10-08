@@ -85,8 +85,8 @@ Tracked as an epic. General guideline only; details are decided per task.
 1. Spike: load a hooks-module mod in a dispatched agent session and find the
    board port and task id.
 2. Mod scaffold and active agent list.
-3. Agent tree pane (changed files via git). Done in #28719 as `/dispatch-tree`:
-   the git work stays in Rust behind `dispatch agent-changes` (JSON), and the
-   mod only draws it (spec: "Agent Tree Mod Pane").
+3. Agent tree pane (changed files via git). Built in #28719 as `/dispatch-tree`
+   (the git work in Rust behind `dispatch agent-changes`), then reverted with
+   the rest of the mod; see the status note at the top.
 4. Diff viewer inside the pane.
 5. Retire the Rust agent-tree and diff panes, tmux plumbing and spec rules.
