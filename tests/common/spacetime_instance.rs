@@ -205,7 +205,18 @@ impl Instance {
     /// and `-y` belong to the SUBCOMMAND rather than to `spacetime`, and
     /// `--delete-data` takes an optional value, so `--delete-data never` is
     /// parsed as the database name.
+    ///
+    /// A publish that fails with a transport error (a reset or refused
+    /// connection) is retried once. A real failure is returned as it is.
     pub fn publish(&self, module_path: &Path, target_dir: Option<&Path>) -> std::process::Output {
+        let first = self.publish_once(module_path, target_dir);
+        if !first.status.success() && is_transport_error(&String::from_utf8_lossy(&first.stderr)) {
+            return self.publish_once(module_path, target_dir);
+        }
+        first
+    }
+
+    fn publish_once(&self, module_path: &Path, target_dir: Option<&Path>) -> std::process::Output {
         run(
             target_dir,
             &[
@@ -300,6 +311,15 @@ pub fn run(target_dir: Option<&Path>, args: &[&str]) -> std::process::Output {
     command
         .output()
         .unwrap_or_else(|e| panic!("running `spacetime {}`: {e}", args.join(" ")))
+}
+
+/// Whether `stderr` from a failed `spacetime` call shows a dropped connection
+/// rather than a rejected request.
+pub fn is_transport_error(stderr: &str) -> bool {
+    let lower = stderr.to_lowercase();
+    ["connection reset", "connection refused", "broken pipe"]
+        .iter()
+        .any(|needle| lower.contains(needle))
 }
 
 pub fn describe(out: &std::process::Output) -> String {

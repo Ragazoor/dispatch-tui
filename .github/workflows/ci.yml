@@ -181,7 +181,8 @@ jobs:
       # recalibrated with that exclusion: 85.09% (20667/24287 lines, llvm
       # engine, `spacetime` off PATH, 2026-10-06). After SQLite was deleted (task
       # #36865) it measured 85.95% (19167/22300 lines, same settings, 2026-10-07);
-      # floor 84 = ~2 points of slack.
+      # re-measured 86.16% (19430/22552 lines, same settings, 2026-10-08); floor 85 = ~1 point
+      # of slack. The review's guess of 88 sits above the measured figure and would fail.
       #
       # `--engine llvm` is pinned because the floor is calibrated against it.
       # The default (`Auto`) engine measured 88.54% on the same tree the llvm
@@ -189,7 +190,7 @@ jobs:
       # in the code. Leaving the engine to the default would leave a floor of 88
       # half a point of slack and fail on noise.
       - name: Run coverage
-        run: cargo tarpaulin --engine llvm --target x86_64-unknown-linux-gnu --out xml --out stdout --output-dir coverage/ --exclude-files 'src/spacetime/bindings/*' --fail-under 84
+        run: cargo tarpaulin --engine llvm --target x86_64-unknown-linux-gnu --out xml --out stdout --output-dir coverage/ --exclude-files 'src/spacetime/bindings/*' --fail-under 85
 
       # `if: always()` so the report still uploads when the floor trips — that is
       # exactly the run whose per-file numbers someone needs to read.

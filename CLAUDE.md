@@ -26,6 +26,12 @@ cargo run -- tui
 
 **Don't pipe `cargo test` into `tail`/`head`/`grep`.** A pipeline's exit code is the last command's, so a failing suite reads as a clean pass. Redirect instead: `cargo test > /tmp/t.txt 2>&1; echo $?`.
 
+**Run `cargo test --no-fail-fast`.** Plain `cargo test` stops at the first failing target, so later targets never run. The live-store tests in `tests/spacetime_module.rs` can flake on a one-off `Connection reset by peer`; `Instance::publish` retries once on a transport error, so a failure that survives is real.
+
+**Raw coverage includes generated bindings.** Pass `--exclude-files 'src/spacetime/bindings/*'`, as CI does, or the figure is not comparable to the floor.
+
+**`--db` names a directory, not a file**, whatever the `.db` suffix suggests.
+
 **The lib target runs in ~10s; a cold full run (including compile) is ~80s.** Run it in the foreground — don't background it. In a *fresh worktree* the first compile is slower than that and a cold `cargo test` can pass 120s, which is Claude Code's default Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
 
 **Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. Always pass `--engine llvm`: the default engine scores ~1.8 points lower than CI's floor assumes. The two live-SpacetimeDB test files skip themselves under tarpaulin, so `spacetime` may stay on `PATH`. Other caveats are in [docs/testing.md](docs/testing.md).

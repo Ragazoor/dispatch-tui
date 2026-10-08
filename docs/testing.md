@@ -158,11 +158,11 @@ Tests must never sleep on the wall clock — not to "wait for" `spawn_blocking` 
 
 ## Coverage
 
-CI's `coverage` job runs `cargo tarpaulin --engine llvm --out xml --out stdout --exclude-files 'src/spacetime/bindings/*' --fail-under 83` (`--out Html` locally). It is **gated**: coverage below the floor fails the job. Each tarpaulin invocation re-runs the whole suite, so both output formats come from one run — don't add a second invocation to render another format.
+CI's `coverage` job runs `cargo tarpaulin --engine llvm --out xml --out stdout --exclude-files 'src/spacetime/bindings/*' --fail-under 85` (`--out Html` locally). It is **gated**: coverage below the floor fails the job. Each tarpaulin invocation re-runs the whole suite, so both output formats come from one run — don't add a second invocation to render another format.
 
 **The engine is part of the measurement.** On the same tree, `--engine llvm` scored 90.28% (14846/16445 lines) and the default `Auto` engine 88.54% — a ~1.8-point instrumentation difference with no code change behind it. The floor is calibrated against llvm, which is why CI pins it; quote the engine whenever you quote a number, and don't compare a local default-engine run against the CI floor.
 
-Generated SpacetimeDB bindings (`src/spacetime/bindings/`) are excluded: they are ~7% covered and would drag the figure down for code nobody writes. The floor is 83, deliberately ~2 points below the measured figure (85.09%, llvm engine, bindings excluded, tarpaulin skipping the live-instance tests, 2026-10-06). It is a regression tripwire, not a target: raise it by hand when a step-change in coverage makes the headroom pointless, never automatically to whatever the last run scored. Don't chase 100% on render-heavy code or `src/setup/`'s OS-interaction branches (hooks, filesystem writes) — a single file below the average is not by itself a problem.
+Generated SpacetimeDB bindings (`src/spacetime/bindings/`) are excluded: they are ~7% covered and would drag the figure down for code nobody writes. The floor is 85, deliberately ~1 point below the measured figure (86.16%, llvm engine, bindings excluded, tarpaulin skipping the live-instance tests, 2026-10-08). It is a regression tripwire, not a target: raise it by hand when a step-change in coverage makes the headroom pointless, never automatically to whatever the last run scored. Don't chase 100% on render-heavy code or `src/setup/`'s OS-interaction branches (hooks, filesystem writes) — a single file below the average is not by itself a problem.
 
 Coverage is not in the pre-push hook; every *other* CI gate is, and `tests/ci_gates.rs` asserts the hook's script list and the workflow's stay in sync.
 

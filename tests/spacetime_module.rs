@@ -32,8 +32,8 @@
 mod common;
 
 use common::spacetime_instance::{
-    column, describe, instance_tests_should_run, module_path, no_rows, spacetime_available_or_skip,
-    Instance,
+    column, describe, instance_tests_should_run, is_transport_error, module_path, no_rows,
+    spacetime_available_or_skip, Instance,
 };
 use dispatch_tui::process::{ProcessRunner, RealProcessRunner};
 use dispatch_tui::sync::{SharedRows, SpacetimeSdkConnector, StoreConnector, SubscriptionRequest};
@@ -137,6 +137,20 @@ fn instance_tests_skip_under_tarpaulin_even_with_the_cli_present() {
     assert!(!instance_tests_should_run(true, false));
     assert!(!instance_tests_should_run(false, false));
     assert!(instance_tests_should_run(false, true));
+}
+
+#[test]
+fn only_transport_errors_are_retried_when_publishing() {
+    assert!(is_transport_error(
+        "Error: Connection reset by peer (os error 104)"
+    ));
+    assert!(is_transport_error(
+        "error sending request: connection refused"
+    ));
+    assert!(!is_transport_error(
+        "Error: schema migration refused: column removed"
+    ));
+    assert!(!is_transport_error(""));
 }
 
 #[test]
