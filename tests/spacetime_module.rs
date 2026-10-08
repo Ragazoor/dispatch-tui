@@ -163,12 +163,19 @@ fn the_cli_does_not_inherit_the_tests_coverage_flags() {
 }
 
 #[test]
-fn only_transport_errors_are_retried_when_publishing() {
+fn only_transport_errors_are_retried() {
     assert!(is_transport_error(
         "Error: Connection reset by peer (os error 104)"
     ));
     assert!(is_transport_error(
         "error sending request: connection refused"
+    ));
+    // The `sql` flake of 2026-10-08: the request never got a response.
+    assert!(is_transport_error(
+        "Error: error sending request for url (http://127.0.0.1:40123/v1/database/db/sql): connection error"
+    ));
+    assert!(!is_transport_error(
+        "Error: no such table: `nope`. Please check the table name"
     ));
     assert!(!is_transport_error(
         "Error: schema migration refused: column removed"

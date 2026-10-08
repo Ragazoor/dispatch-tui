@@ -259,8 +259,25 @@ impl Instance {
         run(None, &argv.iter().map(String::as_str).collect::<Vec<_>>())
     }
 
+    /// Run `query` and return its JSON output, failing the test on an error.
+    ///
+    /// Like [`Instance::publish`], a transport error is retried once. A SQL
+    /// error is never retried: it fails the test as it is.
     pub fn sql(&self, query: &str) -> String {
-        let out = run(
+        let first = self.sql_once(query);
+        let out = if !first.status.success()
+            && is_transport_error(&String::from_utf8_lossy(&first.stderr))
+        {
+            self.sql_once(query)
+        } else {
+            first
+        };
+        assert!(out.status.success(), "{}", describe(&out));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    fn sql_once(&self, query: &str) -> std::process::Output {
+        run(
             None,
             &[
                 &self.config_arg(),
@@ -272,9 +289,7 @@ impl Instance {
                 self.database(),
                 query,
             ],
-        );
-        assert!(out.status.success(), "{}", describe(&out));
-        String::from_utf8_lossy(&out.stdout).into_owned()
+        )
     }
 }
 
@@ -342,11 +357,21 @@ pub fn spacetime_command(target_dir: Option<&Path>, args: &[&str]) -> Command {
 
 /// Whether `stderr` from a failed `spacetime` call shows a dropped connection
 /// rather than a rejected request.
+///
+/// "error sending request" is the HTTP client's wording when no response came
+/// back at all; a request the store rejected comes back as a response, so it
+/// never carries it.
 pub fn is_transport_error(stderr: &str) -> bool {
     let lower = stderr.to_lowercase();
-    ["connection reset", "connection refused", "broken pipe"]
-        .iter()
-        .any(|needle| lower.contains(needle))
+    [
+        "connection reset",
+        "connection refused",
+        "broken pipe",
+        "connection error",
+        "error sending request",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 pub fn describe(out: &std::process::Output) -> String {

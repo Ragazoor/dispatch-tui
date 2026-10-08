@@ -26,7 +26,7 @@ cargo run -- tui
 
 **Don't pipe `cargo test` into `tail`/`head`/`grep`.** A pipeline's exit code is the last command's, so a failing suite reads as a clean pass. Redirect instead: `cargo test > /tmp/t.txt 2>&1; echo $?`.
 
-**Run `cargo test --no-fail-fast`.** Plain `cargo test` stops at the first failing target, so later targets never run. The live-store tests in `tests/spacetime_module.rs` can flake on a one-off `Connection reset by peer`; `Instance::publish` retries once on a transport error, so a failure that survives is real.
+**Run `cargo test --no-fail-fast`.** Plain `cargo test` stops at the first failing target, so later targets never run. The live-store tests in `tests/spacetime_module.rs` can flake on a one-off transport error (`Connection reset by peer`, or `error sending request … connection error`); `Instance::publish` and `Instance::sql` each retry once on one, so a failure that survives is real.
 
 **Raw coverage includes generated bindings.** Pass `--exclude-files 'src/spacetime/bindings/*'`, as CI does, or the figure is not comparable to the floor.
 
