@@ -119,6 +119,8 @@ rm src/dispatch/snapshots/*.snap.new                 # always clean up
 | MCP JSON-RPC handler behaviour | `src/mcp/handlers/tests/` |
 | Full task/epic lifecycle | `tests/` (integration tests) |
 | A `Task` fixture | `TaskBuilder` (`src/models/task_builder.rs`, gated like `test_tmux_window`) — don't hand-roll another `Task { .. }` literal |
+| An `Epic` fixture | `EpicBuilder` (`src/models/epic_builder.rs`, gated the same way) — don't hand-roll another `Epic { .. }` literal |
+| A `CreateTaskRequest`, `CreateTaskParams` or `CreateEpicParams` | `::fixture(..)` (`src/store/fixtures.rs`, `src/service/fixtures.rs`), with only the differing fields spelled out: `CreateTaskRequest { plan: Some("p.md"), ..CreateTaskRequest::fixture("T", "/repo") }` |
 | Domain-type invariants | inline in the owning module |
 | Agent prompt rendering (all variants) | `src/dispatch/prompts_snapshots.rs` |
 | Agent-facing skill copy (`plugin/skills/*/SKILL.md`) | `src/setup/plugins/tests.rs` (via `skill_body`) |
