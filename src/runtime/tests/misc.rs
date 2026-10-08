@@ -1401,6 +1401,86 @@ mod store_address_publication {
     }
 }
 
+/// The small startup helpers `runtime/mod.rs` owns, which need no store.
+mod startup_helpers {
+    use super::*;
+
+    #[test]
+    fn the_board_port_is_published_on_its_session() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        publish_board_port("dispatch", 8899, &mock);
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "set-environment",
+                "-t",
+                "=dispatch",
+                "DISPATCH_PORT",
+                "8899"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_board_with_no_session_publishes_no_port() {
+        let mock = MockProcessRunner::new(vec![]);
+        publish_board_port("", 8899, &mock);
+        assert!(mock.recorded_calls().is_empty());
+    }
+
+    /// Publishing is best-effort: a tmux that refuses is logged, not raised.
+    #[test]
+    fn a_refused_publication_does_not_panic() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::fail("no such session"),
+            MockProcessRunner::fail("no such session"),
+        ]);
+        publish_store_server("dispatch", "http://127.0.0.1:3000", &mock);
+        publish_board_port("dispatch", 8899, &mock);
+        assert_eq!(mock.recorded_calls().len(), 2);
+    }
+
+    #[test]
+    fn an_absent_value_clears_the_field() {
+        assert!(matches!(option_to_field_update(None), FieldUpdate::Clear));
+        assert!(matches!(
+            option_to_field_update(Some("x".into())),
+            FieldUpdate::Set(v) if v == "x"
+        ));
+    }
+
+    #[test]
+    fn an_absent_window_clears_the_window() {
+        assert!(matches!(
+            option_to_tmux_window_update(None),
+            crate::service::TmuxWindowUpdate::Clear
+        ));
+        assert!(matches!(
+            option_to_tmux_window_update(Some(test_tmux_window("w"))),
+            crate::service::TmuxWindowUpdate::Set(_)
+        ));
+    }
+
+    #[test]
+    fn base_branches_group_by_repo_keeping_recency_order() {
+        let grouped = group_base_branches_by_repo(vec![
+            ("/a".into(), "main".into()),
+            ("/b".into(), "dev".into()),
+            ("/a".into(), "old".into()),
+        ]);
+        assert_eq!(grouped["/a"], vec!["main", "old"]);
+        assert_eq!(grouped["/b"], vec!["dev"]);
+    }
+
+    #[test]
+    fn a_failure_with_no_managed_store_is_returned_unchanged() {
+        let error = abort_managed_startup(None, anyhow::anyhow!("boom"));
+        assert_eq!(error.to_string(), "boom");
+    }
+}
+
 /// Task #4982, startup.allium: StoreAddressRecord and the three rules that
 /// write and remove it. The bootstrap half (recorded once the first
 /// connection succeeds, never for an unreachable store, a write failure is not

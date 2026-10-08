@@ -896,3 +896,109 @@ async fn run_async(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dispatch_tui::spacetime::Snapshot;
+
+    fn parse(args: &[&str]) -> Cli {
+        let argv = std::iter::once("dispatch").chain(args.iter().copied());
+        Cli::try_parse_from(argv).expect("the arguments parse")
+    }
+
+    #[test]
+    fn the_four_hook_subcommands_take_the_light_runtime() {
+        assert!(is_hook(&parse(&["hook", "1", "stop"]).command));
+        assert!(is_hook(&parse(&["hook-subagent", "1", "clear"]).command));
+        assert!(is_hook(
+            &parse(&[
+                "hook-peer-message",
+                "1",
+                "--target",
+                "task-2",
+                "--body",
+                "hi"
+            ])
+            .command
+        ));
+        assert!(is_hook(&parse(&["pr-gate", "1"]).command));
+    }
+
+    #[test]
+    fn other_subcommands_take_the_full_runtime() {
+        assert!(!is_hook(&parse(&["tui"]).command));
+        assert!(!is_hook(&parse(&["caller-headers"]).command));
+        assert!(!is_hook(&parse(&["verify-feed", "true"]).command));
+    }
+
+    #[test]
+    fn the_store_server_flag_is_global() {
+        let cli = parse(&["tui", "--spacetime-server", "http://127.0.0.1:3099"]);
+        assert_eq!(
+            cli.spacetime_server.as_deref(),
+            Some("http://127.0.0.1:3099")
+        );
+    }
+
+    #[test]
+    fn a_snapshot_written_to_a_file_reads_back_the_same() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snap.json");
+        let snapshot = Snapshot::new(vec![]);
+        write_snapshot(path.to_str().unwrap(), &snapshot).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.ends_with('\n'), "line-oriented for diffs");
+        let back: Snapshot = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, snapshot);
+    }
+
+    #[test]
+    fn a_snapshot_cannot_be_written_into_a_missing_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing").join("snap.json");
+        let error = write_snapshot(path.to_str().unwrap(), &Snapshot::new(vec![])).unwrap_err();
+        assert!(error.to_string().contains("Failed to write"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn restoring_from_a_missing_file_fails_before_touching_the_store() {
+        let error = cmd_spacetime(SpacetimeAction::Restore {
+            file: "/nonexistent/snapshot.json".into(),
+            database: "dispatch".into(),
+            server: None,
+        })
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("Failed to read"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn restoring_from_a_file_that_is_not_a_snapshot_fails_to_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.json");
+        std::fs::write(&path, "not json").unwrap();
+        let error = cmd_spacetime(SpacetimeAction::Restore {
+            file: path.to_str().unwrap().into(),
+            database: "dispatch".into(),
+            server: None,
+        })
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("Failed to parse"), "{error}");
+    }
+
+    #[test]
+    fn the_app_log_lands_next_to_the_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        init_app_log_subscriber(&data).unwrap();
+        assert!(data.join("app.log").exists());
+    }
+
+    #[test]
+    fn the_cli_flags_are_consistent() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+    }
+}

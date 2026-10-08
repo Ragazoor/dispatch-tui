@@ -310,4 +310,137 @@ mod unconnected {
         let error = caller.create_task(task("t")).await.unwrap_err();
         assert!(error.to_string().contains("not connected"), "{error}");
     }
+
+    /// Every call checks for a connection before it builds anything, so a
+    /// board with no store refuses each one the same way. Lists the calls the
+    /// tests above leave out, so none can skip the check unnoticed.
+    #[tokio::test]
+    async fn every_write_with_no_connection_is_refused_alike() {
+        use crate::models::{EpicId, LearningId};
+        use chrono::Utc;
+
+        let caller = SdkReducerCaller::new(connector(), Arc::new(SettledIdentity::default()));
+        let refused = |what: &str, error: anyhow::Error| {
+            let text = error.to_string();
+            assert!(text.contains("not connected"), "{what}: {text}");
+        };
+        let host = || "host-1".to_string();
+
+        refused(
+            "claim_backlog_task",
+            caller
+                .claim_backlog_task(TaskId(1), host())
+                .await
+                .unwrap_err(),
+        );
+        refused(
+            "release_backlog_claim",
+            caller.release_backlog_claim(TaskId(1)).await.unwrap_err(),
+        );
+        refused(
+            "create_epic",
+            caller.create_epic(epic("e")).await.unwrap_err(),
+        );
+        refused(
+            "delete_epic",
+            caller.delete_epic(EpicId(1)).await.unwrap_err(),
+        );
+        refused(
+            "batch_delete",
+            caller
+                .batch_delete(vec![TaskId(1)], vec![EpicId(2)])
+                .await
+                .unwrap_err(),
+        );
+        refused(
+            "recalculate_epic_status",
+            caller.recalculate_epic_status(EpicId(1)).await.unwrap_err(),
+        );
+        refused(
+            "delete_repo_path",
+            caller.delete_repo_path("/repo".into()).await.unwrap_err(),
+        );
+        refused(
+            "clear_setting",
+            caller
+                .clear_setting(host(), "key".into())
+                .await
+                .unwrap_err(),
+        );
+        refused(
+            "create_learning",
+            caller.create_learning(learning("l")).await.unwrap_err(),
+        );
+        refused(
+            "delete_learning",
+            caller.delete_learning(LearningId(1)).await.unwrap_err(),
+        );
+        refused(
+            "subagent_start",
+            caller
+                .subagent_start(TaskId(1), "a".into(), "s".into(), Utc::now())
+                .await
+                .unwrap_err(),
+        );
+        refused(
+            "subagent_stop",
+            caller
+                .subagent_stop(TaskId(1), "a".into(), "s".into())
+                .await
+                .unwrap_err(),
+        );
+        refused(
+            "subagent_clear",
+            caller.subagent_clear(TaskId(1)).await.unwrap_err(),
+        );
+        refused(
+            "subagent_clear_and_void_pending_stop",
+            caller
+                .subagent_clear_and_void_pending_stop(TaskId(1))
+                .await
+                .unwrap_err(),
+        );
+        refused(
+            "try_record_stop",
+            caller
+                .try_record_stop(TaskId(1), Utc::now())
+                .await
+                .unwrap_err(),
+        );
+        refused(
+            "create_repo_group_sub_epic",
+            caller
+                .create_repo_group_sub_epic(EpicId(1), "t".into(), "alice".into())
+                .await
+                .unwrap_err(),
+        );
+        refused(
+            "create_managed_role_epic",
+            caller
+                .create_managed_role_epic(
+                    "t".into(),
+                    None,
+                    "role".into(),
+                    "cmd".into(),
+                    60,
+                    "alice".into(),
+                )
+                .await
+                .unwrap_err(),
+        );
+        refused(
+            "respawn_phoenix_successor",
+            caller
+                .respawn_phoenix_successor(TaskId(1), task("t"))
+                .await
+                .unwrap_err(),
+        );
+        refused(
+            "register_host",
+            caller
+                .register_host(host(), "label".into(), "alice".into())
+                .await
+                .unwrap_err(),
+        );
+    }
 }

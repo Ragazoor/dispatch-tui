@@ -149,7 +149,7 @@ impl SpacetimeSdkConnector {
             .on_insert(move |ctx, row| widen_subtree(ctx, &subtree, row));
         let subtree = Arc::clone(&self.subtree);
         db.epics().on_update(move |ctx, old, new| {
-            if old.parent_epic_id != new.parent_epic_id {
+            if moved_under_new_parent(old.parent_epic_id, new.parent_epic_id) {
                 widen_subtree(ctx, &subtree, new);
             }
         });
@@ -178,16 +178,33 @@ pub(super) struct Subtree {
 /// "NOT RETRIED" clause).
 fn widen_subtree(ctx: &bindings::EventContext, subtree: &Mutex<Subtree>, row: &bindings::Epic) {
     let mut subtree = subtree.lock().unwrap_or_else(|e| e.into_inner());
-    // Checked before the cache is gathered: nearly every arrival — the whole
-    // initial load included — sits under an uncovered parent or none.
-    if !subtree.cover.covers(row.parent_epic_id) {
-        return;
-    }
-    let newly = subtree
-        .cover
-        .delivered(row.id, row.parent_epic_id, &known_epics(ctx));
-    let queries: Vec<String> = newly.into_iter().flat_map(subtree_queries).collect();
+    let queries = widen_queries(&mut subtree, row.id, row.parent_epic_id, &known_epics(ctx));
     subscribe_widening(ctx, &mut subtree, queries, "a sub-epic");
+}
+
+/// The queries an epic row's arrival adds to the ask: none unless it now sits
+/// under a covered epic. The decision of [`widen_subtree`], apart from the
+/// SDK so it runs without a connection.
+pub(super) fn widen_queries(
+    subtree: &mut Subtree,
+    id: i64,
+    parent: i64,
+    known: &[(i64, i64)],
+) -> Vec<String> {
+    // Checked before the cache is gathered by the caller's `known`: nearly
+    // every arrival — the whole initial load included — sits under an
+    // uncovered parent or none.
+    if !subtree.cover.covers(parent) {
+        return Vec::new();
+    }
+    let newly = subtree.cover.delivered(id, parent, known);
+    newly.into_iter().flat_map(subtree_queries).collect()
+}
+
+/// Whether an epic update re-parented the epic, the only update that can
+/// bring it under a covered epic.
+pub(super) fn moved_under_new_parent(old_parent: i64, new_parent: i64) -> bool {
+    old_parent != new_parent
 }
 
 /// Every `(id, parent)` pair the connection holds, for [`SubtreeCover`].
@@ -239,14 +256,26 @@ fn subscribe_widening(
 /// grows").
 fn follow_epic(ctx: &bindings::EventContext, subtree: &Mutex<Subtree>, epic: i64) {
     let mut subtree = subtree.lock().unwrap_or_else(|e| e.into_inner());
+    let queries = follow_queries(&mut subtree, epic, &known_epics(ctx));
+    subscribe_widening(ctx, &mut subtree, queries, "a followed epic");
+}
+
+/// The queries following `epic` adds to the ask: the epic itself and its
+/// tree, or none when it is already covered. The decision of [`follow_epic`],
+/// apart from the SDK so it runs without a connection.
+pub(super) fn follow_queries(
+    subtree: &mut Subtree,
+    epic: i64,
+    known: &[(i64, i64)],
+) -> Vec<String> {
     if subtree.cover.covers(epic) {
-        return;
+        return Vec::new();
     }
-    let newly = subtree.cover.follow(epic, &known_epics(ctx));
+    let newly = subtree.cover.follow(epic, known);
     if newly.is_empty() {
-        return;
+        return Vec::new();
     }
     let mut queries = vec![format!("SELECT * FROM epics WHERE id = {epic}")];
     queries.extend(newly.into_iter().flat_map(subtree_queries));
-    subscribe_widening(ctx, &mut subtree, queries, "a followed epic");
+    queries
 }

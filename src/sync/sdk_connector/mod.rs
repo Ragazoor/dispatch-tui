@@ -33,6 +33,8 @@ mod wiring;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wiring_tests;
 
 pub use callers::SdkReducerCaller;
 pub(in crate::sync) use queries::{subscription_queries, subtree_queries};
