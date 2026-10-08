@@ -18,6 +18,7 @@ to look.
 | `src/cli/statusline.rs` | `dispatch statusline` decorator: records the subscription rate-limit windows from Claude Code's statusLine hook payload to a snapshot file, then runs the user's previous statusLine command and prints its output verbatim. Never fails (always exits 0) and never opens the database — see the module doc comment |
 | `src/runtime/mod.rs` | `run_tui`, `TuiRuntime` and startup wiring; bridges TUI ↔ MCP ↔ shell commands; `TICK_INTERVAL` |
 | `src/runtime/event_loop.rs` | Async event loop (`tokio::select!` over `LoopEvent`), `apply_loop_event`, `run_loop`, `execute_commands`, frame-rate cap |
+| `src/runtime/store_target.rs` | Which store the board connects to (`StoreTarget`: named or managed), first connection, managed-store health watch, and the guards that stop the store or forget its record on exit |
 | `src/runtime/commands.rs` | `Command` side-effect dispatcher (called by `execute_commands`) |
 | `src/runtime/tasks.rs` | Per-command runtime handlers for tasks (refresh, dispatch, finish, etc.) |
 | `src/runtime/{editor,epics,learnings,pr,settings,split}.rs` | Domain-specific runtime helpers |
