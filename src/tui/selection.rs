@@ -117,33 +117,31 @@ impl App {
         // Rebuild all layout caches for the fresh board state.
         let _ = self.cached_epic_stats();
         // Search for the anchor in the pre-sorted anchor cache (avoids re-sorting each column).
-        let mut found: Option<(usize, usize)> = None;
-        if let Some(anchor_map) = &self.layout.column_anchor_cache {
-            'outer: for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
-                let nav_col = idx + 1;
-                if let Some(anchors) = anchor_map.get(&status) {
-                    for (row, &item_anchor) in anchors.iter().enumerate() {
-                        if item_anchor == anchor {
-                            found = Some((nav_col, row));
-                            break 'outer;
-                        }
-                    }
-                }
-            }
-        }
+        let found = self
+            .layout
+            .column_anchor_cache
+            .as_ref()
+            .and_then(|anchor_map| {
+                TaskStatus::ALL
+                    .iter()
+                    .enumerate()
+                    .find_map(|(idx, status)| {
+                        let row = anchor_map.get(status)?.iter().position(|&a| a == anchor)?;
+                        Some((idx + 1, row))
+                    })
+            });
 
-        if let Some((found_col, found_row)) = found {
-            // Clamp every column, `found_col` included — the anchor row is
-            // overwritten immediately below, so clamping it first is harmless
-            // and saves duplicating the clamp body here.
-            self.clamp_selection();
-            let sel = self.selection_mut();
-            sel.set_column(found_col);
-            sel.set_row(found_col, found_row);
-            sel.on_select_all = false;
-        } else {
-            self.clamp_selection();
-        }
+        // Clamp every column, `found_col` included — the anchor row is
+        // overwritten immediately below, so clamping it first is harmless
+        // and saves duplicating the clamp body here.
+        self.clamp_selection();
+        let Some((found_col, found_row)) = found else {
+            return;
+        };
+        let sel = self.selection_mut();
+        sel.set_column(found_col);
+        sel.set_row(found_col, found_row);
+        sel.on_select_all = false;
     }
 
     pub(in crate::tui) fn reset_column_scroll(&mut self) {

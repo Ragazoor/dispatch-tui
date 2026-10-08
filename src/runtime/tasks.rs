@@ -1200,39 +1200,7 @@ impl TuiRuntime {
                 tmux_window.as_ref(),
                 &*runner,
             );
-            let msg = match result {
-                Ok(()) => crate::tui::messages::TaskMessage::CleanupSucceeded { id, follow_up },
-                Err(failure) => match failure.worktree_left {
-                    Some(worktree) => {
-                        let error = format!("{:#}", failure.error);
-                        // The only durable record of a failed teardown. Without it
-                        // a leftover worktree cannot be attributed to anything
-                        // after the fact — see
-                        // docs/plans/archive/2026-08-11-3897-worktree-cleanup-investigation.md.
-                        tracing::error!(
-                            task_id = id.0,
-                            worktree_path = %worktree,
-                            %error,
-                            "worktree cleanup failed, worktree left on disk"
-                        );
-                        crate::tui::messages::TaskMessage::CleanupFailed {
-                            id,
-                            worktree,
-                            error,
-                        }
-                    }
-                    // Nothing was left on disk, so the gate has nothing to protect
-                    // and the follow-up still stands — withholding it would strand
-                    // the row instead. Warn-logged, matching the feed wrapper.
-                    None => {
-                        tracing::warn!(
-                            task_id = id.0,
-                            "tmux window teardown failed, no worktree to release: {failure}"
-                        );
-                        crate::tui::messages::TaskMessage::CleanupSucceeded { id, follow_up }
-                    }
-                },
-            };
+            let msg = cleanup_outcome(id, result, follow_up);
             let _ = tx.send(Message::Task(msg));
         })
     }
@@ -1258,5 +1226,43 @@ impl TuiRuntime {
                 }
             }
         });
+    }
+}
+
+/// The message a finished [`TuiRuntime::exec_cleanup`] teardown reports.
+fn cleanup_outcome(
+    id: TaskId,
+    result: Result<(), dispatch::TeardownFailure>,
+    follow_up: crate::tui::commands::CleanupFollowUp,
+) -> crate::tui::messages::TaskMessage {
+    let failure = match result {
+        Ok(()) => return crate::tui::messages::TaskMessage::CleanupSucceeded { id, follow_up },
+        Err(failure) => failure,
+    };
+    let Some(worktree) = failure.worktree_left else {
+        // Nothing was left on disk, so the gate has nothing to protect
+        // and the follow-up still stands — withholding it would strand
+        // the row instead. Warn-logged, matching the feed wrapper.
+        tracing::warn!(
+            task_id = id.0,
+            "tmux window teardown failed, no worktree to release: {failure}"
+        );
+        return crate::tui::messages::TaskMessage::CleanupSucceeded { id, follow_up };
+    };
+    let error = format!("{:#}", failure.error);
+    // The only durable record of a failed teardown. Without it
+    // a leftover worktree cannot be attributed to anything
+    // after the fact — see
+    // docs/plans/archive/2026-08-11-3897-worktree-cleanup-investigation.md.
+    tracing::error!(
+        task_id = id.0,
+        worktree_path = %worktree,
+        %error,
+        "worktree cleanup failed, worktree left on disk"
+    );
+    crate::tui::messages::TaskMessage::CleanupFailed {
+        id,
+        worktree,
+        error,
     }
 }

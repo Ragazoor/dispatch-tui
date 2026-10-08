@@ -63,6 +63,37 @@ async fn apply_move(
     Ok(())
 }
 
+/// The per-repo sub-epic under `role_target` for an item at `url`, created on
+/// first use and cached. A failed create falls back to `role_target` and is not
+/// cached, so the next item for that repo tries again.
+async fn repo_group_target(
+    db: &dyn TaskStore,
+    parent_id: EpicId,
+    role_target: EpicId,
+    url: &str,
+    repo_group_cache: &mut HashMap<(EpicId, String), EpicId>,
+) -> EpicId {
+    let repo_name = crate::models::repo_name_from_url(url);
+    let key = (role_target, repo_name.clone());
+    if let Some(&cached) = repo_group_cache.get(&key) {
+        return cached;
+    }
+    match db.create_repo_group_sub_epic(role_target, &repo_name).await {
+        Ok(id) => {
+            repo_group_cache.insert(key, id);
+            id
+        }
+        Err(err) => {
+            tracing::warn!(
+                epic_id = parent_id.0,
+                role_sub_epic_id = role_target.0,
+                "run_role_routed_feed_sync: create_repo_group_sub_epic failed: {err:#}"
+            );
+            role_target
+        }
+    }
+}
+
 /// Route each entry to its target sub-epic (resolving into a per-repo
 /// sub-epic when the role has `group_by_repo`), moving any cross-role or
 /// parent-stranded task in place as it goes.
@@ -101,26 +132,14 @@ pub(super) async fn route_and_group_entries(
         let role_target = roles.target_for(route(&entry.item.signals));
 
         let target = if roles.can_auto_group(role_target) {
-            let repo_name = crate::models::repo_name_from_url(&entry.item.url);
-            let key = (role_target, repo_name.clone());
-            if let Some(&cached) = repo_group_cache.get(&key) {
-                cached
-            } else {
-                match db.create_repo_group_sub_epic(role_target, &repo_name).await {
-                    Ok(id) => {
-                        repo_group_cache.insert(key, id);
-                        id
-                    }
-                    Err(err) => {
-                        tracing::warn!(
-                            epic_id = parent_id.0,
-                            role_sub_epic_id = role_target.0,
-                            "run_role_routed_feed_sync: create_repo_group_sub_epic failed: {err:#}"
-                        );
-                        role_target
-                    }
-                }
-            }
+            repo_group_target(
+                db,
+                parent_id,
+                role_target,
+                &entry.item.url,
+                &mut repo_group_cache,
+            )
+            .await
         } else {
             role_target
         };

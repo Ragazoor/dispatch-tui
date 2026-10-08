@@ -250,27 +250,37 @@ impl App {
 
         // Moving to Done cleans up all subtask tmux windows
         if new_status == TaskStatus::Done {
-            let subtask_ids: Vec<TaskId> = self
-                .board
-                .tasks
-                .iter()
-                .filter(|t| t.epic_id == Some(id) && t.tmux_window.is_some())
-                .map(|t| t.id)
-                .collect();
-            for task_id in subtask_ids {
-                if let Some(task) = self.find_task_mut(task_id) {
-                    if let Some(window) = task.tmux_window.take() {
-                        cmds.push(Command::Task(
-                            crate::tui::commands::TaskCommand::KillTmuxWindow { window },
-                        ));
-                        cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
-                            crate::tui::commands::PersistFields::from_task(task),
-                        )));
-                    }
-                }
-            }
+            cmds.extend(self.release_subtask_windows(id));
         }
         self.sync_board_selection();
+        cmds
+    }
+
+    /// Take every direct subtask's tmux window, returning the commands that
+    /// kill each window and persist its task without it.
+    fn release_subtask_windows(&mut self, id: EpicId) -> Vec<Command> {
+        let subtask_ids: Vec<TaskId> = self
+            .board
+            .tasks
+            .iter()
+            .filter(|t| t.epic_id == Some(id) && t.tmux_window.is_some())
+            .map(|t| t.id)
+            .collect();
+        let mut cmds = Vec::new();
+        for task_id in subtask_ids {
+            let Some(task) = self.find_task_mut(task_id) else {
+                continue;
+            };
+            let Some(window) = task.tmux_window.take() else {
+                continue;
+            };
+            cmds.push(Command::Task(
+                crate::tui::commands::TaskCommand::KillTmuxWindow { window },
+            ));
+            cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                crate::tui::commands::PersistFields::from_task(task),
+            )));
+        }
         cmds
     }
 

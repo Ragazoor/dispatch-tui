@@ -1299,67 +1299,76 @@ fn apply_loop_event(app: &mut App, event: LoopEvent, rt: &TuiRuntime) -> Vec<Com
             // Spawn DB work so this never blocks key-event processing. Results
             // arrive back via msg_rx and are applied on the next iteration.
             app.dirty = true;
-            match event {
-                crate::board_event::BoardEvent::Refresh => {
-                    // A broad refresh may follow a managed-feed config save
-                    // (set_managed_feed_config) that enabled a feed on a
-                    // previously feed-less instance. Invalidate the FeedRunner
-                    // cache so the next tick re-queries for feed commands and
-                    // starts polling the freshly-provisioned epics rather than
-                    // short-circuiting on a stale any_feed_cmds == Some(false).
-                    rt.invalidate_feed_cache();
-                    drop(rt.spawn_refresh_from_db());
-                    vec![]
-                }
-                crate::board_event::BoardEvent::TaskChanged(task_id) => {
-                    drop(rt.spawn_refresh_task(task_id));
-                    vec![]
-                }
-                crate::board_event::BoardEvent::EpicChanged(epic_id) => {
-                    // Invalidate the FeedRunner's cache so the next tick re-queries
-                    // for feed commands (e.g. a newly added feed_command becomes visible).
-                    rt.invalidate_feed_cache();
-                    drop(rt.spawn_refresh_epic(epic_id));
-                    vec![]
-                }
-                crate::board_event::BoardEvent::BranchRebased { repo_path } => {
-                    // A rebase wrap-up pulled origin/<base> and fast-forwarded
-                    // local <base>, so the refs are current and no fetch is
-                    // needed. An unresolved repository measures nothing.
-                    if !repo_path.is_empty() {
-                        drop(rt.exec_refresh_repo_sync(repo_path, false));
-                    }
-                    vec![]
-                }
-                crate::board_event::BoardEvent::AgentLaunched { repo_path } => {
-                    // RefreshRepoSyncStateAfterDispatch: provisioning the agent's
-                    // worktree already fetched origin/<base>, so this is a local
-                    // ref read at no network cost. The board's own dispatch takes
-                    // the same refresh through a command; these are the off-board
-                    // launches (dispatch_task, epic auto-dispatch chaining).
-                    drop(rt.exec_refresh_repo_sync(repo_path, false));
-                    vec![]
-                }
-                crate::board_event::BoardEvent::AutoDispatchFailed {
-                    task_id,
-                    epic_id,
-                    reason,
-                } => {
-                    // No refresh is spawned here: the chain sends TaskChanged
-                    // for the released subtask right behind this, so reloading
-                    // the row is already covered.
-                    app.update(Message::Task(
-                        crate::tui::messages::TaskMessage::AutoDispatchFailed {
-                            task_id,
-                            epic_id,
-                            reason,
-                        },
-                    ))
-                }
-            }
+            apply_board_event(app, event, rt)
         }
         // Handlers set app.dirty themselves when they detect visible changes.
         LoopEvent::Tick => app.update(Message::System(crate::tui::messages::SystemMessage::Tick)),
+    }
+}
+
+/// The `LoopEvent::Mcp` arm of [`apply_loop_event`].
+fn apply_board_event(
+    app: &mut App,
+    event: crate::board_event::BoardEvent,
+    rt: &TuiRuntime,
+) -> Vec<Command> {
+    match event {
+        crate::board_event::BoardEvent::Refresh => {
+            // A broad refresh may follow a managed-feed config save
+            // (set_managed_feed_config) that enabled a feed on a
+            // previously feed-less instance. Invalidate the FeedRunner
+            // cache so the next tick re-queries for feed commands and
+            // starts polling the freshly-provisioned epics rather than
+            // short-circuiting on a stale any_feed_cmds == Some(false).
+            rt.invalidate_feed_cache();
+            drop(rt.spawn_refresh_from_db());
+            vec![]
+        }
+        crate::board_event::BoardEvent::TaskChanged(task_id) => {
+            drop(rt.spawn_refresh_task(task_id));
+            vec![]
+        }
+        crate::board_event::BoardEvent::EpicChanged(epic_id) => {
+            // Invalidate the FeedRunner's cache so the next tick re-queries
+            // for feed commands (e.g. a newly added feed_command becomes visible).
+            rt.invalidate_feed_cache();
+            drop(rt.spawn_refresh_epic(epic_id));
+            vec![]
+        }
+        crate::board_event::BoardEvent::BranchRebased { repo_path } => {
+            // A rebase wrap-up pulled origin/<base> and fast-forwarded
+            // local <base>, so the refs are current and no fetch is
+            // needed. An unresolved repository measures nothing.
+            if !repo_path.is_empty() {
+                drop(rt.exec_refresh_repo_sync(repo_path, false));
+            }
+            vec![]
+        }
+        crate::board_event::BoardEvent::AgentLaunched { repo_path } => {
+            // RefreshRepoSyncStateAfterDispatch: provisioning the agent's
+            // worktree already fetched origin/<base>, so this is a local
+            // ref read at no network cost. The board's own dispatch takes
+            // the same refresh through a command; these are the off-board
+            // launches (dispatch_task, epic auto-dispatch chaining).
+            drop(rt.exec_refresh_repo_sync(repo_path, false));
+            vec![]
+        }
+        crate::board_event::BoardEvent::AutoDispatchFailed {
+            task_id,
+            epic_id,
+            reason,
+        } => {
+            // No refresh is spawned here: the chain sends TaskChanged
+            // for the released subtask right behind this, so reloading
+            // the row is already covered.
+            app.update(Message::Task(
+                crate::tui::messages::TaskMessage::AutoDispatchFailed {
+                    task_id,
+                    epic_id,
+                    reason,
+                },
+            ))
+        }
     }
 }
 

@@ -259,51 +259,55 @@ impl App {
     /// always goes to the batch-delete confirmation, guarded per item.
     fn handle_key_delete_item(&mut self) -> Vec<Command> {
         if self.has_selection() {
-            if self.select.epics.is_empty() {
-                let not_done: Vec<_> = self
-                    .select
-                    .tasks
-                    .iter()
-                    .copied()
-                    .filter(|id| {
-                        self.find_task(*id)
-                            .is_some_and(|t| t.status != crate::models::TaskStatus::Done)
-                    })
-                    .collect();
-                if !not_done.is_empty() {
-                    self.prompt_move_to_done(not_done);
-                    return vec![];
-                }
-            }
-            let count = self.select.tasks.len() + self.select.epics.len();
-            self.input.mode = InputMode::ConfirmBatchDelete;
-            self.set_status(format!("Delete {} items? [y/n]", count));
-            vec![]
+            self.delete_selected_items()
         } else {
-            match self.selected_column_item() {
-                Some(ColumnItem::Epic(_)) => self.update(Message::Epic(
-                    crate::tui::messages::EpicMessage::ConfirmDelete,
-                )),
-                _ => {
-                    if let Some(task) = self.selected_task() {
-                        let id = task.id;
-                        if task.status != crate::models::TaskStatus::Done {
-                            self.prompt_move_to_done(vec![id]);
-                            return vec![];
-                        }
-                        let title = super::super::truncate_title(
-                            &task.title,
-                            super::super::TITLE_DISPLAY_LENGTH,
-                        );
-                        self.input.mode = InputMode::ConfirmDeleteTask(id);
-                        self.set_status(format!("Delete {title}? [y/n]"));
-                        vec![]
-                    } else {
-                        vec![]
-                    }
-                }
+            self.delete_cursor_item()
+        }
+    }
+
+    /// The batch half of [`Self::handle_key_delete_item`].
+    fn delete_selected_items(&mut self) -> Vec<Command> {
+        if self.select.epics.is_empty() {
+            let not_done: Vec<_> = self
+                .select
+                .tasks
+                .iter()
+                .copied()
+                .filter(|id| {
+                    self.find_task(*id)
+                        .is_some_and(|t| t.status != crate::models::TaskStatus::Done)
+                })
+                .collect();
+            if !not_done.is_empty() {
+                self.prompt_move_to_done(not_done);
+                return vec![];
             }
         }
+        let count = self.select.tasks.len() + self.select.epics.len();
+        self.input.mode = InputMode::ConfirmBatchDelete;
+        self.set_status(format!("Delete {} items? [y/n]", count));
+        vec![]
+    }
+
+    /// The single-item half of [`Self::handle_key_delete_item`].
+    fn delete_cursor_item(&mut self) -> Vec<Command> {
+        if let Some(ColumnItem::Epic(_)) = self.selected_column_item() {
+            return self.update(Message::Epic(
+                crate::tui::messages::EpicMessage::ConfirmDelete,
+            ));
+        }
+        let Some(task) = self.selected_task() else {
+            return vec![];
+        };
+        let id = task.id;
+        if task.status != crate::models::TaskStatus::Done {
+            self.prompt_move_to_done(vec![id]);
+            return vec![];
+        }
+        let title = super::super::truncate_title(&task.title, super::super::TITLE_DISPLAY_LENGTH);
+        self.input.mode = InputMode::ConfirmDeleteTask(id);
+        self.set_status(format!("Delete {title}? [y/n]"));
+        vec![]
     }
 
     /// `'D'` — quick-dispatch: immediate for 1 repo, picker for multiple, error for none.
