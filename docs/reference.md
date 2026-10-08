@@ -41,6 +41,17 @@ files beneath it, so a collapsed directory says how much is inside. A file git c
 not count — one that is untracked, or binary — shows no counts rather than `+0 -0`,
 which would read as "nothing changed in there".
 
+### Agent list pane (`/dispatch-agents`)
+
+Inside a dispatched agent's Claude Code session, type `/dispatch-agents` to open a
+pane listing every live agent (Running or Review with a tmux window) as
+`#<id> <title>`, the session's own task marked `●`. Arrows move, Enter jumps to that
+agent's tmux window. It reads the board's `/pane-view` once a second while open, on
+the port in `DISPATCH_PORT`; a failed read keeps the last list and shows why in red.
+It is drawn by the dispatch plugin's hooks module (`plugin/hooks/register.tsx`), the
+first piece of the move in `docs/plans/mods-agent-tree-design.md`; the companion
+pane's own agents section stays until that move is done.
+
 ### Agent-tree diff pane
 
 Splits the companion pane's column when you open your first diff: the tree keeps the

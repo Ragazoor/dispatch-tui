@@ -21,7 +21,9 @@
 --           fork point from the task's base branch and selects which change
 --           the tree and diff pane show; and the AGENTS SECTION beneath that,
 --           which lists every task with a live agent window and jumps to the
---           selected one's window.
+--           selected one's window; and the AGENT LIST MOD PANE, the same list
+--           drawn by the dispatch plugin's Claude Code mod inside the agent's
+--           own session (see "Agent List Mod Pane").
 -- Excludes: Task-activity classification and the activity-signal hook (see
 --           agent-health.allium — HookPreToolUse fires for both PreToolUse and
 --           PostToolUse and is NOT modified by anything in this spec);
@@ -133,6 +135,9 @@ enum NoticeSource { git_query | diff_open | agent_list | agent_jump | commit_lis
 -- decides which one a motion moves and what Space and Enter do. See
 -- SwitchAgentTreeFocus.
 enum AgentTreeFocus { tree | commits | agents }
+
+-- Which writer set the agent list mod pane's notice (AgentListModPane).
+enum AgentListNoticeSource { agent_list | agent_jump }
 
 ------------------------------------------------------------
 -- Value Types
@@ -522,6 +527,38 @@ entity AgentTreePane {
     transitions status {
         shown -> hidden
         hidden -> shown
+    }
+}
+
+-- The dispatch mod's agent list pane: a Claude Code Pane inside one agent's
+-- session (see "Agent List Mod Pane"). One per session. task_id,
+-- listed_agents, has_listed and the notice live in the host's session state
+-- ($.state), so they survive the module reloading and the pane closing.
+-- status and the refresh timer are the module's own and start over on a
+-- reload; the next draw of an open pane starts the timer again. Nothing is
+-- persisted across sessions.
+entity AgentListModPane {
+    status: open | closed
+
+    -- The session's own task, from the git branch; null when the branch has
+    -- no leading digits, and then the pane says so and reads nothing.
+    task_id: Integer?
+
+    -- What the last SUCCESSFUL read returned, sorted by task id.
+    listed_agents: [core/Task]
+
+    -- Whether any read has succeeded yet. Keeps "no agents are running"
+    -- (true, empty list) apart from "not read yet" (false).
+    has_listed: Boolean
+
+    last_listed_at: Timestamp
+
+    error_notice: String?
+    notice_source: AgentListNoticeSource when error_notice != null
+
+    transitions status {
+        closed -> open
+        open -> closed
     }
 }
 
@@ -2330,11 +2367,162 @@ rule AgentSessionLoadsDispatchMod {
         -- the board publishes on its tmux session and every agent window
         -- inherits. An unset variable means the default port.
         --
-        -- The spike's pane is opened by the person typing /dispatch-spike
-        -- and shows the task id, the port and the cwd. It reads nothing
-        -- from the board yet (PanesReadThroughTheBoard will apply once it
-        -- does). A headless run (claude -p) draws nothing, which is fine
-        -- for agents, as they are interactive.
+        -- The mod's first feature is the agent list pane below ("Agent List
+        -- Mod Pane"), which replaced the spike's /dispatch-spike pane. A
+        -- headless run (claude -p) draws nothing, which is fine for agents,
+        -- as they are interactive.
+}
+
+-- == Agent List Mod Pane ==
+--
+-- The agents section's successor, drawn by the dispatch mod inside the agent's
+-- own Claude Code session rather than in the tmux companion pane. Same data
+-- (BoardPaneView's live_agents), same "who is live" (LiveIsTheBoardsOwnDefinition),
+-- same jump. The companion pane's agents section stays until the mod reaches
+-- parity on every feature (docs/plans/mods-agent-tree-design.md, step 3);
+-- the two read independently and share no state.
+--
+-- It is a Claude Code Pane, not an AbovePrompt band: opened on demand, it
+-- costs the prompt no rows until the person asks for it, and one row per
+-- agent leaves room for the title, which a one-line band would not.
+
+rule OpenAgentListModPane {
+    -- The person types /dispatch-agents in the agent's session.
+    when: OpenAgentListModPane(user, pane)
+
+    ensures: pane.status = open
+    ensures: pane.task_id = branch_task_id(pane)
+
+    @guidance
+        -- branch_task_id is the leading digits of `git branch
+        -- --show-current` in the session's cwd, null when the branch has
+        -- none (AgentSessionLoadsDispatchMod). It is read once, on opening:
+        -- an agent does not change branch under its own session.
+        --
+        -- Opening an already open pane changes nothing but shows it. The
+        -- list survives being closed and reopened (it is session state in
+        -- the host, not the module's), so a reopened pane shows the last
+        -- list at once and refreshes from there.
+}
+
+rule CloseAgentListModPane {
+    -- The person closes the pane (Esc, the close mark).
+    when: CloseAgentListModPane(user, pane)
+
+    requires: pane.status = open
+
+    ensures: pane.status = closed
+
+    @guidance
+        -- A closed pane reads nothing: RefreshAgentListModPane requires an
+        -- open one, so the board is asked only while someone can see the
+        -- answer.
+}
+
+rule RefreshAgentListModPane {
+    -- An open pane re-reads the board's live agents on its own timer, and
+    -- once at once when it opens.
+    when: pane: AgentListModPane.last_listed_at + config.agent_tree_agents_refresh_interval <= now
+
+    requires: pane.status = open
+    -- Without a task id there is nothing to ask the board about.
+    requires: pane.task_id != null
+    requires: board_tasks().ok
+
+    let live = board_tasks().value.filter(t => is_live_agent(t))
+
+    ensures: pane.last_listed_at = now
+    ensures: pane.listed_agents = sorted_by_id(live)
+    ensures: pane.has_listed = true
+    -- A working read clears its own stale notice and nothing else, as
+    -- RefreshAgentTreeAgentList does.
+    ensures: pane.error_notice =
+        if old(pane.notice_source) = agent_list: null
+        else: old(pane.error_notice)
+
+    @guidance
+        -- board_tasks() is BoardPaneView's pane_view(pane.task_id).live_agents,
+        -- asked over loopback HTTP on the port in DISPATCH_PORT (default
+        -- 3142), POST /pane-view with {"task_id": <id>}. A non-2xx answer, a
+        -- body that is not a PaneView, or no answer within the mod's own
+        -- timeout is not ok. A single row the mod cannot read is skipped,
+        -- not a failure, as the companion pane skips one. The mod never opens the store and never writes
+        -- to the board (PanesReadThroughTheBoard, AskingChangesNothing).
+        --
+        -- Every repo and every epic is listed, ordered by task id ascending,
+        -- exactly as the companion pane's section is.
+        --
+        -- One read at a time: a tick that comes while a read is still
+        -- waiting for the board is skipped, so a slow answer can never land
+        -- after a newer one. The mod's own wait for an answer is 2 seconds.
+        --
+        -- A live agent the board holds no tmux window name for cannot be
+        -- jumped to and is left out of the answer by the board itself.
+        --
+        -- The timer runs while the pane is drawn. A reload of the module
+        -- starts it again on the next draw; a reload never loses the list,
+        -- which lives in the host's session state.
+}
+
+rule AgentListModPaneFailureKeepsLastList {
+    -- The same tick, when the board could not be reached or its answer
+    -- could not be read.
+    when: pane: AgentListModPane.last_listed_at + config.agent_tree_agents_refresh_interval <= now
+
+    requires: pane.status = open
+    requires: pane.task_id != null
+    requires: not board_tasks().ok
+
+    -- Stamped anyway, so an absent board does not spin.
+    ensures: pane.last_listed_at = now
+    ensures: pane.listed_agents = old(pane.listed_agents)
+    ensures: pane.has_listed = old(pane.has_listed)
+    ensures: pane.error_notice = board_tasks_failure_reason()
+    ensures: pane.notice_source = agent_list
+
+    @guidance
+        -- AgentTreeAgentListFailureKeepsLastList's reasoning, unchanged: a
+        -- stale list that says it is stale beats an empty one that cannot
+        -- say why.
+}
+
+rule JumpFromAgentListModPane {
+    -- The person picks an agent's row (arrows, then Enter).
+    when: JumpFromAgentListModPane(user, pane, target)
+
+    requires: pane.status = open
+    requires: pane.listed_agents.contains(target)
+    -- The session's own task: a no-op, not an error.
+    requires: target.id != pane.task_id
+
+    ensures: AgentWindowSelected(window: target.tmux_window)
+    -- A pick answers any earlier jump's notice: this one succeeded.
+    ensures: pane.error_notice =
+        if old(pane.notice_source) = agent_jump: null
+        else: old(pane.error_notice)
+
+    @guidance
+        -- The window is named by the task's recorded tmux window, matched
+        -- EXACTLY against the windows of every tmux session (`tmux
+        -- list-panes -a`, the active pane of each window), then selected by
+        -- that pane's id. Never `select-window -t <name>`: tmux matches a
+        -- target name by prefix, so `task-12` would select `task-123`. Two
+        -- windows with the name is a failure, as in tmux::window_target.
+        --
+        -- The list is left as it was; the cursor stays on the picked row.
+}
+
+rule AgentListModPaneJumpFailureIsVisible {
+    -- No window with that exact name, more than one, or tmux refused.
+    when: AgentListModPaneJumpFailed(pane, reason)
+
+    ensures: pane.error_notice = reason
+    ensures: pane.notice_source = agent_jump
+
+    @guidance
+        -- As AgentTreeAgentJumpFailureIsVisible: the answer to the person's
+        -- own pick must say something. The next list read drops a closed
+        -- window's row; the notice stays until the next pick.
 }
 
 ------------------------------------------------------------
@@ -3345,6 +3533,49 @@ surface AgentTreeDiffPane {
         -- here, the same way the tree's cursor is not — see the
         -- AgentTreeViewState open question, which covers both.
 
+}
+
+surface AgentListModPaneView {
+    facing user: User
+
+    -- The pane the dispatch mod draws inside the agent's own Claude Code
+    -- session, opened by /dispatch-agents.
+    context pane: AgentListModPane
+
+    exposes:
+        pane.task_id
+        pane.listed_agents
+        pane.has_listed
+        pane.error_notice
+
+    contracts:
+        demands BoardPaneView
+
+    provides:
+        OpenAgentListModPane(user, pane)               -- /dispatch-agents
+        CloseAgentListModPane(user, pane)              -- Esc, close mark
+        JumpFromAgentListModPane(user, pane, target)   -- arrows, Enter
+
+    @guarantee AgentListModRowShowsIdAndTitle
+        -- Each row reads `#<id> <title>`, as AgentRowShowsIdAndTitle. The
+        -- session's own task is marked with a trailing dot. It is listed so
+        -- the list reads as the whole set of running agents; picking it
+        -- does nothing (JumpFromAgentListModPane).
+
+    @guarantee AgentListModPaneSaysWhyItIsEmpty
+        -- An empty pane always says which kind of empty it is, and the
+        -- three never read the same:
+        --   no task id      "Not in a dispatch task worktree." (no reads)
+        --   not read yet    "Reading the board…"
+        --   read, none live "No agents are running."
+        -- A notice, when set, shows on its own line above the rows, in the
+        -- error colour, whether or not there are rows.
+
+    @guarantee AgentListModPaneJumpsWhereItCanPick
+        -- The rows are a Claude Code Select: arrows move, Enter picks. A
+        -- surface whose element table has no Select (mobile, today) draws
+        -- the same rows as plain text, without the jump; the list is still
+        -- worth reading there.
 }
 
 ------------------------------------------------------------

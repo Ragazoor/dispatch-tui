@@ -965,6 +965,15 @@ fn plugin_json_is_valid() {
         .expect("plugin.json must be UTF-8");
     let value: Value = serde_json::from_str(content).expect("plugin.json is invalid JSON");
     assert_eq!(value["name"], "dispatch");
+    // AgentListModPane's state lives in $.state, which the engine holds to the
+    // contract plugin.json names; it must ship beside the hooks module.
+    assert_eq!(value["types"], "./types/index.d.ts");
+    let contract = PLUGIN_DIR
+        .get_file("types/index.d.ts")
+        .expect("the state contract must be embedded")
+        .contents_utf8()
+        .expect("the state contract must be UTF-8");
+    assert!(contract.contains("agentList"));
 }
 
 #[test]
