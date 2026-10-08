@@ -518,12 +518,10 @@ fn install_one_shipped_script(
     // no prompt and no backup.
     let current = match fs::read_to_string(&path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let written = write_shipped_script(&path, shipped);
             return Ok(record_shipped_script(
-                written,
-                name,
+                write_shipped_script(&path, shipped),
+                file,
                 path,
-                shipped,
                 ShippedScriptOutcome::Installed,
                 manifest,
             ));
@@ -538,12 +536,10 @@ fn install_one_shipped_script(
         // Matching on content alone would adopt that file as in_sync
         // and record a digest for it, and the failure would never be
         // reported again. Repair it here instead.
-        let repaired = ensure_executable(&path);
         return Ok(record_shipped_script(
-            repaired,
-            name,
+            ensure_executable(&path),
+            file,
             path,
-            shipped,
             ShippedScriptOutcome::InSync,
             manifest,
         ));
@@ -558,14 +554,12 @@ fn install_one_shipped_script(
         .ok()
         .is_some_and(|c| recorded.is_some_and(|rec| *rec == script_digest(&c)));
     if !proven {
-        return install_unknown_provenance_script(name, path, shipped, confirmer, manifest);
+        return install_unknown_provenance_script(file, path, confirmer, manifest);
     }
-    let written = write_shipped_script(&path, shipped);
     Ok(record_shipped_script(
-        written,
-        name,
+        write_shipped_script(&path, shipped),
+        file,
         path,
-        shipped,
         ShippedScriptOutcome::Updated,
         manifest,
     ))
@@ -576,18 +570,17 @@ fn install_one_shipped_script(
 /// provenance over a file it did not successfully write.
 fn record_shipped_script(
     step: Result<()>,
-    name: &str,
+    file: ShippedFile,
     path: PathBuf,
-    shipped: &str,
     outcome: ShippedScriptOutcome,
     manifest: &mut std::collections::BTreeMap<String, String>,
 ) -> ShippedScriptReport {
     match step {
         Ok(()) => {
-            manifest.insert(name.to_string(), script_digest(shipped));
-            ShippedScriptReport::new(name, path, outcome)
+            manifest.insert(file.name.to_string(), script_digest(file.content));
+            ShippedScriptReport::new(file.name, path, outcome)
         }
-        Err(e) => ShippedScriptReport::failed(name, path, e),
+        Err(e) => ShippedScriptReport::failed(file.name, path, e),
     }
 }
 
@@ -598,12 +591,15 @@ fn record_shipped_script(
 /// backup that fails abandons the script before any write — the fallback on
 /// "cannot back up" is to not destroy, never to destroy without a copy.
 fn install_unknown_provenance_script(
-    name: &str,
+    file: ShippedFile,
     path: PathBuf,
-    shipped: &str,
     confirmer: Option<&dyn super::Confirmer>,
     manifest: &mut std::collections::BTreeMap<String, String>,
 ) -> Result<ShippedScriptReport> {
+    let ShippedFile {
+        name,
+        content: shipped,
+    } = file;
     // The ABSENCE of a confirmer is how "nobody can answer" is expressed, the
     // same way the startup check expresses it — so there is no flag a caller
     // could set inconsistently, and no path that reads a yes out of silence.
@@ -635,14 +631,8 @@ fn install_unknown_provenance_script(
         ));
     }
     let written = write_shipped_script(&path, shipped);
-    let mut report = record_shipped_script(
-        written,
-        name,
-        path,
-        shipped,
-        ShippedScriptOutcome::Updated,
-        manifest,
-    );
+    let mut report =
+        record_shipped_script(written, file, path, ShippedScriptOutcome::Updated, manifest);
     // The backup was already taken, so it is on disk whether or not the
     // write landed — and a failure here is precisely when the user needs
     // to find it.

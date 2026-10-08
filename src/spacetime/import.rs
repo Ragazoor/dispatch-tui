@@ -258,16 +258,16 @@ impl DroppedIds {
         operator: &str,
         report: &mut ImportReport,
     ) {
-        let parent_column = match table {
-            SharedTable::Tasks => "epic_id",
-            SharedTable::Epics => "parent_epic_id",
+        let (parent_column, is_task) = match table {
+            SharedTable::Tasks => ("epic_id", true),
+            SharedTable::Epics => ("parent_epic_id", false),
             _ => return,
         };
         if !id_of(row, parent_column).is_some_and(|e| self.epics.contains(&e)) {
             return;
         }
         row.insert(parent_column.into(), Value::from(0));
-        if table != SharedTable::Tasks {
+        if !is_task {
             return;
         }
         row.insert("owner".into(), Value::from(operator));

@@ -101,7 +101,6 @@ fn update_epic_params_every_field_covered() {
             "group_by_repo",
             UpdateEpicParams {
                 group_by_repo: Some(true),
-                feed_append_only: None,
                 ..UpdateEpicParams::for_epic(EpicId(1))
             },
         ),
@@ -372,7 +371,6 @@ async fn update_epic_sets_group_by_repo() {
     let svc = EpicService::new(db.clone());
     svc.update_epic(UpdateEpicParams {
         group_by_repo: Some(true),
-        feed_append_only: None,
         ..UpdateEpicParams::for_epic(epic.id)
     })
     .await
@@ -747,19 +745,8 @@ async fn detach_repo_group_sub_epic_is_rejected() {
 
     let err = svc
         .update_epic(UpdateEpicParams {
-            epic_id: sub,
             parent_epic_id: Some(None), // detach to root
-            title: None,
-            description: None,
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            completed_at: None,
-            auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            group_by_repo: None,
-            feed_append_only: None,
+            ..UpdateEpicParams::for_epic(sub)
         })
         .await;
     assert!(

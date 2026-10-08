@@ -1312,8 +1312,9 @@ fn apply_board_event(
     event: crate::board_event::BoardEvent,
     rt: &TuiRuntime,
 ) -> Vec<Command> {
+    use crate::board_event::BoardEvent;
     match event {
-        crate::board_event::BoardEvent::Refresh => {
+        BoardEvent::Refresh => {
             // A broad refresh may follow a managed-feed config save
             // (set_managed_feed_config) that enabled a feed on a
             // previously feed-less instance. Invalidate the FeedRunner
@@ -1324,18 +1325,18 @@ fn apply_board_event(
             drop(rt.spawn_refresh_from_db());
             vec![]
         }
-        crate::board_event::BoardEvent::TaskChanged(task_id) => {
+        BoardEvent::TaskChanged(task_id) => {
             drop(rt.spawn_refresh_task(task_id));
             vec![]
         }
-        crate::board_event::BoardEvent::EpicChanged(epic_id) => {
+        BoardEvent::EpicChanged(epic_id) => {
             // Invalidate the FeedRunner's cache so the next tick re-queries
             // for feed commands (e.g. a newly added feed_command becomes visible).
             rt.invalidate_feed_cache();
             drop(rt.spawn_refresh_epic(epic_id));
             vec![]
         }
-        crate::board_event::BoardEvent::BranchRebased { repo_path } => {
+        BoardEvent::BranchRebased { repo_path } => {
             // A rebase wrap-up pulled origin/<base> and fast-forwarded
             // local <base>, so the refs are current and no fetch is
             // needed. An unresolved repository measures nothing.
@@ -1344,7 +1345,7 @@ fn apply_board_event(
             }
             vec![]
         }
-        crate::board_event::BoardEvent::AgentLaunched { repo_path } => {
+        BoardEvent::AgentLaunched { repo_path } => {
             // RefreshRepoSyncStateAfterDispatch: provisioning the agent's
             // worktree already fetched origin/<base>, so this is a local
             // ref read at no network cost. The board's own dispatch takes
@@ -1353,7 +1354,7 @@ fn apply_board_event(
             drop(rt.exec_refresh_repo_sync(repo_path, false));
             vec![]
         }
-        crate::board_event::BoardEvent::AutoDispatchFailed {
+        BoardEvent::AutoDispatchFailed {
             task_id,
             epic_id,
             reason,

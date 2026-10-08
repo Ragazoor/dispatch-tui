@@ -762,7 +762,7 @@ async fn get_epic_shows_bare_parent_id_when_parent_is_missing() {
     .await;
     let text = extract_response_text(&resp);
     assert!(
-        text.contains("Parent: 999999\nPlan") || text.contains("Parent: 999999\nCreated"),
+        text.lines().any(|l| l == "Parent: 999999"),
         "get_epic should show the bare parent id when the parent is gone: {text}"
     );
 }

@@ -284,7 +284,7 @@ impl App {
         }
         self.layout.column_anchor_cache = Some(anchor_cache);
 
-        self.layout.epic_placements_cache = Some(Arc::new(self.compute_epic_placements()));
+        self.layout.epic_placements_cache = Some(Arc::new(placements));
         self.layout.epic_stats_cache = Some(Arc::clone(&stats));
         self.layout.layout_cache_fingerprint = Some(fingerprint);
         stats
