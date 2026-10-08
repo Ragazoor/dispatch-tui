@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::tui::ui::palette::{CYAN, MUTED, YELLOW};
+use crate::palette::{CYAN, MUTED, YELLOW};
 use crate::tui::ui::shared::{
     centered_rect, open_overlay, scroll_offset, titled_block, visible_rows, HintStyles,
 };

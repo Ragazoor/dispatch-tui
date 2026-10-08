@@ -10,12 +10,12 @@ use ratatui::{
 use crate::models::{format_age, Epic, EpicSubstatus, Staleness, SubStatus, Task, TaskStatus};
 use crate::tui::{App, EpicStatsMap};
 
-use super::super::palette::{CYAN, FG, FLASH_BG, GREEN, MUTED, PURPLE, RED, YELLOW};
 use super::super::shared::{staleness_color, truncate};
 use super::{
     card_border_color, card_surface_color, column_color, cursor_border_color,
     selected_card_surface_color, status_icon,
 };
+use crate::palette::{CYAN, FG, FLASH_BG, GREEN, MUTED, PURPLE, RED, YELLOW};
 
 /// Format the title text for a task card (line 1 only — status annotations are on line 2).
 fn format_task_title(task: &Task, max_title: usize) -> String {

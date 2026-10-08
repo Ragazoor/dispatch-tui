@@ -22,6 +22,7 @@ pub mod keybindings;
 pub mod mcp;
 pub mod models;
 pub mod notify;
+pub(crate) mod palette;
 pub mod plan;
 pub mod process;
 pub mod repo_sync;

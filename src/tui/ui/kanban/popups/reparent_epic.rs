@@ -10,7 +10,7 @@ use ratatui::{
 use std::collections::HashSet;
 
 use crate::models::{Epic, EpicId};
-use crate::tui::ui::palette::{MUTED, PURPLE};
+use crate::palette::{MUTED, PURPLE};
 use crate::tui::ui::shared::{centered_x, open_overlay, titled_block};
 use crate::tui::{types::REPARENT_NO_PARENT_SENTINEL, App, InputMode};
 

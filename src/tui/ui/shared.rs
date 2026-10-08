@@ -1,4 +1,4 @@
-use super::palette::{
+use crate::palette::{
     CURSOR_BORDER, FG, GREEN, MUTED, MUTED_LIGHT, RED, SELECT_ALL_HIGHLIGHT_BG, YELLOW,
 };
 

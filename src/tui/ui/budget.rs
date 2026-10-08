@@ -5,8 +5,8 @@
 //! state is testable without sleeping (docs/conventions.md: no sleeping in
 //! tests).
 
-use super::palette::{GREEN, MUTED, RED, YELLOW};
 use crate::models::budget::{BudgetSnapshot, BudgetWindow};
+use crate::palette::{GREEN, MUTED, RED, YELLOW};
 use ratatui::style::Style;
 use ratatui::text::Span;
 use std::time::Duration;

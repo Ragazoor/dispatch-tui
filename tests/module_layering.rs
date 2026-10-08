@@ -4,7 +4,9 @@
 //! import. `feed` sits below `runtime` and `mcp`; `mcp` below `cli`; the
 //! storage and identity layers below `startup`; `sync` and `dispatch` below
 //! `service`; `cli` below `runtime`, sharing the store wiring
-//! (`store_connection`) with it instead. A shared type both sides need belongs in a leaf module
+//! (`store_connection`) with it instead. `agent_tree` is a feature of its own:
+//! `cli` is its entry point, so it never reaches back up into `cli`, nor across
+//! into the board's `tui` (both draw with the shared `palette`). A shared type both sides need belongs in a leaf module
 //! (`models`, `clock`, `embeddings`, …) that each depends on downward.
 //! Test files are scanned too: a test reaching upward pins the edge just as
 //! firmly as production code does.
@@ -25,7 +27,8 @@ const RULES: &[(&str, &[&str])] = &[
     ("store", &["startup"]),
     ("service", &["startup"]),
     ("dispatch", &["service"]),
-    ("cli", &["runtime"]),
+    ("cli", &["runtime", "tui"]),
+    ("agent_tree", &["runtime", "tui", "cli", "mcp"]),
     ("store_connection", &["runtime", "cli"]),
 ];
 

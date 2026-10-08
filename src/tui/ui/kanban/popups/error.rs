@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::tui::ui::palette::{FG, MUTED, RED};
+use crate::palette::{FG, MUTED, RED};
 use crate::tui::ui::shared::{centered_rect, open_overlay, titled_block};
 use crate::tui::App;
 

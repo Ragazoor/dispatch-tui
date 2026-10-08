@@ -12,7 +12,6 @@ use ratatui::{
 use crate::models::{EpicId, EpicSubstatus, TaskStatus};
 use crate::tui::{App, ColumnItem, ColumnLayout, EpicPlacementMap, EpicStatsMap, ViewMode};
 
-use super::super::palette::{MUTED, PURPLE};
 use super::super::shared::{
     render_folded_section_header, render_substatus_header, rounded_block, truncate,
 };
@@ -21,6 +20,7 @@ use super::cards::{
     ColRenderCtx,
 };
 use super::{board_column_constraints, column_bg_color, column_color, render_column_separator};
+use crate::palette::{MUTED, PURPLE};
 
 fn render_orphan_separator(col_width: u16, is_first: bool) -> ListItem<'static> {
     // ╌╌ · ╌╌╌╌╌╌╌╌╌╌╌ — dashed rule with centre dot, all muted.

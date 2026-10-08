@@ -1,5 +1,5 @@
-use super::palette::{CYAN, MUTED, RED};
 use crate::models::TaskId;
+use crate::palette::{CYAN, MUTED, RED};
 use crate::tui::{App, InputState};
 use ratatui::{
     layout::Rect,

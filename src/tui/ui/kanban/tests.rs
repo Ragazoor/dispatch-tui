@@ -1,8 +1,8 @@
-use super::super::palette::{CURSOR_BORDER, MUTED, PURPLE, SELECT_ALL_HIGHLIGHT_BG};
 use super::super::shared::{render_folded_section_header, render_substatus_header};
 use super::cards::render_epic_header_item;
 use super::*;
 use crate::models::{ColumnSection, EpicId, TaskTag};
+use crate::palette::{CURSOR_BORDER, MUTED, PURPLE, SELECT_ALL_HIGHLIGHT_BG};
 use crate::tui::tests::make_epic_with_title;
 use crate::tui::types::{FoldedHeader, SectionRef, TaskDraft};
 use ratatui::buffer::Buffer;

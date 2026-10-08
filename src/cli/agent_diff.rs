@@ -33,8 +33,8 @@ use crate::agent_tree::parse_untracked;
 use crate::cli::agent_tree::{GIT_TIMEOUT, REFRESH_INTERVAL};
 use crate::git::{git_error, git_in, run_git, COULD_NOT_RUN_GIT};
 use crate::models::TaskId;
+use crate::palette::{FG, GREEN, RED, YELLOW};
 use crate::process::{ProcessRunner, RealProcessRunner};
-use crate::tui::ui::palette::{FG, GREEN, RED, YELLOW};
 
 /// How much diff text this pane will render for ONE file before refusing it.
 ///

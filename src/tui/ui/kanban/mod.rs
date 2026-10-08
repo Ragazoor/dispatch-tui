@@ -23,12 +23,12 @@ use super::input_form::{
     input_title_lines, input_wrap_up_mode_lines, quick_dispatch_lines, FormStyles,
     PHOENIX_ARMED_TAG_STEP_LINES,
 };
-use super::palette::{
+use super::shared::{push_hint_spans, render_top_indicators, rounded_block};
+use crate::palette::{
     header_label_focused, header_label_unfocused, mix, BLUE, BOARD_GROUND, BOARD_GROUND_FOCUSED,
     BORDER, CARD_BORDER, CARD_SURFACE, CURSOR_BORDER, CYAN, FG, GREEN, HEADER_BG,
     HEADER_BG_FOCUSED, MUTED, PURPLE, RED, SELECT_ALL_HIGHLIGHT_BG, YELLOW,
 };
-use super::shared::{push_hint_spans, render_top_indicators, rounded_block};
 
 use crate::models::{Epic, Task, TaskStatus};
 use crate::tui::{App, ColumnItem, ColumnLayout, InputMode};

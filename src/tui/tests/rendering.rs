@@ -3,7 +3,7 @@ use crate::models::{test_tmux_window, SubStatus, TaskId, TaskStatus, TaskTag};
 // Palette constants come from the palette, never retyped as literals here: a
 // hand-copied RGB goes stale silently when the palette moves, which is the exact
 // drift the derived header labels were introduced to stop.
-use crate::tui::ui::palette::{BORDER, GREEN, MUTED, PURPLE, RED, YELLOW};
+use crate::palette::{BORDER, GREEN, MUTED, PURPLE, RED, YELLOW};
 use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};

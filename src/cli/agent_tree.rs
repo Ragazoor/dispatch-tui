@@ -38,8 +38,8 @@ use crate::cli::agent_tree_commits::{
 use crate::cli::list_cursor::ListCursor;
 use crate::git::{git_error, git_in, run_git, COULD_NOT_RUN_GIT};
 use crate::models::{TaskId, TmuxWindow};
+use crate::palette::{FG, GREEN, MUTED, RED, YELLOW};
 use crate::process::{ProcessRunner, RealProcessRunner};
-use crate::tui::ui::palette::{FG, GREEN, MUTED, RED, YELLOW};
 
 /// Redraw cadence — see `docs/specs/agent-tree.allium`'s
 /// `config.agent_tree_refresh_interval`. Doubles as the crossterm event

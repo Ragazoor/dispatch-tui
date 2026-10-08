@@ -7,8 +7,8 @@
 //! than wall-clock reads for the same testability reason `budget.rs` takes
 //! them (docs/conventions.md: no sleeping in tests).
 
-use super::palette::MUTED;
 use crate::models::budget::BudgetSnapshot;
+use crate::palette::MUTED;
 use ratatui::style::Style;
 use ratatui::text::Span;
 use std::time::Duration;

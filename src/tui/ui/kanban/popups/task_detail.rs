@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::models::Task;
-use crate::tui::ui::palette::{BORDER, FG, MUTED, MUTED_LIGHT};
+use crate::palette::{BORDER, FG, MUTED, MUTED_LIGHT};
 use crate::tui::{App, ViewMode};
 
 use crate::tui::ui::shared::{open_overlay, rounded_block};

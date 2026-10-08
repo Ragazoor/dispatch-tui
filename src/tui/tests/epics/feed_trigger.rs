@@ -810,7 +810,7 @@ fn append_only_marker_is_green() {
     let style = find_style_of(&buf, "append-only").expect("marker must render");
     assert_eq!(
         style.fg,
-        Some(crate::tui::ui::palette::GREEN),
+        Some(crate::palette::GREEN),
         "append-only must render in GREEN, got {:?}",
         style.fg
     );

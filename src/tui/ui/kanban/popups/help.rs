@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::keybindings::{bindings_in, KeyNamespace, KeyReceiver};
-use crate::tui::ui::palette::CYAN;
+use crate::palette::CYAN;
 use crate::tui::ui::shared::{centered_rect, open_overlay, titled_block, HintStyles};
 use crate::tui::{App, InputMode};
 

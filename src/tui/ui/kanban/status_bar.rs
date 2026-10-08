@@ -13,9 +13,9 @@ use ratatui::{
     Frame,
 };
 
-use super::super::palette::{CYAN, GREEN, MUTED, PURPLE, RED, YELLOW};
 use super::super::shared::push_hint_spans;
 use super::{action_hints, epic_action_hints};
+use crate::palette::{CYAN, GREEN, MUTED, PURPLE, RED, YELLOW};
 use crate::tui::{App, ColumnItem, InputMode};
 
 pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {

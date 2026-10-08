@@ -5,12 +5,12 @@
 
 use super::*;
 use crate::models::test_tmux_window;
+use crate::palette::YELLOW;
 use crate::repo_sync::{AheadBehind, RepoSyncMeasurement, RepoSyncState, SyncOutcome};
 use crate::tui::commands::RepoSyncCommand;
 use crate::tui::messages::RepoSyncMessage;
 use crate::tui::ui::{
-    palette::YELLOW, repo_drift_segment, repo_path_for_prompt, repo_sync_prompt_text,
-    REPO_PATH_DISPLAY_BUDGET,
+    repo_drift_segment, repo_path_for_prompt, repo_sync_prompt_text, REPO_PATH_DISPLAY_BUDGET,
 };
 use crossterm::event::KeyCode;
 

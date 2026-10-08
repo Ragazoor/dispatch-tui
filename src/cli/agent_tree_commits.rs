@@ -20,7 +20,7 @@ use ratatui::Frame;
 
 use crate::cli::agent_tree_agents::border_style;
 use crate::cli::list_cursor::ListCursor;
-use crate::tui::ui::palette::YELLOW;
+use crate::palette::YELLOW;
 
 /// The most rows the section takes from the pane, "unstaged work" included —
 /// the spec's `config.agent_tree_commits_max_rows`.

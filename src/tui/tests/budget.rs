@@ -360,8 +360,8 @@ mod render_glue {
 /// The address of the store the board is connected to is on the top row in
 /// every state, in the plain muted style of the other badges.
 mod store_address_indicator {
+    use crate::palette::MUTED;
     use crate::tui::tests::helpers::{buffer_line, make_app, render_to_buffer};
-    use crate::tui::ui::palette::MUTED;
 
     #[test]
     fn the_top_row_names_the_store() {

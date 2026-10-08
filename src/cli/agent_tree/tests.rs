@@ -3297,7 +3297,7 @@ fn the_tree_title_names_the_selected_commit() {
 /// — every section's border).
 #[test]
 fn the_commits_sections_border_shows_focus_and_reddens_with_a_notice() {
-    use crate::tui::ui::palette::CYAN;
+    use crate::palette::CYAN;
     let tree = build_tree(&root(), &[]);
 
     let mut state = RenderState::new();

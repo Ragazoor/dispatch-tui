@@ -102,7 +102,7 @@ impl ListCursor for AgentsSection {
 /// (`AgentTreeNoticeRedensBorder`), else the focus colour on the focused
 /// section, else the ordinary border. One rule for both of the pane's sections.
 pub(crate) fn border_style(focused: bool, alert: bool) -> Style {
-    use crate::tui::ui::palette::{CYAN, RED};
+    use crate::palette::{CYAN, RED};
     if alert {
         Style::default().fg(RED)
     } else if focused {
@@ -133,7 +133,7 @@ pub fn render_agents(
     focused: bool,
     alert: bool,
 ) {
-    use crate::tui::ui::palette::MUTED;
+    use crate::palette::MUTED;
 
     let visible = usize::from(area.height.saturating_sub(2));
     section.viewport_rows = visible;

@@ -1,7 +1,7 @@
 use super::*;
 use crate::models::{test_tmux_window, EpicId, SubStatus, TaskId, TaskStatus};
+use crate::palette::{FG, MUTED, RED, YELLOW};
 use crate::tui::commands::SettingsCommand;
-use crate::tui::ui::palette::{FG, MUTED, RED, YELLOW};
 use crossterm::event::KeyCode;
 use std::time::{Duration, Instant};
 
