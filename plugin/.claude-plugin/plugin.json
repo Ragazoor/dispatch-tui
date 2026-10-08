@@ -2,6 +2,5 @@
   "name": "dispatch",
   "version": "0.2.0",
   "description": "Terminal kanban board for dispatching Claude Code agents into isolated git worktrees",
-  "repository": "https://github.com/Ragazoor/dispatch-agent",
-  "types": "./types/index.d.ts"
+  "repository": "https://github.com/Ragazoor/dispatch-agent"
 }

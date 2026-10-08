@@ -1,6 +1,15 @@
 # Moving the agent-tree companion pane into Claude Code mods
 
-Task #28713. Status: findings and direction only. No spec or code yet.
+Task #28713. Status: **abandoned on 2026-10-08** (task #28720).
+
+The spike, the agent list pane and the tree pane were built and then reverted.
+The diff viewer is why. A mod `Pane` docks beside the chat at a width Claude
+Code picks; this build's mod API has no way to widen it by hand and nothing
+like tmux's zoom. The tmux diff pane can be resized and zoomed with keys the
+user already knows, so moving the diff into a mod is a step back. Without the
+diff viewer, the move no longer removes the tmux plumbing, which was its main
+payoff. The tmux companion pane stays. Revisit if mod panes gain resizing or
+a full-screen mode.
 
 ## Why
 

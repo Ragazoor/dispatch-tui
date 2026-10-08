@@ -755,25 +755,4 @@ mod tests {
             "task-status-hook must be registered under PostToolUse"
         );
     }
-
-    #[test]
-    fn hooks_json_names_the_dispatch_mod_module() {
-        // AgentSessionLoadsDispatchMod: the module rides in the same
-        // hooks.json as the command hooks and must be embedded too.
-        let value = hooks_json_value();
-        assert_eq!(value["modules"], serde_json::json!(["./register.tsx"]));
-        let module = PLUGIN_DIR
-            .get_file("hooks/register.tsx")
-            .expect("the hooks module must be embedded")
-            .contents_utf8()
-            .expect("the hooks module must be UTF-8");
-        assert!(
-            module.contains("DISPATCH_PORT"),
-            "the mod must read the board port from DISPATCH_PORT"
-        );
-        assert!(
-            module.contains("--show-current"),
-            "the mod must derive the task id from the git branch"
-        );
-    }
 }

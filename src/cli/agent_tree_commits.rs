@@ -33,7 +33,7 @@ pub(crate) const COMMITS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
 /// One of the agent's own commits, as the section lists it — the spec's
 /// `AgentCommit`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentCommit {
     /// The full commit id; what a selection is keyed by.
     pub id: String,

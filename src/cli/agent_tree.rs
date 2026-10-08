@@ -162,7 +162,7 @@ fn count_spans(node: &TreeNode) -> Vec<Span<'static>> {
 /// A COLLAPSED row draws them whatever it holds: there the sum is not a
 /// restatement of rows on screen, it is the only thing saying how much is
 /// hidden.
-pub(crate) fn shows_counts(node: &TreeNode, collapsed: bool) -> bool {
+fn shows_counts(node: &TreeNode, collapsed: bool) -> bool {
     collapsed
         || node
             .children
