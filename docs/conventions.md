@@ -505,7 +505,7 @@ Do not rely on `clippy::large_enum_variant` alone to catch a regression here. It
 compares the largest variant against the *second* largest, so it is blind to the
 case these enums are most exposed to: several domains growing together, which
 keeps the spread under the threshold while the total doubles. The
-`assert_no_entity_inline` tests in `src/tui/types.rs` assert the invariant
+`assert_no_entity_inline` tests in `src/tui/types/tests.rs` assert the invariant
 directly and run under `cargo test`.
 
 An `#[allow(clippy::large_enum_variant)]` anywhere in this plumbing is a smell,

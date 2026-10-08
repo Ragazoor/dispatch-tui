@@ -28,7 +28,7 @@ pub(super) const MIN_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 /// `UnboundedReceiver<Message>` unboxed), so boxing at this hop would add an
 /// allocation per event for no benefit. That only stays affordable while
 /// `Message` itself stays small — see the `size_of` guard-rail tests in
-/// `src/tui/types.rs`.
+/// `src/tui/types/tests.rs`.
 #[cfg_attr(test, derive(Debug))]
 pub(super) enum LoopEvent {
     Key(crossterm::event::KeyEvent),

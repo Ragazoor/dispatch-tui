@@ -1,5 +1,6 @@
 use super::*;
 use crate::models::{EpicBuilder, TaskId};
+use std::collections::HashSet;
 
 fn make_test_epic(id: i64, parent: Option<i64>) -> Epic {
     EpicBuilder::new(id).parent(parent).build()

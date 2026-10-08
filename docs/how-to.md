@@ -84,7 +84,7 @@ Reverse the steps above, but note that one test does **not** self-heal from the 
 ## Adding a New TUI View/Mode
 
 <!-- allow-phantom-symbol: `MyNewView` is the placeholder name for the variant you are adding -->
-1. **Add a `ViewMode` variant** in `src/tui/types.rs` (e.g., `ViewMode::MyNewView { selection, saved_board }`).
+1. **Add a `ViewMode` variant** in `src/tui/types/state.rs` (e.g., `ViewMode::MyNewView { selection, saved_board }`).
 2. **Add `Message` variants** for entering/exiting and any view-specific actions.
 3. **Add `Command` variants** if the view triggers side effects (DB writes, shell commands).
 4. **Handle input** in `src/tui/input.rs` — add key handlers under a new match arm for your `ViewMode`.

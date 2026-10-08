@@ -39,7 +39,10 @@ to look.
 | `src/tui/ui/budget.rs` | Subscription rate-limit indicator: `budget_spans` renders the 5-hour/7-day windows from a `BudgetSnapshot` into status-bar spans — colour by threshold, countdown to reset, dimmed with an age suffix when the snapshot is stale, and graceful degradation (drop countdowns, then the 7-day window, then everything) as the available width shrinks. `pub(in crate::tui::ui)`, so its tests are inline |
 | `src/palette.rs` | Tokyo Night color palette constants, shared by the board (`src/tui/`) and the agent-tree panes (`src/agent_tree/`) |
 | `src/tui/ui/input_form.rs` | Overlay renderer (input forms) |
-| `src/tui/types.rs` | `Message`, `Command` (a pure router over the per-domain enums in `src/tui/commands/`), `ViewMode`, `InputMode`, `LayoutCache`, `AgentTracking` enums and structs |
+| `src/tui/types.rs` | `Message`, `Command` (a pure router over the per-domain enums in `src/tui/commands/`), `InputMode`, and the form drafts; re-exports the three submodules below |
+| `src/tui/types/state.rs` | The `*State` structs `App` holds (`BoardState`, `InputState`, `SplitState`, …), `AgentTracking`, `BoardSelection`, `ViewMode` |
+| `src/tui/types/fold.rs` | `SectionFoldState`, `EpicFoldState` and their persisted settings keys |
+| `src/tui/types/layout.rs` | Per-frame layout: `ColumnItem`, `ColumnLayout`, `EpicPlacement`, `SubtaskStats`, `CardOrderKey`, `LayoutCache` |
 | `src/tui/tests/` | TUI unit and scenario tests, snapshots, helpers |
 | `src/models/mod.rs` | Module declarations + flat re-exports of all domain types (no logic, no tests) |
 | `src/models/tasks.rs` | `Task`, `TaskStatus`, `SubStatus` (+ `column_section()`), `TaskTag` (+ `is_review()`), `DispatchMode::for_task()` tag routing, `is_wrappable`, `slugify`, age formatting |
