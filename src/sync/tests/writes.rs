@@ -1092,7 +1092,10 @@ async fn a_refused_patch_is_an_error() {
 async fn unsubscribing_from_something_unfollowed_is_false_not_an_error() {
     let (writer, _) = writer_with(RecordingCaller::rejecting());
 
-    assert!(!writer.unsubscribe_from_epic("user-me", 3).await.unwrap());
+    assert!(!writer
+        .unsubscribe_from_epic("user-me", EpicId(3))
+        .await
+        .unwrap());
 }
 
 // -- The rest of the routed surface -----------------------------------------
@@ -2151,12 +2154,18 @@ async fn settings_route_with_no_identity_settled() {
 async fn subscribing_to_an_epic_sends_it_and_a_refusal_is_an_error() {
     let (writer, caller) = writer_with(RecordingCaller::default());
 
-    writer.subscribe_to_epic("user-me", 7).await.unwrap();
+    writer
+        .subscribe_to_epic("user-me", EpicId(7))
+        .await
+        .unwrap();
 
     assert_eq!(caller.sent(), [Sent::Subscribe("user-me".to_string(), 7)]);
 
     let (refusing, _) = writer_with(RecordingCaller::rejecting());
-    assert!(refusing.subscribe_to_epic("user-me", 7).await.is_err());
+    assert!(refusing
+        .subscribe_to_epic("user-me", EpicId(7))
+        .await
+        .is_err());
 }
 
 /// The production identity starts unsettled and answers with the name the

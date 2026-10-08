@@ -188,7 +188,7 @@ impl crate::store::SharedReader for SubscriptionBoardReads {
         Ok(self.rows.base_branches())
     }
 
-    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<i64>> {
+    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<EpicId>> {
         Ok(self.rows.subscribed_epics(subscriber))
     }
 

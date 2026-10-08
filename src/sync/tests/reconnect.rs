@@ -5,6 +5,7 @@
 //! behaviour this repo writes by hand, which is why it is asserted at all.
 
 use super::{accepted, refused, RefusingSubscriber, ScriptedConnector};
+use crate::models::EpicId;
 use crate::store::{EpicCrud, HostStore, IdentityCredentialStore, Store, SubscriptionStore};
 use crate::sync::{ConnectionStatus, StepOutcome, SyncSession, RECONNECT_BACKOFF_BASE};
 use std::time::{Duration, Instant};
@@ -223,7 +224,7 @@ async fn a_conflicted_connection_never_subscribes() {
     let db = store().await;
     db.set_user_identity_token("token-a").await.unwrap();
     db.adopt_user_identity("user-a").await.unwrap();
-    db.subscribe_to_epic("user-a", 7).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
     let connector = ScriptedConnector::new(vec![accepted("user-b", "token-b")]);
     let mut session = SyncSession::open("store.example", connector.clone());
 

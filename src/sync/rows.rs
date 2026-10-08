@@ -631,13 +631,13 @@ impl SharedRows {
     }
 
     /// `subscriber`'s followed epic ids, ascending — `ORDER BY epic_id`.
-    pub fn subscribed_epics(&self, subscriber: &str) -> Vec<i64> {
+    pub fn subscribed_epics(&self, subscriber: &str) -> Vec<EpicId> {
         self.read(|rows| {
-            let mut ids: Vec<i64> = rows
+            let mut ids: Vec<EpicId> = rows
                 .subscriptions
                 .values()
                 .filter(|s| s.subscriber == subscriber)
-                .map(|s| s.epic_id)
+                .map(|s| EpicId(s.epic_id))
                 .collect();
             ids.sort_unstable();
             ids

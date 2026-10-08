@@ -5,7 +5,7 @@
 //! worktree gating still keys on host.
 
 use super::{accepted, ScriptedConnector};
-use crate::models::TaskStatus;
+use crate::models::{EpicId, TaskStatus};
 use crate::store::{
     CreateTaskRequest, EpicCrud, HostStore, IdentityCredentialStore, Store, SubscriptionStore,
     TaskCrud,
@@ -49,10 +49,13 @@ async fn a_user_can_follow_any_number_of_epics() {
     let db = store().await;
 
     for epic in [9, 7, 42] {
-        db.subscribe_to_epic("user-a", epic).await.unwrap();
+        db.subscribe_to_epic("user-a", EpicId(epic)).await.unwrap();
     }
 
-    assert_eq!(db.subscribed_epics("user-a").await.unwrap(), vec![7, 9, 42]);
+    assert_eq!(
+        db.subscribed_epics("user-a").await.unwrap(),
+        vec![EpicId(7), EpicId(9), EpicId(42)]
+    );
 }
 
 /// `core.allium: SubscriptionIsUniquePerSubscriberAndEpic`. Re-subscribing is
@@ -62,10 +65,13 @@ async fn a_user_can_follow_any_number_of_epics() {
 async fn subscribing_twice_is_subscribing_once() {
     let db = store().await;
 
-    db.subscribe_to_epic("user-a", 7).await.unwrap();
-    db.subscribe_to_epic("user-a", 7).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
 
-    assert_eq!(db.subscribed_epics("user-a").await.unwrap(), vec![7]);
+    assert_eq!(
+        db.subscribed_epics("user-a").await.unwrap(),
+        vec![EpicId(7)]
+    );
 }
 
 /// The asymmetry is deliberate: subscribing twice expresses what the caller
@@ -74,10 +80,10 @@ async fn subscribing_twice_is_subscribing_once() {
 #[tokio::test]
 async fn unsubscribing_reports_whether_anything_was_following() {
     let db = store().await;
-    db.subscribe_to_epic("user-a", 7).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
 
-    assert!(db.unsubscribe_from_epic("user-a", 7).await.unwrap());
-    assert!(!db.unsubscribe_from_epic("user-a", 7).await.unwrap());
+    assert!(db.unsubscribe_from_epic("user-a", EpicId(7)).await.unwrap());
+    assert!(!db.unsubscribe_from_epic("user-a", EpicId(7)).await.unwrap());
     assert!(db.subscribed_epics("user-a").await.unwrap().is_empty());
 }
 
@@ -87,17 +93,26 @@ async fn unsubscribing_reports_whether_anything_was_following() {
 #[tokio::test]
 async fn one_persons_subscriptions_are_invisible_to_another() {
     let db = store().await;
-    db.subscribe_to_epic("user-a", 7).await.unwrap();
-    db.subscribe_to_epic("user-b", 9).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
+    db.subscribe_to_epic("user-b", EpicId(9)).await.unwrap();
 
-    assert_eq!(db.subscribed_epics("user-a").await.unwrap(), vec![7]);
-    assert_eq!(db.subscribed_epics("user-b").await.unwrap(), vec![9]);
+    assert_eq!(
+        db.subscribed_epics("user-a").await.unwrap(),
+        vec![EpicId(7)]
+    );
+    assert_eq!(
+        db.subscribed_epics("user-b").await.unwrap(),
+        vec![EpicId(9)]
+    );
 
     assert!(
-        !db.unsubscribe_from_epic("user-a", 9).await.unwrap(),
+        !db.unsubscribe_from_epic("user-a", EpicId(9)).await.unwrap(),
         "user-a naming user-b's epic must not remove user-b's row"
     );
-    assert_eq!(db.subscribed_epics("user-b").await.unwrap(), vec![9]);
+    assert_eq!(
+        db.subscribed_epics("user-b").await.unwrap(),
+        vec![EpicId(9)]
+    );
 }
 
 /// An install that has never connected has no identity, so it has nothing to
@@ -107,8 +122,8 @@ async fn one_persons_subscriptions_are_invisible_to_another() {
 async fn subscribing_without_an_identity_is_refused() {
     let db = store().await;
 
-    assert!(db.subscribe_to_epic("", 7).await.is_err());
-    assert!(db.subscribe_to_epic("   ", 7).await.is_err());
+    assert!(db.subscribe_to_epic("", EpicId(7)).await.is_err());
+    assert!(db.subscribe_to_epic("   ", EpicId(7)).await.is_err());
 }
 
 /// **There is no way to ask for somebody else's user board.**
@@ -124,7 +139,7 @@ async fn subscribing_without_an_identity_is_refused() {
 #[tokio::test]
 async fn a_subscription_request_can_only_ever_name_its_own_board() {
     let db = store().await;
-    db.subscribe_to_epic("user-a", 7).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
     let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a")]);
     let mut session = SyncSession::open("store.example", connector.clone());
 
@@ -149,7 +164,7 @@ async fn a_subscription_request_can_only_ever_name_its_own_board() {
 #[tokio::test]
 async fn every_connection_re_asserts_the_subscription_set() {
     let db = store().await;
-    db.subscribe_to_epic("user-a", 7).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
     let connector = ScriptedConnector::new(vec![
         accepted("user-a", "token-a"),
         accepted("user-a", "token-a"),
@@ -182,13 +197,16 @@ async fn a_subscription_follows_the_person_across_their_machines() {
         db.adopt_user_identity("user-a").await.unwrap();
     }
 
-    laptop.subscribe_to_epic("user-a", 7).await.unwrap();
+    laptop.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
 
     // Standing in for the shared store the two would both read: the SAME
     // subscriber key resolves the same row set, whichever machine asks.
     let identity = desktop.user_identity().await.unwrap().unwrap();
     assert_eq!(identity, "user-a");
-    assert_eq!(laptop.subscribed_epics(&identity).await.unwrap(), vec![7]);
+    assert_eq!(
+        laptop.subscribed_epics(&identity).await.unwrap(),
+        vec![EpicId(7)]
+    );
 }
 
 /// Test 2's second half. One person owning two machines must not make a
@@ -241,12 +259,12 @@ async fn shared_ownership_does_not_make_another_machines_worktree_dispatchable()
 #[tokio::test]
 async fn an_unfollow_while_connected_reasserts_the_whole_subscription() {
     let db = store().await;
-    db.subscribe_to_epic("user-a", 7).await.unwrap();
-    db.subscribe_to_epic("user-a", 9).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(9)).await.unwrap();
     let (connector, mut session, now) = connected_session(&db).await;
     assert_eq!(connector.subscriptions().len(), 1);
 
-    db.unsubscribe_from_epic("user-a", 7).await.unwrap();
+    db.unsubscribe_from_epic("user-a", EpicId(7)).await.unwrap();
     session.step(&db, now).await.unwrap();
 
     let requests = connector.subscriptions();
@@ -272,10 +290,10 @@ async fn an_unfollow_while_connected_reasserts_the_whole_subscription() {
 #[tokio::test]
 async fn unfollowing_the_last_epic_reasserts_with_an_empty_list() {
     let db = store().await;
-    db.subscribe_to_epic("user-a", 7).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
     let (connector, mut session, now) = connected_session(&db).await;
 
-    db.unsubscribe_from_epic("user-a", 7).await.unwrap();
+    db.unsubscribe_from_epic("user-a", EpicId(7)).await.unwrap();
     session.step(&db, now).await.unwrap();
 
     let requests = connector.subscriptions();
@@ -292,11 +310,11 @@ async fn unfollowing_the_last_epic_reasserts_with_an_empty_list() {
 #[tokio::test]
 async fn following_an_additional_epic_while_connected_does_not_reassert() {
     let db = store().await;
-    db.subscribe_to_epic("user-a", 7).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
     let (connector, mut session, now) = connected_session(&db).await;
     assert_eq!(connector.subscriptions().len(), 1);
 
-    db.subscribe_to_epic("user-a", 9).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(9)).await.unwrap();
     session.step(&db, now).await.unwrap();
 
     assert_eq!(
@@ -311,7 +329,7 @@ async fn following_an_additional_epic_while_connected_does_not_reassert() {
 #[tokio::test]
 async fn steps_with_no_subscription_change_do_not_reassert() {
     let db = store().await;
-    db.subscribe_to_epic("user-a", 7).await.unwrap();
+    db.subscribe_to_epic("user-a", EpicId(7)).await.unwrap();
     let (connector, mut session, now) = connected_session(&db).await;
 
     session.step(&db, now).await.unwrap();

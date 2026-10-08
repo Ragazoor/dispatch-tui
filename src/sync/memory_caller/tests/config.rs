@@ -109,7 +109,7 @@ async fn subscribe_to_epic_is_idempotent() {
         .subscribe_to_epic("alice".into(), epic_id)
         .await
         .unwrap();
-    assert_eq!(rows.subscribed_epics("alice"), vec![epic_id.0]);
+    assert_eq!(rows.subscribed_epics("alice"), vec![epic_id]);
 }
 
 #[tokio::test]

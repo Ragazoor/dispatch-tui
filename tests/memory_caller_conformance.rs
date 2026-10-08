@@ -716,7 +716,7 @@ fn memory_caller_matches_the_real_reducers() {
         real.subscribe_to_epic(subscriber.into(), EpicId(epic_id_real))
             .await
             .unwrap();
-        wait_for!(rows_real.subscribed_epics(subscriber) == vec![epic_id_real]);
+        wait_for!(rows_real.subscribed_epics(subscriber) == vec![EpicId(epic_id_real)]);
         mem.subscribe_to_epic(subscriber.into(), EpicId(epic_id_mem))
             .await
             .unwrap();

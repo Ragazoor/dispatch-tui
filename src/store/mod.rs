@@ -812,16 +812,16 @@ pub trait IdentityCredentialStore: Send + Sync {
 #[async_trait::async_trait]
 pub trait SubscriptionStore: Send + Sync {
     /// The epic ids `subscriber` follows, ascending.
-    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<i64>>;
+    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<EpicId>>;
 
     /// Follow `epic_id`. Idempotent: subscribing twice is subscribing.
-    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()>;
+    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<()>;
 
     /// Stop following `epic_id`. Returns whether a subscription was actually
     /// removed, so a caller can refuse an unsubscribe from something
     /// unfollowed — the asymmetry with `subscribe_to_epic` is deliberate and
     /// `sync.allium: UnsubscribeFromEpic` says why.
-    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool>;
+    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<bool>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1200,7 +1200,7 @@ pub trait SharedReader: Send + Sync {
     async fn get_verify_command(&self, path: &str) -> Result<Option<String>>;
     async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>>;
     /// `subscriber`'s followed epic ids, ascending.
-    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<i64>>;
+    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<EpicId>>;
     /// This host's setting `key`, if set.
     async fn get_setting(&self, key: &str) -> Result<Option<String>>;
 }
@@ -1315,8 +1315,8 @@ pub trait SharedWriter: Send + Sync {
     async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()>;
 
     // Subscriptions.
-    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()>;
-    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool>;
+    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<()>;
+    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<bool>;
 
     // Settings (Phase 9). Scoped by THIS writer's own host
     // id, not passed as an argument — see `ReducerWriter.host`'s doc comment

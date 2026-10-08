@@ -132,11 +132,19 @@ impl SharedWriter for RecordingWriter {
         self.record(&format!("record_base_branch {repo_path} {branch}"))
     }
 
-    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()> {
+    async fn subscribe_to_epic(
+        &self,
+        subscriber: &str,
+        epic_id: crate::models::EpicId,
+    ) -> Result<()> {
         self.record(&format!("subscribe_to_epic {subscriber} {epic_id}"))
     }
 
-    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool> {
+    async fn unsubscribe_from_epic(
+        &self,
+        subscriber: &str,
+        epic_id: crate::models::EpicId,
+    ) -> Result<bool> {
         self.record(&format!("unsubscribe_from_epic {subscriber} {epic_id}"))?;
         Ok(true)
     }
@@ -664,8 +672,12 @@ async fn every_routed_mutation_reaches_the_writer() {
     db.record_base_branch("/repo", "main").await.unwrap();
     db.delete_repo_path("/repo").await.unwrap();
 
-    db.subscribe_to_epic("user-me", 1).await.unwrap();
-    db.unsubscribe_from_epic("user-me", 1).await.unwrap();
+    db.subscribe_to_epic("user-me", crate::models::EpicId(1))
+        .await
+        .unwrap();
+    db.unsubscribe_from_epic("user-me", crate::models::EpicId(1))
+        .await
+        .unwrap();
 
     db.set_setting_bool("notifications", true).await.unwrap();
     db.set_setting_string("theme", "dark").await.unwrap();

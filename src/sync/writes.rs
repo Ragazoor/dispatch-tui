@@ -969,9 +969,9 @@ impl SharedWriter for ReducerWriter {
             .applied()
     }
 
-    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()> {
+    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<()> {
         self.caller
-            .subscribe_to_epic(subscriber.to_string(), EpicId(epic_id))
+            .subscribe_to_epic(subscriber.to_string(), epic_id)
             .await?
             .applied()
     }
@@ -981,10 +981,10 @@ impl SharedWriter for ReducerWriter {
     /// `sync.allium: UnsubscribeFromEpic` makes that a refusal rather than a
     /// no-op, and the store says so; the local signature reports it as `false`
     /// rather than as an error, exactly as the SQLite version does.
-    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool> {
+    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<bool> {
         Ok(self
             .caller
-            .unsubscribe_from_epic(subscriber.to_string(), EpicId(epic_id))
+            .unsubscribe_from_epic(subscriber.to_string(), epic_id)
             .await?
             .won())
     }

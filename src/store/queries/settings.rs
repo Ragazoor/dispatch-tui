@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use super::super::{SettingsStore, Store};
+use super::super::{EpicId, SettingsStore, Store};
 
 #[async_trait::async_trait]
 impl super::super::SettingsStore for Store {
@@ -324,12 +324,12 @@ impl Store {
 
 #[async_trait::async_trait]
 impl super::super::SubscriptionStore for Store {
-    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<i64>> {
+    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<EpicId>> {
         let reader = self.shared_reader()?;
         reader.subscribed_epics(subscriber).await
     }
 
-    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()> {
+    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<()> {
         if subscriber.trim().is_empty() {
             // `sync.allium: SubscribeToEpic` requires an identity. An install
             // that has never connected has none, and a subscription with an
@@ -342,7 +342,7 @@ impl super::super::SubscriptionStore for Store {
         writer.subscribe_to_epic(subscriber, epic_id).await
     }
 
-    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool> {
+    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<bool> {
         // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
         let writer = self.shared_writer()?;
         writer.unsubscribe_from_epic(subscriber, epic_id).await

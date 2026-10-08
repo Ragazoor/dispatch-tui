@@ -13,6 +13,7 @@
 //! reading a clock: a twenty-minute outage is then something a test states
 //! rather than something it waits out.
 
+use crate::models::EpicId;
 use anyhow::Result;
 use std::sync::Arc;
 use std::time::Instant;
@@ -79,7 +80,7 @@ pub struct SyncSession {
     /// connector's own widen mechanism (`ASubscriptionRowWidensTheAsk`), and
     /// reasserting on every follow too would turn a flicker-free live-follow
     /// into a flickering one.
-    subscribed_epics: Vec<i64>,
+    subscribed_epics: Vec<EpicId>,
 }
 
 /// The shared shape of a subscribe request: this identity, asking for
@@ -89,9 +90,10 @@ pub struct SyncSession {
 async fn build_subscription_request(
     store: &dyn SyncStore,
     identity: impl Into<String>,
-    epics: Vec<i64>,
+    epics: Vec<EpicId>,
 ) -> Result<SubscriptionRequest> {
     let (host, _label) = store.ensure_host_identity().await?;
+    let epics = epics.into_iter().map(|epic| epic.0).collect();
     Ok(SubscriptionRequest::new(identity, epics, host))
 }
 
