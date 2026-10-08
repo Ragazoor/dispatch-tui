@@ -641,17 +641,12 @@ async fn list_tasks_done_status_filter() {
 
 #[tokio::test]
 async fn wrap_up_rebase_does_not_change_status() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
-    let runner: Arc<dyn ProcessRunner> = DispatchScript::finish().no_remote().shared_runner();
-    let state = Arc::new(McpState::new(
-        McpDeps {
-            db: db.clone(),
-            runner,
-            embedding_service: EmbeddingService::new_test(),
-            data_dir: std::env::temp_dir(),
-        },
+    let (state, db) = test_state_with_overrides(
+        DispatchScript::finish().no_remote().shared_runner(),
         None,
-    ));
+        None,
+    )
+    .await;
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -690,17 +685,12 @@ async fn wrap_up_rebase_does_not_change_status() {
 
 #[tokio::test]
 async fn wrap_up_rebase_does_not_recalculate_epic_status() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
-    let runner: Arc<dyn ProcessRunner> = DispatchScript::finish().no_remote().shared_runner();
-    let state = Arc::new(McpState::new(
-        McpDeps {
-            db: db.clone(),
-            runner,
-            embedding_service: EmbeddingService::new_test(),
-            data_dir: std::env::temp_dir(),
-        },
+    let (state, db) = test_state_with_overrides(
+        DispatchScript::finish().no_remote().shared_runner(),
         None,
-    ));
+        None,
+    )
+    .await;
 
     let epic = db.create_epic("E", "", None).await.unwrap();
     let task_id = db
@@ -741,17 +731,12 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
 
 #[tokio::test]
 async fn wrap_up_accepts_string_task_id() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
-    let runner: Arc<dyn ProcessRunner> = DispatchScript::finish().no_remote().shared_runner();
-    let state = Arc::new(McpState::new(
-        McpDeps {
-            db: db.clone(),
-            runner,
-            embedding_service: EmbeddingService::new_test(),
-            data_dir: std::env::temp_dir(),
-        },
+    let (state, db) = test_state_with_overrides(
+        DispatchScript::finish().no_remote().shared_runner(),
         None,
-    ));
+        None,
+    )
+    .await;
 
     let task_id = db
         .create_task(CreateTaskRequest {
