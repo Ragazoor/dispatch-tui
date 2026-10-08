@@ -1074,8 +1074,7 @@ impl TuiRuntime {
 
         let emb_svc = finish_embedding_load(emb_load).await?;
 
-        // Built once and shared: the MCP server and the TUI runtime go
-        // through the same services (`crate::service::Services`).
+        // Built once, shared by the MCP server and the TUI runtime.
         let services =
             crate::service::Services::new(database.clone(), runner.clone(), emb_svc.clone());
 

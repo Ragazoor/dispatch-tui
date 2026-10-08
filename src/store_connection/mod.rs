@@ -212,7 +212,7 @@ pub(crate) async fn connect_first(
         .await
         .map_err(|reason| {
             tracing::error!("first connection to the shared store failed: {reason}");
-            crate::startup::StartupAbort::StoreUnavailable { reason }
+            crate::startup_abort::StartupAbort::StoreUnavailable { reason }
         })?;
     match register_with {
         Some(caller) => on_store_connected(&*parts.database, &parts.settled_identity, caller).await,

@@ -187,14 +187,6 @@ impl TaskService {
         }
     }
 
-    /// This install's `Host` id: the one the store handle was built with,
-    /// and so the one the claim's `is_locally_owned` reads. See
-    /// `dispatch.allium: DispatchTask` ("THE HOST IS RESOLVED BEFORE ANYTHING
-    /// IS PROVISIONED").
-    pub(super) fn local_host_id(&self) -> &str {
-        self.db.host_id()
-    }
-
     /// Construct a `TaskService` that shells out for real. Named so that the
     /// non-hermetic choice is visible at the call site; see [`new`](Self::new).
     pub fn new_with_real_runner(db: Arc<dyn store::TaskStore>) -> Self {

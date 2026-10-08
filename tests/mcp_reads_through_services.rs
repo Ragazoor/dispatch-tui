@@ -4,29 +4,14 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::path::{Path, PathBuf};
+mod common;
 
-fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.is_dir() {
-            if path.file_name().is_some_and(|n| n == "tests") {
-                continue;
-            }
-            rust_files(&path, out);
-        } else if path.extension().is_some_and(|e| e == "rs")
-            && !path.file_name().unwrap().to_string_lossy().contains("test")
-        {
-            out.push(path);
-        }
-    }
-}
+use std::path::PathBuf;
 
 #[test]
 fn mcp_handlers_do_not_read_tasks_or_epics_from_state_db() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/mcp");
-    let mut files = Vec::new();
-    rust_files(&root, &mut files);
+    let files = common::rust_files(&root, true);
     let mut offenders = Vec::new();
     for file in files {
         let body = std::fs::read_to_string(&file).unwrap();

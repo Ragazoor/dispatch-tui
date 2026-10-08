@@ -109,7 +109,7 @@ pub struct McpState {
 
 /// Test-support fields grouped out of [`McpState`]'s field list. Not all of
 /// these are `#[cfg(test)]` — `bg_write_done_tx` is read unconditionally by
-/// production code (`handlers/dispatch.rs`, `router_with_bg_done`) and is
+/// production code (`handlers/dispatch.rs`) and is
 /// simply always `None` outside tests, whereas `db_write` is compiled only
 /// under `#[cfg(test)]`.
 pub(crate) struct TestHooks {
@@ -125,9 +125,10 @@ pub(crate) struct TestHooks {
 }
 
 impl McpState {
-    /// A state with its own services, built from `deps`. For a server that
-    /// is not the board's (the tests); the board shares its own through
-    /// [`with_services`](Self::with_services).
+    /// A state with its own services, built from `deps`. Test-only: the
+    /// board shares its own through [`with_services`](Self::with_services),
+    /// and gating this keeps a production caller from building a second set.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn new(deps: McpDeps, notify_tx: Option<mpsc::UnboundedSender<BoardEvent>>) -> Self {
         let services = Services::new(
             deps.db.clone(),
@@ -242,6 +243,7 @@ impl McpState {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 pub fn router(deps: McpDeps, notify_tx: Option<mpsc::UnboundedSender<BoardEvent>>) -> Router {
     router_with_bg_done(deps, notify_tx, None)
 }
@@ -249,6 +251,7 @@ pub fn router(deps: McpDeps, notify_tx: Option<mpsc::UnboundedSender<BoardEvent>
 /// Like [`router`], but installs a test-only completion signal that fires after
 /// each fire-and-forget background write (usage, trajectory). Lets integration
 /// tests await detached writes deterministically instead of sleeping.
+#[cfg(any(test, feature = "test-support"))]
 pub fn router_with_bg_done(
     deps: McpDeps,
     notify_tx: Option<mpsc::UnboundedSender<BoardEvent>>,

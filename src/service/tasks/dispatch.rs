@@ -121,7 +121,7 @@ impl TaskService {
         // built with, so it names the machine the claim just checked. Known
         // before anything is provisioned, so `HostTracksWorktree` holds by
         // construction (`dispatch.allium: DispatchTask`).
-        let local_host_id = self.local_host_id().to_string();
+        let local_host_id = self.db.host_id().to_string();
 
         // The prologue runs a local embedding inference and several writes, so
         // it happens before the task is handed to the blocking pool.

@@ -11,18 +11,9 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::path::{Path, PathBuf};
+mod common;
 
-fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.is_dir() {
-            rust_files(&path, out);
-        } else if path.extension().is_some_and(|e| e == "rs") {
-            out.push(path);
-        }
-    }
-}
+use std::path::PathBuf;
 
 /// `(directory under src/, modules it must not import)`.
 const RULES: &[(&str, &[&str])] = &[
@@ -38,29 +29,52 @@ const RULES: &[(&str, &[&str])] = &[
     ("store_connection", &["runtime", "cli"]),
 ];
 
-/// Every `crate::<module>` path a line names, including the members of a
-/// grouped `use crate::{a, b::c}` import.
-fn crate_modules(line: &str) -> Vec<String> {
+/// Every `crate::<module>` path `source` names, including each member of a
+/// grouped `use crate::{a, b::{c, d}}` import, nested or spread over several
+/// lines as rustfmt writes a long one. Comment lines are skipped.
+fn crate_modules(source: &str) -> Vec<String> {
+    let code: String = source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut found = Vec::new();
-    for (i, _) in line.match_indices("crate::") {
-        let rest = &line[i + "crate::".len()..];
-        if let Some(group) = rest.strip_prefix('{') {
-            let group = group.split('}').next().unwrap_or("");
-            for item in group.split(',') {
-                let head = item.trim().split("::").next().unwrap_or("").trim();
-                if !head.is_empty() {
-                    found.push(head.to_string());
-                }
-            }
-        } else {
-            let head: String = rest
-                .chars()
-                .take_while(|c| c.is_alphanumeric() || *c == '_')
-                .collect();
-            found.push(head);
+    for (i, _) in code.match_indices("crate::") {
+        let rest = &code[i + "crate::".len()..];
+        match rest.strip_prefix('{') {
+            Some(group) => found.extend(group_heads(group)),
+            None => found.push(ident(rest)),
         }
     }
     found
+}
+
+/// The first segment of each top-level member of a `{...}` group, given the
+/// text just after its opening brace.
+fn group_heads(group: &str) -> Vec<String> {
+    let mut heads = Vec::new();
+    let mut depth = 0;
+    let mut at_member_start = true;
+    for (i, c) in group.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' if depth == 0 => break,
+            '}' => depth -= 1,
+            ',' if depth == 0 => at_member_start = true,
+            c if at_member_start && !c.is_whitespace() => {
+                at_member_start = false;
+                heads.push(ident(&group[i..]));
+            }
+            _ => {}
+        }
+    }
+    heads
+}
+
+fn ident(text: &str) -> String {
+    text.chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect()
 }
 
 #[test]
@@ -77,28 +91,31 @@ fn crate_modules_reads_plain_and_grouped_paths() {
 }
 
 #[test]
+fn crate_modules_reads_nested_and_multi_line_groups() {
+    assert_eq!(
+        crate_modules("use crate::{models::{A, B}, runtime::X};"),
+        vec!["models", "runtime"]
+    );
+    assert_eq!(
+        crate_modules("use crate::{\n    models::Task,\n    runtime::poll,\n};"),
+        vec!["models", "runtime"]
+    );
+    assert!(crate_modules("// use crate::runtime::x;").is_empty());
+}
+
+#[test]
 fn lower_layers_do_not_import_higher_ones() {
     let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut offenders = Vec::new();
     for (dir, forbidden) in RULES {
-        let mut files = Vec::new();
-        rust_files(&src.join(dir), &mut files);
-        for file in files {
+        for file in common::rust_files(&src.join(dir), false) {
             let body = std::fs::read_to_string(&file).unwrap();
-            for (n, line) in body.lines().enumerate() {
-                let code = line.trim_start();
-                if code.starts_with("//") {
-                    continue;
-                }
-                for module in crate_modules(line) {
-                    if forbidden.contains(&module.as_str()) {
-                        offenders.push(format!(
-                            "{}:{}: {dir} -> {module}: {}",
-                            file.strip_prefix(&src).unwrap().display(),
-                            n + 1,
-                            code
-                        ));
-                    }
+            for module in crate_modules(&body) {
+                if forbidden.contains(&module.as_str()) {
+                    offenders.push(format!(
+                        "{}: {dir} -> {module}",
+                        file.strip_prefix(&src).unwrap().display()
+                    ));
                 }
             }
         }

@@ -211,6 +211,30 @@ pub async fn dead_port() -> u16 {
     port
 }
 
+/// Every `.rs` file under `dir`, recursively. With `production_only`, test
+/// code is left out: `tests/` directories and files whose name contains
+/// `test`. The source-scanning guard tests share this walk.
+pub fn rust_files(dir: &Path, production_only: bool) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if path.is_dir() {
+                if !(production_only && name == "tests") {
+                    stack.push(path);
+                }
+            } else if path.extension().is_some_and(|e| e == "rs")
+                && !(production_only && name.contains("test"))
+            {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
 /// Read a file by its path relative to the repository root.
 pub fn repo_file(rel: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
