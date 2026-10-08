@@ -779,11 +779,11 @@ rule InstallShippedFeedScripts {
         -- ort-sys and zero-dependency — no new leaf in the dependency graph
         -- for a digest.
         -- The prompt goes through the existing Confirmer seam in
-        -- src/setup/mod.rs (src/setup/mod.rs::Confirmer): confirm_dangerous,
+        -- src/setup/mod.rs (src/setup/confirm.rs::Confirmer): confirm_dangerous,
         -- which defaults to No, NOT confirm, which defaults to Yes. Tests
         -- inject a fake confirmer, so both answers are exercisable without
         -- a terminal.
-        -- The artefact itself is src/setup/mod.rs::apply_feed_scripts, the
+        -- The artefact itself is src/setup/config_update.rs::apply_feed_scripts, the
         -- `feed_scripts` arm of ConfigArtefact::apply; the read-only half the
         -- drift check calls is
         -- src/setup/plugins.rs::shipped_scripts_are_current, which writes
@@ -913,7 +913,7 @@ rule ReportShippedFeedScripts {
                 SetupSectionLine(section: "Feed scripts", text: script_report_line(report))
 
     @guidance
-        -- Implementation: src/setup/mod.rs::apply_feed_scripts, which prints
+        -- Implementation: src/setup/config_update.rs::apply_feed_scripts, which prints
         -- the header and then walks
         -- src/setup/plugins.rs::feed_scripts_section_lines. The header line
         -- carries the scripts directory, printed with println! like its
