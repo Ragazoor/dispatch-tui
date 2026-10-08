@@ -628,14 +628,14 @@ struct TuiRuntime {
     // mutation-boundary section of docs/conventions.md.
     database: Arc<dyn store::TaskReadStore>,
     /// Where the board's CARDS come from — see
-    /// [`crate::sync::BoardReads`] and `docs/specs/sync.allium`'s
+    /// [`crate::store::BoardReads`] and `docs/specs/sync.allium`'s
     /// `BoardReadsFromTheSubscription`.
     ///
     /// The same `Store` as `database`, typed for drawing: this one answers
     /// "what is on the board?" — the reads the row-change pump and the
     /// revision guard refresh — and `database` answers everything else. Both
-    /// read the same subscription rows; see `crate::sync::board_reads`.
-    board_reads: Arc<dyn crate::sync::BoardReads>,
+    /// read the same subscription rows; see `crate::store::board_reads`.
+    board_reads: Arc<dyn crate::store::BoardReads>,
     /// This machine's own `Host.id` — minted locally on first run, immutable
     /// afterwards (`host.allium: MintHostIdentity`). Needed by
     /// `exec_check_status_if_owned`/the feed-tick ownership check to compare
@@ -676,7 +676,7 @@ struct TuiRuntime {
     /// Shared embedding service for RAG-based learning injection and editor updates.
     emb_svc: Arc<EmbeddingService>,
     /// The revision the board was last refreshed at
-    /// ([`crate::sync::BoardReads::revision`]).
+    /// ([`crate::store::BoardReads::revision`]).
     ///
     /// `-1` is "no snapshot yet", so the first tick always refreshes; the value
     /// is otherwise a `u64` widened, and the store is `Relaxed` because this is
@@ -968,7 +968,7 @@ impl TuiRuntime {
         // `board_reads` field share one handle — `FeedTick`'s host-scoping
         // (feeds.allium: FeedTick) needs to read `core/PollOwner`, which is
         // exactly what this seam answers.
-        let board_reads: Arc<dyn crate::sync::BoardReads> = parts.database.clone();
+        let board_reads: Arc<dyn crate::store::BoardReads> = parts.database.clone();
         let feed_runner = crate::feed::FeedRunner::new(
             database.clone(),
             feed_notify_tx,

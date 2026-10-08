@@ -16,7 +16,7 @@ fn fake_emb_bytes() -> Vec<u8> {
 }
 
 async fn seed_db() -> Arc<Store> {
-    Arc::new(Store::open_in_memory().await.unwrap())
+    Arc::new(Store::open_in_memory().unwrap())
 }
 
 async fn make_task(db: &Arc<Store>) -> crate::models::Task {

@@ -17,7 +17,7 @@ use crate::store::{CreateTaskRequest, EpicRead, RepoConfigRead, Store, TaskCrud,
 /// exactly the "local read cache" Phase 5 records as not existing.
 #[tokio::test]
 async fn nothing_is_read_through_to_the_local_store() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     let any_task = db
         .create_task(CreateTaskRequest::fixture("elsewhere", "/repo"))
         .await
@@ -28,7 +28,7 @@ async fn nothing_is_read_through_to_the_local_store() {
     );
 
     // A second handle over rows nothing has been delivered to.
-    let nothing_delivered = Store::open_in_memory().await.unwrap();
+    let nothing_delivered = Store::open_in_memory().unwrap();
 
     assert!(nothing_delivered.list_all().await.unwrap().is_empty());
     assert!(nothing_delivered.list_epics().await.unwrap().is_empty());

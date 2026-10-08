@@ -302,7 +302,7 @@ mod tests {
     /// in particular the cycle must not proceed with a defaulted `FeedRole`.
     #[tokio::test]
     async fn a_cycle_whose_epic_is_gone_fails_without_running_the_command() {
-        let db = Arc::new(Store::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().unwrap());
         let dir = tempfile::tempdir().unwrap();
         let sentinel = dir.path().join("command-ran");
         let epic_id = reviews_parent_with_sentinel_command(&db, &sentinel).await;
@@ -331,7 +331,7 @@ mod tests {
     /// so the hang is genuine, not a timed sleep that would end on its own.
     #[tokio::test]
     async fn a_hung_command_times_out_and_the_epic_recovers_on_the_next_cycle() {
-        let db = Arc::new(Store::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().unwrap());
         let epic = db.create_epic("Feed", "", None).await.unwrap();
 
         let fifo = std::env::temp_dir().join(format!("dispatch_feed_timeout_{}", epic.id.0));
@@ -453,7 +453,7 @@ mod tests {
     /// append-only epic must therefore keep the task.
     #[tokio::test]
     async fn an_append_only_epic_keeps_a_task_absent_from_the_emission() {
-        let db = Arc::new(Store::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().unwrap());
         let epic_id = flat_feed_epic(&db, TWO_RECORDS, true).await;
 
         cycle(Arc::clone(&db), epic_id).run().await;
@@ -472,7 +472,7 @@ mod tests {
     /// ordinary feed-as-source-of-truth removal still applies.
     #[tokio::test]
     async fn a_mirroring_epic_still_removes_a_task_absent_from_the_emission() {
-        let db = Arc::new(Store::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().unwrap());
         let epic_id = flat_feed_epic(&db, TWO_RECORDS, false).await;
 
         cycle(Arc::clone(&db), epic_id).run().await;
@@ -491,7 +491,7 @@ mod tests {
     /// every poll would train the user to ignore the line that matters.
     #[tokio::test]
     async fn an_append_only_cycle_is_not_reported_as_degraded() {
-        let db = Arc::new(Store::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().unwrap());
         let epic_id = flat_feed_epic(&db, TWO_RECORDS, true).await;
 
         match cycle(db, epic_id).run().await {
@@ -508,7 +508,7 @@ mod tests {
     /// a degraded run, and must still say so.
     #[tokio::test]
     async fn an_append_only_epic_still_reports_a_degraded_emission() {
-        let db = Arc::new(Store::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().unwrap());
         let epic_id = flat_feed_epic(&db, TWO_RECORDS, true).await;
         // Same epic, same emission — only the stderr differs, so this isolates
         // the second cause rather than re-standing-up the first.

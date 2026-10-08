@@ -17,7 +17,7 @@ async fn task_in_epic(db: &Store, epic_id: EpicId) -> crate::models::Task {
 
 #[tokio::test]
 async fn a_task_on_the_cve_root_is_under_the_cve_feed() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     let cve = db
         .create_managed_role_epic("CVE", None, FeedRole::Cve, Some("./fetch-cve.sh"), None)
         .await
@@ -29,7 +29,7 @@ async fn a_task_on_the_cve_root_is_under_the_cve_feed() {
 
 #[tokio::test]
 async fn a_task_on_a_repo_group_sub_epic_of_the_cve_root_is_under_the_cve_feed() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     let cve = db
         .create_managed_role_epic("CVE", None, FeedRole::Cve, Some("./fetch-cve.sh"), None)
         .await
@@ -56,7 +56,7 @@ whole reason the answer is an ancestry walk"
 
 #[tokio::test]
 async fn an_ordinary_epic_tree_is_not_under_the_cve_feed() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     let root = db.create_epic("Dispatch", "", None).await.unwrap().id;
     let child = db.create_epic("Sub", "", Some(root)).await.unwrap().id;
 
@@ -75,7 +75,7 @@ async fn an_ordinary_epic_tree_is_not_under_the_cve_feed() {
 /// exactly the shape the walk must not confuse for CVE work.
 #[tokio::test]
 async fn the_reviews_tree_is_not_under_the_cve_feed() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     let parent = db
         .create_managed_role_epic(
             "PR Reviews",

@@ -166,7 +166,7 @@ mod tests {
     };
 
     async fn mk() -> Store {
-        Store::open_in_memory().await.unwrap()
+        Store::open_in_memory().unwrap()
     }
 
     async fn add_task(db: &Store, epic: EpicId, repo: &str) -> crate::models::TaskId {

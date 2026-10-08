@@ -914,7 +914,7 @@ impl TuiRuntime {
                 // done. Without it the tick reads a revision the pump moved but
                 // never claimed, and repeats the whole read — a doubled refresh
                 // on every single teammate edit.
-                let revision = reads.revision().await.map_or(-1, |n| n as i64);
+                let revision = reads.revision().await as i64;
                 watermark.store(revision, std::sync::atomic::Ordering::Relaxed);
             }
         })
@@ -935,7 +935,7 @@ impl TuiRuntime {
     /// guard against the extra reads already exists one level up, in
     /// `exec_refresh_from_db`'s revision check.
     async fn reload_board(
-        db: Arc<dyn crate::sync::BoardReads>,
+        db: Arc<dyn crate::store::BoardReads>,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
     ) {
         match db.list_all().await {
@@ -1011,7 +1011,7 @@ impl TuiRuntime {
     /// Body of [`Self::spawn_refresh_epic`]. Falls back to a full board refresh
     /// if the epic is gone.
     async fn refresh_epic_into(
-        db: Arc<dyn crate::sync::BoardReads>,
+        db: Arc<dyn crate::store::BoardReads>,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
         epic_id: crate::models::EpicId,
     ) {
@@ -1092,13 +1092,7 @@ impl TuiRuntime {
 
     /// Whether the board has already been refreshed at `revision`.
     ///
-    /// `None` — the backing could not say — always answers false: one wasted
-    /// refresh is the right side to err on, and the other side is a board that
-    /// silently stops updating.
-    fn already_refreshed_at(&self, revision: Option<u64>) -> bool {
-        let Some(revision) = revision else {
-            return false;
-        };
+    fn already_refreshed_at(&self, revision: u64) -> bool {
         match self.last_change_count.load(Ordering::Relaxed) {
             -1 => false,
             last => last as u64 == revision,
@@ -1110,9 +1104,9 @@ impl TuiRuntime {
     /// Called by BOTH refresh paths. The tick's guard is only free if the
     /// pump's redraw counts as a refresh — otherwise every pushed row costs two
     /// full board reads instead of one.
-    fn record_refreshed_at(&self, revision: Option<u64>) {
-        let value = revision.map_or(-1, |n| n as i64);
-        self.last_change_count.store(value, Ordering::Relaxed);
+    fn record_refreshed_at(&self, revision: u64) {
+        self.last_change_count
+            .store(revision as i64, Ordering::Relaxed);
     }
 
     pub(super) async fn exec_delete_repo_path(&self, app: &mut App, path: &str) {

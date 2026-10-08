@@ -26,7 +26,7 @@ pub async fn test_router() -> (axum::Router, Arc<dyn store::TaskStore>) {
 pub async fn test_router_with_data_dir(
     data_dir: &Path,
 ) -> (axum::Router, Arc<dyn store::TaskStore>) {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let router = dispatch_tui::mcp::router(
         dispatch_tui::mcp::McpDeps {
@@ -51,7 +51,7 @@ pub async fn test_router_with_bg_done(
     Arc<dyn store::TaskStore>,
     mpsc::UnboundedReceiver<BackgroundWrite>,
 ) {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, rx) = mpsc::unbounded_channel();
     let router = dispatch_tui::mcp::router_with_bg_done(
@@ -164,7 +164,7 @@ impl Board {
 /// returns and no caller has to poll for readiness.
 pub async fn spawn_board() -> Board {
     let dir = tempfile::tempdir().unwrap();
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (bg_tx, bg_rx) = mpsc::unbounded_channel();
     let router = dispatch_tui::mcp::router_with_bg_done(

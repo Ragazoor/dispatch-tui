@@ -29,7 +29,7 @@ use dispatch_tui::store::{self, CreateTaskRequest, Store, TaskCrud};
 #[tokio::test]
 async fn subscribe_then_finish_delivers_notification() {
     // 1. Set up an in-memory DB + MockProcessRunner-backed MCP router.
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let mock = Arc::new(
         MockProcessRunner::new(vec![
             // tmux capture-pane -p — reports the watcher's pane idle at its

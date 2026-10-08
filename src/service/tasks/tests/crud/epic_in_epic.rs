@@ -1634,7 +1634,7 @@ async fn update_task_pr_finalisation_false_with_non_pr_url() {
 #[tokio::test]
 async fn update_repo_path_reroutes_within_grouped_epic() {
     use crate::store::EpicCrud;
-    let db = std::sync::Arc::new(crate::store::Store::open_in_memory().await.unwrap());
+    let db = std::sync::Arc::new(crate::store::Store::open_in_memory().unwrap());
     let svc =
         crate::service::TaskService::new(db.clone(), crate::process::MockProcessRunner::unused());
     let root = db.create_epic("root", "", None).await.unwrap();
@@ -1671,7 +1671,7 @@ async fn move_task_to_grouped_epic_routes_into_sub_epic() {
     // move_task_to_epic(task, Some(root)) and assert the task lands in a
     // per-repo RepoGroup sub-epic, NOT directly on the root.
     use crate::store::EpicCrud;
-    let db = std::sync::Arc::new(crate::store::Store::open_in_memory().await.unwrap());
+    let db = std::sync::Arc::new(crate::store::Store::open_in_memory().unwrap());
     let svc =
         crate::service::TaskService::new(db.clone(), crate::process::MockProcessRunner::unused());
 
@@ -1711,7 +1711,7 @@ async fn move_task_to_grouped_epic_routes_into_sub_epic() {
 async fn move_task_to_non_grouped_epic_lands_directly() {
     // Regression guard: moving to a plain (non-grouped) epic must NOT route.
     use crate::store::EpicCrud;
-    let db = std::sync::Arc::new(crate::store::Store::open_in_memory().await.unwrap());
+    let db = std::sync::Arc::new(crate::store::Store::open_in_memory().unwrap());
     let svc =
         crate::service::TaskService::new(db.clone(), crate::process::MockProcessRunner::unused());
 

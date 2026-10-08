@@ -8,7 +8,7 @@ use dispatch_tui::store::{CreateTaskRequest, RepoConfigStore, Store, TaskCrud, T
 
 #[tokio::test]
 async fn verify_command_lookup_matches_task_repo_path() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
 
     // Register a verify command for the repo path. The store only sets a
     // command on a saved path.
@@ -36,7 +36,7 @@ async fn verify_command_lookup_matches_task_repo_path() {
 
 #[tokio::test]
 async fn verify_command_lookup_returns_none_for_unregistered_path() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
 
     let fetched = fetch_verify_command(&db, "/not/registered").await;
     assert_eq!(fetched, None);
@@ -44,7 +44,7 @@ async fn verify_command_lookup_returns_none_for_unregistered_path() {
 
 #[tokio::test]
 async fn verify_command_lookup_requires_exact_path_match() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
 
     // Store under expanded path
     db.save_repo_path("/home/me/repo").await.unwrap();

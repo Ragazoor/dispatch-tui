@@ -28,7 +28,7 @@ use dispatch_tui::store::{Store, TaskRead};
 /// binary.
 async fn sqlite() -> (NamedTempFile, Store) {
     let tmp = NamedTempFile::new().unwrap();
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     (tmp, db)
 }
 
@@ -319,7 +319,7 @@ fn update_subcommand_removed() {
 
 #[tokio::test]
 async fn plan_attaches_to_existing_task() {
-    let db = std::sync::Arc::new(Store::open_in_memory().await.unwrap());
+    let db = std::sync::Arc::new(Store::open_in_memory().unwrap());
     let id = seed_task(&db, "Plan Target").await;
     let attach_plan = make_plan_file("Detailed Plan", "Step by step.");
     let plan_path = commands::resolve_plan_path(attach_plan.path()).unwrap();
@@ -345,7 +345,7 @@ async fn plan_attaches_to_existing_task() {
 
 #[tokio::test]
 async fn plan_nonexistent_task_fails() {
-    let db = std::sync::Arc::new(Store::open_in_memory().await.unwrap());
+    let db = std::sync::Arc::new(Store::open_in_memory().unwrap());
     let attach_plan = make_plan_file("Orphan Plan", "No task.");
     let plan_path = commands::resolve_plan_path(attach_plan.path()).unwrap();
 

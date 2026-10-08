@@ -6,8 +6,8 @@ use super::*;
 /// second copy to keep in step (`sync.allium: BoardReadsFromTheSubscription`).
 #[tokio::test]
 async fn the_board_reads_and_the_store_answer_from_the_same_rows() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
-    let board: Arc<dyn crate::sync::BoardReads> = db.clone();
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let board: Arc<dyn crate::store::BoardReads> = db.clone();
     let before = board.revision().await;
 
     let id = db
@@ -37,12 +37,12 @@ async fn a_handle_with_no_host_file_refuses_identity() {
 
 #[tokio::test]
 async fn attached_handle_round_trips_a_task_through_the_store() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     let id = db
         .create_task(CreateTaskRequest::fixture("via store", "/repo"))
         .await
         .unwrap();
     assert_eq!(db.get_task(id).await.unwrap().unwrap().title, "via store");
-    let other = Store::open_in_memory().await.unwrap();
+    let other = Store::open_in_memory().unwrap();
     assert!(other.list_all().await.unwrap().is_empty());
 }

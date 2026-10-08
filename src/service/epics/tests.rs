@@ -130,7 +130,7 @@ async fn create_epic_returns_the_post_patch_epic() {
     // sort_order / feed_command / feed_interval_secs are applied in a
     // second write; the returned Epic must carry them, not the pre-patch
     // insert result.
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
 
     let epic = svc
@@ -162,7 +162,7 @@ fn create_params_with_interval(interval: Option<i64>) -> CreateEpicParams {
 /// would leave an epic able to be *born* busy-looping.
 #[tokio::test]
 async fn create_epic_rejects_a_sub_floor_interval() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
 
     // 0 busy-loops the runner; a negative used to wrap to a near-infinite
@@ -180,7 +180,7 @@ async fn create_epic_rejects_a_sub_floor_interval() {
 
 #[tokio::test]
 async fn create_epic_accepts_the_floor_itself_and_an_unset_interval() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
 
     let at_floor = svc
@@ -199,7 +199,7 @@ async fn create_epic_accepts_the_floor_itself_and_an_unset_interval() {
 
 #[tokio::test]
 async fn update_epic_rejects_a_sub_floor_interval() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let epic = db.create_epic("Test", "", None).await.unwrap();
     let svc = EpicService::new(db.clone());
 
@@ -222,7 +222,7 @@ async fn update_epic_rejects_a_sub_floor_interval() {
 /// so a partial apply would save a title against a refused cadence.
 #[tokio::test]
 async fn update_epic_rejecting_the_interval_writes_no_other_field() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let epic = db.create_epic("Original", "", None).await.unwrap();
     let svc = EpicService::new(db.clone());
 
@@ -244,7 +244,7 @@ async fn update_epic_rejecting_the_interval_writes_no_other_field() {
 
 #[tokio::test]
 async fn update_epic_accepts_the_floor_itself_and_clearing_the_interval() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let epic = db.create_epic("Test", "", None).await.unwrap();
     let svc = EpicService::new(db.clone());
 
@@ -275,7 +275,7 @@ async fn update_epic_accepts_the_floor_itself_and_clearing_the_interval() {
 /// covered by one flat append-only epic each under a common parent.
 #[tokio::test]
 async fn update_epic_refuses_append_only_together_with_group_by_repo() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let epic = db.create_epic("Log warnings", "", None).await.unwrap();
     let svc = EpicService::new(db.clone());
 
@@ -341,7 +341,7 @@ async fn update_epic_refuses_append_only_together_with_group_by_repo() {
 /// grouped epic must not be caught by the guard.
 #[tokio::test]
 async fn update_epic_allows_either_flag_alone() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
 
     let grouped = db.create_epic("Grouped", "", None).await.unwrap();
@@ -365,7 +365,7 @@ async fn update_epic_allows_either_flag_alone() {
 
 #[tokio::test]
 async fn update_epic_sets_group_by_repo() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let epic = db.create_epic("Test", "", None).await.unwrap();
     assert!(!epic.group_by_repo);
     let svc = EpicService::new(db.clone());
@@ -385,7 +385,7 @@ fn epic_svc_with_clock(db: Arc<Store>, clock: Arc<dyn crate::clock::Clock>) -> E
 
 #[tokio::test]
 async fn update_epic_entering_done_stamps_completed_at() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let epic = db.create_epic("Test", "", None).await.unwrap();
     let now = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
     let clock = Arc::new(crate::clock::FixedClock::new(now));
@@ -410,7 +410,7 @@ async fn update_epic_entering_done_stamps_completed_at() {
 /// not the current status (tasks.allium, ConfirmDone).
 #[tokio::test]
 async fn update_epic_leaving_done_keeps_completed_at() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let epic = db.create_epic("Test", "", None).await.unwrap();
     let svc = EpicService::new(db.clone());
 
@@ -438,7 +438,7 @@ async fn update_epic_leaving_done_keeps_completed_at() {
 /// overridden: the two write different fields now.
 #[tokio::test]
 async fn update_epic_entering_done_keeps_an_explicit_sort_order() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let epic = db.create_epic("Test", "", None).await.unwrap();
     let svc = EpicService::new(db.clone());
 
@@ -457,7 +457,7 @@ async fn update_epic_entering_done_keeps_an_explicit_sort_order() {
 
 #[tokio::test]
 async fn update_epic_unrelated_field_edit_while_done_leaves_completed_at_untouched() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let epic = db.create_epic("Test", "", None).await.unwrap();
     let svc = EpicService::new(db.clone());
 
@@ -482,7 +482,7 @@ async fn update_epic_unrelated_field_edit_while_done_leaves_completed_at_untouch
 
 #[tokio::test]
 async fn create_sub_epic_succeeds() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let parent = db.create_epic("Parent", "", None).await.unwrap();
     let sub = svc
@@ -500,7 +500,7 @@ async fn create_sub_epic_recalculates_done_parent() {
     // Regression guard: attaching a new (backlog) sub-epic to a Done
     // parent must regress the parent to Backlog immediately, not wait
     // for some unrelated task write to trigger a recalc.
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let parent = db.create_epic("Parent", "", None).await.unwrap();
     db.patch_epic(parent.id, &EpicPatch::new().status(TaskStatus::Done))
@@ -520,7 +520,7 @@ async fn create_sub_epic_recalculates_done_parent() {
 
 #[tokio::test]
 async fn create_sub_epic_missing_parent_returns_not_found() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let result = svc
         .create_epic(CreateEpicParams {
@@ -536,7 +536,7 @@ async fn create_sub_epic_missing_parent_returns_not_found() {
 
 #[tokio::test]
 async fn update_epic_sets_parent() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let parent = db.create_epic("Parent", "", None).await.unwrap();
     let child = db.create_epic("Child", "", None).await.unwrap();
@@ -553,7 +553,7 @@ async fn update_epic_sets_parent() {
 
 #[tokio::test]
 async fn update_epic_clears_parent() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let parent = db.create_epic("Parent", "", None).await.unwrap();
     let child = db.create_epic("Child", "", Some(parent.id)).await.unwrap();
@@ -570,7 +570,7 @@ async fn update_epic_clears_parent() {
 
 #[tokio::test]
 async fn update_epic_parent_id_absent_is_noop() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let parent = db.create_epic("Parent", "", None).await.unwrap();
     let child = db.create_epic("Child", "", Some(parent.id)).await.unwrap();
@@ -588,7 +588,7 @@ async fn update_epic_parent_id_absent_is_noop() {
 async fn update_epic_reparent_recalculates_old_and_new_parent() {
     // Regression guard: reparenting a sub-epic changes both parents'
     // active_sub_epics set, so both must be recalculated immediately.
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let old_parent = db.create_epic("Old", "", None).await.unwrap();
     let new_parent = db.create_epic("New", "", None).await.unwrap();
@@ -639,7 +639,7 @@ async fn update_epic_reparent_recalculates_old_and_new_parent() {
 async fn update_epic_status_change_recalculates_parent() {
     // Regression guard: explicitly setting a sub-epic's status changes
     // its parent's active_sub_epics rollup and must recalculate it.
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let parent = db.create_epic("Parent", "", None).await.unwrap();
     let child = db.create_epic("Child", "", Some(parent.id)).await.unwrap();
@@ -668,7 +668,7 @@ async fn update_epic_status_change_recalculates_parent() {
 
 #[tokio::test]
 async fn update_epic_cycle_detection() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let a = db.create_epic("A", "", None).await.unwrap();
     let b = db.create_epic("B", "", Some(a.id)).await.unwrap();
@@ -691,7 +691,7 @@ async fn update_epic_cycle_detection() {
 
 #[tokio::test]
 async fn update_epic_self_parent_rejected() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let epic = db.create_epic("Epic", "", None).await.unwrap();
     let result = svc
@@ -709,7 +709,7 @@ async fn update_epic_self_parent_rejected() {
 
 #[tokio::test]
 async fn reparent_repo_group_sub_epic_is_rejected() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let root = db.create_epic("root", "", None).await.unwrap();
     let other = db.create_epic("other", "", None).await.unwrap();
@@ -735,7 +735,7 @@ async fn reparent_repo_group_sub_epic_is_rejected() {
 async fn detach_repo_group_sub_epic_is_rejected() {
     // Nice-to-have guard: detaching (Some(None)) a RepoGroup sub-epic to root
     // must be rejected, just like reparenting it to another epic.
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let root = db.create_epic("root", "", None).await.unwrap();
     let sub = db
@@ -759,7 +759,7 @@ async fn detach_repo_group_sub_epic_is_rejected() {
 #[tokio::test]
 async fn detach_manual_sub_epic_is_allowed() {
     // Regression guard: detaching a Manual sub-epic to root must still work.
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let parent = db.create_epic("parent", "", None).await.unwrap();
     let child = db.create_epic("child", "", Some(parent.id)).await.unwrap();
@@ -782,7 +782,7 @@ async fn detach_manual_sub_epic_is_allowed() {
 #[tokio::test]
 async fn progress_aggregates_descendants_for_grouped_epic() {
     use crate::store::{EpicCrud as _, TaskCrud as _};
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let root = db.create_epic("root", "", None).await.unwrap();
     db.patch_epic(root.id, &crate::store::EpicPatch::new().group_by_repo(true))

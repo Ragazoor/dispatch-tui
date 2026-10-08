@@ -252,7 +252,7 @@ pub struct FeedRunner {
     /// unowned epic) go through `db` instead, since `TaskStore` already
     /// includes `PollOwnershipStore` and `FeedRunner` is a sanctioned
     /// direct-mutation consumer.
-    board_reads: Arc<dyn crate::sync::BoardReads>,
+    board_reads: Arc<dyn crate::store::BoardReads>,
     /// This machine's own `Host.id`, compared against `core/PollOwner.host`.
     host_id: String,
     /// Test-only join handles for the jobs spawned by `tick`. Production keeps
@@ -271,7 +271,7 @@ impl FeedRunner {
         db: Arc<dyn TaskStore>,
         notify: mpsc::UnboundedSender<BoardEvent>,
         runner: Arc<dyn ProcessRunner>,
-        board_reads: Arc<dyn crate::sync::BoardReads>,
+        board_reads: Arc<dyn crate::store::BoardReads>,
         host_id: String,
     ) -> Self {
         let (epic_changed_tx, epic_changed_rx) = tokio::sync::watch::channel(());

@@ -697,7 +697,7 @@ async fn stress_rapid_status_transitions() {
 
 #[tokio::test]
 async fn stress_db_with_many_tasks() {
-    let db = crate::store::Store::open_in_memory().await.unwrap();
+    let db = crate::store::Store::open_in_memory().unwrap();
     use crate::store::{CreateTaskRequest, TaskCrud, TaskRead};
     for i in 0..500 {
         db.create_task(CreateTaskRequest {

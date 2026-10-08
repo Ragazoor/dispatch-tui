@@ -17,7 +17,7 @@ use std::time::Instant;
 /// A store holding epics 1 through 42, so a test can follow any of them: the
 /// store refuses a subscription to an epic that does not exist.
 async fn store() -> Store {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     for n in 1..=42 {
         db.create_epic(&format!("epic {n}"), "", None)
             .await
@@ -239,15 +239,11 @@ async fn shared_ownership_does_not_make_another_machines_worktree_dispatchable()
         .unwrap();
 
     assert!(
-        db.try_claim_backlog_task(mine, chrono::Utc::now())
-            .await
-            .unwrap(),
+        db.try_claim_backlog_task(mine).await.unwrap(),
         "a task whose worktree is on THIS disk stays dispatchable"
     );
     assert!(
-        !db.try_claim_backlog_task(theirs, chrono::Utc::now())
-            .await
-            .unwrap(),
+        !db.try_claim_backlog_task(theirs).await.unwrap(),
         "the other machine's task must stay the other machine's, however the two are owned"
     );
 }

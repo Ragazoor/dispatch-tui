@@ -53,7 +53,7 @@ async fn test_state_with_overrides_and_bg_done(
     task_svc: Option<Arc<dyn crate::service::TaskServiceApi>>,
     bg_write_done_tx: Option<mpsc::UnboundedSender<BackgroundWrite>>,
 ) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().unwrap());
     state_over(db, runner, notify_tx, task_svc, bg_write_done_tx)
 }
 

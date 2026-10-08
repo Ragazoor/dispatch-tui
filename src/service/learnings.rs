@@ -423,12 +423,12 @@ mod learning_tests {
     use crate::store::{CreateTaskRequest, Store, TaskStore};
 
     async fn service() -> LearningService {
-        let db = Arc::new(Store::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().unwrap());
         LearningService::new(db, EmbeddingService::new_test())
     }
 
     async fn service_with_db() -> (LearningService, Arc<dyn TaskStore>) {
-        let db: Arc<dyn TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
+        let db: Arc<dyn TaskStore> = Arc::new(Store::open_in_memory().unwrap());
         (
             LearningService::new(db.clone(), EmbeddingService::new_test()),
             db,
@@ -630,7 +630,7 @@ mod learning_tests {
 
     #[tokio::test]
     async fn create_learning_embeds_on_write() {
-        let db: Arc<dyn TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
+        let db: Arc<dyn TaskStore> = Arc::new(Store::open_in_memory().unwrap());
         let emb_svc = EmbeddingService::new_test();
         let svc = LearningService::new(db.clone(), emb_svc);
         let id = svc

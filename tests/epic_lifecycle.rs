@@ -7,7 +7,7 @@ use dispatch_tui::store::{
 
 #[tokio::test]
 async fn full_epic_lifecycle() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
 
     // 1. Create an epic
     let epic = db
@@ -71,7 +71,7 @@ async fn full_epic_lifecycle() {
 /// with that column cleared, not block it with a FK violation.
 #[tokio::test]
 async fn delete_epic_with_a_learning_referencing_a_subtask_succeeds() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
 
     let epic = db.create_epic("Auth Rewrite", "desc", None).await.unwrap();
 
@@ -121,7 +121,7 @@ async fn delete_epic_with_a_learning_referencing_a_subtask_succeeds() {
 /// run/review and auto-moves to done only when all tasks complete.
 #[tokio::test]
 async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
 
     let epic = db.create_epic("Feature X", "desc", None).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);

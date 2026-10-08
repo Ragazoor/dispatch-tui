@@ -246,7 +246,7 @@ pub(super) fn editor_runtime_on_host(
     msg_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::Message>,
     host_id: &str,
 ) -> TuiRuntime {
-    let board_reads: Arc<dyn crate::sync::BoardReads> = db.clone();
+    let board_reads: Arc<dyn crate::store::BoardReads> = db.clone();
     let db: Arc<dyn crate::store::TaskStore> = db;
     let (feed_tx, _) = unbounded_channel();
     let feed_board_reads = board_reads.clone();
@@ -282,7 +282,7 @@ pub(super) fn editor_runtime_on_host(
 }
 
 async fn runtime_with_runner(runner: Arc<dyn ProcessRunner>) -> (TuiRuntime, App) {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let (tx, _rx) = unbounded_channel();
     let rt = editor_runtime(db, runner.clone(), tx);
     let app = App::new(vec![]);
@@ -378,7 +378,7 @@ async fn seed_task(db: &dyn crate::store::TaskStore) -> models::Task {
 #[tokio::test]
 async fn finalize_task_edit_persists_changes() {
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let task = seed_task(&*db).await;
 
     let (tx, _rx) = unbounded_channel();
@@ -415,7 +415,7 @@ async fn finalize_task_edit_persists_changes() {
 async fn finalize_task_edit_persists_url() {
     use crate::models::{TaskUrl, UrlType};
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let task = seed_task(&*db).await; // Backlog → no was_pr_finalisation path
     assert!(task.url.is_none());
 
@@ -448,7 +448,7 @@ async fn finalize_task_edit_clears_url_when_section_emptied() {
     use crate::models::{TaskUrl, UrlType};
     use crate::service::{UpdateTaskParams, UrlUpdate};
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let task = seed_task(&*db).await;
 
     let (tx, _rx) = unbounded_channel();
@@ -487,7 +487,7 @@ async fn finalize_task_edit_clears_plan_when_section_emptied() {
     // DB, not just the in-memory snapshot. The editor expresses "clear"
     // via FieldUpdate::Clear, which must reach the DB patch.
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let task = seed_task(&*db).await; // seeded with plan docs/plan.md
     assert!(task.plan_path.is_some(), "precondition: task has a plan");
 
@@ -515,7 +515,7 @@ async fn finalize_task_edit_clears_tag_when_section_emptied() {
     // not just the in-memory snapshot.
     use crate::models::TaskTag;
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let task = seed_task(&*db).await;
 
     let (tx, _rx) = unbounded_channel();
@@ -549,7 +549,7 @@ async fn finalize_task_edit_persists_new_repo_path_to_known_list() {
     // saved repo_paths list, so sibling feed items (e.g. other
     // Dependabot PRs in the same repo) can be auto-resolved.
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let task = seed_task(&*db).await;
     // Precondition: known repo_paths does not contain the new path.
     assert!(
@@ -593,7 +593,7 @@ async fn finalize_task_edit_unchanged_repo_path_does_not_save() {
     // value), we must not re-save it. Avoids spurious writes when
     // editing unrelated fields.
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let task = seed_task(&*db).await;
 
     let (tx, _rx) = unbounded_channel();
@@ -629,7 +629,7 @@ async fn finalize_task_edit_unchanged_repo_path_does_not_save() {
 #[tokio::test]
 async fn finalize_task_edit_cancelled_does_not_change_db() {
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     let task = seed_task(&*db).await;
 
     let (tx, _rx) = unbounded_channel();

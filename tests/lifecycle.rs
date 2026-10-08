@@ -6,7 +6,7 @@ use dispatch_tui::store::{self, CreateTaskRequest, Store, TaskCrud, TaskRead};
 use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 
 async fn make_app() -> (App, Store) {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     let app = App::new(vec![]);
     (app, db)
 }

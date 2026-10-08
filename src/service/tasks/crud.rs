@@ -1296,8 +1296,7 @@ impl TaskService {
             .await?
             .ok_or_else(|| ServiceError::NotFound(format!("Epic {} not found", epic_id.0)))?;
 
-        let now = self.clock.now();
-        let Some(claimed_id) = self.db.try_claim_next_backlog_task(epic_id, now).await? else {
+        let Some(claimed_id) = self.db.try_claim_next_backlog_task(epic_id).await? else {
             return Ok(None);
         };
         // No-drain: a claim moves the task *into* Running; draining a
@@ -1332,11 +1331,7 @@ impl TaskService {
     /// nor leave `Done`, so `completed_at_for_status_transition` would return
     /// `None` regardless.
     pub async fn claim_backlog_task(&self, task_id: TaskId) -> Result<bool, ServiceError> {
-        if !self
-            .db
-            .try_claim_backlog_task(task_id, self.clock.now())
-            .await?
-        {
+        if !self.db.try_claim_backlog_task(task_id).await? {
             return Ok(false);
         }
         // No-drain: a claim moves the task *into* Running; draining a

@@ -1,3 +1,4 @@
+mod board_reads;
 mod decode;
 #[cfg(any(test, feature = "test-support"))]
 mod fixtures;
@@ -10,6 +11,7 @@ mod queries;
 /// nothing rather than fail to compile.
 pub(crate) use queries::{HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY};
 
+pub use board_reads::BoardReads;
 pub use decode::decode_fallback_count;
 pub(crate) use decode::{bump_decode_fallback, drop_undecodable, parse_datetime};
 
@@ -365,7 +367,7 @@ pub trait TaskCrud: TaskRead {
     /// Atomically select *and* claim `epic_id`'s next backlog subtask for
     /// dispatch: the first one ordered by `COALESCE(sort_order, id)` then `id`
     /// moves to `Running` with the default running sub-status and
-    /// `last_pre_tool_use_at = now`. Returns the id it claimed, or `None` when
+    /// `last_pre_tool_use_at` stamped. Returns the id it claimed, or `None` when
     /// the epic has no backlog subtask left.
     ///
     /// Selection and claim are one statement — the ordering predicate lives in
@@ -374,11 +376,7 @@ pub trait TaskCrud: TaskRead {
     /// retry. Exclusivity comes from that plus the single writer connection all
     /// mutations serialise through, not from a lock. Backs the epic-chaining
     /// claim described by `AutoDispatchNextSubtask` in `docs/specs/epics.allium`.
-    async fn try_claim_next_backlog_task(
-        &self,
-        epic_id: EpicId,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<Option<TaskId>>;
+    async fn try_claim_next_backlog_task(&self, epic_id: EpicId) -> Result<Option<TaskId>>;
     /// The by-id twin of [`Self::try_claim_next_backlog_task`]: claim `id` for
     /// dispatch if and only if it is still `Backlog`, applying the same
     /// `Running` + default sub-status + `last_pre_tool_use_at` write. Returns
@@ -390,11 +388,7 @@ pub trait TaskCrud: TaskRead {
     /// is gone) and `Err` means nothing was written, which is what lets callers
     /// treat a failed claim as "provision nothing" with no unwind to do. Backs
     /// `DispatchClaimExclusive` in `docs/specs/dispatch.allium`.
-    async fn try_claim_backlog_task(
-        &self,
-        id: TaskId,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<bool>;
+    async fn try_claim_backlog_task(&self, id: TaskId) -> Result<bool>;
     /// The inverse of [`Self::try_claim_next_backlog_task`]: return a claimed but
     /// still-unprovisioned task to `Backlog` and clear the activity stamp the
     /// claim seeded. Conditional on `status = running AND worktree IS NULL`, so
@@ -1246,10 +1240,9 @@ impl Store {
 
     /// A handle attached to a fresh in-memory store, which covers every
     /// reducer domain (spec: `spacetime-memory-store.allium`,
-    /// `OpenInMemoryAttachesStoreOnceComplete`). Async only so the many test
-    /// call sites that `.await` it need no change.
+    /// `OpenInMemoryAttachesStoreOnceComplete`).
     #[cfg(any(test, feature = "test-support"))]
-    pub async fn open_in_memory() -> Result<Self> {
+    pub fn open_in_memory() -> Result<Self> {
         // Identity lives in a host file, as in production, so the handle gets
         // a private data directory holding one. It carries the host id the
         // memory writes settle as, so a claim and an identity read agree.

@@ -164,7 +164,7 @@ async fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
 /// handle; giving one service its own database hides every cross-entity
 /// behaviour between them.
 pub(super) async fn test_db() -> Arc<Store> {
-    Arc::new(Store::open_in_memory().await.unwrap())
+    Arc::new(Store::open_in_memory().unwrap())
 }
 
 /// Persist `cmd` as `epic_id`'s feed command.
@@ -221,7 +221,7 @@ pub(super) async fn make_runtime(
 ) -> TuiRuntime {
     let (feed_tx, _) = mpsc::unbounded_channel();
     let store: Arc<dyn store::TaskStore> = db.clone();
-    let board_reads: Arc<dyn crate::sync::BoardReads> = db.clone();
+    let board_reads: Arc<dyn crate::store::BoardReads> = db.clone();
     let feed_board_reads = board_reads.clone();
     let feed_runner = crate::feed::FeedRunner::new(
         store.clone(),

@@ -42,7 +42,7 @@ fn role_epic(epics: &[Epic], role: FeedRole) -> Epic {
 
 #[tokio::test]
 async fn provisioned_reviews_tick_routes_into_role_sub_epics() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
 
     // Configure both managed feeds, then provision (the startup path).
     db.set_reviews_feed_command(Some(REVIEWS_CMD))
@@ -69,7 +69,7 @@ async fn provisioned_reviews_tick_routes_into_role_sub_epics() {
 
     // Drive a tick: only the parent + cve are polled (sub-epics have no command).
     let (tx, mut rx) = mpsc::unbounded_channel::<BoardEvent>();
-    let board_reads: Arc<dyn dispatch_tui::sync::BoardReads> = db.clone();
+    let board_reads: Arc<dyn dispatch_tui::store::BoardReads> = db.clone();
     let mut runner = FeedRunner::new(
         db.clone(),
         tx,

@@ -28,7 +28,6 @@
 //! - [`writes`] — [`ReducerCaller`], the transport every store write goes
 //!   through, and the identity a write is stamped with.
 //! - [`encode`] / [`decode`] — model rows to and from the generated bindings.
-//! - [`board_reads`] — [`BoardReads`], the handle the board draws cards from.
 //! - [`subtree`] — the epic subtree a board follows.
 //! - [`identity`] — the three-way verdict on an identity the store offers.
 //!   Pure, and the only fatal decision in the subsystem.
@@ -51,7 +50,6 @@
 /// two boards at the same server and have them silently not share anything.
 pub const SHARED_DATABASE_NAME: &str = "dispatch";
 
-pub mod board_reads;
 pub mod connection;
 pub mod connector;
 pub mod decode;
@@ -68,7 +66,6 @@ pub mod writes;
 #[cfg(test)]
 pub(crate) mod tests;
 
-pub use board_reads::BoardReads;
 pub use connection::{
     backoff, BoardConnection, ConnectionEvent, ConnectionStatus, CONNECT_TIMEOUT, MUTATION_TIMEOUT,
     RECONNECT_BACKOFF_BASE, RECONNECT_BACKOFF_MAX,

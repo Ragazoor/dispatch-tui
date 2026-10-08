@@ -74,7 +74,7 @@ fn the_conflict_message_names_both_identities() {
 
 #[tokio::test]
 async fn a_fresh_install_has_no_user_identity() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
 
     assert_eq!(db.user_identity().await.unwrap(), None);
     assert_eq!(db.user_identity_token().await.unwrap(), None);
@@ -118,7 +118,7 @@ async fn a_user_identity_survives_a_restart() {
 /// did, a caller that forgot to consult the verdict would silently adopt.
 #[tokio::test]
 async fn adopting_a_second_identity_does_not_overwrite_the_first() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     db.set_user_identity_token("token-a").await.unwrap();
     db.adopt_user_identity("user-a").await.unwrap();
 
@@ -136,7 +136,7 @@ async fn adopting_a_second_identity_does_not_overwrite_the_first() {
 /// Refreshing the proof of the SAME identity is ordinary, and must work.
 #[tokio::test]
 async fn the_credential_is_refreshed_for_the_same_identity() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     db.set_user_identity_token("token-a").await.unwrap();
     db.adopt_user_identity("user-a").await.unwrap();
 
@@ -159,7 +159,7 @@ async fn the_credential_is_refreshed_for_the_same_identity() {
 /// not an identity.
 #[tokio::test]
 async fn a_blank_identity_or_credential_is_refused() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
 
     assert!(db.set_user_identity_token("").await.is_err());
     assert!(db.set_user_identity_token("   ").await.is_err());

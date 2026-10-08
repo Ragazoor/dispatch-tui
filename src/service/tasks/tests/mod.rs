@@ -9,7 +9,7 @@ use crate::service::{FieldUpdate, ServiceError};
 use crate::store::{self, EpicRead, Store, TaskRead};
 
 async fn test_db() -> Arc<dyn store::TaskStore> {
-    Arc::new(Store::open_in_memory().await.unwrap())
+    Arc::new(Store::open_in_memory().unwrap())
 }
 
 fn task_svc(db: &Arc<dyn store::TaskStore>) -> TaskService {

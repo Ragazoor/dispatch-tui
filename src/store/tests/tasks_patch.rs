@@ -552,10 +552,7 @@ async fn try_claim_next_backlog_task_claims_the_lowest_sort_order_subtask() {
     let first = subtask(&db, epic.id, "a", TaskStatus::Backlog, Some(10)).await;
     let second = subtask(&db, epic.id, "b", TaskStatus::Backlog, Some(20)).await;
 
-    let claimed = db
-        .try_claim_next_backlog_task(epic.id, chrono::Utc::now())
-        .await
-        .unwrap();
+    let claimed = db.try_claim_next_backlog_task(epic.id).await.unwrap();
 
     assert_eq!(claimed, Some(first));
     for untouched in [second, third] {
@@ -580,19 +577,18 @@ async fn try_claim_next_backlog_task_falls_back_to_id_when_sort_order_is_null() 
     let above = subtask(&db, epic.id, "sorts after", TaskStatus::Backlog, Some(500)).await;
     let below = subtask(&db, epic.id, "sorts before", TaskStatus::Backlog, Some(0)).await;
 
-    let now = chrono::Utc::now();
     assert_eq!(
-        db.try_claim_next_backlog_task(epic.id, now).await.unwrap(),
+        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
         Some(below),
         "sort_order 0 must beat a null whose fallback key is its own id"
     );
     assert_eq!(
-        db.try_claim_next_backlog_task(epic.id, now).await.unwrap(),
+        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
         Some(unordered),
         "the null-sort_order subtask beats sort_order 500 via its id fallback"
     );
     assert_eq!(
-        db.try_claim_next_backlog_task(epic.id, now).await.unwrap(),
+        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
         Some(above)
     );
 }
@@ -607,9 +603,7 @@ async fn try_claim_next_backlog_task_skips_non_backlog_subtasks() {
     let backlog = subtask(&db, epic.id, "backlog", TaskStatus::Backlog, Some(4)).await;
 
     assert_eq!(
-        db.try_claim_next_backlog_task(epic.id, chrono::Utc::now())
-            .await
-            .unwrap(),
+        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
         Some(backlog)
     );
 }
@@ -626,9 +620,7 @@ async fn try_claim_next_backlog_task_skips_phoenix_subtasks() {
     let ordinary = subtask(&db, epic.id, "ordinary", TaskStatus::Backlog, Some(2)).await;
 
     assert_eq!(
-        db.try_claim_next_backlog_task(epic.id, chrono::Utc::now())
-            .await
-            .unwrap(),
+        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
         Some(ordinary),
         "the phoenix subtask sorts first but is not a candidate"
     );
@@ -649,7 +641,7 @@ async fn try_claim_next_backlog_task_is_none_when_only_phoenix_subtasks_remain()
     phoenix_subtask(&db, epic.id, "also recurring", Some(2)).await;
 
     assert!(db
-        .try_claim_next_backlog_task(epic.id, chrono::Utc::now())
+        .try_claim_next_backlog_task(epic.id)
         .await
         .unwrap()
         .is_none());
@@ -679,7 +671,7 @@ async fn try_claim_next_backlog_task_is_none_when_no_backlog_subtask_remains() {
     subtask(&db, epic.id, "running", TaskStatus::Running, Some(1)).await;
 
     assert!(db
-        .try_claim_next_backlog_task(epic.id, chrono::Utc::now())
+        .try_claim_next_backlog_task(epic.id)
         .await
         .unwrap()
         .is_none());
@@ -693,7 +685,7 @@ async fn try_claim_next_backlog_task_ignores_other_epics_subtasks() {
     let theirs = subtask(&db, other.id, "theirs", TaskStatus::Backlog, Some(1)).await;
 
     assert!(db
-        .try_claim_next_backlog_task(mine.id, chrono::Utc::now())
+        .try_claim_next_backlog_task(mine.id)
         .await
         .unwrap()
         .is_none());
@@ -710,10 +702,7 @@ async fn try_claim_next_backlog_task_applies_running_and_the_activity_stamp() {
     let id = subtask(&db, epic.id, "t", TaskStatus::Backlog, Some(1)).await;
     let before = db.get_task(id).await.unwrap().unwrap().updated_at;
 
-    let claimed = db
-        .try_claim_next_backlog_task(epic.id, chrono::Utc::now())
-        .await
-        .unwrap();
+    let claimed = db.try_claim_next_backlog_task(epic.id).await.unwrap();
 
     assert_eq!(claimed, Some(id));
     let task = db.get_task(id).await.unwrap().unwrap();
@@ -736,17 +725,16 @@ async fn try_claim_next_backlog_task_claims_each_subtask_at_most_once() {
     let first = subtask(&db, epic.id, "a", TaskStatus::Backlog, Some(10)).await;
     let second = subtask(&db, epic.id, "b", TaskStatus::Backlog, Some(20)).await;
 
-    let now = chrono::Utc::now();
     assert_eq!(
-        db.try_claim_next_backlog_task(epic.id, now).await.unwrap(),
+        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
         Some(first)
     );
     assert_eq!(
-        db.try_claim_next_backlog_task(epic.id, now).await.unwrap(),
+        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
         Some(second)
     );
     assert!(db
-        .try_claim_next_backlog_task(epic.id, now)
+        .try_claim_next_backlog_task(epic.id)
         .await
         .unwrap()
         .is_none());
@@ -767,10 +755,7 @@ async fn try_claim_backlog_task_claims_a_phoenix_task_the_chain_would_skip() {
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = phoenix_subtask(&db, epic.id, "recurring", Some(1)).await;
 
-    assert!(db
-        .try_claim_backlog_task(id, chrono::Utc::now())
-        .await
-        .unwrap());
+    assert!(db.try_claim_backlog_task(id).await.unwrap());
     assert_eq!(
         db.get_task(id).await.unwrap().unwrap().status,
         TaskStatus::Running
@@ -787,10 +772,7 @@ async fn try_claim_backlog_task_applies_the_full_claim() {
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = subtask(&db, epic.id, "target", TaskStatus::Backlog, Some(1)).await;
 
-    assert!(db
-        .try_claim_backlog_task(id, chrono::Utc::now())
-        .await
-        .unwrap());
+    assert!(db.try_claim_backlog_task(id).await.unwrap());
 
     // Same SET list as the by-epic claim — asserted here so the two cannot drift.
     let claimed = db.get_task(id).await.unwrap().unwrap();
@@ -812,10 +794,7 @@ async fn try_claim_backlog_task_is_false_for_a_task_out_of_backlog() {
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = subtask(&db, epic.id, "running", TaskStatus::Running, Some(1)).await;
 
-    assert!(!db
-        .try_claim_backlog_task(id, chrono::Utc::now())
-        .await
-        .unwrap());
+    assert!(!db.try_claim_backlog_task(id).await.unwrap());
     assert!(
         db.get_task(id)
             .await
@@ -830,10 +809,7 @@ async fn try_claim_backlog_task_is_false_for_a_task_out_of_backlog() {
 #[tokio::test]
 async fn try_claim_backlog_task_is_false_for_a_missing_task() {
     let db = in_memory_db().await;
-    assert!(!db
-        .try_claim_backlog_task(TaskId(999_999), chrono::Utc::now())
-        .await
-        .unwrap());
+    assert!(!db.try_claim_backlog_task(TaskId(999_999)).await.unwrap());
 }
 
 #[tokio::test]
@@ -841,11 +817,10 @@ async fn try_claim_backlog_task_claims_at_most_once() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = subtask(&db, epic.id, "target", TaskStatus::Backlog, Some(1)).await;
-    let now = chrono::Utc::now();
 
-    assert!(db.try_claim_backlog_task(id, now).await.unwrap());
+    assert!(db.try_claim_backlog_task(id).await.unwrap());
     assert!(
-        !db.try_claim_backlog_task(id, now).await.unwrap(),
+        !db.try_claim_backlog_task(id).await.unwrap(),
         "the row has left Backlog, so a second claim on it must lose"
     );
 }
@@ -865,10 +840,7 @@ async fn try_claim_backlog_task_allows_a_task_with_no_host() {
 
     // A never-dispatched task has `host = NULL`, so the gate is a no-op —
     // `is_locally_owned`'s first arm (core/Task in docs/specs/core.allium).
-    assert!(db
-        .try_claim_backlog_task(id, chrono::Utc::now())
-        .await
-        .unwrap());
+    assert!(db.try_claim_backlog_task(id).await.unwrap());
 }
 
 #[tokio::test]
@@ -883,9 +855,7 @@ async fn try_claim_backlog_task_refuses_a_foreign_owned_task() {
         .unwrap();
 
     assert!(
-        !db.try_claim_backlog_task(id, chrono::Utc::now())
-            .await
-            .unwrap(),
+        !db.try_claim_backlog_task(id).await.unwrap(),
         "another machine holds this task's worktree; claiming it here would \
          re-dispatch onto a directory that is not on this disk"
     );
@@ -908,10 +878,7 @@ async fn try_claim_next_backlog_task_skips_a_foreign_owned_subtask_and_claims_th
         .unwrap();
     let next = subtask(&db, epic.id, "next", TaskStatus::Backlog, Some(20)).await;
 
-    let claimed = db
-        .try_claim_next_backlog_task(epic.id, chrono::Utc::now())
-        .await
-        .unwrap();
+    let claimed = db.try_claim_next_backlog_task(epic.id).await.unwrap();
 
     assert_eq!(
         claimed,
@@ -933,9 +900,7 @@ async fn claimed_task(db: &Store) -> TaskId {
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = subtask(db, epic.id, "t", TaskStatus::Backlog, None).await;
     assert_eq!(
-        db.try_claim_next_backlog_task(epic.id, chrono::Utc::now())
-            .await
-            .unwrap(),
+        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
         Some(id)
     );
     id

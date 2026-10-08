@@ -4,7 +4,7 @@ use super::*;
 
 #[tokio::test]
 async fn create_repo_group_sub_epic_is_idempotent() {
-    let db = crate::store::Store::open_in_memory().await.unwrap();
+    let db = crate::store::Store::open_in_memory().unwrap();
     let root = db.create_epic("root", "", None).await.unwrap();
 
     let a1 = db
@@ -27,7 +27,7 @@ async fn create_repo_group_sub_epic_is_idempotent() {
 
 #[tokio::test]
 async fn create_managed_role_epic_is_idempotent() {
-    let db = crate::store::Store::open_in_memory().await.unwrap();
+    let db = crate::store::Store::open_in_memory().unwrap();
 
     let a1 = db
         .create_managed_role_epic(
@@ -81,7 +81,7 @@ async fn create_epic_defaults_feed_role_none() {
 
 #[tokio::test]
 async fn create_epic_defaults_origin_manual_and_patch_sets_repo_group() {
-    let db = crate::store::Store::open_in_memory().await.unwrap();
+    let db = crate::store::Store::open_in_memory().unwrap();
     let root = db.create_epic("root", "", None).await.unwrap();
     assert_eq!(root.origin, crate::models::EpicOrigin::Manual);
 
@@ -144,14 +144,14 @@ async fn delete_epic_multi_level_sub_epics() {
 
 #[tokio::test]
 async fn epic_has_status_field() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     let epic = db.create_epic("Test", "Desc", None).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
 #[tokio::test]
 async fn patch_epic_status() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     let epic = db.create_epic("Test", "Desc", None).await.unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Running))
         .await
@@ -742,7 +742,7 @@ async fn patch_epic_auto_dispatch_persists() {
 
 #[tokio::test]
 async fn patch_epic_feed_append_only_defaults_false() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     let epic = db.create_epic("Test", "", None).await.unwrap();
     assert!(
         !epic.feed_append_only,
@@ -752,7 +752,7 @@ async fn patch_epic_feed_append_only_defaults_false() {
 
 #[tokio::test]
 async fn patch_epic_feed_append_only_persists() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     let epic = db.create_epic("Test", "", None).await.unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().feed_append_only(true))
         .await
@@ -768,14 +768,14 @@ async fn patch_epic_feed_append_only_persists() {
 
 #[tokio::test]
 async fn patch_epic_group_by_repo_defaults_false() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     let epic = db.create_epic("Test", "", None).await.unwrap();
     assert!(!epic.group_by_repo);
 }
 
 #[tokio::test]
 async fn patch_epic_group_by_repo_persists() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     let epic = db.create_epic("Test", "", None).await.unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().group_by_repo(true))
         .await

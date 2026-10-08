@@ -111,7 +111,7 @@ mod load_init_helpers {
 
     #[tokio::test]
     async fn load_notifications_pref_defaults_to_false_when_not_set() {
-        let db = Store::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().unwrap();
         let mut app = empty_app();
         load_notifications_pref(&db, &mut app).await;
         assert!(!app.notifications_enabled());
@@ -119,7 +119,7 @@ mod load_init_helpers {
 
     #[tokio::test]
     async fn load_notifications_pref_sets_true_when_enabled() {
-        let db = Store::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().unwrap();
         db.set_setting_bool("notifications_enabled", true)
             .await
             .unwrap();
@@ -130,7 +130,7 @@ mod load_init_helpers {
 
     #[tokio::test]
     async fn load_repo_filter_loads_paths_and_mode() {
-        let db = Store::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().unwrap();
         db.set_setting_string(
             "repo_filter",
             &serde_json::to_string(&vec!["/repo/a".to_string(), "/repo/b".to_string()]).unwrap(),
@@ -153,7 +153,7 @@ mod load_init_helpers {
 
     #[tokio::test]
     async fn load_repo_filter_leaves_defaults_when_nothing_saved() {
-        let db = Store::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().unwrap();
         let mut app = empty_app();
 
         load_repo_filter(&db, &mut app).await;
@@ -164,7 +164,7 @@ mod load_init_helpers {
 
     #[tokio::test]
     async fn load_repo_filter_ignores_an_unparseable_saved_mode() {
-        let db = Store::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().unwrap();
         db.set_setting_string("repo_filter_mode", "bogus")
             .await
             .unwrap();
@@ -303,7 +303,7 @@ mod backfill_embeddings {
         use crate::models::{LearningKind, LearningScope};
         use crate::store::{CreateLearningRow, LearningStore};
 
-        let db = Arc::new(Store::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().unwrap());
 
         // Insert two learnings without embeddings.
         let id1 = db
@@ -379,7 +379,7 @@ mod backfill_embeddings {
         use crate::models::{LearningKind, LearningScope};
         use crate::store::{CreateLearningRow, LearningStore};
 
-        let db = Arc::new(Store::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().unwrap());
 
         // Insert a learning that already has an embedding.
         let sentinel = serialize_embedding(&vec![0.1f32; 384]);

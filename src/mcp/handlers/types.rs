@@ -618,7 +618,7 @@ mod fetch_caller_task_tests {
 
     #[tokio::test]
     async fn returns_task_when_found() {
-        let db = Store::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().unwrap();
         let task_id = db
             .create_task(CreateTaskRequest {
                 status: TaskStatus::Running,
@@ -635,7 +635,7 @@ mod fetch_caller_task_tests {
 
     #[tokio::test]
     async fn returns_not_found_error_when_not_found() {
-        let db = Store::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().unwrap();
 
         let result = fetch_caller_task(&db, &Some(json!(1)), TaskId(99999)).await;
         let err_resp = result.unwrap_err();

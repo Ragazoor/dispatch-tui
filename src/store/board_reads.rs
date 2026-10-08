@@ -27,8 +27,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
+use super::{EpicRead, RepoConfigRead, TaskRead};
 use crate::models::PollScopeId;
-use crate::store::{EpicRead, RepoConfigRead, TaskRead};
 
 /// The reads a board performs to draw itself.
 ///
@@ -45,12 +45,7 @@ pub trait BoardReads: TaskRead + EpicRead + RepoConfigRead {
 
     /// A number that changes when the rows do.
     ///
-    /// `None` means "cannot tell" — take it as changed. Erring towards one
-    /// wasted refresh is the right side to err on: the other side is a board
-    /// that stops updating and says nothing.
-    ///
-    /// `Option<u64>` rather than a signed sentinel. The caller also has to
-    /// represent "never read yet", and with one `-1` standing for both that
-    /// value meant two different absences on the same line.
-    async fn revision(&self) -> Option<u64>;
+    /// The subscription's generation, read straight from the rows in memory, so
+    /// it always has an answer.
+    async fn revision(&self) -> u64;
 }

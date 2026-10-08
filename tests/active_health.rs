@@ -10,7 +10,7 @@ use dispatch_tui::store::Store;
 
 #[tokio::test]
 async fn hook_event_flow_drives_sub_status_and_lifecycle() {
-    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().unwrap());
     // Inject a manually-advanced clock so hook-event timestamps land in distinct
     // seconds deterministically — no wall-clock sleeps. Timestamps persist at
     // one-second resolution, so each step below advances the clock by ≥1s.

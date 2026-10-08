@@ -1027,23 +1027,17 @@ async fn a_delete_sends_only_the_id() {
 #[tokio::test]
 async fn a_lost_claim_is_an_answer_and_an_outage_is_an_error() {
     let (winner, _) = writer_with(RecordingCaller::default());
-    assert!(winner
-        .try_claim_backlog_task(TaskId(1), at())
-        .await
-        .unwrap());
+    assert!(winner.try_claim_backlog_task(TaskId(1)).await.unwrap());
 
     let (loser, _) = writer_with(RecordingCaller::rejecting());
     assert!(
-        !loser.try_claim_backlog_task(TaskId(1), at()).await.unwrap(),
+        !loser.try_claim_backlog_task(TaskId(1)).await.unwrap(),
         "a refused claim is Ok(false) — somebody else got there first"
     );
 
     let (offline, _) = writer_with(RecordingCaller::refusing("store unreachable"));
     assert!(
-        offline
-            .try_claim_backlog_task(TaskId(1), at())
-            .await
-            .is_err(),
+        offline.try_claim_backlog_task(TaskId(1)).await.is_err(),
         "a claim with the store down must fail rather than report a lost race"
     );
 }
@@ -1178,10 +1172,7 @@ async fn a_board_with_no_identity_cannot_create_an_epic() {
 async fn a_claim_names_the_machine_making_it() {
     let (writer, caller) = writer_with(RecordingCaller::default());
 
-    writer
-        .try_claim_backlog_task(TaskId(3), at())
-        .await
-        .unwrap();
+    writer.try_claim_backlog_task(TaskId(3)).await.unwrap();
 
     assert_eq!(
         caller.sent(),
@@ -1206,10 +1197,7 @@ async fn the_chain_takes_the_task_the_board_draws_as_next() {
     }
     let (writer, caller) = writer_over(rows, RecordingCaller::default());
 
-    let claimed = writer
-        .try_claim_next_backlog_task(EpicId(1), at())
-        .await
-        .unwrap();
+    let claimed = writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap();
 
     assert_eq!(claimed, Some(TaskId(20)), "the explicit sort_order wins");
     assert_eq!(
@@ -1230,10 +1218,7 @@ async fn the_chain_passes_over_a_phoenix() {
     let (writer, _) = writer_over(rows, RecordingCaller::default());
 
     assert_eq!(
-        writer
-            .try_claim_next_backlog_task(EpicId(1), at())
-            .await
-            .unwrap(),
+        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
         Some(TaskId(2))
     );
 }
@@ -1248,10 +1233,7 @@ async fn the_chain_passes_over_another_hosts_task() {
     let (writer, _) = writer_over(rows, RecordingCaller::default());
 
     assert_eq!(
-        writer
-            .try_claim_next_backlog_task(EpicId(1), at())
-            .await
-            .unwrap(),
+        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
         Some(TaskId(2))
     );
 }
@@ -1266,10 +1248,7 @@ async fn an_empty_backlog_ends_the_chain_quietly() {
     );
 
     assert_eq!(
-        writer
-            .try_claim_next_backlog_task(EpicId(1), at())
-            .await
-            .unwrap(),
+        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
         None
     );
     assert!(caller.sent().is_empty(), "nothing to offer, nothing sent");
@@ -1285,10 +1264,7 @@ async fn a_chain_that_loses_every_race_claims_nothing() {
     let (writer, _) = writer_over(rows, RecordingCaller::rejecting());
 
     assert_eq!(
-        writer
-            .try_claim_next_backlog_task(EpicId(1), at())
-            .await
-            .unwrap(),
+        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
         None
     );
 }
@@ -1302,10 +1278,7 @@ async fn a_chain_with_the_store_down_fails_loudly() {
     rows.upsert_task(&backlog_row(1, None, "", false));
     let (writer, _) = writer_over(rows, RecordingCaller::refusing("store unreachable"));
 
-    assert!(writer
-        .try_claim_next_backlog_task(EpicId(1), at())
-        .await
-        .is_err());
+    assert!(writer.try_claim_next_backlog_task(EpicId(1)).await.is_err());
 }
 
 // -- The refusal names the outage -------------------------------------------
@@ -2183,7 +2156,7 @@ async fn every_store_mutation_reaches_the_transport() {
         .await
         .unwrap();
     db.delete_task(TaskId(1)).await.unwrap();
-    db.try_claim_backlog_task(TaskId(1), now).await.unwrap();
+    db.try_claim_backlog_task(TaskId(1)).await.unwrap();
     db.try_release_backlog_claim(TaskId(1)).await.unwrap();
 
     db.create_epic("E", "", None).await.unwrap();

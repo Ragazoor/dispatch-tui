@@ -1,4 +1,4 @@
-//! The board's card-read handle (`crate::sync::BoardReads`) over the same
+//! The board's card-read handle (`crate::store::BoardReads`) over the same
 //! rows every other read answers from.
 
 use anyhow::Result;
@@ -14,12 +14,12 @@ use super::super::Store;
 /// state to report (`sync.allium`'s `ConnectionIndicator`) and reporting it
 /// again per read would put the same outage on screen eight times.
 #[async_trait]
-impl crate::sync::BoardReads for Store {
+impl crate::store::BoardReads for Store {
     async fn poll_owner(&self, target: PollScopeId) -> Result<Option<String>> {
         Ok(self.rows.poll_owner(target).map(|row| row.host))
     }
 
-    async fn revision(&self) -> Option<u64> {
-        Some(self.rows.generation())
+    async fn revision(&self) -> u64 {
+        self.rows.generation()
     }
 }

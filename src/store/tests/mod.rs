@@ -12,7 +12,7 @@ mod tasks_patch;
 mod usage;
 
 pub(super) async fn in_memory_db() -> Store {
-    Store::open_in_memory().await.unwrap()
+    Store::open_in_memory().unwrap()
 }
 
 pub(super) async fn create_task_returning(

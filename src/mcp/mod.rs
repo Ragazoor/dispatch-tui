@@ -343,7 +343,7 @@ mod services_tests {
     /// (one clock, one runner) rather than two built from the same handles.
     #[tokio::test]
     async fn with_services_uses_the_services_it_is_given() {
-        let db: Arc<dyn store::TaskStore> = Arc::new(store::Store::open_in_memory().await.unwrap());
+        let db: Arc<dyn store::TaskStore> = Arc::new(store::Store::open_in_memory().unwrap());
         let runner = crate::process::MockProcessRunner::unused();
         let embedding_service = EmbeddingService::new_test();
         let services =

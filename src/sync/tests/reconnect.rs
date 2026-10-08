@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 /// A store holding epics 1 through 42, so a test can follow any of them: the
 /// store refuses a subscription to an epic that does not exist.
 async fn store() -> Store {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     for n in 1..=42 {
         db.create_epic(&format!("epic {n}"), "", None)
             .await

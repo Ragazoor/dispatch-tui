@@ -7,7 +7,7 @@ use crate::store::{HostStore, RepoConfigRead, RepoConfigStore};
 /// See `refuse_identity_key`.
 #[tokio::test]
 async fn set_setting_string_refuses_the_identity_keys() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     for key in [
         "host_id",
         "host_label",
@@ -27,7 +27,7 @@ async fn set_setting_string_refuses_the_identity_keys() {
 
 #[tokio::test]
 async fn get_setting_bool_returns_none_when_absent() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     assert_eq!(
         db.get_setting_bool("notifications_enabled").await.unwrap(),
         None
@@ -36,7 +36,7 @@ async fn get_setting_bool_returns_none_when_absent() {
 
 #[tokio::test]
 async fn set_and_get_setting_bool_roundtrips() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     db.set_setting_bool("notifications_enabled", true)
         .await
         .unwrap();
@@ -56,13 +56,13 @@ async fn set_and_get_setting_bool_roundtrips() {
 
 #[tokio::test]
 async fn get_setting_string_returns_none_when_absent() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     assert_eq!(db.get_setting_string("repo_filter").await.unwrap(), None);
 }
 
 #[tokio::test]
 async fn set_and_get_setting_string() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     db.set_setting_string("repo_filter", "/repo1\n/repo2")
         .await
         .unwrap();
@@ -74,7 +74,7 @@ async fn set_and_get_setting_string() {
 
 #[tokio::test]
 async fn set_setting_string_upserts() {
-    let db = Store::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().unwrap();
     db.set_setting_string("repo_filter", "old").await.unwrap();
     db.set_setting_string("repo_filter", "new").await.unwrap();
     assert_eq!(

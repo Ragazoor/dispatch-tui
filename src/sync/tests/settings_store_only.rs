@@ -8,7 +8,7 @@ use crate::store::{SettingsStore, Store};
 /// A store with no row for a key answers with the default.
 #[tokio::test]
 async fn a_setting_the_store_does_not_hold_reads_as_unset() {
-    let store_backed = Store::open_in_memory().await.unwrap();
+    let store_backed = Store::open_in_memory().unwrap();
 
     assert_eq!(
         store_backed

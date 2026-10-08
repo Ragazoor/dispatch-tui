@@ -247,7 +247,7 @@ entity BoardConnection {
         -- delivered and what is drawn — are sets of every shared entity at
         -- once, which this language has no union to name. What is checkable is
         -- a property of the CODE rather than of a state: exactly one read path
-        -- exists (`crate::sync::BoardReads`, whose card reads are the store's
+        -- exists (`crate::store::BoardReads`, whose card reads are the store's
         -- own read traits), and the `Store` that implements it holds no handle
         -- to any other store to reach through. `sync::tests::board_reads`
         -- asserts it directly, by standing a fully populated store beside one
@@ -863,7 +863,7 @@ rule BoardReadsFromTheSubscription {
         -- up a task, the watcher fan-out finding who to notify, a setting read
         -- back after it was saved, the subscribed-epic list — and not only the
         -- reads that put cards on screen. Until task #4916 only the drawing
-        -- (`sync::BoardReads`), the knowledge base and usage had a store path,
+        -- (`store::BoardReads`), the knowledge base and usage had a store path,
         -- and every other read went to a local table that
         -- BoardWritesThroughTheStore had stopped writing: a task created a
         -- moment earlier answered "not found". In the implementation every

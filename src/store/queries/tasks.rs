@@ -339,11 +339,7 @@ impl TaskCrud for Store {
     /// `phoenix` rows are passed over: `epics.allium: PhoenixIsNeverChained`. A
     /// recurring subtask respawns on completion, so chaining its successor
     /// would launch an agent at it immediately, forever.
-    async fn try_claim_next_backlog_task(
-        &self,
-        epic_id: EpicId,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<Option<TaskId>> {
+    async fn try_claim_next_backlog_task(&self, epic_id: EpicId) -> Result<Option<TaskId>> {
         let candidates: Vec<TaskId> = self
             .rows
             .tasks_for_epic(epic_id)
@@ -360,7 +356,7 @@ impl TaskCrud for Store {
         // the order the chain must take them in.
 
         for id in candidates {
-            if self.try_claim_backlog_task(id, now).await? {
+            if self.try_claim_backlog_task(id).await? {
                 return Ok(Some(id));
             }
         }
@@ -377,13 +373,9 @@ impl TaskCrud for Store {
     /// transport failed rather than the reducer — see [`ReducerOutcome`] for
     /// why the two are kept apart.
     ///
-    /// `now` is dropped: the store stamps its own clock, so two hosts' claims
-    /// are ordered by one clock rather than by whose laptop is fast.
-    async fn try_claim_backlog_task(
-        &self,
-        id: TaskId,
-        _now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<bool> {
+    /// The store stamps its own clock, so two hosts' claims are ordered by one
+    /// clock rather than by whose laptop is fast.
+    async fn try_claim_backlog_task(&self, id: TaskId) -> Result<bool> {
         Ok(won(
             self.caller
                 .claim_backlog_task(id, self.host.clone())

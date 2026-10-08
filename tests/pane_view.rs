@@ -138,7 +138,7 @@ async fn asking_changes_no_row() {
 async fn asking_pushes_no_refresh_to_the_board() {
     let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();
     let db: std::sync::Arc<dyn dispatch_tui::store::TaskStore> =
-        std::sync::Arc::new(Store::open_in_memory().await.unwrap());
+        std::sync::Arc::new(Store::open_in_memory().unwrap());
     let router = dispatch_tui::mcp::router(
         dispatch_tui::mcp::McpDeps {
             db,

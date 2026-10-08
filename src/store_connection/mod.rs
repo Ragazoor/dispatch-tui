@@ -24,7 +24,7 @@ use crate::store;
 /// or write goes to cannot change under a caller, and a process cannot read
 /// one copy and write another.
 pub struct StoreParts {
-    /// Also the board's card-read handle (`crate::sync::BoardReads`).
+    /// Also the board's card-read handle (`crate::store::BoardReads`).
     pub database: Arc<store::Store>,
     pub rows: Arc<crate::sync::SharedRows>,
     pub connector: Arc<dyn crate::sync::StoreConnector>,
