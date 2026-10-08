@@ -743,6 +743,31 @@ async fn get_epic_shows_parent_when_set() {
 }
 
 #[tokio::test]
+async fn get_epic_shows_bare_parent_id_when_parent_is_missing() {
+    let state = test_state().await;
+    let child = state
+        .db_write()
+        .create_epic("Orphan Epic", "", Some(crate::models::EpicId(999_999)))
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "get_epic",
+            "arguments": { "epic_id": child.id.0 }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("Parent: 999999\nPlan") || text.contains("Parent: 999999\nCreated"),
+        "get_epic should show the bare parent id when the parent is gone: {text}"
+    );
+}
+
+#[tokio::test]
 async fn get_epic_omits_parent_line_when_unset() {
     let state = test_state().await;
     let epic = state

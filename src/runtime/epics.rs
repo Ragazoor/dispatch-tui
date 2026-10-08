@@ -85,19 +85,10 @@ impl TuiRuntime {
         self.exec_patch_epic(
             app,
             crate::service::UpdateEpicParams {
-                epic_id: id,
-                title: None,
-                description: None,
                 status,
-                plan_path: None,
                 sort_order,
                 completed_at: completed_at.map(Some),
-                auto_dispatch: None,
-                feed_command: None,
-                feed_interval_secs: None,
-                group_by_repo: None,
-                feed_append_only: None,
-                parent_epic_id: None,
+                ..crate::service::UpdateEpicParams::for_epic(id)
             },
             "updating epic",
         )
@@ -166,19 +157,8 @@ impl TuiRuntime {
         self.exec_patch_epic(
             app,
             crate::service::UpdateEpicParams {
-                epic_id: id,
-                title: None,
-                description: None,
-                status: None,
-                plan_path: None,
-                sort_order: None,
-                completed_at: None,
                 auto_dispatch: Some(auto_dispatch),
-                feed_command: None,
-                feed_interval_secs: None,
-                group_by_repo: None,
-                feed_append_only: None,
-                parent_epic_id: None,
+                ..crate::service::UpdateEpicParams::for_epic(id)
             },
             "toggling auto dispatch",
         )
@@ -192,19 +172,8 @@ impl TuiRuntime {
         group_by_repo: bool,
     ) {
         let params = crate::service::UpdateEpicParams {
-            epic_id: id,
-            title: None,
-            description: None,
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            completed_at: None,
-            auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
             group_by_repo: Some(group_by_repo),
-            feed_append_only: None,
-            parent_epic_id: None,
+            ..crate::service::UpdateEpicParams::for_epic(id)
         };
         match self.epic_svc.update_epic(params).await {
             Ok(result) => self.write_back_epic_completed_at(app, result),
@@ -294,19 +263,8 @@ impl TuiRuntime {
         self.exec_patch_epic(
             app,
             crate::service::UpdateEpicParams {
-                epic_id: id,
-                title: None,
-                description: None,
-                status: None,
-                plan_path: None,
-                sort_order: None,
-                completed_at: None,
-                auto_dispatch: None,
-                feed_command: None,
-                feed_interval_secs: None,
-                group_by_repo: None,
-                feed_append_only: None,
                 parent_epic_id: Some(new_parent),
+                ..crate::service::UpdateEpicParams::for_epic(id)
             },
             "reparenting epic",
         )

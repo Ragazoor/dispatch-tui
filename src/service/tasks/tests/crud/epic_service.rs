@@ -160,19 +160,8 @@ async fn update_epic_status() {
         .unwrap();
 
     svc.update_epic(UpdateEpicParams {
-        epic_id: epic.id,
-        title: None,
-        description: None,
         status: Some(TaskStatus::Running),
-        plan_path: None,
-        sort_order: None,
-        completed_at: None,
-        auto_dispatch: None,
-        feed_command: None,
-        feed_interval_secs: None,
-        group_by_repo: None,
-        feed_append_only: None,
-        parent_epic_id: None,
+        ..UpdateEpicParams::for_epic(epic.id)
     })
     .await
     .unwrap();
@@ -193,19 +182,7 @@ async fn update_epic_no_fields_returns_error() {
 
     let err = svc
         .update_epic(UpdateEpicParams {
-            epic_id: epic.id,
-            title: None,
-            description: None,
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            completed_at: None,
-            auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            group_by_repo: None,
-            feed_append_only: None,
-            parent_epic_id: None,
+            ..UpdateEpicParams::for_epic(epic.id)
         })
         .await
         .unwrap_err();
@@ -226,19 +203,8 @@ async fn update_epic_auto_dispatch_persists() {
     assert!(!db.get_epic(epic.id).await.unwrap().unwrap().auto_dispatch);
 
     svc.update_epic(UpdateEpicParams {
-        epic_id: epic.id,
-        title: None,
-        description: None,
-        status: None,
-        plan_path: None,
-        sort_order: None,
-        completed_at: None,
         auto_dispatch: Some(true),
-        feed_command: None,
-        feed_interval_secs: None,
-        group_by_repo: None,
-        feed_append_only: None,
-        parent_epic_id: None,
+        ..UpdateEpicParams::for_epic(epic.id)
     })
     .await
     .unwrap();

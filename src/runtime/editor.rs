@@ -405,19 +405,11 @@ impl TuiRuntime {
         if let Err(e) = self
             .epic_svc
             .update_epic(UpdateEpicParams {
-                epic_id,
                 title: Some(applied.title.clone()),
                 description: Some(applied.description.clone()),
-                status: None,
-                plan_path: None,
-                sort_order: None,
-                completed_at: None,
-                auto_dispatch: None,
                 feed_command: Some(applied.feed_command.clone()),
                 feed_interval_secs: Some(applied.feed_interval_secs),
-                group_by_repo: None,
-                feed_append_only: None,
-                parent_epic_id: None,
+                ..UpdateEpicParams::for_epic(epic_id)
             })
             .await
         {

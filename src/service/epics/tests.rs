@@ -2,29 +2,18 @@ use super::*;
 use crate::models::MIN_FEED_INTERVAL_SECS;
 use crate::store::{EpicCrud, EpicRead, Store};
 
-fn base_params(epic_id: EpicId) -> UpdateEpicParams {
-    UpdateEpicParams {
-        epic_id,
-        title: None,
-        description: None,
-        status: None,
-        plan_path: None,
-        sort_order: None,
-        completed_at: None,
-        auto_dispatch: None,
-        feed_command: None,
-        feed_interval_secs: None,
-        group_by_repo: None,
-        feed_append_only: None,
-        parent_epic_id: None,
-    }
+#[test]
+fn for_epic_sets_only_the_epic_id() {
+    let params = UpdateEpicParams::for_epic(EpicId(7));
+    assert_eq!(params.epic_id, EpicId(7));
+    assert!(params.updated_field_names().is_empty());
 }
 
 #[test]
 fn update_epic_params_has_any_field_consistent_with_updated_field_names() {
     let with_field = UpdateEpicParams {
         title: Some("x".to_string()),
-        ..base_params(EpicId(1))
+        ..UpdateEpicParams::for_epic(EpicId(1))
     };
     assert!(
         with_field.has_any_field(),
@@ -35,7 +24,7 @@ fn update_epic_params_has_any_field_consistent_with_updated_field_names() {
         "updated_field_names should be non-empty when title is set"
     );
 
-    let empty = base_params(EpicId(1));
+    let empty = UpdateEpicParams::for_epic(EpicId(1));
     assert!(
         !empty.has_any_field(),
         "has_any_field should be false when no fields are set"
@@ -56,56 +45,56 @@ fn update_epic_params_every_field_covered() {
             "title",
             UpdateEpicParams {
                 title: Some("t".to_string()),
-                ..base_params(EpicId(1))
+                ..UpdateEpicParams::for_epic(EpicId(1))
             },
         ),
         (
             "description",
             UpdateEpicParams {
                 description: Some("d".to_string()),
-                ..base_params(EpicId(1))
+                ..UpdateEpicParams::for_epic(EpicId(1))
             },
         ),
         (
             "status",
             UpdateEpicParams {
                 status: Some(TaskStatus::Backlog),
-                ..base_params(EpicId(1))
+                ..UpdateEpicParams::for_epic(EpicId(1))
             },
         ),
         (
             "plan_path",
             UpdateEpicParams {
                 plan_path: Some("p".to_string()),
-                ..base_params(EpicId(1))
+                ..UpdateEpicParams::for_epic(EpicId(1))
             },
         ),
         (
             "sort_order",
             UpdateEpicParams {
                 sort_order: Some(0),
-                ..base_params(EpicId(1))
+                ..UpdateEpicParams::for_epic(EpicId(1))
             },
         ),
         (
             "auto_dispatch",
             UpdateEpicParams {
                 auto_dispatch: Some(true),
-                ..base_params(EpicId(1))
+                ..UpdateEpicParams::for_epic(EpicId(1))
             },
         ),
         (
             "feed_command",
             UpdateEpicParams {
                 feed_command: Some(FieldUpdate::Set("cmd".to_string())),
-                ..base_params(EpicId(1))
+                ..UpdateEpicParams::for_epic(EpicId(1))
             },
         ),
         (
             "feed_interval_secs",
             UpdateEpicParams {
                 feed_interval_secs: Some(Some(300)),
-                ..base_params(EpicId(1))
+                ..UpdateEpicParams::for_epic(EpicId(1))
             },
         ),
         (
@@ -113,14 +102,14 @@ fn update_epic_params_every_field_covered() {
             UpdateEpicParams {
                 group_by_repo: Some(true),
                 feed_append_only: None,
-                ..base_params(EpicId(1))
+                ..UpdateEpicParams::for_epic(EpicId(1))
             },
         ),
         (
             "parent_epic_id",
             UpdateEpicParams {
                 parent_epic_id: Some(Some(EpicId(2))),
-                ..base_params(EpicId(1))
+                ..UpdateEpicParams::for_epic(EpicId(1))
             },
         ),
     ];
@@ -219,7 +208,7 @@ async fn update_epic_rejects_a_sub_floor_interval() {
         let err = svc
             .update_epic(UpdateEpicParams {
                 feed_interval_secs: Some(Some(bad)),
-                ..base_params(epic.id)
+                ..UpdateEpicParams::for_epic(epic.id)
             })
             .await;
         assert!(
@@ -242,7 +231,7 @@ async fn update_epic_rejecting_the_interval_writes_no_other_field() {
         .update_epic(UpdateEpicParams {
             title: Some("Renamed".to_string()),
             feed_interval_secs: Some(Some(10)),
-            ..base_params(epic.id)
+            ..UpdateEpicParams::for_epic(epic.id)
         })
         .await;
     assert!(matches!(err, Err(ServiceError::Validation(_))), "{err:?}");
@@ -262,7 +251,7 @@ async fn update_epic_accepts_the_floor_itself_and_clearing_the_interval() {
 
     svc.update_epic(UpdateEpicParams {
         feed_interval_secs: Some(Some(MIN_FEED_INTERVAL_SECS)),
-        ..base_params(epic.id)
+        ..UpdateEpicParams::for_epic(epic.id)
     })
     .await
     .unwrap();
@@ -272,7 +261,7 @@ async fn update_epic_accepts_the_floor_itself_and_clearing_the_interval() {
     // Explicit null clears to "inherit the default", never below the floor.
     svc.update_epic(UpdateEpicParams {
         feed_interval_secs: Some(None),
-        ..base_params(epic.id)
+        ..UpdateEpicParams::for_epic(epic.id)
     })
     .await
     .unwrap();
@@ -293,7 +282,7 @@ async fn update_epic_refuses_append_only_together_with_group_by_repo() {
 
     svc.update_epic(UpdateEpicParams {
         feed_append_only: Some(true),
-        ..base_params(epic.id)
+        ..UpdateEpicParams::for_epic(epic.id)
     })
     .await
     .unwrap();
@@ -302,7 +291,7 @@ async fn update_epic_refuses_append_only_together_with_group_by_repo() {
     let err = svc
         .update_epic(UpdateEpicParams {
             group_by_repo: Some(true),
-            ..base_params(epic.id)
+            ..UpdateEpicParams::for_epic(epic.id)
         })
         .await;
     assert!(
@@ -319,14 +308,14 @@ async fn update_epic_refuses_append_only_together_with_group_by_repo() {
     let grouped = db.create_epic("Grouped", "", None).await.unwrap();
     svc.update_epic(UpdateEpicParams {
         group_by_repo: Some(true),
-        ..base_params(grouped.id)
+        ..UpdateEpicParams::for_epic(grouped.id)
     })
     .await
     .unwrap();
     let reversed = svc
         .update_epic(UpdateEpicParams {
             feed_append_only: Some(true),
-            ..base_params(grouped.id)
+            ..UpdateEpicParams::for_epic(grouped.id)
         })
         .await;
     assert!(
@@ -340,7 +329,7 @@ async fn update_epic_refuses_append_only_together_with_group_by_repo() {
         .update_epic(UpdateEpicParams {
             group_by_repo: Some(true),
             feed_append_only: Some(true),
-            ..base_params(both.id)
+            ..UpdateEpicParams::for_epic(both.id)
         })
         .await;
     assert!(
@@ -360,7 +349,7 @@ async fn update_epic_allows_either_flag_alone() {
     svc.update_epic(UpdateEpicParams {
         group_by_repo: Some(true),
         feed_append_only: Some(false),
-        ..base_params(grouped.id)
+        ..UpdateEpicParams::for_epic(grouped.id)
     })
     .await
     .unwrap();
@@ -369,7 +358,7 @@ async fn update_epic_allows_either_flag_alone() {
     // Append-only on an ungrouped epic is the shipped case.
     svc.update_epic(UpdateEpicParams {
         feed_append_only: Some(true),
-        ..base_params(log.id)
+        ..UpdateEpicParams::for_epic(log.id)
     })
     .await
     .unwrap();
@@ -384,7 +373,7 @@ async fn update_epic_sets_group_by_repo() {
     svc.update_epic(UpdateEpicParams {
         group_by_repo: Some(true),
         feed_append_only: None,
-        ..base_params(epic.id)
+        ..UpdateEpicParams::for_epic(epic.id)
     })
     .await
     .unwrap();
@@ -406,7 +395,7 @@ async fn update_epic_entering_done_stamps_completed_at() {
 
     svc.update_epic(UpdateEpicParams {
         status: Some(TaskStatus::Done),
-        ..base_params(epic.id)
+        ..UpdateEpicParams::for_epic(epic.id)
     })
     .await
     .unwrap();
@@ -429,7 +418,7 @@ async fn update_epic_leaving_done_keeps_completed_at() {
 
     svc.update_epic(UpdateEpicParams {
         status: Some(TaskStatus::Done),
-        ..base_params(epic.id)
+        ..UpdateEpicParams::for_epic(epic.id)
     })
     .await
     .unwrap();
@@ -438,7 +427,7 @@ async fn update_epic_leaving_done_keeps_completed_at() {
 
     svc.update_epic(UpdateEpicParams {
         status: Some(TaskStatus::Backlog),
-        ..base_params(epic.id)
+        ..UpdateEpicParams::for_epic(epic.id)
     })
     .await
     .unwrap();
@@ -458,7 +447,7 @@ async fn update_epic_entering_done_keeps_an_explicit_sort_order() {
     svc.update_epic(UpdateEpicParams {
         status: Some(TaskStatus::Done),
         sort_order: Some(7),
-        ..base_params(epic.id)
+        ..UpdateEpicParams::for_epic(epic.id)
     })
     .await
     .unwrap();
@@ -476,7 +465,7 @@ async fn update_epic_unrelated_field_edit_while_done_leaves_completed_at_untouch
 
     svc.update_epic(UpdateEpicParams {
         status: Some(TaskStatus::Done),
-        ..base_params(epic.id)
+        ..UpdateEpicParams::for_epic(epic.id)
     })
     .await
     .unwrap();
@@ -484,7 +473,7 @@ async fn update_epic_unrelated_field_edit_while_done_leaves_completed_at_untouch
 
     svc.update_epic(UpdateEpicParams {
         title: Some("Renamed".to_string()),
-        ..base_params(epic.id)
+        ..UpdateEpicParams::for_epic(epic.id)
     })
     .await
     .unwrap();
@@ -556,7 +545,7 @@ async fn update_epic_sets_parent() {
     assert!(child.parent_epic_id.is_none());
     svc.update_epic(UpdateEpicParams {
         parent_epic_id: Some(Some(parent.id)),
-        ..base_params(child.id)
+        ..UpdateEpicParams::for_epic(child.id)
     })
     .await
     .unwrap();
@@ -573,7 +562,7 @@ async fn update_epic_clears_parent() {
     assert_eq!(child.parent_epic_id, Some(parent.id));
     svc.update_epic(UpdateEpicParams {
         parent_epic_id: Some(None),
-        ..base_params(child.id)
+        ..UpdateEpicParams::for_epic(child.id)
     })
     .await
     .unwrap();
@@ -589,7 +578,7 @@ async fn update_epic_parent_id_absent_is_noop() {
     let child = db.create_epic("Child", "", Some(parent.id)).await.unwrap();
     svc.update_epic(UpdateEpicParams {
         title: Some("New Title".to_string()),
-        ..base_params(child.id)
+        ..UpdateEpicParams::for_epic(child.id)
     })
     .await
     .unwrap();
@@ -629,7 +618,7 @@ async fn update_epic_reparent_recalculates_old_and_new_parent() {
 
     svc.update_epic(UpdateEpicParams {
         parent_epic_id: Some(Some(new_parent.id)),
-        ..base_params(child.id)
+        ..UpdateEpicParams::for_epic(child.id)
     })
     .await
     .unwrap();
@@ -659,7 +648,7 @@ async fn update_epic_status_change_recalculates_parent() {
 
     svc.update_epic(UpdateEpicParams {
         status: Some(TaskStatus::Done),
-        ..base_params(child.id)
+        ..UpdateEpicParams::for_epic(child.id)
     })
     .await
     .unwrap();
@@ -670,7 +659,7 @@ async fn update_epic_status_change_recalculates_parent() {
     // immediately, not left stale at Done.
     svc.update_epic(UpdateEpicParams {
         status: Some(TaskStatus::Running),
-        ..base_params(child.id)
+        ..UpdateEpicParams::for_epic(child.id)
     })
     .await
     .unwrap();
@@ -689,7 +678,7 @@ async fn update_epic_cycle_detection() {
     let result = svc
         .update_epic(UpdateEpicParams {
             parent_epic_id: Some(Some(b.id)),
-            ..base_params(a.id)
+            ..UpdateEpicParams::for_epic(a.id)
         })
         .await;
     assert!(
@@ -710,7 +699,7 @@ async fn update_epic_self_parent_rejected() {
     let result = svc
         .update_epic(UpdateEpicParams {
             parent_epic_id: Some(Some(epic.id)),
-            ..base_params(epic.id)
+            ..UpdateEpicParams::for_epic(epic.id)
         })
         .await;
     assert!(
@@ -733,19 +722,8 @@ async fn reparent_repo_group_sub_epic_is_rejected() {
 
     let err = svc
         .update_epic(UpdateEpicParams {
-            epic_id: sub,
             parent_epic_id: Some(Some(other.id)),
-            title: None,
-            description: None,
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            completed_at: None,
-            auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            group_by_repo: None,
-            feed_append_only: None,
+            ..UpdateEpicParams::for_epic(sub)
         })
         .await;
     assert!(
@@ -802,7 +780,7 @@ async fn detach_manual_sub_epic_is_allowed() {
 
     svc.update_epic(UpdateEpicParams {
         parent_epic_id: Some(None),
-        ..base_params(child.id)
+        ..UpdateEpicParams::for_epic(child.id)
     })
     .await
     .unwrap();

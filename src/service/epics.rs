@@ -51,6 +51,25 @@ pub struct UpdateEpicParams {
 }
 
 impl UpdateEpicParams {
+    /// Create params with all optional fields unset (no-op except epic_id).
+    pub fn for_epic(epic_id: EpicId) -> Self {
+        Self {
+            epic_id,
+            title: None,
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            completed_at: None,
+            auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            group_by_repo: None,
+            feed_append_only: None,
+            parent_epic_id: None,
+        }
+    }
+
     pub(in crate::service) fn has_any_field(&self) -> bool {
         !self.updated_field_names().is_empty()
     }

@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
-use crate::models::{EpicId, TaskStatus};
+use crate::models::{Epic, EpicId, TaskStatus};
 use crate::service::{CreateEpicParams, UpdateEpicParams};
 
 use super::types::{
@@ -122,48 +122,46 @@ pub(super) async fn handle_get_epic(
     };
     tracing::info!(epic_id = parsed.epic_id.0, "MCP get_epic");
 
-    match state.epic_svc.get_epic_with_progress(parsed.epic_id).await {
-        Ok((epic, done_count, total)) => {
-            let mut text = format!(
-                "Epic {id}: {title}\nDescription: {desc}\nStatus: {status}",
-                id = epic.id,
-                title = epic.title,
-                desc = epic.description,
-                status = epic.status.as_str(),
-            );
-            if let Some(parent_id) = epic.parent_epic_id {
-                match state.epic_svc.get_epic(parent_id).await.ok() {
-                    Some(parent) => {
-                        text.push_str(&format!("\nParent: {parent_id} {}", parent.title));
-                    }
-                    None => text.push_str(&format!("\nParent: {parent_id}")),
-                }
-            }
-            if let Some(ref p) = epic.plan_path {
-                text.push_str(&format!("\nPlan: {p}"));
-            }
-            if let Some(sort_order) = epic.sort_order {
-                text.push_str(&format!("\nSort order: {sort_order}"));
-            }
-            if let Some(ref fc) = epic.feed_command {
-                text.push_str(&format!("\nFeed command: {fc}"));
-            }
-            if let Some(fi) = epic.feed_interval_secs {
-                text.push_str(&format!("\nFeed interval: {fi}s"));
-            }
-            text.push_str(&format!(
-                "\nCreated: {}",
-                epic.created_at.format("%Y-%m-%d %H:%M:%S UTC")
-            ));
-            text.push_str(&format!(
-                "\nUpdated: {}",
-                epic.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
-            ));
-            text.push_str(&format!("\nSubtasks: {done_count}/{total} done"));
-            JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
+    let (epic, done_count, total) =
+        match state.epic_svc.get_epic_with_progress(parsed.epic_id).await {
+            Ok(found) => found,
+            Err(e) => return service_err_to_response(id, e),
+        };
+    let mut text = format!(
+        "Epic {id}: {title}\nDescription: {desc}\nStatus: {status}",
+        id = epic.id,
+        title = epic.title,
+        desc = epic.description,
+        status = epic.status.as_str(),
+    );
+    if let Some(parent_id) = epic.parent_epic_id {
+        text.push_str(&format!("\nParent: {parent_id}"));
+        if let Ok(parent) = state.epic_svc.get_epic(parent_id).await {
+            text.push_str(&format!(" {}", parent.title));
         }
-        Err(e) => service_err_to_response(id, e),
     }
+    if let Some(ref p) = epic.plan_path {
+        text.push_str(&format!("\nPlan: {p}"));
+    }
+    if let Some(sort_order) = epic.sort_order {
+        text.push_str(&format!("\nSort order: {sort_order}"));
+    }
+    if let Some(ref fc) = epic.feed_command {
+        text.push_str(&format!("\nFeed command: {fc}"));
+    }
+    if let Some(fi) = epic.feed_interval_secs {
+        text.push_str(&format!("\nFeed interval: {fi}s"));
+    }
+    text.push_str(&format!(
+        "\nCreated: {}",
+        epic.created_at.format("%Y-%m-%d %H:%M:%S UTC")
+    ));
+    text.push_str(&format!(
+        "\nUpdated: {}",
+        epic.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
+    ));
+    text.push_str(&format!("\nSubtasks: {done_count}/{total} done"));
+    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
 pub(super) async fn handle_list_epics(
@@ -178,51 +176,52 @@ pub(super) async fn handle_list_epics(
     };
     tracing::info!(parent_epic_id = ?parsed.parent_epic_id, recursive = parsed.recursive, "MCP list_epics");
 
-    match state
+    let epics = match state
         .epic_svc
         .list_epics_with_progress_under(parsed.parent_epic_id, parsed.recursive)
         .await
     {
-        Ok(epics) => {
-            if epics.is_empty() {
-                return JsonRpcResponse::ok(
-                    id,
-                    json!({"content": [{"type": "text", "text": "No epics found"}]}),
-                );
-            }
-            let lines: Vec<String> = epics
-                .iter()
-                .map(|(e, done, total)| {
-                    let plan_indicator = if e.plan_path.is_some() { " [plan]" } else { "" };
-                    let status_indicator = if e.status != TaskStatus::Backlog {
-                        format!(" [{}]", e.status.as_str())
-                    } else {
-                        String::new()
-                    };
-                    let parent_indicator = match e.parent_epic_id {
-                        Some(p) => format!(" (parent:{p})"),
-                        None => String::new(),
-                    };
-                    format!(
-                        "- [{}] {} ({}/{} done){}{}{}: {}",
-                        e.id,
-                        e.title,
-                        done,
-                        total,
-                        plan_indicator,
-                        status_indicator,
-                        parent_indicator,
-                        e.description
-                    )
-                })
-                .collect();
-            JsonRpcResponse::ok(
-                id,
-                json!({"content": [{"type": "text", "text": lines.join("\n")}]}),
-            )
-        }
-        Err(e) => service_err_to_response(id, e),
+        Ok(epics) => epics,
+        Err(e) => return service_err_to_response(id, e),
+    };
+    if epics.is_empty() {
+        return JsonRpcResponse::ok(
+            id,
+            json!({"content": [{"type": "text", "text": "No epics found"}]}),
+        );
     }
+    let lines: Vec<String> = epics
+        .iter()
+        .map(|(e, done, total)| format_epic_list_line(e, *done, *total))
+        .collect();
+    JsonRpcResponse::ok(
+        id,
+        json!({"content": [{"type": "text", "text": lines.join("\n")}]}),
+    )
+}
+
+fn format_epic_list_line(e: &Epic, done: usize, total: usize) -> String {
+    let plan_indicator = if e.plan_path.is_some() { " [plan]" } else { "" };
+    let status_indicator = if e.status != TaskStatus::Backlog {
+        format!(" [{}]", e.status.as_str())
+    } else {
+        String::new()
+    };
+    let parent_indicator = match e.parent_epic_id {
+        Some(p) => format!(" (parent:{p})"),
+        None => String::new(),
+    };
+    format!(
+        "- [{}] {} ({}/{} done){}{}{}: {}",
+        e.id,
+        e.title,
+        done,
+        total,
+        plan_indicator,
+        status_indicator,
+        parent_indicator,
+        e.description
+    )
 }
 
 pub(super) async fn handle_update_epic(
