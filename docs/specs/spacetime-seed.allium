@@ -816,7 +816,9 @@ actor Operator {
 -- is a running old store, read with the same dump `dump-server` performs.
 -- `--from <data-dir>` is a convenience over it: the folder is COPIED to a
 -- temporary place, a store is started over the copy on a free port, read, and
--- stopped, and the copy deleted. The folder named is never opened by a store
+-- stopped, and the copy deleted. A port taken by another process between the
+-- pick and the start is picked again, a few times, before the import fails.
+-- The folder named is never opened by a store
 -- and never written, so "read-only on the source" holds by construction rather
 -- than by care. A data folder that a running store holds is refused (copying
 -- a live commit log can capture it mid-write): name that store's URL instead.

@@ -103,6 +103,9 @@ async fn read_data_dir(data_dir: &Path) -> Result<Snapshot> {
     .await
 }
 
+/// How many free ports the import tries before it gives up.
+const PORT_ATTEMPTS: u32 = 5;
+
 /// How long the copy gets to answer before the import gives up.
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -133,13 +136,23 @@ async fn read_data_dir_with(
         .await?
         .context("could not copy the data folder")?;
 
-    let port = std::net::TcpListener::bind("127.0.0.1:0")?
-        .local_addr()?
-        .port();
-    let address = format!("127.0.0.1:{port}");
-    let child = spawner
-        .spawn(&address, &copy, &scratch.path().join("store.log"))
-        .context("could not run `spacetime start`")?;
+    // The port is free when picked, not when the store starts: another process
+    // can take it in between. Pick again when the start reports that.
+    let log = scratch.path().join("store.log");
+    let mut attempt = 1;
+    let (address, child) = loop {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")?
+            .local_addr()?
+            .port();
+        let address = format!("127.0.0.1:{port}");
+        match spawner.spawn(&address, &copy, &log) {
+            Ok(child) => break (address, child),
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && attempt < PORT_ATTEMPTS => {
+                attempt += 1;
+            }
+            Err(e) => return Err(e).context("could not run `spacetime start`"),
+        }
+    };
     let group = child.id();
 
     let result = async {
@@ -275,6 +288,9 @@ mod tests {
         output: Mutex<Option<std::process::ChildStdout>>,
         fail: bool,
         answer_on_start: bool,
+        /// How many starts fail with "address in use" before one succeeds: a
+        /// parallel process took the port between the pick and the start.
+        taken_ports: Mutex<u32>,
     }
 
     /// A process group stopped when dropped: a backstop for a test that fails
@@ -297,6 +313,13 @@ mod tests {
                     std::io::ErrorKind::NotFound,
                     "no spacetime",
                 ));
+            }
+            {
+                let mut taken = self.taken_ports.lock().unwrap();
+                if *taken > 0 {
+                    *taken -= 1;
+                    return Err(std::io::Error::from(std::io::ErrorKind::AddrInUse));
+                }
             }
             *self.seen.lock().unwrap() = Some((address.to_string(), data_dir.to_path_buf()));
             if self.answer_on_start {
@@ -356,6 +379,35 @@ mod tests {
         let dir = data_folder();
         let spawner = FakeSpawner {
             fail: true,
+            ..Default::default()
+        };
+        let err = read_data_dir_with(dir.path(), &spawner, Duration::from_secs(1), &memory_store)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("could not run `spacetime start`"));
+    }
+
+    #[tokio::test]
+    async fn a_port_taken_between_the_pick_and_the_start_is_picked_again() {
+        let dir = data_folder();
+        let spawner = FakeSpawner {
+            answer_on_start: true,
+            taken_ports: Mutex::new(2),
+            ..Default::default()
+        };
+        let snapshot =
+            read_data_dir_with(dir.path(), &spawner, Duration::from_secs(10), &memory_store)
+                .await
+                .unwrap();
+        assert!(!snapshot.extracts().is_empty());
+        assert_eq!(*spawner.taken_ports.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_port_that_stays_taken_gives_up_and_names_the_command() {
+        let dir = data_folder();
+        let spawner = FakeSpawner {
+            taken_ports: Mutex::new(u32::MAX),
             ..Default::default()
         };
         let err = read_data_dir_with(dir.path(), &spawner, Duration::from_secs(1), &memory_store)
