@@ -145,3 +145,130 @@ fn unflattened_is_backlog_alone() {
         );
     }
 }
+
+mod default_tests {
+    use super::*;
+
+    #[test]
+    fn default_task_has_sensible_placeholder_values() {
+        let task = Task::default();
+        assert_eq!(task.id, TaskId(0));
+        assert_eq!(task.title, "");
+        assert_eq!(task.description, "");
+        assert_eq!(task.repo_path, "/repo");
+        assert_eq!(task.status, TaskStatus::Backlog);
+        assert_eq!(task.sub_status, SubStatus::None);
+        assert_eq!(task.base_branch, "main");
+        assert!(task.labels.is_empty());
+        assert!(task.worktree.is_none());
+        assert!(task.tmux_window.is_none());
+        assert!(task.host.is_none());
+        assert!(task.plan_path.is_none());
+        assert!(task.epic_id.is_none());
+        assert!(task.url.is_none());
+        assert!(task.tag.is_none());
+        assert!(task.sort_order.is_none());
+        assert!(task.external_id.is_none());
+        assert!(task.last_pre_tool_use_at.is_none());
+        assert!(task.last_notification_at.is_none());
+        assert!(task.last_peer_message_sent_at.is_none());
+        assert!(task.last_peer_message_received_at.is_none());
+        assert!(task.wrap_up_mode.is_none());
+        assert!(!task.auto_run_plan);
+        assert!(!task.phoenix);
+        assert_eq!(task.live_subagents, 0);
+        assert!(!task.stop_pending);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task::is_locally_owned (task #4812 distributed-dispatch foundations)
+// ---------------------------------------------------------------------------
+//
+// Mirrors core/Task::is_locally_owned in docs/specs/core.allium: true when
+// `host` is null (nothing to conflict over) or names this machine, false
+// only when it names a different one.
+mod is_locally_owned_tests {
+    use super::*;
+
+    #[test]
+    fn no_host_is_locally_owned() {
+        let task = Task {
+            host: None,
+            ..Task::default()
+        };
+        assert!(task.is_locally_owned(Some("this-machine")));
+    }
+
+    #[test]
+    fn host_matching_local_id_is_locally_owned() {
+        let task = Task {
+            host: Some("this-machine".to_string()),
+            ..Task::default()
+        };
+        assert!(task.is_locally_owned(Some("this-machine")));
+    }
+
+    #[test]
+    fn host_naming_another_machine_is_not_locally_owned() {
+        let task = Task {
+            host: Some("other-machine".to_string()),
+            ..Task::default()
+        };
+        assert!(!task.is_locally_owned(Some("this-machine")));
+    }
+
+    #[test]
+    fn a_held_task_is_not_locally_owned_when_this_install_has_no_id_yet() {
+        let task = Task {
+            host: Some("some-machine".to_string()),
+            ..Task::default()
+        };
+        assert!(!task.is_locally_owned(None));
+    }
+
+    #[test]
+    fn an_unheld_task_is_locally_owned_even_when_this_install_has_no_id_yet() {
+        let task = Task {
+            host: None,
+            ..Task::default()
+        };
+        assert!(task.is_locally_owned(None));
+    }
+}
+
+mod wrap_up_mode_tests {
+    use super::*;
+
+    #[test]
+    fn wrap_up_mode_roundtrip() {
+        for mode in [WrapUpMode::Rebase, WrapUpMode::Pr, WrapUpMode::Done] {
+            let s = mode.as_str();
+            let parsed = WrapUpMode::parse(s).expect("parse should succeed");
+            assert_eq!(parsed, mode);
+        }
+    }
+
+    /// `WrapUpMode::ALL` backs the create_task/update_task MCP schema's
+    /// wrap_up_mode enum (dispatch.rs) — a variant added there without
+    /// updating `ALL` would silently under-advertise it.
+    #[test]
+    fn wrap_up_mode_all_has_every_variant() {
+        assert_eq!(WrapUpMode::ALL.len(), 3);
+    }
+
+    #[test]
+    fn wrap_up_mode_from_str() {
+        assert_eq!("rebase".parse::<WrapUpMode>().unwrap(), WrapUpMode::Rebase);
+        assert_eq!("pr".parse::<WrapUpMode>().unwrap(), WrapUpMode::Pr);
+        assert_eq!("done".parse::<WrapUpMode>().unwrap(), WrapUpMode::Done);
+        assert!("unknown".parse::<WrapUpMode>().is_err());
+    }
+
+    #[test]
+    fn wrap_up_mode_display() {
+        assert_eq!(WrapUpMode::Rebase.to_string(), "rebase");
+        assert_eq!(WrapUpMode::Pr.to_string(), "pr");
+        assert_eq!(WrapUpMode::Done.to_string(), "done");
+    }
+}

@@ -43,6 +43,7 @@ to look.
 | `src/tui/tests/` | TUI unit and scenario tests, snapshots, helpers |
 | `src/models/mod.rs` | Module declarations + flat re-exports of all domain types (no logic, no tests) |
 | `src/models/tasks.rs` | `Task`, `TaskStatus`, `SubStatus` (+ `column_section()`), `TaskTag` (+ `is_review()`), `DispatchMode::for_task()` tag routing, `is_wrappable`, `slugify`, age formatting |
+| `src/models/agent_events.rs` | What an agent reports through hooks: `HookEventKind`, `SubagentEvent`, `StopOutcome`, `NotificationKind`/`NotificationWrite`, `classify_agent_activity` |
 | `src/models/{epics,learnings,review,usage}.rs` | Domain types per area. `review.rs` holds `ReviewDecision` and `pr_number_from_url` |
 | `src/models/url.rs` | `TaskUrl` / `UrlType` — the typed URL on a task (PR, issue, security alert), stored explicitly rather than sniffed |
 | `src/models/ids.rs` | `define_id_newtype!` macro behind `TaskId`/`EpicId`/`LearningId` |

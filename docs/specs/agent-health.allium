@@ -640,7 +640,7 @@ rule HookNotification {
         -- shell hook (task-status-hook) reads the payload's `notification_type`
         -- and forwards it as an optional `--kind` argument:
         --   dispatch hook <id> notification [--kind <notification_type>]
-        -- `NotificationWrite::from_kind` (models/tasks.rs) resolves the kind
+        -- `NotificationWrite::from_kind` (models/agent_events.rs) resolves the kind
         -- alone into the write to apply; record_hook_event hands that straight
         -- to `record_notification` (db/queries/tasks.rs), which applies it as
         -- one conditional statement. See the branches above. `kind` is

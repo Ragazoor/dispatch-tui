@@ -428,7 +428,7 @@ Two rules make it temporary rather than permanent: the comment must name the spe
 
 ## Prod-vs-test LOC split
 
-Tests live inline behind `#[cfg(test)]` blocks (or in sibling `tests/` sub-modules) in the same file as the production code. Large files like `src/models/tasks.rs` (≈1700 LOC) are roughly half tests. If a file looks unexpectedly large, check how much of it is `#[cfg(test)]` before concluding the production code is complex.
+Tests live inline behind `#[cfg(test)]` blocks (or in sibling `tests/` sub-modules) in the same file as the production code. Some large files are still roughly half inline tests. If a file looks unexpectedly large, check how much of it is `#[cfg(test)]` before concluding the production code is complex.
 
 ## Test-injectable paths — never resolve `$HOME` at the point of use
 

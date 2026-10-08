@@ -58,6 +58,9 @@ pub use review::*;
 pub mod tasks;
 pub use tasks::*;
 
+pub mod agent_events;
+pub use agent_events::*;
+
 pub mod epics;
 pub use epics::*;
 

@@ -114,3 +114,86 @@ fn live_subagents_with_no_timestamps_at_all_is_active() {
         AgentActivity::Active
     );
 }
+
+mod notification_kind_tests {
+    use super::*;
+
+    #[test]
+    fn notification_kind_parse_known_values() {
+        for (raw, kind) in [
+            ("permission_prompt", NotificationKind::PermissionPrompt),
+            ("idle_prompt", NotificationKind::IdlePrompt),
+            ("auth_success", NotificationKind::AuthSuccess),
+            ("elicitation_dialog", NotificationKind::ElicitationDialog),
+            (
+                "elicitation_complete",
+                NotificationKind::ElicitationComplete,
+            ),
+            (
+                "elicitation_response",
+                NotificationKind::ElicitationResponse,
+            ),
+        ] {
+            assert_eq!(NotificationKind::parse(raw), Some(kind));
+        }
+    }
+
+    #[test]
+    fn notification_kind_parse_unknown_is_none() {
+        // Agent-view-only values never reach a plain `claude` session, and any
+        // future/unknown value must fall through to None (raise/compat path).
+        assert_eq!(NotificationKind::parse("agent_needs_input"), None);
+        assert_eq!(NotificationKind::parse("agent_completed"), None);
+        assert_eq!(NotificationKind::parse(""), None);
+        assert_eq!(NotificationKind::parse("something_new"), None);
+    }
+
+    #[test]
+    fn notification_write_makes_only_idle_prompt_conditional() {
+        assert_eq!(
+            NotificationWrite::from_kind(Some(NotificationKind::IdlePrompt)),
+            NotificationWrite::RaiseIfNoOwnWorkLive
+        );
+        // A permission decision or a question dialog needs a human even while
+        // background work churns — and an absent kind may be either.
+        for kind in [
+            None,
+            Some(NotificationKind::PermissionPrompt),
+            Some(NotificationKind::ElicitationDialog),
+        ] {
+            assert_eq!(
+                NotificationWrite::from_kind(kind),
+                NotificationWrite::Raise,
+                "kind {kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn notification_write_carries_the_clear_and_ignore_buckets_through() {
+        for kind in [
+            NotificationKind::ElicitationComplete,
+            NotificationKind::ElicitationResponse,
+        ] {
+            assert_eq!(
+                NotificationWrite::from_kind(Some(kind)),
+                NotificationWrite::Clear,
+                "kind {kind:?}"
+            );
+        }
+        assert_eq!(
+            NotificationWrite::from_kind(Some(NotificationKind::AuthSuccess)),
+            NotificationWrite::Ignore
+        );
+    }
+
+    #[test]
+    fn hook_event_kind_parse_notification_has_no_kind() {
+        // The subtype arrives via `--kind`, not the event name.
+        assert_eq!(
+            HookEventKind::parse("notification"),
+            Some(HookEventKind::Notification(None))
+        );
+        assert_eq!(HookEventKind::Notification(None).as_str(), "notification");
+    }
+}
