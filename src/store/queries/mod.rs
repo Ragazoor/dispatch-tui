@@ -12,7 +12,6 @@ mod usage;
 pub(crate) use settings::{HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY};
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 
 use crate::models::{EpicId, SubagentDrain, TaskId, TaskStatus};
 use crate::spacetime::bindings;
@@ -56,12 +55,6 @@ impl Store {
     /// clock rather than by whose laptop is fast.
     fn now(&self) -> String {
         encode::stamp(self.clock.now())
-    }
-
-    /// [`Self::now`] before it is spelled for the wire, for the calls whose
-    /// transport takes a typed instant.
-    fn now_at(&self) -> DateTime<Utc> {
-        self.clock.now()
     }
 
     /// This connection's own proven identity, or a refusal naming what could
@@ -214,7 +207,7 @@ impl Store {
     ) -> Vec<crate::store::RemovedFeedTask> {
         let mut removed = Vec::with_capacity(candidates.len());
         for candidate in candidates {
-            if self.rows.task(candidate.id).is_none() {
+            if !self.rows.has_task(candidate.id) {
                 removed.push(crate::store::RemovedFeedTask {
                     id: candidate.id,
                     repo_path: candidate.repo_path,

@@ -103,7 +103,7 @@ impl super::super::RepoConfigRead for Store {
 impl super::super::RepoConfigStore for Store {
     async fn save_repo_path(&self, path: &str) -> Result<()> {
         self.caller
-            .save_repo_path(path.to_string(), self.now_at())
+            .save_repo_path(path.to_string(), self.clock.now())
             .await?
             .applied()
     }
@@ -126,7 +126,7 @@ impl super::super::RepoConfigStore for Store {
 
     async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()> {
         self.caller
-            .record_base_branch(repo_path.to_string(), branch.to_string(), self.now_at())
+            .record_base_branch(repo_path.to_string(), branch.to_string(), self.clock.now())
             .await?
             .applied()
     }

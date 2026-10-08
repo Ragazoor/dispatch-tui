@@ -1,6 +1,6 @@
 use super::*;
 use crate::process::{MockProcessRunner, ProcessRunner};
-use crate::store::{EpicCrud, EpicRead, PollOwnershipStore, Store};
+use crate::store::{EpicCrud, EpicRead, PollOwnershipStore, Store, MEMORY_HOST_ID};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -81,7 +81,6 @@ async fn changing_feed_command_against_a_foreign_owner_offers_a_takeover() {
     let epic = db.create_epic("Original", "", None).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, _rx) = mpsc::unbounded_channel();
-    // The in-memory store claims as `test-host`.
     db.claim_poll_owner(crate::models::PollScopeId::Epic(epic.id))
         .await
         .unwrap();
@@ -100,7 +99,7 @@ async fn changing_feed_command_against_a_foreign_owner_offers_a_takeover() {
         matches!(
             *app.input_mode(),
             crate::tui::InputMode::ConfirmOverrideFeedOwner { epic_id, ref other_host }
-                if epic_id == epic.id && other_host == "test-host"
+                if epic_id == epic.id && other_host == MEMORY_HOST_ID
         ),
         "expected the take-over prompt, got {:?}",
         app.input_mode()
@@ -114,11 +113,10 @@ async fn changing_feed_command_when_this_host_already_owns_it_offers_no_takeover
     let epic = db.create_epic("Original", "", None).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, _rx) = mpsc::unbounded_channel();
-    // The in-memory store claims as `test-host`.
     db.claim_poll_owner(crate::models::PollScopeId::Epic(epic.id))
         .await
         .unwrap();
-    let rt = super::tests::editor_runtime_on_host(db.clone(), runner, tx, "test-host");
+    let rt = super::tests::editor_runtime_on_host(db.clone(), runner, tx, MEMORY_HOST_ID);
     let mut app = App::new(vec![]);
 
     rt.finalize_epic_edit(&mut app, epic.clone(), saved("Renamed", "60"))
@@ -144,7 +142,6 @@ async fn resubmitting_the_same_feed_command_offers_no_takeover() {
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, _rx) = mpsc::unbounded_channel();
-    // The in-memory store claims as `test-host`.
     db.claim_poll_owner(crate::models::PollScopeId::Epic(epic.id))
         .await
         .unwrap();
@@ -175,7 +172,6 @@ async fn clearing_feed_command_offers_no_takeover() {
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, _rx) = mpsc::unbounded_channel();
-    // The in-memory store claims as `test-host`.
     db.claim_poll_owner(crate::models::PollScopeId::Epic(epic.id))
         .await
         .unwrap();

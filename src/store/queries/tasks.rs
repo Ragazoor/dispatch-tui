@@ -161,9 +161,8 @@ impl TaskCrud for Store {
     ) -> Result<Vec<RemovedFeedTask>> {
         let children: std::collections::HashSet<EpicId> = self
             .rows
-            .epics()
+            .epics_with_parent(Some(parent_id))
             .into_iter()
-            .filter(|e| e.parent_epic_id == Some(parent_id))
             .map(|e| e.id)
             .collect();
         let keep: std::collections::HashSet<&str> =
@@ -190,7 +189,7 @@ impl TaskCrud for Store {
     async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool> {
         Ok(self
             .caller
-            .mark_pr_learnings_gate_shown(id, self.now_at())
+            .mark_pr_learnings_gate_shown(id, self.clock.now())
             .await?
             .won())
     }

@@ -737,7 +737,14 @@ fn call_at() -> chrono::DateTime<chrono::Utc> {
         .with_timezone(&chrono::Utc)
 }
 
-fn writer_with(caller: RecordingCaller) -> (Store, Arc<RecordingCaller>) {
+/// A store over `rows`, writing through `caller` as `identity` with the
+/// clock fixed at [`AT`]. Every writer fixture below is this with a default
+/// filled in.
+fn store_over(
+    rows: Arc<crate::sync::SharedRows>,
+    identity: Option<&str>,
+    caller: RecordingCaller,
+) -> (Store, Arc<RecordingCaller>) {
     let caller = Arc::new(caller);
     let clock = FixedClock::new(
         chrono::DateTime::parse_from_rfc3339(AT)
@@ -745,9 +752,9 @@ fn writer_with(caller: RecordingCaller) -> (Store, Arc<RecordingCaller>) {
             .with_timezone(&chrono::Utc),
     );
     let writer = Store::new(
-        Arc::new(crate::sync::SharedRows::new()),
+        rows,
         caller.clone(),
-        Arc::new(FixedIdentity(Some("user-me".into()))),
+        Arc::new(FixedIdentity(identity.map(str::to_string))),
         Arc::new(clock) as Arc<dyn Clock>,
         "host-me".into(),
         std::path::Path::new(NO_HOST_FILE),
@@ -755,22 +762,17 @@ fn writer_with(caller: RecordingCaller) -> (Store, Arc<RecordingCaller>) {
     (writer, caller)
 }
 
+fn writer_with(caller: RecordingCaller) -> (Store, Arc<RecordingCaller>) {
+    store_over(
+        Arc::new(crate::sync::SharedRows::new()),
+        Some("user-me"),
+        caller,
+    )
+}
+
 /// The twin of [`writer_with`], for the "nothing has settled yet" tests.
 fn writer_with_no_identity(caller: RecordingCaller) -> (Store, Arc<RecordingCaller>) {
-    let caller = Arc::new(caller);
-    let writer = Store::new(
-        Arc::new(crate::sync::SharedRows::new()),
-        caller.clone(),
-        Arc::new(FixedIdentity(None)),
-        Arc::new(FixedClock::new(
-            chrono::DateTime::parse_from_rfc3339(AT)
-                .unwrap()
-                .with_timezone(&chrono::Utc),
-        )) as Arc<dyn Clock>,
-        "host-me".into(),
-        std::path::Path::new(NO_HOST_FILE),
-    );
-    (writer, caller)
+    store_over(Arc::new(crate::sync::SharedRows::new()), None, caller)
 }
 
 /// A writer over a seeded subscription view, for the candidate loop.
@@ -778,20 +780,7 @@ fn writer_over(
     rows: Arc<crate::sync::SharedRows>,
     caller: RecordingCaller,
 ) -> (Store, Arc<RecordingCaller>) {
-    let caller = Arc::new(caller);
-    let writer = Store::new(
-        rows,
-        caller.clone(),
-        Arc::new(FixedIdentity(Some("user-me".into()))),
-        Arc::new(FixedClock::new(
-            chrono::DateTime::parse_from_rfc3339(AT)
-                .unwrap()
-                .with_timezone(&chrono::Utc),
-        )) as Arc<dyn Clock>,
-        "host-me".into(),
-        std::path::Path::new(NO_HOST_FILE),
-    );
-    (writer, caller)
+    store_over(rows, Some("user-me"), caller)
 }
 
 /// A backlog subtask of epic 1, as the subscription would deliver it.
@@ -966,20 +955,7 @@ async fn a_refused_write_carries_the_stores_reason() {
 /// the first — `sync.allium: NoWriteIsEverQueued`.
 #[tokio::test]
 async fn a_refusal_is_not_retried_inside_the_writer() {
-    let caller = Arc::new(RecordingCaller::refusing("down"));
-    let clock = FixedClock::new(
-        chrono::DateTime::parse_from_rfc3339(AT)
-            .unwrap()
-            .with_timezone(&chrono::Utc),
-    );
-    let writer = Store::new(
-        Arc::new(crate::sync::SharedRows::new()),
-        caller.clone(),
-        Arc::new(FixedIdentity(Some("user-me".into()))),
-        Arc::new(clock) as Arc<dyn Clock>,
-        "host-me".into(),
-        std::path::Path::new(NO_HOST_FILE),
-    );
+    let (writer, caller) = writer_with(RecordingCaller::refusing("down"));
 
     for _ in 0..3 {
         assert!(writer.delete_task(TaskId(1)).await.is_err());
@@ -1844,24 +1820,7 @@ async fn additive_upsert_never_reports_a_removal() {
 /// `feeds.allium: UpsertFeedTasks`.
 #[tokio::test]
 async fn feed_upsert_with_no_settled_identity_still_applies_with_an_empty_created_by() {
-    let rows = Arc::new(crate::sync::SharedRows::new());
-    let caller = RecordingCaller::default();
-    let (writer, sent) = {
-        let caller = Arc::new(caller);
-        let writer = Store::new(
-            rows,
-            caller.clone(),
-            Arc::new(FixedIdentity(None)),
-            Arc::new(FixedClock::new(
-                chrono::DateTime::parse_from_rfc3339(AT)
-                    .unwrap()
-                    .with_timezone(&chrono::Utc),
-            )) as Arc<dyn Clock>,
-            "host-me".into(),
-            std::path::Path::new(NO_HOST_FILE),
-        );
-        (writer, caller)
-    };
+    let (writer, sent) = writer_with_no_identity(RecordingCaller::default());
 
     writer
         .upsert_feed_tasks(

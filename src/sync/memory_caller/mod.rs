@@ -85,11 +85,8 @@ const POLL_SCOPE_EPIC: &str = "epic";
 /// copy.
 const MAX_EPIC_DEPTH: usize = 64;
 
-/// The timestamp format both stores write — see `super::encode::stamp`'s own
-/// doc comment for why this is restated rather than imported.
-fn stamp(at: chrono::DateTime<chrono::Utc>) -> String {
-    super::encode::stamp(at)
-}
+/// The timestamp format the store writes.
+use super::encode::stamp;
 
 // ---------------------------------------------------------------------------
 // Native row storage

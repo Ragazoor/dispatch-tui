@@ -1202,9 +1202,10 @@ pub struct Store {
     _memory_host_dir: Option<tempfile::TempDir>,
 }
 
-/// The host id an in-memory handle's writes and host file both carry.
+/// The host id an in-memory handle's writes and host file both carry, and so
+/// the host every poll-owner claim it makes is recorded under.
 #[cfg(any(test, feature = "test-support"))]
-const MEMORY_HOST_ID: &str = "test-host";
+pub const MEMORY_HOST_ID: &str = "test-host";
 
 impl Store {
     /// A handle over `rows`, writing through `caller`, with this install's
