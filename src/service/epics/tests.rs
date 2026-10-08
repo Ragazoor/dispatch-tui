@@ -147,12 +147,10 @@ async fn create_epic_returns_the_post_patch_epic() {
 
     let epic = svc
         .create_epic(CreateEpicParams {
-            title: "E".to_string(),
-            description: String::new(),
             sort_order: Some(42),
-            parent_epic_id: None,
             feed_command: Some("gh api repos/x/pulls".to_string()),
             feed_interval_secs: Some(300),
+            ..CreateEpicParams::fixture("E".to_string())
         })
         .await
         .unwrap();
@@ -166,12 +164,9 @@ async fn create_epic_returns_the_post_patch_epic() {
 
 fn create_params_with_interval(interval: Option<i64>) -> CreateEpicParams {
     CreateEpicParams {
-        title: "E".to_string(),
-        description: String::new(),
-        sort_order: None,
-        parent_epic_id: None,
         feed_command: Some("true".to_string()),
         feed_interval_secs: interval,
+        ..CreateEpicParams::fixture("E".to_string())
     }
 }
 
@@ -505,12 +500,8 @@ async fn create_sub_epic_succeeds() {
     let parent = db.create_epic("Parent", "", None).await.unwrap();
     let sub = svc
         .create_epic(CreateEpicParams {
-            title: "Sub".into(),
-            description: "".into(),
-            sort_order: None,
             parent_epic_id: Some(parent.id),
-            feed_command: None,
-            feed_interval_secs: None,
+            ..CreateEpicParams::fixture("Sub")
         })
         .await
         .unwrap();
@@ -530,12 +521,8 @@ async fn create_sub_epic_recalculates_done_parent() {
         .unwrap();
 
     svc.create_epic(CreateEpicParams {
-        title: "Sub".into(),
-        description: "".into(),
-        sort_order: None,
         parent_epic_id: Some(parent.id),
-        feed_command: None,
-        feed_interval_secs: None,
+        ..CreateEpicParams::fixture("Sub")
     })
     .await
     .unwrap();
@@ -550,12 +537,8 @@ async fn create_sub_epic_missing_parent_returns_not_found() {
     let svc = EpicService::new(db.clone());
     let result = svc
         .create_epic(CreateEpicParams {
-            title: "Sub".into(),
-            description: "".into(),
-            sort_order: None,
             parent_epic_id: Some(EpicId(9999)),
-            feed_command: None,
-            feed_interval_secs: None,
+            ..CreateEpicParams::fixture("Sub")
         })
         .await;
     assert!(

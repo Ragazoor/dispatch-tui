@@ -10,25 +10,14 @@ async fn create_sub_epic_links_parent() {
     let svc = epic_svc(&db);
 
     let parent = svc
-        .create_epic(CreateEpicParams {
-            title: "Parent".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("Parent"))
         .await
         .unwrap();
 
     let child = svc
         .create_epic(CreateEpicParams {
-            title: "Child".into(),
-            description: "".into(),
-            sort_order: None,
             parent_epic_id: Some(parent.id),
-            feed_command: None,
-            feed_interval_secs: None,
+            ..CreateEpicParams::fixture("Child")
         })
         .await
         .unwrap();
@@ -45,23 +34,12 @@ async fn list_root_epics_service() {
     let svc = epic_svc(&db);
 
     let parent = svc
-        .create_epic(CreateEpicParams {
-            title: "Root".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("Root"))
         .await
         .unwrap();
     svc.create_epic(CreateEpicParams {
-        title: "Sub".into(),
-        description: "".into(),
-        sort_order: None,
         parent_epic_id: Some(parent.id),
-        feed_command: None,
-        feed_interval_secs: None,
+        ..CreateEpicParams::fixture("Sub")
     })
     .await
     .unwrap();
@@ -77,24 +55,13 @@ async fn list_sub_epics_service() {
     let svc = epic_svc(&db);
 
     let parent = svc
-        .create_epic(CreateEpicParams {
-            title: "Parent".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("Parent"))
         .await
         .unwrap();
     let child = svc
         .create_epic(CreateEpicParams {
-            title: "Child".into(),
-            description: "".into(),
-            sort_order: None,
             parent_epic_id: Some(parent.id),
-            feed_command: None,
-            feed_interval_secs: None,
+            ..CreateEpicParams::fixture("Child")
         })
         .await
         .unwrap();
@@ -1930,14 +1897,7 @@ async fn the_successor_inherits_the_operators_settings_and_none_of_the_run() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let epic = epic_svc(&db)
-        .create_epic(CreateEpicParams {
-            title: "recurring work".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("recurring work"))
         .await
         .unwrap();
     let id = phoenix_task(&db, Some(epic.id)).await;
@@ -2542,14 +2502,7 @@ async fn epic_ensure_deletable_refuses_when_any_subtree_task_is_not_done() {
     let tasks = task_svc(&db);
     let epics = epic_svc(&db);
     let epic = epics
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
     let t = tasks.create_task(make_task_params("/repo")).await.unwrap();
@@ -2570,12 +2523,8 @@ async fn epic_ensure_deletable_names_the_lowest_id_blocking_task_across_sub_epic
     let tasks = task_svc(&db);
     let epics = epic_svc(&db);
     let mk = |parent| CreateEpicParams {
-        title: "E".into(),
-        description: "".into(),
-        sort_order: None,
         parent_epic_id: parent,
-        feed_command: None,
-        feed_interval_secs: None,
+        ..CreateEpicParams::fixture("E")
     };
     let root = epics.create_epic(mk(None)).await.unwrap();
     let sub = epics.create_epic(mk(Some(root.id))).await.unwrap();

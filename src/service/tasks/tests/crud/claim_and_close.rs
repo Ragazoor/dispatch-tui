@@ -97,14 +97,7 @@ async fn close_session_recalculates_the_parent_epic() {
     let svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
     let epic = epic_svc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
     let (id, _) = running_task_with_window(&db, Some(epic.id)).await;
@@ -135,14 +128,7 @@ async fn epic_with_backlog_subtasks(
     let epic_svc = epic_svc(db);
     let task_svc = task_svc(db);
     let epic = epic_svc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
     let mut ids = Vec::new();

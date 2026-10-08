@@ -69,16 +69,9 @@ fn make_task_params_on_branch(repo_path: &str, base_branch: &str) -> CreateTaskP
 
 /// Helper: create a root epic with the given title.
 async fn make_epic(svc: &EpicService, title: &str) -> crate::models::Epic {
-    svc.create_epic(CreateEpicParams {
-        title: title.into(),
-        description: "".into(),
-        sort_order: None,
-        parent_epic_id: None,
-        feed_command: None,
-        feed_interval_secs: None,
-    })
-    .await
-    .unwrap()
+    svc.create_epic(CreateEpicParams::fixture(title))
+        .await
+        .unwrap()
 }
 
 /// Helper: create a backlog task in the given (optional) epic.

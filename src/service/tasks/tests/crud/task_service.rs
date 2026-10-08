@@ -455,14 +455,7 @@ async fn update_task_with_epic_linkage() {
     let epic_svc = epic_svc(&db);
 
     let epic = epic_svc
-        .create_epic(CreateEpicParams {
-            title: "Epic".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("Epic"))
         .await
         .unwrap();
 
@@ -501,14 +494,7 @@ async fn update_task_status_recalculates_parent_epic() {
     let epic_svc = epic_svc(&db);
 
     let epic = epic_svc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
 
@@ -548,25 +534,11 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
     let epic_svc = epic_svc(&db);
 
     let epic_a = epic_svc
-        .create_epic(CreateEpicParams {
-            title: "A".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("A"))
         .await
         .unwrap();
     let epic_b = epic_svc
-        .create_epic(CreateEpicParams {
-            title: "B".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("B"))
         .await
         .unwrap();
 

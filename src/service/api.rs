@@ -635,14 +635,7 @@ mod tests {
         let svc: Arc<dyn EpicServiceApi> = Arc::new(EpicService::new(store.clone()));
 
         let epic = svc
-            .create_epic(CreateEpicParams {
-                title: "delegated epic".to_string(),
-                description: String::new(),
-                sort_order: None,
-                parent_epic_id: None,
-                feed_command: None,
-                feed_interval_secs: None,
-            })
+            .create_epic(CreateEpicParams::fixture("delegated epic".to_string()))
             .await
             .unwrap();
 

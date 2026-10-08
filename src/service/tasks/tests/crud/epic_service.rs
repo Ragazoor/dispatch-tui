@@ -131,12 +131,8 @@ async fn create_and_get_epic() {
 
     let epic = svc
         .create_epic(CreateEpicParams {
-            title: "Epic 1".into(),
             description: "desc".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
+            ..CreateEpicParams::fixture("Epic 1")
         })
         .await
         .unwrap();
@@ -159,14 +155,7 @@ async fn update_epic_status() {
     let svc = epic_svc(&db);
 
     let epic = svc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
 
@@ -198,14 +187,7 @@ async fn update_epic_no_fields_returns_error() {
     let svc = epic_svc(&db);
 
     let epic = svc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
 
@@ -236,14 +218,7 @@ async fn update_epic_auto_dispatch_persists() {
     let svc = epic_svc(&db);
 
     let epic = svc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
 
@@ -278,14 +253,7 @@ async fn list_epics_with_progress() {
     let epic_svc = epic_svc(&db);
 
     let epic = epic_svc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
 
@@ -320,25 +288,11 @@ async fn list_epics_with_progress_multiple_epics() {
     let epic_svc = epic_svc(&db);
 
     let e1 = epic_svc
-        .create_epic(CreateEpicParams {
-            title: "E1".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E1"))
         .await
         .unwrap();
     let e2 = epic_svc
-        .create_epic(CreateEpicParams {
-            title: "E2".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E2"))
         .await
         .unwrap();
 
@@ -416,14 +370,7 @@ async fn update_task_status_recalculates_epic() {
     let epic_svc = epic_svc(&db);
 
     let epic = epic_svc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
 
@@ -460,14 +407,7 @@ async fn get_epic_with_subtasks() {
     let epic_svc = epic_svc(&db);
 
     let epic = epic_svc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
 

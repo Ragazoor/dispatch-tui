@@ -1,5 +1,7 @@
 pub mod api;
 pub mod epics;
+#[cfg(any(test, feature = "test-support"))]
+mod fixtures;
 mod grouping;
 pub mod learnings;
 pub mod managed_feeds;

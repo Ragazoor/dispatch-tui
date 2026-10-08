@@ -61,14 +61,7 @@ async fn create_task_returning_with_epic() {
     let esvc = epic_svc(&db);
 
     let epic = esvc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
 
@@ -99,14 +92,7 @@ async fn create_task_returning_sets_all_optional_fields_atomically() {
     let esvc = epic_svc(&db);
 
     let epic = esvc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
 
@@ -306,14 +292,7 @@ async fn delete_epic_removes_it() {
     let svc = epic_svc(&db);
 
     let epic = svc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
 
@@ -337,12 +316,8 @@ async fn delete_epic_not_found() {
 
 async fn epic_under(svc: &EpicService, title: &str, parent: Option<EpicId>) -> EpicId {
     svc.create_epic(CreateEpicParams {
-        title: title.into(),
-        description: "".into(),
-        sort_order: None,
         parent_epic_id: parent,
-        feed_command: None,
-        feed_interval_secs: None,
+        ..CreateEpicParams::fixture(title)
     })
     .await
     .unwrap()
@@ -460,14 +435,7 @@ async fn list_tasks_filters_by_epic_id() {
     let esvc = epic_svc(&db);
 
     let epic = esvc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(CreateEpicParams::fixture("E"))
         .await
         .unwrap();
 
