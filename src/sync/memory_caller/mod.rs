@@ -25,9 +25,9 @@
 //! # After a call: pushed into `SharedRows`, not held separately
 //!
 //! Every mutation below pushes its resulting rows into the same
-//! [`super::rows::SharedRows`] a real board's `SubscriptionBoardReads` wraps —
+//! [`super::rows::SharedRows`] a real board's `Store` reads from —
 //! `ReducerCallReachesSharedRows`. That is what lets every downstream read
-//! (`SharedReader`, `decode`, the board itself) run unchanged against this
+//! (the store traits, `decode`, the board itself) run unchanged against this
 //! store: nothing downstream of `SharedRows` can tell the difference between a
 //! row that arrived over a subscription and one this caller just wrote.
 

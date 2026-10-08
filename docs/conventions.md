@@ -194,69 +194,50 @@ seam to separate, and both umbrella traits are gone. `TaskStore`
 the single home for which table is reached through which member trait — don't
 restate the list here.
 
-**Where a call actually goes is a property of `Store`'s routing, not of
-the traits.** A `Store` built by `runtime::StoreParts::build` carries a
-writer and four readers over the connection's rows, attached together by
-`Store::with_shared_store` (`store::SharedStorePorts`) so a handle is routed
-all or nothing:
+**Where a call actually goes is a property of `Store`'s methods, not of
+the traits.** `Store` (`src/store/mod.rs::Store`) is the one implementation of
+every store trait, and it sits directly on the shared store's two halves —
+there is no routing layer or port trait between them (task #40967):
 
-| Port (`src/store/mod.rs`) | Implemented by (`src/sync/`) | Covers |
+| Part (a `Store` field) | Type (`src/sync/`) | Serves |
 |---|---|---|
-| `SharedWriter` | `ReducerWriter` | every shared mutation |
-| `SharedReader` | `SubscriptionBoardReads` (the same adapter the board draws from) | tasks, epics, watchers, repo config, subscriptions, settings |
-| `SharedLearningReader` | `SubscriptionLearningReads` | learnings and retrievals |
-| `SharedUsageReader` | `SubscriptionUsageReads` | usage aggregation, done in Rust because a subscription cannot `GROUP BY` |
-| `SharedRetiredFeedItemReader` | `SubscriptionRetiredFeedItemReads` | `retired_without_task`'s subtree join (task #4971), for the same reason as usage |
+| `rows` | `SharedRows` | every read: tasks, epics, watchers, repo config, subscriptions, settings, learnings, usage, retired feed items |
+| `caller` | `ReducerCaller` (`SdkReducerCaller` in production) | every write, encoded by `sync::encode` |
+| `host_file_dir` | — (`src/host_file/mod.rs`) | the identity: `HostStore`, `IdentityCredentialStore` |
 
-Each routed method is `self.shared_…()?.…` — it hands the call to the
-port and returns its answer. **There is no local fallback and no SQLite**
-(task #36865): a handle built without ports (`Store::unattached()`) refuses
-every shared call with a `no shared store attached` error, and tests use
-`Store::open_in_memory()`, which attaches ports over an in-memory store that
-runs the module's own reducer logic. A new shared read or write therefore needs
-its port method *and* its routing in `src/store/queries/`; the routing test
-`every_routed_mutation_reaches_the_writer` (`src/store/tests/shared_writer.rs`)
-calls every writer method through `Store` and fails when one is missing.
+The trait implementations live in `src/store/queries/<domain>.rs`. A read is a
+query on `rows`; a write encodes its row and makes one reducer call. Every part
+is required by `Store::new`, so there is no half-built handle and no "no store
+attached" error. **There is no local fallback and no SQLite** (task #36865);
+tests use `Store::open_in_memory()`, the same `Store` over an in-memory
+`ReducerCaller` that runs the module's own reducer logic. A new shared read or
+write is its trait method and its body in `src/store/queries/` — and a reducer
+on `ReducerCaller` for a write. `every_store_mutation_reaches_the_transport`
+(`src/sync/tests/writes.rs`) calls every write once and fails when one sends
+nothing.
 
-**Never routed:** the Host row (`HostStore`) and the user identity's
+**Never shared:** the Host row (`HostStore`) and the user identity's
 credential (`IdentityCredentialStore`). They are this install's own and stay
 on this machine (`host.allium`), in `host.json` in the data directory
-(`src/host_file/mod.rs`; task #16755). `Store::with_host_file` points a
-handle at it, and a handle without one refuses these calls — nothing is kept in
-a fallback. `Store::open_in_memory()` gets a temporary data directory holding
-a host file. The shared Host registry gets a mirror via
-`sync.allium: RegisterHostOnConnect`.
+(`src/host_file/mod.rs`; task #16755). `Store::open_in_memory()` gets a
+temporary data directory holding a host file. The shared Host registry gets a
+mirror via `sync.allium: RegisterHostOnConnect`.
 
-`UsageStore` followed in Phase 11 (task #4915), for the same reads-must-follow-
-writes reason, but for a different underlying cause: `query_usage` groups and
-counts rows, a shape no subscription's `WHERE` clause can express, so the
-aggregation has to be done in Rust over the rows a standing subscription
-already holds rather than left to SQL. See [`crate::store::SharedUsageReader`],
-implemented by `sync::SubscriptionUsageReads` (`src/sync/usage_reads.rs`). No
-spec: `usage_events` is append-only telemetry with no user-observable rule
-beyond "recorded".
-
-`TaskCrud::retired_without_task` (task #4971) got the same treatment for the
-same underlying cause as `query_usage`: it joins `retired_feed_items` against
-every task in an epic's whole subtree, which is also a shape no subscription's
-`WHERE` clause can express. `drop_closed_retired_feed_items` is a plain
-single-table write, so it routes through `SharedWriter` like any other
-reducer call; only the join needed a reader of its own.
+**Some reads are done in Rust because a subscription cannot express them.**
+`query_usage` (task #4915) groups and counts rows, and
+`TaskCrud::retired_without_task` (task #4971) joins `retired_feed_items`
+against every task in an epic's whole subtree — no subscription's `WHERE`
+clause can do either, so both run over the rows a standing subscription
+already holds (`SharedRows::usage_summary`, `SharedRows::retired_without_task`).
+`usage_events` has no spec: it is append-only telemetry with no
+user-observable rule beyond "recorded". `drop_closed_retired_feed_items` is a
+plain single-table write, a reducer call like any other.
 <!-- allow-phantom-symbol: removed reducer, named here only as history -->
 (A `create_retired_feed_item` reducer once existed as a second, direct-call
 write path, but every real retirement goes through `delete_task`/`delete_epic`/
 `batch_delete` or the migration itself, so it had no production caller and was
 removed — `retire_feed_item` inside the module is the shared helper those four
-call into.) See [`crate::store::SharedRetiredFeedItemReader`], implemented by
-`sync::SubscriptionRetiredFeedItemReads` (`src/sync/retired_feed_item_reads.rs`).
-
-Both readers, like every port in the table above, are attached in production
-through `Store::with_shared_store`/`SharedStorePorts` — task #4916 bundled
-every port into that one all-or-nothing call. Each still keeps its own
-single-port builder (`with_shared_usage_reader`, `with_shared_retired_feed_item_reader`,
-…), but those are `#[cfg(test)]`-gated now: a test that wants to prove one
-read routes in isolation attaches only that one port, the way
-`shared_usage_reader.rs`/`shared_retired_feed_item_reader.rs` do.
+call into.)
 
 **A rule that touches two tables still takes two handles, not one wider
 trait.** `EpicService` holds `Arc<dyn TaskAndEpicStore>` *and*
@@ -388,7 +369,7 @@ Expect the duplication: it is the language's shape, not a smell to refactor away
 
 ## The `Store` router
 
-`Store` (`src/store/mod.rs`) holds no data and no connection: it is a router over the attached ports (see "The store seam" above). Every `*Store` trait method is `async fn` and hands the call to the one port that serves it, through `self.shared_writer()?`, `self.shared_reader()?` or the learning, usage and retired-feed-item readers. A handle with no port attached returns a `no shared store attached` error rather than answering from anywhere else.
+`Store` (`src/store/mod.rs`) holds no data of its own and no connection: its reads answer from the connection's `SharedRows` and its writes go through a `ReducerCaller` (see "The store seam" above). Every `*Store` trait method is `async fn` and is the implementation itself, in `src/store/queries/`, not a hop to one.
 
 **A routed call is not a transaction.** Each writer method is one reducer call, and SpacetimeDB runs a reducer to completion before the next, so a rule that must be atomic belongs in a reducer (`spacetime/module/src/`, mirrored by `src/sync/memory_caller/`), not in a sequence of port calls: two calls can be interleaved by another host's write between them. `try_record_stop`, `record_user_prompt_submit`, the claim methods and `batch_delete` are single reducers for this reason.
 

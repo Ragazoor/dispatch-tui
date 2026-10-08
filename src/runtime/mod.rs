@@ -266,27 +266,24 @@ struct Bootstrap {
 // The store every process reads and writes through
 // ---------------------------------------------------------------------------
 
-/// A `Store` routed through the shared store, and the pieces of the
+/// The `Store` every process reads and writes through, and the pieces of the
 /// connection behind it.
 ///
-/// Built before anything connects, because the routing is attached at the
-/// handle's construction: `with_shared_writer` and the reader attachments
-/// consume, deliberately, so which backing a read or write goes to cannot
-/// change under a caller. Every reader and the writer's claim chain sit over
-/// the same `rows`, so a process cannot read one copy and write another.
+/// Built before anything connects: the store's reads answer from `rows`, which
+/// the connection fills, and its writes go through `reducer_caller`, which the
+/// connection carries. Both are fixed at construction, so which backing a read
+/// or write goes to cannot change under a caller, and a process cannot read
+/// one copy and write another.
 pub struct StoreParts {
+    /// Also the board's card-read handle (`crate::sync::BoardReads`).
     pub database: Arc<store::Store>,
     pub rows: Arc<crate::sync::SharedRows>,
-    /// The one adapter over `rows`: the board draws from it and `database`'s
-    /// shared reads route to it.
-    pub board_reads: Arc<crate::sync::SubscriptionBoardReads>,
     pub connector: Arc<dyn crate::sync::StoreConnector>,
     pub settled_identity: Arc<crate::sync::SettledIdentity>,
-    /// Reused everywhere a reducer call is needed outside `SharedWriter`
-    /// proper — today, only the host-registry mirror (`sync.allium:
-    /// RegisterHostOnConnect`/`RegisterHostOnRename`). `register_host` is
-    /// deliberately NOT a `SharedWriter` method (see `store::SharedWriter`'s doc
-    /// comment), so it needs its own handle to the transport.
+    /// The store's own transport, also reused where a reducer call is needed
+    /// outside the store traits — today, only the host-registry mirror
+    /// (`sync.allium: RegisterHostOnConnect`/`RegisterHostOnRename`), which is
+    /// deliberately not a store method.
     pub reducer_caller: Arc<dyn crate::sync::ReducerCaller>,
     /// Ask the store at an address for its database's identity, before any
     /// connection (`startup.allium`: `StoreIdentityPin.store_database_identity`).
@@ -296,11 +293,12 @@ pub struct StoreParts {
 }
 
 impl StoreParts {
-    /// Route `database` through a fresh connection's rows. `host_id` is this
-    /// install's own — known before any connection, because it is minted
-    /// locally on first run (`host.allium: MintHostIdentity`) — and the claim
-    /// needs it on every write.
-    pub fn build(database: store::Store, host_id: &str) -> Self {
+    /// A store over a fresh connection's rows, with this install's identity in
+    /// `<data_dir>/host.json` (`host.allium: IdentityLivesInHostFile`).
+    /// `host_id` is this install's own — known before any connection, because
+    /// it is minted locally on first run (`host.allium: MintHostIdentity`) —
+    /// and the claim needs it on every write.
+    pub fn build(data_dir: &Path, host_id: &str) -> Self {
         let rows = Arc::new(crate::sync::SharedRows::new());
         let sdk = Arc::new(crate::sync::SpacetimeSdkConnector::new(
             crate::sync::SHARED_DATABASE_NAME,
@@ -311,30 +309,18 @@ impl StoreParts {
             crate::sync::SdkReducerCaller::new(sdk.clone(), settled_identity.clone()),
         );
         let connector: Arc<dyn crate::sync::StoreConnector> = sdk;
-        // One adapter over the rows serves the board's drawing, every other
-        // shared read, and the writer's claim chain — which must take the
-        // task the column shows as next, so it reads the same seam.
-        let board_reads = Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone()));
-        let database = Arc::new(database.with_shared_store(store::SharedStorePorts {
-            writer: Arc::new(crate::sync::ReducerWriter::new(
-                reducer_caller.clone(),
-                settled_identity.clone(),
-                Arc::new(crate::service::SystemClock),
-                host_id.to_string(),
-                board_reads.clone(),
-            )),
-            reader: board_reads.clone(),
-            learning_reader: Arc::new(crate::sync::SubscriptionLearningReads::new(rows.clone())),
-            usage_reader: Arc::new(crate::sync::SubscriptionUsageReads::new(rows.clone())),
-            retired_feed_item_reader: Arc::new(crate::sync::SubscriptionRetiredFeedItemReads::new(
-                rows.clone(),
-            )),
-        }));
+        let database = Arc::new(store::Store::new(
+            rows.clone(),
+            reducer_caller.clone(),
+            settled_identity.clone(),
+            Arc::new(crate::service::SystemClock),
+            host_id.to_string(),
+            data_dir,
+        ));
         Self {
             store_identity: store_database_identity,
             database,
             rows,
-            board_reads,
             connector,
             settled_identity,
             reducer_caller,
@@ -370,8 +356,8 @@ pub async fn open_cli_store(data_dir: &Path, server: Option<String>) -> Result<C
         std::env::var(crate::startup::BOARD_STORE_ENV).ok(),
         data_dir,
     );
-    let (database, host_id) = open_with_cli_identity(data_dir).await?;
-    let parts = StoreParts::build(database, &host_id);
+    let host_id = open_with_cli_identity(data_dir).await?;
+    let parts = StoreParts::build(data_dir, &host_id);
     // No host-registry push: a short-lived command is not a board, and the
     // board already registers this host on every connect.
     let session = connect_first(server, &parts, None).await?;
@@ -443,17 +429,9 @@ fn pin_store_after_connect(data_dir: &Path, found: Option<&str>) {
     }
 }
 
-/// The handle every process routes through the store. It holds no data of its
-/// own: an empty base for the routed ports to attach to (dispatch has no
-/// SQLite — `storage.allium: StoreInUseNeverOpensSqlite`), with this install's
-/// identity kept in `<data_dir>/host.json` (`host.allium: IdentityLivesInHostFile`).
-fn placeholder_database(data_dir: &Path) -> store::Store {
-    store::Store::unattached().with_host_file(data_dir)
-}
-
 /// A one-shot command's identity: read from the host file, never minted
 /// (`cli.allium: CliCommandsNeedAHostFile`).
-async fn open_with_cli_identity(data_dir: &Path) -> Result<(store::Store, String)> {
+async fn open_with_cli_identity(data_dir: &Path) -> Result<String> {
     let dir = data_dir.to_path_buf();
     let identity =
         tokio::task::spawn_blocking(move || crate::host_file::read_for_cli(&dir)).await??;
@@ -466,7 +444,7 @@ async fn open_with_cli_identity(data_dir: &Path) -> Result<(store::Store, String
             crate::host_file::host_file_path(data_dir).display()
         );
     }
-    Ok((placeholder_database(data_dir), identity.host_id))
+    Ok(identity.host_id)
 }
 
 /// The host identity read at launch, on a blocking thread.
@@ -1081,16 +1059,15 @@ struct TuiRuntime {
     /// [`crate::sync::BoardReads`] and `docs/specs/sync.allium`'s
     /// `BoardReadsFromTheSubscription`.
     ///
-    /// Deliberately separate from `database` rather than replacing it. This one
-    /// answers "what is on the board?" — the reads the row-change pump and the
+    /// The same `Store` as `database`, typed for drawing: this one answers
+    /// "what is on the board?" — the reads the row-change pump and the
     /// revision guard refresh — and `database` answers everything else. Both
     /// read the same subscription rows; see `crate::sync::board_reads`.
     board_reads: Arc<dyn crate::sync::BoardReads>,
     /// This machine's own `Host.id` — minted locally on first run, immutable
     /// afterwards (`host.allium: MintHostIdentity`). Needed by
     /// `exec_check_status_if_owned`/the feed-tick ownership check to compare
-    /// against `core/PollOwner.host`, the same value `ReducerWriter`'s own
-    /// `host` field carries.
+    /// against `core/PollOwner.host`, the same value the `Store` claims as.
     host_id: String,
     /// Write-capable handle reserved for the feed subsystem (the manual
     /// `exec_trigger_epic_feed` path), which upserts tasks and recalculates epic
@@ -1226,16 +1203,15 @@ impl TuiRuntime {
     /// [`Self::bootstrap`], with the store's wiring supplied by the caller.
     ///
     /// Production passes [`StoreParts::build`]. The tests pass a stand-in
-    /// whose connector accepts without a server and whose database is left
-    /// unrouted, so the startup wiring can be exercised against SQLite until
-    /// Phase 12b (#4975) supplies an in-memory store.
+    /// over the in-memory reducers, whose connector accepts without a
+    /// server, so the startup wiring runs without one.
     #[cfg(test)]
     async fn bootstrap_with(
         data_dir: &Path,
         port: u16,
         paths: &StartupPaths,
         server: String,
-        build_store: fn(store::Store, &str) -> StoreParts,
+        build_store: fn(&Path, &str) -> StoreParts,
         accept_store_switch: bool,
     ) -> Result<Bootstrap> {
         Self::bootstrap_inner(
@@ -1257,17 +1233,16 @@ impl TuiRuntime {
         port: u16,
         paths: &StartupPaths,
         target: StoreTarget,
-        build_store: fn(store::Store, &str) -> StoreParts,
+        build_store: fn(&Path, &str) -> StoreParts,
         accept_store_switch: bool,
     ) -> Result<Bootstrap> {
         let mcp_listener = claim_agent_port(port).await?;
         let data_dir = data_dir.to_path_buf();
         let (host_id, host_label) = read_launch_identity(&data_dir).await?;
-        let database = placeholder_database(&data_dir);
-        // Routed at construction: which backing a read or write goes to cannot
+        // Fixed at construction: which backing a read or write goes to cannot
         // change under a caller. Nothing connects yet — that is
         // `connect_first` below, once the host is named.
-        let parts = build_store(database, &host_id);
+        let parts = build_store(&data_dir, &host_id);
         let database = parts.database.clone();
 
         // `data_dir` (above) is the directory the operator named with `--db`:
@@ -1399,7 +1374,7 @@ impl TuiRuntime {
         // `board_reads` field share one handle — `FeedTick`'s host-scoping
         // (feeds.allium: FeedTick) needs to read `core/PollOwner`, which is
         // exactly what this seam answers.
-        let board_reads: Arc<dyn crate::sync::BoardReads> = parts.board_reads.clone();
+        let board_reads: Arc<dyn crate::sync::BoardReads> = parts.database.clone();
         let feed_runner = crate::feed::FeedRunner::new(
             database.clone(),
             feed_notify_tx,

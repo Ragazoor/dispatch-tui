@@ -1114,9 +1114,8 @@ async fn delete_epic_retires_its_feed_tasks_under_the_surviving_feed_epic() {
 }
 
 /// Deleting the feed epic itself is a reset: there is nothing left to retire
-/// under, and its existing records go with it (FK cascade). Observed through
-/// SQLite's rowid reuse: the next epic created takes the deleted one's id, so
-/// a record left behind would silently suppress items in an unrelated feed.
+/// under, and its existing records go with it. A record left behind would
+/// silently suppress items in an unrelated feed that later reused the id.
 /// The delete must also succeed at all — a record holding a non-cascading
 /// foreign key to the epic would fail it.
 #[tokio::test]

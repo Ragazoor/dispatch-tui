@@ -356,7 +356,7 @@ rule DeleteEpic {
         --
         -- ENFORCED TWICE, DELIBERATELY. EpicService::delete_epic
         -- (src/service/epics.rs) checks this guard client-side, over
-        -- SharedReader's subscription view, before ever calling the store —
+        -- the Store's subscription view, before ever calling the store —
         -- that is what lets a refusal be instant and say why. But permanent
         -- delete removed the safety net an incomplete view used to have: an
         -- epic visible only through own_creations, or whose subtree ask is

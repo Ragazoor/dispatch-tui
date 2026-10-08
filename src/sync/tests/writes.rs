@@ -2,7 +2,7 @@
 //!
 //! Spec: `docs/specs/sync.allium`'s three write rules.
 //!
-//! These exercise [`ReducerWriter`] against a recording [`ReducerCaller`]. That
+//! These exercise [`Store`] against a recording [`ReducerCaller`]. That
 //! is the whole testable surface without a server: what the writer sends, what
 //! it does with a refusal, and where the timestamps and the identity come from.
 //! The transport itself — and the reducers on the far side — are
@@ -16,12 +16,18 @@ use crate::models::{
 };
 use crate::service::{Clock, FixedClock};
 use crate::spacetime::bindings;
-use crate::store::{CreateTaskRequest, SharedWriter, TaskPatch};
+use crate::store::{
+    CreateTaskRequest, EpicCrud, LearningRetrievalStore, LearningStore, PollOwnershipStore,
+    RepoConfigStore, SettingsStore, Store, SubscriptionStore, TaskCrud, TaskPatch, UsageStore,
+};
 use crate::sync::encode;
 use crate::sync::writes::{
-    push_host_registration, DrainReadBack, ReducerCaller, ReducerOutcome, ReducerWriter,
-    WriterIdentity,
+    push_host_registration, DrainReadBack, ReducerCaller, ReducerOutcome, WriterIdentity,
 };
+
+/// A data directory with no host file in it. The writes under test never read
+/// this install's identity, so the store is given nowhere to read it from.
+const NO_HOST_FILE: &str = "/nonexistent-test-path/dispatch-data";
 use chrono::{DateTime, Utc};
 
 /// A settled identity, without a store behind it.
@@ -115,7 +121,7 @@ struct RecordingCaller {
     /// The subscription view a feed-upsert/stale-delete call should mutate as
     /// a side effect, simulating what a live reducer's delete does to the
     /// subscription cache — only set by the predict-then-verify tests, which
-    /// need `ReducerWriter`'s post-call verify-read to see a row actually
+    /// need `Store`'s post-call verify-read to see a row actually
     /// gone. `None` elsewhere: every other test's mock call has no such
     /// effect.
     rows: Option<Arc<crate::sync::SharedRows>>,
@@ -178,7 +184,7 @@ impl RecordingCaller {
     /// A reachable store whose feed-upsert/stale-delete calls apply AND
     /// remove `ids` from `rows` as a side effect — simulating what the real
     /// reducer's delete does to the subscription cache, so a test can assert
-    /// on `ReducerWriter`'s post-call verify-read.
+    /// on `Store`'s post-call verify-read.
     fn removing_on_feed_write(rows: Arc<crate::sync::SharedRows>, ids: &[i64]) -> Self {
         Self {
             rows: Some(rows),
@@ -731,29 +737,29 @@ fn call_at() -> chrono::DateTime<chrono::Utc> {
         .with_timezone(&chrono::Utc)
 }
 
-fn writer_with(caller: RecordingCaller) -> (ReducerWriter, Arc<RecordingCaller>) {
+fn writer_with(caller: RecordingCaller) -> (Store, Arc<RecordingCaller>) {
     let caller = Arc::new(caller);
     let clock = FixedClock::new(
         chrono::DateTime::parse_from_rfc3339(AT)
             .unwrap()
             .with_timezone(&chrono::Utc),
     );
-    let writer = ReducerWriter::new(
+    let writer = Store::new(
+        Arc::new(crate::sync::SharedRows::new()),
         caller.clone(),
         Arc::new(FixedIdentity(Some("user-me".into()))),
         Arc::new(clock) as Arc<dyn Clock>,
         "host-me".into(),
-        Arc::new(crate::sync::SubscriptionBoardReads::new(Arc::new(
-            crate::sync::SharedRows::new(),
-        ))),
+        std::path::Path::new(NO_HOST_FILE),
     );
     (writer, caller)
 }
 
 /// The twin of [`writer_with`], for the "nothing has settled yet" tests.
-fn writer_with_no_identity(caller: RecordingCaller) -> (ReducerWriter, Arc<RecordingCaller>) {
+fn writer_with_no_identity(caller: RecordingCaller) -> (Store, Arc<RecordingCaller>) {
     let caller = Arc::new(caller);
-    let writer = ReducerWriter::new(
+    let writer = Store::new(
+        Arc::new(crate::sync::SharedRows::new()),
         caller.clone(),
         Arc::new(FixedIdentity(None)),
         Arc::new(FixedClock::new(
@@ -762,9 +768,7 @@ fn writer_with_no_identity(caller: RecordingCaller) -> (ReducerWriter, Arc<Recor
                 .with_timezone(&chrono::Utc),
         )) as Arc<dyn Clock>,
         "host-me".into(),
-        Arc::new(crate::sync::SubscriptionBoardReads::new(Arc::new(
-            crate::sync::SharedRows::new(),
-        ))),
+        std::path::Path::new(NO_HOST_FILE),
     );
     (writer, caller)
 }
@@ -773,9 +777,10 @@ fn writer_with_no_identity(caller: RecordingCaller) -> (ReducerWriter, Arc<Recor
 fn writer_over(
     rows: Arc<crate::sync::SharedRows>,
     caller: RecordingCaller,
-) -> (ReducerWriter, Arc<RecordingCaller>) {
+) -> (Store, Arc<RecordingCaller>) {
     let caller = Arc::new(caller);
-    let writer = ReducerWriter::new(
+    let writer = Store::new(
+        rows,
         caller.clone(),
         Arc::new(FixedIdentity(Some("user-me".into()))),
         Arc::new(FixedClock::new(
@@ -784,7 +789,7 @@ fn writer_over(
                 .with_timezone(&chrono::Utc),
         )) as Arc<dyn Clock>,
         "host-me".into(),
-        Arc::new(crate::sync::SubscriptionBoardReads::new(rows)),
+        std::path::Path::new(NO_HOST_FILE),
     );
     (writer, caller)
 }
@@ -848,7 +853,7 @@ async fn a_create_sends_the_row_and_returns_the_generated_id() {
 /// `created_at` records when the person asked, which is a fact about this
 /// machine rather than about the store. Everything the store DERIVES afterwards
 /// uses the store's clock instead, so two boards' rows are ordered by one
-/// clock — see `ReducerWriter::now`.
+/// clock — see `Store::now`.
 #[tokio::test]
 async fn a_create_is_stamped_with_this_boards_clock() {
     let (writer, caller) = writer_with(RecordingCaller::default());
@@ -967,14 +972,13 @@ async fn a_refusal_is_not_retried_inside_the_writer() {
             .unwrap()
             .with_timezone(&chrono::Utc),
     );
-    let writer = ReducerWriter::new(
+    let writer = Store::new(
+        Arc::new(crate::sync::SharedRows::new()),
         caller.clone(),
         Arc::new(FixedIdentity(Some("user-me".into()))),
         Arc::new(clock) as Arc<dyn Clock>,
         "host-me".into(),
-        Arc::new(crate::sync::SubscriptionBoardReads::new(Arc::new(
-            crate::sync::SharedRows::new(),
-        ))),
+        std::path::Path::new(NO_HOST_FILE),
     );
 
     for _ in 0..3 {
@@ -1057,17 +1061,23 @@ async fn a_delete_sends_only_the_id() {
 #[tokio::test]
 async fn a_lost_claim_is_an_answer_and_an_outage_is_an_error() {
     let (winner, _) = writer_with(RecordingCaller::default());
-    assert!(winner.try_claim_backlog_task(TaskId(1)).await.unwrap());
+    assert!(winner
+        .try_claim_backlog_task(TaskId(1), at())
+        .await
+        .unwrap());
 
     let (loser, _) = writer_with(RecordingCaller::rejecting());
     assert!(
-        !loser.try_claim_backlog_task(TaskId(1)).await.unwrap(),
+        !loser.try_claim_backlog_task(TaskId(1), at()).await.unwrap(),
         "a refused claim is Ok(false) — somebody else got there first"
     );
 
     let (offline, _) = writer_with(RecordingCaller::refusing("store unreachable"));
     assert!(
-        offline.try_claim_backlog_task(TaskId(1)).await.is_err(),
+        offline
+            .try_claim_backlog_task(TaskId(1), at())
+            .await
+            .is_err(),
         "a claim with the store down must fail rather than report a lost race"
     );
 }
@@ -1087,7 +1097,7 @@ async fn a_refused_patch_is_an_error() {
 
 /// The same asymmetry on unsubscribing, where the spec asks for it explicitly:
 /// unfollowing something unfollowed is a refusal at the store and `Ok(false)`
-/// here, matching the SQLite signature (`sync.allium: UnsubscribeFromEpic`).
+/// here (`sync.allium: UnsubscribeFromEpic`).
 #[tokio::test]
 async fn unsubscribing_from_something_unfollowed_is_false_not_an_error() {
     let (writer, _) = writer_with(RecordingCaller::rejecting());
@@ -1202,7 +1212,10 @@ async fn a_board_with_no_identity_cannot_create_an_epic() {
 async fn a_claim_names_the_machine_making_it() {
     let (writer, caller) = writer_with(RecordingCaller::default());
 
-    writer.try_claim_backlog_task(TaskId(3)).await.unwrap();
+    writer
+        .try_claim_backlog_task(TaskId(3), at())
+        .await
+        .unwrap();
 
     assert_eq!(
         caller.sent(),
@@ -1227,7 +1240,10 @@ async fn the_chain_takes_the_task_the_board_draws_as_next() {
     }
     let (writer, caller) = writer_over(rows, RecordingCaller::default());
 
-    let claimed = writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap();
+    let claimed = writer
+        .try_claim_next_backlog_task(EpicId(1), at())
+        .await
+        .unwrap();
 
     assert_eq!(claimed, Some(TaskId(20)), "the explicit sort_order wins");
     assert_eq!(
@@ -1248,7 +1264,10 @@ async fn the_chain_passes_over_a_phoenix() {
     let (writer, _) = writer_over(rows, RecordingCaller::default());
 
     assert_eq!(
-        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
+        writer
+            .try_claim_next_backlog_task(EpicId(1), at())
+            .await
+            .unwrap(),
         Some(TaskId(2))
     );
 }
@@ -1263,7 +1282,10 @@ async fn the_chain_passes_over_another_hosts_task() {
     let (writer, _) = writer_over(rows, RecordingCaller::default());
 
     assert_eq!(
-        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
+        writer
+            .try_claim_next_backlog_task(EpicId(1), at())
+            .await
+            .unwrap(),
         Some(TaskId(2))
     );
 }
@@ -1278,7 +1300,10 @@ async fn an_empty_backlog_ends_the_chain_quietly() {
     );
 
     assert_eq!(
-        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
+        writer
+            .try_claim_next_backlog_task(EpicId(1), at())
+            .await
+            .unwrap(),
         None
     );
     assert!(caller.sent().is_empty(), "nothing to offer, nothing sent");
@@ -1294,7 +1319,10 @@ async fn a_chain_that_loses_every_race_claims_nothing() {
     let (writer, _) = writer_over(rows, RecordingCaller::rejecting());
 
     assert_eq!(
-        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
+        writer
+            .try_claim_next_backlog_task(EpicId(1), at())
+            .await
+            .unwrap(),
         None
     );
 }
@@ -1308,7 +1336,10 @@ async fn a_chain_with_the_store_down_fails_loudly() {
     rows.upsert_task(&backlog_row(1, None, "", false));
     let (writer, _) = writer_over(rows, RecordingCaller::refusing("store unreachable"));
 
-    assert!(writer.try_claim_next_backlog_task(EpicId(1)).await.is_err());
+    assert!(writer
+        .try_claim_next_backlog_task(EpicId(1), at())
+        .await
+        .is_err());
 }
 
 // -- The refusal names the outage -------------------------------------------
@@ -1363,7 +1394,7 @@ fn writer_seeded_with(
     id: i64,
     status: TaskStatus,
     caller: RecordingCaller,
-) -> (ReducerWriter, Arc<RecordingCaller>) {
+) -> (Store, Arc<RecordingCaller>) {
     let rows = Arc::new(crate::sync::SharedRows::new());
     rows.upsert_task(&seeded_row(id, status));
     writer_over(rows, caller)
@@ -1785,9 +1816,8 @@ async fn a_confirmed_removal_is_reported_but_a_raced_survivor_is_not() {
     );
 }
 
-/// The additive variant never predicts or reports a removal, matching the
-/// SQLite version's "always empty" contract — it has no stale-delete pass to
-/// predict candidates for.
+/// The additive variant never predicts or reports a removal — it has no
+/// stale-delete pass to predict candidates for.
 #[tokio::test]
 async fn additive_upsert_never_reports_a_removal() {
     let rows = Arc::new(crate::sync::SharedRows::new());
@@ -1818,7 +1848,8 @@ async fn feed_upsert_with_no_settled_identity_still_applies_with_an_empty_create
     let caller = RecordingCaller::default();
     let (writer, sent) = {
         let caller = Arc::new(caller);
-        let writer = ReducerWriter::new(
+        let writer = Store::new(
+            rows,
             caller.clone(),
             Arc::new(FixedIdentity(None)),
             Arc::new(FixedClock::new(
@@ -1827,7 +1858,7 @@ async fn feed_upsert_with_no_settled_identity_still_applies_with_an_empty_create
                     .with_timezone(&chrono::Utc),
             )) as Arc<dyn Clock>,
             "host-me".into(),
-            Arc::new(crate::sync::SubscriptionBoardReads::new(rows)),
+            std::path::Path::new(NO_HOST_FILE),
         );
         (writer, caller)
     };
@@ -1975,9 +2006,8 @@ async fn task_watcher_methods_are_plain_applied_calls() {
     );
 }
 
-/// An empty batch never reaches the writer at all — mirrors the SQLite
-/// path's own early return, and saves a round trip for the tick's common
-/// case of nothing having changed.
+/// An empty batch never reaches the transport at all — it saves a round trip
+/// for the tick's common case of nothing having changed.
 #[tokio::test]
 async fn an_empty_sub_status_batch_never_calls_the_writer() {
     let (writer, caller) = writer_with(RecordingCaller::returning(&[]));
@@ -2038,9 +2068,8 @@ async fn a_board_with_no_identity_cannot_respawn_a_phoenix_successor() {
 
 // -- Host registry (Phase 6c) -------------------------------------------------
 //
-// `push_host_registration` is NOT a `SharedWriter` method — see
-// `store::SharedWriter`'s doc comment — so it is exercised directly rather than
-// through `ReducerWriter`, against the same `RecordingCaller` every other
+// `push_host_registration` is NOT a store method — see its doc comment — so it
+// is exercised directly rather than through `Store`, against the same `RecordingCaller` every other
 // transport-level test here uses.
 
 /// The ordinary case: the call reaches the caller with exactly the row
@@ -2090,8 +2119,8 @@ async fn push_host_registration_swallows_a_refusal() {
 
 // -- Settings (Phase 9) -------------------------------------------------------
 //
-// `host` is never a caller-supplied argument on `SharedWriter` — see that
-// trait's doc comment — so the load-bearing assertion here is not "the call
+// `host` is never a caller-supplied argument on `SettingsStore` — see
+// `Store.host`'s doc comment — so the load-bearing assertion here is not "the call
 // reaches the store" (every other routed method already proves that shape);
 // it is that the host id the store SEES is this writer's own, with no way for
 // a caller to name a different one.
@@ -2100,7 +2129,7 @@ async fn push_host_registration_swallows_a_refusal() {
 async fn save_setting_is_scoped_to_this_writers_own_host() {
     let (writer, caller) = writer_with(RecordingCaller::default());
 
-    writer.save_setting("theme", "dark").await.unwrap();
+    writer.set_setting_string("theme", "dark").await.unwrap();
 
     assert_eq!(
         caller.sent(),
@@ -2116,13 +2145,13 @@ async fn save_setting_is_scoped_to_this_writers_own_host() {
 async fn clear_setting_is_scoped_to_this_writers_own_host() {
     let (writer, caller) = writer_with(RecordingCaller::default());
 
-    writer.clear_setting("theme").await.unwrap();
+    writer.set_reviews_feed_command(None).await.unwrap();
 
     assert_eq!(
         caller.sent(),
         vec![Sent::ClearSetting(
             "host-me".to_string(),
-            "theme".to_string()
+            "reviews_feed_command".to_string()
         )]
     );
 }
@@ -2134,7 +2163,7 @@ async fn clear_setting_is_scoped_to_this_writers_own_host() {
 async fn settings_route_with_no_identity_settled() {
     let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
 
-    writer.save_setting("theme", "dark").await.unwrap();
+    writer.set_setting_string("theme", "dark").await.unwrap();
 
     assert_eq!(
         caller.sent(),
@@ -2179,4 +2208,230 @@ async fn the_settled_identity_is_none_until_the_store_names_us() {
     identity.settle("user-me");
 
     assert_eq!(identity.user().await.unwrap(), Some("user-me".to_string()));
+}
+
+/// EVERY STORE MUTATION REACHES THE TRANSPORT, checked one call at a time.
+///
+/// A store trait method whose body forgets its reducer call compiles and
+/// passes every test that only reads it back from rows nothing wrote. This
+/// calls each mutation once, through the store traits, and names the reducer
+/// call each one produced — in order, so a method that sends nothing or sends
+/// the wrong call shows up as a mismatch at its position.
+///
+/// `try_claim_next_backlog_task` is absent: with no rows it has no candidate
+/// to offer, which `a_chain_that_loses_every_race_claims_nothing` and its
+/// neighbours cover.
+#[tokio::test]
+async fn every_store_mutation_reaches_the_transport() {
+    let (db, caller) = writer_with(RecordingCaller::default());
+    let now = at();
+
+    db.create_task(a_request()).await.unwrap();
+    db.patch_task(TaskId(1), &TaskPatch::new().title("t"))
+        .await
+        .unwrap();
+    db.set_task_epic_id(TaskId(1), Some(EpicId(2)))
+        .await
+        .unwrap();
+    db.delete_task(TaskId(1)).await.unwrap();
+    db.try_claim_backlog_task(TaskId(1), now).await.unwrap();
+    db.try_release_backlog_claim(TaskId(1)).await.unwrap();
+
+    db.create_epic("E", "", None).await.unwrap();
+    db.patch_epic(EpicId(1), &crate::store::EpicPatch::new().title("e"))
+        .await
+        .unwrap();
+    db.recalculate_epic_status(EpicId(1)).await.unwrap();
+    db.delete_epic(EpicId(1)).await.unwrap();
+    db.batch_delete(&[TaskId(1)], &[EpicId(1)]).await.unwrap();
+
+    db.save_repo_path("/repo").await.unwrap();
+    db.set_verify_command("/repo", Some("cargo test"))
+        .await
+        .unwrap();
+    db.record_base_branch("/repo", "main").await.unwrap();
+    db.delete_repo_path("/repo").await.unwrap();
+
+    db.subscribe_to_epic("user-me", EpicId(1)).await.unwrap();
+    db.unsubscribe_from_epic("user-me", EpicId(1))
+        .await
+        .unwrap();
+
+    db.set_setting_bool("notifications", true).await.unwrap();
+    db.set_setting_string("theme", "dark").await.unwrap();
+    db.set_reviews_feed_command(None).await.unwrap();
+
+    db.subagent_start(TaskId(1), "agent-1", "session-1", now)
+        .await
+        .unwrap();
+    db.subagent_stop(TaskId(1), "agent-1", "session-1")
+        .await
+        .unwrap();
+    db.subagent_clear(TaskId(1)).await.unwrap();
+    db.subagent_clear_and_void_pending_stop(TaskId(1))
+        .await
+        .unwrap();
+    db.try_record_stop(TaskId(1), now).await.unwrap();
+    db.record_pre_tool_use(TaskId(1), SubStatus::Active, now)
+        .await
+        .unwrap();
+    db.record_notification(TaskId(1), NotificationWrite::Raise, now)
+        .await
+        .unwrap();
+    db.record_user_prompt_submit(TaskId(1), now).await.unwrap();
+    db.mark_pr_learnings_gate_shown(TaskId(1)).await.unwrap();
+
+    let items = vec![a_feed_item("ext-1", "item")];
+    let repo_paths = vec!["/repo".to_string()];
+    let base_branches = vec!["main".to_string()];
+    db.upsert_feed_tasks(EpicId(1), &items, &repo_paths, &base_branches)
+        .await
+        .unwrap();
+    db.upsert_feed_tasks_additive(EpicId(1), &items, &repo_paths, &base_branches)
+        .await
+        .unwrap();
+    db.delete_stale_subtree_feed_tasks(EpicId(1), &["ext-1".to_string()])
+        .await
+        .unwrap();
+    db.drop_closed_retired_feed_items(EpicId(1), &["ext-1".to_string()])
+        .await
+        .unwrap();
+    db.create_repo_group_sub_epic(EpicId(1), "repo")
+        .await
+        .unwrap();
+    db.create_managed_role_epic(
+        "Reviews",
+        Some(EpicId(1)),
+        crate::models::FeedRole::None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    db.create_task_watcher(TaskId(1), TaskId(2)).await.unwrap();
+    db.delete_task_watcher(TaskId(1), TaskId(2)).await.unwrap();
+    db.delete_watches_of_target(TaskId(2)).await.unwrap();
+    db.delete_watches_by_watcher(TaskId(1)).await.unwrap();
+    db.batch_patch_sub_status(&[(TaskId(1), SubStatus::Active)])
+        .await
+        .unwrap();
+    db.respawn_phoenix_successor(TaskId(1), a_request(), &[])
+        .await
+        .unwrap();
+
+    db.claim_poll_owner(crate::models::PollScopeId::Epic(EpicId(1)))
+        .await
+        .unwrap();
+    db.override_poll_owner(crate::models::PollScopeId::Epic(EpicId(1)))
+        .await
+        .unwrap();
+
+    db.create_learning(crate::store::CreateLearningRow {
+        kind: crate::models::LearningKind::Landscape,
+        summary: "a learning",
+        detail: None,
+        scope: crate::models::LearningScope::Repo,
+        scope_ref: Some("/repo"),
+        tags: &[],
+        source_task_id: None,
+        embedding: None,
+    })
+    .await
+    .unwrap();
+    db.patch_learning(
+        LearningId(1),
+        &crate::store::LearningPatch::new().summary("s"),
+    )
+    .await
+    .unwrap();
+    db.delete_learning(LearningId(1)).await.unwrap();
+    db.rescope_epic_learnings(EpicId(1), EpicId(2))
+        .await
+        .unwrap();
+    db.archive_stale_learnings(now).await.unwrap();
+    db.record_retrieval(TaskId(1), LearningId(1), RetrievalSource::QueryLearnings)
+        .await
+        .unwrap();
+    db.apply_verdicts_tx(&[(LearningId(1), crate::models::LearningVerdict::Helped)])
+        .await
+        .unwrap();
+
+    db.record_usage_event(&crate::models::UsageEvent {
+        category: crate::models::UsageCategory::Keybinding,
+        action: "dispatch_task".to_string(),
+        detail: None,
+        actor: crate::models::UsageActor::Human,
+    })
+    .await
+    .unwrap();
+
+    let names: Vec<String> = caller
+        .sent()
+        .iter()
+        .map(|s| {
+            let debug = format!("{s:?}");
+            debug
+                .split(|c: char| !c.is_alphanumeric())
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "CreateTask",
+            "PatchTask",
+            "SetTaskEpic",
+            "DeleteTask",
+            "Claim",
+            "Release",
+            "CreateEpic",
+            "PatchEpic",
+            "Recalculate",
+            "DeleteEpic",
+            "BatchDelete",
+            "SaveRepoPath",
+            "SetVerifyCommand",
+            "RecordBaseBranch",
+            "DeleteRepoPath",
+            "Subscribe",
+            "Unsubscribe",
+            "SaveSetting",
+            "SaveSetting",
+            "ClearSetting",
+            "SubagentStart",
+            "SubagentStop",
+            "SubagentClear",
+            "SubagentClearAndVoidPendingStop",
+            "TryRecordStop",
+            "RecordPreToolUse",
+            "RecordNotification",
+            "RecordUserPromptSubmit",
+            "MarkPrLearningsGateShown",
+            "UpsertFeedTasks",
+            "UpsertFeedTasksAdditive",
+            "DeleteStaleSubtreeFeedTasks",
+            "DropClosedRetiredFeedItems",
+            "CreateRepoGroupSubEpic",
+            "CreateManagedRoleEpic",
+            "CreateTaskWatcher",
+            "DeleteTaskWatcher",
+            "DeleteWatchesOfTarget",
+            "DeleteWatchesByWatcher",
+            "BatchPatchSubStatus",
+            "RespawnPhoenixSuccessor",
+            "ClaimPollOwner",
+            "OverridePollOwner",
+            "CreateLearning",
+            "PatchLearning",
+            "DeleteLearning",
+            "RescopeEpicLearnings",
+            "ArchiveStaleLearnings",
+            "RecordLearningRetrieval",
+            "ApplyLearningVerdicts",
+            "RecordUsageEvent",
+        ]
+    );
 }

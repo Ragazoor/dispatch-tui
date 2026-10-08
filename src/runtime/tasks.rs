@@ -819,7 +819,7 @@ impl TuiRuntime {
     /// `crate::sync::SyncStore` for why that surface mixes routed and local
     /// methods.
     /// `connector` is built by the caller rather than here, because the write
-    /// side needs it too: `store::SharedWriter` is attached to the `Store` at
+    /// side needs it too: the `Store`'s reducer caller is built over it at
     /// construction, and a connector created inside this task would be
     /// unreachable from there. One connector, so reads and writes cannot end up
     /// on two sockets to the same store.
@@ -938,7 +938,7 @@ impl TuiRuntime {
         db: Arc<dyn crate::sync::BoardReads>,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
     ) {
-        match db.list_tasks().await {
+        match db.list_all().await {
             Ok(tasks) => {
                 let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Refresh(
                     tasks,
@@ -1071,7 +1071,7 @@ impl TuiRuntime {
         }
 
         let mut cmds = Vec::new();
-        match self.board_reads.list_tasks().await {
+        match self.board_reads.list_all().await {
             Ok(tasks) => {
                 cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
                     tasks,

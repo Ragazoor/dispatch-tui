@@ -127,7 +127,7 @@ proptest! {
             .build()
             .unwrap();
         let actual = rt.block_on(async {
-            let db = test_db_unattached().await;
+            let db = test_db().await;
             let epic = db.create_epic("E", "", None).await.unwrap();
             for status in &task_statuses {
                 db.create_task(CreateTaskRequest {

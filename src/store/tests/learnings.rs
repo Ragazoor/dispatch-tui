@@ -503,5 +503,5 @@ async fn patch_learning_can_set_embedding() {
 }
 
 // ---------------------------------------------------------------------------
-// No SQLite branch: learnings live only in the shared store
+// Learnings live only in the shared store
 // ---------------------------------------------------------------------------

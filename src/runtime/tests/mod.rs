@@ -167,13 +167,6 @@ pub(super) async fn test_db() -> Arc<Store> {
     Arc::new(Store::open_in_memory().await.unwrap())
 }
 
-/// A SQLite-only handle, for a test whose subject is a SQLite-side behaviour
-/// the shared store does not share (a patch on a missing id errors here and is
-/// a silent no-op there; a store refuses to delete a task that is not done).
-pub(super) async fn test_db_unattached() -> Arc<Store> {
-    Arc::new(Store::open_in_memory().await.unwrap())
-}
-
 /// Persist `cmd` as `epic_id`'s feed command.
 ///
 /// The manual trigger reads the command (and feed_role, and group_by_repo) from
@@ -228,9 +221,7 @@ pub(super) async fn make_runtime(
 ) -> TuiRuntime {
     let (feed_tx, _) = mpsc::unbounded_channel();
     let store: Arc<dyn store::TaskStore> = db.clone();
-    let board_reads = db
-        .board_reads()
-        .expect("a memory-attached handle serves its own board reads");
+    let board_reads: Arc<dyn crate::sync::BoardReads> = db.clone();
     let feed_board_reads = board_reads.clone();
     let feed_runner = crate::feed::FeedRunner::new(
         store.clone(),
@@ -278,11 +269,6 @@ pub(super) async fn make_runtime(
 
 async fn test_runtime() -> (TuiRuntime, App) {
     test_runtime_over(test_db().await).await
-}
-
-/// [`test_runtime`] over a SQLite-only handle; see [`test_db_unattached`].
-async fn test_runtime_unattached() -> (TuiRuntime, App) {
-    test_runtime_over(test_db_unattached().await).await
 }
 
 async fn test_runtime_over(db: Arc<Store>) -> (TuiRuntime, App) {

@@ -197,12 +197,7 @@ mod dispatch_seam {
     #[tokio::test]
     async fn dispatch_aborts_when_the_host_identity_cannot_be_resolved() {
         let host_dir = tempfile::tempdir().unwrap();
-        let concrete = Arc::new(
-            Store::open_in_memory()
-                .await
-                .unwrap()
-                .with_host_file(host_dir.path()),
-        );
+        let concrete = Arc::new(Store::in_memory_with_host_file(host_dir.path()));
         let db: Arc<dyn store::TaskStore> = concrete.clone();
         let runner = Arc::new(MockProcessRunner::new(vec![]));
         let (svc, task, _dir) = fixture(&db, runner.clone()).await;

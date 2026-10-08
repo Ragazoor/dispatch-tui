@@ -160,7 +160,7 @@ entity BoardConnection {
     -- `IngestSkipsRetiredFeedItems` — decides "no survivor" by walking the
     -- feed epic's subtree over whatever rows this connection has delivered
     -- (`SharedRows::retired_without_task`, reached through
-    -- `SharedRetiredFeedItemReader`). That walk is only as complete as
+    -- `TaskCrud::retired_without_task`). That walk is only as complete as
     -- `covered_epics` is: it is correct when the host running that feed's
     -- poll (`core/PollOwner`) has this feed epic in `covered_epics`, so the
     -- whole subtree arrives live through ASubEpicOfAFollowedEpicIsAskedForToo.
@@ -179,11 +179,11 @@ entity BoardConnection {
     -- deleted, by a reducer that had the row in front of it the whole time.
     --
     -- NOT JUST THIS ONE JOIN, SINCE task #4916. Every board now has a store
-    -- (see `SharedWriter`'s "One path" and `SharedReader` above), so
+    -- (`store::Store` reads every shared row from the subscription), so
     -- `FeedRunner`'s OTHER reads — `list_epics`, every
-    -- `list_tasks_for_epic`/`list_epics_with_parent` call ingest's routing
+    -- `list_tasks_for_epic`/`list_sub_epics` call ingest's routing
     -- makes while walking a feed epic's sub-epics — are ALSO answered from
-    -- the subscription, through `SharedReader`. Not
+    -- the subscription, through the same `Store`. Not
     -- `list_repo_paths`, though: `repo_paths`/`repo_base_branches` are
     -- subscribed to UNFILTERED (SubscribeOnceIdentityIsSettled's "repo lists"
     -- clause), so that one read is always complete regardless of
@@ -247,10 +247,12 @@ entity BoardConnection {
         -- delivered and what is drawn — are sets of every shared entity at
         -- once, which this language has no union to name. What is checkable is
         -- a property of the CODE rather than of a state: exactly one read path
-        -- exists (`crate::sync::BoardReads`), and the implementation the
-        -- runtime uses holds no handle to the local store to reach through. `sync::tests::board_reads` asserts it
-        -- directly, by standing a fully populated local database beside an
-        -- empty subscription and requiring every read to answer empty.
+        -- exists (`crate::sync::BoardReads`, whose card reads are the store's
+        -- own read traits), and the `Store` that implements it holds no handle
+        -- to any other store to reach through. `sync::tests::board_reads`
+        -- asserts it directly, by standing a fully populated store beside one
+        -- whose rows are empty and requiring every read of the second to
+        -- answer empty.
         --
         -- There is no install without a connection to except from this: the
         -- store is mandatory (see this file's header).
@@ -864,9 +866,9 @@ rule BoardReadsFromTheSubscription {
         -- (`sync::BoardReads`), the knowledge base and usage had a store path,
         -- and every other read went to a local table that
         -- BoardWritesThroughTheStore had stopped writing: a task created a
-        -- moment earlier answered "not found". The implementation's
-        -- counterpart is `store::SharedReader`, attached by `runtime::bootstrap`
-        -- at the same point as `store::SharedWriter` and over the same rows.
+        -- moment earlier answered "not found". In the implementation every
+        -- `store::Store` read answers from the connection's `SharedRows`, the
+        -- rows its writes' reducers land in (`runtime::StoreParts::build`).
 }
 
 rule SubscribedRowsArriveUnasked {

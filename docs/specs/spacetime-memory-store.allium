@@ -13,10 +13,10 @@
 --           build (a reducer belongs to exactly one domain, and a domain is
 --           either fully implemented or not yet started — no partial
 --           domains); the panic a caller gets from a not-yet-covered domain;
---           and the rule deciding when Store::open_in_memory() attaches
---           this stand-in rather than returning an unattached handle (since
---           task #8277 it always attaches it, together with a private host
---           file).
+--           and the rule by which Store::open_in_memory() attaches this
+--           stand-in (since task #8277 it always does, together with a
+--           private host file; since task #40967 there is no unattached
+--           handle at all).
 -- Excludes: what a reducer call actually means once its domain is covered —
 --           task and epic rules live in core.allium, tasks.allium and
 --           epics.allium; the identity and subscription rules a real board
@@ -218,11 +218,11 @@ rule ReducerCallReachesSharedRows {
     @guidance
         -- The resulting rows are the same ones a production board would
         -- receive from a subscription after the same reducer call, pushed
-        -- into the same sync::rows::SharedRows a real board's
-        -- SubscriptionBoardReads wraps. This is what lets every downstream
-        -- read (SharedReader, SharedLearningReader, SharedUsageReader,
-        -- decode) run unchanged against this store — see sync.allium for
-        -- what those reads mean in production.
+        -- into the same sync::rows::SharedRows a real board's Store reads.
+        -- This is what lets every downstream read (the Store's task, epic,
+        -- learning, usage and retired-feed-item reads, and decode) run
+        -- unchanged against this store — see sync.allium for what those
+        -- reads mean in production.
 }
 
 rule ReducerCallOnUncoveredDomainPanics {
@@ -242,33 +242,30 @@ rule ReducerCallOnUncoveredDomainPanics {
 }
 
 rule OpenInMemoryAttachesStoreOnceComplete {
-    -- The one, atomic point at which every existing Store::open_in_memory()
-    -- call site starts getting a store-backed handle, with no per-call-site
-    -- change: this rule's condition, not a rolling default, decides it.
+    -- Every Store::open_in_memory() call site gets a store-backed handle,
+    -- with no per-call-site change. The attach waits on
+    -- the_store.is_complete (task #8277); the_store is complete, so every
+    -- request gets an attached handle and the Rust carries no check.
     when: OpenInMemoryRequested(_)
 
-    ensures:
-        if the_store.is_complete:
-            TestDatabaseHandle.created(shared_store_attached: true)
-        else:
-            TestDatabaseHandle.created(shared_store_attached: false)
+    requires: the_store.is_complete
+
+    ensures: TestDatabaseHandle.created(shared_store_attached: true)
 
     @guidance
-        -- There is no SQLite behind an unattached handle (task #36865): it
-        -- refuses every shared read and write (storage.allium).
-        --
-        -- The store is complete (task #8277; the Rust carries no
-        -- is_complete check, so the attach is unconditional), so the attached handle is built from one
-        -- fresh SharedRows and one MemoryReducerCaller over it, with every
-        -- port (writer and all readers) over those same rows. The writer
+        -- There is no unattached handle (task #40967): a Store always holds
+        -- its rows, its reducer caller, an identity, a clock, a host id and
+        -- a host-file dir. The handle is built from one fresh SharedRows and
+        -- one MemoryReducerCaller over it; its reads query those rows and
+        -- its writes call that caller, so both see the same rows. It
         -- settles as a fixed test user and a fixed test host id, and stamps
-        -- with the system clock. Each handle
-        -- gets its own store; two handles never share rows.
+        -- with the system clock. Each handle gets its own store; two handles
+        -- never share rows.
 }
 
 rule TestBoardReadsShareTheHandlesRows {
-    -- A test that needs the board's read seam for a store-attached handle
-    -- asks the handle for it.
+    -- A test that needs the board's read seam uses the handle itself: the
+    -- handle implements it.
     when: BoardReadsRequested(handle)
 
     requires: handle.shared_store_attached
@@ -276,12 +273,12 @@ rule TestBoardReadsShareTheHandlesRows {
     ensures: BoardReadsServed(over: handle.shared_rows)
 
     @guidance
-        -- The seam is the same SubscriptionBoardReads a production board
-        -- runs, over the very rows this handle's writes land in, so a write
+        -- The seam is the same Store a production board reads through,
+        -- over the very rows this handle's writes land in, so a write
         -- through the handle is visible to the board reads at once and
         -- PollOwner claims are real rather than always "unclaimed". There is
         -- no SQLite-backed BoardReads: the old LocalBoardReads stand-in is
-        -- gone. An unattached handle has no such seam and has no answer.
+        -- gone.
 }
 
 ------------------------------------------------------------

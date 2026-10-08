@@ -69,7 +69,7 @@ async fn provisioned_reviews_tick_routes_into_role_sub_epics() {
 
     // Drive a tick: only the parent + cve are polled (sub-epics have no command).
     let (tx, mut rx) = mpsc::unbounded_channel::<McpEvent>();
-    let board_reads = db.board_reads().expect("memory handle has board reads");
+    let board_reads: Arc<dyn dispatch_tui::sync::BoardReads> = db.clone();
     let mut runner = FeedRunner::new(
         db.clone(),
         tx,

@@ -17,14 +17,14 @@ use crate::sync::StoreConnector;
 
 const TEST_STORE: &str = "http://store.test";
 
-/// The stand-in store `misc.rs`'s bootstrap tests use: whatever database
-/// bootstrap hands over, routed over fresh rows, behind a connector that accepts once.
-fn test_store(database: crate::store::Store, _host: &str) -> StoreParts {
+/// The stand-in store `misc.rs`'s bootstrap tests use: the production wiring
+/// over fresh rows, behind a connector that accepts once.
+fn test_store(data_dir: &Path, _host: &str) -> StoreParts {
     let connector: Arc<dyn StoreConnector> =
         ScriptedConnector::new(vec![accepted("c0ffee", "secret-token")]);
     StoreParts {
         connector,
-        ..StoreParts::build(database, "test-host")
+        ..StoreParts::build(data_dir, "test-host")
     }
 }
 

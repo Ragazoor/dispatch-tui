@@ -233,21 +233,21 @@ fn editor_runtime(
     runner: Arc<dyn ProcessRunner>,
     msg_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::Message>,
 ) -> TuiRuntime {
-    let board_reads = db.board_reads().expect("memory handle has board reads");
-    editor_runtime_with_board_reads(db, runner, msg_tx, board_reads, "test-host")
+    editor_runtime_on_host(db, runner, msg_tx, "test-host")
 }
 
-/// [`editor_runtime`], with the board-reads seam and host id overridable
-/// — needed by tests that drive `core/PollOwner`-dependent behaviour
-/// (`epics.allium: EditEpic`'s take-over prompt), where nothing has
-/// claimed the epic, so the conflicting-owner branch needs a fixed owner.
-pub(super) fn editor_runtime_with_board_reads(
-    db: Arc<dyn crate::store::TaskStore>,
+/// [`editor_runtime`], with this board's host id overridable — needed by
+/// tests that drive `core/PollOwner`-dependent behaviour (`epics.allium:
+/// EditEpic`'s take-over prompt). The in-memory store claims as `test-host`,
+/// so a runtime on any other host sees that claim as a foreign owner.
+pub(super) fn editor_runtime_on_host(
+    db: Arc<Store>,
     runner: Arc<dyn ProcessRunner>,
     msg_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::Message>,
-    board_reads: Arc<dyn crate::sync::BoardReads>,
     host_id: &str,
 ) -> TuiRuntime {
+    let board_reads: Arc<dyn crate::sync::BoardReads> = db.clone();
+    let db: Arc<dyn crate::store::TaskStore> = db;
     let (feed_tx, _) = unbounded_channel();
     let feed_board_reads = board_reads.clone();
     let feed_runner = crate::feed::FeedRunner::new(

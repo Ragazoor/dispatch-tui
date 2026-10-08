@@ -39,7 +39,7 @@ use crate::spacetime::bindings;
 use crate::store::{CreateTaskRequest, TaskPatch};
 
 /// The module's spelling of an empty label list. Not `""`: the column holds
-/// JSON, and SQLite's decoder reads `[]` for a task with no labels.
+/// JSON, and [`super::decode`] reads `[]` for a task with no labels.
 const NO_LABELS: &str = "[]";
 
 /// Map a patch field that may be cleared.
@@ -56,14 +56,11 @@ fn nullable<T, U>(field: Option<Option<T>>, set: impl Fn(T) -> U, clear: U) -> O
     }
 }
 
-/// The timestamp format both stores write.
-///
-/// The same string `store::queries::format_datetime_millis` produces. Spelled out
-/// rather than imported because that one is `pub(super)` to `db` and widening
-/// it would make a SQLite formatting detail part of the crate's surface — where
-/// the thing that actually has to agree is the FORMAT, which this comment and
-/// the module's `SQLITE_TIMESTAMP` both name.
-pub(super) fn stamp(at: chrono::DateTime<chrono::Utc>) -> String {
+/// The timestamp format the store writes: the module's `SQLITE_TIMESTAMP`
+/// (named for the store it replaced, whose rows it stays sortable with).
+/// Spelled out rather than shared, because the module is a separate crate —
+/// the thing that has to agree is the FORMAT, which both names state.
+pub(crate) fn stamp(at: chrono::DateTime<chrono::Utc>) -> String {
     at.format("%Y-%m-%d %H:%M:%S%.3f").to_string()
 }
 

@@ -1701,30 +1701,6 @@ async fn update_task_pr_finalisation_false_with_non_pr_url() {
 }
 
 #[tokio::test]
-async fn update_task_propagates_db_error_on_prior_task_read() {
-    // When update_task needs to read the prior task state (epic_id is set, so
-    // needs_prior=true) and the store returns an error when reading the task,
-    // the error should propagate rather than being silently swallowed as None.
-    // A handle with no store attached refuses every read, which is that error.
-    let db = Arc::new(Store::unattached());
-    let svc = TaskService::new(db, crate::process::MockProcessRunner::unused());
-
-    let result = svc
-        .update_task(UpdateTaskParams::for_task(TaskId(1)).epic_id(EpicId(1)))
-        .await;
-
-    assert!(
-        result.is_err(),
-        "DB error on prior-task read should propagate, not be silently ignored"
-    );
-    let err = result.unwrap_err();
-    assert!(
-        matches!(err, ServiceError::Internal(_)),
-        "error should be ServiceError::Internal, got: {err:?}"
-    );
-}
-
-#[tokio::test]
 async fn update_repo_path_reroutes_within_grouped_epic() {
     use crate::store::EpicCrud;
     let db = std::sync::Arc::new(crate::store::Store::open_in_memory().await.unwrap());

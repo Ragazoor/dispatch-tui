@@ -136,7 +136,7 @@ async fn create_task_returning_sets_all_optional_fields_atomically() {
 
 #[tokio::test]
 async fn delete_task_removes_it() {
-    let db = test_db_unattached().await;
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc

@@ -17,9 +17,7 @@ fn make_runner_with_runner(
     runner: Arc<dyn ProcessRunner>,
 ) -> (FeedRunner, mpsc::UnboundedReceiver<McpEvent>) {
     let (tx, rx) = mpsc::unbounded_channel();
-    let board_reads = db
-        .board_reads()
-        .expect("a memory-attached handle serves its own board reads");
+    let board_reads: Arc<dyn crate::sync::BoardReads> = db.clone();
     (
         FeedRunner::new(db, tx, runner, board_reads, "test-host".into()),
         rx,
@@ -1152,7 +1150,7 @@ async fn start_background_task_eventually_runs_feed_command() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let proc_runner: Arc<dyn ProcessRunner> =
         Arc::new(crate::process::MockProcessRunner::new(vec![]));
-    let board_reads = db.board_reads().expect("memory handle has board reads");
+    let board_reads: Arc<dyn crate::sync::BoardReads> = db.clone();
     let runner = FeedRunner::new(
         Arc::clone(&db) as Arc<dyn crate::store::TaskStore>,
         tx,

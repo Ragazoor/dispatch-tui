@@ -9,22 +9,23 @@ impl super::super::SettingsStore for Store {
     }
 
     async fn set_setting_bool(&self, key: &str, value: bool) -> Result<()> {
-        refuse_identity_key(key)?;
-        let writer = self.shared_writer()?;
-        writer
-            .save_setting(key, if value { "1" } else { "0" })
+        self.set_setting_string(key, if value { "1" } else { "0" })
             .await
     }
 
     async fn get_setting_string(&self, key: &str) -> Result<Option<String>> {
-        let reader = self.shared_reader()?;
-        reader.get_setting(key).await
+        Ok(self.rows.setting(key))
     }
 
     async fn set_setting_string(&self, key: &str, value: &str) -> Result<()> {
         refuse_identity_key(key)?;
-        let writer = self.shared_writer()?;
-        writer.save_setting(key, value).await
+        // Scoped by this board's own host id, not an argument —
+        // `docs/specs/settings.allium` for why the scope is host rather than
+        // owner.
+        self.caller
+            .save_setting(self.host.clone(), key.to_string(), value.to_string())
+            .await?
+            .applied()
     }
 
     // -- Managed-feed config (WP5) --
@@ -86,44 +87,48 @@ impl super::super::SettingsStore for Store {
 #[async_trait::async_trait]
 impl super::super::RepoConfigRead for Store {
     async fn list_repo_paths(&self) -> Result<Vec<String>> {
-        let reader = self.shared_reader()?;
-        reader.list_repo_paths().await
+        Ok(self.rows.repo_paths())
     }
 
     async fn get_verify_command(&self, path: &str) -> Result<Option<String>> {
-        let reader = self.shared_reader()?;
-        reader.get_verify_command(path).await
+        Ok(self.rows.verify_command(path))
     }
 
     async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>> {
-        let reader = self.shared_reader()?;
-        reader.list_all_base_branches().await
+        Ok(self.rows.base_branches())
     }
 }
 
 #[async_trait::async_trait]
 impl super::super::RepoConfigStore for Store {
     async fn save_repo_path(&self, path: &str) -> Result<()> {
-        let writer = self.shared_writer()?;
-        writer.save_repo_path(path).await
+        self.caller
+            .save_repo_path(path.to_string(), self.now_at())
+            .await?
+            .applied()
     }
 
     async fn delete_repo_path(&self, path: &str) -> Result<()> {
-        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
-        let writer = self.shared_writer()?;
-        writer.delete_repo_path(path).await
+        self.caller
+            .delete_repo_path(path.to_string())
+            .await?
+            .applied()
     }
 
     async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()> {
-        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
-        let writer = self.shared_writer()?;
-        writer.set_verify_command(path, command).await
+        // `""` clears it. The module's absent sentinel, not a command that
+        // happens to be empty — see its header.
+        self.caller
+            .set_verify_command(path.to_string(), command.unwrap_or_default().to_string())
+            .await?
+            .applied()
     }
 
     async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()> {
-        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
-        let writer = self.shared_writer()?;
-        writer.record_base_branch(repo_path, branch).await
+        self.caller
+            .record_base_branch(repo_path.to_string(), branch.to_string(), self.now_at())
+            .await?
+            .applied()
     }
 }
 
@@ -138,8 +143,7 @@ impl super::super::HostStore for Store {
         // is the board launch's `host_file::resolve_for_launch`, and a
         // one-shot command with no host file must fail rather than mint
         // (`cli.allium: CliCommandsNeedAHostFile`).
-        let dir = self.host_file_dir()?;
-        let identity = host_file_call(dir, crate::host_file::read_for_cli).await?;
+        let identity = host_file_call(&self.host_file_dir, crate::host_file::read_for_cli).await?;
         Ok((identity.host_id, identity.label))
     }
 
@@ -148,14 +152,14 @@ impl super::super::HostStore for Store {
         if trimmed.is_empty() {
             anyhow::bail!("host label must not be empty");
         }
-        let dir = self.host_file_dir()?;
+        let dir = &self.host_file_dir;
         let label = trimmed.to_string();
         host_file_call(dir, move |dir| crate::host_file::rename_host(dir, &label)).await?;
         Ok(())
     }
 
     async fn user_identity(&self) -> Result<Option<String>> {
-        let dir = self.host_file_dir()?;
+        let dir = &self.host_file_dir;
         Ok(host_file_call(dir, crate::host_file::read_for_cli)
             .await?
             .user_identity)
@@ -166,7 +170,7 @@ impl super::super::HostStore for Store {
         identity: &str,
         credential: &str,
     ) -> Result<()> {
-        let dir = self.host_file_dir()?;
+        let dir = &self.host_file_dir;
         let (identity, credential) = (identity.to_string(), credential.to_string());
         host_file_call(dir, move |dir| {
             crate::host_file::adopt_user_identity(dir, &identity, &credential)
@@ -180,7 +184,7 @@ impl super::super::HostStore for Store {
         if identity.is_empty() {
             anyhow::bail!("user identity must not be empty");
         }
-        let dir = self.host_file_dir()?;
+        let dir = &self.host_file_dir;
         let identity = identity.to_string();
         host_file_call(dir, move |dir| {
             crate::host_file::adopt_user_identity_once(dir, &identity)
@@ -197,7 +201,7 @@ impl super::super::HostStore for Store {
 #[async_trait::async_trait]
 impl super::super::IdentityCredentialStore for Store {
     async fn user_identity_token(&self) -> Result<Option<String>> {
-        let dir = self.host_file_dir()?;
+        let dir = &self.host_file_dir;
         Ok(host_file_call(dir, crate::host_file::read_for_cli)
             .await?
             .credential)
@@ -212,7 +216,7 @@ impl super::super::IdentityCredentialStore for Store {
             // conflict, which is the worst of both answers.
             anyhow::bail!("user identity credential must not be empty");
         }
-        let dir = self.host_file_dir()?;
+        let dir = &self.host_file_dir;
         let token = token.to_string();
         host_file_call(dir, move |dir| {
             crate::host_file::set_credential(dir, &token)
@@ -272,7 +276,7 @@ pub(crate) const USER_IDENTITY_KEY: &str = "user_identity";
 /// keep identity in the host file and never call it, so this only ever fires on a
 /// caller mistake — but the alternative is a future caller passing
 /// `USER_IDENTITY_TOKEN_KEY` to `set_setting_string` and silently routing a
-/// credential into the shared store the moment a writer is attached.
+/// credential into the shared store.
 fn refuse_identity_key(key: &str) -> Result<()> {
     if matches!(
         key,
@@ -313,7 +317,11 @@ impl Store {
     async fn set_managed_feed_setting(&self, key: &'static str, value: Option<&str>) -> Result<()> {
         match value {
             Some(v) => self.set_setting_string(key, v).await,
-            None => self.shared_writer()?.clear_setting(key).await,
+            None => self
+                .caller
+                .clear_setting(self.host.clone(), key.to_string())
+                .await?
+                .applied(),
         }
     }
 }
@@ -325,8 +333,7 @@ impl Store {
 #[async_trait::async_trait]
 impl super::super::SubscriptionStore for Store {
     async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<EpicId>> {
-        let reader = self.shared_reader()?;
-        reader.subscribed_epics(subscriber).await
+        Ok(self.rows.subscribed_epics(subscriber))
     }
 
     async fn subscribe_to_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<()> {
@@ -337,14 +344,20 @@ impl super::super::SubscriptionStore for Store {
             // then be sent to everybody by a store that matches on it.
             anyhow::bail!("cannot subscribe without a user identity");
         }
-        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
-        let writer = self.shared_writer()?;
-        writer.subscribe_to_epic(subscriber, epic_id).await
+        self.caller
+            .subscribe_to_epic(subscriber.to_string(), epic_id)
+            .await?
+            .applied()
     }
 
     async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<bool> {
-        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
-        let writer = self.shared_writer()?;
-        writer.unsubscribe_from_epic(subscriber, epic_id).await
+        // `sync.allium: UnsubscribeFromEpic` makes an epic that was not
+        // followed a refusal rather than a no-op, and the store says so; it is
+        // reported as `false` rather than as an error.
+        Ok(self
+            .caller
+            .unsubscribe_from_epic(subscriber.to_string(), epic_id)
+            .await?
+            .won())
     }
 }

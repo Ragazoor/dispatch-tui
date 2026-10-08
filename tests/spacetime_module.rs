@@ -605,7 +605,7 @@ fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
             .expect("the subscription must deliver the second learning");
 
         // Host B's read: the RAG candidate pool, sourced entirely from the
-        // subscription — this is `SharedLearningReader::list_all_approved_non_task_learnings`'s
+        // subscription — this is `LearningStore::list_all_approved_non_task_learnings`'s
         // backing, `SharedRows::approved_non_task_learnings_with_embedding`.
         let candidates = rows.approved_non_task_learnings_with_embedding();
         assert_eq!(candidates.len(), 2, "both learnings must have arrived");
@@ -1548,7 +1548,7 @@ fn a_task_created_in_done_is_stamped_as_completed() {
 // A handful of scenarios a unit test with a recording caller cannot check,
 // the same reason this file exists at all: whether the REAL module reproduces
 // `docs/specs/agent-health.allium`'s guarantees, not whether a mock assumed it
-// would. `src/sync/tests/writes.rs` covers `ReducerWriter`'s decoding far more
+// would. `src/sync/tests/writes.rs` covers the `Store`'s decoding far more
 // exhaustively; these are chosen to hit the module's own logic that decoding
 // can't reach, especially the no-primary-key dedupe hazard an adversarial
 // review of this task's plan flagged (`docs/plans/
@@ -1693,7 +1693,7 @@ fn try_record_stop_defers_while_a_subagent_is_live_and_the_drain_applies_it() {
 }
 
 /// A Stop against a task that is not `Running` is refused outright — the
-/// precondition failing is what lets `ReducerWriter` read `NoOp` back
+/// precondition failing is what lets the `Store` read `NoOp` back
 /// unambiguously (this task's plan doc, decision 3) — rather than a silent
 /// no-op the caller could not tell apart from a real flip.
 #[test]
@@ -1716,7 +1716,7 @@ fn try_record_stop_refuses_a_task_that_is_not_running() {
 }
 
 /// The PR learnings gate fires EXACTLY once: the first call sets it and wins,
-/// a second is refused. `ReducerWriter` reads that refusal as `false` via
+/// a second is refused. The `Store` reads that refusal as `false` via
 /// `ReducerOutcome::won()` — the same shape as the dispatch claim.
 #[test]
 fn mark_pr_learnings_gate_shown_wins_exactly_once() {

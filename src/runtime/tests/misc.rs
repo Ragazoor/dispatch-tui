@@ -790,10 +790,7 @@ mod bootstrap {
 
     /// The stand-in store: the in-memory reducers over fresh rows, behind a
     /// connector that answers as scripted.
-    fn test_store_with(
-        database: crate::store::Store,
-        connector: Arc<dyn StoreConnector>,
-    ) -> StoreParts {
+    fn test_store_with(data_dir: &Path, connector: Arc<dyn StoreConnector>) -> StoreParts {
         use crate::sync as sy;
         let rows = Arc::new(sy::SharedRows::new());
         let clock: Arc<dyn crate::service::Clock> = Arc::new(crate::service::SystemClock);
@@ -802,26 +799,17 @@ mod bootstrap {
         );
         let settled_identity = Arc::new(sy::SettledIdentity::default());
         settled_identity.settle("c0ffee");
-        let board_reads = Arc::new(sy::SubscriptionBoardReads::new(rows.clone()));
-        let database = database.with_shared_store(crate::store::SharedStorePorts {
-            writer: Arc::new(sy::ReducerWriter::new(
-                reducer_caller.clone(),
-                settled_identity.clone(),
-                clock,
-                "bootstrap-test-host".to_string(),
-                board_reads.clone(),
-            )),
-            reader: board_reads.clone(),
-            learning_reader: Arc::new(sy::SubscriptionLearningReads::new(rows.clone())),
-            usage_reader: Arc::new(sy::SubscriptionUsageReads::new(rows.clone())),
-            retired_feed_item_reader: Arc::new(sy::SubscriptionRetiredFeedItemReads::new(
-                rows.clone(),
-            )),
-        });
+        let database = crate::store::Store::new(
+            rows.clone(),
+            reducer_caller.clone(),
+            settled_identity.clone(),
+            clock,
+            "bootstrap-test-host".to_string(),
+            data_dir,
+        );
         StoreParts {
             database: Arc::new(database),
             rows,
-            board_reads,
             connector,
             settled_identity,
             reducer_caller,
@@ -831,16 +819,16 @@ mod bootstrap {
 
     /// One scripted answer: a connect beyond the one startup makes panics,
     /// which is the point — startup makes exactly one attempt.
-    fn test_store(database: crate::store::Store, _host: &str) -> StoreParts {
+    fn test_store(data_dir: &Path, _host: &str) -> StoreParts {
         test_store_with(
-            database,
+            data_dir,
             ScriptedConnector::new(vec![accepted("c0ffee", "token")]),
         )
     }
 
-    fn unreachable_store(database: crate::store::Store, _host: &str) -> StoreParts {
+    fn unreachable_store(data_dir: &Path, _host: &str) -> StoreParts {
         test_store_with(
-            database,
+            data_dir,
             ScriptedConnector::new(vec![refused("connection refused")]),
         )
     }
@@ -878,31 +866,28 @@ mod bootstrap {
     const OTHER_DB: &str = "c200a1ada23f68e494f28f6a791a2afe105f5a0056e01e6762e3d3618a893ccb";
 
     /// A reachable store whose database is PINNED_DB.
-    fn store_holding_pinned_db(database: crate::store::Store, host: &str) -> StoreParts {
+    fn store_holding_pinned_db(data_dir: &Path, host: &str) -> StoreParts {
         StoreParts {
             store_identity: |_| Some(PINNED_DB.to_string()),
-            ..test_store(database, host)
+            ..test_store(data_dir, host)
         }
     }
 
     /// A store whose database is OTHER_DB, behind a connector with no scripted
     /// answers: any connection attempt panics, so a test that passes proves
     /// the launch never connected.
-    fn store_holding_other_db_never_connect(
-        database: crate::store::Store,
-        _host: &str,
-    ) -> StoreParts {
+    fn store_holding_other_db_never_connect(data_dir: &Path, _host: &str) -> StoreParts {
         StoreParts {
             store_identity: |_| Some(OTHER_DB.to_string()),
-            ..test_store_with(database, ScriptedConnector::new(vec![]))
+            ..test_store_with(data_dir, ScriptedConnector::new(vec![]))
         }
     }
 
     /// A reachable store whose database is OTHER_DB.
-    fn store_holding_other_db(database: crate::store::Store, host: &str) -> StoreParts {
+    fn store_holding_other_db(data_dir: &Path, host: &str) -> StoreParts {
         StoreParts {
             store_identity: |_| Some(OTHER_DB.to_string()),
-            ..test_store(database, host)
+            ..test_store(data_dir, host)
         }
     }
 
@@ -1250,7 +1235,7 @@ mod bootstrap {
     async fn persist_host_label_maps_a_failed_persist_to_host_identity_unavailable() {
         let dir = tempfile::tempdir().unwrap();
         crate::host_file::resolve_for_launch(dir.path()).unwrap();
-        let db = crate::store::Store::unattached().with_host_file(dir.path());
+        let db = crate::store::Store::in_memory_with_host_file(dir.path());
         let host_file = crate::host_file::host_file_path(dir.path());
         std::fs::remove_file(&host_file).unwrap();
         std::fs::create_dir(&host_file).unwrap();

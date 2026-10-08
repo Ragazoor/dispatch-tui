@@ -227,8 +227,8 @@ fn tmux_window(raw: &str) -> Option<TmuxWindow> {
     }
 }
 
-/// Labels travel as the same JSON array SQLite stores, so one encoding serves
-/// both stores and a dump moves between them untouched.
+/// Labels travel as a JSON array, the same encoding a snapshot dump carries,
+/// so a dump moves in and out of the store untouched.
 fn labels(table: &str, row_id: i64, raw: &str) -> Decoded<Vec<String>> {
     let Some(raw) = text(raw) else {
         return Ok(Vec::new());
@@ -261,9 +261,9 @@ pub fn epic(row: &bindings::Epic) -> Decoded<Epic> {
         feed_interval_secs: id(row.feed_interval_secs),
         group_by_repo: row.group_by_repo,
         feed_append_only: row.feed_append_only,
-        // Soft-failed to a default rather than refused, matching SQLite's
-        // `parse_feed_role`/`parse_epic_origin`: a role written by a newer
-        // binary must not take the epic and every task under it off the board.
+        // Soft-failed to a default rather than refused: a role written by a
+        // newer binary must not take the epic and every task under it off the
+        // board.
         feed_role: FeedRole::parse(&row.feed_role).unwrap_or_else(|| {
             let count = crate::store::bump_decode_fallback();
             tracing::warn!(count, value = %row.feed_role, "unknown feed_role from the shared store; defaulting to none");

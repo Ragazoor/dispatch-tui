@@ -252,7 +252,7 @@ async fn delete_task_does_not_notify_watcher_when_target_already_finished_via_by
 
 #[tokio::test]
 async fn delete_task_cleans_up_rows_where_it_was_the_watcher() {
-    let db = test_db_unattached().await;
+    let db = test_db().await;
     let runner: Arc<dyn crate::process::ProcessRunner> =
         crate::process::MockProcessRunner::unused();
     let svc = task_svc_with_runner(&db, runner);

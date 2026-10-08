@@ -14,7 +14,9 @@ pub(crate) use decode::{bump_decode_fallback, drop_undecodable, parse_datetime};
 #[cfg(test)]
 mod tests;
 
-use anyhow::{Context, Result};
+#[cfg(any(test, feature = "test-support"))]
+use anyhow::Context;
+use anyhow::Result;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -227,13 +229,9 @@ pub trait TaskCrud: TaskRead {
     /// [`Self::delete_task`]/[`EpicCrud::delete_epic`] once per selected item.
     /// Validates every task and epic against the store's TRUE state and
     /// deletes all of them, or none, together — see
-    /// `spacetime/module/src/tasks_epics.rs::batch_delete` for the shared-store path,
-    /// which is the one that actually needs the joint guard (a stale
-    /// subscription view is what "one operation, or nothing at all" has to
-    /// hold up against; the local SQLite path has always had a single
-    /// serialized writer and no such gap, matching [`Self::delete_task`]'s and
-    /// [`EpicCrud::delete_epic`]'s own SQLite shape, which never re-validates
-    /// there either).
+    /// `spacetime/module/src/tasks_epics.rs::batch_delete`. The joint guard
+    /// runs in the store because a stale subscription view is what "one
+    /// operation, or nothing at all" has to hold up against.
     async fn batch_delete(&self, task_ids: &[TaskId], epic_ids: &[EpicId]) -> Result<()>;
     async fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
     /// Atomically set `pr_learnings_gate_shown_at` to now if it is currently null.
@@ -493,15 +491,13 @@ pub trait TaskCrud: TaskRead {
 
     // Retired feed items (`docs/specs/core.allium`: `RetiredFeedItem`).
     //
-    // The write routes through [`SharedWriter`] (`drop_closed_retired_feed_items`);
-    // the read routes through [`SharedRetiredFeedItemReader`]
-    // (`retired_without_task`) instead of `SharedWriter`, for the same reason
-    // `query_usage` and the learning reads do: it is a join a subscription's
-    // `WHERE` clause cannot express, so it has to run in Rust over the store's
-    // rows rather than through a reducer. There is no `create_retired_feed_item`
-    // port here — every real retirement writes the row inline, in the same
-    // transaction as the delete (`delete_task`, `delete_epic`) or the v105/v106
-    // migration, rather than through a separate call.
+    // The write is a reducer call (`drop_closed_retired_feed_items`); the read
+    // (`retired_without_task`) is a join a subscription's `WHERE` clause cannot
+    // express, so it runs in Rust over the store's rows, the same as
+    // `query_usage` and the learning reads. There is no
+    // `create_retired_feed_item` here — every real retirement writes the row
+    // inline, in the same reducer transaction as the delete (`delete_task`,
+    // `delete_epic`), rather than through a separate call.
     /// Of `external_ids`, the subset that are retired under `feed_epic_id`
     /// AND have no existing task anywhere in `feed_epic_id`'s subtree. Used by
     /// `GroupedFeedUpsert`/`RoleRoutedFeedSync` (`docs/specs/feeds.allium`) to
@@ -533,10 +529,7 @@ pub trait TaskCrud: TaskRead {
 /// [`HostStore`] and [`RepoConfigStore`] do for their own non-CRUD writes.
 #[async_trait::async_trait]
 pub trait PollOwnershipStore: Send + Sync {
-    /// Fill an absent claim. A no-op on a single-machine install — `PollOwner`
-    /// has no SQLite counterpart, so there is no other host to contend a
-    /// claim with. `claim_poll_owner`/`override_poll_owner` mirror
-    /// [`SharedWriter`]'s own naming: `claim_poll_owner` fills an absent row,
+    /// Fill an absent claim. `claim_poll_owner` fills an absent row,
     /// `override_poll_owner` unconditionally reassigns an existing one. One
     /// method per operation rather than one per scope — `PollScopeId` already
     /// carries the type-safe task/epic distinction, so a second split here
@@ -605,13 +598,11 @@ pub trait EpicCrud: EpicRead {
     async fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()>;
 }
 
-/// Per-host preferences: key/value settings and the managed-feed config. **Routed, not local** (Phase 9) — a mutation goes
-/// through [`SharedWriter`] when one is configured, scoped to this install's
-/// own host id, and falls back to the local table otherwise; see
-/// `docs/specs/settings.allium`. Reads route the same way, through
-/// [`SharedReader`] (task #4916): a board that writes a setting to the store
-/// reads it back from the store, never from a local table it no longer
-/// writes.
+/// Per-host preferences: key/value settings and the managed-feed config.
+/// **Shared, not local** — a mutation is a reducer call scoped to this
+/// install's own host id, and a read answers from the store's rows, so a board
+/// that writes a setting reads it back from the same place; see
+/// `docs/specs/settings.allium`.
 #[async_trait::async_trait]
 pub trait SettingsStore: Send + Sync {
     async fn get_setting_bool(&self, key: &str) -> Result<Option<bool>>;
@@ -693,17 +684,10 @@ pub trait RepoConfigStore: RepoConfigRead {
 /// [`TaskStore`]. Its reads and writes stay on this machine; the shared
 /// registry gets a mirror (`sync.allium: RegisterHostOnConnect`).
 ///
-/// Backed by two rows in SQLite's `settings` table rather than a dedicated one:
-/// there is exactly one Host per install, so a key/value pair per field is
-/// simpler than a one-row table. The trait says nothing about that — a backend
-/// that holds a real `hosts` table satisfies it equally.
-///
-/// **The seam is declared here, not sealed.** Because SQLite stores the id and
-/// label as ordinary `settings` rows, the same two rows are also readable and
-/// writable through [`SettingsStore`]'s untyped key/value accessors — the local
-/// half. Nothing stops a local-only consumer rewriting this install's host id
-/// that way. Go through this trait; the key/value route is a leftover of the
-/// backing, not a second supported API.
+/// Backed by this install's `host.json` (`host.allium:
+/// IdentityLivesInHostFile`), not by a store table. [`SettingsStore`]'s
+/// key/value accessors refuse the identity keys, so this trait is the only way
+/// to read or change them.
 ///
 /// See `docs/specs/host.allium` (MintHostIdentity, RenameHost) and `core/Host`
 /// in `docs/specs/core.allium`.
@@ -1010,8 +994,9 @@ pub trait UsageStore: Send + Sync {
 /// settings, the knowledge base and usage to the shared side, and Phase 12
 /// made the store mandatory, which left one backend and nothing for a seam to
 /// separate. What stays on this machine — the Host row and the user identity
-/// with its credential (`host.allium`) — is a property of which methods
-/// `Store` routes, not of which trait declares them.
+/// with its credential (`host.allium`) — is a property of what `Store`'s
+/// methods do (they read and write `host.json`), not of which trait declares
+/// them.
 ///
 /// | Table | Reached through |
 /// |---|---|
@@ -1095,422 +1080,6 @@ impl<
 }
 
 // ---------------------------------------------------------------------------
-// SharedLearningReader — where a learning read goes, when it does not go here
-// ---------------------------------------------------------------------------
-
-/// The read twin of [`SharedWriter`], scoped to the one table whose reads
-/// need to leave SQLite: the knowledge base (Phase 10, task #4914).
-///
-/// Every other shared table's reads have their own dedicated seam already
-/// (`crate::sync::BoardReads` for tasks/epics/repo config), because the
-/// board's drawing needs them. Learnings have no TUI presence at all, so
-/// there is no `BoardReads`-shaped consumer to fold this into — see
-/// `crate::sync::learning_reads`'s header for why it is a sibling seam
-/// rather than an addition to that one.
-///
-/// `db` defines this port and `sync` implements it
-/// (`sync::SubscriptionLearningReads`), the same inversion `SharedWriter`
-/// uses: nothing in `db` knows what a subscription is.
-#[async_trait::async_trait]
-pub trait SharedLearningReader: Send + Sync {
-    async fn get_learning(&self, id: LearningId) -> Result<Option<Learning>>;
-    async fn list_learnings(&self, filter: LearningFilter) -> Result<Vec<Learning>>;
-    async fn list_all_approved_non_task_learnings(&self) -> Result<Vec<(Learning, Vec<u8>)>>;
-    async fn list_learnings_missing_embedding(&self) -> Result<Vec<Learning>>;
-    async fn list_retrievals_for_task(&self, task_id: TaskId) -> Result<Vec<LearningRetrieval>>;
-}
-
-// ---------------------------------------------------------------------------
-// SharedUsageReader — where a usage read goes, when it does not go here
-// ---------------------------------------------------------------------------
-
-/// The read twin of [`SharedWriter`], scoped to `usage_events` (Phase 11, task
-/// #4915).
-///
-/// `query_usage` groups and counts rows — a shape a subscription's `WHERE`
-/// clause cannot express at all, let alone the dynamic category/actor/since
-/// filters the MCP tool takes. So unlike every board-drawing table
-/// (`crate::sync::BoardReads`), the aggregation has to run in Rust over the
-/// rows a standing, unconditional subscription already holds in memory — the
-/// same reasoning `SharedLearningReader` exists for, applied to a query
-/// SQLite could answer with `GROUP BY` and a store cannot.
-///
-/// `db` defines this port and `sync` implements it
-/// (`sync::SubscriptionUsageReads`), the same inversion `SharedWriter` and
-/// `SharedLearningReader` use: nothing in `db` knows what a subscription is.
-#[async_trait::async_trait]
-pub trait SharedUsageReader: Send + Sync {
-    async fn query_usage(&self, query: &UsageQuery) -> Result<Vec<crate::models::UsageSummary>>;
-}
-
-// ---------------------------------------------------------------------------
-// SharedReader — where every other shared read goes
-// ---------------------------------------------------------------------------
-
-/// The read twin of [`SharedWriter`] for everything [`SharedLearningReader`]
-/// and [`SharedUsageReader`] do not cover: tasks, epics, watchers, repo
-/// configuration, subscriptions and settings.
-///
-/// Spec: `sync.allium`'s `BoardReadsFromTheSubscription`.
-///
-/// # Why this exists
-///
-/// A board with a store writes a shared row to the store and nowhere else
-/// ("one copy, not two" — see [`SharedWriter`]). Until task #4916 its reads of
-/// those same rows still went to SQLite, which from that moment held nothing
-/// new: an MCP `get_task` on a just-created task answered `None`, a setting
-/// read back after it was saved answered the old value, and the watcher
-/// fan-out found nobody. Only the card-drawing reads
-/// ([`crate::sync::BoardReads`]) had a store path. This port closes the rest.
-///
-/// Every derived query (live agents, a task by plan, an epic's tasks, an
-/// epic's children) is a method here rather than a filter `Store` runs over
-/// `list_all`: the implementation filters inside the rows' lock before
-/// cloning, and each routed `Store` method is a one-line delegation. The
-/// managed-feed getters are `get_setting` under a fixed key.
-///
-/// `db` defines this port and `sync` implements it
-/// (`sync::SubscriptionBoardReads`, the adapter the board already draws
-/// from), the same inversion the writer uses.
-#[async_trait::async_trait]
-pub trait SharedReader: Send + Sync {
-    /// Every task, ordered `COALESCE(sort_order, id) ASC, id ASC`.
-    async fn list_all(&self) -> Result<Vec<Task>>;
-    async fn get_task(&self, id: TaskId) -> Result<Option<Task>>;
-    async fn task_exists(&self, id: TaskId) -> Result<bool>;
-    /// Running or Review tasks with a tmux window, ordered by id.
-    async fn list_live_agent_tasks(&self) -> Result<Vec<Task>>;
-    /// The lowest-id task whose plan is `plan`.
-    async fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
-    /// An epic's tasks, in `list_all`'s order.
-    async fn list_tasks_for_epic(&self, epic: EpicId) -> Result<Vec<Task>>;
-    /// An epic's tasks that did not decode, by ascending id.
-    async fn list_undecodable_task_ids_for_epic(&self, epic: EpicId) -> Result<Vec<TaskId>>;
-    /// Every task with an epic, ordered by epic, then as `list_all`.
-    async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>>;
-    /// The watcher task ids of `target`, ordered by watch id.
-    async fn list_watchers_of(&self, target: TaskId) -> Result<Vec<TaskId>>;
-    /// Every epic, ordered `COALESCE(sort_order, id) ASC, id ASC`.
-    async fn list_epics(&self) -> Result<Vec<Epic>>;
-    /// Epics whose parent is `parent` (`None` for the roots), in
-    /// `list_epics`'s order.
-    async fn list_epics_with_parent(&self, parent: Option<EpicId>) -> Result<Vec<Epic>>;
-    async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
-    async fn list_repo_paths(&self) -> Result<Vec<String>>;
-    async fn get_verify_command(&self, path: &str) -> Result<Option<String>>;
-    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>>;
-    /// `subscriber`'s followed epic ids, ascending.
-    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<EpicId>>;
-    /// This host's setting `key`, if set.
-    async fn get_setting(&self, key: &str) -> Result<Option<String>>;
-}
-
-// ---------------------------------------------------------------------------
-// SharedWriter — where a shared-table mutation goes
-// ---------------------------------------------------------------------------
-
-/// The destination of a shared-table mutation on a board that has a store.
-///
-/// Spec: `sync.allium`'s `BoardWritesThroughTheStore`.
-///
-/// # Why a port here rather than a second store
-///
-/// The read side got a seam of its own ([`crate::sync::BoardReads`]) because
-/// the board's reads are a small, self-contained set that a subscription can
-/// serve whole. The write side is not like that. A mutation arrives through
-/// [`Store`] — the same handle that also holds settings, learnings,
-/// embeddings and usage, none of which are shared and none of which a store
-/// would accept. Swapping the whole handle would mean a second implementation
-/// of a hundred local methods that have nowhere else to go.
-///
-/// So the branch is here instead, at the one point every shared mutation
-/// already passes through, and this trait is the port it branches to. `db`
-/// defines it; `crate::sync` implements it over reducers. Nothing in `db`
-/// knows what a reducer is.
-///
-/// # One copy, not two
-///
-/// A method implemented here is a method [`Store`] no longer performs
-/// locally when a writer is attached. Not "also performs": a shared table has
-/// exactly one copy, and a local one that nothing reads would diverge from the
-/// store at the first mutation and leave the operator unable to tell which they
-/// were looking at.
-///
-/// # The methods here are the ones cut over
-///
-/// As of task #4907, this is the whole shared mutation surface — see below.
-///
-/// # What was routed, and by which task
-///
-/// Task CRUD, the dispatch claim, epic CRUD and recalculation, repo
-/// configuration and subscriptions — task #4864/#4905 and earlier Phase 6
-/// work. Agent session state (`subagent_start`, `subagent_stop`,
-/// `subagent_clear`, `subagent_clear_and_void_pending_stop`, `try_record_stop`,
-/// `record_pre_tool_use`, `record_notification`, `record_user_prompt_submit`,
-/// `mark_pr_learnings_gate_shown`) — task #4906. Feed ingestion
-/// (`upsert_feed_tasks`, `upsert_feed_tasks_additive`,
-/// `delete_stale_subtree_feed_tasks`, `create_repo_group_sub_epic`,
-/// `create_managed_role_epic`), task watchers (`create_task_watcher`,
-/// `delete_task_watcher`, `delete_watches_of_target`,
-/// `delete_watches_by_watcher`), `batch_patch_sub_status` and
-/// `respawn_phoenix_successor` — task #4907, this task.
-///
-/// # The host registry is a decision, not an omission
-///
-/// `ensure_host_identity`, `adopt_user_identity` and `rename_host` are NOT
-/// here and never will be: the identity handshake writes this install's Host
-/// row locally, before any connection exists, and that write must keep
-/// happening unconditionally — it is the durable local credential, not a
-/// shared row with one copy (the single-storage design doc's declared
-/// permanent local exception). What DOES reach the store is a separate
-/// best-effort mirror, `register_host` (not on this trait — see
-/// [`crate::sync::push_host_registration`]), pushed on every connect/reconnect
-/// and on a live rename — `sync.allium: RegisterHostOnConnect`/
-/// `RegisterHostOnRename`. Decided on task #4907 rather than assumed.
-///
-/// # One path
-///
-/// Every board has a store (task #4916), so every shared mutation takes the
-/// writer: the `Some` branch of each routed method is the production path,
-/// and the SQLite branch remains only for handles built without a writer —
-/// the test suite's in-memory database, until Phase 12b (#4975) replaces it.
-/// The completeness flag that once gated `--spacetime-server` on this list
-/// being finished went with the store-less board.
-#[async_trait::async_trait]
-pub trait SharedWriter: Send + Sync {
-    // Tasks.
-    async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
-    async fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
-    async fn delete_task(&self, id: TaskId) -> Result<()>;
-    async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()>;
-
-    // The dispatch claim. Each returns whether it was WON, which on a store is
-    // the reducer's acceptance rather than a row read back — see
-    // `dispatch.allium: DispatchClaimExclusive`.
-    async fn try_claim_next_backlog_task(&self, epic_id: EpicId) -> Result<Option<TaskId>>;
-    async fn try_claim_backlog_task(&self, id: TaskId) -> Result<bool>;
-    async fn try_release_backlog_claim(&self, id: TaskId) -> Result<bool>;
-
-    // Epics.
-    async fn create_epic(
-        &self,
-        title: &str,
-        description: &str,
-        parent_epic_id: Option<EpicId>,
-    ) -> Result<Epic>;
-    async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
-    async fn delete_epic(&self, id: EpicId) -> Result<()>;
-    async fn recalculate_epic_status(&self, id: EpicId) -> Result<()>;
-
-    // Batch delete (tasks.allium: BatchDelete) — one atomic call over both
-    // domains together, not `delete_task`/`delete_epic` looped per item. See
-    // `TaskCrud::batch_delete`'s doc comment for why looping them independently
-    // is exactly the gap this exists to close.
-    async fn batch_delete(&self, task_ids: &[TaskId], epic_ids: &[EpicId]) -> Result<()>;
-
-    // Repo configuration.
-    async fn save_repo_path(&self, path: &str) -> Result<()>;
-    async fn delete_repo_path(&self, path: &str) -> Result<()>;
-    async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()>;
-    async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()>;
-
-    // Subscriptions.
-    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<()>;
-    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<bool>;
-
-    // Settings (Phase 9). Scoped by THIS writer's own host
-    // id, not passed as an argument — see `ReducerWriter.host`'s doc comment
-    // for why that value is a field rather than a lookup, and
-    // `docs/specs/settings.allium` for why the scope is host rather than
-    // owner. host_id, host_label, the stored UserIdentity and its credential
-    // are NOT here: `HostStore`/`IdentityCredentialStore` write those
-    // unconditionally to the local store and are deliberately never routed —
-    // see task #4907 and the `register_host` reducer's doc comment.
-    async fn save_setting(&self, key: &str, value: &str) -> Result<()>;
-    async fn clear_setting(&self, key: &str) -> Result<()>;
-
-    // Learnings and retrievals (Phase 10, task #4914). Unlike settings above,
-    // nothing here is scoped by host — a learning's visibility is governed
-    // entirely by its own scope/scope_ref (`docs/specs/learnings.allium`'s
-    // Storage Backend section).
-    async fn create_learning(&self, row: CreateLearningRow<'_>) -> Result<LearningId>;
-    async fn patch_learning(&self, id: LearningId, patch: &LearningPatch<'_>) -> Result<()>;
-    async fn delete_learning(&self, id: LearningId) -> Result<bool>;
-    async fn rescope_epic_learnings(&self, from: EpicId, to: EpicId) -> Result<()>;
-    async fn record_learning_retrieval(
-        &self,
-        task_id: TaskId,
-        learning_id: LearningId,
-        source: RetrievalSource,
-    ) -> Result<()>;
-    async fn apply_learning_verdicts(
-        &self,
-        verdicts: &[(LearningId, LearningVerdict)],
-    ) -> Result<()>;
-    /// The archived count is best-effort telemetry, not a correctness signal
-    /// — its one caller (`runtime::learnings::exec_archive_stale_learnings`)
-    /// only logs it. A reducer cannot answer with a value
-    /// (`sync.allium: EveryMutationIsAtomicAndAnswered`), so the routed path
-    /// always reports `0` rather than reproducing the read-back machinery
-    /// `create_task` needs for its id, which this count is not worth.
-    async fn archive_stale_learnings(&self, cutoff: chrono::DateTime<chrono::Utc>) -> Result<u64>;
-
-    // Usage events (Phase 11, task #4915). Append-only telemetry with no
-    // user-observable rule beyond "recorded" — no id readback, no patch, no
-    // delete. `cap` is carried on every call rather than read from a stored
-    // default, so the reducer's prune stays in step with whatever
-    // `UsageCap` the caller passed, the same as the local SQL path does today.
-    async fn record_usage_event_with_cap(
-        &self,
-        event: &crate::models::UsageEvent,
-        cap: UsageCap,
-    ) -> Result<()>;
-
-    // Agent session state (Phase 6b). Mirrors the `TaskCrud` methods of the
-    // same name exactly — same arguments, same return types — because this is
-    // the same operation on a different backing, not a different operation.
-    async fn subagent_start(
-        &self,
-        id: TaskId,
-        agent_id: &str,
-        session_id: &str,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<i64>;
-    async fn subagent_stop(
-        &self,
-        id: TaskId,
-        agent_id: &str,
-        session_id: &str,
-    ) -> Result<SubagentDrain>;
-    async fn subagent_clear(&self, id: TaskId) -> Result<SubagentDrain>;
-    async fn subagent_clear_and_void_pending_stop(&self, id: TaskId) -> Result<()>;
-    async fn try_record_stop(
-        &self,
-        id: TaskId,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<StopOutcome>;
-    async fn record_pre_tool_use(
-        &self,
-        id: TaskId,
-        sub_status: SubStatus,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<()>;
-    async fn record_notification(
-        &self,
-        id: TaskId,
-        write: NotificationWrite,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<()>;
-    async fn record_user_prompt_submit(
-        &self,
-        id: TaskId,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<UserPromptOutcome>;
-    async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool>;
-
-    // Feed ingestion (Phase 6c). Mirrors `TaskCrud`'s methods of the same
-    // name exactly — see that trait's doc comments for the field-precedence
-    // and reconciliation rules, unchanged by the move to a store.
-    async fn upsert_feed_tasks(
-        &self,
-        epic_id: EpicId,
-        items: &[FeedItem],
-        repo_paths: &[String],
-        base_branches: &[String],
-    ) -> Result<Vec<RemovedFeedTask>>;
-    async fn upsert_feed_tasks_additive(
-        &self,
-        epic_id: EpicId,
-        items: &[FeedItem],
-        repo_paths: &[String],
-        base_branches: &[String],
-    ) -> Result<Vec<RemovedFeedTask>>;
-    async fn delete_stale_subtree_feed_tasks(
-        &self,
-        parent_id: EpicId,
-        keep_external_ids: &[String],
-    ) -> Result<Vec<RemovedFeedTask>>;
-
-    // Retired feed items (task #4971): the write side. See `TaskCrud`'s own
-    // methods and the doc comment there for why this is here and
-    // `retired_without_task` (a READ) is not.
-    async fn drop_closed_retired_feed_items(
-        &self,
-        feed_epic_id: EpicId,
-        keep_external_ids: &[String],
-    ) -> Result<()>;
-
-    async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId>;
-    async fn create_managed_role_epic(
-        &self,
-        title: &str,
-        parent_epic_id: Option<EpicId>,
-        role: FeedRole,
-        feed_command: Option<&str>,
-        feed_interval_secs: Option<i64>,
-    ) -> Result<EpicId>;
-
-    // Task watchers.
-    async fn create_task_watcher(
-        &self,
-        watcher_task_id: TaskId,
-        target_task_id: TaskId,
-    ) -> Result<()>;
-    async fn delete_task_watcher(
-        &self,
-        watcher_task_id: TaskId,
-        target_task_id: TaskId,
-    ) -> Result<()>;
-    async fn delete_watches_of_target(&self, target_task_id: TaskId) -> Result<()>;
-    async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<()>;
-
-    // Poll ownership (Phase 7): `core.allium: PollOwner`. `claim_poll_owner`
-    // fills an absent row; `override_poll_owner` unconditionally reassigns an
-    // existing one. Only ever called when a store is attached — on a
-    // single-machine install there is no `SharedWriter` to reach, so the
-    // caller must check `shared_writer()` first, the same as every other
-    // method here.
-    async fn claim_poll_owner(&self, target: PollScopeId) -> Result<()>;
-    async fn override_poll_owner(&self, target: PollScopeId) -> Result<()>;
-
-    // Stragglers.
-    async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()>;
-    async fn respawn_phoenix_successor(
-        &self,
-        predecessor: TaskId,
-        req: CreateTaskRequest<'_>,
-        labels: &[String],
-    ) -> Result<TaskId>;
-}
-
-// ---------------------------------------------------------------------------
-// SharedRetiredFeedItemReader — where a retired-feed-item READ goes, when it
-// does not go here
-// ---------------------------------------------------------------------------
-
-/// The read twin of [`SharedWriter`], scoped to `retired_feed_items` (task
-/// #4971).
-///
-/// `retired_without_task` joins across `retired_feed_items` AND `tasks`
-/// (feed_epic_id's whole subtree) — a shape a subscription's `WHERE` clause
-/// cannot express, so the join runs in Rust over the rows a standing,
-/// unconditional subscription already holds in memory, the same reasoning
-/// [`SharedUsageReader`] and [`SharedLearningReader`] exist for.
-///
-/// `db` defines this port and `sync` implements it
-/// (`sync::SubscriptionRetiredFeedItemReads`), the same inversion the other
-/// two readers and `SharedWriter` use: nothing in `db` knows what a
-/// subscription is.
-#[async_trait::async_trait]
-pub trait SharedRetiredFeedItemReader: Send + Sync {
-    async fn retired_without_task(
-        &self,
-        feed_epic_id: EpicId,
-        external_ids: &[String],
-    ) -> Result<Vec<String>>;
-}
-
-// ---------------------------------------------------------------------------
 // TaskReadStore — task/epic-read-only handle held by non-service consumers
 // ---------------------------------------------------------------------------
 
@@ -1584,193 +1153,84 @@ impl<
 // Store
 // ---------------------------------------------------------------------------
 
-/// The handle every service and handler holds: a router over the attached
-/// store ports. It keeps no data of its own and opens no local database —
-/// every shared read and write goes to the port that serves it, and a handle
-/// with no port attached refuses (`storage.allium`).
+/// The handle every service and handler holds, and the one implementation of
+/// every store trait above.
+///
+/// It sits directly on the two halves of the shared store
+/// (`storage.allium`, `sync.allium`):
+///
+/// - **reads** answer from [`SharedRows`](crate::sync::SharedRows), the live
+///   view of this connection's subscriptions
+///   (`sync.allium: BoardReadsFromTheSubscription`);
+/// - **writes** are encoded here and sent as reducer calls through a
+///   [`ReducerCaller`](crate::sync::ReducerCaller)
+///   (`sync.allium: BoardWritesThroughTheStore`);
+/// - **identity** is this install's `host.json` in `host_file_dir`
+///   (`host.allium: IdentityLivesInHostFile`).
+///
+/// Every part is required, so there is no half-built handle: no "no store
+/// attached" error, and no write that lands while its reads answer from
+/// somewhere else. Nothing sits between a trait and the rows or reducers that
+/// serve it: each method below is the implementation, not a hop to one.
 pub struct Store {
-    /// Where shared-table mutations go.
+    /// What this board can see. Every read, and the pre-reads a few writes
+    /// take (the chain's candidates, a drain's prior status, a feed sync's
+    /// removal candidates), answer from these rows — the same rows the board
+    /// draws, so the chain takes the task the column shows as next.
+    rows: Arc<crate::sync::SharedRows>,
+    /// The transport every mutation goes through.
+    caller: Arc<dyn crate::sync::ReducerCaller>,
+    /// Who the board is writing as. Read per write, not resolved at
+    /// construction — see [`crate::sync::WriterIdentity`].
+    identity: Arc<dyn crate::sync::WriterIdentity>,
+    clock: Arc<dyn crate::service::Clock>,
+    /// This machine's `Host` id, resolved once at bootstrap.
     ///
-    /// `Some` on every board and CLI process (`runtime::StoreParts::build`);
-    /// `None` only on the empty placeholder base before
-    /// [`Store::with_shared_store`] attaches the ports, or on a test handle
-    /// built without one. See [`SharedWriter`].
-    shared_writer: Option<Arc<dyn SharedWriter>>,
-    /// Where a learning READ goes. The read twin of `shared_writer`: the
-    /// knowledge base is team-shared, so a read must answer from the same rows
-    /// a write lands in. See [`SharedLearningReader`].
-    shared_learning_reader: Option<Arc<dyn SharedLearningReader>>,
-    /// Where a usage READ goes, so `query_usage`'s aggregation runs over the
-    /// store's rows. See [`SharedUsageReader`].
-    shared_usage_reader: Option<Arc<dyn SharedUsageReader>>,
-    /// Where every other shared READ goes — tasks, epics, watchers, repo
-    /// configuration, subscriptions and settings. See [`SharedReader`].
-    shared_reader: Option<Arc<dyn SharedReader>>,
-    /// Where a `retired_without_task` READ goes. See
-    /// [`SharedRetiredFeedItemReader`].
-    shared_retired_feed_item_reader: Option<Arc<dyn SharedRetiredFeedItemReader>>,
+    /// Unlike the user identity this is known before any connection — it is
+    /// minted locally on first run and immutable afterwards
+    /// (`host.allium: MintHostIdentity`) — so it is a value rather than a cell.
+    /// The claim needs it (a task whose worktree is on another machine is one
+    /// this board must not take), and settings are scoped by it
+    /// (`settings.allium`).
+    host: String,
     /// The data directory whose `host.json` holds this install's identity
-    /// (`host.allium: IdentityLivesInHostFile`). `Some` on every board and CLI
-    /// process; the [`HostStore`] and [`IdentityCredentialStore`] methods
-    /// refuse without it.
-    host_file_dir: Option<std::path::PathBuf>,
-    /// The board's read seam over the in-memory store's own rows. Set only by
-    /// [`Store::open_in_memory`] (spec: `spacetime-memory-store.allium`,
-    /// `TestBoardReadsShareTheHandlesRows`).
-    #[cfg(any(test, feature = "test-support"))]
-    memory_board_reads: Option<Arc<dyn crate::sync::BoardReads>>,
+    /// (`host.allium: IdentityLivesInHostFile`).
+    host_file_dir: std::path::PathBuf,
     /// The temporary data directory [`Store::open_in_memory`] keeps its host
     /// file in, removed with the handle.
     #[cfg(any(test, feature = "test-support"))]
     _memory_host_dir: Option<tempfile::TempDir>,
 }
 
-/// Every port a store-backed [`Store`] routes through, attached together
-/// by [`Store::with_shared_store`] so a handle is routed all or nothing: a
-/// handle with a writer and no reader is the half-routed board task #4916
-/// found (writes reaching the store, reads answering from a table nothing
-/// writes), and this is what keeps it from being built again.
-pub struct SharedStorePorts {
-    pub writer: Arc<dyn SharedWriter>,
-    pub reader: Arc<dyn SharedReader>,
-    pub learning_reader: Arc<dyn SharedLearningReader>,
-    pub usage_reader: Arc<dyn SharedUsageReader>,
-    pub retired_feed_item_reader: Arc<dyn SharedRetiredFeedItemReader>,
-}
-
-/// The host id an in-memory handle's writer and host file both carry.
+/// The host id an in-memory handle's writes and host file both carry.
 #[cfg(any(test, feature = "test-support"))]
 const MEMORY_HOST_ID: &str = "test-host";
 
-/// The error every routed call returns on a handle with no port for it.
-fn no_store(port: &str) -> anyhow::Error {
-    anyhow::anyhow!("no shared store attached: this handle has no {port}")
-}
-
 impl Store {
-    /// A handle with no store and no host file attached. In production this is
-    /// the empty placeholder base the store's ports are attached to
-    /// (`runtime::placeholder_database`); it holds no data.
-    pub fn unattached() -> Self {
+    /// A handle over `rows`, writing through `caller`, with this install's
+    /// identity in `<data_dir>/host.json`.
+    ///
+    /// `host` is this install's own `Host` id — known before any connection,
+    /// because it is minted locally on first run (`host.allium:
+    /// MintHostIdentity`).
+    pub fn new(
+        rows: Arc<crate::sync::SharedRows>,
+        caller: Arc<dyn crate::sync::ReducerCaller>,
+        identity: Arc<dyn crate::sync::WriterIdentity>,
+        clock: Arc<dyn crate::service::Clock>,
+        host: String,
+        data_dir: &Path,
+    ) -> Self {
         Store {
-            shared_writer: None,
-            shared_learning_reader: None,
-            shared_usage_reader: None,
-            shared_reader: None,
-            shared_retired_feed_item_reader: None,
-            host_file_dir: None,
-            #[cfg(any(test, feature = "test-support"))]
-            memory_board_reads: None,
+            rows,
+            caller,
+            identity,
+            clock,
+            host,
+            host_file_dir: data_dir.to_path_buf(),
             #[cfg(any(test, feature = "test-support"))]
             _memory_host_dir: None,
         }
-    }
-
-    /// Route every shared read and write through `ports`. The one production
-    /// way to attach a store; the per-port builders below exist for the
-    /// tests that exercise a single port.
-    ///
-    /// Consuming rather than a setter, so which backing a read or write goes
-    /// to cannot change under a caller mid-operation.
-    pub fn with_shared_store(mut self, ports: SharedStorePorts) -> Self {
-        self.shared_writer = Some(ports.writer);
-        self.shared_reader = Some(ports.reader);
-        self.shared_learning_reader = Some(ports.learning_reader);
-        self.shared_usage_reader = Some(ports.usage_reader);
-        self.shared_retired_feed_item_reader = Some(ports.retired_feed_item_reader);
-        self
-    }
-
-    /// Keep this install's identity in `<data_dir>/host.json`
-    /// (`host.allium: IdentityLivesInHostFile`). The one production way to
-    /// build a handle's identity half; consuming for the same reason
-    /// [`Self::with_shared_store`] is.
-    pub fn with_host_file(mut self, data_dir: &Path) -> Self {
-        self.host_file_dir = Some(data_dir.to_path_buf());
-        self
-    }
-
-    /// The data directory holding the host file.
-    fn host_file_dir(&self) -> Result<&Path> {
-        self.host_file_dir.as_deref().ok_or_else(|| {
-            anyhow::anyhow!("no host file attached: this handle has no data directory")
-        })
-    }
-
-    /// Route the [`SharedReader`] reads to `reader`.
-    #[cfg(test)]
-    pub(crate) fn with_shared_reader(mut self, reader: Arc<dyn SharedReader>) -> Self {
-        self.shared_reader = Some(reader);
-        self
-    }
-
-    /// The shared reader.
-    fn shared_reader(&self) -> Result<&Arc<dyn SharedReader>> {
-        self.shared_reader
-            .as_ref()
-            .ok_or_else(|| no_store("shared reader"))
-    }
-
-    /// Route shared-table mutations to `writer`.
-    #[cfg(test)]
-    pub(crate) fn with_shared_writer(mut self, writer: Arc<dyn SharedWriter>) -> Self {
-        self.shared_writer = Some(writer);
-        self
-    }
-
-    /// The writer — the single accessor every routed mutation reads.
-    fn shared_writer(&self) -> Result<&Arc<dyn SharedWriter>> {
-        self.shared_writer
-            .as_ref()
-            .ok_or_else(|| no_store("shared writer"))
-    }
-
-    /// Route learning reads to `reader`.
-    #[cfg(test)]
-    pub(crate) fn with_shared_learning_reader(
-        mut self,
-        reader: Arc<dyn SharedLearningReader>,
-    ) -> Self {
-        self.shared_learning_reader = Some(reader);
-        self
-    }
-
-    /// The learning reader.
-    fn shared_learning_reader(&self) -> Result<&Arc<dyn SharedLearningReader>> {
-        self.shared_learning_reader
-            .as_ref()
-            .ok_or_else(|| no_store("learning reader"))
-    }
-
-    /// Route usage reads to `reader`.
-    #[cfg(test)]
-    pub(crate) fn with_shared_usage_reader(mut self, reader: Arc<dyn SharedUsageReader>) -> Self {
-        self.shared_usage_reader = Some(reader);
-        self
-    }
-
-    /// The usage reader.
-    fn shared_usage_reader(&self) -> Result<&Arc<dyn SharedUsageReader>> {
-        self.shared_usage_reader
-            .as_ref()
-            .ok_or_else(|| no_store("usage reader"))
-    }
-
-    /// Route `retired_without_task` reads to `reader`.
-    #[cfg(test)]
-    pub(crate) fn with_shared_retired_feed_item_reader(
-        mut self,
-        reader: Arc<dyn SharedRetiredFeedItemReader>,
-    ) -> Self {
-        self.shared_retired_feed_item_reader = Some(reader);
-        self
-    }
-
-    /// The retired-feed-item reader.
-    fn shared_retired_feed_item_reader(&self) -> Result<&Arc<dyn SharedRetiredFeedItemReader>> {
-        self.shared_retired_feed_item_reader
-            .as_ref()
-            .ok_or_else(|| no_store("retired feed item reader"))
     }
 
     /// A handle attached to a fresh in-memory store, which covers every
@@ -1779,10 +1239,9 @@ impl Store {
     /// call sites that `.await` it need no change.
     #[cfg(any(test, feature = "test-support"))]
     pub async fn open_in_memory() -> Result<Self> {
-        let (ports, board_reads) = Self::memory_store_ports();
         // Identity lives in a host file, as in production, so the handle gets
         // a private data directory holding one. It carries the host id the
-        // memory writer settles as, so a claim and an identity read agree.
+        // memory writes settle as, so a claim and an identity read agree.
         let host_dir = tempfile::tempdir().context("creating the host file directory")?;
         let host_file = crate::host_file::host_file_path(host_dir.path());
         let identity = crate::host_file::HostIdentity {
@@ -1798,26 +1257,18 @@ impl Store {
             std::fs::set_permissions(&host_file, std::fs::Permissions::from_mode(0o600))
                 .context("restricting the test host file")?;
         }
-        let mut db = Self::unattached()
-            .with_shared_store(ports)
-            .with_host_file(host_dir.path());
-        db.memory_board_reads = Some(board_reads);
+        let mut db = Self::in_memory_with_host_file(host_dir.path());
         db._memory_host_dir = Some(host_dir);
         Ok(db)
     }
 
-    /// The board's read seam over this handle's own in-memory rows, or `None`
-    /// for a handle with no store attached.
+    /// A handle over a fresh, private in-process store — one `SharedRows` and
+    /// one `MemoryReducerCaller` over it — whose identity lives in
+    /// `<data_dir>/host.json`. The writes settle as a fixed test user and
+    /// host. For a test whose subject is the host file itself; every other
+    /// test wants [`Self::open_in_memory`].
     #[cfg(any(test, feature = "test-support"))]
-    pub fn board_reads(&self) -> Option<Arc<dyn crate::sync::BoardReads>> {
-        self.memory_board_reads.clone()
-    }
-
-    /// Ports over a fresh, private in-process store: one `SharedRows` and one
-    /// `MemoryReducerCaller` over it, with every reader and the writer over
-    /// those same rows. The writer settles as a fixed test user and host.
-    #[cfg(any(test, feature = "test-support"))]
-    fn memory_store_ports() -> (SharedStorePorts, Arc<dyn crate::sync::BoardReads>) {
+    pub fn in_memory_with_host_file(data_dir: &Path) -> Self {
         use crate::sync as s;
         let rows = Arc::new(s::SharedRows::new());
         let clock: Arc<dyn crate::service::Clock> = Arc::new(crate::service::SystemClock);
@@ -1826,20 +1277,13 @@ impl Store {
         );
         let identity = Arc::new(s::SettledIdentity::default());
         identity.settle("test-user");
-        let board_reads = Arc::new(s::SubscriptionBoardReads::new(rows.clone()));
-        let ports = SharedStorePorts {
-            writer: Arc::new(s::ReducerWriter::new(
-                caller,
-                identity,
-                clock,
-                MEMORY_HOST_ID.to_string(),
-                board_reads.clone(),
-            )),
-            reader: board_reads.clone(),
-            learning_reader: Arc::new(s::SubscriptionLearningReads::new(rows.clone())),
-            usage_reader: Arc::new(s::SubscriptionUsageReads::new(rows.clone())),
-            retired_feed_item_reader: Arc::new(s::SubscriptionRetiredFeedItemReads::new(rows)),
-        };
-        (ports, board_reads)
+        Self::new(
+            rows,
+            caller,
+            identity,
+            clock,
+            MEMORY_HOST_ID.to_string(),
+            data_dir,
+        )
     }
 }

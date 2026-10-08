@@ -20,18 +20,25 @@
 //!
 //! # Shape of the module
 //!
+//! The primitives [`crate::store::Store`] sits on, and the connection that
+//! fills them:
+//!
+//! - [`rows`] — [`SharedRows`], the decoded, in-memory view of this
+//!   connection's subscriptions. Every store read answers from it.
+//! - [`writes`] — [`ReducerCaller`], the transport every store write goes
+//!   through, and the identity a write is stamped with.
+//! - [`encode`] / [`decode`] — model rows to and from the generated bindings.
+//! - [`board_reads`] — [`BoardReads`], the handle the board draws cards from.
+//! - [`subtree`] — the epic subtree a board follows.
 //! - [`identity`] — the three-way verdict on an identity the store offers.
 //!   Pure, and the only fatal decision in the subsystem.
 //! - [`connection`] — the connection lifecycle as a state machine. No I/O, no
 //!   clock of its own; the caller supplies both the event and the instant.
+//! - [`session`] — drives that state machine against a [`StoreConnector`].
 //! - [`connector`] — the seam to a real store. One trait, so the state machine
-//!   above can be driven against a fake that fails on command.
-//!
-//! # What this module does NOT do
-//!
-//! It does not repoint the board's reads. The board still reads and writes its
-//! local store; this builds the connection beside it. Moving the read path is a
-//! later change with its own spec work — see `sync.allium`'s Excludes.
+//!   above can be driven against a fake that fails on command;
+//!   [`sdk_connector`] is the SpacetimeDB implementation, and `memory_caller`
+//!   the in-process test double.
 //!
 //! **The Rust SDK has no auto-reconnect.** That is not a gap being worked
 //! around here, it is the reason [`connection`] exists at all: without the
@@ -50,21 +57,18 @@ pub mod connector;
 pub mod decode;
 pub mod encode;
 pub mod identity;
-pub mod learning_reads;
 #[cfg(any(test, feature = "test-support"))]
 pub mod memory_caller;
-pub mod retired_feed_item_reads;
 pub mod rows;
 pub mod sdk_connector;
 pub mod session;
 pub mod subtree;
-pub mod usage_reads;
 pub mod writes;
 
 #[cfg(test)]
 pub(crate) mod tests;
 
-pub use board_reads::{BoardReads, SubscriptionBoardReads};
+pub use board_reads::BoardReads;
 pub use connection::{
     backoff, BoardConnection, ConnectionEvent, ConnectionStatus, CONNECT_TIMEOUT, MUTATION_TIMEOUT,
     RECONNECT_BACKOFF_BASE, RECONNECT_BACKOFF_MAX,
@@ -72,14 +76,11 @@ pub use connection::{
 pub use connector::{Accepted, ConnectError, StoreConnector, SubscriptionRequest};
 pub use decode::DecodeError;
 pub use identity::{identity_conflict_message, settle_identity, IdentityVerdict};
-pub use learning_reads::SubscriptionLearningReads;
 #[cfg(any(test, feature = "test-support"))]
 pub use memory_caller::MemoryReducerCaller;
-pub use retired_feed_item_reads::SubscriptionRetiredFeedItemReads;
 pub use rows::{HostRow, RepoBaseBranchRow, RepoPathRow, SharedRows};
 pub use sdk_connector::{SdkReducerCaller, SpacetimeSdkConnector};
 pub use session::{StepOutcome, SyncSession, SyncStore};
-pub use usage_reads::SubscriptionUsageReads;
 pub use writes::{
-    push_host_registration, ReducerCaller, ReducerWriter, SettledIdentity, WriterIdentity,
+    push_host_registration, ReducerCaller, ReducerOutcome, SettledIdentity, WriterIdentity,
 };

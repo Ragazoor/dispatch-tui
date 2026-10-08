@@ -2,10 +2,7 @@
 //! `nothing_is_read_through_to_the_local_store` is the structural half; the
 //! other half is what is ASKED for, in `tests::queries`.
 
-use std::sync::Arc;
-
-use crate::store::{CreateTaskRequest, Store, TaskCrud};
-use crate::sync::{BoardReads, SharedRows, SubscriptionBoardReads};
+use crate::store::{CreateTaskRequest, EpicRead, RepoConfigRead, Store, TaskCrud, TaskRead};
 
 /// **Test 3 of the phase plan**, structurally.
 ///
@@ -39,18 +36,14 @@ async fn nothing_is_read_through_to_the_local_store() {
         .await
         .unwrap();
     assert!(
-        !db.board_reads()
-            .unwrap()
-            .list_tasks()
-            .await
-            .unwrap()
-            .is_empty(),
+        !db.list_all().await.unwrap().is_empty(),
         "the handle's own store must be populated, or this proves nothing"
     );
 
-    let nothing_delivered = SubscriptionBoardReads::new(Arc::new(SharedRows::new()));
+    // A second handle over rows nothing has been delivered to.
+    let nothing_delivered = Store::open_in_memory().await.unwrap();
 
-    assert!(nothing_delivered.list_tasks().await.unwrap().is_empty());
+    assert!(nothing_delivered.list_all().await.unwrap().is_empty());
     assert!(nothing_delivered.list_epics().await.unwrap().is_empty());
     assert!(nothing_delivered
         .list_repo_paths()

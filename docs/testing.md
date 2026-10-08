@@ -72,16 +72,19 @@ Suite is green; if a runtime test fails locally, suspect timing — `spawn_block
 ## The in-memory store
 
 `Store::open_in_memory()` — the constructor behind essentially every
-DB-touching test — attaches ports over a fresh, private in-process store: one
+DB-touching test — is the production `Store` over a fresh, private in-process store: one
 `SharedRows` and one `MemoryReducerCaller` that runs the module's own reducer
 logic over it. Two handles never share rows, and a handle's host file lives in
 a temporary directory removed with it. Nothing builds a schema, so a handle
 costs microseconds.
 
-There is no SQLite: `Store::unattached()` is the empty base with no ports,
-for the tests whose subject is "a handle with no store refuses". A fault a test
-needs to inject (an unreadable store, an unreadable host file) is injected with
-that handle, or with a replaced `host.json`, not with a broken table.
+There is no SQLite, and no handle without a store: every part of a `Store` is
+required. A test whose subject is the host file itself uses
+`Store::in_memory_with_host_file(dir)`; a fault it needs to inject (an
+unreadable host file) is injected with a replaced `host.json`. Reads answer
+from in-memory rows and cannot fail, so a read-error arm in a service is not
+reachable from a test; a write fault is injected with a refusing
+`ReducerCaller` (see `RecordingCaller` in `src/sync/tests/writes.rs`).
 
 ## Snapshot tests
 

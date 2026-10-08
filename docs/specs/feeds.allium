@@ -1514,7 +1514,7 @@ rule UpsertFeedTasks {
         -- SQLite ONE ABOVE, but the obligation it discharges does not: the
         -- delete itself is still unconditional (every stale row is removed
         -- whether or not it is reported). A reducer cannot RETURN the rows it
-        -- deleted, so src/sync/writes.rs::ReducerWriter predicts candidates
+        -- deleted, so the Store (src/store/queries/tasks.rs) predicts candidates
         -- from its own already-subscribed view before calling the reducer,
         -- then reports only the ones CONFIRMED absent from that view
         -- afterward. A candidate that survives the call (raced by a

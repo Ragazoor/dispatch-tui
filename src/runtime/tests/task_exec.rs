@@ -152,7 +152,7 @@ async fn exec_refresh_from_db_syncs_external_changes() {
 
 #[tokio::test]
 async fn exec_refresh_from_db_returns_commands_from_refresh() {
-    let (rt, mut app) = test_runtime_unattached().await;
+    let (rt, mut app) = test_runtime().await;
     // Insert a task directly into DB as Running
     rt.db_write()
         .create_task(CreateTaskRequest {

@@ -321,23 +321,6 @@ mod tests {
         );
     }
 
-    /// The other half of bucket 5: the epic row is there but cannot be READ.
-    ///
-    /// Fault-injected with a handle that has no store attached, whose every
-    /// read refuses — the arm is unreachable otherwise.
-    #[tokio::test]
-    async fn a_cycle_whose_epic_read_errors_fails_without_syncing_anything() {
-        let db = Arc::new(Store::unattached());
-        let epic_id = EpicId(1);
-
-        let err = failure(cycle(db.clone(), epic_id).run().await);
-
-        assert!(
-            err.contains("failed to read epic"),
-            "an unreadable epic must fail as such, got: {err}"
-        );
-    }
-
     /// #4150: exec_feed_command has a deadline. A command that never exits
     /// must fail within it AND release the epic's claim so the NEXT cycle
     /// proceeds — proving only that one call returned is not enough (see

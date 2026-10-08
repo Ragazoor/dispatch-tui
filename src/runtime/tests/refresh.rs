@@ -96,7 +96,7 @@ mod spawn_refresh_task {
 
     #[tokio::test]
     async fn spawn_refresh_task_falls_back_when_task_gone() {
-        let db = test_db_unattached().await;
+        let db = test_db().await;
         let (tx, mut rx) = mpsc::unbounded_channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let rt = make_runtime(db.clone(), tx, runner).await;

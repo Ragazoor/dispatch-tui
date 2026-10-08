@@ -18,8 +18,8 @@
 //!
 //! # Ordering is part of the contract
 //!
-//! Every accessor returns rows in the order SQLite's corresponding `ORDER BY`
-//! returns them, because "renders identically" is a claim about a `Vec`, not
+//! Every accessor returns rows in the order the retired SQLite store's
+//! corresponding `ORDER BY` returned them, because "renders identically" is a claim about a `Vec`, not
 //! about a set. The orderings are stated at each accessor and are the reason
 //! this type keeps `BTreeMap`s rather than hash maps: the tiebreak is then the
 //! id, deterministically, without a second sort.
@@ -141,8 +141,8 @@ struct Rows {
     /// Telemetry (Phase 11, task #4915). Unconditionally subscribed, like
     /// `learnings` above — nothing here is scoped by owner or host.
     usage_events: BTreeMap<i64, UsageEventRow>,
-    /// The three tables `store::SharedReader` needs beyond the ones above (task
-    /// #4916). None carries a sentinel, an enum or a timestamp a reader
+    /// The three tables the store's task, subscription and settings reads need
+    /// beyond the ones above (task #4916). None carries a sentinel, an enum or a timestamp a reader
     /// interprets, so they are held as the store sends them.
     ///
     /// `settings` arrives already scoped to this host by the subscription's
@@ -597,9 +597,9 @@ impl SharedRows {
     ///
     /// The ascending tiebreak looks backwards beside `base_branches` below, and
     /// is deliberate: `last_used` has whole-second resolution, so paths saved in
-    /// one second tie, and SQLite has always broken that tie by rowid ascending.
-    /// Matching it is what keeps the picker's order the order it has always had
-    /// — see the same `ORDER BY` in `RepoConfigStore::list_repo_paths`.
+    /// one second tie, and the retired SQLite store broke that tie by rowid
+    /// ascending. Matching it is what keeps the picker's order the order it has
+    /// always had.
     pub fn repo_paths(&self) -> Vec<String> {
         self.read(|rows| {
             let mut out: Vec<&RepoPathRow> = rows.repo_paths.values().collect();
@@ -803,10 +803,11 @@ impl SharedRows {
     }
 
     /// Of `external_ids`, the subset retired under `feed_epic_id` AND absent
-    /// from every task anywhere in `feed_epic_id`'s subtree — the read twin of
-    /// `store::TaskCrud::retired_without_task`'s SQLite recursive-CTE query, done
-    /// in Rust over the rows a standing subscription already holds, the same
-    /// reasoning [`Self::usage_summary`] documents.
+    /// from every task anywhere in `feed_epic_id`'s subtree — what
+    /// `store::TaskCrud::retired_without_task` answers. A subtree join a
+    /// subscription's `WHERE` clause cannot express, so it runs in Rust over the
+    /// rows a standing subscription already holds, the same reasoning
+    /// [`Self::usage_summary`] documents.
     pub fn retired_without_task(
         &self,
         feed_epic_id: EpicId,

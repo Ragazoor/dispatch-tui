@@ -1,55 +1,55 @@
 //! `OpenInMemoryAttachesStoreOnceComplete` (docs/specs/spacetime-memory-store.allium).
 use super::*;
 
+/// The board's card reads and the store's own reads are one path over one
+/// set of rows: a write through the handle is visible through both, with no
+/// second copy to keep in step (`sync.allium: BoardReadsFromTheSubscription`).
 #[tokio::test]
-async fn open_in_memory_attaches_every_shared_port_once_store_is_complete() {
-    let db = Store::open_in_memory().await.unwrap();
-    assert!(db.shared_writer.is_some());
-    assert!(db.shared_reader.is_some());
-    assert!(db.shared_learning_reader.is_some());
-    assert!(db.shared_usage_reader.is_some());
-    assert!(db.shared_retired_feed_item_reader.is_some());
+async fn the_board_reads_and_the_store_answer_from_the_same_rows() {
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
+    let board: Arc<dyn crate::sync::BoardReads> = db.clone();
+    let before = board.revision().await;
+
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "drawn",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+            auto_run_plan: false,
+            phoenix: false,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(board.get_task(id).await.unwrap().unwrap().title, "drawn");
+    assert_eq!(board.list_all().await.unwrap().len(), 1);
+    assert_ne!(
+        board.revision().await,
+        before,
+        "a write must move the revision the redraw guard compares"
+    );
 }
 
-/// A handle with no store attached has nothing to answer from: every shared
-/// read and write refuses, and says why, instead of answering from a table
-/// nothing else reads (`storage.allium`).
-#[tokio::test]
-async fn an_unattached_handle_refuses_every_shared_read_and_write() {
-    let db = Store::unattached();
-    assert!(db.shared_writer.is_none());
-    assert!(db.shared_reader.is_none());
-
-    let read = db.list_all().await.unwrap_err();
-    assert!(
-        read.to_string().contains("no shared store attached"),
-        "{read}"
-    );
-    let write = db.create_epic("E", "", None).await.unwrap_err();
-    assert!(
-        write.to_string().contains("no shared store attached"),
-        "{write}"
-    );
-    let learning = db.get_learning(LearningId(1)).await.unwrap_err();
-    assert!(
-        learning.to_string().contains("no shared store attached"),
-        "{learning}"
-    );
-}
-
-/// Identity lives only in the host file: a handle with none refuses, rather
-/// than keeping an identity somewhere nothing else reads.
+/// Identity lives only in the host file: a handle whose data directory holds
+/// none refuses, rather than keeping an identity somewhere nothing else reads.
 #[tokio::test]
 async fn a_handle_with_no_host_file_refuses_identity() {
-    let db = Store::unattached();
-    let err = db.ensure_host_identity().await.unwrap_err();
-    assert!(err.to_string().contains("no host file attached"), "{err}");
+    let dir = tempfile::tempdir().unwrap();
+    let db = Store::in_memory_with_host_file(dir.path());
+    assert!(db.ensure_host_identity().await.is_err());
     assert!(db.user_identity().await.is_err());
     assert!(db.adopt_user_identity("user-a").await.is_err());
 }
 
 #[tokio::test]
-async fn attached_handle_round_trips_a_task_through_the_store_not_sqlite() {
+async fn attached_handle_round_trips_a_task_through_the_store() {
     let db = Store::open_in_memory().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {

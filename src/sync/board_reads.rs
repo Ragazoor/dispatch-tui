@@ -2,49 +2,41 @@
 //!
 //! Spec: `docs/specs/sync.allium`'s `BoardReadsFromTheSubscription`.
 //!
-//! # Why a seam rather than a swapped store
+//! # One read path for cards
 //!
-//! This trait names exactly the reads the board performs to put cards on
-//! screen, and nothing else — the reads the row-change pump and the tick's
-//! revision guard refresh. Every other read goes through the runtime's
-//! `database`, which since task #4916 answers from the same rows through
-//! `store::SharedReader`.
+//! [`BoardReads`] is the handle the board draws its cards from — the reads
+//! the row-change pump and the tick's revision guard refresh. Its card reads
+//! are the store's own read traits ([`TaskRead`], [`EpicRead`],
+//! [`RepoConfigRead`]), so there is one `get_task`, not a second copy on a
+//! second trait; this trait adds only what drawing needs beyond them: the
+//! poll owner and the revision.
 //!
-//! # Two implementations, and which one runs
-//!
-//! [`SubscriptionBoardReads`] reads the live view of this board's
-//! subscriptions, and is what every board runs: the store is mandatory.
-//! A store-attached in-memory `Store` serves the same type over its own rows
-//! (`Store::board_reads`); there is no SQLite-backed implementation.
+//! [`crate::store::Store`] is the one implementation, answering from the
+//! subscription's rows. The TUI holds the same `Store` twice — as
+//! `dyn BoardReads` for cards and as `dyn TaskReadStore` for everything else —
+//! so a card read through either answers from the same rows; the separate
+//! handle is what makes "the board draws from here" visible at the call site.
 //!
 //! # The revision number
 //!
-//! [`BoardReads::revision`] is the cheap "has anything changed?" both backings
-//! can answer: SQLite's cumulative change counter, or the subscription's
-//! generation. The tick-driven refresh compares it before re-reading, which is
-//! what keeps a speculative refresh free. Its VALUES are not comparable across
-//! implementations and nothing persists one, so swapping the backing simply
-//! costs one extra refresh.
+//! [`BoardReads::revision`] is the cheap "has anything changed?": the
+//! subscription's generation. The tick-driven refresh compares it before
+//! re-reading, which is what keeps a speculative refresh free. Nothing
+//! persists one, so a fresh connection simply costs one extra refresh.
 
 use anyhow::Result;
 use async_trait::async_trait;
-use std::sync::Arc;
 
-use crate::models::{Epic, EpicId, PollScopeId, Task, TaskId};
-
-use super::SharedRows;
+use crate::models::PollScopeId;
+use crate::store::{EpicRead, RepoConfigRead, TaskRead};
 
 /// The reads a board performs to draw itself.
+///
+/// Read-only by construction: the supertraits are the read halves of the
+/// task, epic and repo-config domains, so a `dyn BoardReads` reaches no
+/// mutation.
 #[async_trait]
-pub trait BoardReads: Send + Sync {
-    async fn list_tasks(&self) -> Result<Vec<Task>>;
-    async fn get_task(&self, id: TaskId) -> Result<Option<Task>>;
-    async fn list_tasks_for_epic(&self, epic: EpicId) -> Result<Vec<Task>>;
-    async fn list_epics(&self) -> Result<Vec<Epic>>;
-    async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
-    async fn list_repo_paths(&self) -> Result<Vec<String>>;
-    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>>;
-
+pub trait BoardReads: TaskRead + EpicRead + RepoConfigRead {
     /// The `Host.id` allowed to run recurring background polling for
     /// `target`, or `None` if unclaimed (`core.allium: PollOwner`). See
     /// `pr-workflow.allium: PollPrStatus` and `feeds.allium: FeedTick`, the two
@@ -53,146 +45,12 @@ pub trait BoardReads: Send + Sync {
 
     /// A number that changes when the rows do.
     ///
-    /// `None` means "cannot tell" — take it as changed. That is the answer a
-    /// failed read gives, and erring towards one wasted refresh is the right
-    /// side to err on: the other side is a board that stops updating and says
-    /// nothing.
+    /// `None` means "cannot tell" — take it as changed. Erring towards one
+    /// wasted refresh is the right side to err on: the other side is a board
+    /// that stops updating and says nothing.
     ///
     /// `Option<u64>` rather than a signed sentinel. The caller also has to
     /// represent "never read yet", and with one `-1` standing for both that
-    /// value meant two different absences on the same line. It also spared the
-    /// subscription backing a saturating conversion it only needed because the
-    /// trait had chosen a signed type for an unsigned counter.
+    /// value meant two different absences on the same line.
     async fn revision(&self) -> Option<u64>;
-}
-
-/// Reads from the live view of this board's subscriptions.
-///
-/// Every method is infallible in practice — the rows are already decoded and in
-/// memory — but keeps the `Result` its twin has, so the runtime has one code
-/// path rather than two. A board that is not connected holds no rows and
-/// answers empty; it does not answer an error, because "disconnected" is the
-/// connection's state to report (`sync.allium`'s `ConnectionIndicator`) and
-/// reporting it again per read would put the same outage on screen eight times.
-pub struct SubscriptionBoardReads {
-    rows: Arc<SharedRows>,
-}
-
-impl SubscriptionBoardReads {
-    pub fn new(rows: Arc<SharedRows>) -> Self {
-        Self { rows }
-    }
-}
-
-#[async_trait]
-impl BoardReads for SubscriptionBoardReads {
-    async fn list_tasks(&self) -> Result<Vec<Task>> {
-        Ok(self.rows.tasks())
-    }
-
-    async fn get_task(&self, id: TaskId) -> Result<Option<Task>> {
-        Ok(self.rows.task(id))
-    }
-
-    async fn list_tasks_for_epic(&self, epic: EpicId) -> Result<Vec<Task>> {
-        Ok(self.rows.tasks_for_epic(epic))
-    }
-
-    async fn list_epics(&self) -> Result<Vec<Epic>> {
-        Ok(self.rows.epics())
-    }
-
-    async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
-        Ok(self.rows.epic(id))
-    }
-
-    async fn list_repo_paths(&self) -> Result<Vec<String>> {
-        Ok(self.rows.repo_paths())
-    }
-
-    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>> {
-        Ok(self.rows.base_branches())
-    }
-
-    async fn poll_owner(&self, target: PollScopeId) -> Result<Option<String>> {
-        Ok(self.rows.poll_owner(target).map(|row| row.host))
-    }
-
-    async fn revision(&self) -> Option<u64> {
-        Some(self.rows.generation())
-    }
-}
-
-/// The same rows answer every other shared read `Store` routes
-/// (`store::SharedReader`, `sync.allium`'s `BoardReadsFromTheSubscription`) — one
-/// adapter over [`SharedRows`], not two kept in step.
-#[async_trait]
-impl crate::store::SharedReader for SubscriptionBoardReads {
-    async fn list_all(&self) -> Result<Vec<Task>> {
-        Ok(self.rows.tasks())
-    }
-
-    async fn get_task(&self, id: TaskId) -> Result<Option<Task>> {
-        Ok(self.rows.task(id))
-    }
-
-    async fn task_exists(&self, id: TaskId) -> Result<bool> {
-        Ok(self.rows.has_task(id))
-    }
-
-    async fn list_live_agent_tasks(&self) -> Result<Vec<Task>> {
-        Ok(self.rows.live_agent_tasks())
-    }
-
-    async fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>> {
-        Ok(self.rows.task_by_plan(plan))
-    }
-
-    async fn list_tasks_for_epic(&self, epic: EpicId) -> Result<Vec<Task>> {
-        Ok(self.rows.tasks_for_epic(epic))
-    }
-
-    async fn list_undecodable_task_ids_for_epic(&self, epic: EpicId) -> Result<Vec<TaskId>> {
-        Ok(self.rows.undecodable_task_ids_for_epic(epic))
-    }
-
-    async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>> {
-        Ok(self.rows.tasks_with_epic())
-    }
-
-    async fn list_watchers_of(&self, target: TaskId) -> Result<Vec<TaskId>> {
-        Ok(self.rows.watchers_of(target))
-    }
-
-    async fn list_epics(&self) -> Result<Vec<Epic>> {
-        Ok(self.rows.epics())
-    }
-
-    async fn list_epics_with_parent(&self, parent: Option<EpicId>) -> Result<Vec<Epic>> {
-        Ok(self.rows.epics_with_parent(parent))
-    }
-
-    async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
-        Ok(self.rows.epic(id))
-    }
-
-    async fn list_repo_paths(&self) -> Result<Vec<String>> {
-        Ok(self.rows.repo_paths())
-    }
-
-    async fn get_verify_command(&self, path: &str) -> Result<Option<String>> {
-        Ok(self.rows.verify_command(path))
-    }
-
-    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>> {
-        Ok(self.rows.base_branches())
-    }
-
-    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<EpicId>> {
-        Ok(self.rows.subscribed_epics(subscriber))
-    }
-
-    async fn get_setting(&self, key: &str) -> Result<Option<String>> {
-        Ok(self.rows.setting(key))
-    }
 }

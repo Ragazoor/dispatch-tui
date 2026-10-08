@@ -1116,8 +1116,7 @@ async fn create_task_with_epic_sort_tag_single_insert() {
 // ---------------------------------------------------------------------------
 
 /// tasks.allium: `BatchDelete`'s atomic counterpart to `delete_task`/
-/// `delete_epic` looped per item — the SQLite (no shared writer) path,
-/// covering both domains in one call.
+/// `delete_epic` looped per item, covering both domains in one call.
 #[tokio::test]
 async fn batch_delete_removes_a_task_and_an_epic_subtree_together() {
     let db = in_memory_db().await;

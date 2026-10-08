@@ -601,7 +601,7 @@ impl ReducerCaller for SdkReducerCaller {
     }
 
     /// Plain applied/refused — `Resumed` vs. `Refreshed` is not decodable
-    /// here at all (both write the identical row); `ReducerWriter` classifies
+    /// here at all (both write the identical row); the `Store` classifies
     /// it from a pre-read instead. See its own doc comment.
     async fn record_user_prompt_submit(
         &self,
@@ -635,7 +635,7 @@ impl ReducerCaller for SdkReducerCaller {
     // -- Feed ingestion (Phase 6c) --------------------------------------------
     //
     // Plain applied-or-refused calls: which rows a stale-delete removed is
-    // decoded in `ReducerWriter`, from its own pre-read, not here — see this
+    // decoded in the `Store`, from its own pre-read, not here — see this
     // task's plan doc, decision 1.
 
     async fn upsert_feed_tasks(
