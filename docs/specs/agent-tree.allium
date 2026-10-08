@@ -2307,6 +2307,36 @@ rule AgentTreeAgentJumpFailureIsVisible {
         -- to cover the second in between.
 }
 
+-- A spike, not yet a replacement: the dispatch plugin also ships a Claude Code
+-- mod (a hooks module) that draws a pane inside the agent's own session. It
+-- exists to prove the move described in docs/plans/mods-agent-tree-design.md
+-- is possible; the tmux companion pane above stays the working feature until
+-- the mod reaches parity.
+
+rule AgentSessionLoadsDispatchMod {
+    -- A dispatched agent's session (any launch path) starts with the dispatch plugin directory
+    -- (the --plugin-dir flag dispatch always passes). The plugin's
+    -- hooks/hooks.json names a hooks module beside its command hooks, so the
+    -- session loads the module without the person enabling anything.
+    when: AgentLaunched(task, mode)
+
+    ensures: DispatchModLoaded(task)
+
+    @guidance
+        -- The mod learns its task id the way the command hooks do: the
+        -- leading digits of the git branch name, from `git branch
+        -- --show-current` run in the session's cwd. It learns the board's
+        -- loopback port from the DISPATCH_PORT environment variable, which
+        -- the board publishes on its tmux session and every agent window
+        -- inherits. An unset variable means the default port.
+        --
+        -- The spike's pane is opened by the person typing /dispatch-spike
+        -- and shows the task id, the port and the cwd. It reads nothing
+        -- from the board yet (PanesReadThroughTheBoard will apply once it
+        -- does). A headless run (claude -p) draws nothing, which is fine
+        -- for agents, as they are interactive.
+}
+
 ------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------
