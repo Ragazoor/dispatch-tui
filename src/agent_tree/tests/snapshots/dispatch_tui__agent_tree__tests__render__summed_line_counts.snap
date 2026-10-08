@@ -1,5 +1,5 @@
 ---
-source: src/cli/agent_tree/tests.rs
+source: src/agent_tree/tests/render.rs
 expression: out
 ---
 ┌ task ────────────────────────────────────────────────────┐

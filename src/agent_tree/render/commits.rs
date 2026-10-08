@@ -7,7 +7,7 @@
 //! and `AgentTreeSourceIsOneSelection` guarantees).
 //!
 //! Pure view state and rendering only. Reading the commits from git belongs to
-//! `super::agent_tree::git_branch_commits`, and the selection itself lives on
+//! [`crate::agent_tree::changes::git_branch_commits`], and the selection itself lives on
 //! the pane's `RenderState`.
 
 use std::time::Duration;
@@ -18,8 +18,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::cli::agent_tree_agents::border_style;
-use crate::cli::list_cursor::ListCursor;
+use crate::agent_tree::list_cursor::ListCursor;
+use crate::agent_tree::render::agents::border_style;
 use crate::palette::YELLOW;
 
 /// The most rows the section takes from the pane, "unstaged work" included —

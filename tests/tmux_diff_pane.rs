@@ -8,13 +8,13 @@
 //! replaced), which pane keeps focus, which cwd the process resolved, and which
 //! panes the agent-tree toggle kills. `MockProcessRunner` can only pin the
 //! command strings — see tests/tmux_harness/mod.rs and the mock-level tests in
-//! `src/agent_tree_diff_pane.rs`.
+//! `src/agent_tree/diff_pane.rs`.
 
 mod tmux_harness;
 
 use std::path::Path;
 
-use dispatch_tui::agent_tree_diff_pane::reconcile_diff_pane;
+use dispatch_tui::agent_tree::diff_pane::reconcile_diff_pane;
 use dispatch_tui::dispatch;
 use dispatch_tui::models::{test_tmux_window, TaskId};
 use dispatch_tui::tmux::{PANE_ROLE_AGENT_TREE, PANE_ROLE_DIFF, PANE_ROLE_OPTION};

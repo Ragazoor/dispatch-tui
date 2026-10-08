@@ -32,13 +32,16 @@ pub trait ListCursor {
     }
 
     fn half_page_down(&mut self) {
-        let (last, step) = (self.last(), crate::cli::half_page(self.viewport_rows()));
+        let (last, step) = (
+            self.last(),
+            crate::agent_tree::pane::half_page(self.viewport_rows()),
+        );
         let cursor = self.cursor_mut();
         *cursor = (*cursor + step).min(last);
     }
 
     fn half_page_up(&mut self) {
-        let step = crate::cli::half_page(self.viewport_rows());
+        let step = crate::agent_tree::pane::half_page(self.viewport_rows());
         let cursor = self.cursor_mut();
         *cursor = cursor.saturating_sub(step);
     }

@@ -14,7 +14,7 @@ use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
-use common::{dead_port, repo_file, seed_task, spawn_board};
+use common::{dead_port, seed_task, spawn_board};
 use dispatch_tui::hooks::fetch_pane_view;
 use dispatch_tui::hooks::wire::{PaneTask, PaneViewRequest, PANE_VIEW_PATH};
 use dispatch_tui::models::{test_tmux_window, TaskId, TaskStatus};
@@ -222,21 +222,25 @@ fn pane_renderers_take_the_board_address_like_a_hook() {
 /// holds the guarantee.
 #[test]
 fn no_pane_renderer_source_opens_the_store() {
-    const FILES: &[&str] = &[
-        "src/cli/mod.rs",
-        "src/cli/agent_tree.rs",
-        "src/cli/agent_diff.rs",
-        "src/cli/agent_tree_agents.rs",
-        "src/cli/agent_tree_commits.rs",
-    ];
+    // The whole feature module, so a file added to it is covered without
+    // being listed here, plus the two `cli` entry points.
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = common::rust_files(&src.join("agent_tree"), true);
+    assert!(
+        files.len() > 5,
+        "found only {files:?} under src/agent_tree -- did the module move?"
+    );
+    files.push(src.join("cli/agent_tree.rs"));
+    files.push(src.join("cli/agent_diff.rs"));
     const FORBIDDEN: &[&str] = &["open_cli_store", "crate::store::", "TaskRead", "Store"];
-    for file in FILES {
-        let source = repo_file(file);
+    for file in &files {
+        let source = std::fs::read_to_string(file).unwrap();
         for needle in FORBIDDEN {
             assert!(
                 !source.contains(needle),
-                "{file} names `{needle}` -- a pane renderer reads through the board, \
-                 never the store"
+                "{} names `{needle}` -- a pane renderer reads through the board, \
+                 never the store",
+                file.display()
             );
         }
     }

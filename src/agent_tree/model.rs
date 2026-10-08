@@ -6,7 +6,7 @@
 //! guarantee. This module owns two halves of that: parsing what git printed
 //! ([`parse_name_status`], [`parse_untracked`]) and folding the result into a
 //! tree of only the changed paths and their ancestor directories
-//! ([`build_tree`]). Running git is the renderer's job (`src/cli/agent_tree.rs`);
+//! ([`build_tree`]). Running git is [`crate::agent_tree::changes`]';
 //! nothing in this file touches the filesystem or spawns a process, which is
 //! what keeps every rule below testable from a string literal.
 
@@ -99,7 +99,7 @@ impl TreeNode {
     /// Resolve a chain of name segments, relative to this node, to the node it
     /// names — `None` if any segment matches no child. Segment chains are how
     /// the companion pane's tree widget identifies a node (see
-    /// `build_tree_items` in `src/cli/agent_tree.rs`), so this is what turns a
+    /// `build_tree_items` in `src/agent_tree/render/mod.rs`), so this is what turns a
     /// widget selection back into a `TreeNode`.
     ///
     /// A segment here is a node's `name`, which for a chain-merged directory is
@@ -358,7 +358,7 @@ fn change_precedence(change: FileChange) -> u8 {
 /// we cannot vouch for, and the pane's rooting at the worktree
 /// (`TaskPaneRootIsTaskWorktree`) is what depends on getting it right.
 ///
-/// Shared with [`crate::agent_tree_open_set::read_open_set`], which applies it
+/// Shared with [`crate::agent_tree::open_set::read_open_set`], which applies it
 /// to every path it reads back off disk — one guard, so the two cannot drift
 /// apart on which components they consider safe.
 pub(crate) fn relative_components(path: &Path) -> Option<Vec<OsString>> {
@@ -533,7 +533,7 @@ fn kind_rank(kind: TreeNodeKind) -> u8 {
 ///
 /// A `Vec`, not a set, because the order is the point: it is the order the
 /// tree publishes to the diff pane, which renders the paths as received (see
-/// `crate::agent_tree_open_set::write_open_set`).
+/// `crate::agent_tree::open_set::write_open_set`).
 pub fn file_paths_in_tree_order(root: &TreeNode) -> Vec<PathBuf> {
     // `join`, not a shared `PathBuf` pushed and popped down the walk. A
     // chain-merged directory's name spans several components, and

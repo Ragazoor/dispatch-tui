@@ -281,7 +281,7 @@ fn pressing_each_key_of_each_diff_row_records_the_rows_action() {
                 assert!(rig.state.usage.is_empty(), "first g is pending input");
                 rig.press(KeyCode::Char('g'));
             } else {
-                let ev = crate::cli::test_key_event(key);
+                let ev = crate::agent_tree::pane::test_key_event(key);
                 handle_key(&mut rig.state, rig.lines.len(), ev);
             }
             pressed += 1;
@@ -311,7 +311,7 @@ fn pressing_each_key_of_each_diff_row_records_the_rows_action() {
 fn a_press_with_no_row_does_nothing_in_the_diff_pane() {
     for key in ["Space", "Enter", "a", "Tab", "Ctrl+J", "Ctrl+G", "Ctrl+Q"] {
         let mut rig = Rig::new(60, 12);
-        let ev = crate::cli::test_key_event(key);
+        let ev = crate::agent_tree::pane::test_key_event(key);
         assert_eq!(
             handle_key(&mut rig.state, rig.lines.len(), ev),
             DiffKeyAction::Continue,

@@ -210,7 +210,7 @@ pub async fn detect_default_branch_async(
 /// here — provisioning a worktree's start point
 /// ([`crate::dispatch::worktree`]), measuring drift and merging
 /// ([`crate::repo_sync`]), and resolving the agent tree's diff baseline
-/// (`crate::cli::agent_tree`).
+/// (`crate::agent_tree::changes`).
 ///
 /// Being one definition is load-bearing, not tidiness. Two of those callers
 /// must agree on which ref a worktree was branched from: dispatch picks the

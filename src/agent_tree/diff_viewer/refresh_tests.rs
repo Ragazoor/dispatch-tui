@@ -1,6 +1,6 @@
 use super::*;
-use crate::agent_tree_open_set::{read_open_set, write_open_set, write_selected_source};
-use crate::cli::agent_tree::test_repo::TestRepo;
+use crate::agent_tree::open_set::{read_open_set, write_open_set, write_selected_source};
+use crate::agent_tree::test_repo::TestRepo;
 use crate::process::{MockProcessRunner, RealProcessRunner};
 use crate::worktree_admin::tests::make_linked_worktree;
 

@@ -1,5 +1,5 @@
 use super::*;
-use crate::cli::agent_tree::GIT_TIMEOUT;
+use crate::agent_tree::changes::GIT_TIMEOUT;
 use crate::process::MockProcessRunner;
 
 /// A commit the user has selected in the tree's commits section.

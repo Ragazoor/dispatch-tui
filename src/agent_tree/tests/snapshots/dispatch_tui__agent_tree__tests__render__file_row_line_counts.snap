@@ -1,9 +1,9 @@
 ---
-source: src/cli/agent_tree/tests.rs
+source: src/agent_tree/tests/render.rs
 expression: out
 ---
 ┌ task ────────────────────────────────────────────────────┐
-│    a.rs [Modified] +2 -1                                 │
+│    a.rs [Modified] +12 -3                                │
 │                                                          │
 │                                                          │
 │                                                          │

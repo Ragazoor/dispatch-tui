@@ -5,7 +5,7 @@
 Code under `src/tui/ui/` must be pure: it reads `App` and shared helpers, writes ratatui buffers, and does nothing else.
 
 **Allowed:**
-- Immutable reads of `App` fields and shared helpers from `src/tui/ui/shared.rs` and `src/tui/ui/palette.rs`
+- Immutable reads of `App` fields and shared helpers from `src/tui/ui/shared.rs` and `src/palette.rs`
 - Writes to the ratatui `Buffer` / `Frame` passed in by the caller
 - Pure formatting (`format!`, `truncate`, span construction)
 

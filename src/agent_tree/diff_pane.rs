@@ -3,8 +3,9 @@
 //! `docs/specs/agent-tree.allium`'s `SplitAgentTreeDiffPane` and
 //! `CloseAgentTreeDiffPaneWhenEmpty`).
 //!
-//! Sibling of `src/agent_tree.rs`, which owns tree *building*, and of
-//! `src/cli/agent_diff.rs`, which owns what the pane draws once it exists. This
+//! Sibling of [`crate::agent_tree::model`], which owns tree *building*, and of
+//! [`crate::agent_tree::diff_viewer`], which owns what the pane draws once it
+//! exists. This
 //! module owns only the tmux effect, so the renderer's key handling can stay a
 //! pure function of the keys pressed.
 //!

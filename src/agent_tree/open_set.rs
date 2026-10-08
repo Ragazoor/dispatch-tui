@@ -113,7 +113,7 @@ pub fn read_open_set(worktree_path: &str) -> Vec<PathBuf> {
     paths
         .into_iter()
         .map(PathBuf::from)
-        .filter(|p| crate::agent_tree::relative_components(p).is_some())
+        .filter(|p| crate::agent_tree::model::relative_components(p).is_some())
         .filter(|p| seen.insert(p.clone()))
         .collect()
 }

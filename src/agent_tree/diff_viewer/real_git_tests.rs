@@ -1,5 +1,5 @@
 use super::*;
-use crate::cli::agent_tree::test_repo::TestRepo;
+use crate::agent_tree::test_repo::TestRepo;
 use crate::process::RealProcessRunner;
 
 fn diff_of(

@@ -1188,7 +1188,7 @@ pub fn respawn_pane_running(
 ///
 /// Lives here rather than with either creator because unrelated modules must
 /// agree on it forever: `dispatch::agents` writes the tree role and reads it back
-/// to toggle and resync that pane, `agent_tree_diff_pane` writes and reads the
+/// to toggle and resync that pane, `agent_tree::diff_pane` writes and reads the
 /// diff role to split and kill its pane, and `dispatch::companion_pane_ids` reads the
 /// option's mere *presence* to drain every dispatch-created pane when an agent
 /// window is pinned into the board. The *policy* (when to split, when to replace)

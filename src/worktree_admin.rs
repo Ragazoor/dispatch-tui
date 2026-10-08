@@ -14,7 +14,7 @@
 //!   * **It is per worktree**, so two agents cannot read each other's.
 //!
 //! Two callers rely on that today: `dispatch::caller_identity` writes the
-//! per-task MCP configuration there, and `agent_tree_open_set` writes the set
+//! per-task MCP configuration there, and `agent_tree::open_set` writes the set
 //! of files whose diffs the companion pane has open. The placement rule is the
 //! same for both, so it is stated once, here.
 
@@ -57,7 +57,7 @@ pub(crate) mod tests {
     ///
     /// `pub(crate)` and living here rather than in a consumer's test module,
     /// because every test of this placement rule — this module's own, and
-    /// `caller_identity`'s and `agent_tree_open_set`'s over the files they put
+    /// `caller_identity`'s and `agent_tree::open_set`'s over the files they put
     /// there — needs the same on-disk shape. Two encodings of what git writes
     /// would be two things to keep in step with git.
     pub(crate) fn make_linked_worktree(base: &Path, slug: &str) -> (String, PathBuf) {

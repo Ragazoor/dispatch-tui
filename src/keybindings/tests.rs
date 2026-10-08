@@ -718,7 +718,8 @@ fn the_tmux_toggle_row_names_the_bound_key() {
 fn the_startup_screens_exit_keys_are_the_exit_pane_rows_keys() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     for ns in [KeyNamespace::AgentTreeTree, KeyNamespace::AgentDiff] {
-        let press = |code, mods| crate::cli::is_quit_key(&KeyEvent::new(code, mods), ns);
+        let press =
+            |code, mods| crate::agent_tree::pane::is_quit_key(&KeyEvent::new(code, mods), ns);
         assert!(press(KeyCode::Char('q'), KeyModifiers::NONE));
         assert!(press(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(!press(KeyCode::Char('q'), KeyModifiers::ALT));

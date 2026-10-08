@@ -276,7 +276,7 @@ fn discard_agent_tree_panes(
         // View state does not survive a restart of the renderer, exactly as the
         // cursor and the manual expansions do not, so a tree started later
         // begins bare.
-        if let Err(e) = crate::agent_tree_open_set::clear_open_set(&worktree) {
+        if let Err(e) = crate::agent_tree::open_set::clear_open_set(&worktree) {
             tracing::warn!(%window, error = %format!("{e:#}"), "failed to clear the open set");
         }
     }

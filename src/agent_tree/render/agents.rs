@@ -5,7 +5,7 @@
 //! `AgentRowShowsIdAndTitle` and `AgentKeysFollowFocus` guarantees).
 //!
 //! Pure view state and rendering only. Reading the board's task list and
-//! selecting a tmux window both belong to the loop in `super::agent_tree`.
+//! selecting a tmux window both belong to the loop in [`crate::agent_tree::run`].
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -13,7 +13,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::cli::list_cursor::ListCursor;
+use crate::agent_tree::list_cursor::ListCursor;
 use crate::models::{TaskId, TmuxWindow};
 
 /// The most rows the section takes from the pane — the spec's
@@ -190,7 +190,7 @@ mod tests {
         terminal
             .draw(|frame| render_agents(frame, frame.area(), section, focused, false))
             .expect("draw");
-        crate::cli::buffer_to_string(terminal.backend().buffer())
+        crate::agent_tree::pane::buffer_to_string(terminal.backend().buffer())
     }
 
     // ---- cursor ----------------------------------------------------------
