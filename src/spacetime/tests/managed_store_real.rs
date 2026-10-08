@@ -349,6 +349,34 @@ fn nothing_to_find_on_the_port_means_nothing_to_stop() {
 // End to end, against a real store on a private port
 // ---------------------------------------------------------------------------
 
+/// Whether the live test below should run. Under CI a missing CLI is a hard
+/// failure, not a skip: an `eprintln!` skip is a silent pass, so a broken
+/// `Install spacetime CLI` step would otherwise turn this test into a no-op.
+/// The same rule as `spacetime_available_or_skip` in
+/// `tests/common/spacetime_instance.rs`, which this crate cannot import.
+fn live_store_test_should_run(cli_present: bool, in_ci: bool) -> bool {
+    assert!(
+        cli_present || !in_ci,
+        "spacetime is required in CI but was not found on PATH — the workflow's \
+         `Install spacetime CLI` step must run before the tests (see \
+         .github/workflows/ci.yml). Refusing to skip and report green."
+    );
+    cli_present
+}
+
+#[test]
+fn a_missing_cli_skips_the_live_test_outside_ci_only() {
+    assert!(live_store_test_should_run(true, false));
+    assert!(live_store_test_should_run(true, true));
+    assert!(!live_store_test_should_run(false, false));
+}
+
+#[test]
+#[should_panic(expected = "spacetime is required in CI")]
+fn a_missing_cli_fails_the_live_test_in_ci() {
+    live_store_test_should_run(false, true);
+}
+
 fn spacetime_available() -> bool {
     let present = Command::new("spacetime")
         .arg("--version")
@@ -357,10 +385,11 @@ fn spacetime_available() -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
-    if !present {
+    let run = live_store_test_should_run(present, std::env::var_os("CI").is_some());
+    if !run {
         eprintln!("skipping: spacetime not available on PATH");
     }
-    present
+    run
 }
 
 /// Never touches port 3000: the layout's address is a free private port and the

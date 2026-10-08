@@ -20,28 +20,36 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Whether a test that needs a live instance should run.
 ///
-/// Pure so the tarpaulin arm can be tested without running under tarpaulin.
-pub fn instance_tests_should_run(under_tarpaulin: bool, cli_present: bool) -> bool {
-    !under_tarpaulin && cli_present
+/// Under CI a missing CLI is a hard failure instead of a skip, the same rule as
+/// `tmux_available_or_skip` in `tests/tmux_harness/mod.rs`. Skipping there
+/// would be a silent pass — `eprintln!` is swallowed by the default test
+/// harness — so a broken `Install spacetime CLI` step would quietly turn this
+/// file and `tests/memory_caller_conformance.rs` into a no-op, and with them
+/// the only coverage of the SDK glue in `src/sync/sdk_connector/`.
+///
+/// Pure so the CI arm can be tested without unsetting `CI` or `PATH`.
+pub fn instance_tests_should_run(cli_present: bool, in_ci: bool) -> bool {
+    assert!(
+        cli_present || !in_ci,
+        "spacetime is required in CI but was not found on PATH — the workflow's \
+         `Install spacetime CLI` step must run before the tests (see \
+         .github/workflows/ci.yml). Refusing to skip and report green."
+    );
+    cli_present
 }
 
 pub fn spacetime_available_or_skip() -> bool {
-    // Tarpaulin's instrumentation breaks `spacetime publish` (task #4909), so
-    // skip there even when the CLI is on PATH. The Test job still runs these.
-    let under_tarpaulin = cfg!(tarpaulin);
-    let present = Command::new("spacetime")
-        .arg("--version")
+    let present = spacetime_command(None, &["--version"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
-    if under_tarpaulin {
-        eprintln!("skipping: running under tarpaulin");
-    } else if !present {
+    let run = instance_tests_should_run(present, std::env::var_os("CI").is_some());
+    if !run {
         eprintln!("skipping: spacetime not available on PATH");
     }
-    instance_tests_should_run(under_tarpaulin, present)
+    run
 }
 
 /// A port nothing is listening on, released immediately so the server can take
@@ -72,19 +80,20 @@ impl Instance {
     pub fn start(label: &str) -> Self {
         let dir = tempfile::tempdir().expect("temp dir");
         let port = free_port();
-        let child = Command::new("spacetime")
-            .arg(format!(
-                "--config-path={}",
-                dir.path().join("cli.toml").display()
-            ))
-            .arg("start")
-            .arg(format!("--listen-addr=127.0.0.1:{port}"))
-            .arg(format!("--data-dir={}", dir.path().join("data").display()))
-            .arg("--non-interactive")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn spacetime start");
+        let child = spacetime_command(
+            None,
+            &[
+                &format!("--config-path={}", dir.path().join("cli.toml").display()),
+                "start",
+                &format!("--listen-addr=127.0.0.1:{port}"),
+                &format!("--data-dir={}", dir.path().join("data").display()),
+                "--non-interactive",
+            ],
+        )
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn spacetime start");
 
         let database = format!(
             "dispatch-{label}-{}",
@@ -303,14 +312,32 @@ impl Drop for Instance {
 /// refused for "removing a column" — a migration neither test asked for,
 /// reported against a wasm one test built and the other uploaded.
 pub fn run(target_dir: Option<&Path>, args: &[&str]) -> std::process::Output {
+    spacetime_command(target_dir, args)
+        .output()
+        .unwrap_or_else(|e| panic!("running `spacetime {}`: {e}", args.join(" ")))
+}
+
+/// A `spacetime` invocation, without the test binary's coverage flags.
+///
+/// Under tarpaulin the tests run with `RUSTFLAGS=-Cinstrument-coverage` and an
+/// `LLVM_PROFILE_FILE`. `spacetime publish -p` builds the module with cargo, so
+/// inheriting them makes the wasm build fail with "can't find crate for
+/// `profiler_builtins`" (task #4909). The module is never what is measured, so
+/// they are dropped for every call.
+pub const COVERAGE_ENV_VARS: [&str; 3] =
+    ["RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "LLVM_PROFILE_FILE"];
+
+/// A `spacetime` invocation with [`COVERAGE_ENV_VARS`] removed.
+pub fn spacetime_command(target_dir: Option<&Path>, args: &[&str]) -> Command {
     let mut command = Command::new("spacetime");
     command.args(args);
+    for var in COVERAGE_ENV_VARS {
+        command.env_remove(var);
+    }
     if let Some(dir) = target_dir {
         command.env("CARGO_TARGET_DIR", dir);
     }
     command
-        .output()
-        .unwrap_or_else(|e| panic!("running `spacetime {}`: {e}", args.join(" ")))
 }
 
 /// Whether `stderr` from a failed `spacetime` call shows a dropped connection

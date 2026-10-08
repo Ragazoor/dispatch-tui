@@ -39,6 +39,11 @@ jobs:
       # and rustc fails the moment it rebuilds the ort-sys lib with
       # "could not find native static library `onnxruntime`". Both paths live in
       # one cache entry, so they are saved and restored together and cannot drift.
+      #
+      # `spacetime/module/target` holds the wasm build `spacetime publish -p`
+      # runs for the live-store tests; without it each run compiles the
+      # `spacetimedb` crate tree from cold. `**/Cargo.lock` in the key already
+      # covers the module's own lockfile.
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -47,6 +52,7 @@ jobs:
             ~/.cargo/git
             ~/.cache/ort.pyke.io
             target
+            spacetime/module/target
           key: ${{ runner.os }}-cargo-v2-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-v2-
@@ -62,13 +68,12 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux
 
       # tests/spacetime_module.rs and tests/memory_caller_conformance.rs publish
-      # the real module into a throwaway instance and skip (not fail) when
-      # `spacetime` isn't on PATH — installing it here is what makes
-      # docs/specs/spacetime-memory-store.allium's ConformanceIsCiGated
-      # guarantee true rather than aspirational. Deliberately NOT added to the
-      # Coverage job: tarpaulin's instrumentation breaks the `spacetime
-      # publish` these tests shell out to (task #4909), so they skip
-      # themselves under `cfg(tarpaulin)`; it is not installed there.
+      # the real module into a throwaway instance, and
+      # src/spacetime/tests/managed_store_real.rs brings up a real managed
+      # store. Without `spacetime` on PATH they skip locally but FAIL when CI is
+      # set, so dropping this step cannot quietly turn them into a no-op —
+      # docs/specs/spacetime-memory-store.allium's ConformanceIsCiGated. The
+      # Coverage job installs it the same way.
       - name: Install spacetime CLI
         run: |
           curl -sSf https://install.spacetimedb.com | sh -s -- -y
@@ -137,10 +142,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # wasm32 for the same reason as the Test job: the live-store tests below
+      # build the module inside `spacetime publish -p`.
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.96.0
         with:
-          targets: x86_64-unknown-linux-gnu
+          targets: x86_64-unknown-linux-gnu,wasm32-unknown-unknown
 
       # See the Test job's cache step for why ~/.cache/ort.pyke.io is here.
       - name: Cache cargo registry
@@ -151,6 +158,7 @@ jobs:
             ~/.cargo/git
             ~/.cache/ort.pyke.io
             target
+            spacetime/module/target
           key: ${{ runner.os }}-cargo-v2-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-v2-
@@ -160,6 +168,25 @@ jobs:
       # coverage.
       - name: Install tmux
         run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux
+
+      # The live-store tests are the only thing that reaches the SDK glue in
+      # src/sync/sdk_connector/ (callers.rs, connect.rs::open_connection,
+      # wiring.rs): those bodies run on the SDK's own event context, which only
+      # a real store produces. Without `spacetime` here they would fail (CI is
+      # set), and before that they skipped, leaving that glue unmeasured.
+      # They used to skip under tarpaulin on purpose (task #4909): its
+      # RUSTFLAGS leaked into the wasm build `spacetime publish` runs.
+      # `spacetime_command` in tests/common/spacetime_instance.rs now drops them.
+      # Same install and pin as the Test job; see the comments there.
+      - name: Install spacetime CLI
+        run: |
+          curl -sSf https://install.spacetimedb.com | sh -s -- -y
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Pin and verify the spacetime CLI version
+        run: |
+          spacetime version install 2.10.1 --use -y
+          spacetime --version | tee /dev/stderr | grep -q 'spacetimedb tool version 2\.10\.1;'
 
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin
@@ -181,8 +208,10 @@ jobs:
       # recalibrated with that exclusion: 85.09% (20667/24287 lines, llvm
       # engine, `spacetime` off PATH, 2026-10-06). After SQLite was deleted (task
       # #36865) it measured 85.95% (19167/22300 lines, same settings, 2026-10-07);
-      # re-measured 86.16% (19430/22552 lines, same settings, 2026-10-08); floor 85 = ~1 point
-      # of slack. The review's guess of 88 sits above the measured figure and would fail.
+      # re-measured 86.16% (19430/22552 lines, same settings, 2026-10-08).
+      # With `spacetime` installed and the live-store tests running under
+      # tarpaulin it measured 87.05% (19593/22509 lines, llvm engine, bindings
+      # excluded, 2026-10-08); floor 86 = ~1 point of slack.
       #
       # `--engine llvm` is pinned because the floor is calibrated against it.
       # The default (`Auto`) engine measured 88.54% on the same tree the llvm
@@ -190,7 +219,7 @@ jobs:
       # in the code. Leaving the engine to the default would leave a floor of 88
       # half a point of slack and fail on noise.
       - name: Run coverage
-        run: cargo tarpaulin --engine llvm --target x86_64-unknown-linux-gnu --out xml --out stdout --output-dir coverage/ --exclude-files 'src/spacetime/bindings/*' --fail-under 85
+        run: cargo tarpaulin --engine llvm --target x86_64-unknown-linux-gnu --out xml --out stdout --output-dir coverage/ --exclude-files 'src/spacetime/bindings/*' --fail-under 86
 
       # `if: always()` so the report still uploads when the floor trips — that is
       # exactly the run whose per-file numbers someone needs to read.

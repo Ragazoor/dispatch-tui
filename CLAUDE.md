@@ -34,7 +34,7 @@ cargo run -- tui
 
 **The lib target runs in ~10s; a cold full run (including compile) is ~80s.** Run it in the foreground — don't background it. In a *fresh worktree* the first compile is slower than that and a cold `cargo test` can pass 120s, which is Claude Code's default Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
 
-**Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. Always pass `--engine llvm`: the default engine scores ~1.8 points lower than CI's floor assumes. The two live-SpacetimeDB test files skip themselves under tarpaulin, so `spacetime` may stay on `PATH`. Other caveats are in [docs/testing.md](docs/testing.md).
+**Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. Always pass `--engine llvm`: the default engine scores ~1.8 points lower than CI's floor assumes. With `spacetime` on `PATH` the live-store tests run under it too, as in CI; that is slower, not broken. Other caveats are in [docs/testing.md](docs/testing.md).
 
 Everything else about tests — the per-target command list, snapshot workflow, where a new test belongs, the no-wall-clock-sleep rule, coverage — is in [docs/testing.md](docs/testing.md).
 

@@ -13,17 +13,16 @@
 //! rather than a hope: with it, a change the store cannot automigrate aborts
 //! instead of quietly destroying the database and reporting success.
 //!
-//! **Skipped when `spacetime` is not on `PATH`, or under tarpaulin** (which
-//! sets `cfg(tarpaulin)`; its instrumentation breaks `spacetime publish`,
-//! task #4909). CI's Test job installs it
-//! and hard-fails the job if the install doesn't land at the pinned version
-//! (see `.github/workflows/ci.yml`'s "Pin and verify the spacetime CLI
-//! version" step) — that is docs/specs/spacetime-memory-store.allium's
-//! `ConformanceIsCiGated` guarantee. The Coverage job deliberately does not
-//! install it, and the tarpaulin skip covers a local run with it on `PATH`. Unlike tmux, this file's own
-//! availability check has no hard-fail arm of its own — the enforcement
-//! lives in that earlier CI step rather than in this test — see
-//! `tests/tmux_harness/mod.rs` for the pattern this deliberately departs from.
+//! **Skipped when `spacetime` is not on `PATH`, except under CI**, where a
+//! missing CLI fails instead (`spacetime_available_or_skip`, the same rule as
+//! `tests/tmux_harness/mod.rs`). CI's Test and Coverage jobs both install it
+//! and hard-fail if the install doesn't land at the pinned version (see
+//! `.github/workflows/ci.yml`'s "Pin and verify the spacetime CLI version"
+//! step) — that is docs/specs/spacetime-memory-store.allium's
+//! `ConformanceIsCiGated` guarantee. These tests also run under tarpaulin:
+//! `spacetime_command` drops the coverage flags a module build would otherwise
+//! inherit (task #4909), and this is the only place the SDK glue in
+//! `src/sync/sdk_connector/` is measured.
 //! The gate script `scripts/check-spacetime-module.sh` runs the parts that need
 //! no server, and runs everywhere.
 
@@ -33,7 +32,7 @@ mod common;
 
 use common::spacetime_instance::{
     column, describe, instance_tests_should_run, is_transport_error, module_path, no_rows,
-    spacetime_available_or_skip, Instance,
+    spacetime_available_or_skip, spacetime_command, Instance, COVERAGE_ENV_VARS,
 };
 use dispatch_tui::process::{ProcessRunner, RealProcessRunner};
 use dispatch_tui::sync::{SharedRows, SpacetimeSdkConnector, StoreConnector, SubscriptionRequest};
@@ -130,13 +129,37 @@ fn schema_version_row(instance: &Instance) -> Vec<i64> {
         .collect()
 }
 
-/// Publishing the same module over itself is accepted and changes nothing.
 #[test]
-fn instance_tests_skip_under_tarpaulin_even_with_the_cli_present() {
-    assert!(!instance_tests_should_run(true, true));
-    assert!(!instance_tests_should_run(true, false));
+fn a_missing_cli_is_a_skip_outside_ci_only() {
+    assert!(instance_tests_should_run(true, false));
+    assert!(instance_tests_should_run(true, true));
     assert!(!instance_tests_should_run(false, false));
-    assert!(instance_tests_should_run(false, true));
+}
+
+/// Under CI a skip would be a silent pass, so a missing CLI fails instead.
+#[test]
+#[should_panic(expected = "spacetime is required in CI")]
+fn a_missing_cli_is_a_failure_in_ci() {
+    instance_tests_should_run(false, true);
+}
+
+/// Tarpaulin builds the tests with `RUSTFLAGS=-Cinstrument-coverage`. Inherited
+/// by the wasm build `spacetime publish -p` runs, that flag fails it with
+/// "can't find crate for `profiler_builtins`".
+#[test]
+fn the_cli_does_not_inherit_the_tests_coverage_flags() {
+    let command = spacetime_command(None, &["--version"]);
+    let removed: Vec<_> = command
+        .get_envs()
+        .filter(|(_, value)| value.is_none())
+        .map(|(key, _)| key.to_string_lossy().into_owned())
+        .collect();
+    for var in COVERAGE_ENV_VARS {
+        assert!(
+            removed.iter().any(|r| r == var),
+            "{var} not removed: {removed:?}"
+        );
+    }
 }
 
 #[test]
@@ -153,6 +176,7 @@ fn only_transport_errors_are_retried_when_publishing() {
     assert!(!is_transport_error(""));
 }
 
+/// Publishing the same module over itself is accepted and changes nothing.
 #[test]
 fn publishing_the_module_twice_automigrates() {
     if !spacetime_available_or_skip() {

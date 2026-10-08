@@ -301,9 +301,12 @@ surface StandInFidelity {
         -- the `spacetime` CLI (pinned to the version the rest of the repo
         -- builds against) specifically so this suite runs for real rather
         -- than taking its "not on PATH" skip — see .github/workflows/ci.yml's
-        -- Test job. Deliberately not installed on the Coverage job's runner:
-        -- tarpaulin's instrumentation breaks the `spacetime publish` these
-        -- tests shell out to (task #4909), so that job keeps taking the skip.
+        -- Test job. The Coverage job installs it the same way, so the suite
+        -- also runs under tarpaulin and measures the SDK glue it exercises.
+        -- The CLI install is not the only guard: when CI is set, a missing
+        -- `spacetime` FAILS the suite instead of skipping it, the same rule
+        -- the real-tmux suites follow, so a broken install step cannot
+        -- report green with nothing run.
 }
 
 surface MemoryStoreCallSurface {

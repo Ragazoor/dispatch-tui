@@ -29,10 +29,9 @@
 //! subscriptions. This suite's scenario is chosen to exercise exactly that
 //! surface.
 //!
-//! **Skipped when `spacetime` is not on `PATH`.** CI's Test job installs and
-//! pins it, hard-failing the job rather than letting the install silently
-//! fail — see `tests/spacetime_module.rs`'s own header for the full picture,
-//! including why the Coverage job still takes this skip.
+//! **Skipped when `spacetime` is not on `PATH`, except under CI**, where a
+//! missing CLI fails the test instead. CI's Test and Coverage jobs install and
+//! pin it — see `tests/spacetime_module.rs`'s own header for the full picture.
 //!
 //! **Every `ReducerDomain` now covered**: tasks_and_epics/repo_config/
 //! subscriptions (task #4975), usage/agent_state (task #5004), learnings
