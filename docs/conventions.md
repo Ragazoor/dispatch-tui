@@ -10,7 +10,7 @@ Code under `src/tui/ui/` must be pure: it reads `App` and shared helpers, writes
 - Pure formatting (`format!`, `truncate`, span construction)
 
 **Forbidden:**
-- Database access (no `self.db`, no `Database::*`, no `rusqlite`)
+- Database access (no `self.db`, no `Store::*`, no `rusqlite`)
 - File I/O (`std::fs`, `std::io`, `tokio::fs`)
 - Process spawning (`std::process::Command`, `tokio::process`)
 - Async runtime calls (`tokio::*`, `block_on`, channel sends/receives)
@@ -194,10 +194,10 @@ seam to separate, and both umbrella traits are gone. `TaskStore`
 the single home for which table is reached through which member trait — don't
 restate the list here.
 
-**Where a call actually goes is a property of `Database`'s routing, not of
-the traits.** A `Database` built by `runtime::StoreParts::build` carries a
+**Where a call actually goes is a property of `Store`'s routing, not of
+the traits.** A `Store` built by `runtime::StoreParts::build` carries a
 writer and four readers over the connection's rows, attached together by
-`Database::with_shared_store` (`store::SharedStorePorts`) so a handle is routed
+`Store::with_shared_store` (`store::SharedStorePorts`) so a handle is routed
 all or nothing:
 
 | Port (`src/store/mod.rs`) | Implemented by (`src/sync/`) | Covers |
@@ -210,20 +210,20 @@ all or nothing:
 
 Each routed method is `self.shared_…()?.…` — it hands the call to the
 port and returns its answer. **There is no local fallback and no SQLite**
-(task #36865): a handle built without ports (`Database::unattached()`) refuses
+(task #36865): a handle built without ports (`Store::unattached()`) refuses
 every shared call with a `no shared store attached` error, and tests use
-`Database::open_in_memory()`, which attaches ports over an in-memory store that
+`Store::open_in_memory()`, which attaches ports over an in-memory store that
 runs the module's own reducer logic. A new shared read or write therefore needs
 its port method *and* its routing in `src/store/queries/`; the routing test
 `every_routed_mutation_reaches_the_writer` (`src/store/tests/shared_writer.rs`)
-calls every writer method through `Database` and fails when one is missing.
+calls every writer method through `Store` and fails when one is missing.
 
 **Never routed:** the Host row (`HostStore`) and the user identity's
 credential (`IdentityCredentialStore`). They are this install's own and stay
 on this machine (`host.allium`), in `host.json` in the data directory
-(`src/host_file/mod.rs`; task #16755). `Database::with_host_file` points a
+(`src/host_file/mod.rs`; task #16755). `Store::with_host_file` points a
 handle at it, and a handle without one refuses these calls — nothing is kept in
-a fallback. `Database::open_in_memory()` gets a temporary data directory holding
+a fallback. `Store::open_in_memory()` gets a temporary data directory holding
 a host file. The shared Host registry gets a mirror via
 `sync.allium: RegisterHostOnConnect`.
 
@@ -251,7 +251,7 @@ call into.) See [`crate::store::SharedRetiredFeedItemReader`], implemented by
 `sync::SubscriptionRetiredFeedItemReads` (`src/sync/retired_feed_item_reads.rs`).
 
 Both readers, like every port in the table above, are attached in production
-through `Database::with_shared_store`/`SharedStorePorts` — task #4916 bundled
+through `Store::with_shared_store`/`SharedStorePorts` — task #4916 bundled
 every port into that one all-or-nothing call. Each still keeps its own
 single-port builder (`with_shared_usage_reader`, `with_shared_retired_feed_item_reader`,
 …), but those are `#[cfg(test)]`-gated now: a test that wants to prove one
@@ -344,9 +344,9 @@ Reading through `state.db` directly is fine — list, get, and other queries hav
 
 How the seam works:
 
-- `TaskCrud: TaskRead` and `EpicCrud: EpicRead` — each CRUD trait splits into a read super-trait plus the mutating methods. `Database` implements both halves.
+- `TaskCrud: TaskRead` and `EpicCrud: EpicRead` — each CRUD trait splits into a read super-trait plus the mutating methods. `Store` implements both halves.
 - `TaskReadStore: TaskRead + EpicRead + RepoConfigStore + HostStore + SettingsStore + IdentityCredentialStore`, and `TaskStore: … + TaskReadStore`, so a write-capable `Arc<dyn TaskStore>` upcasts to `Arc<dyn TaskReadStore>` for free at construction.
-- Services keep their write handles (`TaskService` holds `Arc<dyn TaskStore>`, `EpicService` holds `Arc<dyn TaskAndEpicStore>` plus `Arc<dyn LearningStore>`), built from the still-write-capable `Arc<Database>` / `deps.db`.
+- Services keep their write handles (`TaskService` holds `Arc<dyn TaskStore>`, `EpicService` holds `Arc<dyn TaskAndEpicStore>` plus `Arc<dyn LearningStore>`), built from the still-write-capable `Arc<Store>` / `deps.db`.
 
 Settings/learning/usage writes remain reachable through `TaskReadStore` on purpose: they carry no cross-entity invariant, so sealing them would add churn without protecting anything.
 
@@ -354,9 +354,9 @@ Settings/learning/usage writes remain reachable through `TaskReadStore` on purpo
 
 - `FeedRunner` (`src/feed/`) — holds its own `Arc<dyn TaskStore>` and calls `recalculate_epic_status` itself.
 - `TuiRuntime::feed_db` — a write handle reserved for the manual `exec_trigger_epic_feed` path (the TUI's version of a feed tick).
-- Startup / CLI paths (`runtime::bootstrap`, `src/setup/`, `src/main.rs`) — use a concrete `&Database` / `Arc<Database>` before the read-only narrowing applies.
+- Startup / CLI paths (`runtime::bootstrap`, `src/setup/`, `src/main.rs`) — use a concrete `&Store` / `Arc<Store>` before the read-only narrowing applies.
 
-  The sanction is a fallback for startup wiring, **not** a licence for CLI subcommands to skip the service. CLI handlers that mutate tasks route through `TaskService` like their siblings: `cmd_plan` → `attach_plan`. The `hook-*` subcommands and `pr-gate` are not on this list because they mutate nothing themselves — they post to the running board, which routes through the service on their behalf (`src/mcp/handlers/hooks.rs`). When adding a new `cmd_*` that writes a task/epic, add (or reuse) a `TaskService`/`EpicService` method rather than calling `Database::patch_task` on the concrete handle.
+  The sanction is a fallback for startup wiring, **not** a licence for CLI subcommands to skip the service. CLI handlers that mutate tasks route through `TaskService` like their siblings: `cmd_plan` → `attach_plan`. The `hook-*` subcommands and `pr-gate` are not on this list because they mutate nothing themselves — they post to the running board, which routes through the service on their behalf (`src/mcp/handlers/hooks.rs`). When adding a new `cmd_*` that writes a task/epic, add (or reuse) a `TaskService`/`EpicService` method rather than calling `Store::patch_task` on the concrete handle.
 
 Tests seed fixtures via the `#[cfg(test)]` write accessors `McpState::db_write()` / `TuiRuntime::db_write()`, which are invisible to production handler code.
 
@@ -386,9 +386,9 @@ Two constructs cover it, and both are in `tasks.allium`:
 
 Expect the duplication: it is the language's shape, not a smell to refactor away.
 
-## The `Database` router
+## The `Store` router
 
-`Database` (`src/store/mod.rs`) holds no data and no connection: it is a router over the attached ports (see "The store seam" above). Every `*Store` trait method is `async fn` and hands the call to the one port that serves it, through `self.shared_writer()?`, `self.shared_reader()?` or the learning, usage and retired-feed-item readers. A handle with no port attached returns a `no shared store attached` error rather than answering from anywhere else.
+`Store` (`src/store/mod.rs`) holds no data and no connection: it is a router over the attached ports (see "The store seam" above). Every `*Store` trait method is `async fn` and hands the call to the one port that serves it, through `self.shared_writer()?`, `self.shared_reader()?` or the learning, usage and retired-feed-item readers. A handle with no port attached returns a `no shared store attached` error rather than answering from anywhere else.
 
 **A routed call is not a transaction.** Each writer method is one reducer call, and SpacetimeDB runs a reducer to completion before the next, so a rule that must be atomic belongs in a reducer (`spacetime/module/src/`, mirrored by `src/sync/memory_caller/`), not in a sequence of port calls: two calls can be interleaved by another host's write between them. `try_record_stop`, `record_user_prompt_submit`, the claim methods and `batch_delete` are single reducers for this reason.
 

@@ -193,7 +193,7 @@ fn plan_launch_restarts_without_asking_whether_the_old_board_is_alive() {
 fn plan_launch_carries_the_operators_arguments_through() {
     let argv = vec![
         "/bin/dispatch".to_string(),
-        "--db".to_string(),
+        "--data-dir".to_string(),
         "/tmp/scratch.db".to_string(),
         "tui".to_string(),
         "--port".to_string(),
@@ -250,7 +250,7 @@ fn session_argv_names_the_boards_window_up_front() {
 fn session_argv_separates_the_inner_command_from_tmux_flags() {
     let argv = session_argv(
         "dispatch",
-        &["/bin/dispatch".to_string(), "--db".to_string()],
+        &["/bin/dispatch".to_string(), "--data-dir".to_string()],
     );
     let sep = argv.iter().position(|a| a == "--").unwrap();
     assert!(

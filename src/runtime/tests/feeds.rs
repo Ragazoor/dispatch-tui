@@ -406,7 +406,7 @@ mod feed_epic_trigger {
     /// review agent would. Its survival is what distinguishes "the cycle was
     /// dropped" from "the cycle ran and destroyed a live session".
     async fn seed_feed_task_with_worktree(
-        db: &Arc<Database>,
+        db: &Arc<Store>,
         epic_id: crate::models::EpicId,
         title: &str,
     ) {

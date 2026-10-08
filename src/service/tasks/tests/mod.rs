@@ -6,17 +6,17 @@ use crate::models::{
 };
 use crate::service::epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 use crate::service::{FieldUpdate, ServiceError};
-use crate::store::{self, Database, EpicRead, TaskRead};
+use crate::store::{self, EpicRead, Store, TaskRead};
 
 async fn test_db() -> Arc<dyn store::TaskStore> {
-    Arc::new(Database::open_in_memory().await.unwrap())
+    Arc::new(Store::open_in_memory().await.unwrap())
 }
 
 /// A SQLite-only handle, for a test whose subject is a behaviour the shared
 /// store does not share (it refuses to delete a task that is not done, and
 /// treats a patch on a missing id as a no-op).
 async fn test_db_unattached() -> Arc<dyn store::TaskStore> {
-    Arc::new(Database::open_in_memory().await.unwrap())
+    Arc::new(Store::open_in_memory().await.unwrap())
 }
 
 fn task_svc(db: &Arc<dyn store::TaskStore>) -> TaskService {

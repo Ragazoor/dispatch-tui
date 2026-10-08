@@ -68,7 +68,7 @@ use "./core.allium" as core
 ------------------------------------------------------------
 
 -- The file this install keeps who it is in: `host.json` in the data
--- directory (storage.allium: DataDirectory), beside --db.
+-- directory (storage.allium: DataDirectory), beside --data-dir.
 --
 -- It holds the LOCAL Host row's three fields — core/Host's id, label and
 -- owner — and the credential that proves that owner to the store. Nothing

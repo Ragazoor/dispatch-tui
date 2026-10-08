@@ -448,7 +448,7 @@ fn a_feed_item() -> crate::models::FeedItem {
     }
 }
 
-async fn db_with(writer: RecordingWriter) -> (Database, Arc<RecordingWriter>) {
+async fn db_with(writer: RecordingWriter) -> (Store, Arc<RecordingWriter>) {
     let writer = Arc::new(writer);
     let db = in_memory_db().await.with_shared_writer(writer.clone());
     (db, writer)
@@ -623,7 +623,7 @@ async fn a_generic_setting_routes_but_the_host_identity_does_not() {
 /// The value here is not any single assertion — it is that a method added to
 /// [`SharedWriter`] and then NOT routed in `src/store/queries/` compiles, passes
 /// every other test, and silently writes to the wrong store. Nothing but a call
-/// through `Database` catches that, so this calls all of them.
+/// through `Store` catches that, so this calls all of them.
 ///
 /// It asserts the WRITER saw it rather than that SQLite did not, because a
 /// couple of these (a patch with no changes, an epic recalculation) have no

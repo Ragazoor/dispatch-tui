@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 
 use dispatch_tui::feed::FeedRunner;
 use dispatch_tui::mcp::McpEvent;
-use dispatch_tui::store::{Database, EpicCrud, EpicPatch, EpicRead};
+use dispatch_tui::store::{EpicCrud, EpicPatch, EpicRead, Store};
 
 use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
 
@@ -33,7 +33,7 @@ async fn wait_for_refresh(rx: &mut mpsc::UnboundedReceiver<McpEvent>) {
 
 #[tokio::test]
 async fn feed_sync_creates_then_updates_tasks_via_external_id() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Feed Epic", "", None).await.unwrap();
 
     // First feed: 3 items.

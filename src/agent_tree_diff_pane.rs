@@ -71,7 +71,7 @@ fn existing_diff_pane(my_pane: &str, runner: &dyn ProcessRunner) -> Result<Optio
 /// agent's own window.
 pub fn reconcile_diff_pane(
     my_pane: &str,
-    db_path: &Path,
+    data_dir: &Path,
     task_id: i64,
     worktree: &Path,
     anything_open: bool,
@@ -80,7 +80,7 @@ pub fn reconcile_diff_pane(
     let existing = existing_diff_pane(my_pane, runner)?;
 
     match (anything_open, existing) {
-        (true, None) => split_diff_pane(my_pane, db_path, task_id, worktree, runner),
+        (true, None) => split_diff_pane(my_pane, data_dir, task_id, worktree, runner),
         (false, Some(pane)) => tmux::kill_pane(&pane, runner),
         // Already agreeing: something is open and a pane is showing it, or
         // nothing is open and there is no pane. Both are the resting state.
@@ -90,12 +90,12 @@ pub fn reconcile_diff_pane(
 
 fn split_diff_pane(
     my_pane: &str,
-    db_path: &Path,
+    data_dir: &Path,
     task_id: i64,
     worktree: &Path,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
-    let db_arg = db_path.to_string_lossy().into_owned();
+    let db_arg = data_dir.to_string_lossy().into_owned();
     let id_arg = task_id.to_string();
     let dispatch_bin = runner.agent_binaries().dispatch;
     let cwd = worktree.to_string_lossy().into_owned();
@@ -106,7 +106,7 @@ fn split_diff_pane(
     // be a coincidence, not a guarantee.
     let command = [
         dispatch_bin.as_str(),
-        "--db",
+        "--data-dir",
         db_arg.as_str(),
         "agent-diff",
         id_arg.as_str(),
@@ -132,7 +132,7 @@ mod tests {
     use crate::process::MockProcessRunner;
 
     fn db() -> &'static Path {
-        Path::new("/data/tasks.db")
+        Path::new("/data")
     }
 
     fn worktree() -> &'static Path {
@@ -180,7 +180,7 @@ mod tests {
         reconcile_diff_pane("%2", db(), 42, worktree(), true, &runner).unwrap();
 
         let split = &runner.flattened_calls()[1];
-        assert!(split.contains("--db /data/tasks.db"), "got {split}");
+        assert!(split.contains("--data-dir /data"), "got {split}");
         assert!(split.contains("agent-diff 42"), "got {split}");
     }
 

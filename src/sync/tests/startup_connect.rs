@@ -6,7 +6,7 @@
 //! `AbortWhenTheStoreCannotBeReached`.
 
 use super::{accepted, refused, ScriptedConnector};
-use crate::store::{Database, HostStore, IdentityCredentialStore};
+use crate::store::{HostStore, IdentityCredentialStore, Store};
 use crate::sync::{ConnectionStatus, SyncSession};
 use std::time::Instant;
 
@@ -15,7 +15,7 @@ use std::time::Instant;
 /// minted itself, and the user identity and credential the store issued.
 #[tokio::test]
 async fn a_fresh_install_connects_and_mints_its_identities() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     let connector = ScriptedConnector::new(vec![accepted("c0ffee", "token-1")]);
     let mut session = SyncSession::open("store.example", connector.clone());
 
@@ -51,7 +51,7 @@ async fn a_fresh_install_connects_and_mints_its_identities() {
 /// There is no retry: the backoff is for a board that was up.
 #[tokio::test]
 async fn an_unreachable_store_fails_the_start_with_its_reason() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     let connector = ScriptedConnector::new(vec![refused("connection refused")]);
     let mut session = SyncSession::open("store.example", connector.clone());
 
@@ -69,7 +69,7 @@ async fn an_unreachable_store_fails_the_start_with_its_reason() {
 /// the conflict's own composed message rather than a generic one.
 #[tokio::test]
 async fn an_identity_conflict_fails_the_start() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     db.set_user_identity_token("token-a").await.unwrap();
     db.adopt_user_identity("aaaa").await.unwrap();
     let connector = ScriptedConnector::new(vec![accepted("bbbb", "token-b")]);

@@ -47,7 +47,7 @@ use "./core.allium" as core
 -- TrajectoryEntry, serialised as a single JSON object on its own line.
 -- Entries for a given task accumulate in a single per-task file named
 -- by the task's integer ID. The centralized data dir (storage.allium:
--- DataDirectory — the parent of the --db path) holds all trajectory files so they outlive worktree
+-- DataDirectory — the data directory) holds all trajectory files so they outlive worktree
 -- cleanup and remain queryable in a single location.
 --
 -- args and result are stored as opaque JSON strings to keep this spec free
@@ -156,7 +156,7 @@ rule TrajectoryAppend {
 
     @guidance
         -- dispatch_data_dir is the data directory (storage.allium:
-        -- DataDirectory): the parent of the --db path, e.g.
+        -- DataDirectory): the data directory, e.g.
         -- ~/.local/share/dispatch/. It is not task-specific.
         -- append_jsonl opens the file in append mode (O_APPEND | O_CREAT),
         -- writes one JSON-encoded TrajectoryEntry followed by "\n", flushes,

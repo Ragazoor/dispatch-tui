@@ -17,7 +17,7 @@ use tower::ServiceExt;
 use dispatch_tui::mcp::BackgroundWrite;
 use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
 use dispatch_tui::service::embeddings::EmbeddingService;
-use dispatch_tui::store::{self, Database};
+use dispatch_tui::store::{self, Store};
 
 pub async fn test_router() -> (axum::Router, Arc<dyn store::TaskStore>) {
     test_router_with_data_dir(std::env::temp_dir().as_path()).await
@@ -26,7 +26,7 @@ pub async fn test_router() -> (axum::Router, Arc<dyn store::TaskStore>) {
 pub async fn test_router_with_data_dir(
     data_dir: &Path,
 ) -> (axum::Router, Arc<dyn store::TaskStore>) {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let router = dispatch_tui::mcp::router(
         dispatch_tui::mcp::McpDeps {
@@ -51,7 +51,7 @@ pub async fn test_router_with_bg_done(
     Arc<dyn store::TaskStore>,
     mpsc::UnboundedReceiver<BackgroundWrite>,
 ) {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, rx) = mpsc::unbounded_channel();
     let router = dispatch_tui::mcp::router_with_bg_done(
@@ -103,7 +103,7 @@ pub async fn post_mcp(router: axum::Router, headers: &[(&str, &str)], body: Valu
 
 /// Seed a backlog task directly via the DB API. Task creation is not exposed
 /// over the CLI, so every suite that needs a row to act on starts here.
-pub async fn seed_task(db: &Database, title: &str) -> dispatch_tui::models::TaskId {
+pub async fn seed_task(db: &Store, title: &str) -> dispatch_tui::models::TaskId {
     use dispatch_tui::store::{CreateTaskRequest, TaskCrud};
 
     db.create_task(CreateTaskRequest {
@@ -127,7 +127,7 @@ pub async fn seed_task(db: &Database, title: &str) -> dispatch_tui::models::Task
 /// [`seed_task`], then moved to Running with the given sub-status — the state
 /// most hook rules require before they do anything.
 pub async fn seed_running_task(
-    db: &Database,
+    db: &Store,
     title: &str,
     sub: dispatch_tui::models::SubStatus,
 ) -> dispatch_tui::models::TaskId {
@@ -155,7 +155,7 @@ pub async fn seed_running_task(
 pub struct Board {
     pub port: u16,
     pub dir: tempfile::TempDir,
-    pub db: Arc<Database>,
+    pub db: Arc<Store>,
     bg_writes: tokio::sync::Mutex<mpsc::UnboundedReceiver<BackgroundWrite>>,
 }
 
@@ -177,7 +177,7 @@ impl Board {
 /// returns and no caller has to poll for readiness.
 pub async fn spawn_board() -> Board {
     let dir = tempfile::tempdir().unwrap();
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (bg_tx, bg_rx) = mpsc::unbounded_channel();
     let router = dispatch_tui::mcp::router_with_bg_done(

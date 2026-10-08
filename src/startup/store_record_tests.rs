@@ -13,17 +13,17 @@ const MANAGED: &str = "http://127.0.0.1:3000";
 /// A database path inside a fresh temp directory. The database file
 /// itself never needs to exist: the record is about its folder.
 fn db_in(dir: &tempfile::TempDir) -> PathBuf {
-    dir.path().join("dispatch.db")
+    dir.path().to_path_buf()
 }
 
 /// Where the record lives: beside the database file
 /// (`TheRecordBelongsToItsDatabase`).
-fn record_file(db_path: &Path) -> PathBuf {
-    db_path.parent().unwrap().join("store-server")
+fn record_file(data_dir: &Path) -> PathBuf {
+    data_dir.join("store-server")
 }
 
-fn write_record(db_path: &Path, contents: &str) {
-    std::fs::write(record_file(db_path), contents).unwrap();
+fn write_record(data_dir: &Path, contents: &str) {
+    std::fs::write(record_file(data_dir), contents).unwrap();
 }
 
 // -- recorded_store_server ------------------------------------------------

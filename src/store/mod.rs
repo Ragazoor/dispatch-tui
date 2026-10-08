@@ -1011,7 +1011,7 @@ pub trait UsageStore: Send + Sync {
 /// made the store mandatory, which left one backend and nothing for a seam to
 /// separate. What stays on this machine — the Host row and the user identity
 /// with its credential (`host.allium`) — is a property of which methods
-/// `Database` routes, not of which trait declares them.
+/// `Store` routes, not of which trait declares them.
 ///
 /// | Table | Reached through |
 /// |---|---|
@@ -1164,9 +1164,9 @@ pub trait SharedUsageReader: Send + Sync {
 /// ([`crate::sync::BoardReads`]) had a store path. This port closes the rest.
 ///
 /// Every derived query (live agents, a task by plan, an epic's tasks, an
-/// epic's children) is a method here rather than a filter `Database` runs over
+/// epic's children) is a method here rather than a filter `Store` runs over
 /// `list_all`: the implementation filters inside the rows' lock before
-/// cloning, and each routed `Database` method is a one-line delegation. The
+/// cloning, and each routed `Store` method is a one-line delegation. The
 /// managed-feed getters are `get_setting` under a fixed key.
 ///
 /// `db` defines this port and `sync` implements it
@@ -1218,7 +1218,7 @@ pub trait SharedReader: Send + Sync {
 /// The read side got a seam of its own ([`crate::sync::BoardReads`]) because
 /// the board's reads are a small, self-contained set that a subscription can
 /// serve whole. The write side is not like that. A mutation arrives through
-/// [`Database`] — the same handle that also holds settings, learnings,
+/// [`Store`] — the same handle that also holds settings, learnings,
 /// embeddings and usage, none of which are shared and none of which a store
 /// would accept. Swapping the whole handle would mean a second implementation
 /// of a hundred local methods that have nowhere else to go.
@@ -1230,7 +1230,7 @@ pub trait SharedReader: Send + Sync {
 ///
 /// # One copy, not two
 ///
-/// A method implemented here is a method [`Database`] no longer performs
+/// A method implemented here is a method [`Store`] no longer performs
 /// locally when a writer is attached. Not "also performs": a shared table has
 /// exactly one copy, and a local one that nothing reads would diverge from the
 /// store at the first mutation and leave the operator unable to tell which they
@@ -1581,19 +1581,19 @@ impl<
 }
 
 // ---------------------------------------------------------------------------
-// Database
+// Store
 // ---------------------------------------------------------------------------
 
 /// The handle every service and handler holds: a router over the attached
 /// store ports. It keeps no data of its own and opens no local database —
 /// every shared read and write goes to the port that serves it, and a handle
 /// with no port attached refuses (`storage.allium`).
-pub struct Database {
+pub struct Store {
     /// Where shared-table mutations go.
     ///
     /// `Some` on every board and CLI process (`runtime::StoreParts::build`);
     /// `None` only on the empty placeholder base before
-    /// [`Database::with_shared_store`] attaches the ports, or on a test handle
+    /// [`Store::with_shared_store`] attaches the ports, or on a test handle
     /// built without one. See [`SharedWriter`].
     shared_writer: Option<Arc<dyn SharedWriter>>,
     /// Where a learning READ goes. The read twin of `shared_writer`: the
@@ -1615,18 +1615,18 @@ pub struct Database {
     /// refuse without it.
     host_file_dir: Option<std::path::PathBuf>,
     /// The board's read seam over the in-memory store's own rows. Set only by
-    /// [`Database::open_in_memory`] (spec: `spacetime-memory-store.allium`,
+    /// [`Store::open_in_memory`] (spec: `spacetime-memory-store.allium`,
     /// `TestBoardReadsShareTheHandlesRows`).
     #[cfg(any(test, feature = "test-support"))]
     memory_board_reads: Option<Arc<dyn crate::sync::BoardReads>>,
-    /// The temporary data directory [`Database::open_in_memory`] keeps its host
+    /// The temporary data directory [`Store::open_in_memory`] keeps its host
     /// file in, removed with the handle.
     #[cfg(any(test, feature = "test-support"))]
     _memory_host_dir: Option<tempfile::TempDir>,
 }
 
-/// Every port a store-backed [`Database`] routes through, attached together
-/// by [`Database::with_shared_store`] so a handle is routed all or nothing: a
+/// Every port a store-backed [`Store`] routes through, attached together
+/// by [`Store::with_shared_store`] so a handle is routed all or nothing: a
 /// handle with a writer and no reader is the half-routed board task #4916
 /// found (writes reaching the store, reads answering from a table nothing
 /// writes), and this is what keeps it from being built again.
@@ -1647,12 +1647,12 @@ fn no_store(port: &str) -> anyhow::Error {
     anyhow::anyhow!("no shared store attached: this handle has no {port}")
 }
 
-impl Database {
+impl Store {
     /// A handle with no store and no host file attached. In production this is
     /// the empty placeholder base the store's ports are attached to
     /// (`runtime::placeholder_database`); it holds no data.
     pub fn unattached() -> Self {
-        Database {
+        Store {
             shared_writer: None,
             shared_learning_reader: None,
             shared_usage_reader: None,

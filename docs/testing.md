@@ -10,7 +10,7 @@ the rest lives here.
 
 ```bash
 cargo test                                # full suite
-cargo test store::tests                   # the Database router and its ports
+cargo test store::tests                   # the Store router and its ports
 cargo test service::                      # domain service layer
 cargo test tui::tests                     # TUI input/message handling
 cargo test mcp::handlers::tests           # MCP JSON-RPC handlers
@@ -71,14 +71,14 @@ Suite is green; if a runtime test fails locally, suspect timing — `spawn_block
 
 ## The in-memory store
 
-`Database::open_in_memory()` — the constructor behind essentially every
+`Store::open_in_memory()` — the constructor behind essentially every
 DB-touching test — attaches ports over a fresh, private in-process store: one
 `SharedRows` and one `MemoryReducerCaller` that runs the module's own reducer
 logic over it. Two handles never share rows, and a handle's host file lives in
 a temporary directory removed with it. Nothing builds a schema, so a handle
 costs microseconds.
 
-There is no SQLite: `Database::unattached()` is the empty base with no ports,
+There is no SQLite: `Store::unattached()` is the empty base with no ports,
 for the tests whose subject is "a handle with no store refuses". A fault a test
 needs to inject (an unreadable store, an unreadable host file) is injected with
 that handle, or with a replaced `host.json`, not with a broken table.
@@ -110,7 +110,7 @@ rm src/dispatch/snapshots/*.snap.new                 # always clean up
 | What you're testing | Where |
 |---|---|
 | TUI key handling / message flow | `src/tui/tests/` |
-| The `Database` router, its ports, CRUD over the in-memory store | `src/store/tests/` |
+| The `Store` router, its ports, CRUD over the in-memory store | `src/store/tests/` |
 | A SpacetimeDB module change (table, column, reducer) | `spacetime/module/` tests and `tests/spacetime_module.rs`; mirror it in `src/sync/memory_caller/` |
 | Service-layer business rules | inline in `src/service/<domain>/` |
 | MCP JSON-RPC handler behaviour | `src/mcp/handlers/tests/` |

@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 
-use super::super::{Database, SettingsStore};
+use super::super::{SettingsStore, Store};
 
 #[async_trait::async_trait]
-impl super::super::SettingsStore for Database {
+impl super::super::SettingsStore for Store {
     async fn get_setting_bool(&self, key: &str) -> Result<Option<bool>> {
         Ok(self.get_setting_string(key).await?.map(|v| v == "1"))
     }
@@ -84,7 +84,7 @@ impl super::super::SettingsStore for Database {
 // ---------------------------------------------------------------------------
 
 #[async_trait::async_trait]
-impl super::super::RepoConfigRead for Database {
+impl super::super::RepoConfigRead for Store {
     async fn list_repo_paths(&self) -> Result<Vec<String>> {
         let reader = self.shared_reader()?;
         reader.list_repo_paths().await
@@ -102,7 +102,7 @@ impl super::super::RepoConfigRead for Database {
 }
 
 #[async_trait::async_trait]
-impl super::super::RepoConfigStore for Database {
+impl super::super::RepoConfigStore for Store {
     async fn save_repo_path(&self, path: &str) -> Result<()> {
         let writer = self.shared_writer()?;
         writer.save_repo_path(path).await
@@ -132,7 +132,7 @@ impl super::super::RepoConfigStore for Database {
 // ---------------------------------------------------------------------------
 
 #[async_trait::async_trait]
-impl super::super::HostStore for Database {
+impl super::super::HostStore for Store {
     async fn ensure_host_identity(&self) -> Result<(String, Option<String>)> {
         // The identity is READ from the host file, never minted here: minting
         // is the board launch's `host_file::resolve_for_launch`, and a
@@ -195,7 +195,7 @@ impl super::super::HostStore for Database {
 // ---------------------------------------------------------------------------
 
 #[async_trait::async_trait]
-impl super::super::IdentityCredentialStore for Database {
+impl super::super::IdentityCredentialStore for Store {
     async fn user_identity_token(&self) -> Result<Option<String>> {
         let dir = self.host_file_dir()?;
         Ok(host_file_call(dir, crate::host_file::read_for_cli)
@@ -307,7 +307,7 @@ fn parse_setting_i64(key: &str, raw: Option<String>) -> Result<Option<i64>> {
     }
 }
 
-impl Database {
+impl Store {
     /// Upsert a managed-feed settings key when `value` is `Some`, or delete the
     /// row when `None` so a subsequent get returns `None`.
     async fn set_managed_feed_setting(&self, key: &'static str, value: Option<&str>) -> Result<()> {
@@ -323,7 +323,7 @@ impl Database {
 // ---------------------------------------------------------------------------
 
 #[async_trait::async_trait]
-impl super::super::SubscriptionStore for Database {
+impl super::super::SubscriptionStore for Store {
     async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<i64>> {
         let reader = self.shared_reader()?;
         reader.subscribed_epics(subscriber).await

@@ -636,7 +636,7 @@ struct Harness {
     msgs: mpsc::UnboundedReceiver<Message>,
     calls: mpsc::UnboundedReceiver<String>,
     mock: Arc<MockProcessRunner>,
-    db: Arc<Database>,
+    db: Arc<Store>,
 }
 
 async fn harness(mock: MockProcessRunner) -> Harness {

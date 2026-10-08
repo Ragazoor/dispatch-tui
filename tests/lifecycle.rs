@@ -2,17 +2,17 @@
 //! Integration test: full task lifecycle through App::update() with a real (in-memory) DB.
 
 use dispatch_tui::models::{DispatchMode, Task, TaskId, TaskStatus, TmuxWindow};
-use dispatch_tui::store::{self, CreateTaskRequest, Database, TaskCrud, TaskRead};
+use dispatch_tui::store::{self, CreateTaskRequest, Store, TaskCrud, TaskRead};
 use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 
-async fn make_app() -> (App, Database) {
-    let db = Database::open_in_memory().await.unwrap();
+async fn make_app() -> (App, Store) {
+    let db = Store::open_in_memory().await.unwrap();
     let app = App::new(vec![]);
     (app, db)
 }
 
 /// Helper: execute PersistTask/DeleteTask commands against the DB.
-async fn execute(db: &Database, cmds: &[Command]) {
+async fn execute(db: &Store, cmds: &[Command]) {
     for cmd in cmds {
         match cmd {
             Command::Task(dispatch_tui::tui::commands::TaskCommand::Persist(task)) => {

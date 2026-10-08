@@ -8,7 +8,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use crate::store::{Database, EpicCrud, EpicPatch, EpicRead};
+use crate::store::{EpicCrud, EpicPatch, EpicRead, Store};
 
 // The entire plugin/ directory is embedded at compile time. Any file added to
 // plugin/ is automatically picked up — no manual registration required.
@@ -731,7 +731,7 @@ fn install_if_absent(path: &std::path::Path, content: &str) -> Result<()> {
 /// proceeds: the path is the right one to seed against either way, and a later
 /// setup retries the write. Skipping would make the example epic depend on an
 /// unrelated filesystem error that no later run notices.
-pub async fn seed_feed_epics(db: &Database, data_dir: &Path) -> Result<()> {
+pub async fn seed_feed_epics(db: &Store, data_dir: &Path) -> Result<()> {
     let script_path = installed_script_path(data_dir, "fetch-dependabot.sh");
     let cmd = script_path
         .to_str()

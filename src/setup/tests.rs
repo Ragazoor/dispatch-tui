@@ -232,7 +232,7 @@ fn display_for_leaves_non_home_paths_untouched() {
 /// Build a fully-populated uninstall layout under a temp dir: a plugin
 /// directory with a file, a `~/.claude.json` carrying the dispatch MCP
 /// entry, an empty legacy file, a statusline settings file, and a
-/// `db_path` that does not yet exist.
+/// `data_dir` that does not yet exist.
 fn uninstall_layout(root: &Path) -> UninstallPaths {
     let plugin_path = root.join("plugins").join("local").join("dispatch");
     fs::create_dir_all(&plugin_path).unwrap();
@@ -258,7 +258,7 @@ fn uninstall_layout(root: &Path) -> UninstallPaths {
         mcp_path,
         legacy_mcp_path: root.join(".claude").join(".mcp.json"),
         plugin_path,
-        db_path: root.join("dispatch").join("tasks.db"),
+        data_dir: root.join("dispatch"),
         statusline_path,
     }
 }
@@ -339,7 +339,7 @@ fn run_uninstall_in_yes_still_prompts_before_forgetting_the_identity() {
     // auto-confirm the irreversible forgetting of this machine's identity.
     let dir = tempfile::tempdir().unwrap();
     let paths = uninstall_layout(dir.path());
-    let data_dir = paths.db_path.parent().unwrap();
+    let data_dir = paths.data_dir.as_path();
     fs::create_dir_all(data_dir).unwrap();
     fs::write(data_dir.join("host.json"), br#"{"host_id":"h"}"#).unwrap();
 
@@ -367,7 +367,7 @@ fn run_uninstall_in_noop_when_nothing_present() {
         mcp_path: dir.path().join(".claude.json"),
         legacy_mcp_path: dir.path().join(".mcp.json"),
         plugin_path: dir.path().join("plugin"),
-        db_path: dir.path().join("dispatch").join("tasks.db"),
+        data_dir: dir.path().join("dispatch"),
         statusline_path: dir.path().join(statusline::SETTINGS_FILE_NAME),
     };
     let confirmer = FakeConfirmer::new(vec![true], vec![]);

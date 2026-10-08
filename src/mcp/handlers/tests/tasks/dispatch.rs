@@ -1204,7 +1204,7 @@ async fn dispatch_next_tool_no_longer_exists() {
 
 #[tokio::test]
 async fn wrap_up_rebase_preserves_tmux_window() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish().no_remote().shared_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -1272,7 +1272,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
 
 #[tokio::test]
 async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish()
         .no_remote()
         .rebase_conflicts_in_stderr(&["foo.rs"])
@@ -1340,7 +1340,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
     // When a task has Conflict sub_status from a previous rebase attempt,
     // and a new rebase fails with a non-conflict error (e.g. Other), the
     // stale Conflict sub_status should be cleared — matching TUI behavior.
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     // This queue was stale before the script existed: it led with a
     // `detect_default_branch` response `finish_task` never asks for, and omitted
     // the dirty-worktree porcelain read, so every response after the first

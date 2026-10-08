@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::store::{CreateTaskRequest, Database, TaskCrud};
+use crate::store::{CreateTaskRequest, Store, TaskCrud};
 use crate::sync::{BoardReads, SharedRows, SubscriptionBoardReads};
 
 /// **Test 3 of the phase plan**, structurally.
@@ -20,7 +20,7 @@ use crate::sync::{BoardReads, SharedRows, SubscriptionBoardReads};
 /// exactly the "local read cache" Phase 5 records as not existing.
 #[tokio::test]
 async fn nothing_is_read_through_to_the_local_store() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     let any_task = db
         .create_task(CreateTaskRequest {
             title: "elsewhere",

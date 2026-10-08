@@ -230,31 +230,28 @@ pub fn store_server_or_managed(server: Option<String>) -> String {
 /// The record's file name, in the same folder as the database file.
 const STORE_RECORD_FILE: &str = "store-server";
 
-/// `file` in the same folder as the database file `db_path` names: where the
+/// `file` inside the data directory `data_dir`: where the
 /// store record and the store pin live (`TheRecordBelongsToItsDatabase`,
 /// `ThePinBelongsToItsDatabase`).
-pub(super) fn beside_database(db_path: &std::path::Path, file: &str) -> std::path::PathBuf {
-    db_path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join(file)
+pub(super) fn beside_data_dir(data_dir: &std::path::Path, file: &str) -> std::path::PathBuf {
+    data_dir.join(file)
 }
 
-fn store_record_path(db_path: &std::path::Path) -> std::path::PathBuf {
-    beside_database(db_path, STORE_RECORD_FILE)
+fn store_record_path(data_dir: &std::path::Path) -> std::path::PathBuf {
+    beside_data_dir(data_dir, STORE_RECORD_FILE)
 }
 
-/// The address a board on `db_path` recorded beside it, else `None`. Blank is
+/// The address a board on `data_dir` recorded beside it, else `None`. Blank is
 /// `None`. `startup.allium`: `StoreAddressRecord.recorded_store_server`.
-pub fn recorded_store_server(db_path: &std::path::Path) -> Option<String> {
-    let text = std::fs::read_to_string(store_record_path(db_path)).ok()?;
+pub fn recorded_store_server(data_dir: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(store_record_path(data_dir)).ok()?;
     crate::spacetime::managed_store::normalize_server(Some(text))
 }
 
-/// Record `address` beside `db_path`, replacing whatever was there. True when
+/// Record `address` beside `data_dir`, replacing whatever was there. True when
 /// the record was kept. `startup.allium`: `StoreAddressRecord.record_store_server`.
-pub fn record_store_server(db_path: &std::path::Path, address: &str) -> bool {
-    match std::fs::write(store_record_path(db_path), format!("{}\n", address.trim())) {
+pub fn record_store_server(data_dir: &std::path::Path, address: &str) -> bool {
+    match std::fs::write(store_record_path(data_dir), format!("{}\n", address.trim())) {
         Ok(()) => true,
         Err(e) => {
             tracing::warn!("could not record the store address beside the database: {e}");
@@ -263,10 +260,10 @@ pub fn record_store_server(db_path: &std::path::Path, address: &str) -> bool {
     }
 }
 
-/// Remove the record beside `db_path`. A record that is not there is not a
+/// Remove the record beside `data_dir`. A record that is not there is not a
 /// failure. `startup.allium`: `StoreAddressRecord.forget_store_server`.
-pub fn forget_store_server(db_path: &std::path::Path) -> bool {
-    match std::fs::remove_file(store_record_path(db_path)) {
+pub fn forget_store_server(data_dir: &std::path::Path) -> bool {
+    match std::fs::remove_file(store_record_path(data_dir)) {
         Ok(()) => true,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
         Err(e) => {
@@ -278,20 +275,20 @@ pub fn forget_store_server(db_path: &std::path::Path) -> bool {
 
 /// The store a short-lived subcommand connects to, first answer wins: the
 /// flag, the operator's environment variable, the address the board published
-/// on its session (`board`), the record beside `db_path`, the managed
+/// on its session (`board`), the record beside `data_dir`, the managed
 /// address. Blank counts as absent at every step. `cli.allium`:
 /// `CliCommandsReachTheStoreWithoutManagingIt`.
 pub fn cli_store_server(
     flag: Option<String>,
     env: Option<String>,
     board: Option<String>,
-    db_path: &std::path::Path,
+    data_dir: &std::path::Path,
 ) -> String {
     use crate::spacetime::managed_store::normalize_server;
     let named = normalize_server(flag)
         .or_else(|| normalize_server(env))
         .or_else(|| normalize_server(board))
-        .or_else(|| recorded_store_server(db_path));
+        .or_else(|| recorded_store_server(data_dir));
     store_server_or_managed(named)
 }
 

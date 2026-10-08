@@ -14,11 +14,11 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::models::{expand_tilde, TaskId};
-use crate::store::{Database, RepoConfigRead, RepoConfigStore};
+use crate::store::{RepoConfigRead, RepoConfigStore, Store};
 
 /// `dispatch repo set-verify <path> <command>`.
 pub async fn set_verify(
-    database: &Database,
+    database: &Store,
     path: &str,
     command: &str,
     out: &mut dyn Write,
@@ -34,7 +34,7 @@ pub async fn set_verify(
 }
 
 /// `dispatch repo clear-verify <path>`.
-pub async fn clear_verify(database: &Database, path: &str, out: &mut dyn Write) -> Result<()> {
+pub async fn clear_verify(database: &Store, path: &str, out: &mut dyn Write) -> Result<()> {
     let path = expand_tilde(path);
     database.set_verify_command(&path, None).await?;
     writeln!(out, "verify_command cleared for {path}")?;
@@ -42,7 +42,7 @@ pub async fn clear_verify(database: &Database, path: &str, out: &mut dyn Write) 
 }
 
 /// `dispatch repo list`.
-pub async fn list_repos(database: &Database, out: &mut dyn Write) -> Result<()> {
+pub async fn list_repos(database: &Store, out: &mut dyn Write) -> Result<()> {
     let paths = database.list_repo_paths().await?;
     if paths.is_empty() {
         writeln!(out, "No repo paths configured.")?;
@@ -63,7 +63,7 @@ pub async fn list_repos(database: &Database, out: &mut dyn Write) -> Result<()> 
 /// repository that could not be measured shows no ahead/behind figures at all
 /// (`UnmeasuredIsNeverPresentedAsClean`) and, when the fetch was the cause, its
 /// fetch error instead.
-pub async fn repo_status(database: &Database, no_fetch: bool, out: &mut dyn Write) -> Result<()> {
+pub async fn repo_status(database: &Store, no_fetch: bool, out: &mut dyn Write) -> Result<()> {
     let paths = database.list_repo_paths().await?;
     if paths.is_empty() {
         writeln!(out, "No repo paths configured.")?;
@@ -119,7 +119,7 @@ pub async fn repo_status(database: &Database, no_fetch: bool, out: &mut dyn Writ
 /// code is non-zero when any target failed, so the command is usable from a
 /// script. Needs a multi-thread runtime (`block_in_place`).
 pub async fn repo_sync(
-    database: &Database,
+    database: &Store,
     path: Option<String>,
     out: &mut dyn Write,
     err: &mut dyn Write,
@@ -171,7 +171,7 @@ pub async fn repo_sync(
 
 /// `dispatch prune-repo-paths` — forget every saved repo path that no longer
 /// exists on disk.
-pub async fn prune_repo_paths(database: &Database, out: &mut dyn Write) -> Result<()> {
+pub async fn prune_repo_paths(database: &Store, out: &mut dyn Write) -> Result<()> {
     let paths = database.list_repo_paths().await?;
     let total = paths.len();
     let mut removed = 0;
@@ -193,7 +193,7 @@ pub async fn prune_repo_paths(database: &Database, out: &mut dyn Write) -> Resul
 /// path fails without a store round trip; the caller opens the store only
 /// once [`resolve_plan_path`] has answered.
 pub async fn attach_plan(
-    database: Arc<Database>,
+    database: Arc<Store>,
     id: i64,
     plan_path: &str,
     out: &mut dyn Write,

@@ -2,10 +2,10 @@ use anyhow::Result;
 
 use crate::models::{UsageEvent, UsageSummary};
 
-use super::super::{Database, UsageCap, UsageQuery};
+use super::super::{Store, UsageCap, UsageQuery};
 
 #[async_trait::async_trait]
-impl crate::store::UsageStore for Database {
+impl crate::store::UsageStore for Store {
     async fn record_usage_event_with_cap(&self, event: &UsageEvent, cap: UsageCap) -> Result<()> {
         let writer = self.shared_writer()?;
         writer.record_usage_event_with_cap(event, cap).await

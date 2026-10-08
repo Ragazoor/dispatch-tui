@@ -447,7 +447,7 @@ pub trait WriterIdentity: Send + Sync {
 ///
 /// The local store does hold it — the handshake writes it there
 /// (`host.allium: AdoptUserIdentity`) — but reading it from there at bootstrap
-/// is not possible: the writer is built before the `Database` it would read,
+/// is not possible: the writer is built before the `Store` it would read,
 /// and the two would refer to each other. Filling a cell afterwards breaks that
 /// and is the truer statement besides. What a write may stamp is the identity
 /// THIS CONNECTION settled, not whatever a previous run left on disk: a board

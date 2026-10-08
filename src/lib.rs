@@ -35,7 +35,7 @@ pub mod tmux;
 pub mod tui;
 pub mod worktree_admin;
 
-pub fn default_db_path() -> std::path::PathBuf {
+pub fn default_data_dir() -> std::path::PathBuf {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
@@ -50,7 +50,7 @@ pub fn default_db_path() -> std::path::PathBuf {
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
             home.join(".local").join("share")
         });
-    base.join("dispatch").join("tasks.db")
+    base.join("dispatch")
 }
 
 /// The one budget-snapshot location on this machine.
@@ -61,12 +61,12 @@ pub fn default_db_path() -> std::path::PathBuf {
 /// happens to have open — see `docs/specs/observability.allium`:
 /// `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase`.
 pub(crate) fn budget_snapshot_path() -> std::path::PathBuf {
-    default_db_path().with_file_name(crate::setup::statusline::RATE_LIMITS_FILE_NAME)
+    default_data_dir().join(crate::setup::statusline::RATE_LIMITS_FILE_NAME)
 }
 
 #[cfg(test)]
 mod budget_snapshot_path_tests {
-    /// The snapshot sits beside the default database, under its own fixed name.
+    /// The snapshot sits in the default data directory, under its own fixed name.
     /// The file name is spelled out rather than imported from the constant the
     /// code reads: an expectation derived from the code under test asserts
     /// nothing.
@@ -78,6 +78,6 @@ mod budget_snapshot_path_tests {
             path.file_name(),
             Some(std::ffi::OsStr::new("rate-limits.json"))
         );
-        assert_eq!(path.parent(), super::default_db_path().parent());
+        assert_eq!(path.parent(), Some(super::default_data_dir().as_path()));
     }
 }

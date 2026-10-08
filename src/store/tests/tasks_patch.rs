@@ -622,7 +622,7 @@ async fn mark_pr_learnings_gate_shown_missing_task_is_false() {
 
 /// Helper: a subtask of `epic_id` in `status`, with an explicit `sort_order`.
 async fn subtask(
-    db: &Database,
+    db: &Store,
     epic_id: EpicId,
     title: &str,
     status: TaskStatus,
@@ -759,7 +759,7 @@ async fn try_claim_next_backlog_task_is_none_when_only_phoenix_subtasks_remain()
 
 /// Helper: a backlog subtask of `epic_id` carrying the phoenix flag.
 async fn phoenix_subtask(
-    db: &Database,
+    db: &Store,
     epic_id: EpicId,
     title: &str,
     sort_order: Option<i64>,
@@ -1039,7 +1039,7 @@ async fn try_claim_next_backlog_task_skips_a_foreign_owned_subtask_and_claims_th
 // -- try_release_backlog_claim ----------------------------------------------
 
 /// Helper: a backlog subtask, claimed, ready to have its claim released.
-async fn claimed_task(db: &Database) -> TaskId {
+async fn claimed_task(db: &Store) -> TaskId {
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = subtask(db, epic.id, "t", TaskStatus::Backlog, None).await;
     assert_eq!(

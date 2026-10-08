@@ -949,7 +949,7 @@ rule SeedExampleFeedEpic {
     -- seeding an epic wired to a command the user has no file to configure
     -- would produce a feed that silently emits nothing.
     -- (`<data_dir>` is the data directory — storage.allium: DataDirectory,
-    -- the parent of the --db path.)
+    -- the data directory.)
     --
     -- The seeding itself is UNCHANGED by the install rules above: still
     -- exactly one example epic, still idempotent, still keyed on the

@@ -21,7 +21,7 @@ const OLD: &str = "c200a1ada23f68e494f28f6a791a2afe105f5a0056e01e6762e3d3618a893
 const DATABASE_BODY: &str = r#"{"database_identity":{"__identity__":"0xc200298fac876590c951a7e10328c408fb4664de2bd945a55a0eff22ff8e1f77"},"owner_identity":{"__identity__":"0xc200975dee337d6da6edb78c4d590b56b5c3a200e3867bafbd68b5f6e4c0927c"},"host_type":{"Wasm":[]},"initial_program":"0xf48378dc8671a01fce2b2c9bb3e8a3e47f5323b4c4633c098597b33e8b53e323"}"#;
 
 fn db_in(dir: &tempfile::TempDir) -> std::path::PathBuf {
-    dir.path().join("tasks.db")
+    dir.path().to_path_buf()
 }
 
 // -- the check -------------------------------------------------------------
@@ -122,7 +122,7 @@ fn a_blank_pin_is_none() {
 #[test]
 fn a_pin_that_cannot_be_written_reports_false() {
     let dir = tempfile::tempdir().unwrap();
-    let db = dir.path().join("missing-folder").join("tasks.db");
+    let db = dir.path().join("missing-folder");
     assert!(!pin_store_identity(&db, MANAGED));
 }
 

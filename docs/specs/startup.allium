@@ -450,7 +450,7 @@ contract ManagedStoreHost {
     -- config.managed_database_name (null when none is recorded). The record
     -- is a small file in the managed store's own data directory — outside the
     -- module's schema, so a migration cannot reshape it, readable without a
-    -- connection, and independent of the board's --db so that every board on
+    -- connection, and independent of the board's --data-dir so that every board on
     -- the managed store reads the same one.
     embedded_module_hash: () -> String
     recorded_module_hash: () -> String?
@@ -515,13 +515,13 @@ contract ManagedStoreHost {
 -- as a contract because it is a file on disk, which can be unwritable,
 -- missing, or left behind by a board that could not run its exit.
 contract StoreAddressRecord {
-    -- The address recorded beside this launch's --db database file, else
+    -- The address recorded beside this launch's data directory, else
     -- null. A blank record is null too, for the same reason a blank
     -- DISPATCH_SPACETIME_SERVER is.
     recorded_store_server: () -> String?
 
     -- Record `address` — the store's address as the board normalised it to
-    -- connect, one line — beside the --db database file, replacing whatever
+    -- connect, one line — beside the data directory, replacing whatever
     -- was there. True when the record was kept.
     record_store_server: (address: String) -> Boolean
 
@@ -531,9 +531,9 @@ contract StoreAddressRecord {
 
     @invariant TheRecordBelongsToItsDatabase
         -- The record sits in the same folder as the database file the board
-        -- was started with, so a board on a throwaway --db records nothing
+        -- was started with, so a board on a throwaway --data-dir records nothing
         -- next to the operator's real one, and a command run with that same
-        -- --db finds the throwaway board's store and no other.
+        -- --data-dir finds the throwaway board's store and no other.
 
     @invariant TheRecordIsLocal
         -- The record is this install's own configuration, like the database
@@ -564,12 +564,12 @@ contract StoreIdentityPin {
     -- first published is what stays with the data.
     store_database_identity: () -> String?
 
-    -- The identity recorded beside this launch's --db database file by the
+    -- The identity recorded beside this launch's data directory by the
     -- last board that reached its store, else null (a first launch, or one
     -- whose record was removed). A blank record is null too.
     pinned_store_identity: () -> String?
 
-    -- Record `identity` beside the --db database file, replacing whatever was
+    -- Record `identity` beside the data directory, replacing whatever was
     -- there. True when the record was kept.
     pin_store_identity: (identity: String) -> Boolean
 
@@ -580,7 +580,7 @@ contract StoreIdentityPin {
     @invariant ThePinBelongsToItsDatabase
         -- The record sits in the same folder as the database file the board
         -- was started with, like StoreAddressRecord, so a board on a
-        -- throwaway --db pins nothing next to the operator's real one.
+        -- throwaway --data-dir pins nothing next to the operator's real one.
 
     @invariant ThePinIsLocal
         -- The record is this install's own, never a shared row: which
@@ -1645,10 +1645,10 @@ rule ConnectWhenTheManagedModuleIsCurrent {
         -- is stale against spacetime/module, as it does for the committed
         -- client bindings), so the thing compared is exactly the thing that
         -- would be published. The recorded hash lives in the managed store's
-        -- own data directory, not the board's --db directory, so every board
+        -- own data directory, not the board's --data-dir directory, so every board
         -- on the managed store reads the same record — a second binary
         -- pointed at the same store, an older worktree build say, sees a
-        -- difference and publishes its own — and a throwaway --db cannot
+        -- difference and publishes its own — and a throwaway --data-dir cannot
         -- desync it.
 }
 
@@ -1749,7 +1749,7 @@ rule ConnectWhenTheStoreIsTheOneThisInstallUses {
         --
         -- FOUR WAYS THROUGH. The store's database is the one this install
         -- pinned: the steady state. Nothing is pinned yet: the first launch
-        -- on this --db, which PinTheStoreOnceItAnswers then pins. The store
+        -- on this --data-dir, which PinTheStoreOnceItAnswers then pins. The store
         -- could not be asked: the connection that follows fails on its own
         -- if the store is down (AbortWhenTheStoreCannotBeReached), and a store
         -- whose TLS certificate the board does not trust goes through
@@ -2263,7 +2263,7 @@ rule AbortWhenTheAgentPortIsTaken {
 surface BoardLaunchCommand {
     facing operator: User
 
-    -- `dispatch tui [--spacetime-server <url>] [--db <path>] [--port <n>]` —
+    -- `dispatch tui [--spacetime-server <url>] [--data-dir <path>] [--port <n>]` —
     -- the one command that starts dispatch. The store may instead be named by
     -- DISPATCH_SPACETIME_SERVER. Naming one is optional: without either, the
     -- board runs its own managed store on config.managed_store_address

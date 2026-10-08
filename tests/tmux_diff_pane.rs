@@ -95,7 +95,7 @@ impl Fixture {
     fn reconcile(&self, anything_open: bool) {
         reconcile_diff_pane(
             &self.tree_pane,
-            Path::new("/data/tasks.db"),
+            Path::new("/data"),
             TASK_ID,
             self.dir.path(),
             anything_open,
@@ -250,7 +250,7 @@ fn the_diff_renderer_runs_in_the_worktree_and_is_told_its_task() {
         "the renderer must be told which task to read; line: {line:?}"
     );
     assert!(
-        line.args.contains("--db /data/tasks.db"),
+        line.args.contains("--data-dir /data"),
         "and which database, so it reads the same open set; line: {line:?}"
     );
 }

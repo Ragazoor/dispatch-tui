@@ -4,16 +4,13 @@
 
 use super::{accepted, ScriptedConnector};
 use crate::host_file::{host_file_path, read_for_cli, resolve_for_launch};
-use crate::store::{Database, HostStore, IdentityCredentialStore};
+use crate::store::{HostStore, IdentityCredentialStore, Store};
 use crate::sync::SyncSession;
 use std::time::Instant;
 
-async fn host_file_database(dir: &std::path::Path) -> Database {
+async fn host_file_database(dir: &std::path::Path) -> Store {
     resolve_for_launch(dir).unwrap();
-    Database::open_in_memory()
-        .await
-        .unwrap()
-        .with_host_file(dir)
+    Store::open_in_memory().await.unwrap().with_host_file(dir)
 }
 
 /// The combined port method writes owner and credential into host.json

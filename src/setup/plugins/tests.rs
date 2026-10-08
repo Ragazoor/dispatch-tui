@@ -6,7 +6,7 @@ use serde_json::Value;
 
 #[tokio::test]
 async fn seed_feed_epics_creates_single_example_epic() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     let data_dir = tempfile::tempdir().unwrap();
     seed_feed_epics(&db, data_dir.path()).await.unwrap();
 
@@ -31,7 +31,7 @@ async fn seed_feed_epics_creates_single_example_epic() {
 
 #[tokio::test]
 async fn seed_feed_epics_is_idempotent() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     let data_dir = tempfile::tempdir().unwrap();
     seed_feed_epics(&db, data_dir.path()).await.unwrap();
     seed_feed_epics(&db, data_dir.path()).await.unwrap();
@@ -44,7 +44,7 @@ async fn seed_feed_epics_is_idempotent() {
 /// the script onto disk belongs to InstallShippedFeedScripts.
 #[tokio::test]
 async fn seed_feed_epics_writes_no_files() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     let data_dir = tempfile::tempdir().unwrap();
     seed_feed_epics(&db, data_dir.path()).await.unwrap();
 
@@ -63,7 +63,7 @@ async fn seed_feed_epics_writes_no_files() {
 /// script that FAILED to write, seeding proceeds unchanged."
 #[tokio::test]
 async fn seed_feed_epics_seeds_even_when_the_dependabot_script_failed_to_write() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     let data_dir = tempfile::tempdir().unwrap();
     let dir = data_dir.path().join("scripts");
     std::fs::create_dir_all(&dir).unwrap();

@@ -782,7 +782,7 @@ async fn list_tasks_done_status_filter() {
 
 #[tokio::test]
 async fn wrap_up_rebase_does_not_change_status() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish().no_remote().shared_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -840,7 +840,7 @@ async fn wrap_up_rebase_does_not_change_status() {
 
 #[tokio::test]
 async fn wrap_up_rebase_does_not_recalculate_epic_status() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish().no_remote().shared_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -900,7 +900,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
 
 #[tokio::test]
 async fn wrap_up_accepts_string_task_id() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish().no_remote().shared_runner();
     let state = Arc::new(McpState::new(
         McpDeps {

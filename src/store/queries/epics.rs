@@ -2,10 +2,10 @@ use anyhow::Result;
 
 use crate::models::{EpicId, TaskId};
 
-use super::super::{Database, EpicPatch};
+use super::super::{EpicPatch, Store};
 
 #[async_trait::async_trait]
-impl super::super::EpicRead for Database {
+impl super::super::EpicRead for Store {
     async fn get_epic(&self, id: EpicId) -> Result<Option<crate::models::Epic>> {
         let reader = self.shared_reader()?;
         reader.get_epic(id).await
@@ -46,7 +46,7 @@ impl super::super::EpicRead for Database {
 }
 
 #[async_trait::async_trait]
-impl super::super::EpicCrud for Database {
+impl super::super::EpicCrud for Store {
     async fn create_epic(
         &self,
         title: &str,

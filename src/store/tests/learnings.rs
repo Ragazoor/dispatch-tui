@@ -325,7 +325,7 @@ async fn delete_learning_removes_row() {
     assert!(db.get_learning(id).await.unwrap().is_none());
 }
 
-async fn make_db_with_task_and_learning() -> (Database, crate::models::TaskId, LearningId) {
+async fn make_db_with_task_and_learning() -> (Store, crate::models::TaskId, LearningId) {
     use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db().await;
     let task = create_task_returning(

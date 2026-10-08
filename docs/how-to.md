@@ -97,13 +97,13 @@ Adding a fully integrated entity involves five layers. Work through them in orde
 
 1. **Domain model** (`src/models/`) — define the struct and any enums in the appropriate domain file. For nullable fields that agents or the TUI can set/clear, plan to use `FieldUpdate` (service layer) and `Option<Option<T>>` double-Option (DB layer); see the [FieldUpdate](conventions.md#fieldupdate--nullable-string-fields) and [TaskPatch/EpicPatch](conventions.md#taskpatch--epicpatch--double-option-in-the-db-layer) conventions.
 
-2. **Store table and reducers** (`spacetime/module/src/`) — add the table and a reducer per write, mirror them in the in-memory store (`src/sync/memory_caller/`, which `Database::open_in_memory` runs), then rebuild with `./scripts/build-managed-module.sh` and regenerate the client bindings with `./scripts/regenerate-spacetime-bindings.sh`. SpacetimeDB automigrates a new table or an appended column; it cannot drop a table that holds rows. See [docs/testing.md](testing.md) ("SpacetimeDB module and CI details").
+2. **Store table and reducers** (`spacetime/module/src/`) — add the table and a reducer per write, mirror them in the in-memory store (`src/sync/memory_caller/`, which `Store::open_in_memory` runs), then rebuild with `./scripts/build-managed-module.sh` and regenerate the client bindings with `./scripts/regenerate-spacetime-bindings.sh`. SpacetimeDB automigrates a new table or an appended column; it cannot drop a table that holds rows. See [docs/testing.md](testing.md) ("SpacetimeDB module and CI details").
 
 3. **DB trait and queries** (`src/store/mod.rs`, `src/store/queries/`):
    - Define a narrow sub-trait (e.g., `trait NewEntityCrud`) with CRUD methods. Follow the [trait-narrowing convention](conventions.md#db-trait-narrowing--take-the-narrowest-sub-trait-you-need).
    - Add `NewEntityCrud` to `TaskStore`'s member list, and give every read and write a store path: a table in the SpacetimeDB module, reducers for the writes (a `SharedWriter` method), and the reads on a reader port over `SharedRows` — each routed with `self.shared_writer()?` / `self.shared_reader()?`. See "The store seam" in [conventions.md](conventions.md#the-store-seam--retired-and-where-reads-and-writes-go-instead): there is no local fallback, so a method that is not routed has nothing to answer from.
    - Add `NewEntityCrud` as a supertrait of the store the holders actually carry. `McpState` and `TuiRuntime` hold `Arc<dyn TaskReadStore>` (`src/mcp/mod.rs::McpState`), so a **read** trait belongs on `TaskReadStore`; a **mutating** trait belongs on `TaskStore` and stays out of `TaskReadStore` — that split is what makes bypassing the service layer a compile error.
-   - Implement `impl NewEntityCrud for Database` under `src/store/queries/` (a new file per domain, wired into `src/store/queries/mod.rs`). Each method hands the call to the attached port; there is no local connection.
+   - Implement `impl NewEntityCrud for Store` under `src/store/queries/` (a new file per domain, wired into `src/store/queries/mod.rs`). Each method hands the call to the attached port; there is no local connection.
    - Define a `NewEntityPatch` builder struct with `Option<Option<T>>` for nullable fields; carry it through the port's reducer call.
    - Write a corresponding `NewEntityFilter` if list queries need filtering.
 
@@ -112,7 +112,7 @@ Adding a fully integrated entity involves five layers. Work through them in orde
 5. **MCP handler** (if agents need to interact) — follow [Adding a New MCP Tool](#adding-a-new-mcp-tool). For read-only tools, hold the narrowest sub-trait; for mutating tools, route the write through the service layer (never `state.db`) and call `state.notify()` afterwards.
 
 6. **Tests**:
-   - DB-layer tests in `src/store/tests/` (the file matching the entity's domain) using `Database::open_in_memory()` (the in-memory store).
+   - DB-layer tests in `src/store/tests/` (the file matching the entity's domain) using `Store::open_in_memory()` (the in-memory store).
    - Service-layer tests inline in the corresponding `src/service/<entity>.rs` file.
    - MCP handler tests in `src/mcp/handlers/tests/` (the file matching the tool's domain) for any new tools.
 

@@ -37,13 +37,13 @@ fn plan_file() -> tempfile::NamedTempFile {
     f
 }
 
-/// Run `args` against `--db <data_dir>/tasks.db` and a dead store.
+/// Run `args` against `--data-dir <data_dir>` and a dead store.
 fn run(data_dir: &Path, args: &[&str]) -> Output {
     binary()
         .env_remove("DISPATCH_SPACETIME_SERVER")
         .args([
-            "--db",
-            data_dir.join("tasks.db").to_str().unwrap(),
+            "--data-dir",
+            data_dir.to_str().unwrap(),
             "--spacetime-server",
             &dead_store_address(),
         ])
@@ -69,11 +69,11 @@ fn store_backed_commands(plan: &Path) -> Vec<Vec<String>> {
 /// has no SQLite to write one with any more, so the fixture is a file with the
 /// SQLite magic header and some payload: all the guarantee needs is bytes whose
 /// digest and mtime a stray open, truncate or rewrite would change.
-async fn legacy_database(db_path: &Path) {
+async fn legacy_database(data_dir: &Path) {
     let mut bytes = b"SQLite format 3\0".to_vec();
     bytes.extend((0..4096u32).map(|n| (n % 251) as u8));
-    std::fs::write(db_path, bytes).unwrap();
-    let left = footprint(db_path);
+    std::fs::write(data_dir.join("tasks.db"), bytes).unwrap();
+    let left = footprint(data_dir);
     assert!(
         !left.wal && !left.shm,
         "fixture: the legacy database must be self-contained"
@@ -89,9 +89,10 @@ struct LegacyFootprint {
     shm: bool,
 }
 
-fn footprint(db_path: &Path) -> LegacyFootprint {
+fn footprint(data_dir: &Path) -> LegacyFootprint {
     let companion = |suffix: &str| {
-        let mut name = db_path.as_os_str().to_owned();
+        let db_file = data_dir.join("tasks.db");
+        let mut name = db_file.as_os_str().to_owned();
         name.push(suffix);
         PathBuf::from(name).exists()
     };
@@ -99,10 +100,15 @@ fn footprint(db_path: &Path) -> LegacyFootprint {
         content: {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            std::fs::read(db_path).unwrap().hash(&mut h);
+            std::fs::read(data_dir.join("tasks.db"))
+                .unwrap()
+                .hash(&mut h);
             h.finish()
         },
-        modified: std::fs::metadata(db_path).unwrap().modified().unwrap(),
+        modified: std::fs::metadata(data_dir.join("tasks.db"))
+            .unwrap()
+            .modified()
+            .unwrap(),
         wal: companion("-wal"),
         shm: companion("-shm"),
     }
@@ -157,8 +163,8 @@ async fn one_shot_commands_with_a_host_file_never_touch_the_legacy_database() {
     let plan = plan_file();
     for args in store_backed_commands(plan.path()) {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("tasks.db");
-        legacy_database(&db_path).await;
+        let data_dir = dir.path().to_path_buf();
+        legacy_database(&data_dir).await;
         let host_file = dir.path().join("host.json");
         std::fs::write(
             &host_file,
@@ -172,7 +178,7 @@ async fn one_shot_commands_with_a_host_file_never_touch_the_legacy_database() {
         )
         .unwrap();
         let host_before = std::fs::read(&host_file).unwrap();
-        let before = footprint(&db_path);
+        let before = footprint(&data_dir);
         let argv: Vec<&str> = args.iter().map(String::as_str).collect();
 
         let out = run(dir.path(), &argv);
@@ -184,7 +190,7 @@ async fn one_shot_commands_with_a_host_file_never_touch_the_legacy_database() {
             "{args:?} with a host file must get as far as the store, got: {stderr}"
         );
         assert_eq!(
-            footprint(&db_path),
+            footprint(&data_dir),
             before,
             "{args:?} must not open, write or delete the leftover tasks.db"
         );
@@ -254,16 +260,15 @@ async fn purge_states_no_task_count_and_never_opens_the_legacy_database() {
     let xdg = home.path().join("xdg");
     let data_dir = xdg.join("dispatch");
     std::fs::create_dir_all(&data_dir).unwrap();
-    let db_path = data_dir.join("tasks.db");
-    legacy_database(&db_path).await;
+    legacy_database(&data_dir).await;
     std::fs::write(data_dir.join("host.json"), br#"{"host_id":"h"}"#).unwrap();
     std::fs::write(data_dir.join("app.log"), b"log").unwrap();
-    let before = footprint(&db_path);
+    let before = footprint(&data_dir);
 
     let mut child = binary()
         .env("HOME", home.path())
         .env("XDG_DATA_HOME", &xdg)
-        .env_remove("DISPATCH_DB")
+        .env_remove("DISPATCH_DATA_DIR")
         .args(["uninstall", "--yes", "--purge"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -291,7 +296,7 @@ async fn purge_states_no_task_count_and_never_opens_the_legacy_database() {
     );
     assert!(!data_dir.join("app.log").exists(), "purge removes the log");
     assert_eq!(
-        footprint(&db_path),
+        footprint(&data_dir),
         before,
         "purge must not open, read-and-checkpoint, or delete the leftover tasks.db"
     );
@@ -416,7 +421,7 @@ fn no_production_code_opens_a_sqlite_database() {
     for (path, text) in production_sources() {
         for line in text.lines() {
             if [
-                "Database::open(",
+                "Store::open(",
                 "Connection::open(",
                 "Connection::open_with_flags(",
             ]

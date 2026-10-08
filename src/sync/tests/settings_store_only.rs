@@ -7,14 +7,14 @@
 
 use std::sync::Arc;
 
-use crate::store::{Database, SettingsStore};
+use crate::store::{SettingsStore, Store};
 use crate::sync::{SharedRows, SubscriptionBoardReads};
 
 /// A handle with no store attached refuses a settings write and a settings
 /// read, rather than keeping the value somewhere nothing else reads.
 #[tokio::test]
 async fn a_handle_with_no_store_refuses_settings_rather_than_keeping_them_locally() {
-    let local = Database::unattached();
+    let local = Store::unattached();
 
     let write = local
         .set_setting_string("repo_filter", "/legacy/repo")
@@ -27,7 +27,7 @@ async fn a_handle_with_no_store_refuses_settings_rather_than_keeping_them_locall
 /// A store-backed handle with no row for a key answers with the default.
 #[tokio::test]
 async fn a_setting_the_store_does_not_hold_reads_as_unset() {
-    let store_backed = Database::unattached().with_shared_reader(Arc::new(
+    let store_backed = Store::unattached().with_shared_reader(Arc::new(
         SubscriptionBoardReads::new(Arc::new(SharedRows::new())),
     ));
 

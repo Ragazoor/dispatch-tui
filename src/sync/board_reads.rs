@@ -14,8 +14,8 @@
 //!
 //! [`SubscriptionBoardReads`] reads the live view of this board's
 //! subscriptions, and is what every board runs: the store is mandatory.
-//! A store-attached in-memory `Database` serves the same type over its own rows
-//! (`Database::board_reads`); there is no SQLite-backed implementation.
+//! A store-attached in-memory `Store` serves the same type over its own rows
+//! (`Store::board_reads`); there is no SQLite-backed implementation.
 //!
 //! # The revision number
 //!
@@ -123,7 +123,7 @@ impl BoardReads for SubscriptionBoardReads {
     }
 }
 
-/// The same rows answer every other shared read `Database` routes
+/// The same rows answer every other shared read `Store` routes
 /// (`store::SharedReader`, `sync.allium`'s `BoardReadsFromTheSubscription`) — one
 /// adapter over [`SharedRows`], not two kept in step.
 #[async_trait]

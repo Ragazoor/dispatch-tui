@@ -1,4 +1,4 @@
-//! The [`Database`](super::Database) routing: each store trait is implemented
+//! The [`Store`](super::Store) routing: each store trait is implemented
 //! by handing the call to the attached port (`SharedWriter`, `SharedReader`,
 //! and the per-domain readers). Nothing here touches a local database.
 

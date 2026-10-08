@@ -4,7 +4,7 @@
 //! backend could implement one of them. With the store mandatory there is one
 //! backend, and [`TaskStore`] is the one complete store. Every test here
 //! reaches the tables through `&dyn TaskStore` rather than through the
-//! concrete type — reaching a method on `Database` proves nothing about the
+//! concrete type — reaching a method on `Store` proves nothing about the
 //! trait. The compile-time half (the old local half is gone, and is not a
 //! complete store) is the compile-fail doc tests on `TaskStore` in
 //! `src/store/mod.rs`.

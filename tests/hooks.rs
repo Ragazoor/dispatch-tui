@@ -522,7 +522,7 @@ fn no_hook_source_names_the_database() {
     files.sort();
     assert!(!files.is_empty(), "expected hook sources under src/hooks");
 
-    const FORBIDDEN: &[&str] = &["db::", "Database", "rusqlite", "TaskService", "TaskStore"];
+    const FORBIDDEN: &[&str] = &["db::", "Store", "rusqlite", "TaskService", "TaskStore"];
     for file in &files {
         let source = std::fs::read_to_string(file).unwrap();
         for needle in FORBIDDEN {
@@ -663,10 +663,10 @@ async fn no_installed_hook_entry_point_creates_a_database() {
     let dead = dead_port().await;
     for (name, argv) in hook_entry_point_invocations() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("dispatch.db");
+        let data_dir = dir.path().join("data");
 
         Command::new(env!("CARGO_BIN_EXE_dispatch"))
-            .args(["--db", db_path.to_str().unwrap()])
+            .args(["--data-dir", data_dir.to_str().unwrap()])
             .args(&argv)
             .args(["--port", &dead.to_string()])
             .output()
@@ -674,7 +674,7 @@ async fn no_installed_hook_entry_point_creates_a_database() {
             .unwrap();
 
         assert!(
-            !db_path.exists(),
+            !data_dir.exists(),
             "`dispatch {name}` brought a database into existence — a hook must reach the \
              board, never the database"
         );

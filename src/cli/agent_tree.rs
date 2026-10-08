@@ -1391,7 +1391,7 @@ fn navigate_half_page(
 /// cannot say which database holds it.
 pub(crate) struct DiffPaneContext<'a> {
     pub root: &'a Path,
-    pub db_path: &'a Path,
+    pub data_dir: &'a Path,
     pub task_id: i64,
 }
 
@@ -1435,7 +1435,7 @@ fn publish_open_set(
 
     if let Err(e) = crate::agent_tree_diff_pane::reconcile_diff_pane(
         &my_pane,
-        context.db_path,
+        context.data_dir,
         context.task_id,
         context.root,
         !state.open_diffs.is_empty(),
@@ -1683,7 +1683,7 @@ fn refresh(root: &Path, runner: &dyn ProcessRunner, tree: &mut TreeNode, state: 
 /// doc comment). Resolves the task's worktree and base branch from the board once,
 /// then re-queries git on a 1-second timer and lists the agent's commits on a
 /// worker thread.
-pub async fn run(db_path: &Path, board_port: u16, task_id: i64) -> Result<()> {
+pub async fn run(data_dir: &Path, board_port: u16, task_id: i64) -> Result<()> {
     // The task and the live-agent list come from the running board, which
     // already holds them (`PanesReadThroughTheBoard`).
     let source = std::sync::Arc::new(crate::cli::BoardPaneSource { port: board_port });
@@ -1709,7 +1709,7 @@ pub async fn run(db_path: &Path, board_port: u16, task_id: i64) -> Result<()> {
                 terminal,
                 &DiffPaneContext {
                     root: &root,
-                    db_path,
+                    data_dir,
                     task_id,
                 },
                 &agent_reads,

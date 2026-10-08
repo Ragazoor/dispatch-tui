@@ -22,7 +22,7 @@ fn layout(root: &Path) -> (UninstallPaths, PathBuf) {
         mcp_path: root.join(".claude.json"),
         legacy_mcp_path: root.join(".claude").join(".mcp.json"),
         plugin_path: root.join("plugin"),
-        db_path: data_dir.join("tasks.db"),
+        data_dir: data_dir.clone(),
         statusline_path: root.join("statusline.json"),
     };
     (paths, data_dir)
@@ -35,8 +35,8 @@ fn yes_to_everything() -> FakeConfirmer {
 /// A leftover `tasks.db` file plus sentinel `-wal`/`-shm`
 /// companions. Returns each file and its bytes.
 async fn leftover_database(data_dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
-    let db_path = data_dir.join("tasks.db");
-    fs::write(&db_path, b"SQLite format 3\0 leftover").unwrap();
+    let db_file = data_dir.join("tasks.db");
+    fs::write(&db_file, b"SQLite format 3\0 leftover").unwrap();
     fs::write(data_dir.join("tasks.db-wal"), b"wal sentinel").unwrap();
     fs::write(data_dir.join("tasks.db-shm"), b"shm sentinel").unwrap();
     ["tasks.db", "tasks.db-wal", "tasks.db-shm"]

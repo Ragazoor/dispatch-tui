@@ -266,7 +266,7 @@ struct Bootstrap {
 // The store every process reads and writes through
 // ---------------------------------------------------------------------------
 
-/// A `Database` routed through the shared store, and the pieces of the
+/// A `Store` routed through the shared store, and the pieces of the
 /// connection behind it.
 ///
 /// Built before anything connects, because the routing is attached at the
@@ -275,7 +275,7 @@ struct Bootstrap {
 /// change under a caller. Every reader and the writer's claim chain sit over
 /// the same `rows`, so a process cannot read one copy and write another.
 pub struct StoreParts {
-    pub database: Arc<store::Database>,
+    pub database: Arc<store::Store>,
     pub rows: Arc<crate::sync::SharedRows>,
     /// The one adapter over `rows`: the board draws from it and `database`'s
     /// shared reads route to it.
@@ -300,7 +300,7 @@ impl StoreParts {
     /// install's own — known before any connection, because it is minted
     /// locally on first run (`host.allium: MintHostIdentity`) — and the claim
     /// needs it on every write.
-    pub fn build(database: store::Database, host_id: &str) -> Self {
+    pub fn build(database: store::Store, host_id: &str) -> Self {
         let rows = Arc::new(crate::sync::SharedRows::new());
         let sdk = Arc::new(crate::sync::SpacetimeSdkConnector::new(
             crate::sync::SHARED_DATABASE_NAME,
@@ -349,7 +349,7 @@ impl StoreParts {
 /// No reconnect loop — a command that loses its store mid-run fails, and the
 /// operator runs it again.
 pub struct CliStore {
-    pub database: Arc<store::Database>,
+    pub database: Arc<store::Store>,
     _session: crate::sync::SyncSession,
 }
 
@@ -359,7 +359,7 @@ pub struct CliStore {
 /// `AbortWhenTheStoreCannotBeReached`). For the subcommands that read or write
 /// shared rows (`repo`, `plan`, the agent-tree and diff panes): with the store
 /// mandatory, the local database no longer holds them.
-pub async fn open_cli_store(db_path: &Path, server: Option<String>) -> Result<CliStore> {
+pub async fn open_cli_store(data_dir: &Path, server: Option<String>) -> Result<CliStore> {
     // Flag, then the operator's environment, then the address the board
     // published on its session, then the record a board left beside this
     // database, then the managed address (`CliCommandsReachTheStoreWithoutManagingIt`).
@@ -368,9 +368,9 @@ pub async fn open_cli_store(db_path: &Path, server: Option<String>) -> Result<Cl
         server,
         std::env::var(crate::startup::STORE_SERVER_ENV).ok(),
         std::env::var(crate::startup::BOARD_STORE_ENV).ok(),
-        db_path,
+        data_dir,
     );
-    let (database, host_id) = open_with_cli_identity(db_path).await?;
+    let (database, host_id) = open_with_cli_identity(data_dir).await?;
     let parts = StoreParts::build(database, &host_id);
     // No host-registry push: a short-lived command is not a board, and the
     // board already registers this host on every connect.
@@ -397,13 +397,13 @@ fn store_database_identity(server: &str) -> Option<String> {
 /// [`pin_store_after_connect`].
 async fn check_store_identity(
     parts: &StoreParts,
-    db_path: &Path,
+    data_dir: &Path,
     server: &str,
     accept_store_switch: bool,
 ) -> Result<Option<String>> {
     let probe = parts.store_identity;
     let address = server.to_string();
-    let pin_db = db_path.to_path_buf();
+    let pin_db = data_dir.to_path_buf();
     // One deadline over the whole probe: its own timeouts are per step, and a
     // name lookup has none. Past it the store counts as unaskable.
     let probed = tokio::time::timeout(
@@ -418,7 +418,7 @@ async fn check_store_identity(
     .await;
     let (found, pinned) = match probed {
         Ok(joined) => joined?,
-        Err(_elapsed) => (None, crate::startup::pinned_store_identity(db_path)),
+        Err(_elapsed) => (None, crate::startup::pinned_store_identity(data_dir)),
     };
     if found.is_none() {
         tracing::warn!(
@@ -437,18 +437,9 @@ async fn check_store_identity(
 
 /// `startup.allium`: `PinTheStoreOnceItAnswers`. Best-effort: a pin that
 /// cannot be written is logged by `pin_store_identity` and the launch goes on.
-fn pin_store_after_connect(db_path: &Path, found: Option<&str>) {
+fn pin_store_after_connect(data_dir: &Path, found: Option<&str>) {
     if let Some(identity) = found {
-        crate::startup::pin_store_identity(db_path, identity);
-    }
-}
-
-/// The data directory `--db` names: where `host.json`, `app.log` and the store
-/// record live. The database file itself is never opened.
-pub fn data_dir_of(db_path: &Path) -> &Path {
-    match db_path.parent() {
-        Some(dir) if !dir.as_os_str().is_empty() => dir,
-        _ => Path::new("."),
+        crate::startup::pin_store_identity(data_dir, identity);
     }
 }
 
@@ -456,14 +447,13 @@ pub fn data_dir_of(db_path: &Path) -> &Path {
 /// own: an empty base for the routed ports to attach to (dispatch has no
 /// SQLite — `storage.allium: StoreInUseNeverOpensSqlite`), with this install's
 /// identity kept in `<data_dir>/host.json` (`host.allium: IdentityLivesInHostFile`).
-fn placeholder_database(data_dir: &Path) -> store::Database {
-    store::Database::unattached().with_host_file(data_dir)
+fn placeholder_database(data_dir: &Path) -> store::Store {
+    store::Store::unattached().with_host_file(data_dir)
 }
 
 /// A one-shot command's identity: read from the host file, never minted
 /// (`cli.allium: CliCommandsNeedAHostFile`).
-async fn open_with_cli_identity(db_path: &Path) -> Result<(store::Database, String)> {
-    let data_dir = data_dir_of(db_path);
+async fn open_with_cli_identity(data_dir: &Path) -> Result<(store::Store, String)> {
     let dir = data_dir.to_path_buf();
     let identity =
         tokio::task::spawn_blocking(move || crate::host_file::read_for_cli(&dir)).await??;
@@ -509,7 +499,7 @@ async fn read_launch_identity(data_dir: &Path) -> Result<(String, Option<String>
 /// What starts once the first connection answers: seed and provision the feed
 /// epics, backfill embeddings, and serve agents.
 async fn start_services_after_connect(
-    database: &Arc<store::Database>,
+    database: &Arc<store::Store>,
     data_dir: &Path,
     emb_svc: Arc<EmbeddingService>,
     mcp_listener: tokio::net::TcpListener,
@@ -545,7 +535,7 @@ async fn start_services_after_connect(
 /// Returns the address and the open session.
 async fn connect_to_store(
     target: &StoreTarget,
-    db_path: &Path,
+    data_dir: &Path,
     parts: &StoreParts,
     accept_store_switch: bool,
 ) -> Result<(String, crate::sync::SyncSession)> {
@@ -554,12 +544,12 @@ async fn connect_to_store(
     // holding a different database from the one this install last used is
     // refused here (`AbortWhenTheStoreIsNotTheOneThisInstallUses`, task
     // #28710).
-    let found = check_store_identity(parts, db_path, &server, accept_store_switch).await?;
+    let found = check_store_identity(parts, data_dir, &server, accept_store_switch).await?;
     let session = connect_first(server.clone(), parts, Some(&*parts.reducer_caller)).await?;
-    pin_store_after_connect(db_path, found.as_deref());
+    pin_store_after_connect(data_dir, found.as_deref());
     // Only an address that answered is worth recording; failing to write
     // it is a warning, not an abort.
-    record_store_server_for(target, db_path, &server);
+    record_store_server_for(target, data_dir, &server);
     Ok((server, session))
 }
 
@@ -624,19 +614,19 @@ impl Drop for ManagedStoreGuard {
     }
 }
 
-/// `RecordTheNamedStoreOnceItAnswers`: record `server` beside `db_path` for a
+/// `RecordTheNamedStoreOnceItAnswers`: record `server` beside `data_dir` for a
 /// named store; a managed board records nothing. True when a record was kept.
 /// Best-effort: a board that cannot write it still runs.
-fn record_store_server_for(target: &StoreTarget, db_path: &Path, server: &str) -> bool {
-    target.is_named() && crate::startup::record_store_server(db_path, server)
+fn record_store_server_for(target: &StoreTarget, data_dir: &Path, server: &str) -> bool {
+    target.is_named() && crate::startup::record_store_server(data_dir, server)
 }
 
 /// `ForgetAStaleStoreRecordOnAManagedLaunch`: a managed launch clears any
-/// record beside `db_path`; a named launch leaves it for its own record to
+/// record beside `data_dir`; a named launch leaves it for its own record to
 /// replace.
-fn forget_stale_store_record_for(target: &StoreTarget, db_path: &Path) {
+fn forget_stale_store_record_for(target: &StoreTarget, data_dir: &Path) {
     if matches!(target, StoreTarget::Managed(_)) {
-        crate::startup::forget_store_server(db_path);
+        crate::startup::forget_store_server(data_dir);
     }
 }
 
@@ -647,15 +637,15 @@ fn forget_stale_store_record_for(target: &StoreTarget, db_path: &Path) {
 struct StoreRecordGuard(Option<std::path::PathBuf>);
 
 impl StoreRecordGuard {
-    fn for_target(target: &StoreTarget, db_path: &Path) -> Self {
-        Self(target.is_named().then(|| db_path.to_path_buf()))
+    fn for_target(target: &StoreTarget, data_dir: &Path) -> Self {
+        Self(target.is_named().then(|| data_dir.to_path_buf()))
     }
 }
 
 impl Drop for StoreRecordGuard {
     fn drop(&mut self) {
-        if let Some(db_path) = &self.0 {
-            crate::startup::forget_store_server(db_path);
+        if let Some(data_dir) = &self.0 {
+            crate::startup::forget_store_server(data_dir);
         }
     }
 }
@@ -704,8 +694,8 @@ fn clean_up_on_termination(
         if let Some(store) = store {
             let _ = tokio::task::spawn_blocking(move || store.stop_on_exit()).await;
         }
-        if let Some(db_path) = record_db {
-            crate::startup::forget_store_server(&db_path);
+        if let Some(data_dir) = record_db {
+            crate::startup::forget_store_server(&data_dir);
         }
         let _ = disable_raw_mode();
         std::process::exit(0);
@@ -715,7 +705,7 @@ fn clean_up_on_termination(
 /// Pick the store this launch uses: the one the operator named, or dispatch's
 /// own managed one. `cli_on_path` is consulted only when none is named.
 fn select_store_target(
-    db_path: &Path,
+    data_dir: &Path,
     spacetime_server: Option<String>,
     cli_on_path: impl FnOnce() -> bool,
 ) -> Result<StoreTarget> {
@@ -728,8 +718,8 @@ fn select_store_target(
                 // Fixed, not derived from `--db`: a throwaway database must not
                 // start a second store or lose sight of the module hash the first
                 // recorded.
-                let store_data_dir = data_dir_of(&crate::default_db_path()).join("spacetime");
-                let log_dir = data_dir_of(db_path);
+                let store_data_dir = crate::default_data_dir().join("spacetime");
+                let log_dir = data_dir;
                 StoreTarget::Managed(Arc::new(
                     crate::spacetime::managed_store::ManagedStore::for_launch(
                         store_data_dir,
@@ -827,7 +817,7 @@ fn spawn_input_thread(
 /// `paths` carries the operator's `$HOME`-derived locations, resolved by the
 /// caller — see [`StartupPaths`].
 pub async fn run_tui(
-    db_path: &Path,
+    data_dir: &Path,
     port: u16,
     paths: &StartupPaths,
     spacetime_server: Option<String>,
@@ -851,7 +841,7 @@ pub async fn run_tui(
     // process that hands off to tmux never gets this far, so exactly one
     // process starts a store.
     let target = select_store_target(
-        db_path,
+        data_dir,
         spacetime_server,
         crate::spacetime::managed_store::spacetime_cli_on_path,
     )?;
@@ -861,14 +851,14 @@ pub async fn run_tui(
     let _store_guard = ManagedStoreGuard(target.managed().cloned());
     // A record left by an earlier named board must not outlive this managed
     // launch, and a named board's own record goes when this function does.
-    forget_stale_store_record_for(&target, db_path);
-    let _record_guard = StoreRecordGuard::for_target(&target, db_path);
+    forget_stale_store_record_for(&target, data_dir);
+    let _record_guard = StoreRecordGuard::for_target(&target, data_dir);
     clean_up_on_termination(
         target.managed().cloned(),
-        target.is_named().then(|| db_path.to_path_buf()),
+        target.is_named().then(|| data_dir.to_path_buf()),
     );
     let bootstrapped =
-        TuiRuntime::bootstrap_for(db_path, port, paths, target.clone(), accept_store_switch).await;
+        TuiRuntime::bootstrap_for(data_dir, port, paths, target.clone(), accept_store_switch).await;
     let Bootstrap {
         store_server: server,
         mut app,
@@ -902,7 +892,7 @@ pub async fn run_tui(
     // Tick interval (2 seconds)
     let mut tick_interval = interval(TICK_INTERVAL);
 
-    tracing::info!(port, db = %db_path.display(), "TUI started, MCP server on port {port}");
+    tracing::info!(port, db = %data_dir.display(), "TUI started, MCP server on port {port}");
 
     let result = run_loop(
         &mut app,
@@ -1033,7 +1023,7 @@ async fn finish_embedding_load(_load: EmbeddingLoad) -> Result<Arc<EmbeddingServ
 
 /// Seed the example feed epic and provision the managed feed-epic tree.
 /// Idempotent and best-effort: a failure is logged and never blocks startup.
-async fn seed_and_provision_feeds(database: &Arc<store::Database>, data_dir: &Path) {
+async fn seed_and_provision_feeds(database: &Arc<store::Store>, data_dir: &Path) {
     if let Err(e) = crate::setup::seed_feed_epics(database, data_dir).await {
         tracing::warn!("Example feed epic seeding failed: {e:#}");
     }
@@ -1043,7 +1033,7 @@ async fn seed_and_provision_feeds(database: &Arc<store::Database>, data_dir: &Pa
 }
 
 /// Fire-and-forget: partial work is retried on the next startup.
-fn spawn_embedding_backfill(database: Arc<store::Database>, emb: Arc<EmbeddingService>) {
+fn spawn_embedding_backfill(database: Arc<store::Store>, emb: Arc<EmbeddingService>) {
     tokio::spawn(async move {
         if let Err(e) = backfill_embeddings(database, emb).await {
             tracing::warn!("Embedding backfill failed: {e}");
@@ -1221,14 +1211,14 @@ impl TuiRuntime {
     /// The `#[cfg(test)]` / `#[cfg(not(test))]` embedding-service split lives
     /// here so call sites don't branch on `cfg`.
     async fn bootstrap_for(
-        db_path: &Path,
+        data_dir: &Path,
         port: u16,
         paths: &StartupPaths,
         target: StoreTarget,
         accept_store_switch: bool,
     ) -> Result<Bootstrap> {
         Self::bootstrap_inner(
-            db_path,
+            data_dir,
             port,
             paths,
             target,
@@ -1246,15 +1236,15 @@ impl TuiRuntime {
     /// Phase 12b (#4975) supplies an in-memory store.
     #[cfg(test)]
     async fn bootstrap_with(
-        db_path: &Path,
+        data_dir: &Path,
         port: u16,
         paths: &StartupPaths,
         server: String,
-        build_store: fn(store::Database, &str) -> StoreParts,
+        build_store: fn(store::Store, &str) -> StoreParts,
         accept_store_switch: bool,
     ) -> Result<Bootstrap> {
         Self::bootstrap_inner(
-            db_path,
+            data_dir,
             port,
             paths,
             StoreTarget::Named(server),
@@ -1268,15 +1258,15 @@ impl TuiRuntime {
     /// host being named and the first connection
     /// (`BringUpTheManagedStoreOnceTheHostIsNamed`).
     async fn bootstrap_inner(
-        db_path: &Path,
+        data_dir: &Path,
         port: u16,
         paths: &StartupPaths,
         target: StoreTarget,
-        build_store: fn(store::Database, &str) -> StoreParts,
+        build_store: fn(store::Store, &str) -> StoreParts,
         accept_store_switch: bool,
     ) -> Result<Bootstrap> {
         let mcp_listener = claim_agent_port(port).await?;
-        let data_dir = data_dir_of(db_path).to_path_buf();
+        let data_dir = data_dir.to_path_buf();
         let (host_id, host_label) = read_launch_identity(&data_dir).await?;
         let database = placeholder_database(&data_dir);
         // Routed at construction: which backing a read or write goes to cannot
@@ -1319,7 +1309,7 @@ impl TuiRuntime {
         // every setting the loaders read — is a shared row, and would read
         // nothing from a store that had not answered yet.
         let (store_server, session) =
-            connect_to_store(&target, db_path, &parts, accept_store_switch).await?;
+            connect_to_store(&target, &data_dir, &parts, accept_store_switch).await?;
         let sync_store: Arc<dyn crate::sync::SyncStore> = database.clone();
 
         let emb_svc = finish_embedding_load(emb_load).await?;
@@ -1402,7 +1392,7 @@ impl TuiRuntime {
     /// Wire the services, the feed runner and the message channel around an
     /// already-connected store. Nothing here touches the network or the terminal.
     fn build_runtime(
-        database: &Arc<store::Database>,
+        database: &Arc<store::Store>,
         runner: &Arc<dyn ProcessRunner>,
         emb_svc: &Arc<EmbeddingService>,
         parts: &StoreParts,
@@ -1451,7 +1441,7 @@ impl TuiRuntime {
             editor_session: Arc::new(std::sync::Mutex::new(None)),
             emb_svc: emb_svc.clone(),
             last_change_count: Arc::new(AtomicI64::new(-1)),
-            // Deliberately not derived from `db_path`: the subscription windows
+            // Deliberately not derived from `data_dir`: the subscription windows
             // are account-global, so a run against a throwaway database must
             // publish and read the same location as every other session. See
             // docs/specs/observability.allium:
@@ -1796,7 +1786,7 @@ async fn claim_agent_port(port: u16) -> Result<tokio::net::TcpListener> {
 /// label that is already set, so entering it would cost a blocking-pool
 /// hop and a `/proc` read (the prompt's default, evaluated eagerly as an
 /// argument) only to discard both.
-async fn name_the_host(label: Option<String>, database: &store::Database) -> Result<()> {
+async fn name_the_host(label: Option<String>, database: &store::Store) -> Result<()> {
     let resolved = if label.is_none() {
         let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
         tokio::task::spawn_blocking(move || {
@@ -1845,7 +1835,7 @@ async fn resolve_store_server(target: &StoreTarget) -> Result<String> {
 async fn hydrate_app(
     tasks: Vec<models::Task>,
     host_id: &str,
-    database: &store::Database,
+    database: &store::Store,
     runner: &dyn ProcessRunner,
 ) -> App {
     let mut app = App::new(tasks);

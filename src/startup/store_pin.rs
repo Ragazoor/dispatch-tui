@@ -18,8 +18,8 @@ pub const STORE_PIN_FILE: &str = "store-identity";
 /// How long asking the store for its database identity may take.
 pub const STORE_IDENTITY_TIMEOUT: Duration = Duration::from_secs(2);
 
-fn store_pin_path(db_path: &Path) -> PathBuf {
-    super::beside_database(db_path, STORE_PIN_FILE)
+fn store_pin_path(data_dir: &Path) -> PathBuf {
+    super::beside_data_dir(data_dir, STORE_PIN_FILE)
 }
 
 /// One spelling for an identity: lowercase hex with no `0x`, so a pin
@@ -33,20 +33,20 @@ fn normalize_identity(identity: &str) -> Option<String> {
     (!hex.is_empty()).then(|| hex.to_ascii_lowercase())
 }
 
-/// The identity the last board on `db_path` pinned, else `None`. Blank is
+/// The identity the last board on `data_dir` pinned, else `None`. Blank is
 /// `None`. `StoreIdentityPin.pinned_store_identity`.
-pub fn pinned_store_identity(db_path: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(store_pin_path(db_path)).ok()?;
+pub fn pinned_store_identity(data_dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(store_pin_path(data_dir)).ok()?;
     normalize_identity(&text)
 }
 
-/// Pin `identity` beside `db_path`, replacing whatever was there. True when
+/// Pin `identity` beside `data_dir`, replacing whatever was there. True when
 /// the pin was kept. `StoreIdentityPin.pin_store_identity`.
-pub fn pin_store_identity(db_path: &Path, identity: &str) -> bool {
+pub fn pin_store_identity(data_dir: &Path, identity: &str) -> bool {
     let Some(identity) = normalize_identity(identity) else {
         return false;
     };
-    match std::fs::write(store_pin_path(db_path), format!("{identity}\n")) {
+    match std::fs::write(store_pin_path(data_dir), format!("{identity}\n")) {
         Ok(()) => true,
         Err(e) => {
             tracing::warn!("could not pin the store database identity beside the database: {e}");

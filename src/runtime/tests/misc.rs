@@ -111,7 +111,7 @@ mod load_init_helpers {
 
     #[tokio::test]
     async fn load_notifications_pref_defaults_to_false_when_not_set() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         let mut app = empty_app();
         load_notifications_pref(&db, &mut app).await;
         assert!(!app.notifications_enabled());
@@ -119,7 +119,7 @@ mod load_init_helpers {
 
     #[tokio::test]
     async fn load_notifications_pref_sets_true_when_enabled() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         db.set_setting_bool("notifications_enabled", true)
             .await
             .unwrap();
@@ -130,7 +130,7 @@ mod load_init_helpers {
 
     #[tokio::test]
     async fn load_repo_filter_loads_paths_and_mode() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         db.set_setting_string(
             "repo_filter",
             &serde_json::to_string(&vec!["/repo/a".to_string(), "/repo/b".to_string()]).unwrap(),
@@ -153,7 +153,7 @@ mod load_init_helpers {
 
     #[tokio::test]
     async fn load_repo_filter_leaves_defaults_when_nothing_saved() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         let mut app = empty_app();
 
         load_repo_filter(&db, &mut app).await;
@@ -164,7 +164,7 @@ mod load_init_helpers {
 
     #[tokio::test]
     async fn load_repo_filter_ignores_an_unparseable_saved_mode() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         db.set_setting_string("repo_filter_mode", "bogus")
             .await
             .unwrap();
@@ -312,7 +312,7 @@ mod backfill_embeddings {
         use crate::service::embeddings::EmbeddingService;
         use crate::store::{CreateLearningRow, LearningStore};
 
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().await.unwrap());
 
         // Insert two learnings without embeddings.
         let id1 = db
@@ -388,7 +388,7 @@ mod backfill_embeddings {
         use crate::service::embeddings::{serialize_embedding, EmbeddingService};
         use crate::store::{CreateLearningRow, LearningStore};
 
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().await.unwrap());
 
         // Insert a learning that already has an embedding.
         let sentinel = serialize_embedding(&vec![0.1f32; 384]);
@@ -791,7 +791,7 @@ mod bootstrap {
     /// The stand-in store: the in-memory reducers over fresh rows, behind a
     /// connector that answers as scripted.
     fn test_store_with(
-        database: crate::store::Database,
+        database: crate::store::Store,
         connector: Arc<dyn StoreConnector>,
     ) -> StoreParts {
         use crate::sync as sy;
@@ -831,14 +831,14 @@ mod bootstrap {
 
     /// One scripted answer: a connect beyond the one startup makes panics,
     /// which is the point — startup makes exactly one attempt.
-    fn test_store(database: crate::store::Database, _host: &str) -> StoreParts {
+    fn test_store(database: crate::store::Store, _host: &str) -> StoreParts {
         test_store_with(
             database,
             ScriptedConnector::new(vec![accepted("c0ffee", "token")]),
         )
     }
 
-    fn unreachable_store(database: crate::store::Database, _host: &str) -> StoreParts {
+    fn unreachable_store(database: crate::store::Store, _host: &str) -> StoreParts {
         test_store_with(
             database,
             ScriptedConnector::new(vec![refused("connection refused")]),
@@ -849,10 +849,10 @@ mod bootstrap {
     /// attempt's reason. startup.allium: AbortWhenTheStoreCannotBeReached.
     #[tokio::test]
     async fn bootstrap_aborts_when_the_store_cannot_be_reached() {
-        let (_dir, db_path, paths) = fixture().await;
+        let (_dir, data_dir, paths) = fixture().await;
 
         match TuiRuntime::bootstrap_with(
-            &db_path,
+            &data_dir,
             0,
             &paths,
             TEST_STORE.into(),
@@ -878,7 +878,7 @@ mod bootstrap {
     const OTHER_DB: &str = "c200a1ada23f68e494f28f6a791a2afe105f5a0056e01e6762e3d3618a893ccb";
 
     /// A reachable store whose database is PINNED_DB.
-    fn store_holding_pinned_db(database: crate::store::Database, host: &str) -> StoreParts {
+    fn store_holding_pinned_db(database: crate::store::Store, host: &str) -> StoreParts {
         StoreParts {
             store_identity: |_| Some(PINNED_DB.to_string()),
             ..test_store(database, host)
@@ -889,7 +889,7 @@ mod bootstrap {
     /// answers: any connection attempt panics, so a test that passes proves
     /// the launch never connected.
     fn store_holding_other_db_never_connect(
-        database: crate::store::Database,
+        database: crate::store::Store,
         _host: &str,
     ) -> StoreParts {
         StoreParts {
@@ -899,7 +899,7 @@ mod bootstrap {
     }
 
     /// A reachable store whose database is OTHER_DB.
-    fn store_holding_other_db(database: crate::store::Database, host: &str) -> StoreParts {
+    fn store_holding_other_db(database: crate::store::Store, host: &str) -> StoreParts {
         StoreParts {
             store_identity: |_| Some(OTHER_DB.to_string()),
             ..test_store(database, host)
@@ -910,10 +910,10 @@ mod bootstrap {
     /// database it reached.
     #[tokio::test]
     async fn bootstrap_pins_the_store_database_once_it_answers() {
-        let (_dir, db_path, paths) = fixture().await;
+        let (_dir, data_dir, paths) = fixture().await;
 
         let _bootstrap = TuiRuntime::bootstrap_with(
-            &db_path,
+            &data_dir,
             0,
             &paths,
             TEST_STORE.into(),
@@ -924,7 +924,7 @@ mod bootstrap {
         .expect("a first launch has nothing pinned and must start");
 
         assert_eq!(
-            crate::startup::pinned_store_identity(&db_path).as_deref(),
+            crate::startup::pinned_store_identity(&data_dir).as_deref(),
             Some(PINNED_DB)
         );
     }
@@ -935,11 +935,11 @@ mod bootstrap {
     /// attempt), and the pin is left as it was.
     #[tokio::test]
     async fn bootstrap_refuses_a_store_holding_a_different_database() {
-        let (_dir, db_path, paths) = fixture().await;
-        assert!(crate::startup::pin_store_identity(&db_path, PINNED_DB));
+        let (_dir, data_dir, paths) = fixture().await;
+        assert!(crate::startup::pin_store_identity(&data_dir, PINNED_DB));
 
         let result = TuiRuntime::bootstrap_with(
-            &db_path,
+            &data_dir,
             0,
             &paths,
             TEST_STORE.into(),
@@ -960,7 +960,7 @@ mod bootstrap {
             ),
         }
         assert_eq!(
-            crate::startup::pinned_store_identity(&db_path).as_deref(),
+            crate::startup::pinned_store_identity(&data_dir).as_deref(),
             Some(PINNED_DB)
         );
     }
@@ -971,11 +971,11 @@ mod bootstrap {
     /// launch needs no flag.
     #[tokio::test]
     async fn bootstrap_accepts_a_switch_when_told_to_and_repins() {
-        let (_dir, db_path, paths) = fixture().await;
-        assert!(crate::startup::pin_store_identity(&db_path, PINNED_DB));
+        let (_dir, data_dir, paths) = fixture().await;
+        assert!(crate::startup::pin_store_identity(&data_dir, PINNED_DB));
 
         let result = TuiRuntime::bootstrap_with(
-            &db_path,
+            &data_dir,
             0,
             &paths,
             TEST_STORE.into(),
@@ -990,7 +990,7 @@ mod bootstrap {
             result.err()
         );
         assert_eq!(
-            crate::startup::pinned_store_identity(&db_path).as_deref(),
+            crate::startup::pinned_store_identity(&data_dir).as_deref(),
             Some(OTHER_DB)
         );
     }
@@ -999,10 +999,10 @@ mod bootstrap {
     /// TheStoreIsAlwaysNamed), so bootstrap hands it to the App.
     #[tokio::test]
     async fn bootstrap_gives_the_app_its_store_address() {
-        let (_dir, db_path, paths) = fixture().await;
+        let (_dir, data_dir, paths) = fixture().await;
 
         let bootstrap =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
+            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
                 .await
                 .expect("bootstrap must succeed");
 
@@ -1011,8 +1011,8 @@ mod bootstrap {
 
     /// The record a board leaves beside its database (task #4982,
     /// startup.allium: StoreAddressRecord).
-    fn store_record(db_path: &std::path::Path) -> std::path::PathBuf {
-        db_path.parent().unwrap().join("store-server")
+    fn store_record(data_dir: &std::path::Path) -> std::path::PathBuf {
+        data_dir.join("store-server")
     }
 
     /// startup.allium: RecordTheNamedStoreOnceItAnswers. A board on a named
@@ -1020,14 +1020,14 @@ mod bootstrap {
     /// has succeeded, so a command in a plain terminal reaches the same store.
     #[tokio::test]
     async fn bootstrap_records_a_named_store_beside_the_database_once_it_answers() {
-        let (_dir, db_path, paths) = fixture().await;
+        let (_dir, data_dir, paths) = fixture().await;
 
         let _bootstrap =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
+            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
                 .await
                 .expect("bootstrap must succeed against a reachable named store");
 
-        let recorded = std::fs::read_to_string(store_record(&db_path))
+        let recorded = std::fs::read_to_string(store_record(&data_dir))
             .expect("a board on a named store must record its address beside the database");
         assert_eq!(recorded.trim(), TEST_STORE);
     }
@@ -1037,10 +1037,10 @@ mod bootstrap {
     /// what every later command reaches for.
     #[tokio::test]
     async fn bootstrap_records_nothing_when_the_named_store_cannot_be_reached() {
-        let (_dir, db_path, paths) = fixture().await;
+        let (_dir, data_dir, paths) = fixture().await;
 
         let result = TuiRuntime::bootstrap_with(
-            &db_path,
+            &data_dir,
             0,
             &paths,
             TEST_STORE.into(),
@@ -1051,7 +1051,7 @@ mod bootstrap {
 
         assert!(result.is_err(), "an unreachable store must abort startup");
         assert!(
-            !store_record(&db_path).exists(),
+            !store_record(&data_dir).exists(),
             "an address that never answered must not be recorded"
         );
     }
@@ -1062,11 +1062,11 @@ mod bootstrap {
     /// above, which proves bootstrap attempts the write at all.
     #[tokio::test]
     async fn bootstrap_starts_even_when_the_store_record_cannot_be_written() {
-        let (_dir, db_path, paths) = fixture().await;
-        std::fs::create_dir(store_record(&db_path)).unwrap();
+        let (_dir, data_dir, paths) = fixture().await;
+        std::fs::create_dir(store_record(&data_dir)).unwrap();
 
         let result =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
+            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
                 .await;
 
         assert!(
@@ -1075,7 +1075,7 @@ mod bootstrap {
             result.err()
         );
         assert!(
-            store_record(&db_path).is_dir(),
+            store_record(&data_dir).is_dir(),
             "the unwritable path is left as it was"
         );
     }
@@ -1094,7 +1094,7 @@ mod bootstrap {
     /// what each test actually checks.
     async fn fixture() -> (tempfile::TempDir, std::path::PathBuf, StartupPaths) {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("bootstrap.db");
+        let data_dir = dir.path().to_path_buf();
         let paths = StartupPaths {
             claude_dir: dir.path().join("claude"),
             claude_json_path: dir.path().join(".claude.json"),
@@ -1102,7 +1102,7 @@ mod bootstrap {
         // The host file `--db`'s directory holds, already named.
         crate::host_file::resolve_for_launch(dir.path()).unwrap();
         crate::host_file::rename_host(dir.path(), "bootstrap-test-host").unwrap();
-        (dir, db_path, paths)
+        (dir, data_dir, paths)
     }
 
     /// The happy path: reads the host file, spawns the
@@ -1112,10 +1112,10 @@ mod bootstrap {
     /// not the MCP server's own behaviour.
     #[tokio::test]
     async fn wires_up_a_working_app_and_runtime() {
-        let (_dir, db_path, paths) = fixture().await;
+        let (_dir, data_dir, paths) = fixture().await;
 
         let bootstrap =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
+            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
                 .await
                 .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -1147,10 +1147,10 @@ mod bootstrap {
     /// repoint every later Claude session at a temp directory.
     #[tokio::test]
     async fn budget_snapshot_path_ignores_the_open_database() {
-        let (dir, db_path, paths) = fixture().await;
+        let (dir, data_dir, paths) = fixture().await;
 
         let bootstrap =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
+            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
                 .await
                 .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -1180,9 +1180,9 @@ mod bootstrap {
     /// in `src/setup/mod.rs`.
     #[tokio::test]
     async fn bootstrap_writes_nothing_into_the_supplied_claude_dir() {
-        let (_dir, db_path, paths) = fixture().await;
+        let (_dir, data_dir, paths) = fixture().await;
 
-        TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
+        TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
             .await
             .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -1206,10 +1206,10 @@ mod bootstrap {
     /// from the runtime's own handle.)
     #[tokio::test]
     async fn bootstrap_seeds_the_example_feed_epic_without_asking() {
-        let (_dir, db_path, paths) = fixture().await;
+        let (_dir, data_dir, paths) = fixture().await;
 
         let bootstrap =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
+            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
                 .await
                 .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -1256,7 +1256,7 @@ mod bootstrap {
     async fn persist_host_label_maps_a_failed_persist_to_host_identity_unavailable() {
         let dir = tempfile::tempdir().unwrap();
         crate::host_file::resolve_for_launch(dir.path()).unwrap();
-        let db = crate::store::Database::unattached().with_host_file(dir.path());
+        let db = crate::store::Store::unattached().with_host_file(dir.path());
         let host_file = crate::host_file::host_file_path(dir.path());
         std::fs::remove_file(&host_file).unwrap();
         std::fs::create_dir(&host_file).unwrap();
@@ -1279,10 +1279,10 @@ mod bootstrap {
     /// operator's session cannot reach `$HOME/.claude.json` either.
     #[tokio::test]
     async fn trust_store_path_comes_from_the_supplied_paths() {
-        let (_dir, db_path, paths) = fixture().await;
+        let (_dir, data_dir, paths) = fixture().await;
 
         let bootstrap =
-            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store, false)
+            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
                 .await
                 .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -1501,25 +1501,25 @@ mod store_address_record {
     /// A database path in a fresh temp directory, with a record already
     /// beside it -- the stale one a board that could not run its exit leaves.
     fn db_with_record(dir: &tempfile::TempDir, address: &str) -> std::path::PathBuf {
-        let db_path = dir.path().join("dispatch.db");
-        std::fs::write(record_path(&db_path), format!("{address}\n")).unwrap();
-        db_path
+        let data_dir = dir.path().to_path_buf();
+        std::fs::write(record_path(&data_dir), format!("{address}\n")).unwrap();
+        data_dir
     }
 
-    fn record_path(db_path: &std::path::Path) -> std::path::PathBuf {
-        db_path.parent().unwrap().join("store-server")
+    fn record_path(data_dir: &std::path::Path) -> std::path::PathBuf {
+        data_dir.join("store-server")
     }
 
     #[test]
     fn a_named_store_is_recorded_beside_the_database() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("dispatch.db");
+        let data_dir = dir.path().to_path_buf();
 
-        let kept = record_store_server_for(&named_target(), &db_path, "http://store.example:3000");
+        let kept = record_store_server_for(&named_target(), &data_dir, "http://store.example:3000");
 
         assert!(kept);
         assert_eq!(
-            crate::startup::recorded_store_server(&db_path),
+            crate::startup::recorded_store_server(&data_dir),
             Some("http://store.example:3000".to_string())
         );
     }
@@ -1529,16 +1529,16 @@ mod store_address_record {
     #[test]
     fn a_managed_board_records_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("dispatch.db");
+        let data_dir = dir.path().to_path_buf();
 
         let kept = record_store_server_for(
             &managed_target(dir.path()),
-            &db_path,
+            &data_dir,
             "http://127.0.0.1:3000",
         );
 
         assert!(!kept);
-        assert!(!record_path(&db_path).exists());
+        assert!(!record_path(&data_dir).exists());
     }
 
     /// ForgetAStaleStoreRecordOnAManagedLaunch: from then on a command with
@@ -1546,12 +1546,12 @@ mod store_address_record {
     #[test]
     fn a_managed_launch_forgets_a_stale_record() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = db_with_record(&dir, "http://gone:3000");
+        let data_dir = db_with_record(&dir, "http://gone:3000");
 
-        forget_stale_store_record_for(&managed_target(dir.path()), &db_path);
+        forget_stale_store_record_for(&managed_target(dir.path()), &data_dir);
 
         assert!(
-            !record_path(&db_path).exists(),
+            !record_path(&data_dir).exists(),
             "a managed launch must clear a record a named board left behind"
         );
     }
@@ -1562,11 +1562,11 @@ mod store_address_record {
     #[test]
     fn a_named_launch_leaves_the_record_for_its_own_to_replace() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = db_with_record(&dir, "http://earlier:3000");
+        let data_dir = db_with_record(&dir, "http://earlier:3000");
 
-        forget_stale_store_record_for(&named_target(), &db_path);
+        forget_stale_store_record_for(&named_target(), &data_dir);
 
-        assert!(record_path(&db_path).exists());
+        assert!(record_path(&data_dir).exists());
     }
 
     /// ForgetTheStoreRecordWhenTheBoardExits: the record says "a board on this
@@ -1575,12 +1575,12 @@ mod store_address_record {
     #[test]
     fn a_named_boards_exit_forgets_its_record() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = db_with_record(&dir, "http://store.example:3000");
+        let data_dir = db_with_record(&dir, "http://store.example:3000");
 
-        drop(StoreRecordGuard::for_target(&named_target(), &db_path));
+        drop(StoreRecordGuard::for_target(&named_target(), &data_dir));
 
         assert!(
-            !record_path(&db_path).exists(),
+            !record_path(&data_dir).exists(),
             "a named board's exit must remove the record it left"
         );
     }
@@ -1590,14 +1590,14 @@ mod store_address_record {
     #[test]
     fn a_managed_boards_exit_leaves_any_record_alone() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = db_with_record(&dir, "http://other-board:3000");
+        let data_dir = db_with_record(&dir, "http://other-board:3000");
 
         drop(StoreRecordGuard::for_target(
             &managed_target(dir.path()),
-            &db_path,
+            &data_dir,
         ));
 
-        assert!(record_path(&db_path).exists());
+        assert!(record_path(&data_dir).exists());
     }
 
     /// A named store is used as given, and the CLI is not asked for.

@@ -82,7 +82,7 @@ The agent reports progress via the MCP server running on `localhost:3142`. When 
 
 ```bash
 cargo run -- tui                                  # brings up (or adopts) the managed local store on 127.0.0.1:3000 — YOUR REAL ONE
-cargo run -- --db /tmp/scratch.db --spacetime-server http://127.0.0.1:3099 tui --port 8899
+cargo run -- --data-dir /tmp/scratch --spacetime-server http://127.0.0.1:3099 tui --port 8899
                                                   # throwaway store, DB and port — never point a dev run at your real ones
 RUST_LOG=dispatch_tui=debug cargo run -- tui      # then tail the log file (see below)
 ```
@@ -100,7 +100,7 @@ RUST_LOG=dispatch_tui=debug cargo run -- tui      # then tail the log file (see 
   The board aborts before drawing if the store cannot be reached.
 - **The managed store's files.** Its data lives in `spacetime/` beside the
   default database (`$XDG_DATA_HOME/dispatch/spacetime`, fixed — a throwaway
-  `--db` does not move it), with the recorded hash of the published module
+  `--data-dir` does not move it), with the recorded hash of the published module
   (`managed-module.sha256`) in that same directory so every board on the store
   sees the same record. Its stdout and stderr go to `managed-store.log` next to
   `app.log`. It is started with `spacetime start --listen-addr=127.0.0.1:3000
@@ -120,7 +120,7 @@ RUST_LOG=dispatch_tui=debug cargo run -- tui      # then tail the log file (see 
   from inside one) before launching it.
 - **Where the live data is**: in the SpacetimeDB store, not in `tasks.db`. The board's tasks and epics are served by the store at `DISPATCH_SPACETIME_SERVER` (the managed store defaults to `127.0.0.1:3000`; the operator's board uses `127.0.0.1:3001`, database `dispatch`; the running address is in `~/.local/share/dispatch/store-server`, and the managed store's files are in `~/.local/share/dispatch/spacetime/`). **`tasks.db` is a leftover** from before the move: dispatch no longer opens, reads or migrates it (`storage.allium: StoreInUseNeverOpensSqlite`), and you may delete it (and any `-wal`/`-shm` beside it) by hand. Query the store through the MCP tools (`list_tasks`, `get_task`) or `spacetime sql`.
 - **What SQLite still stores**: nothing. Dispatch links no SQLite since task #36865; the data directory's `tasks.db` is never opened. A handle with no store attached refuses every shared read and write with a "no shared store attached" error.
-- **Data directory**: the parent of `$XDG_DATA_HOME/dispatch/tasks.db`, else `~/.local/share/dispatch/` (`default_db_path()` in `src/lib.rs`). `--db` / `DISPATCH_DB` only picks that directory — the file it names is never opened. The directory holds `host.json` (this machine's identity: host id, label, user identity and its credential; mode 0600, written whole by rename), `app.log`, the `store-server` record and the `store-identity` pin. The pin holds the identity of the store database the last board connected to; a launch whose store holds a different database stops before connecting, naming both, and `dispatch tui --accept-store-switch` lets one launch through and re-pins (`startup.allium: AbortWhenTheStoreIsNotTheOneThisInstallUses`, task #28710). Both `http://` and `https://` stores are checked (TLS uses the bundled web roots); a store that cannot be asked, such as one behind a certificate only the OS trusts, connects unchecked with a warning in `app.log`. A board launch with no `host.json` is a first run and mints one; one that exists but cannot be read or parsed is never overwritten, and the launch aborts naming it. One-shot commands (`repo`, `plan`, `prune-repo-paths`, the agent-tree panes) only read it and fail with "run `dispatch tui` once" when it is missing. To forget this machine's identity, `dispatch uninstall --purge` (or delete `host.json`): the next launch mints a new one.
+- **Data directory**: `$XDG_DATA_HOME/dispatch`, else `~/.local/share/dispatch/` (`default_data_dir()` in `src/lib.rs`). `--data-dir` / `DISPATCH_DATA_DIR` picks it; the old `--db` / `DISPATCH_DB` is gone. The directory holds `host.json` (this machine's identity: host id, label, user identity and its credential; mode 0600, written whole by rename), `app.log`, the `store-server` record and the `store-identity` pin. The pin holds the identity of the store database the last board connected to; a launch whose store holds a different database stops before connecting, naming both, and `dispatch tui --accept-store-switch` lets one launch through and re-pins (`startup.allium: AbortWhenTheStoreIsNotTheOneThisInstallUses`, task #28710). Both `http://` and `https://` stores are checked (TLS uses the bundled web roots); a store that cannot be asked, such as one behind a certificate only the OS trusts, connects unchecked with a warning in `app.log`. A board launch with no `host.json` is a first run and mints one; one that exists but cannot be read or parsed is never overwritten, and the launch aborts naming it. One-shot commands (`repo`, `plan`, `prune-repo-paths`, the agent-tree panes) only read it and fail with "run `dispatch tui` once" when it is missing. To forget this machine's identity, `dispatch uninstall --purge` (or delete `host.json`): the next launch mints a new one.
 - **Logs do not go to stderr.** `cmd_tui` installs a `tracing_subscriber` that appends to `app.log` **next to the database file** (`init_app_log_subscriber` in `src/main.rs`), because stderr belongs to the TUI. Watch it with `tail -f ~/.local/share/dispatch/app.log`. The floor is `INFO`; `RUST_LOG` (crate name `dispatch_tui`) raises it.
 - **MCP port**: `DEFAULT_PORT = 3142` (`src/lib.rs`), override with `--port` on `tui`/`setup` or `DISPATCH_PORT`.
 - **Exercising MCP by hand**: see `docs/mcp.md`. Identity comes from headers, and **exactly one** of the two must be set (`src/mcp/identity.rs::from_headers`, applied by the `src/mcp/middleware.rs` middleware). A bare `curl` sends neither, so it resolves to `IdentityError::Missing` and any handler that requires authorization rejects it. Send `-H 'X-Caller-Task-Id: <id>'` to act as that task's agent, or `-H 'X-Caller-Kind: session'` to act as the human session; sending both is a `Conflict`.
@@ -191,7 +191,7 @@ updating a task.
 
 | Flag | Env Var | Default |
 |------|---------|---------|
-| `--db` | `DISPATCH_DB` | `~/.local/share/dispatch/tasks.db` — names the data directory (`host.json`, `app.log`); the file itself is never opened |
+| `--data-dir` | `DISPATCH_DATA_DIR` | `~/.local/share/dispatch` — the data directory (`host.json`, `app.log`, store records) |
 | `--port` | `DISPATCH_PORT` | `3142` |
 | `--spacetime-server` | `DISPATCH_SPACETIME_SERVER` | none — `dispatch tui` runs its own managed store on `127.0.0.1:3000` |
 
@@ -206,7 +206,7 @@ the managed address spelled out; that is how a team, or a dev run, opts out.
 The other subcommands that read or write shared rows — `repo`,
 `prune-repo-paths` and `plan` — never manage anything. They find the store in
 this order: the flag, the environment variable, `DISPATCH_BOARD_STORE` (set inside the board's tmux session), the address a board on the same
-`--db` recorded in the `store-server` file beside it (written once a *named*
+`--data-dir` recorded in the `store-server` file beside it (written once a *named*
 store answers, removed when the board exits), then `http://127.0.0.1:3000`,
 where a running board keeps its managed store. The agent-tree and diff panes
 open no store at all: they ask the running board on `--port` / `DISPATCH_PORT`
@@ -231,7 +231,7 @@ inherits its predecessor's store (task #28729).
 It is a flag or environment variable rather than a setting because which store
 a board uses is a property of how it was launched: the address has to be known
 before anything can be read from the store. It is read at the entry point and
-threaded down like `--db` and `--port`.
+threaded down like `--data-dir` and `--port`.
 
 ## Timing Constants
 
@@ -883,7 +883,7 @@ summary="Always use uv to run Python scripts, never python directly"
 **Repo convention** — applies to all tasks in this repository:
 ```
 scope=repo, kind=convention
-summary="Integration tests use Database::open_in_memory() — never mock the DB layer"
+summary="Integration tests use Store::open_in_memory() — never mock the DB layer"
 ```
 
 **Epic decision** — applies only to tasks in this epic:

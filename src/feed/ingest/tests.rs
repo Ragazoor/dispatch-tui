@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::models::{test_tmux_window, FeedRole, Signal, TaskId, TaskStatus, TaskTag};
-use crate::store::{
-    CreateTaskRequest, Database, EpicCrud, EpicPatch, EpicRead, TaskCrud, TaskPatch,
-};
+use crate::store::{CreateTaskRequest, EpicCrud, EpicPatch, EpicRead, Store, TaskCrud, TaskPatch};
 
 fn make_item(external_id: &str, url: &str) -> FeedItem {
     FeedItem {
@@ -101,7 +99,7 @@ async fn sync_grouped_feed(
 /// Create a manual (non-feed) task under `epic` — no `external_id`, so the
 /// reconcile's stale pass must spare it. Every field but the title and the
 /// epic is the same at all call sites, which is why this is a helper.
-async fn create_manual_task(db: &Database, title: &str, epic: EpicId) -> TaskId {
+async fn create_manual_task(db: &Store, title: &str, epic: EpicId) -> TaskId {
     db.create_task(CreateTaskRequest {
         title,
         description: "",
@@ -121,7 +119,7 @@ async fn create_manual_task(db: &Database, title: &str, epic: EpicId) -> TaskId 
 }
 
 /// Find the sub-epic of `parent` carrying `role`, asserting exactly one.
-async fn role_sub_epic(db: &Database, parent: EpicId, role: FeedRole) -> EpicId {
+async fn role_sub_epic(db: &Store, parent: EpicId, role: FeedRole) -> EpicId {
     let subs = db.list_sub_epics(parent).await.unwrap();
     let matching: Vec<_> = subs.iter().filter(|e| e.feed_role == role).collect();
     assert_eq!(
@@ -138,7 +136,7 @@ async fn role_sub_epic(db: &Database, parent: EpicId, role: FeedRole) -> EpicId 
 /// other role sub-epics stay empty.
 #[tokio::test]
 async fn route_routed_inserts_into_role_sub_epic() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -172,7 +170,7 @@ async fn route_routed_inserts_into_role_sub_epic() {
 /// status, sub_status, worktree, and tmux_window (agent session survives).
 #[tokio::test]
 async fn route_routed_moves_task_preserving_state() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
 
     // Cycle 1: a team-requested PR lands in Team Reviews.
@@ -238,7 +236,7 @@ async fn route_routed_moves_task_preserving_state() {
 /// it is absent from its losing role's group.
 #[tokio::test]
 async fn route_routed_move_not_deleted_same_cycle() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
 
     let cycle1 = vec![make_signal_item(
@@ -283,7 +281,7 @@ async fn route_routed_move_not_deleted_same_cycle() {
 /// `pr-2` and the test stops detecting the mis-ordering.
 #[tokio::test]
 async fn moved_task_is_never_reported_as_removed() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -387,7 +385,7 @@ async fn moved_task_is_never_reported_as_removed() {
 /// caller can tear its worktree down — the counterpart to the move case above.
 #[tokio::test]
 async fn absent_task_with_worktree_is_reported_as_removed() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -448,7 +446,7 @@ async fn absent_task_with_worktree_is_reported_as_removed() {
 /// branch of `run_feed_sync` is a `RemovedFeedTask` producer like the rest.
 #[tokio::test]
 async fn flat_sync_reports_removed_task_with_worktree() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Flat Feed", "", None).await.unwrap();
 
     let items = vec![make_item("pr-1", "https://github.com/org/repo/pull/1")];
@@ -478,7 +476,7 @@ async fn flat_sync_reports_removed_task_with_worktree() {
 }
 
 /// Count feed-managed tasks (external_id set) sitting DIRECTLY on an epic.
-async fn flat_feed_task_count(db: &Database, epic: EpicId) -> usize {
+async fn flat_feed_task_count(db: &Store, epic: EpicId) -> usize {
     db.list_tasks_for_epic(epic)
         .await
         .unwrap()
@@ -493,7 +491,7 @@ async fn flat_feed_task_count(db: &Database, epic: EpicId) -> usize {
 /// subtree-uniqueness trigger. Enforces NoFlatFeedTasksOnReviewsParent.
 #[tokio::test]
 async fn route_routed_rescues_flat_task_stranded_on_parent() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -567,7 +565,7 @@ async fn route_routed_rescues_flat_task_stranded_on_parent() {
 /// whose scope must include the parent epic itself.
 #[tokio::test]
 async fn route_routed_deletes_stale_flat_task_on_parent() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -598,7 +596,7 @@ async fn route_routed_deletes_stale_flat_task_on_parent() {
 /// touched by the parent-inclusive reconcile — only feed-managed tasks are.
 #[tokio::test]
 async fn route_routed_preserves_manual_task_on_parent() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -628,7 +626,7 @@ async fn route_routed_preserves_manual_task_on_parent() {
 /// copy in the sub-epic and clear the parent duplicate.
 #[tokio::test]
 async fn route_routed_clears_parent_duplicate_when_canonical_in_sub_epic() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -696,7 +694,7 @@ async fn route_routed_clears_parent_duplicate_when_canonical_in_sub_epic() {
 /// is removed from the subtree; a manual task (external_id NULL) survives.
 #[tokio::test]
 async fn route_routed_removes_merged_pr_keeps_manual() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
 
     let cycle1 = vec![
@@ -760,7 +758,7 @@ async fn route_routed_removes_merged_pr_keeps_manual() {
 /// task holding the wrong branch or repo_path.
 #[tokio::test]
 async fn route_routed_preserves_per_item_repo_path_and_base_branch() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -829,7 +827,7 @@ async fn route_routed_preserves_per_item_repo_path_and_base_branch() {
 /// routed into per-repo sub-epics rather than into the role sub-epic directly.
 #[tokio::test]
 async fn role_routed_group_by_repo_routes_into_repo_sub_epic() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -882,7 +880,7 @@ async fn role_routed_group_by_repo_routes_into_repo_sub_epic() {
 /// into repo-group sub-epics so the PR is recognised as already present.
 #[tokio::test]
 async fn role_routed_group_by_repo_no_duplicate_on_resync() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -932,7 +930,7 @@ async fn role_routed_group_by_repo_no_duplicate_on_resync() {
 /// and remove the task.
 #[tokio::test]
 async fn role_routed_group_by_repo_stale_deletion_reaches_grandchildren() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -983,7 +981,7 @@ async fn role_routed_group_by_repo_stale_deletion_reaches_grandchildren() {
 
 #[tokio::test]
 async fn items_grouped_by_repo_name() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
 
     let items = vec![
@@ -1015,7 +1013,7 @@ async fn items_grouped_by_repo_name() {
 
 #[tokio::test]
 async fn no_url_groups_as_other() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
 
     let items = vec![FeedItem {
@@ -1041,7 +1039,7 @@ async fn no_url_groups_as_other() {
 
 #[tokio::test]
 async fn existing_active_sub_epic_reused() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
 
     // Pre-create the sub-epic as active.
@@ -1069,7 +1067,7 @@ async fn existing_active_sub_epic_reused() {
 
 #[tokio::test]
 async fn run_feed_sync_flat_upserts_to_parent_epic() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Feed", "", None).await.unwrap();
     let items = vec![crate::models::FeedItem {
         external_id: "1".into(),
@@ -1097,7 +1095,7 @@ async fn run_feed_sync_flat_upserts_to_parent_epic() {
 
 #[tokio::test]
 async fn run_feed_sync_grouped_puts_tasks_in_sub_epics() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Reviews", "", None).await.unwrap();
     let items = vec![crate::models::FeedItem {
         external_id: "pr-1".into(),
@@ -1136,7 +1134,7 @@ async fn run_feed_sync_grouped_puts_tasks_in_sub_epics() {
 /// remain (not auto-deleted).
 #[tokio::test]
 async fn sync_grouped_feed_empty_emission_clears_all_sub_epics() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
 
     let items = vec![
@@ -1176,7 +1174,7 @@ async fn sync_grouped_feed_empty_emission_clears_all_sub_epics() {
 /// repos still present keep their tasks.
 #[tokio::test]
 async fn sync_grouped_feed_partial_emission_clears_dropped_repo() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
 
     let items = vec![
@@ -1213,7 +1211,7 @@ async fn sync_grouped_feed_partial_emission_clears_dropped_repo() {
 /// from the orphaned repo-group sub-epic onto the role sub-epic — no duplicate.
 #[tokio::test]
 async fn role_routed_group_by_repo_off_rehomes_repo_tasks_no_duplicate() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -1281,7 +1279,7 @@ async fn role_routed_group_by_repo_off_rehomes_repo_tasks_no_duplicate() {
 /// a manually-added task (external_id = null) in that sub-epic survives.
 #[tokio::test]
 async fn sync_grouped_feed_preserves_manual_task_in_dropped_sub_epic() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
 
     let items = vec![make_item("1", "https://github.com/org/repo-a/pull/1")];
@@ -1313,7 +1311,7 @@ async fn sync_grouped_feed_preserves_manual_task_in_dropped_sub_epic() {
 /// now-empty sub-epic, then upserts the current emission onto the parent.
 #[tokio::test]
 async fn flat_sync_rehomes_tasks_from_existing_repo_group_subepic_and_deletes_it() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("CVE", "", None).await.unwrap();
 
     // Simulate a pre-existing grouped state: a RepoGroup sub-epic holding
@@ -1353,7 +1351,7 @@ async fn flat_sync_rehomes_tasks_from_existing_repo_group_subepic_and_deletes_it
 /// reconciliation, not vacuous — the emission still lands on the parent).
 #[tokio::test]
 async fn flat_sync_with_no_repo_group_subepics_is_unaffected() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("CVE", "", None).await.unwrap();
 
     let items = vec![make_item("cve-2", "https://github.com/org/other/pull/2")];
@@ -1375,7 +1373,7 @@ async fn flat_sync_with_no_repo_group_subepics_is_unaffected() {
 /// `flatten_preserves_manual_sub_epics` in src/service/grouping.rs.
 #[tokio::test]
 async fn flat_sync_preserves_manual_sub_epic() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("CVE", "", None).await.unwrap();
     let manual = db.create_epic("notes", "", Some(parent.id)).await.unwrap();
     let manual_task = create_manual_task(&db, "Manual note", manual.id).await;
@@ -1408,7 +1406,7 @@ async fn flat_sync_preserves_manual_sub_epic() {
 /// review agent whose PR one soft-failed sub-query dropped.
 #[tokio::test]
 async fn additive_role_routed_sync_keeps_a_task_absent_from_the_emission() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -1490,7 +1488,7 @@ async fn additive_role_routed_sync_keeps_a_task_absent_from_the_emission() {
 /// task on a degraded cycle without ever consulting the emission.
 #[tokio::test]
 async fn additive_role_routed_sync_keeps_parent_stranded_tasks() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -1537,7 +1535,7 @@ async fn additive_role_routed_sync_keeps_parent_stranded_tasks() {
 /// make a degraded cycle actively wrong rather than merely conservative.
 #[tokio::test]
 async fn additive_role_routed_sync_still_moves_and_inserts() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
 
     let cycle1 = vec![make_signal_item(
@@ -1595,7 +1593,7 @@ async fn additive_role_routed_sync_still_moves_and_inserts() {
 /// flat tasks — are both skipped.
 #[tokio::test]
 async fn additive_grouped_sync_keeps_tasks_in_a_dropped_repo_sub_epic() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
 
     let items = vec![
@@ -1633,7 +1631,7 @@ async fn additive_grouped_sync_keeps_tasks_in_a_dropped_repo_sub_epic() {
 /// gated by the additive variant of that call rather than by a skipped step.
 #[tokio::test]
 async fn additive_flat_sync_keeps_a_task_absent_from_the_emission() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("CVE", "", None).await.unwrap();
 
     let items = vec![make_item("cve-1", ""), make_item("cve-2", "")];
@@ -1687,7 +1685,7 @@ async fn additive_flat_sync_keeps_a_task_absent_from_the_emission() {
 /// role sub-epic, not even Bots, and not on the parent.
 #[tokio::test]
 async fn role_routed_drops_own_authored_pr_entirely() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -1751,7 +1749,7 @@ async fn role_routed_drops_own_authored_pr_entirely() {
 /// team_request and author_bot is still dropped, never routed to Team or Bots.
 #[tokio::test]
 async fn role_routed_drops_own_authored_pr_even_with_team_and_bot_signals() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -1785,7 +1783,7 @@ async fn role_routed_drops_own_authored_pr_even_with_team_and_bot_signals() {
 /// Reviews is still attached and must not rescue it.
 #[tokio::test]
 async fn role_routed_drops_settled_approved_pr_entirely() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -1853,7 +1851,7 @@ async fn role_routed_drops_settled_approved_pr_entirely() {
 /// but a review is pending again, so the item is kept and routed as usual.
 #[tokio::test]
 async fn role_routed_keeps_approved_pr_with_a_pending_request() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -1913,7 +1911,7 @@ async fn role_routed_keeps_approved_pr_with_a_pending_request() {
 /// delete reaches its task exactly as it reaches a merged PR's, while a manual
 /// task (no `external_id`) in the same sub-epic survives.
 async fn assert_newly_excluded_pr_loses_its_task(before: Vec<Signal>, after: Vec<Signal>) {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -1982,7 +1980,7 @@ async fn role_routed_removes_existing_task_for_approved_pr() {
 /// survives a tainted cycle.
 #[tokio::test]
 async fn additive_role_routed_sync_does_not_insert_own_authored_pr() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -2023,7 +2021,7 @@ async fn additive_role_routed_sync_does_not_insert_own_authored_pr() {
 
 /// Put `feed_command` on `epic`, making it the `nearest_feed_epic` its
 /// subtree's deletions retire under.
-async fn make_feed_epic(db: &Database, epic: EpicId) {
+async fn make_feed_epic(db: &Store, epic: EpicId) {
     db.patch_epic(epic, &EpicPatch::new().feed_command(Some("echo []")))
         .await
         .unwrap();
@@ -2031,7 +2029,7 @@ async fn make_feed_epic(db: &Database, epic: EpicId) {
 
 /// Every task anywhere under `root` (two levels deep covers every feed shape:
 /// flat, grouped, role-routed, role-routed + group_by_repo) carrying `id`.
-async fn subtree_tasks_with_id(db: &Database, root: EpicId, id: &str) -> Vec<crate::models::Task> {
+async fn subtree_tasks_with_id(db: &Store, root: EpicId, id: &str) -> Vec<crate::models::Task> {
     let mut epics = vec![root];
     for sub in db.list_sub_epics(root).await.unwrap() {
         epics.push(sub.id);
@@ -2054,7 +2052,7 @@ async fn subtree_tasks_with_id(db: &Database, root: EpicId, id: &str) -> Vec<cra
 
 /// The DeleteTask gesture on the one task under `root` carrying `id`:
 /// complete it, then delete it.
-async fn retire_by_deleting(db: &Database, root: EpicId, id: &str) {
+async fn retire_by_deleting(db: &Store, root: EpicId, id: &str) {
     let tasks = subtree_tasks_with_id(db, root, id).await;
     assert_eq!(tasks.len(), 1, "fixture: exactly one task for {id}");
     db.patch_task(tasks[0].id, &TaskPatch::new().status(TaskStatus::Done))
@@ -2063,7 +2061,7 @@ async fn retire_by_deleting(db: &Database, root: EpicId, id: &str) {
     db.delete_task(tasks[0].id).await.unwrap();
 }
 
-async fn flat_feed_with_retired(db: &Database, title: &str, id: &str) -> EpicId {
+async fn flat_feed_with_retired(db: &Store, title: &str, id: &str) -> EpicId {
     let epic = db.create_epic(title, "", None).await.unwrap();
     make_feed_epic(db, epic.id).await;
     let items = vec![make_item(id, "")];
@@ -2079,7 +2077,7 @@ async fn flat_feed_with_retired(db: &Database, title: &str, id: &str) -> EpicId 
 /// refused.
 #[tokio::test]
 async fn flat_mirror_sync_inserts_no_task_for_a_retired_id() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = flat_feed_with_retired(&db, "CVE", "cve-1").await;
 
     let items = vec![make_item("cve-1", ""), make_item("cve-2", "")];
@@ -2099,7 +2097,7 @@ async fn flat_mirror_sync_inserts_no_task_for_a_retired_id() {
 /// IngestSkipsRetiredFeedItems, flat additive path.
 #[tokio::test]
 async fn flat_additive_sync_inserts_no_task_for_a_retired_id() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = flat_feed_with_retired(&db, "Log", "warn-1").await;
 
     let items = vec![make_item("warn-1", "")];
@@ -2121,7 +2119,7 @@ async fn flat_additive_sync_inserts_no_task_for_a_retired_id() {
 /// so a later REOPEN of the same id shows up again as a fresh task.
 #[tokio::test]
 async fn mirror_sync_drops_the_record_of_an_id_no_longer_emitted_so_a_reopen_reappears() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = flat_feed_with_retired(&db, "CVE", "cve-1").await;
 
     // Upstream closed it: a trusted, non-empty emission without the id.
@@ -2153,7 +2151,7 @@ async fn mirror_sync_drops_the_record_of_an_id_no_longer_emitted_so_a_reopen_rea
 /// record of the epic is absent from it and dropped.
 #[tokio::test]
 async fn mirror_sync_with_an_empty_emission_drops_the_record() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = flat_feed_with_retired(&db, "CVE", "cve-1").await;
 
     run_feed_sync(&*db, epic, false, vec![]).await.unwrap();
@@ -2171,7 +2169,7 @@ async fn mirror_sync_with_an_empty_emission_drops_the_record() {
 /// carries the id still refuses it.
 #[tokio::test]
 async fn additive_sync_never_drops_a_retired_record() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = flat_feed_with_retired(&db, "Log", "warn-1").await;
 
     let other = vec![make_item("warn-2", "")];
@@ -2205,7 +2203,7 @@ async fn additive_sync_never_drops_a_retired_record() {
 /// another feed's records, even for the same id.
 #[tokio::test]
 async fn mirror_sync_drops_only_the_records_of_its_own_feed_epic() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let a = flat_feed_with_retired(&db, "Feed A", "shared").await;
     let b = flat_feed_with_retired(&db, "Feed B", "shared").await;
 
@@ -2227,7 +2225,7 @@ async fn mirror_sync_drops_only_the_records_of_its_own_feed_epic() {
 /// is retired gets no empty sub-epic.
 #[tokio::test]
 async fn grouped_sync_creates_no_sub_epic_for_a_retired_item_with_no_task() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let root = db.create_epic("Grouped", "", None).await.unwrap();
     make_feed_epic(&db, root.id).await;
 
@@ -2272,7 +2270,7 @@ async fn grouped_sync_creates_no_sub_epic_for_a_retired_item_with_no_task() {
 /// A reviews_parent root carrying a feed_command, with `pr-1` already routed
 /// into a role sub-epic and then deleted from it — retired under the ROOT,
 /// since role sub-epics carry no command of their own.
-async fn reviews_feed_with_retired_pr(db: &Database) -> EpicId {
+async fn reviews_feed_with_retired_pr(db: &Store) -> EpicId {
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -2298,7 +2296,7 @@ async fn reviews_feed_with_retired_pr(db: &Database) -> EpicId {
 /// on the feed epic, not the role sub-epic.
 #[tokio::test]
 async fn role_routed_sync_inserts_no_task_for_a_retired_id_under_any_role() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = reviews_feed_with_retired_pr(&db).await;
 
     let rerouted = vec![make_signal_item(
@@ -2319,7 +2317,7 @@ async fn role_routed_sync_inserts_no_task_for_a_retired_id_under_any_role() {
 /// moment it stopped being excluded.
 #[tokio::test]
 async fn role_routed_mirror_keeps_the_record_of_an_excluded_but_emitted_pr() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = reviews_feed_with_retired_pr(&db).await;
 
     // Still emitted, but now excluded (own-authored) — dropped before routing.
@@ -2352,7 +2350,7 @@ async fn role_routed_mirror_keeps_the_record_of_an_excluded_but_emitted_pr() {
 /// left the emission (merged/closed) loses its record, so a reopen reappears.
 #[tokio::test]
 async fn role_routed_mirror_drops_the_record_of_a_pr_no_longer_emitted() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = reviews_feed_with_retired_pr(&db).await;
 
     run_role_routed_feed_sync(&*db, parent, vec![])
@@ -2374,7 +2372,7 @@ async fn role_routed_mirror_drops_the_record_of_a_pr_no_longer_emitted() {
 /// Additive role-routed cycles never drop either.
 #[tokio::test]
 async fn role_routed_additive_sync_never_drops_a_retired_record() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = reviews_feed_with_retired_pr(&db).await;
 
     super::role_routed::run_role_routed_feed_sync(&*db, parent, vec![], SyncMode::Additive)
@@ -2397,7 +2395,7 @@ async fn role_routed_additive_sync_never_drops_a_retired_record() {
 /// found-or-created for it.
 #[tokio::test]
 async fn role_routed_group_by_repo_creates_no_repo_sub_epic_for_a_retired_item() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
         parent.id,
@@ -2442,7 +2440,7 @@ async fn role_routed_group_by_repo_creates_no_repo_sub_epic_for_a_retired_item()
 /// "pre-existing gap fixed in passing").
 #[tokio::test]
 async fn mirror_sync_purge_leaves_no_watch_rows_for_the_removed_task() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("CVE", "", None).await.unwrap();
     let items = vec![make_item("cve-1", "")];
     run_feed_sync(&*db, epic.id, false, entries(&items, &[""], &["main"]))

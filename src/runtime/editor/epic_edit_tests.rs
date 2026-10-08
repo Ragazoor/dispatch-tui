@@ -1,11 +1,11 @@
 use super::*;
 use crate::process::{MockProcessRunner, ProcessRunner};
-use crate::store::{Database, EpicCrud, EpicRead};
+use crate::store::{EpicCrud, EpicRead, Store};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-async fn runtime_and_app() -> (Arc<Database>, TuiRuntime, App) {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+async fn runtime_and_app() -> (Arc<Store>, TuiRuntime, App) {
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let rt = crate::runtime::tests::make_runtime(db.clone(), tx, runner).await;
@@ -135,7 +135,7 @@ async fn an_epic_edit_at_the_floor_is_applied() {
 /// itself still applies regardless.
 #[tokio::test]
 async fn changing_feed_command_against_a_foreign_owner_offers_a_takeover() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Original", "", None).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, _rx) = mpsc::unbounded_channel();
@@ -175,7 +175,7 @@ async fn changing_feed_command_against_a_foreign_owner_offers_a_takeover() {
 /// No prompt when this host already owns the claim.
 #[tokio::test]
 async fn changing_feed_command_when_this_host_already_owns_it_offers_no_takeover() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Original", "", None).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, _rx) = mpsc::unbounded_channel();
@@ -205,7 +205,7 @@ async fn changing_feed_command_when_this_host_already_owns_it_offers_no_takeover
 /// (epics.allium: EditEpic).
 #[tokio::test]
 async fn resubmitting_the_same_feed_command_offers_no_takeover() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Original", "", None).await.unwrap();
     db.patch_epic(
         epic.id,
@@ -243,7 +243,7 @@ async fn resubmitting_the_same_feed_command_offers_no_takeover() {
 /// take-over, since the new value is absent, not conflicting.
 #[tokio::test]
 async fn clearing_feed_command_offers_no_takeover() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Original", "", None).await.unwrap();
     db.patch_epic(
         epic.id,

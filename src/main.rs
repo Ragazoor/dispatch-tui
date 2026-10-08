@@ -13,9 +13,9 @@ use dispatch_tui::{dispatch, runtime, startup};
 #[command(about = "A terminal kanban board for dispatching and managing AI agents")]
 #[command(version)]
 struct Cli {
-    /// Path to the database file
-    #[arg(long, env = "DISPATCH_DB", default_value_os_t = default_db_path())]
-    db: PathBuf,
+    /// Directory holding this install's own files (host.json, app.log, store records)
+    #[arg(long, env = "DISPATCH_DATA_DIR", default_value_os_t = default_data_dir())]
+    data_dir: PathBuf,
 
     /// Shared store the board lives in, e.g. http://127.0.0.1:3000.
     ///
@@ -317,8 +317,8 @@ enum SpacetimeAction {
 /// with rather than whether it errors at all.
 const BLOCK_TOOL_CALL: i32 = 2;
 
-fn default_db_path() -> PathBuf {
-    dispatch_tui::default_db_path()
+fn default_data_dir() -> PathBuf {
+    dispatch_tui::default_data_dir()
 }
 
 // ---------------------------------------------------------------------------
@@ -379,12 +379,11 @@ fn enter_tmux_session_if_needed() -> Result<()> {
 }
 
 async fn cmd_tui(
-    db: &std::path::Path,
+    data_dir: &std::path::Path,
     port: u16,
     spacetime_server: Option<String>,
     accept_store_switch: bool,
 ) -> Result<()> {
-    let data_dir = runtime::data_dir_of(db);
     init_app_log_subscriber(data_dir)?;
 
     // The one place the TUI path resolves the operator's `$HOME`-derived
@@ -422,24 +421,29 @@ async fn cmd_tui(
         Err(e) => eprintln!("Warning: the dispatch configuration check panicked: {e}"),
     }
 
-    runtime::run_tui(db, port, &paths, spacetime_server, accept_store_switch).await
+    runtime::run_tui(
+        data_dir,
+        port,
+        &paths,
+        spacetime_server,
+        accept_store_switch,
+    )
+    .await
 }
 
-async fn cmd_agent_tree(db: &std::path::Path, board_port: u16, task_id: i64) -> Result<()> {
+async fn cmd_agent_tree(data_dir: &std::path::Path, board_port: u16, task_id: i64) -> Result<()> {
     // The renderer owns the alternate screen, so its warnings cannot go to
     // stderr — they go to `app.log` next to the database, like the board's.
     // Without this every `tracing::warn!` in the renderer went nowhere, which
     // included the only report of a file it could not open.
     // Best-effort: a renderer that cannot open the log still renders.
-    let data_dir = runtime::data_dir_of(db);
     let _ = init_app_log_subscriber(data_dir);
-    dispatch_tui::cli::agent_tree::run(db, board_port, task_id).await
+    dispatch_tui::cli::agent_tree::run(data_dir, board_port, task_id).await
 }
 
 /// The diff pane beneath the tree. Same alternate-screen constraint as
 /// [`cmd_agent_tree`], so the same best-effort log redirection.
-async fn cmd_agent_diff(db: &std::path::Path, board_port: u16, task_id: i64) -> Result<()> {
-    let data_dir = runtime::data_dir_of(db);
+async fn cmd_agent_diff(data_dir: &std::path::Path, board_port: u16, task_id: i64) -> Result<()> {
     let _ = init_app_log_subscriber(data_dir);
     dispatch_tui::cli::agent_diff::run(board_port, task_id).await
 }
@@ -673,13 +677,13 @@ fn write_snapshot(out: &str, snapshot: &dispatch_tui::spacetime::Snapshot) -> Re
 }
 
 async fn cmd_repo(
-    db: &std::path::Path,
+    data_dir: &std::path::Path,
     store_server: Option<String>,
     action: RepoAction,
 ) -> Result<()> {
     use dispatch_tui::cli::commands;
     // Repo paths and their verify commands are shared rows.
-    let store = runtime::open_cli_store(db, store_server).await?;
+    let store = runtime::open_cli_store(data_dir, store_server).await?;
     let database = &*store.database;
     let mut out = std::io::stdout();
     match action {
@@ -697,20 +701,23 @@ async fn cmd_repo(
     }
 }
 
-async fn cmd_prune_repo_paths(db: &std::path::Path, store_server: Option<String>) -> Result<()> {
-    let store = runtime::open_cli_store(db, store_server).await?;
+async fn cmd_prune_repo_paths(
+    data_dir: &std::path::Path,
+    store_server: Option<String>,
+) -> Result<()> {
+    let store = runtime::open_cli_store(data_dir, store_server).await?;
     dispatch_tui::cli::commands::prune_repo_paths(&store.database, &mut std::io::stdout()).await
 }
 
 async fn cmd_plan(
-    db: &std::path::Path,
+    data_dir: &std::path::Path,
     store_server: Option<String>,
     id: i64,
     path: PathBuf,
 ) -> Result<()> {
     use dispatch_tui::cli::commands;
     let plan_path = commands::resolve_plan_path(&path)?;
-    let store = runtime::open_cli_store(db, store_server).await?;
+    let store = runtime::open_cli_store(data_dir, store_server).await?;
     commands::attach_plan(
         store.database.clone(),
         id,
@@ -724,8 +731,7 @@ async fn cmd_plan(
 /// detached via the global keybinding's `run-shell -b`, so a failure has
 /// nowhere useful to surface — it's logged to app.log and swallowed rather
 /// than returned, matching `spawn_agent_tree_pane`'s own best-effort stance.
-fn cmd_toggle_agent_tree_pane(db: &std::path::Path, window: String) -> Result<()> {
-    let data_dir = runtime::data_dir_of(db);
+fn cmd_toggle_agent_tree_pane(data_dir: &std::path::Path, window: String) -> Result<()> {
     let _ = init_app_log_subscriber(data_dir);
     // tmux substitutes `#{window_name}` into the keybinding, so this is the
     // border where an arbitrary argv string becomes a window name. A value that
@@ -791,9 +797,11 @@ fn main() -> Result<()> {
         Commands::CallerHeaders => cmd_caller_headers(),
         Commands::VerifyFeed { command } => cmd_verify_feed(command),
         Commands::Uninstall { yes, purge } => {
-            dispatch_tui::setup::run_uninstall(yes, purge, &cli.db)
+            dispatch_tui::setup::run_uninstall(yes, purge, &cli.data_dir)
         }
-        Commands::ToggleAgentTreePane { window } => cmd_toggle_agent_tree_pane(&cli.db, window),
+        Commands::ToggleAgentTreePane { window } => {
+            cmd_toggle_agent_tree_pane(&cli.data_dir, window)
+        }
         // One connect, one small request, one response — and the connection
         // task the client spawns is driven by this same `block_on` while the
         // main task awaits the response.
@@ -801,11 +809,19 @@ fn main() -> Result<()> {
             .enable_io()
             .enable_time()
             .build()?
-            .block_on(run_async(&cli.db, cli.spacetime_server.clone(), command)),
+            .block_on(run_async(
+                &cli.data_dir,
+                cli.spacetime_server.clone(),
+                command,
+            )),
         command => tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?
-            .block_on(run_async(&cli.db, cli.spacetime_server.clone(), command)),
+            .block_on(run_async(
+                &cli.data_dir,
+                cli.spacetime_server.clone(),
+                command,
+            )),
     }
 }
 
@@ -824,7 +840,7 @@ fn is_hook(command: &Commands) -> bool {
 }
 
 async fn run_async(
-    db: &std::path::Path,
+    data_dir: &std::path::Path,
     store_server: Option<String>,
     command: Commands,
 ) -> Result<()> {
@@ -832,7 +848,7 @@ async fn run_async(
         Commands::Tui {
             port,
             accept_store_switch,
-        } => cmd_tui(db, port, store_server, accept_store_switch).await?,
+        } => cmd_tui(data_dir, port, store_server, accept_store_switch).await?,
         // Hooks reach the running board, never the database — `db` is
         // deliberately unused on all four arms. See `HookDelivery` in
         // `docs/specs/agent-health.allium`.
@@ -855,8 +871,12 @@ async fn run_async(
             body,
             board,
         } => hooks::run_peer_message(board.port, id, target, body).await?,
-        Commands::AgentTree { task_id, board } => cmd_agent_tree(db, board.port, task_id).await?,
-        Commands::AgentDiff { task_id, board } => cmd_agent_diff(db, board.port, task_id).await?,
+        Commands::AgentTree { task_id, board } => {
+            cmd_agent_tree(data_dir, board.port, task_id).await?
+        }
+        Commands::AgentDiff { task_id, board } => {
+            cmd_agent_diff(data_dir, board.port, task_id).await?
+        }
         // Like the hook arms above, the gate reaches the board, not `db`.
         // The verdict comes back rather than being acted on there: choosing
         // the process's exit code is this layer's job, and `BLOCK_TOOL_CALL`
@@ -868,21 +888,21 @@ async fn run_async(
             }
             hooks::GateVerdict::Allow => {}
         },
-        Commands::Repo { action } => cmd_repo(db, store_server, action).await?,
-        Commands::PruneRepoPaths => cmd_prune_repo_paths(db, store_server).await?,
+        Commands::Repo { action } => cmd_repo(data_dir, store_server, action).await?,
+        Commands::PruneRepoPaths => cmd_prune_repo_paths(data_dir, store_server).await?,
         Commands::Spacetime { action } => cmd_spacetime(action).await?,
         Commands::Store {
             action: StoreAction::Import { from },
         } => {
             dispatch_tui::cli::store_import::import_store(
-                db,
+                data_dir,
                 store_server,
                 &from,
                 &mut std::io::stdout(),
             )
             .await?
         }
-        Commands::Plan { id, path } => cmd_plan(db, store_server, id, path).await?,
+        Commands::Plan { id, path } => cmd_plan(data_dir, store_server, id, path).await?,
         // Unreachable by construction: `main` matches these same patterns before
         // any runtime exists, so they never reach the async path.
         Commands::Statusline { .. }

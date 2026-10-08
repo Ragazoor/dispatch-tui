@@ -6,7 +6,7 @@
 //!
 //! # Keeping the decoders honest
 //!
-//! The in-memory store (`Database::open_in_memory`) decodes through this file
+//! The in-memory store (`Store::open_in_memory`) decodes through this file
 //! too, so every test that writes through a memory-attached handle exercises
 //! it. Two things hold it to one policy:
 //!

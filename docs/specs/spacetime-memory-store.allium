@@ -13,7 +13,7 @@
 --           build (a reducer belongs to exactly one domain, and a domain is
 --           either fully implemented or not yet started — no partial
 --           domains); the panic a caller gets from a not-yet-covered domain;
---           and the rule deciding when Database::open_in_memory() attaches
+--           and the rule deciding when Store::open_in_memory() attaches
 --           this stand-in rather than returning an unattached handle (since
 --           task #8277 it always attaches it, together with a private host
 --           file).
@@ -130,7 +130,7 @@ entity MemoryReducerCaller {
         -- review has to check by hand.
 }
 
--- The handle Database::open_in_memory() returns to a test. Whether a shared
+-- The handle Store::open_in_memory() returns to a test. Whether a shared
 -- store is attached is the one fact this spec adds to it; everything else
 -- about it belongs to storage.allium.
 entity TestDatabaseHandle {
@@ -198,7 +198,7 @@ config {
 -- OpenInMemoryAttachesStoreOnceComplete: #5002 left that wiring to its own
 -- follow-up, task #8277, since it is a distinct risk surface from adding a
 -- domain (a behavioural cutover for roughly 342 call sites). #8277 wired
--- Database::open_in_memory() to check is_complete() and attach the store.
+-- Store::open_in_memory() to check is_complete() and attach the store.
 default MemoryReducerCaller the_store = {
     covered_domains: { tasks_and_epics, repo_config, subscriptions, settings, learnings, usage, agent_state }
 }
@@ -242,7 +242,7 @@ rule ReducerCallOnUncoveredDomainPanics {
 }
 
 rule OpenInMemoryAttachesStoreOnceComplete {
-    -- The one, atomic point at which every existing Database::open_in_memory()
+    -- The one, atomic point at which every existing Store::open_in_memory()
     -- call site starts getting a store-backed handle, with no per-call-site
     -- change: this rule's condition, not a rolling default, decides it.
     when: OpenInMemoryRequested(_)

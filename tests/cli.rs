@@ -20,14 +20,14 @@ use tempfile::NamedTempFile;
 
 use common::seed_task;
 use dispatch_tui::cli::commands;
-use dispatch_tui::store::{Database, TaskRead};
+use dispatch_tui::store::{Store, TaskRead};
 
 /// A fresh in-memory store for the in-process command tests. The temp file is
 /// only a path that nothing opens, for the tests that also pass `--db` to the
 /// binary.
-async fn sqlite() -> (NamedTempFile, Database) {
+async fn sqlite() -> (NamedTempFile, Store) {
     let tmp = NamedTempFile::new().unwrap();
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     (tmp, db)
 }
 
@@ -49,7 +49,7 @@ fn write_host_file(dir: &Path) {
 }
 
 /// `dispatch repo list`'s output.
-async fn list(db: &Database) -> String {
+async fn list(db: &Store) -> String {
     let mut out = Vec::new();
     commands::list_repos(db, &mut out).await.unwrap();
     String::from_utf8(out).unwrap()
@@ -69,7 +69,7 @@ async fn list(db: &Database) -> String {
 fn store_backed_commands_fail_cleanly_when_the_store_is_unreachable() {
     let tmp = tempfile::tempdir().unwrap();
     write_host_file(tmp.path());
-    let db = tmp.path().join("dispatch.db");
+    let db = tmp.path().to_path_buf();
     let db = db.to_str().unwrap();
     let plan = make_plan_file("A plan", "Goal.");
     let plan = plan.path().to_str().unwrap();
@@ -85,7 +85,7 @@ fn store_backed_commands_fail_cleanly_when_the_store_is_unreachable() {
     ] {
         let out = binary()
             .env_remove("DISPATCH_SPACETIME_SERVER")
-            .args(["--db", db, "--spacetime-server", &dead])
+            .args(["--data-dir", db, "--spacetime-server", &dead])
             .args(&args)
             .output()
             .unwrap();
@@ -120,10 +120,10 @@ fn uninstall_purge_honours_db() {
     let mut child = binary()
         .env("HOME", home.path())
         .env("XDG_DATA_HOME", &xdg)
-        .env_remove("DISPATCH_DB")
+        .env_remove("DISPATCH_DATA_DIR")
         .args([
-            "--db",
-            chosen.join("tasks.db").to_str().unwrap(),
+            "--data-dir",
+            chosen.to_str().unwrap(),
             "uninstall",
             "--yes",
             "--purge",
@@ -166,14 +166,14 @@ fn dead_store_address() -> String {
 fn a_command_with_nothing_named_reaches_the_store_recorded_beside_its_database() {
     let dir = tempfile::tempdir().unwrap();
     write_host_file(dir.path());
-    let db = dir.path().join("dispatch.db");
+    let db = dir.path().to_path_buf();
     let recorded = dead_store_address();
     std::fs::write(dir.path().join("store-server"), format!("{recorded}\n")).unwrap();
 
     let out = binary()
         .env_remove("DISPATCH_SPACETIME_SERVER")
         .env_remove("DISPATCH_BOARD_STORE")
-        .args(["--db", db.to_str().unwrap(), "repo", "list"])
+        .args(["--data-dir", db.to_str().unwrap(), "repo", "list"])
         .output()
         .unwrap();
 
@@ -199,14 +199,14 @@ fn a_command_with_nothing_named_reaches_the_store_recorded_beside_its_database()
 fn the_environment_wins_over_the_recorded_store() {
     let dir = tempfile::tempdir().unwrap();
     write_host_file(dir.path());
-    let db = dir.path().join("dispatch.db");
+    let db = dir.path().to_path_buf();
     let recorded = dead_store_address();
     let from_env = dead_store_address();
     std::fs::write(dir.path().join("store-server"), format!("{recorded}\n")).unwrap();
 
     let out = binary()
         .env("DISPATCH_SPACETIME_SERVER", &from_env)
-        .args(["--db", db.to_str().unwrap(), "repo", "list"])
+        .args(["--data-dir", db.to_str().unwrap(), "repo", "list"])
         .output()
         .unwrap();
 
@@ -227,7 +227,7 @@ fn the_environment_wins_over_the_recorded_store() {
 fn the_boards_published_address_wins_over_the_recorded_store() {
     let dir = tempfile::tempdir().unwrap();
     write_host_file(dir.path());
-    let db = dir.path().join("dispatch.db");
+    let db = dir.path().to_path_buf();
     let recorded = dead_store_address();
     let from_board = dead_store_address();
     std::fs::write(dir.path().join("store-server"), format!("{recorded}\n")).unwrap();
@@ -235,7 +235,7 @@ fn the_boards_published_address_wins_over_the_recorded_store() {
     let out = binary()
         .env_remove("DISPATCH_SPACETIME_SERVER")
         .env("DISPATCH_BOARD_STORE", &from_board)
-        .args(["--db", db.to_str().unwrap(), "repo", "list"])
+        .args(["--data-dir", db.to_str().unwrap(), "repo", "list"])
         .output()
         .unwrap();
 
@@ -275,7 +275,7 @@ fn make_plan_file(title: &str, goal: &str) -> NamedTempFile {
 
 /// A `--db` path that deliberately does not exist. Every assertion in this
 /// section is about clap rejecting argv *before* anything opens a database, so
-/// pointing at a path no `Database::open` could succeed on makes that claim
+/// pointing at a path no `Store::open` could succeed on makes that claim
 /// structural rather than merely asserted — and saves the tests a temp file
 /// none of them ever reads.
 const UNOPENABLE_DB: &str = "/nonexistent-dir/dispatch-test.db";
@@ -283,7 +283,7 @@ const UNOPENABLE_DB: &str = "/nonexistent-dir/dispatch-test.db";
 /// Assert `subcommand` is not a recognised `dispatch` subcommand.
 fn assert_subcommand_removed(subcommand: &str) {
     let out = binary()
-        .args(["--db", UNOPENABLE_DB, subcommand])
+        .args(["--data-dir", UNOPENABLE_DB, subcommand])
         .output()
         .unwrap();
     assert!(
@@ -318,7 +318,7 @@ fn update_subcommand_removed() {
 
 #[tokio::test]
 async fn plan_attaches_to_existing_task() {
-    let db = std::sync::Arc::new(Database::open_in_memory().await.unwrap());
+    let db = std::sync::Arc::new(Store::open_in_memory().await.unwrap());
     let id = seed_task(&db, "Plan Target").await;
     let attach_plan = make_plan_file("Detailed Plan", "Step by step.");
     let plan_path = commands::resolve_plan_path(attach_plan.path()).unwrap();
@@ -344,7 +344,7 @@ async fn plan_attaches_to_existing_task() {
 
 #[tokio::test]
 async fn plan_nonexistent_task_fails() {
-    let db = std::sync::Arc::new(Database::open_in_memory().await.unwrap());
+    let db = std::sync::Arc::new(Store::open_in_memory().await.unwrap());
     let attach_plan = make_plan_file("Orphan Plan", "No task.");
     let plan_path = commands::resolve_plan_path(attach_plan.path()).unwrap();
 
@@ -362,7 +362,7 @@ async fn plan_nonexistent_file_fails() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
-            "--db",
+            "--data-dir",
             db.path().to_str().unwrap(),
             "plan",
             "1",
@@ -411,7 +411,7 @@ fn fetch_security_subcommand_removed() {
 /// is built — hence [`UNOPENABLE_DB`] and no board.
 fn assert_action_rejected_by_clap(subcommand: &str, bogus: &str, valid: &[&str]) {
     let out = binary()
-        .args(["--db", UNOPENABLE_DB, subcommand, "1", bogus])
+        .args(["--data-dir", UNOPENABLE_DB, subcommand, "1", bogus])
         .output()
         .unwrap();
     assert!(
@@ -448,7 +448,7 @@ async fn verify_feed_empty_array_fails() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
-            "--db",
+            "--data-dir",
             db.path().to_str().unwrap(),
             "verify-feed",
             "echo '[]'",
@@ -475,7 +475,7 @@ async fn verify_feed_rejects_a_review_tagged_item_that_names_no_pr() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
-            "--db",
+            "--data-dir",
             db.path().to_str().unwrap(),
             "verify-feed",
             r#"echo '[{"external_id":"x1","title":"T","description":"","status":"backlog","tag":"pr-review"}]'"#,
@@ -498,7 +498,7 @@ async fn verify_feed_valid_items_succeeds() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
-            "--db",
+            "--data-dir",
             db.path().to_str().unwrap(),
             "verify-feed",
             r#"echo '[{"external_id":"x1","title":"T","description":"","url":"https://github.com/o/r/pull/1","status":"backlog","tag":"pr-review"}]'"#,
@@ -542,7 +542,7 @@ async fn verify_feed_reports_dropped_unrecognised_signal() {
         // suppressed the warning and this test failed.
         .env_remove("RUST_LOG")
         .args([
-            "--db",
+            "--data-dir",
             db.path().to_str().unwrap(),
             "verify-feed",
             r#"echo '[{"external_id":"x1","title":"T","description":"","url":"https://github.com/o/r/pull/1","status":"backlog","tag":"pr-review","signals":["reviewed","bogus"]}]'"#,
@@ -578,7 +578,7 @@ async fn verify_feed_recognised_signals_produce_no_warning() {
     let out = binary()
         .env_remove("RUST_LOG")
         .args([
-            "--db",
+            "--data-dir",
             db.path().to_str().unwrap(),
             "verify-feed",
             r#"echo '[{"external_id":"x1","title":"T","description":"","url":"https://github.com/o/r/pull/1","status":"backlog","tag":"pr-review","signals":["reviewed"]}]'"#,
@@ -602,7 +602,7 @@ async fn verify_feed_missing_tag_fails() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
-            "--db",
+            "--data-dir",
             db.path().to_str().unwrap(),
             "verify-feed",
             r#"echo '[{"external_id":"x1","title":"T","description":"","status":"backlog"}]'"#,
@@ -625,7 +625,7 @@ async fn verify_feed_invalid_tag_fails() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
-            "--db",
+            "--data-dir",
             db.path().to_str().unwrap(),
             "verify-feed",
             r#"echo '[{"external_id":"x1","title":"T","description":"","status":"backlog","tag":"nonsense"}]'"#,
@@ -648,7 +648,7 @@ async fn verify_feed_invalid_json_fails() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
-            "--db",
+            "--data-dir",
             db.path().to_str().unwrap(),
             "verify-feed",
             "echo 'not json'",
@@ -676,7 +676,7 @@ async fn verify_feed_surfaces_stderr_written_on_zero_exit() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
-            "--db",
+            "--data-dir",
             db.path().to_str().unwrap(),
             "verify-feed",
             "echo 'boom' >&2; printf '[]'",
@@ -694,7 +694,12 @@ async fn verify_feed_surfaces_stderr_written_on_zero_exit() {
 async fn verify_feed_command_failure_exits_nonzero() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
-        .args(["--db", db.path().to_str().unwrap(), "verify-feed", "exit 7"])
+        .args([
+            "--data-dir",
+            db.path().to_str().unwrap(),
+            "verify-feed",
+            "exit 7",
+        ])
         .output()
         .unwrap();
     assert!(
@@ -830,7 +835,7 @@ async fn dispatch_repo_set_verify_expands_tilde_in_path() {
 fn doctor_subcommand_removed() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
-        .args(["--db", db.path().to_str().unwrap(), "doctor"])
+        .args(["--data-dir", db.path().to_str().unwrap(), "doctor"])
         .output()
         .unwrap();
     assert!(
@@ -859,7 +864,7 @@ async fn toggle_agent_tree_pane_never_fails_without_a_real_tmux_session() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
-            "--db",
+            "--data-dir",
             db.path().to_str().unwrap(),
             "toggle-agent-tree-pane",
             "task-999999999",
@@ -879,13 +884,13 @@ async fn toggle_agent_tree_pane_never_fails_without_a_real_tmux_session() {
 // ---------------------------------------------------------------------------
 
 /// Seed a repo path via `repo set-verify`, which creates the row.
-async fn seed_repo_path(db: &Database, path: &str) {
+async fn seed_repo_path(db: &Store, path: &str) {
     commands::set_verify(db, path, "true", &mut Vec::new())
         .await
         .unwrap_or_else(|e| panic!("seeding {path} should succeed: {e:#}"));
 }
 
-async fn status(db: &Database, no_fetch: bool) -> String {
+async fn status(db: &Store, no_fetch: bool) -> String {
     let mut out = Vec::new();
     commands::repo_status(db, no_fetch, &mut out)
         .await
@@ -1026,7 +1031,7 @@ const STATUS_PAYLOAD: &[u8] =
 fn run_statusline(db: &Path, snapshot: &Path, chain: Option<&str>) -> std::process::Output {
     let mut command = binary();
     command.args([
-        "--db",
+        "--data-dir",
         db.to_str().unwrap(),
         "statusline",
         "--snapshot",
@@ -1051,17 +1056,17 @@ fn run_statusline(db: &Path, snapshot: &Path, chain: Option<&str>) -> std::proce
 
 /// The decorator runs several times a second in every dispatch-spawned Claude
 /// session, so any database work there would be pure waste. The module keeps no
-/// `Database` import, but that is a source property; this asserts the observable
+/// `Store` import, but that is a source property; this asserts the observable
 /// one — running the subcommand brings no database into existence. See
 /// docs/specs/dispatch.allium: StatusLineDecorator
 /// (`@guarantee NeverReadsOrWritesTheDatabase`).
 #[test]
 fn statusline_creates_no_database_file() {
     let tmp = tempfile::tempdir().unwrap();
-    let db_path = tmp.path().join("tasks.db");
+    let data_dir = tmp.path().join("data");
     let snapshot = tmp.path().join("rate-limits.json");
 
-    let out = run_statusline(&db_path, &snapshot, None);
+    let out = run_statusline(&data_dir, &snapshot, None);
 
     assert!(out.status.success(), "the decorator must always exit 0");
     assert!(
@@ -1069,7 +1074,7 @@ fn statusline_creates_no_database_file() {
         "the snapshot must have been published, or this proves nothing about the DB"
     );
     assert!(
-        !db_path.exists(),
+        !data_dir.exists(),
         "the statusline subcommand must not create a database file"
     );
 }
@@ -1092,7 +1097,7 @@ fn statusline_creates_no_database_file() {
 fn statusline_starts_no_worker_thread_pool() {
     let tmp = tempfile::tempdir().unwrap();
     let out = run_statusline(
-        &tmp.path().join("tasks.db"),
+        &tmp.path().join("data"),
         &tmp.path().join("rate-limits.json"),
         Some("ls /proc/$PPID/task | wc -l"),
     );
@@ -1164,5 +1169,22 @@ fn tui_accepts_the_store_switch_flag() {
     assert!(
         help.contains("--accept-store-switch"),
         "`dispatch tui --help` must offer --accept-store-switch:\n{help}"
+    );
+}
+
+/// The data directory is named with `--data-dir`; the old `--db` (which named a
+/// database file nothing opened) is gone (`storage.allium: DataDirectory`).
+#[test]
+fn the_old_db_option_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = binary()
+        .args(["--db", dir.path().to_str().unwrap(), "repo", "list"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--db"),
+        "clap names the unknown argument: {out:?}"
     );
 }

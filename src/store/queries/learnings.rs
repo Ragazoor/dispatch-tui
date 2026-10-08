@@ -4,10 +4,10 @@ use crate::models::{
     EpicId, Learning, LearningId, LearningRetrieval, LearningVerdict, RetrievalSource, TaskId,
 };
 
-use super::super::{CreateLearningRow, Database, LearningFilter, LearningPatch};
+use super::super::{CreateLearningRow, LearningFilter, LearningPatch, Store};
 
 #[async_trait::async_trait]
-impl super::super::LearningStore for Database {
+impl super::super::LearningStore for Store {
     async fn create_learning(&self, row: CreateLearningRow<'_>) -> Result<LearningId> {
         let writer = self.shared_writer()?;
         writer.create_learning(row).await
@@ -58,7 +58,7 @@ impl super::super::LearningStore for Database {
 }
 
 #[async_trait::async_trait]
-impl super::super::LearningRetrievalStore for Database {
+impl super::super::LearningRetrievalStore for Store {
     async fn record_retrieval(
         &self,
         task_id: TaskId,

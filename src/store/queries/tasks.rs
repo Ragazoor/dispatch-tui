@@ -5,10 +5,10 @@ use crate::models::{
     UserPromptOutcome,
 };
 
-use super::super::{CreateTaskRequest, Database, RemovedFeedTask, TaskPatch};
+use super::super::{CreateTaskRequest, RemovedFeedTask, Store, TaskPatch};
 
 #[async_trait::async_trait]
-impl super::super::TaskRead for Database {
+impl super::super::TaskRead for Store {
     async fn get_task(&self, id: TaskId) -> Result<Option<crate::models::Task>> {
         let reader = self.shared_reader()?;
         reader.get_task(id).await
@@ -36,7 +36,7 @@ impl super::super::TaskRead for Database {
 }
 
 #[async_trait::async_trait]
-impl super::super::TaskCrud for Database {
+impl super::super::TaskCrud for Store {
     async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId> {
         // ROUTED. `sync.allium: BoardWritesThroughTheStore` — a board with a
         // store writes there and NOT here, so the return is the whole method
@@ -321,7 +321,7 @@ impl super::super::TaskCrud for Database {
 }
 
 #[async_trait::async_trait]
-impl super::super::PollOwnershipStore for Database {
+impl super::super::PollOwnershipStore for Store {
     // `PollOwner` has no SQLite counterpart at all — a no-op with no writer
     // attached is the correct answer, not a missing branch: on a
     // single-machine install there is no other host to contend a claim with,

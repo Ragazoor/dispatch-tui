@@ -2,18 +2,18 @@ use std::sync::Arc;
 
 use super::*;
 use crate::models::{test_tmux_window, TaskStatus, TaskTag, MIN_FEED_INTERVAL_SECS};
-use crate::store::{Database, EpicCrud, EpicPatch, EpicRead, RepoConfigStore, TaskCrud};
+use crate::store::{EpicCrud, EpicPatch, EpicRead, RepoConfigStore, Store, TaskCrud};
 
 use super::exec::AlwaysFailRunner;
 
 // --- FeedRunner tests ---
 
-fn make_runner(db: Arc<Database>) -> (FeedRunner, mpsc::UnboundedReceiver<McpEvent>) {
+fn make_runner(db: Arc<Store>) -> (FeedRunner, mpsc::UnboundedReceiver<McpEvent>) {
     make_runner_with_runner(db, Arc::new(AlwaysFailRunner))
 }
 
 fn make_runner_with_runner(
-    db: Arc<Database>,
+    db: Arc<Store>,
     runner: Arc<dyn ProcessRunner>,
 ) -> (FeedRunner, mpsc::UnboundedReceiver<McpEvent>) {
     let (tx, rx) = mpsc::unbounded_channel();
@@ -33,7 +33,7 @@ fn make_runner_with_runner(
 /// the 30s a `tick()` that awaited the command inline would take.
 #[tokio::test]
 async fn tick_does_not_block_event_loop() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Slow Epic", "", None).await.unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("sleep 30")))
         .await
@@ -48,7 +48,7 @@ async fn tick_does_not_block_event_loop() {
 
 #[tokio::test]
 async fn tick_background_task_upserts_tasks() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("BG Epic", "", None).await.unwrap();
     db.patch_epic(
             epic.id,
@@ -76,7 +76,7 @@ async fn tick_done_epic_moves_to_backlog_when_new_feed_tasks_added() {
     // Regression test: a done epic should regress to backlog when the feed
     // adds new non-done tasks, because recalculate_epic_status must be
     // called after upsert_feed_tasks.
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Done Epic", "", None).await.unwrap();
 
     // Mark the epic as done before the feed runs.
@@ -110,7 +110,7 @@ async fn tick_done_epic_moves_to_backlog_when_new_feed_tasks_added() {
 
 #[tokio::test]
 async fn tick_valid_json_upserts_tasks() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("My Epic", "", None).await.unwrap();
     db.patch_epic(
             epic.id,
@@ -141,7 +141,7 @@ async fn tick_valid_json_upserts_tasks() {
 // before; this closes the gap for the auto-poll path.
 #[tokio::test]
 async fn tick_stderr_on_zero_exit_does_not_suppress_sync() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Noisy Epic", "", None).await.unwrap();
     db.patch_epic(
             epic.id,
@@ -175,7 +175,7 @@ async fn tick_stderr_on_zero_exit_does_not_suppress_sync() {
 // syncing it would delete every feed task already in the epic.
 #[tokio::test]
 async fn tick_degraded_empty_emission_does_not_delete_existing_tasks() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Degraded Epic", "", None).await.unwrap();
 
     // Seed one feed task, as a previous healthy poll would have.
@@ -234,7 +234,7 @@ async fn tick_degraded_empty_emission_does_not_delete_existing_tasks() {
 /// wiring, and it is gone now that a caller exists.
 #[tokio::test]
 async fn tick_removed_task_tears_down_its_worktree() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Reviews", "", None).await.unwrap();
 
     // Seed one feed task, as a previous healthy poll would have, and give it
@@ -316,7 +316,7 @@ async fn tick_removed_task_tears_down_its_worktree() {
 /// the DB, since the destroyed worktree is the part that cannot be undone.
 #[tokio::test]
 async fn tick_partially_degraded_emission_does_not_delete_or_tear_down() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Reviews", "", None).await.unwrap();
 
     // Two feed tasks from a previous healthy poll; `pr-1` carries a live
@@ -409,7 +409,7 @@ async fn tick_partially_degraded_emission_does_not_delete_or_tear_down() {
 
 #[tokio::test]
 async fn tick_persists_feed_tag() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Tagged Epic", "", None).await.unwrap();
     db.patch_epic(
             epic.id,
@@ -434,7 +434,7 @@ async fn tick_persists_feed_tag() {
 
 #[tokio::test]
 async fn tick_missing_tag_rejects_item() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Untagged Epic", "", None).await.unwrap();
     db.patch_epic(
         epic.id,
@@ -461,7 +461,7 @@ async fn tick_missing_tag_rejects_item() {
 
 #[tokio::test]
 async fn tick_nonzero_exit_no_panic() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Err Epic", "", None).await.unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("exit 1")))
         .await
@@ -480,7 +480,7 @@ async fn tick_nonzero_exit_no_panic() {
 
 #[tokio::test]
 async fn tick_malformed_json_no_panic() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Bad JSON Epic", "", None).await.unwrap();
     db.patch_epic(
         epic.id,
@@ -501,7 +501,7 @@ async fn tick_malformed_json_no_panic() {
 
 #[tokio::test]
 async fn tick_interval_not_elapsed_skips_command() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Interval Epic", "", None).await.unwrap();
 
     // Write a counter to a temp file so we can count how many times the command ran.
@@ -641,7 +641,7 @@ fn epic_due_rejects_a_negative_interval_rather_than_wrapping() {
 #[tokio::test]
 async fn tick_skips_an_epic_whose_stored_interval_is_below_the_floor() {
     for bad in [MIN_FEED_INTERVAL_SECS - 1] {
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().await.unwrap());
         let epic = db.create_epic("Too Fast", "", None).await.unwrap();
         db.patch_epic(
                 epic.id,
@@ -677,7 +677,7 @@ async fn tick_skips_an_epic_whose_stored_interval_is_below_the_floor() {
 /// skip path as any other sub-floor value.
 #[tokio::test]
 async fn tick_skips_an_epic_with_a_negative_interval_rather_than_wrapping() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Negative", "", None).await.unwrap();
     db.patch_epic(
             epic.id,
@@ -710,7 +710,7 @@ async fn tick_skips_an_epic_with_a_negative_interval_rather_than_wrapping() {
 /// so an epic set exactly there polls normally.
 #[tokio::test]
 async fn tick_polls_an_epic_whose_interval_is_exactly_the_floor() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("At Floor", "", None).await.unwrap();
     db.patch_epic(
             epic.id,
@@ -740,7 +740,7 @@ async fn tick_polls_an_epic_whose_interval_is_exactly_the_floor() {
 
 #[tokio::test]
 async fn tick_null_feed_command_skipped() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     // Epic with no feed_command (default)
     let epic = db.create_epic("Plain Epic", "", None).await.unwrap();
 
@@ -762,7 +762,7 @@ async fn tick_null_feed_command_skipped() {
 
 #[tokio::test]
 async fn tick_grouped_creates_sub_epics_per_repo() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Dependabot", "", None).await.unwrap();
     db.patch_epic(
             epic.id,
@@ -810,7 +810,7 @@ async fn tick_grouped_creates_sub_epics_per_repo() {
 async fn tick_done_epic_grouped_moves_to_backlog_when_new_feed_tasks_added() {
     // Grouped feed variant: a done parent epic should regress to backlog when
     // the feed adds new backlog tasks into a sub-epic.
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Done Grouped Epic", "", None).await.unwrap();
 
     // Mark the parent epic as done before the feed runs.
@@ -846,7 +846,7 @@ async fn tick_done_epic_grouped_moves_to_backlog_when_new_feed_tasks_added() {
 
 #[tokio::test]
 async fn tick_grouped_migrates_existing_flat_tasks() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Dependabot", "", None).await.unwrap();
     // First run: flat (group_by_repo = false by default)
     db.patch_epic(
@@ -894,7 +894,7 @@ async fn tick_grouped_migrates_existing_flat_tasks() {
 
 #[tokio::test]
 async fn tick_grouped_uses_other_for_no_url() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Feed", "", None).await.unwrap();
     db.patch_epic(
             epic.id,
@@ -939,7 +939,7 @@ fn role_sub(subs: &[crate::models::Epic], role: crate::models::FeedRole) -> &cra
 
 #[tokio::test]
 async fn tick_routes_reviews_parent_into_role_sub_epics() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
             parent.id,
@@ -990,7 +990,7 @@ async fn tick_routes_reviews_parent_into_role_sub_epics() {
 /// deterministic: no second cycle has to be raced into existence.
 #[tokio::test]
 async fn tick_skips_an_epic_whose_cycle_is_already_in_flight() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Busy Epic", "", None).await.unwrap();
     // The command would insert a task if it ever ran. It must not run.
     db.patch_epic(
@@ -1030,7 +1030,7 @@ async fn tick_skips_an_epic_whose_cycle_is_already_in_flight() {
 /// would pass the test above and silently kill the feed.
 #[tokio::test]
 async fn tick_resumes_after_the_in_flight_cycle_releases() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Busy Epic", "", None).await.unwrap();
     db.patch_epic(
             epic.id,
@@ -1083,7 +1083,7 @@ async fn tick_resumes_after_the_in_flight_cycle_releases() {
 /// why it must not be rewritten to expect one specific arm.
 #[tokio::test]
 async fn tick_two_ticks_lose_nothing() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
             parent.id,
@@ -1139,7 +1139,7 @@ async fn tick_two_ticks_lose_nothing() {
 /// on. See "No `tokio::time::sleep` in tests" in docs/conventions.md.
 #[tokio::test]
 async fn start_background_task_eventually_runs_feed_command() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("BG Feed Epic", "", None).await.unwrap();
     db.patch_epic(
             epic.id,
@@ -1183,7 +1183,7 @@ async fn start_background_task_eventually_runs_feed_command() {
 
 #[tokio::test]
 async fn tick_github_url_resolves_to_known_repo_path() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     // Register a known repo path matching "myrepo"
     db.save_repo_path("/home/user/code/myrepo").await.unwrap();
     let epic = db.create_epic("Feed Epic", "", None).await.unwrap();
@@ -1211,7 +1211,7 @@ async fn tick_github_url_resolves_to_known_repo_path() {
 
 #[tokio::test]
 async fn tick_no_matching_repo_stores_empty_sentinel() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     // Known repo is "other-repo", not matching "myrepo"
     db.save_repo_path("/home/user/code/other-repo")
         .await
@@ -1240,7 +1240,7 @@ async fn tick_no_matching_repo_stores_empty_sentinel() {
 
 #[tokio::test]
 async fn tick_empty_url_stores_empty_sentinel() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     db.save_repo_path("/home/user/code/myrepo").await.unwrap();
     let epic = db.create_epic("Feed Epic", "", None).await.unwrap();
     let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","status":"backlog","tag":"bug"}]'"#;
@@ -1314,7 +1314,7 @@ impl ProcessRunner for PerRepoBranchRunner {
 
 #[tokio::test]
 async fn tick_resolves_default_branch_per_unique_repo() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     db.save_repo_path("/home/user/code/repo-a").await.unwrap();
     db.save_repo_path("/home/user/code/repo-b").await.unwrap();
     let epic = db.create_epic("Feed Epic", "", None).await.unwrap();
@@ -1365,7 +1365,7 @@ async fn tick_resolves_default_branch_per_unique_repo() {
 
 #[tokio::test]
 async fn tick_falls_back_to_main_when_origin_head_missing() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     db.save_repo_path("/home/user/code/repo-a").await.unwrap();
     let epic = db.create_epic("Feed Epic", "", None).await.unwrap();
     let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog","tag":"bug"}]'"#;
@@ -1388,7 +1388,7 @@ async fn tick_falls_back_to_main_when_origin_head_missing() {
 
 #[tokio::test]
 async fn tick_twice_is_idempotent() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Idem Epic", "", None).await.unwrap();
     db.patch_epic(
             epic.id,
@@ -1434,7 +1434,7 @@ async fn tick_twice_is_idempotent() {
 
 #[tokio::test]
 async fn tick_empty_array_creates_no_tasks() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Empty Epic", "", None).await.unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("echo '[]'")))
         .await
@@ -1453,7 +1453,7 @@ async fn tick_empty_array_creates_no_tasks() {
 
 #[tokio::test]
 async fn tick_sets_cache_to_false_when_no_feed_commands() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     db.create_epic("Plain Epic", "", None).await.unwrap();
 
     let (mut runner, _rx) = make_runner(db.clone());
@@ -1468,7 +1468,7 @@ async fn tick_sets_cache_to_false_when_no_feed_commands() {
 
 #[tokio::test]
 async fn tick_sets_cache_to_true_when_feed_command_exists() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Feed Epic", "", None).await.unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("echo '[]'")))
         .await
@@ -1486,7 +1486,7 @@ async fn tick_sets_cache_to_true_when_feed_command_exists() {
 
 #[tokio::test]
 async fn tick_skips_db_queries_when_cache_is_false_and_no_invalidation() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     db.create_epic("Plain Epic", "", None).await.unwrap();
 
     let (mut runner, mut rx) = make_runner(db.clone());
@@ -1519,7 +1519,7 @@ async fn tick_skips_db_queries_when_cache_is_false_and_no_invalidation() {
 
 #[tokio::test]
 async fn tick_re_queries_after_epic_changed_invalidation() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     db.create_epic("Plain Epic", "", None).await.unwrap();
 
     let (mut runner, mut rx) = make_runner(db.clone());
@@ -1553,7 +1553,7 @@ async fn tick_re_queries_after_epic_changed_invalidation() {
 
 #[tokio::test]
 async fn tick_non_github_url_stores_empty_sentinel() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     db.save_repo_path("/home/user/code/myrepo").await.unwrap();
     let epic = db.create_epic("Feed Epic", "", None).await.unwrap();
     let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://jira.company.com/PROJ-123","status":"backlog","tag":"bug"}]'"#;

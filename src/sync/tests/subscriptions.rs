@@ -7,7 +7,7 @@
 use super::{accepted, ScriptedConnector};
 use crate::models::TaskStatus;
 use crate::store::{
-    CreateTaskRequest, Database, EpicCrud, HostStore, IdentityCredentialStore, SubscriptionStore,
+    CreateTaskRequest, EpicCrud, HostStore, IdentityCredentialStore, Store, SubscriptionStore,
     TaskCrud,
 };
 use crate::sync::{StepOutcome, SubscriptionRequest, SyncSession};
@@ -16,8 +16,8 @@ use std::time::Instant;
 
 /// A store holding epics 1 through 42, so a test can follow any of them: the
 /// store refuses a subscription to an epic that does not exist.
-async fn store() -> Database {
-    let db = Database::open_in_memory().await.unwrap();
+async fn store() -> Store {
+    let db = Store::open_in_memory().await.unwrap();
     for n in 1..=42 {
         db.create_epic(&format!("epic {n}"), "", None)
             .await
@@ -29,7 +29,7 @@ async fn store() -> Database {
 /// A session connected as "user-a" against whatever `db` already holds — the
 /// starting point the live-unfollow tests below all share: subscribe to some
 /// epics first, then call this to connect and send the first subscribe.
-async fn connected_session(db: &Database) -> (Arc<ScriptedConnector>, SyncSession, Instant) {
+async fn connected_session(db: &Store) -> (Arc<ScriptedConnector>, SyncSession, Instant) {
     let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a")]);
     let mut session = SyncSession::open("store.example", connector.clone());
     let now = Instant::now();
@@ -321,7 +321,7 @@ async fn steps_with_no_subscription_change_do_not_reassert() {
 }
 
 async fn new_backlog_task(
-    db: &Database,
+    db: &Store,
     epic: crate::models::EpicId,
     title: &str,
 ) -> crate::models::TaskId {

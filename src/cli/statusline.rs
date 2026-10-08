@@ -12,7 +12,7 @@
 //!    error must still exit 0, or the user's status line breaks.
 //! 2. **Never open the database.** At several invocations per second per session,
 //!    across every agent, database work here would be pure waste. This module has
-//!    no `Database` import and must keep it that way.
+//!    no `Store` import and must keep it that way.
 
 use crate::models::budget::BudgetSnapshot;
 use crate::process::run_bounded;

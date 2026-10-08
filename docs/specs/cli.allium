@@ -97,7 +97,7 @@ entity CliInvocation {
     named_store: String?          -- --spacetime-server, else DISPATCH_SPACETIME_SERVER; blank counts as absent
     board_store: String?          -- DISPATCH_BOARD_STORE: the address the board that started this
                                   -- process's tmux session published; blank counts as absent
-    recorded_store: String?       -- the address a board on this --db recorded beside it
+    recorded_store: String?       -- the address a board on this --data-dir recorded beside it
                                   -- (startup.allium: StoreAddressRecord); blank counts as absent
     exit: ProcessExit?            -- null while the process is still running
 }
@@ -172,7 +172,7 @@ rule CliCommandsReachTheStoreWithoutManagingIt {
         -- operator's environment variable (DISPATCH_SPACETIME_SERVER), the
         -- address the board published on its tmux session
         -- (DISPATCH_BOARD_STORE; startup.allium: PublishTheBoardsStoreOnItsSession),
-        -- the address a board on the same --db recorded beside it
+        -- the address a board on the same --data-dir recorded beside it
         -- (startup.allium: RecordTheNamedStoreOnceItAnswers), and last the
         -- managed store's address. The board's variable reaches the
         -- processes started inside the board's own tmux session; the record
@@ -571,12 +571,12 @@ surface DispatchCommandLine {
         --                               spacetime-seed.allium: SnapshotCommandLine
         --   store import --from <src>   spacetime-seed.allium: ImportOldStore
         --
-        -- Two options are global: `--db` (also DISPATCH_DB) and
+        -- Two options are global: `--data-dir` (also DISPATCH_DATA_DIR) and
         -- `--spacetime-server` (the store; also DISPATCH_SPACETIME_SERVER, which is
         -- the operator's; the board's own variable is DISPATCH_BOARD_STORE).
-        -- `--db` still names a database file, but no command opens it: its
-        -- folder is the data directory (storage.allium: DataDirectory), where
-        -- the host file is read from and a command's log lines go.
+        -- `--data-dir` names the data directory itself (storage.allium:
+        -- DataDirectory), where the host file is read from and a command's log
+        -- lines go. The old `--db` option is gone.
         --
         -- REMOVED with task #16755: `spacetime dump` (a snapshot of the local
         -- database) and `spacetime seed` (an empty store seeded from it). Both
@@ -596,6 +596,6 @@ surface DispatchCommandLine {
 
 open question "An unparseable argument list exits 2 before any command body runs, and exit 2 is also Claude Code's 'block this tool call' signal. A `pr-gate` invocation that fails to parse (an id that is not a number, a renamed flag after an upgrade) therefore BLOCKS the gated `gh pr create`, contradicting the gate's fail-open stance (pr-workflow.allium: PrLearningsGate). Is a parse failure meant to block, or should pr-gate map usage errors to a non-blocking code?"
 
-open question "Task #4982: CliCommandsReachTheStoreWithoutManagingIt now falls back to the address a named-store board recorded beside the --db database before the managed address, while `store import` with nothing named brings up the managed store. Should `import` — which would then write into a store some board is running on rather than bring the managed one up — read the recorded address too, or ignore it?"
+open question "Task #4982: CliCommandsReachTheStoreWithoutManagingIt now falls back to the address a named-store board recorded beside the --data-dir database before the managed address, while `store import` with nothing named brings up the managed store. Should `import` — which would then write into a store some board is running on rather than bring the managed one up — read the recorded address too, or ignore it?"
 
 open question "`prune-repo-paths` judges existence on the local filesystem, but saved repo paths are shared rows in the store (core/SavedRepoPath has no host). Run on one machine, it forgets every repo path that exists only on a teammate's machine. Is pruning meant to be per-host, or is the shared table meant to hold only paths valid everywhere?"

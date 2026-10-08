@@ -110,7 +110,7 @@ pub(super) fn home_dir_from_value(home: Option<&str>) -> Result<PathBuf> {
 /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`.
 ///
 /// Not every `$HOME` reader in the crate: `crate::models::expand_tilde` and
-/// `crate::default_db_path` resolve their own, and neither fails — they are
+/// `crate::default_data_dir` resolve their own, and neither fails — they are
 /// string-in/string-out and fall back to a default respectively, so they have
 /// no `Result` to report an absence through.
 pub(super) fn home_dir() -> Result<PathBuf> {

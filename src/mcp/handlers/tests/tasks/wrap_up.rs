@@ -73,7 +73,7 @@ async fn wrap_up_rejects_backlog_task() {
 
 #[tokio::test]
 async fn wrap_up_accepts_running_blocked_task() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = rebase_ok_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -130,7 +130,7 @@ async fn wrap_up_accepts_running_blocked_task() {
 
 #[tokio::test]
 async fn wrap_up_accepts_running_active_task() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = rebase_ok_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -189,7 +189,7 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
     //   - name exit_session as the next call,
     //   - be imperative (not advisory like "when ready"),
     //   - say the session is not yet closed so the agent does not stop.
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = rebase_ok_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -345,7 +345,7 @@ async fn wrap_up_invalid_action() {
 
 #[tokio::test]
 async fn wrap_up_rebase_returns_started() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = rebase_ok_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -400,7 +400,7 @@ async fn wrap_up_rebase_returns_started() {
 
 #[tokio::test]
 async fn wrap_up_rebase_returns_exit_token() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"),
         MockProcessRunner::ok_with_stdout(b""),
@@ -454,7 +454,7 @@ async fn wrap_up_rebase_returns_exit_token() {
 
 #[tokio::test]
 async fn wrap_up_done_returns_exit_token() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -684,7 +684,7 @@ async fn wrap_up_pr_response_contains_token_and_no_retro_instruction() {
 async fn make_state_with_runner(
     runner: Arc<dyn ProcessRunner>,
 ) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let state = Arc::new(McpState::new(
         McpDeps {
             db: db.clone(),
@@ -918,7 +918,7 @@ async fn wrap_up_done_success_includes_verify_reminder_when_configured() {
 
 #[tokio::test]
 async fn wrap_up_rebase_conflict_returns_error() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish()
         .no_remote()
         .rebase_conflicts_in_stderr(&["foo.rs"])
@@ -982,7 +982,7 @@ async fn wrap_up_rebase_dirty_primary_worktree_returns_error() {
     // A dirty primary worktree must be reported as its own distinct error —
     // not conflated with a rebase conflict — and must not flip the task's
     // sub_status to Conflict, since no rebase was ever attempted.
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = DispatchScript::finish()
         .dirty_primary(&["unrelated.rs"])
         .shared_runner();
@@ -1052,7 +1052,7 @@ async fn wrap_up_rebase_dirty_primary_worktree_returns_error() {
 
 #[tokio::test]
 async fn wrap_up_rebase_not_on_main_returns_error() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     // HEAD is on something other than the base branch, so the finish refuses at
     // its first call — the script declares that as its whole sequence, which is
     // what makes the stale trailing response this queue used to carry
@@ -1170,7 +1170,7 @@ async fn test_state_with_notify() -> (
     Arc<McpState>,
     tokio::sync::mpsc::UnboundedReceiver<crate::mcp::McpEvent>,
 ) {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let state = Arc::new(McpState::new(
@@ -1262,7 +1262,7 @@ async fn failed_update_does_not_send_notification() {
 // =======================================================================
 
 async fn make_rebase_state() -> (Arc<dyn store::TaskStore>, Arc<McpState>) {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = rebase_ok_runner();
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -1531,7 +1531,7 @@ async fn exit_session_after_close_token_is_gone() {
 
 #[tokio::test]
 async fn exit_session_full_flow_rebase() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"),
         MockProcessRunner::ok_with_stdout(b""),
@@ -1595,7 +1595,7 @@ async fn exit_session_full_flow_rebase() {
 
 #[tokio::test]
 async fn wrap_up_second_call_overwrites_token() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         // First rebase
         MockProcessRunner::ok_with_stdout(b"main\n"),
@@ -1976,7 +1976,7 @@ async fn exit_session_emits_refresh_after_done_patch() {
 
 #[tokio::test]
 async fn wrap_up_then_exit_session_end_to_end() {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     // The finish's own calls come from the script; the two tmux calls after it
     // belong to `exit_session`, which the script has no vocabulary to model, so
     // they are appended — the pattern documented on `DispatchScript::responses`.
@@ -2095,7 +2095,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
 async fn wrap_up_done_defers_done_transition_to_exit_session() {
     use crate::process::MockProcessRunner;
     let runner: Arc<dyn crate::process::ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let state = Arc::new(McpState::new(
         McpDeps {
             db: db.clone(),
@@ -2199,7 +2199,7 @@ async fn wrap_up_done_recalculates_epic_status() {
     // wrap_up(done) on an epic's only running subtask must NOT advance the
     // epic yet (status is deferred to exit_session); the closing call is
     // what auto-advances the epic to Done.
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState::new(
         McpDeps {
@@ -2392,7 +2392,7 @@ async fn dispatch_task_recalculates_epic_status() {
     let repo_path = dir.path().to_str().unwrap().to_string();
     std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     // The worktree dir is pre-created below, so this is the reused-worktree
     // shape — see `src/dispatch/mock_sequence.rs`.
     let runner: Arc<dyn ProcessRunner> =

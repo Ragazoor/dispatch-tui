@@ -30,7 +30,7 @@ cargo run -- tui
 
 **Raw coverage includes generated bindings.** Pass `--exclude-files 'src/spacetime/bindings/*'`, as CI does, or the figure is not comparable to the floor.
 
-**`--db` names a directory, not a file**, whatever the `.db` suffix suggests.
+**`--data-dir` names a directory** (`DISPATCH_DATA_DIR`). The old `--db` flag is gone.
 
 **The lib target runs in ~10s; a cold full run (including compile) is ~80s.** Run it in the foreground — don't background it. In a *fresh worktree* the first compile is slower than that and a cold `cargo test` can pass 120s, which is Claude Code's default Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
 
@@ -60,11 +60,11 @@ CI runs Test, Clippy, Format, Coverage and Gate scripts (a mirror of the pre-pus
 
 `cargo run -- tui` needs `tmux` on `PATH`. Outside tmux it starts its own `dispatch` session; where one exists it restarts the board and the agent windows survive. See `docs/specs/startup.allium`.
 
-**Point dev runs at a throwaway database, store and port**: `cargo run -- --db /tmp/scratch.db --spacetime-server http://127.0.0.1:3099 tui --port 8899` (stand up the store as "Running & Debugging Locally" in `docs/reference.md` describes). **A bare `cargo run -- tui` runs the *managed* store: it adopts whatever answers on `127.0.0.1:3000` (your real store) and stops it on exit.**
+**Point dev runs at a throwaway data directory, store and port**: `cargo run -- --data-dir /tmp/scratch --spacetime-server http://127.0.0.1:3099 tui --port 8899` (stand up the store as "Running & Debugging Locally" in `docs/reference.md` describes). **A bare `cargo run -- tui` runs the *managed* store: it adopts whatever answers on `127.0.0.1:3000` (your real store) and stops it on exit.**
 
-**A throwaway `--db` does not sandbox the run.** It redirects the data directory only; the startup configuration check still rewrites the real Claude Code configuration under `$HOME`. Verify configuration behaviour through the tests, which use temp directories, not by running the TUI.
+**A throwaway `--data-dir` does not sandbox the run.** It redirects the data directory only; the startup configuration check still rewrites the real Claude Code configuration under `$HOME`. Verify configuration behaviour through the tests, which use temp directories, not by running the TUI.
 
-Logs do not go to stderr — stderr belongs to the TUI. They append to `app.log` next to the database file; `tail -f ~/.local/share/dispatch/app.log`. Database location, port, environment variables, the full CLI subcommand list, and troubleshooting are in [docs/reference.md](docs/reference.md); driving MCP by hand is in [docs/mcp.md](docs/mcp.md).
+Logs do not go to stderr — stderr belongs to the TUI. They append to `app.log` in the data directory; `tail -f ~/.local/share/dispatch/app.log`. Data directory, port, environment variables, the full CLI subcommand list, and troubleshooting are in [docs/reference.md](docs/reference.md); driving MCP by hand is in [docs/mcp.md](docs/mcp.md).
 
 **Never run `tmux kill-server`, and never drive tmux by hand without an explicit `-L <unique-socket>`.** You run inside the operator's own tmux server, next to every other agent. A glob loop that matches nothing falls back to the default socket and kills them all. Test real tmux through `tests/tmux_harness/mod.rs`, which gives each test a private socket.
 

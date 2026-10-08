@@ -28,12 +28,11 @@
 -- Entities and Variants
 ------------------------------------------------------------
 
--- The directory this install keeps its own files in: the parent of the path
--- `--db` / DISPATCH_DB names, defaulting to `$XDG_DATA_HOME/dispatch`, else
--- `~/.local/share/dispatch`. The option still names a database FILE, because
--- that is what it named when the board's database lived there; no command
--- opens that file, and the folder around it is what everything else is
--- placed beside.
+-- The directory this install keeps its own files in: the one `--data-dir` /
+-- DISPATCH_DATA_DIR names, defaulting to `$XDG_DATA_HOME/dispatch`, else
+-- `~/.local/share/dispatch`. The option names the directory itself. The old
+-- `--db` / DISPATCH_DB option, which named a database FILE nothing opened, is
+-- gone: passing `--db` is an unknown-argument error.
 --
 -- What lives here: the host file (host.allium: HostFile), app.log, the store
 -- address record (startup.allium: StoreAddressRecord), the store pin file
@@ -41,7 +40,7 @@
 -- (observability.allium) and the shipped feed scripts (feeds.allium). On an
 -- install that predates task #16755 the old `tasks.db` (with `-wal` and
 -- `-shm`) may still be here too, as an inert leftover. The managed store's
--- own data is NOT here when --db is overridden: it is always under the
+-- own data is NOT here when --data-dir is overridden: it is always under the
 -- default data directory (spacetime-snapshot.allium:
 -- ManagedStoreDataIgnoresTheBoardDatabase).
 entity DataDirectory {
@@ -75,5 +74,3 @@ entity DataDirectory {
 ------------------------------------------------------------
 -- Open Questions
 ------------------------------------------------------------
-
-open question "`--db` / DISPATCH_DB still name a database file, although after task #16755 no command opens it and the option's only job is choosing the data directory. Keep the option as it is, or add a `--data-dir` and retire `--db`?"

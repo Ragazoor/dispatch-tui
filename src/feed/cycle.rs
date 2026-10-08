@@ -248,7 +248,7 @@ mod tests {
     use super::super::exec::AlwaysFailRunner;
     use super::*;
     use crate::models::FeedRole;
-    use crate::store::{Database, EpicCrud, EpicPatch, EpicRead};
+    use crate::store::{EpicCrud, EpicPatch, EpicRead, Store};
 
     /// One PR, enough to be routed and therefore enough to be stranded.
     const EMISSION: &str = r#"[{"external_id":"pr-1","title":"PR 1","description":"","status":"backlog","tag":"pr-review"}]"#;
@@ -261,7 +261,7 @@ mod tests {
     /// failed epic read would route this emission through the FLAT upsert and
     /// strand the task directly on the parent, violating
     /// `NoFlatFeedTasksOnReviewsParent`.
-    async fn reviews_parent_with_sentinel_command(db: &Database, sentinel: &Path) -> EpicId {
+    async fn reviews_parent_with_sentinel_command(db: &Store, sentinel: &Path) -> EpicId {
         let epic = db.create_epic("Reviews", "", None).await.unwrap();
         let cmd = format!("touch {}; echo '{EMISSION}'", sentinel.display());
         db.patch_epic(
@@ -275,7 +275,7 @@ mod tests {
         epic.id
     }
 
-    fn cycle(db: Arc<Database>, epic_id: EpicId) -> FeedCycle {
+    fn cycle(db: Arc<Store>, epic_id: EpicId) -> FeedCycle {
         FeedCycle {
             db,
             runner: Arc::new(AlwaysFailRunner),
@@ -302,7 +302,7 @@ mod tests {
     /// in particular the cycle must not proceed with a defaulted `FeedRole`.
     #[tokio::test]
     async fn a_cycle_whose_epic_is_gone_fails_without_running_the_command() {
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().await.unwrap());
         let dir = tempfile::tempdir().unwrap();
         let sentinel = dir.path().join("command-ran");
         let epic_id = reviews_parent_with_sentinel_command(&db, &sentinel).await;
@@ -327,7 +327,7 @@ mod tests {
     /// read refuses — the arm is unreachable otherwise.
     #[tokio::test]
     async fn a_cycle_whose_epic_read_errors_fails_without_syncing_anything() {
-        let db = Arc::new(Database::unattached());
+        let db = Arc::new(Store::unattached());
         let epic_id = EpicId(1);
 
         let err = failure(cycle(db.clone(), epic_id).run().await);
@@ -348,7 +348,7 @@ mod tests {
     /// so the hang is genuine, not a timed sleep that would end on its own.
     #[tokio::test]
     async fn a_hung_command_times_out_and_the_epic_recovers_on_the_next_cycle() {
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().await.unwrap());
         let epic = db.create_epic("Feed", "", None).await.unwrap();
 
         let fifo = std::env::temp_dir().join(format!("dispatch_feed_timeout_{}", epic.id.0));
@@ -430,7 +430,7 @@ mod tests {
 
     /// A plain flat feed epic (no role, no grouping) whose command emits
     /// `emission`, optionally declaring itself append-only.
-    async fn flat_feed_epic(db: &Database, emission: &str, append_only: bool) -> EpicId {
+    async fn flat_feed_epic(db: &Store, emission: &str, append_only: bool) -> EpicId {
         let epic = db.create_epic("Log warnings", "", None).await.unwrap();
         let cmd = format!("echo '{emission}'");
         db.patch_epic(
@@ -445,7 +445,7 @@ mod tests {
     }
 
     /// Repoint an existing feed epic at a new emission and run another cycle.
-    async fn recycle(db: &Arc<Database>, epic_id: EpicId, emission: &str) -> FeedCycleOutcome {
+    async fn recycle(db: &Arc<Store>, epic_id: EpicId, emission: &str) -> FeedCycleOutcome {
         let cmd = format!("echo '{emission}'");
         db.patch_epic(epic_id, &EpicPatch::new().feed_command(Some(cmd.as_str())))
             .await
@@ -453,7 +453,7 @@ mod tests {
         cycle(Arc::clone(db), epic_id).run().await
     }
 
-    async fn external_ids(db: &Database, epic_id: EpicId) -> Vec<String> {
+    async fn external_ids(db: &Store, epic_id: EpicId) -> Vec<String> {
         let mut ids: Vec<String> = db
             .list_tasks_for_epic(epic_id)
             .await
@@ -470,7 +470,7 @@ mod tests {
     /// append-only epic must therefore keep the task.
     #[tokio::test]
     async fn an_append_only_epic_keeps_a_task_absent_from_the_emission() {
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().await.unwrap());
         let epic_id = flat_feed_epic(&db, TWO_RECORDS, true).await;
 
         cycle(Arc::clone(&db), epic_id).run().await;
@@ -489,7 +489,7 @@ mod tests {
     /// ordinary feed-as-source-of-truth removal still applies.
     #[tokio::test]
     async fn a_mirroring_epic_still_removes_a_task_absent_from_the_emission() {
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().await.unwrap());
         let epic_id = flat_feed_epic(&db, TWO_RECORDS, false).await;
 
         cycle(Arc::clone(&db), epic_id).run().await;
@@ -508,7 +508,7 @@ mod tests {
     /// every poll would train the user to ignore the line that matters.
     #[tokio::test]
     async fn an_append_only_cycle_is_not_reported_as_degraded() {
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().await.unwrap());
         let epic_id = flat_feed_epic(&db, TWO_RECORDS, true).await;
 
         match cycle(db, epic_id).run().await {
@@ -525,7 +525,7 @@ mod tests {
     /// a degraded run, and must still say so.
     #[tokio::test]
     async fn an_append_only_epic_still_reports_a_degraded_emission() {
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let db = Arc::new(Store::open_in_memory().await.unwrap());
         let epic_id = flat_feed_epic(&db, TWO_RECORDS, true).await;
         // Same epic, same emission — only the stderr differs, so this isolates
         // the second cause rather than re-standing-up the first.

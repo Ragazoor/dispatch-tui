@@ -8,31 +8,31 @@ pub(super) struct UninstallPaths {
     pub mcp_path: PathBuf,
     pub legacy_mcp_path: PathBuf,
     pub plugin_path: PathBuf,
-    pub db_path: PathBuf,
+    pub data_dir: PathBuf,
     pub statusline_path: PathBuf,
 }
 
 impl UninstallPaths {
     /// Resolve the real `$HOME`-derived locations used in production.
     ///
-    /// `db_path` is the operator's `--db` / `DISPATCH_DB`: it names the data
+    /// `data_dir` is the operator's `--db` / `DISPATCH_DATA_DIR`: it names the data
     /// directory the purge works in, and is never opened.
-    fn resolve(db_path: &Path) -> Result<Self> {
+    fn resolve(data_dir: &Path) -> Result<Self> {
         let claude_dir = claude_dir()?;
         Ok(Self {
             mcp_path: user_global_config_path()?,
             legacy_mcp_path: claude_dir.join(".mcp.json"),
             plugin_path: plugins::plugin_dir()?,
-            db_path: db_path.to_path_buf(),
+            data_dir: data_dir.to_path_buf(),
             statusline_path: statusline::settings_path(&claude_dir),
         })
     }
 }
 
-/// `db_path` is the global `--db` (default: the XDG data directory's
+/// `data_dir` is the global `--db` (default: the XDG data directory's
 /// `tasks.db`); `--purge` works in its parent directory.
-pub fn run_uninstall(yes: bool, purge: bool, db_path: &Path) -> Result<()> {
-    let paths = UninstallPaths::resolve(db_path)?;
+pub fn run_uninstall(yes: bool, purge: bool, data_dir: &Path) -> Result<()> {
+    let paths = UninstallPaths::resolve(data_dir)?;
     run_uninstall_in(&paths, &StdinConfirmer, yes, purge)
 }
 
@@ -61,7 +61,7 @@ pub(super) fn run_uninstall_in(
     // be cleaned up manually.
 
     if purge {
-        any_removed |= purge_data_dir(&paths.db_path, confirmer)?;
+        any_removed |= purge_data_dir(&paths.data_dir, confirmer)?;
     }
 
     if any_removed {
@@ -79,7 +79,7 @@ pub(super) fn print_uninstall_plan(paths: &UninstallPaths, purge: bool) {
         mcp_path,
         legacy_mcp_path,
         plugin_path,
-        db_path,
+        data_dir,
         statusline_path,
     } = paths;
 
@@ -98,7 +98,7 @@ pub(super) fn print_uninstall_plan(paths: &UninstallPaths, purge: bool) {
     if purge {
         eprintln!(
             "  Identity:    host.json and app.log in {}",
-            crate::runtime::data_dir_of(db_path).display()
+            data_dir.display()
         );
     }
 }
@@ -112,7 +112,7 @@ pub(super) fn remove_installed_files(paths: &UninstallPaths) -> bool {
         legacy_mcp_path,
         plugin_path,
         statusline_path,
-        db_path: _,
+        data_dir: _,
     } = paths;
     let mut any_removed = false;
 
@@ -174,8 +174,7 @@ pub(super) fn remove_installed_files(paths: &UninstallPaths) -> bool {
 /// its companions are never opened, read, moved or deleted
 /// (`storage.allium: CodeNeverTouchesLegacyDatabase`): they are the operator's
 /// to delete by hand.
-pub(super) fn purge_data_dir(db_path: &Path, confirmer: &dyn Confirmer) -> Result<bool> {
-    let data_dir = crate::runtime::data_dir_of(db_path);
+pub(super) fn purge_data_dir(data_dir: &Path, confirmer: &dyn Confirmer) -> Result<bool> {
     let host_file = crate::host_file::host_file_path(data_dir);
     let log = data_dir.join("app.log");
     let present: Vec<&PathBuf> = [&host_file, &log]

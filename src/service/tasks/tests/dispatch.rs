@@ -198,7 +198,7 @@ mod dispatch_seam {
     async fn dispatch_aborts_when_the_host_identity_cannot_be_resolved() {
         let host_dir = tempfile::tempdir().unwrap();
         let concrete = Arc::new(
-            Database::open_in_memory()
+            Store::open_in_memory()
                 .await
                 .unwrap()
                 .with_host_file(host_dir.path()),

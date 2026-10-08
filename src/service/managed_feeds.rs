@@ -226,7 +226,7 @@ pub async fn write_managed_feed_settings(
 /// Read the managed-feed settings and provision accordingly. This is the
 /// startup entry point (called from `run_tui`), also exercised directly in
 /// tests. A no-op when neither command is configured.
-// Takes the umbrella `&dyn TaskStore` so a concrete `&Database` (startup, tests)
+// Takes the umbrella `&dyn TaskStore` so a concrete `&Store` (startup, tests)
 // coerces in. Non-service consumers go through
 // `EpicServiceApi::provision_managed_feeds` instead. The inner
 // `ensure_managed_epics` call upcasts the trait object to `&dyn EpicCrud`.
@@ -246,12 +246,12 @@ pub async fn provision_managed_feeds_from_settings(db: &dyn crate::store::TaskSt
 mod tests {
     use super::*;
     use crate::models::MIN_FEED_INTERVAL_SECS;
-    use crate::store::{Database, EpicRead, SettingsStore};
+    use crate::store::{EpicRead, SettingsStore, Store};
 
     const REVIEWS: &str = "/scripts/fetch-reviews.sh";
     const CVE: &str = "/scripts/fetch-cve.sh";
 
-    async fn ensure(db: &Database) {
+    async fn ensure(db: &Store) {
         ensure_managed_epics(db, Some(REVIEWS), Some(300), Some(CVE), Some(900))
             .await
             .unwrap();
@@ -263,7 +263,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_managed_epics_creates_tree() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         ensure(&db).await;
         let epics = db.list_epics().await.unwrap();
 
@@ -307,7 +307,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_is_idempotent() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         ensure(&db).await;
         ensure(&db).await;
         let epics = db.list_epics().await.unwrap();
@@ -320,7 +320,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_preserves_user_rename() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         ensure(&db).await;
         let my_id = by_role(&db.list_epics().await.unwrap(), FeedRole::MyReviews)[0].id;
         db.patch_epic(my_id, &EpicPatch::new().title("My PRs"))
@@ -342,7 +342,7 @@ mod tests {
     /// stays configured.
     #[tokio::test]
     async fn ensure_recreates_a_deleted_managed_epic() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         ensure(&db).await;
         let bots_id = by_role(&db.list_epics().await.unwrap(), FeedRole::Bots)[0].id;
         db.delete_epic(bots_id).await.unwrap();
@@ -360,7 +360,7 @@ mod tests {
 
     #[tokio::test]
     async fn provision_from_settings_is_noop_without_config() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         provision_managed_feeds_from_settings(&db).await.unwrap();
         assert!(
             db.list_epics().await.unwrap().is_empty(),
@@ -370,7 +370,7 @@ mod tests {
 
     #[tokio::test]
     async fn provision_from_settings_creates_tree() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         db.set_reviews_feed_command(Some(REVIEWS)).await.unwrap();
         db.set_reviews_feed_interval_secs(Some(300)).await.unwrap();
         db.set_cve_feed_command(Some(CVE)).await.unwrap();
@@ -388,7 +388,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_managed_feed_settings_updates_only_provided_fields() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         db.set_cve_feed_command(Some("/existing.sh")).await.unwrap();
 
         write_managed_feed_settings(
@@ -420,7 +420,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_managed_feed_settings_clears_on_explicit_none() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         db.set_reviews_feed_command(Some(REVIEWS)).await.unwrap();
 
         write_managed_feed_settings(
@@ -448,7 +448,7 @@ mod tests {
     #[tokio::test]
     async fn write_managed_feed_settings_rejects_a_sub_floor_interval() {
         for bad in [0, -5, MIN_FEED_INTERVAL_SECS - 1] {
-            let db = Database::open_in_memory().await.unwrap();
+            let db = Store::open_in_memory().await.unwrap();
 
             let reviews = write_managed_feed_settings(
                 &db,
@@ -482,7 +482,7 @@ mod tests {
     /// arrived alongside, and not the other feed's interval.
     #[tokio::test]
     async fn write_managed_feed_settings_rejecting_an_interval_writes_nothing() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
 
         let err = write_managed_feed_settings(
             &db,
@@ -508,7 +508,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_managed_feed_settings_accepts_the_floor_and_clearing() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
 
         write_managed_feed_settings(
             &db,

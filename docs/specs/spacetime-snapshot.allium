@@ -104,9 +104,9 @@ entity StoreSelection {
 -- what is pinned here is WHERE it lives, which decides whether two launches
 -- find the same data.
 entity ManagedStoreLocation {
-    data_dir: String       -- <dispatch's default data directory>/spacetime, whatever --db says
+    data_dir: String       -- <dispatch's default data directory>/spacetime, whatever --data-dir says
     module_hash_record: String -- a file in data_dir: startup.allium's recorded_module_hash
-    log_file: String       -- beside the launch's own app.log, i.e. under --db's directory
+    log_file: String       -- beside the launch's own app.log, i.e. under --data-dir
 }
 
 -- One board (or import) process's hold on the managed store.
@@ -121,7 +121,7 @@ entity ManagedStoreHold {
 
 config {
     -- The directory, under dispatch's DEFAULT data directory, that the
-    -- managed store serves. Not under --db's directory: see
+    -- managed store serves. Not under --data-dir: see
     -- ManagedStoreDataIgnoresTheBoardDatabase.
     managed_store_data_dir_name: String = "spacetime"
 
@@ -302,17 +302,17 @@ rule ManagedStoreDataIgnoresTheBoardDatabase {
     ensures: location.log_file = directory_of(board_database) + "/" + config.managed_store_log_name
 
     @guidance
-        -- `board_database` is the path --db names; only its directory is
+        -- `board_database` is the path --data-dir names; only its directory is
         -- used (storage.allium: DataDirectory) — no database is opened.
         --
         -- THE DATA FOLLOWS THE MACHINE, THE LOG FOLLOWS THE LAUNCH. A
-        -- throwaway --db (a worktree build, a scratch run) must not start a
+        -- throwaway --data-dir (a worktree build, a scratch run) must not start a
         -- second managed store over an empty data directory, nor lose sight of
         -- the module hash the real one recorded — so the data directory, and
         -- the hash record inside it, are fixed under dispatch's default data
-        -- directory regardless of --db. The store's own log goes beside the
+        -- directory regardless of --data-dir. The store's own log goes beside the
         -- launch's app.log, where the operator reading that launch's log will
-        -- look. This is also why a scratch `dispatch tui --db /tmp/x.db`
+        -- look. This is also why a scratch `dispatch tui --data-dir /tmp/x`
         -- with no store named adopts — and on exit stops — the operator's
         -- real managed store.
         --

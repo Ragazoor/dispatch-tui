@@ -1,12 +1,12 @@
 use super::*;
 use crate::models::test_tmux_window;
 
-// `db` is the concrete `Arc<Database>` in this fixture (see `test_db`), so the
+// `db` is the concrete `Arc<Store>` in this fixture (see `test_db`), so the
 // store traits must be in scope for their methods to resolve on it.
 use crate::dispatch::mock_sequence::DispatchScript;
 use crate::process::MockProcessRunner;
 use crate::store::{
-    CreateTaskRequest, Database, EpicCrud, EpicRead, SettingsStore, TaskCrud, TaskPatch,
+    CreateTaskRequest, EpicCrud, EpicRead, SettingsStore, Store, TaskCrud, TaskPatch,
 };
 use crate::tui::commands::SettingsCommand;
 
@@ -159,19 +159,19 @@ async fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
 
 /// One in-memory SQLite database, shared by every service the fixture builds.
 ///
-/// Returns the concrete `Arc<Database>` rather than `Arc<dyn store::TaskStore>` so
+/// Returns the concrete `Arc<Store>` rather than `Arc<dyn store::TaskStore>` so
 /// `make_runtime` can derive every trait object it needs from the *same*
 /// handle; giving one service its own database hides every cross-entity
 /// behaviour between them.
-pub(super) async fn test_db() -> Arc<Database> {
-    Arc::new(Database::open_in_memory().await.unwrap())
+pub(super) async fn test_db() -> Arc<Store> {
+    Arc::new(Store::open_in_memory().await.unwrap())
 }
 
 /// A SQLite-only handle, for a test whose subject is a SQLite-side behaviour
 /// the shared store does not share (a patch on a missing id errors here and is
 /// a silent no-op there; a store refuses to delete a task that is not done).
-pub(super) async fn test_db_unattached() -> Arc<Database> {
-    Arc::new(Database::open_in_memory().await.unwrap())
+pub(super) async fn test_db_unattached() -> Arc<Store> {
+    Arc::new(Store::open_in_memory().await.unwrap())
 }
 
 /// Persist `cmd` as `epic_id`'s feed command.
@@ -212,11 +212,7 @@ fn assert_feed_failed_because(msg: &Message, needle: Option<&str>, what: &str) {
     }
 }
 
-pub(super) async fn set_feed_command(
-    db: &Arc<Database>,
-    epic_id: crate::models::EpicId,
-    cmd: &str,
-) {
+pub(super) async fn set_feed_command(db: &Arc<Store>, epic_id: crate::models::EpicId, cmd: &str) {
     db.patch_epic(
         epic_id,
         &crate::store::EpicPatch::new().feed_command(Some(cmd)),
@@ -226,7 +222,7 @@ pub(super) async fn set_feed_command(
 }
 
 pub(super) async fn make_runtime(
-    db: Arc<Database>,
+    db: Arc<Store>,
     tx: mpsc::UnboundedSender<Message>,
     runner: Arc<dyn ProcessRunner>,
 ) -> TuiRuntime {
@@ -289,7 +285,7 @@ async fn test_runtime_unattached() -> (TuiRuntime, App) {
     test_runtime_over(test_db_unattached().await).await
 }
 
-async fn test_runtime_over(db: Arc<Database>) -> (TuiRuntime, App) {
+async fn test_runtime_over(db: Arc<Store>) -> (TuiRuntime, App) {
     let (tx, _rx) = mpsc::unbounded_channel();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let rt = make_runtime(db.clone(), tx, runner).await;

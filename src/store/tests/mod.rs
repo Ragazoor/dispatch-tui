@@ -15,12 +15,12 @@ mod tasks_feed;
 mod tasks_patch;
 mod usage;
 
-pub(super) async fn in_memory_db() -> Database {
-    Database::open_in_memory().await.unwrap()
+pub(super) async fn in_memory_db() -> Store {
+    Store::open_in_memory().await.unwrap()
 }
 
 pub(super) async fn create_task_returning(
-    db: &Database,
+    db: &Store,
     title: &str,
     description: &str,
     repo_path: &str,
@@ -51,7 +51,7 @@ pub(super) async fn create_task_returning(
 /// Create a backlog task and unwrap, for tests that don't care about
 /// [`create_task_returning`]'s `Result`. Shared across the db test modules,
 /// which otherwise would each declare an identical private copy.
-pub(super) async fn make_task(db: &Database, title: &str) -> Task {
+pub(super) async fn make_task(db: &Store, title: &str) -> Task {
     create_task_returning(db, title, "desc", "/repo", None, TaskStatus::Backlog)
         .await
         .unwrap()

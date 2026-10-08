@@ -185,7 +185,7 @@ pub async fn read_source(source: &ImportSource) -> Result<Snapshot> {
 /// `dispatch store import`. `named_target` is `--spacetime-server`; without one
 /// the managed store is brought up for the import and stopped after it.
 pub async fn import_store(
-    db_path: &Path,
+    data_dir: &Path,
     named_target: Option<String>,
     from: &str,
     out: &mut dyn Write,
@@ -201,9 +201,8 @@ pub async fn import_store(
             if !crate::spacetime::managed_store::spacetime_cli_on_path() {
                 bail!("the `spacetime` CLI is not on PATH; install it first");
             }
-            let store_data_dir =
-                crate::runtime::data_dir_of(&crate::default_db_path()).join("spacetime");
-            let log_dir = crate::runtime::data_dir_of(db_path).to_path_buf();
+            let store_data_dir = crate::default_data_dir().join("spacetime");
+            let log_dir = data_dir.to_path_buf();
             let managed = Arc::new(ManagedStore::for_launch(store_data_dir, &log_dir));
             let m = managed.clone();
             let ready = tokio::task::spawn_blocking(move || m.bring_up())
@@ -213,7 +212,7 @@ pub async fn import_store(
         }
     };
 
-    let outcome = run(db_path, &server, &source, out).await;
+    let outcome = run(data_dir, &server, &source, out).await;
 
     if let Some(managed) = managed {
         let _ = tokio::task::spawn_blocking(move || managed.stop_on_exit()).await;
@@ -222,7 +221,7 @@ pub async fn import_store(
 }
 
 async fn run(
-    db_path: &Path,
+    data_dir: &Path,
     server: &str,
     source: &ImportSource,
     out: &mut dyn Write,
@@ -234,7 +233,7 @@ async fn run(
     }
     let snapshot = read_source(source).await?;
 
-    let connected = crate::runtime::open_cli_store(db_path, Some(server.to_string())).await?;
+    let connected = crate::runtime::open_cli_store(data_dir, Some(server.to_string())).await?;
     let operator = crate::store::HostStore::user_identity(&*connected.database)
         .await?
         .context("connected to the store, but no user identity was stored")?;

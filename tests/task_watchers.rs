@@ -2,14 +2,14 @@
 //! End-to-end integration test: full task-watcher flow — subscribe, finish,
 //! notified. Exercises the production MCP router (`subscribe_to_task`) plus
 //! `TaskService::update_task` (the ConfirmDone-equivalent status transition)
-//! together, over a real in-memory `Database` and a `MockProcessRunner`, to
+//! together, over a real in-memory `Store` and a `MockProcessRunner`, to
 //! lock in the wiring from `docs/specs/task-watchers.allium` as a regression
 //! guard.
 //!
 //! `McpState::db_write()` is `#[cfg(test)]`-gated and unavailable to
 //! integration tests under `tests/` (which link against the crate compiled
 //! without `cfg(test)`), so every fixture here is seeded through the public
-//! API only: `Database::open_in_memory()` directly, the MCP router's
+//! API only: `Store::open_in_memory()` directly, the MCP router's
 //! JSON-RPC calls, and `TaskService` directly.
 
 mod common;
@@ -24,12 +24,12 @@ use dispatch_tui::models::{test_tmux_window, TaskStatus};
 use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
 use dispatch_tui::service::embeddings::EmbeddingService;
 use dispatch_tui::service::{TaskService, UpdateTaskParams};
-use dispatch_tui::store::{self, CreateTaskRequest, Database, TaskCrud};
+use dispatch_tui::store::{self, CreateTaskRequest, Store, TaskCrud};
 
 #[tokio::test]
 async fn subscribe_then_finish_delivers_notification() {
     // 1. Set up an in-memory DB + MockProcessRunner-backed MCP router.
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
     let mock = Arc::new(
         MockProcessRunner::new(vec![
             // tmux capture-pane -p — reports the watcher's pane idle at its

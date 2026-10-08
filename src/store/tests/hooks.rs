@@ -19,7 +19,7 @@ use chrono::Utc;
 /// Deliberately not `subagents::set_running`, which also stamps
 /// `last_pre_tool_use_at` and `last_notification_at` — every assertion below
 /// turns on one of those still being null when the write under test runs.
-async fn running_task(db: &Database) -> Task {
+async fn running_task(db: &Store) -> Task {
     let task = make_task(db, "t").await;
     db.patch_task(
         task.id,

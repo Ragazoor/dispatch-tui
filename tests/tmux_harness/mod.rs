@@ -483,7 +483,7 @@ pub fn poll_until(mut pred: impl FnMut() -> bool) -> bool {
 // Do not go back to shadowing them on `PATH` (#3799). That needed four
 // cooperating mechanisms and was still unsound: an `env::set_var("PATH", …)` that
 // races libtest's parallel `Command::spawn`s, a pinned no-rc `default-command`
-// because a pane's login shell re-resolves `PATH`, a `DISPATCH_DB` override to
+// because a pane's login shell re-resolves `PATH`, a `DISPATCH_DATA_DIR` override to
 // bound the damage, and two guards to detect failure — one of which existed
 // because it had already failed. An absolute path is immune to `PATH` order.
 //

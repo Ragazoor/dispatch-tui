@@ -37,7 +37,7 @@ fn main_branches(n: usize) -> Vec<String> {
 
 /// A root epic that carries a `feed_command`, i.e. one whose cycle emits items
 /// and so is the `nearest_feed_epic` a deletion retires under.
-async fn feed_epic(db: &Database, title: &str) -> Epic {
+async fn feed_epic(db: &Store, title: &str) -> Epic {
     let epic = db.create_epic(title, "", None).await.unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("echo []")))
         .await
@@ -46,7 +46,7 @@ async fn feed_epic(db: &Database, title: &str) -> Epic {
 }
 
 /// Upsert `items` into `epic` with placeholder repo paths and base branches.
-async fn upsert(db: &Database, epic: EpicId, items: &[crate::models::FeedItem]) {
+async fn upsert(db: &Store, epic: EpicId, items: &[crate::models::FeedItem]) {
     db.upsert_feed_tasks(
         epic,
         items,
@@ -59,7 +59,7 @@ async fn upsert(db: &Database, epic: EpicId, items: &[crate::models::FeedItem]) 
 
 /// The only id-to-task lookup these tests need: every task under `epic`
 /// carrying `external_id`.
-async fn tasks_with_external_id(db: &Database, epic: EpicId, external_id: &str) -> Vec<Task> {
+async fn tasks_with_external_id(db: &Store, epic: EpicId, external_id: &str) -> Vec<Task> {
     db.list_tasks_for_epic(epic)
         .await
         .unwrap()
@@ -71,7 +71,7 @@ async fn tasks_with_external_id(db: &Database, epic: EpicId, external_id: &str) 
 /// Complete and delete the single task under `epic` that carries
 /// `external_id` — the DeleteTask gesture (`x` on a Done card), which requires
 /// status = done.
-async fn complete_and_delete(db: &Database, epic: EpicId, external_id: &str) -> TaskId {
+async fn complete_and_delete(db: &Store, epic: EpicId, external_id: &str) -> TaskId {
     let tasks = tasks_with_external_id(db, epic, external_id).await;
     assert_eq!(
         tasks.len(),

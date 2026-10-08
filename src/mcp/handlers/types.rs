@@ -433,7 +433,7 @@ pub(super) async fn fetch_caller_task(
         Err(e) => Err(JsonRpcResponse::err(
             id.clone(),
             INTERNAL_ERROR,
-            format!("Database error: {e}"),
+            format!("Store error: {e}"),
         )),
     }
 }
@@ -593,12 +593,12 @@ mod flexible_i64_tests {
 mod fetch_caller_task_tests {
     use super::fetch_caller_task;
     use crate::models::{TaskId, TaskStatus};
-    use crate::store::{CreateTaskRequest, Database, TaskCrud};
+    use crate::store::{CreateTaskRequest, Store, TaskCrud};
     use serde_json::json;
 
     #[tokio::test]
     async fn returns_task_when_found() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
         let task_id = db
             .create_task(CreateTaskRequest {
                 title: "caller",
@@ -625,7 +625,7 @@ mod fetch_caller_task_tests {
 
     #[tokio::test]
     async fn returns_not_found_error_when_not_found() {
-        let db = Database::open_in_memory().await.unwrap();
+        let db = Store::open_in_memory().await.unwrap();
 
         let result = fetch_caller_task(&db, &Some(json!(1)), TaskId(99999)).await;
         let err_resp = result.unwrap_err();

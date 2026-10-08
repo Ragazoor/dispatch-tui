@@ -3,7 +3,7 @@
 //! `docs/specs/host.allium`: AdoptUserIdentity, ConfirmUnchangedUserIdentity,
 //! RefuseAChangedUserIdentity.
 
-use crate::store::{Database, HostStore, IdentityCredentialStore};
+use crate::store::{HostStore, IdentityCredentialStore, Store};
 use crate::sync::{identity_conflict_message, settle_identity, IdentityVerdict};
 
 #[test]
@@ -74,7 +74,7 @@ fn the_conflict_message_names_both_identities() {
 
 #[tokio::test]
 async fn a_fresh_install_has_no_user_identity() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
 
     assert_eq!(db.user_identity().await.unwrap(), None);
     assert_eq!(db.user_identity_token().await.unwrap(), None);
@@ -83,7 +83,7 @@ async fn a_fresh_install_has_no_user_identity() {
 /// Test 1 of the phase plan: minted on first connect, and still there after a
 /// restart.
 ///
-/// "Restart" is a second `Database` handle over the same host file, which is
+/// "Restart" is a second `Store` handle over the same host file, which is
 /// what a restart actually is from this code's point of view. A handle with a
 /// private directory would prove nothing here — it is the persistence that is
 /// under test.
@@ -93,13 +93,13 @@ async fn a_user_identity_survives_a_restart() {
     crate::host_file::resolve_for_launch(dir.path()).unwrap();
 
     {
-        let db = Database::unattached().with_host_file(dir.path());
+        let db = Store::unattached().with_host_file(dir.path());
         db.set_user_identity_token("token-a").await.unwrap();
         db.adopt_user_identity("user-a").await.unwrap();
         assert_eq!(db.user_identity().await.unwrap().as_deref(), Some("user-a"));
     }
 
-    let restarted = Database::unattached().with_host_file(dir.path());
+    let restarted = Store::unattached().with_host_file(dir.path());
     assert_eq!(
         restarted.user_identity().await.unwrap().as_deref(),
         Some("user-a")
@@ -118,7 +118,7 @@ async fn a_user_identity_survives_a_restart() {
 /// did, a caller that forgot to consult the verdict would silently adopt.
 #[tokio::test]
 async fn adopting_a_second_identity_does_not_overwrite_the_first() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     db.set_user_identity_token("token-a").await.unwrap();
     db.adopt_user_identity("user-a").await.unwrap();
 
@@ -136,7 +136,7 @@ async fn adopting_a_second_identity_does_not_overwrite_the_first() {
 /// Refreshing the proof of the SAME identity is ordinary, and must work.
 #[tokio::test]
 async fn the_credential_is_refreshed_for_the_same_identity() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     db.set_user_identity_token("token-a").await.unwrap();
     db.adopt_user_identity("user-a").await.unwrap();
 
@@ -159,7 +159,7 @@ async fn the_credential_is_refreshed_for_the_same_identity() {
 /// not an identity.
 #[tokio::test]
 async fn a_blank_identity_or_credential_is_refused() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
 
     assert!(db.set_user_identity_token("").await.is_err());
     assert!(db.set_user_identity_token("   ").await.is_err());
@@ -183,8 +183,8 @@ async fn two_installs_of_one_person_hold_one_identity_and_two_host_ids() {
     let desktop_dir = tempfile::tempdir().unwrap();
     crate::host_file::resolve_for_launch(laptop_dir.path()).unwrap();
     crate::host_file::resolve_for_launch(desktop_dir.path()).unwrap();
-    let laptop = Database::unattached().with_host_file(laptop_dir.path());
-    let desktop = Database::unattached().with_host_file(desktop_dir.path());
+    let laptop = Store::unattached().with_host_file(laptop_dir.path());
+    let desktop = Store::unattached().with_host_file(desktop_dir.path());
 
     let (laptop_host, _) = laptop.ensure_host_identity().await.unwrap();
     let (desktop_host, _) = desktop.ensure_host_identity().await.unwrap();

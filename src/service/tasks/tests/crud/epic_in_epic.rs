@@ -1706,7 +1706,7 @@ async fn update_task_propagates_db_error_on_prior_task_read() {
     // needs_prior=true) and the store returns an error when reading the task,
     // the error should propagate rather than being silently swallowed as None.
     // A handle with no store attached refuses every read, which is that error.
-    let db = Arc::new(Database::unattached());
+    let db = Arc::new(Store::unattached());
     let svc = TaskService::new(db, crate::process::MockProcessRunner::unused());
 
     let result = svc
@@ -1727,7 +1727,7 @@ async fn update_task_propagates_db_error_on_prior_task_read() {
 #[tokio::test]
 async fn update_repo_path_reroutes_within_grouped_epic() {
     use crate::store::EpicCrud;
-    let db = std::sync::Arc::new(crate::store::Database::open_in_memory().await.unwrap());
+    let db = std::sync::Arc::new(crate::store::Store::open_in_memory().await.unwrap());
     let svc =
         crate::service::TaskService::new(db.clone(), crate::process::MockProcessRunner::unused());
     let root = db.create_epic("root", "", None).await.unwrap();
@@ -1773,7 +1773,7 @@ async fn move_task_to_grouped_epic_routes_into_sub_epic() {
     // move_task_to_epic(task, Some(root)) and assert the task lands in a
     // per-repo RepoGroup sub-epic, NOT directly on the root.
     use crate::store::EpicCrud;
-    let db = std::sync::Arc::new(crate::store::Database::open_in_memory().await.unwrap());
+    let db = std::sync::Arc::new(crate::store::Store::open_in_memory().await.unwrap());
     let svc =
         crate::service::TaskService::new(db.clone(), crate::process::MockProcessRunner::unused());
 
@@ -1825,7 +1825,7 @@ async fn move_task_to_grouped_epic_routes_into_sub_epic() {
 async fn move_task_to_non_grouped_epic_lands_directly() {
     // Regression guard: moving to a plain (non-grouped) epic must NOT route.
     use crate::store::EpicCrud;
-    let db = std::sync::Arc::new(crate::store::Database::open_in_memory().await.unwrap());
+    let db = std::sync::Arc::new(crate::store::Store::open_in_memory().await.unwrap());
     let svc =
         crate::service::TaskService::new(db.clone(), crate::process::MockProcessRunner::unused());
 

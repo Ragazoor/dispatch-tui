@@ -26,7 +26,7 @@ use crate::mcp::{BackgroundWrite, McpDeps, McpState};
 use crate::models::{SubStatus, TaskStatus};
 use crate::process::{MockProcessRunner, ProcessRunner};
 use crate::service::embeddings::{serialize_embedding, EmbeddingService};
-use crate::store::{self, CreateLearningRow, CreateTaskRequest, Database};
+use crate::store::{self, CreateLearningRow, CreateTaskRequest, Store};
 
 use super::dispatch::{handle_mcp, tool_definitions};
 use super::types::{JsonRpcRequest, JsonRpcResponse};
@@ -53,7 +53,7 @@ async fn test_state_with_overrides_and_bg_done(
     task_svc: Option<Arc<dyn crate::service::TaskServiceApi>>,
     bg_write_done_tx: Option<mpsc::UnboundedSender<BackgroundWrite>>,
 ) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
-    let db: Arc<dyn store::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     state_over(db, runner, notify_tx, task_svc, bg_write_done_tx)
 }
 

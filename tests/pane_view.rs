@@ -18,10 +18,10 @@ use common::{dead_port, repo_file, seed_task, spawn_board};
 use dispatch_tui::hooks::fetch_pane_view;
 use dispatch_tui::hooks::wire::{PaneTask, PaneViewRequest, PANE_VIEW_PATH};
 use dispatch_tui::models::{test_tmux_window, TaskId, TaskStatus};
-use dispatch_tui::store::{Database, TaskCrud, TaskPatch, TaskRead};
+use dispatch_tui::store::{Store, TaskCrud, TaskPatch, TaskRead};
 
 /// Seed a task with `status`, and a tmux window when `window` is set.
-async fn seed_with(db: &Database, title: &str, status: TaskStatus, window: bool) -> TaskId {
+async fn seed_with(db: &Store, title: &str, status: TaskStatus, window: bool) -> TaskId {
     let id = seed_task(db, title).await;
     let mut patch = TaskPatch::new().status(status);
     let tmux = test_tmux_window(&format!("task-{}", id.0));
@@ -97,12 +97,12 @@ async fn a_task_without_a_worktree_is_answered_as_present_without_one() {
 #[tokio::test]
 async fn live_agents_are_exactly_the_boards_live_agents_by_id() {
     let board = spawn_board().await;
-    let db_path = &board.db;
-    let review = seed_with(db_path, "review, window", TaskStatus::Review, true).await;
-    let running = seed_with(db_path, "running, window", TaskStatus::Running, true).await;
-    seed_with(db_path, "running, no window", TaskStatus::Running, false).await;
-    seed_with(db_path, "backlog, window", TaskStatus::Backlog, true).await;
-    seed_with(db_path, "done, window", TaskStatus::Done, true).await;
+    let data_dir = &board.db;
+    let review = seed_with(data_dir, "review, window", TaskStatus::Review, true).await;
+    let running = seed_with(data_dir, "running, window", TaskStatus::Running, true).await;
+    seed_with(data_dir, "running, no window", TaskStatus::Running, false).await;
+    seed_with(data_dir, "backlog, window", TaskStatus::Backlog, true).await;
+    seed_with(data_dir, "done, window", TaskStatus::Done, true).await;
 
     let view = fetch_pane_view(board.port, running.0)
         .await
@@ -138,7 +138,7 @@ async fn asking_changes_no_row() {
 async fn asking_pushes_no_refresh_to_the_board() {
     let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();
     let db: std::sync::Arc<dyn dispatch_tui::store::TaskStore> =
-        std::sync::Arc::new(Database::open_in_memory().await.unwrap());
+        std::sync::Arc::new(Store::open_in_memory().await.unwrap());
     let router = dispatch_tui::mcp::router(
         dispatch_tui::mcp::McpDeps {
             db,
@@ -229,7 +229,7 @@ fn no_pane_renderer_source_opens_the_store() {
         "src/cli/agent_tree_agents.rs",
         "src/cli/agent_tree_commits.rs",
     ];
-    const FORBIDDEN: &[&str] = &["open_cli_store", "crate::store::", "TaskRead", "Database"];
+    const FORBIDDEN: &[&str] = &["open_cli_store", "crate::store::", "TaskRead", "Store"];
     for file in FILES {
         let source = repo_file(file);
         for needle in FORBIDDEN {
@@ -267,11 +267,11 @@ async fn no_pane_renderer_creates_a_database() {
     let dead_store = format!("http://127.0.0.1:{}", dead_port().await);
     for subcommand in ["agent-tree", "agent-diff"] {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("dispatch.db");
+        let data_dir = dir.path().join("data");
 
         let run = tokio::process::Command::new("setsid")
             .arg(env!("CARGO_BIN_EXE_dispatch"))
-            .args(["--db", db_path.to_str().unwrap()])
+            .args(["--data-dir", data_dir.to_str().unwrap()])
             .args([subcommand, "1"])
             .env("DISPATCH_SPACETIME_SERVER", &dead_store)
             .env("DISPATCH_PORT", dead_board.to_string())
@@ -284,8 +284,17 @@ async fn no_pane_renderer_creates_a_database() {
             .unwrap();
 
         let stderr = String::from_utf8_lossy(&out.stderr);
+        let created: Vec<_> = std::fs::read_dir(&data_dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.file_name())
+                    .filter(|name| name != "app.log")
+                    .collect()
+            })
+            .unwrap_or_default();
         assert!(
-            !db_path.exists(),
+            created.is_empty(),
             "`dispatch {subcommand}` brought a database into existence -- a pane \
              renderer must ask the board, never open the store. stderr: {stderr}"
         );

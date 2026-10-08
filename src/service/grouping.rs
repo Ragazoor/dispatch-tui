@@ -161,15 +161,15 @@ mod tests {
     use super::*;
     use crate::models::{EpicId, LearningKind, LearningScope, LearningStatus, TaskStatus};
     use crate::store::{
-        CreateLearningRow, Database, EpicCrud, EpicRead, LearningFilter, LearningStore, TaskCrud,
+        CreateLearningRow, EpicCrud, EpicRead, LearningFilter, LearningStore, Store, TaskCrud,
         TaskPatch,
     };
 
-    async fn mk() -> Database {
-        Database::open_in_memory().await.unwrap()
+    async fn mk() -> Store {
+        Store::open_in_memory().await.unwrap()
     }
 
-    async fn add_task(db: &Database, epic: EpicId, repo: &str) -> crate::models::TaskId {
+    async fn add_task(db: &Store, epic: EpicId, repo: &str) -> crate::models::TaskId {
         db.create_task(crate::store::CreateTaskRequest {
             title: "t",
             description: "",

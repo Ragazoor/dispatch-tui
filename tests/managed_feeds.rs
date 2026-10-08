@@ -14,7 +14,7 @@ use dispatch_tui::mcp::McpEvent;
 use dispatch_tui::models::{Epic, FeedRole};
 use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
 use dispatch_tui::service::provision_managed_feeds_from_settings;
-use dispatch_tui::store::{Database, EpicRead, SettingsStore};
+use dispatch_tui::store::{EpicRead, SettingsStore, Store};
 
 /// Always-failing runner: each `git symbolic-ref` call falls back to "main".
 struct AlwaysFailRunner;
@@ -42,7 +42,7 @@ fn role_epic(epics: &[Epic], role: FeedRole) -> Epic {
 
 #[tokio::test]
 async fn provisioned_reviews_tick_routes_into_role_sub_epics() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let db = Arc::new(Store::open_in_memory().await.unwrap());
 
     // Configure both managed feeds, then provision (the startup path).
     db.set_reviews_feed_command(Some(REVIEWS_CMD))

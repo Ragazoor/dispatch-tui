@@ -898,7 +898,7 @@ async fn patch_sets_and_clears_typed_url_together() {
 
 #[tokio::test]
 async fn patch_task_sets_sort_order() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -925,7 +925,7 @@ async fn patch_task_sets_sort_order() {
 
 #[tokio::test]
 async fn patch_task_clears_sort_order() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -955,7 +955,7 @@ async fn patch_task_clears_sort_order() {
 
 #[tokio::test]
 async fn task_sub_status_persists() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "Test",
@@ -982,7 +982,7 @@ async fn task_sub_status_persists() {
 
 #[tokio::test]
 async fn task_sub_status_pr_closed_persists_for_review() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "Test",
@@ -1009,7 +1009,7 @@ async fn task_sub_status_pr_closed_persists_for_review() {
 
 #[tokio::test]
 async fn task_sub_status_defaults_to_none() {
-    let db = Database::open_in_memory().await.unwrap();
+    let db = Store::open_in_memory().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "Test",

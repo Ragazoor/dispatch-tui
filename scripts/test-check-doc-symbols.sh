@@ -204,7 +204,7 @@ expect 1 src/scratch.rs '/// Superseded by FeedJob::run.' \
     'Type::method naming a deleted type fails in a Rust doc comment'
 expect 0 src/scratch.rs 'pub fn call_it() -> bool { FeedJob::run() }' \
     'Type::method on a Rust CODE line is not scanned'
-expect 1 docs/scratch.md 'See `Database::ghost_method` for that.' \
+expect 1 docs/scratch.md 'See `Store::ghost_method` for that.' \
     'Type::method whose method resolves nowhere fails'
 expect 0 docs/scratch.md 'Formerly `FeedJob::run`. <!-- allow-phantom-symbol: removed in #4091 -->' \
     'marker suppresses a stale Type::method citation'

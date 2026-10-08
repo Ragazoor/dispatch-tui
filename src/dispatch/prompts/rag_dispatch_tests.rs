@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::models::{LearningKind, LearningScope, TaskStatus};
 use crate::service::embeddings::{serialize_embedding, EmbeddingService};
 use crate::store::{
-    CreateLearningRow, CreateTaskRequest, Database, LearningRetrievalStore, LearningStore,
-    TaskCrud, TaskRead,
+    CreateLearningRow, CreateTaskRequest, LearningRetrievalStore, LearningStore, Store, TaskCrud,
+    TaskRead,
 };
 
 use super::{build_and_record_injections, list_learnings_for_dispatch_rag, DISPATCH_INJECTION_CAP};
@@ -15,11 +15,11 @@ fn fake_emb_bytes() -> Vec<u8> {
     serialize_embedding(&vec![0.1f32; 384])
 }
 
-async fn seed_db() -> Arc<Database> {
-    Arc::new(Database::open_in_memory().await.unwrap())
+async fn seed_db() -> Arc<Store> {
+    Arc::new(Store::open_in_memory().await.unwrap())
 }
 
-async fn make_task(db: &Arc<Database>) -> crate::models::Task {
+async fn make_task(db: &Arc<Store>) -> crate::models::Task {
     let id = db
         .create_task(CreateTaskRequest {
             title: "test task",
