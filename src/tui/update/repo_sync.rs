@@ -55,7 +55,7 @@ impl App {
         let repo_path = state.repo_path.clone();
         let prompt = crate::tui::ui::repo_sync_prompt_text(state);
         self.input.mode = InputMode::ConfirmRepoSync { repo_path };
-        self.set_status(prompt);
+        self.status.set(prompt);
         vec![]
     }
 
@@ -81,7 +81,7 @@ impl App {
                 format!("Synced {base}: pulled {pulled}, pushed {pushed}")
             }
         };
-        self.set_status(msg);
+        self.status.set(msg);
         vec![Self::refresh_repo_sync_command(repo_path)]
     }
 

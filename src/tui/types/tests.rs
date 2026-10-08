@@ -216,3 +216,32 @@ fn repo_filter_matches_exclude_mode() {
         "org/b"
     ));
 }
+
+// -- StatusState --
+
+#[test]
+fn status_set_shows_a_transient_message() {
+    let mut status = StatusState::default();
+    status.set("saved".to_string());
+    assert_eq!(status.message.as_deref(), Some("saved"));
+    assert!(status.message_set_at.is_some());
+    assert!(!status.message_sticky);
+}
+
+#[test]
+fn status_set_sticky_survives_the_ttl() {
+    let mut status = StatusState::default();
+    status.set_sticky("dispatching".to_string());
+    assert_eq!(status.message.as_deref(), Some("dispatching"));
+    assert!(status.message_sticky);
+}
+
+#[test]
+fn status_clear_drops_message_timestamp_and_stickiness() {
+    let mut status = StatusState::default();
+    status.set_sticky("dispatching".to_string());
+    status.clear();
+    assert!(status.message.is_none());
+    assert!(status.message_set_at.is_none());
+    assert!(!status.message_sticky);
+}

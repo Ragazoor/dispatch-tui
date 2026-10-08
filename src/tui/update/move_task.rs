@@ -75,14 +75,14 @@ impl App {
         };
 
         self.input.mode = InputMode::ConfirmMoveTaskToEpic { task_id, new_epic };
-        self.set_status(msg);
+        self.status.set(msg);
         vec![]
     }
 
     fn clear_move_task_state(&mut self) {
         self.input.mode = InputMode::Normal;
         self.interaction.move_task_picker = None;
-        self.clear_status();
+        self.status.clear();
     }
 
     pub(in crate::tui) fn handle_move_to_epic_execute(&mut self) -> Vec<Command> {
@@ -110,7 +110,7 @@ impl App {
         match self.input.mode {
             InputMode::ConfirmMoveTaskToEpic { task_id, .. } => {
                 self.input.mode = InputMode::MoveTaskToEpic(task_id);
-                self.clear_status();
+                self.status.clear();
             }
             InputMode::MoveTaskToEpic(_) => {
                 self.input.mode = InputMode::Normal;

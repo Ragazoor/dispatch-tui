@@ -19,7 +19,7 @@ impl App {
             .map(|e| e.title.clone());
         match title {
             Some(title) => {
-                self.set_status(format!("Fetching feed for '{title}'…"));
+                self.status.set(format!("Fetching feed for '{title}'…"));
                 vec![Command::Feed(
                     crate::tui::commands::FeedCommand::TriggerEpic {
                         epic_id: id,
@@ -28,7 +28,7 @@ impl App {
                 )]
             }
             None => {
-                self.set_status("No feed command configured".to_string());
+                self.status.set("No feed command configured".to_string());
                 vec![]
             }
         }
@@ -48,7 +48,7 @@ impl App {
             Some(reason) => format!(" (additive, no removals: {reason})"),
             None => String::new(),
         };
-        self.set_status(format!(
+        self.status.set(format!(
             "Feed for '{epic_title}': {count} task(s) synced{suffix}"
         ));
         vec![Command::Task(
@@ -61,7 +61,8 @@ impl App {
         epic_title: String,
         error: String,
     ) -> Vec<Command> {
-        self.set_status(format!("Feed for '{epic_title}' failed: {error}"));
+        self.status
+            .set(format!("Feed for '{epic_title}' failed: {error}"));
         vec![]
     }
 
@@ -72,7 +73,8 @@ impl App {
         &mut self,
         epic_title: String,
     ) -> Vec<Command> {
-        self.set_status(format!("Feed for '{epic_title}' is already refreshing…"));
+        self.status
+            .set(format!("Feed for '{epic_title}' is already refreshing…"));
         vec![]
     }
 }

@@ -92,7 +92,7 @@ impl App {
         };
         self.select.pending_done = ids;
         self.input.mode = InputMode::ConfirmDone;
-        self.set_status(status);
+        self.status.set(status);
     }
 
     pub(in crate::tui) fn handle_confirm_done(&mut self) -> Vec<Command> {
@@ -101,7 +101,7 @@ impl App {
             return vec![];
         }
         self.input.mode = InputMode::Normal;
-        self.clear_status();
+        self.status.clear();
 
         let mut cmds = Vec::new();
         for id in ids {
@@ -132,7 +132,7 @@ impl App {
 
     pub(in crate::tui) fn handle_cancel_done(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.clear_status();
+        self.status.clear();
         self.select.pending_done.clear();
         vec![]
     }
@@ -144,7 +144,7 @@ impl App {
         } else {
             "Notifications disabled"
         };
-        self.set_status(label.to_string());
+        self.status.set(label.to_string());
         vec![Command::Settings(
             crate::tui::commands::SettingsCommand::PersistSetting {
                 key: "notifications_enabled".to_string(),
@@ -222,7 +222,7 @@ impl App {
         }
         let expanded = crate::models::expand_tilde(&repo_path);
         self.input.mode = InputMode::ConfirmTrustRepo { task_id, mode };
-        self.set_status(format!(
+        self.status.set(format!(
             "Repo '{expanded}' not trusted by Claude Code — trust it? [y/N]"
         ));
         vec![]
@@ -238,7 +238,7 @@ impl App {
         epic_id: Option<EpicId>,
     ) -> Vec<Command> {
         let expanded = crate::models::expand_tilde(&draft.repo_path);
-        self.set_status(format!(
+        self.status.set(format!(
             "Repo '{expanded}' not trusted by Claude Code — trust it? [y/N]"
         ));
         self.input.mode = InputMode::ConfirmTrustRepoQuickDispatch { draft, epic_id };

@@ -23,7 +23,7 @@ impl App {
         on_confirm: impl FnOnce(&mut Self) -> Vec<Command>,
     ) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.clear_status();
+        self.status.clear();
         if yes {
             let mut cmds = on_confirm(self);
             cmds.push(key_event(&format!("{action}_yes"), label));
@@ -183,7 +183,7 @@ impl App {
         mode: DispatchMode,
     ) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.clear_status();
+        self.status.clear();
         if yes {
             self.dispatch_keyed(
                 Message::Task(crate::tui::messages::TaskMessage::TrustAndDispatch {
@@ -220,7 +220,7 @@ impl App {
         epic_id: Option<EpicId>,
     ) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.clear_status();
+        self.status.clear();
         if yes {
             vec![
                 Command::Task(crate::tui::commands::TaskCommand::TrustAndQuickDispatch {

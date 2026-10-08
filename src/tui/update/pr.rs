@@ -72,7 +72,7 @@ impl App {
 
             self.clear_agent_tracking(id);
             self.sync_board_selection();
-            self.set_status(format!(
+            self.status.set(format!(
                 "{pr_label} merged \u{2014} task #{id} moved to Done"
             ));
 
@@ -113,7 +113,7 @@ impl App {
             task.sub_status = SubStatus::PrClosed;
             let fields = crate::tui::commands::PersistFields::from_task(task);
 
-            self.set_status(format!(
+            self.status.set(format!(
                 "{pr_label} closed \u{2014} task #{id} marked \"PR closed\""
             ));
 
@@ -193,7 +193,7 @@ impl App {
         task.sub_status = SubStatus::PrUnreachable;
         let fields = crate::tui::commands::PersistFields::from_task(task);
 
-        self.set_status(format!(
+        self.status.set(format!(
             "{pr_label} unreadable \u{2014} task #{id} marked \"PR unreachable\""
         ));
 

@@ -17,7 +17,8 @@ impl App {
         // stale nor crashed. See RetryReachableInPlace in
         // docs/specs/dispatch.allium.
         if task.is_some_and(|t| t.is_unprovisioned()) {
-            self.set_status("Agent never started - [f] Fresh start  [Esc] Cancel".to_string());
+            self.status
+                .set("Agent never started - [f] Fresh start  [Esc] Cancel".to_string());
             return vec![];
         }
 
@@ -26,7 +27,7 @@ impl App {
         } else {
             "stale"
         };
-        self.set_status(format!(
+        self.status.set(format!(
             "Agent {state} - [r] Resume  [f] Fresh start  [Esc] Cancel"
         ));
         vec![]
@@ -34,7 +35,7 @@ impl App {
 
     pub(in crate::tui) fn handle_retry_resume(&mut self, id: TaskId) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.clear_status();
+        self.status.clear();
         self.clear_agent_tracking(id);
         let local_host_id = self.local_host_id().map(str::to_string);
 
@@ -43,7 +44,8 @@ impl App {
                 return vec![];
             }
             if task.worktree.is_none() {
-                self.set_status("Cannot resume: task has no worktree".to_string());
+                self.status
+                    .set("Cannot resume: task has no worktree".to_string());
                 return vec![];
             }
             // RetryResume's `requires: task.is_locally_owned`
@@ -51,7 +53,8 @@ impl App {
             // reattach a tmux window to lives on ONE machine's disk, and a
             // foreign `host` names a machine that is not this one.
             if !task.is_locally_owned(local_host_id.as_deref()) {
-                self.set_status(crate::tui::foreign_worktree_refusal(Some("resume")));
+                self.status
+                    .set(crate::tui::foreign_worktree_refusal(Some("resume")));
                 return vec![];
             }
             task.sub_status = SubStatus::Active;
@@ -82,7 +85,7 @@ impl App {
 
     pub(in crate::tui) fn handle_retry_fresh(&mut self, id: TaskId) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.clear_status();
+        self.status.clear();
         self.clear_agent_tracking(id);
         let local_host_id = self.local_host_id().map(str::to_string);
 
@@ -98,7 +101,8 @@ impl App {
             // wiping its `host` here would transfer ownership of work that
             // machine may still be running, with no signal to either side.
             if !task.is_locally_owned(local_host_id.as_deref()) {
-                self.set_status(crate::tui::foreign_worktree_refusal(Some("retry")));
+                self.status
+                    .set(crate::tui::foreign_worktree_refusal(Some("retry")));
                 return vec![];
             }
             // RetryFresh is exempt from the pointer gate (see

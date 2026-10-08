@@ -44,6 +44,30 @@ pub struct StatusState {
     pub(in crate::tui) message_sticky: bool,
 }
 
+impl StatusState {
+    /// Set a transient status message with auto-clear timestamp.
+    pub(in crate::tui) fn set(&mut self, msg: String) {
+        self.message = Some(msg);
+        self.message_set_at = Some(Instant::now());
+        self.message_sticky = false;
+    }
+
+    /// Set a sticky status message that bypasses the 5-second TTL.
+    /// The message persists until `clear` is called explicitly.
+    pub(in crate::tui) fn set_sticky(&mut self, msg: String) {
+        self.message = Some(msg);
+        self.message_set_at = Some(Instant::now());
+        self.message_sticky = true;
+    }
+
+    /// Clear the status message and its timestamp.
+    pub(in crate::tui) fn clear(&mut self) {
+        self.message = None;
+        self.message_set_at = None;
+        self.message_sticky = false;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // AgentTracking — agent health state for dispatched agents
 // ---------------------------------------------------------------------------

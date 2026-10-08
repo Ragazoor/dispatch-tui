@@ -275,7 +275,8 @@ impl App {
                 .find_task(id)
                 .map(|t| crate::tui::truncate_title(&t.title, crate::tui::TITLE_DISPLAY_LENGTH))
                 .unwrap_or_default();
-            self.set_status(format!("Cannot delete: {title} is not done"));
+            self.status
+                .set(format!("Cannot delete: {title} is not done"));
             return vec![];
         }
         let bad_epic = epic_ids
@@ -290,7 +291,8 @@ impl App {
                 .find(|e| e.id == id)
                 .map(|e| crate::tui::truncate_title(&e.title, crate::tui::TITLE_DISPLAY_LENGTH))
                 .unwrap_or_default();
-            self.set_status(format!("Cannot delete: epic {title} has unfinished work"));
+            self.status
+                .set(format!("Cannot delete: epic {title} has unfinished work"));
             return vec![];
         }
 

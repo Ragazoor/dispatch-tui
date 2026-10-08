@@ -442,10 +442,10 @@ fn terminal_resized_returns_no_commands() {
 #[test]
 fn set_status_sticky_overrides_existing_status() {
     let mut app = make_app();
-    app.set_status("plain message".to_string());
+    app.status.set("plain message".to_string());
     assert!(!app.status.message_sticky);
 
-    app.set_status_sticky("sticky message".to_string());
+    app.status.set_sticky("sticky message".to_string());
     assert_eq!(app.status.message.as_deref(), Some("sticky message"));
     assert!(app.status.message_sticky);
 }
@@ -453,10 +453,10 @@ fn set_status_sticky_overrides_existing_status() {
 #[test]
 fn clear_status_resets_message_sticky() {
     let mut app = make_app();
-    app.set_status_sticky("sticky".to_string());
+    app.status.set_sticky("sticky".to_string());
     assert!(app.status.message_sticky);
 
-    app.clear_status();
+    app.status.clear();
     assert!(app.status.message.is_none());
     assert!(!app.status.message_sticky);
 }

@@ -213,7 +213,7 @@ impl App {
         if self.input.mode == InputMode::Normal && !self.status.message_sticky {
             if let Some(set_at) = self.status.message_set_at {
                 if set_at.elapsed() > STATUS_MESSAGE_TTL {
-                    self.clear_status();
+                    self.status.clear();
                 }
             }
         }
@@ -551,7 +551,8 @@ impl App {
                 mode: crate::models::DrainMode::NoDrain,
             },
         ));
-        self.set_status(format!("Task {id} agent crashed - press d to retry",));
+        self.status
+            .set(format!("Task {id} agent crashed - press d to retry",));
 
         if self.notifications_enabled {
             if let Some(task) = self.find_task(id) {
@@ -625,7 +626,7 @@ impl App {
             task.last_pre_tool_use_at = Some(seed_at);
             let fields = crate::tui::commands::PersistFields::from_task(task);
             self.sync_board_selection();
-            self.set_status(format!("Task {id} resumed"));
+            self.status.set(format!("Task {id} resumed"));
             vec![
                 Command::Task(crate::tui::commands::TaskCommand::Persist(fields)),
                 Command::Task(crate::tui::commands::TaskCommand::SeedActivity { id, at: seed_at }),
@@ -656,7 +657,7 @@ mod tick_tests {
     #[test]
     fn status_ttl_clears_expired_normal_message() {
         let mut app = make_app();
-        app.set_status("hello".into());
+        app.status.set("hello".into());
         // Backdate the message past the TTL so the sweep clears it.
         app.status.message_set_at =
             Some(Instant::now() - STATUS_MESSAGE_TTL - Duration::from_secs(1));
@@ -668,7 +669,7 @@ mod tick_tests {
     #[test]
     fn status_ttl_keeps_sticky_message() {
         let mut app = make_app();
-        app.set_status_sticky("dispatching".into());
+        app.status.set_sticky("dispatching".into());
         app.status.message_set_at =
             Some(Instant::now() - STATUS_MESSAGE_TTL - Duration::from_secs(1));
 
@@ -679,7 +680,7 @@ mod tick_tests {
     #[test]
     fn status_ttl_ignored_outside_normal_mode() {
         let mut app = make_app();
-        app.set_status("hello".into());
+        app.status.set("hello".into());
         app.status.message_set_at =
             Some(Instant::now() - STATUS_MESSAGE_TTL - Duration::from_secs(1));
         app.input.mode = InputMode::Help;

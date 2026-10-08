@@ -119,7 +119,7 @@ impl App {
         epic_id: EpicId,
         other_host: String,
     ) -> Vec<Command> {
-        self.set_status(format!(
+        self.status.set(format!(
             "This feed is currently owned by host {other_host} — take over polling? [y/N]"
         ));
         self.input.mode = InputMode::ConfirmOverrideFeedOwner {
@@ -201,14 +201,15 @@ impl App {
             let id = epic.id;
             if !self.epic_subtree_all_done(id) {
                 let title = truncate_title(&epic.title, TITLE_DISPLAY_LENGTH);
-                self.set_status(format!(
+                self.status.set(format!(
                     "Cannot delete epic {title}: unfinished work in its subtree"
                 ));
                 return vec![];
             }
             let title = truncate_title(&epic.title, TITLE_DISPLAY_LENGTH);
             self.input.mode = InputMode::ConfirmDeleteEpic;
-            self.set_status(format!("Delete epic {title} and subtasks? [y/n]"));
+            self.status
+                .set(format!("Delete epic {title} and subtasks? [y/n]"));
         }
         vec![]
     }
@@ -296,7 +297,7 @@ impl App {
             parent_epic_id,
             ..Default::default()
         });
-        self.set_status("Epic title: ".to_string());
+        self.status.set("Epic title: ".to_string());
         vec![]
     }
 
@@ -304,7 +305,7 @@ impl App {
         self.input.clear_buffer();
         if value.is_empty() {
             self.input.mode = InputMode::Normal;
-            self.clear_status();
+            self.status.clear();
             vec![]
         } else {
             let parent_epic_id = self
@@ -318,7 +319,8 @@ impl App {
                 parent_epic_id,
             });
             self.input.mode = InputMode::InputEpicDescription;
-            self.set_status("Opening editor for description...".to_string());
+            self.status
+                .set("Opening editor for description...".to_string());
             vec![Command::Editor(
                 crate::tui::commands::EditorCommand::PopOut(EditKind::Description {
                     is_epic: true,
@@ -407,14 +409,14 @@ impl App {
             epic_id,
             new_parent,
         };
-        self.set_status(msg);
+        self.status.set(msg);
         vec![]
     }
 
     fn clear_reparent_state(&mut self) {
         self.input.mode = InputMode::Normal;
         self.interaction.reparent_picker = None;
-        self.clear_status();
+        self.status.clear();
     }
 
     pub(in crate::tui) fn handle_reparent_execute(&mut self) -> Vec<Command> {
@@ -443,7 +445,7 @@ impl App {
         match self.input.mode {
             InputMode::ConfirmReparentEpic { epic_id, .. } => {
                 self.input.mode = InputMode::ReparentEpic(epic_id);
-                self.clear_status();
+                self.status.clear();
             }
             InputMode::ReparentEpic(_) => {
                 self.input.mode = InputMode::Normal;

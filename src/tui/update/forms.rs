@@ -32,7 +32,8 @@ impl App {
         self.input.clear_buffer();
         self.input.copy_flow = true;
         self.input.mode = InputMode::InputTag;
-        self.set_status(crate::tui::ui::tag_prompt(false).to_string());
+        self.status
+            .set(crate::tui::ui::tag_prompt(false).to_string());
         vec![]
     }
 
@@ -41,7 +42,7 @@ impl App {
         self.input.clear_buffer();
         self.input.task_draft = None;
         self.input.copy_flow = false;
-        self.set_status("Enter title: ".to_string());
+        self.status.set("Enter title: ".to_string());
         vec![]
     }
 
@@ -52,7 +53,7 @@ impl App {
         self.input.copy_flow = false;
         self.input.pending_epic_id = None;
         self.interaction.pending_g = None;
-        self.clear_status();
+        self.status.clear();
         vec![]
     }
 
@@ -61,7 +62,7 @@ impl App {
         if value.is_empty() {
             self.input.mode = InputMode::Normal;
             self.input.task_draft = None;
-            self.clear_status();
+            self.status.clear();
         } else {
             self.input.task_draft = Some(TaskDraft {
                 title: value,
@@ -73,7 +74,8 @@ impl App {
                 phoenix: false,
             });
             self.input.mode = InputMode::InputTag;
-            self.set_status(crate::tui::ui::tag_prompt(false).to_string());
+            self.status
+                .set(crate::tui::ui::tag_prompt(false).to_string());
         }
         vec![]
     }
@@ -96,7 +98,7 @@ impl App {
         self.input.set_buffer(prefill);
         self.input.repo_cursor = 0;
         self.input.mode = InputMode::InputRepoPath;
-        self.set_status("Enter repo path: ".to_string());
+        self.status.set("Enter repo path: ".to_string());
     }
 
     pub(in crate::tui) fn handle_submit_description(&mut self, value: String) -> Vec<Command> {
@@ -110,14 +112,15 @@ impl App {
     pub(in crate::tui) fn handle_submit_repo_path(&mut self, value: String) -> Vec<Command> {
         self.input.clear_buffer();
         if value.is_empty() {
-            self.set_status("Repo path required (no saved paths available)".to_string());
+            self.status
+                .set("Repo path required (no saved paths available)".to_string());
             return vec![];
         }
         // Accepted std::fs-in-handler exception (docs/conventions.md, "No
         // std::fs inside async handlers"): a bare exists()/is_dir() stat, no
         // read or parse, on the low-frequency repo-path submit path.
         if let Err(msg) = crate::dispatch::validate_repo_path(&value) {
-            self.set_status(msg);
+            self.status.set(msg);
             return vec![];
         }
         if let Some(ref mut draft) = self.input.task_draft {
@@ -137,7 +140,7 @@ impl App {
         self.input.set_buffer(base_branch.clone());
         self.input.repo_cursor = 0;
         self.input.mode = InputMode::InputBaseBranch;
-        self.set_status("Base branch: ".to_string());
+        self.status.set("Base branch: ".to_string());
         // No history means the user has never answered this for this repo, so
         // the fallback above is a guess — ask the repository instead
         // (DefaultBaseBranchIsDetectedNotAssumed). Reading it is a subprocess,
@@ -190,7 +193,8 @@ impl App {
         }
         self.input.clear_buffer();
         self.input.mode = InputMode::InputWrapUpMode;
-        self.set_status("Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip".to_string());
+        self.status
+            .set("Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip".to_string());
         vec![]
     }
 
@@ -222,7 +226,8 @@ impl App {
             draft.phoenix = true;
         }
         // Mode is already InputTag; re-advertise the accepted set without `p`.
-        self.set_status(crate::tui::ui::tag_prompt(true).to_string());
+        self.status
+            .set(crate::tui::ui::tag_prompt(true).to_string());
         vec![]
     }
 
@@ -248,7 +253,8 @@ impl App {
             return vec![];
         }
         self.input.mode = InputMode::InputDescription;
-        self.set_status("Opening editor for description...".to_string());
+        self.status
+            .set("Opening editor for description...".to_string());
         vec![Command::Editor(
             crate::tui::commands::EditorCommand::PopOut(EditKind::Description { is_epic: false }),
         )]
@@ -319,7 +325,8 @@ impl App {
         self.input.mode = InputMode::QuickDispatch;
         self.input.repo_cursor = 0;
         self.input.clear_buffer();
-        self.set_status("Type to filter · ↑/↓ navigate · Enter select · Esc cancel".to_string());
+        self.status
+            .set("Type to filter · ↑/↓ navigate · Enter select · Esc cancel".to_string());
         vec![]
     }
 
@@ -335,13 +342,13 @@ impl App {
         let epic_id = self.input.pending_epic_id.take();
         self.input.mode = InputMode::Normal;
         self.input.clear_buffer();
-        self.clear_status();
+        self.status.clear();
         self.handle_quick_dispatch(repo_path, epic_id)
     }
 
     pub(in crate::tui) fn handle_cancel_retry(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.clear_status();
+        self.status.clear();
         vec![]
     }
 }

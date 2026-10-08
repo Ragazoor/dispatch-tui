@@ -569,28 +569,6 @@ impl App {
         self.sync_board_selection();
     }
 
-    /// Set a transient status message with auto-clear timestamp.
-    pub(in crate::tui) fn set_status(&mut self, msg: String) {
-        self.status.message = Some(msg);
-        self.status.message_set_at = Some(Instant::now());
-        self.status.message_sticky = false;
-    }
-
-    /// Set a sticky status message that bypasses the 5-second TTL.
-    /// The message persists until `clear_status` is called explicitly.
-    pub(in crate::tui) fn set_status_sticky(&mut self, msg: String) {
-        self.status.message = Some(msg);
-        self.status.message_set_at = Some(Instant::now());
-        self.status.message_sticky = true;
-    }
-
-    /// Clear the status message and its timestamp.
-    pub(in crate::tui) fn clear_status(&mut self) {
-        self.status.message = None;
-        self.status.message_set_at = None;
-        self.status.message_sticky = false;
-    }
-
     /// Compute the sticky status text for the current `dispatching` set.
     /// Returns `None` when no dispatch is in flight.
     pub(in crate::tui) fn dispatching_status_text(&self) -> Option<String> {
@@ -644,7 +622,7 @@ impl App {
         // retry's own spinner.
         self.agents.auto_dispatch_failed.remove(&id);
         if let Some(msg) = self.dispatching_status_text() {
-            self.set_status_sticky(msg);
+            self.status.set_sticky(msg);
         }
     }
 
@@ -658,10 +636,10 @@ impl App {
     /// Clears the status if no dispatches remain.
     pub(in crate::tui) fn refresh_dispatching_status(&mut self) {
         match self.dispatching_status_text() {
-            Some(msg) => self.set_status_sticky(msg),
+            Some(msg) => self.status.set_sticky(msg),
             None => {
                 if self.status.message_sticky {
-                    self.clear_status();
+                    self.status.clear();
                 }
             }
         }
@@ -1070,7 +1048,7 @@ impl App {
             format!("Detach {count} tmux panels? [y/n]")
         };
         self.input.mode = InputMode::ConfirmDetachTmux(detachable);
-        self.set_status(msg);
+        self.status.set(msg);
         vec![]
     }
 
@@ -1080,7 +1058,7 @@ impl App {
         };
         let ids = ids.clone();
         self.input.mode = InputMode::Normal;
-        self.clear_status();
+        self.status.clear();
         self.detach_tmux_panels(ids)
     }
 
@@ -1118,7 +1096,7 @@ impl App {
     pub(in crate::tui) fn finish_epic_creation(&mut self) -> Vec<Command> {
         let draft = self.input.epic_draft.take().unwrap_or_default();
         self.input.mode = InputMode::Normal;
-        self.clear_status();
+        self.status.clear();
         vec![Command::Epic(crate::tui::commands::EpicCommand::Insert(
             draft,
         ))]

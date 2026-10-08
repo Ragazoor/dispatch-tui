@@ -93,7 +93,7 @@ impl App {
     pub(in crate::tui) fn handle_delete_repo_path(&mut self, path: String) -> Vec<Command> {
         self.filter.repos.remove(&path);
         self.input.mode = InputMode::RepoFilter;
-        self.set_status("Deleted repo path".to_string());
+        self.status.set("Deleted repo path".to_string());
         vec![Command::RepoFilter(
             crate::tui::commands::RepoFilterCommand::DeleteRepoPath(path),
         )]

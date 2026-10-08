@@ -285,7 +285,7 @@ impl App {
         }
         let count = self.select.tasks.len() + self.select.epics.len();
         self.input.mode = InputMode::ConfirmBatchDelete;
-        self.set_status(format!("Delete {} items? [y/n]", count));
+        self.status.set(format!("Delete {} items? [y/n]", count));
         vec![]
     }
 
@@ -306,7 +306,7 @@ impl App {
         }
         let title = super::super::truncate_title(&task.title, super::super::TITLE_DISPLAY_LENGTH);
         self.input.mode = InputMode::ConfirmDeleteTask(id);
-        self.set_status(format!("Delete {title}? [y/n]"));
+        self.status.set(format!("Delete {title}? [y/n]"));
         vec![]
     }
 

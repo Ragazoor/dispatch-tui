@@ -92,7 +92,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_status_info(&mut self, msg: String) -> Vec<Command> {
-        self.set_status(msg);
+        self.status.set(msg);
         vec![]
     }
 
@@ -147,7 +147,7 @@ impl App {
         let base_branch = draft.base_branch.clone();
         let repo_path = draft.repo_path.clone();
         self.input.mode = InputMode::Normal;
-        self.clear_status();
+        self.status.clear();
         let epic_id = match self.effective_view_mode() {
             BoardViewMode::Epic { epic_id, .. } => Some(epic_id),
             BoardViewMode::Board(_) => None,
@@ -211,7 +211,7 @@ impl App {
         epic_id: crate::models::EpicId,
         reason: String,
     ) -> Vec<Command> {
-        self.set_status(format!(
+        self.status.set(format!(
             "Auto-dispatch of #{} failed — epic #{} stalled: {reason}",
             task_id.0, epic_id.0
         ));
