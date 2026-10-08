@@ -187,7 +187,7 @@ pub(in crate::tui) fn epic_ids_owning_matching_task(
 }
 
 /// Per-view-pass state for the epic board-search predicate, built once by
-/// [`App::epic_search_index`] and reused across every epic in the pass — and,
+/// `BoardView::epic_search_index` and reused across every epic in the pass — and,
 /// wrapped in an [`EpicSearchPass`], across every column of a frame.
 ///
 /// Collapses what used to be per-epic work: the query is parsed once (not once
@@ -210,7 +210,7 @@ pub(in crate::tui) struct EpicSearchIndex<'a> {
 
 #[cfg(test)]
 thread_local! {
-    /// Counts [`App::epic_search_index`] builds so tests can pin the
+    /// Counts `BoardView::epic_search_index` builds so tests can pin the
     /// once-per-pass shape (a view pass must build one index, not one per
     /// column). Thread-local, so parallel tests don't interfere.
     pub(in crate::tui) static EPIC_SEARCH_INDEX_BUILDS: std::cell::Cell<usize> =
@@ -219,7 +219,7 @@ thread_local! {
 
 impl EpicSearchIndex<'_> {
     /// Whether `epic`'s own title or id satisfies the query. The epic and
-    /// sub-epic branches of [`App::epic_search_matches_indexed`] ask the same
+    /// sub-epic branches of `BoardView::epic_search_matches_indexed` ask the same
     /// question, so the parsed-query plumbing is expressed once.
     pub(in crate::tui) fn own_match(&self, epic: &Epic) -> bool {
         own_search_match(&epic.title, epic.id.0, &self.query_lower, self.id_digits)

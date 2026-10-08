@@ -20,7 +20,7 @@ pub struct BoardState {
     /// Per-repo most-recently-used base_branch history, keyed by repo_path,
     /// each list ordered most-recent-first (see docs/specs/dispatch.allium:
     /// surface BaseBranchPicker).
-    pub(in crate::tui) repo_base_branches: std::collections::HashMap<String, Vec<String>>,
+    pub(in crate::tui) repo_base_branches: HashMap<String, Vec<String>>,
     pub(in crate::tui) split: SplitState,
     /// Flattened rendering mode: when true, epic cards are hidden and every
     /// descendant task of the current view surfaces directly in its status
@@ -50,10 +50,7 @@ impl BoardState {
 
     /// Look up the title of an epic by ID.
     pub(in crate::tui) fn epic_title(&self, id: EpicId) -> Option<&str> {
-        self.epics
-            .iter()
-            .find(|e| e.id == id)
-            .map(|e| e.title.as_str())
+        self.find_epic(id).map(|e| e.title.as_str())
     }
 }
 
@@ -76,17 +73,19 @@ pub struct StatusState {
 impl StatusState {
     /// Set a transient status message with auto-clear timestamp.
     pub(in crate::tui) fn set(&mut self, msg: String) {
-        self.message = Some(msg);
-        self.message_set_at = Some(Instant::now());
-        self.message_sticky = false;
+        self.show(msg, false);
     }
 
     /// Set a sticky status message that bypasses the 5-second TTL.
     /// The message persists until `clear` is called explicitly.
     pub(in crate::tui) fn set_sticky(&mut self, msg: String) {
+        self.show(msg, true);
+    }
+
+    fn show(&mut self, msg: String, sticky: bool) {
         self.message = Some(msg);
         self.message_set_at = Some(Instant::now());
-        self.message_sticky = true;
+        self.message_sticky = sticky;
     }
 
     /// Clear the status message and its timestamp.

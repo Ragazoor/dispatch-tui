@@ -113,7 +113,7 @@ impl EpicFoldState {
     }
 
     /// Whether this column has any folded epic at all. The cheap guard
-    /// [`crate::tui::App::column_has_rendered_fold`] shares with
+    /// `BoardView::column_has_rendered_fold` shares with
     /// [`SectionFoldState::any_in`].
     pub(in crate::tui) fn any_in(&self, status: TaskStatus) -> bool {
         self.folded.iter().any(|&(s, _)| s == status)

@@ -125,7 +125,7 @@ fn render_tree_picker(
 /// Build the reparent picker tree from the pre-filtered `eligible` epics.
 ///
 /// Eligibility (target/descendant exclusion, status, board filter) is decided
-/// by [`crate::tui::App::reparent_target_epics`]. Here we only assemble the
+/// by `BoardView::reparent_target_epics`. Here we only assemble the
 /// hierarchy. Because status filtering can drop a parent while keeping an
 /// eligible child, any epic whose `parent_epic_id` is not itself eligible is
 /// re-rooted to the top level so it stays selectable.

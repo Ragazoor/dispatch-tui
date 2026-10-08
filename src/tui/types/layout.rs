@@ -389,7 +389,7 @@ pub type EpicPlacementMap = HashMap<EpicId, EpicPlacement>;
 
 /// The group keys a flattened column orders its cards by, resolved once per
 /// build rather than once per comparison. Built by
-/// `App::flattened_group_keys`, whose doc comment carries the rule.
+/// `BoardView::flattened_group_keys`, whose doc comment carries the rule.
 ///
 /// `done` is `Some` only in the Done column; everywhere else both accessors
 /// fall through to the generic behaviour and the map is never allocated.
@@ -482,7 +482,7 @@ impl CardOrderKey {
 /// that must stay coherent with each other (and with the board) can only be
 /// invalidated as a unit — see `LayoutCache::invalidate()`. `cached_epic_stats()`
 /// also self-heals on a fingerprint mismatch even if invalidation was
-/// forgotten; see `App::compute_layout_fingerprint()`.
+/// forgotten; see `BoardView::compute_layout_fingerprint()`.
 #[derive(Debug, Default)]
 pub(in crate::tui) struct LayoutCache {
     /// Cached result of `compute_epic_stats_with_map()`, wrapped in an `Arc` so that
@@ -495,7 +495,7 @@ pub(in crate::tui) struct LayoutCache {
     ///
     /// Unlike the stats, this depends on the repo filter, the only-active
     /// filter and the search query as well as on the board, which is why
-    /// `App::compute_layout_fingerprint()` folds all three in. Without that it
+    /// `BoardView::compute_layout_fingerprint()` folds all three in. Without that it
     /// would keep serving yesterday's columns the moment the user typed a query.
     pub(in crate::tui) epic_placements_cache: Option<std::sync::Arc<EpicPlacementMap>>,
     /// Parent→children adjacency map over `board.epics`. Built once alongside
@@ -515,16 +515,16 @@ pub(in crate::tui) struct LayoutCache {
     /// recomputes this fingerprint on every call and self-heals (discards and
     /// rebuilds) if it no longer matches — so a handler that forgets to call
     /// `invalidate_layout_cache()` cannot serve stale data, it only pays for
-    /// an extra rebuild. See `App::compute_layout_fingerprint()`.
+    /// an extra rebuild. See `BoardView::compute_layout_fingerprint()`.
     pub(in crate::tui) layout_cache_fingerprint: Option<u64>,
     /// TaskId → Vec index for O(1) lookups in `find_task_mut`. Not primed in
     /// `App::new()` to avoid staleness when tests mutate `board.tasks` directly.
     /// Rebuilt lazily in `find_task_mut` whenever `task_index_fingerprint`
-    /// no longer matches `App::compute_task_ids_fingerprint()` (covers both
+    /// no longer matches `BoardView::compute_task_ids_fingerprint()` (covers both
     /// length changes and same-length id-set replacement).
     pub(in crate::tui) task_index: Option<HashMap<TaskId, usize>>,
     /// Fingerprint of `board.tasks` ids captured when `task_index` was last
-    /// built. See `App::compute_task_ids_fingerprint()`.
+    /// built. See `BoardView::compute_task_ids_fingerprint()`.
     pub(in crate::tui) task_index_fingerprint: Option<u64>,
 }
 

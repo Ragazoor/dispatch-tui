@@ -279,7 +279,7 @@ pub struct App {
 }
 
 /// FNV-1a offset basis, used as the seed for the layout-cache fingerprints
-/// (`App::compute_layout_fingerprint`, `App::compute_task_ids_fingerprint`).
+/// (`BoardView::compute_layout_fingerprint`, `BoardView::compute_task_ids_fingerprint`).
 /// These are internal, non-adversarial fingerprints — a cheap fold is
 /// plenty and much cheaper than `DefaultHasher` (SipHash) on the hot render
 /// path.
