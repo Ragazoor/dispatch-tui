@@ -1,5 +1,5 @@
 use super::*;
-use crate::models::{Epic, EpicId, SubStatus, TaskBuilder, TaskId, TaskStatus};
+use crate::models::{Epic, EpicBuilder, EpicId, SubStatus, TaskBuilder, TaskId, TaskStatus};
 use crate::tui::commands::UsageCommand;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -147,26 +147,7 @@ pub(in crate::tui) fn hint_keys<'a>(hints: &'a [ratatui::text::Span<'static>]) -
 }
 
 pub(in crate::tui) fn make_epic(id: i64) -> Epic {
-    let now = chrono::Utc::now();
-    Epic {
-        id: EpicId(id),
-        title: format!("Epic {id}"),
-        description: String::new(),
-        status: TaskStatus::Backlog,
-        plan_path: None,
-        sort_order: None,
-        completed_at: None,
-        auto_dispatch: false,
-        parent_epic_id: None,
-        feed_command: None,
-        feed_interval_secs: None,
-        group_by_repo: false,
-        feed_append_only: false,
-        feed_role: crate::models::FeedRole::None,
-        origin: crate::models::EpicOrigin::Manual,
-        created_at: now,
-        updated_at: now,
-    }
+    EpicBuilder::new(id).build()
 }
 
 pub(in crate::tui) fn make_epic_with_title(id: i64, title: &str) -> Epic {

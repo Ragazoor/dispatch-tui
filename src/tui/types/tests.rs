@@ -1,28 +1,8 @@
 use super::*;
-use crate::models::TaskId;
-use chrono::Utc;
+use crate::models::{EpicBuilder, TaskId};
 
 fn make_test_epic(id: i64, parent: Option<i64>) -> Epic {
-    let now = Utc::now();
-    Epic {
-        id: EpicId(id),
-        title: format!("Epic {id}"),
-        description: String::new(),
-        status: TaskStatus::Backlog,
-        plan_path: None,
-        sort_order: None,
-        completed_at: None,
-        auto_dispatch: false,
-        parent_epic_id: parent.map(EpicId),
-        feed_command: None,
-        feed_interval_secs: None,
-        group_by_repo: false,
-        feed_append_only: false,
-        feed_role: crate::models::FeedRole::None,
-        origin: crate::models::EpicOrigin::Manual,
-        created_at: now,
-        updated_at: now,
-    }
+    EpicBuilder::new(id).parent(parent).build()
 }
 
 fn make_test_task(id: i64, status: TaskStatus, epic: Option<i64>) -> Task {

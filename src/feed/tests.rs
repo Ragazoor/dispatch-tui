@@ -569,25 +569,11 @@ fn the_default_interval_clears_the_floor() {
 // --- epic_due: the extracted per-epic predicate ---
 
 fn cadence_test_epic(interval_secs: Option<i64>) -> crate::models::Epic {
-    crate::models::Epic {
-        id: EpicId(1),
-        title: "Cadence Test".to_string(),
-        description: String::new(),
-        status: TaskStatus::Backlog,
-        plan_path: None,
-        sort_order: None,
-        completed_at: None,
-        auto_dispatch: false,
-        parent_epic_id: None,
-        feed_command: Some("echo hi".to_string()),
-        feed_interval_secs: interval_secs,
-        group_by_repo: false,
-        feed_append_only: false,
-        feed_role: crate::models::FeedRole::None,
-        origin: crate::models::EpicOrigin::Manual,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    }
+    crate::models::EpicBuilder::new(1)
+        .title("Cadence Test")
+        .feed_command(Some("echo hi"))
+        .feed_interval_secs(interval_secs)
+        .build()
 }
 
 #[test]

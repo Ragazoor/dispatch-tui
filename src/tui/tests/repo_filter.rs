@@ -1,5 +1,5 @@
 use super::*;
-use crate::models::{test_tmux_window, Epic, EpicId, TaskId, TaskStatus};
+use crate::models::{test_tmux_window, EpicBuilder, EpicId, TaskId, TaskStatus};
 use crate::tui::commands::SettingsCommand;
 use crossterm::event::KeyCode;
 
@@ -92,46 +92,9 @@ fn repo_filter_hides_non_matching_tasks() {
 #[test]
 fn repo_filter_applies_to_epics_in_column_items() {
     let mut app = App::new(vec![]);
-    let now = chrono::Utc::now();
     app.board.epics = vec![
-        Epic {
-            id: EpicId(1),
-            title: "A".into(),
-            description: "".into(),
-            status: TaskStatus::Backlog,
-            plan_path: None,
-            sort_order: None,
-            completed_at: None,
-            auto_dispatch: true,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            group_by_repo: false,
-            feed_append_only: false,
-            feed_role: crate::models::FeedRole::None,
-            origin: crate::models::EpicOrigin::Manual,
-            created_at: now,
-            updated_at: now,
-        },
-        Epic {
-            id: EpicId(2),
-            title: "B".into(),
-            description: "".into(),
-            status: TaskStatus::Backlog,
-            plan_path: None,
-            sort_order: None,
-            completed_at: None,
-            auto_dispatch: true,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            group_by_repo: false,
-            feed_append_only: false,
-            feed_role: crate::models::FeedRole::None,
-            origin: crate::models::EpicOrigin::Manual,
-            created_at: now,
-            updated_at: now,
-        },
+        EpicBuilder::new(1).title("A").auto_dispatch(true).build(),
+        EpicBuilder::new(2).title("B").auto_dispatch(true).build(),
     ];
     // Epic A has a task in /repo-a; epic B has a task in /repo-b.
     // Filtering by /repo-a should show only epic A.
@@ -260,46 +223,9 @@ fn repo_filter_exclude_empty_shows_all() {
 #[test]
 fn repo_filter_exclude_applies_to_epics() {
     let mut app = App::new(vec![]);
-    let now = chrono::Utc::now();
     app.board.epics = vec![
-        Epic {
-            id: EpicId(1),
-            title: "A".into(),
-            description: "".into(),
-            status: TaskStatus::Backlog,
-            plan_path: None,
-            sort_order: None,
-            completed_at: None,
-            auto_dispatch: true,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            group_by_repo: false,
-            feed_append_only: false,
-            feed_role: crate::models::FeedRole::None,
-            origin: crate::models::EpicOrigin::Manual,
-            created_at: now,
-            updated_at: now,
-        },
-        Epic {
-            id: EpicId(2),
-            title: "B".into(),
-            description: "".into(),
-            status: TaskStatus::Backlog,
-            plan_path: None,
-            sort_order: None,
-            completed_at: None,
-            auto_dispatch: true,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            group_by_repo: false,
-            feed_append_only: false,
-            feed_role: crate::models::FeedRole::None,
-            origin: crate::models::EpicOrigin::Manual,
-            created_at: now,
-            updated_at: now,
-        },
+        EpicBuilder::new(1).title("A").auto_dispatch(true).build(),
+        EpicBuilder::new(2).title("B").auto_dispatch(true).build(),
     ];
     // Epic A has a task in /repo-a; epic B has a task in /repo-b.
     // Excluding /repo-a should hide epic A and show only epic B.

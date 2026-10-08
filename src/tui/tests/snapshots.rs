@@ -345,26 +345,12 @@ fn snapshot_input_epic_title_form() {
 }
 
 fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> crate::models::Epic {
-    let now = chrono::Utc::now();
-    crate::models::Epic {
-        id: crate::models::EpicId(id),
-        title: title.to_string(),
-        description: String::new(),
-        status: crate::models::TaskStatus::Backlog,
-        plan_path: None,
-        sort_order: Some(sort_order),
-        completed_at: None,
-        auto_dispatch: false,
-        parent_epic_id: None,
-        feed_command: Some(format!("feed-{title}")),
-        feed_interval_secs: Some(30),
-        created_at: now,
-        updated_at: now,
-        group_by_repo: false,
-        feed_append_only: false,
-        feed_role: crate::models::FeedRole::None,
-        origin: crate::models::EpicOrigin::Manual,
-    }
+    crate::models::EpicBuilder::new(id)
+        .title(title.to_string())
+        .sort_order(Some(sort_order))
+        .feed_command(Some(&format!("feed-{title}")))
+        .feed_interval_secs(Some(30))
+        .build()
 }
 
 #[test]

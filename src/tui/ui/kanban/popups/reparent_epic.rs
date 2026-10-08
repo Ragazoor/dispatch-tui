@@ -173,29 +173,10 @@ fn build_epic_nodes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::TaskStatus;
+    use crate::models::EpicBuilder;
 
     fn epic(id: i64, parent: Option<i64>) -> Epic {
-        let now = chrono::Utc::now();
-        Epic {
-            id: EpicId(id),
-            title: format!("Epic {id}"),
-            description: String::new(),
-            status: TaskStatus::Backlog,
-            plan_path: None,
-            sort_order: None,
-            completed_at: None,
-            auto_dispatch: false,
-            parent_epic_id: parent.map(EpicId),
-            feed_command: None,
-            feed_interval_secs: None,
-            group_by_repo: false,
-            feed_append_only: false,
-            feed_role: crate::models::FeedRole::None,
-            origin: crate::models::EpicOrigin::Manual,
-            created_at: now,
-            updated_at: now,
-        }
+        EpicBuilder::new(id).parent(parent).build()
     }
 
     /// Top-level identifiers in the built tree, in order, excluding the

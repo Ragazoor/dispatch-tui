@@ -1,6 +1,5 @@
 use super::*;
-use crate::models::{EpicId, TaskBuilder, TaskStatus};
-use chrono::Utc;
+use crate::models::{EpicBuilder, TaskBuilder, TaskStatus};
 use proptest::prelude::*;
 
 // --- resolve_editor ---
@@ -54,25 +53,11 @@ const FEED_INTERVAL_MED_SECS: i64 = 120;
 const FEED_INTERVAL_FAST_SECS: i64 = 60;
 
 fn make_epic(title: &str, description: &str) -> Epic {
-    Epic {
-        id: EpicId(1),
-        title: title.to_string(),
-        description: description.to_string(),
-        status: TaskStatus::Backlog,
-        plan_path: None,
-        sort_order: None,
-        completed_at: None,
-        auto_dispatch: true,
-        parent_epic_id: None,
-        feed_command: None,
-        feed_interval_secs: None,
-        group_by_repo: false,
-        feed_append_only: false,
-        feed_role: crate::models::FeedRole::None,
-        origin: crate::models::EpicOrigin::Manual,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-    }
+    EpicBuilder::new(1)
+        .title(title.to_string())
+        .description(description.to_string())
+        .auto_dispatch(true)
+        .build()
 }
 
 #[test]

@@ -406,7 +406,7 @@ pub fn descendant_task_ids(root: EpicId, epics: &[Epic], tasks: &[Task]) -> Hash
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{SubStatus, Task, TaskBuilder, TaskId, TaskStatus};
+    use crate::models::{EpicBuilder, SubStatus, Task, TaskBuilder, TaskId, TaskStatus};
     use chrono::Utc;
 
     fn make_epic(
@@ -415,25 +415,11 @@ mod tests {
         plan_path: Option<&str>,
         parent: Option<i64>,
     ) -> Epic {
-        Epic {
-            id: EpicId(id),
-            title: format!("Epic {id}"),
-            description: String::new(),
-            status,
-            plan_path: plan_path.map(String::from),
-            sort_order: None,
-            completed_at: None,
-            auto_dispatch: false,
-            parent_epic_id: parent.map(EpicId),
-            feed_command: None,
-            feed_interval_secs: None,
-            group_by_repo: false,
-            feed_append_only: false,
-            feed_role: FeedRole::None,
-            origin: EpicOrigin::Manual,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        }
+        EpicBuilder::new(id)
+            .status(status)
+            .plan(plan_path)
+            .parent(parent)
+            .build()
     }
 
     fn make_task(id: i64, status: TaskStatus, sub_status: SubStatus, epic: Option<i64>) -> Task {
@@ -683,25 +669,10 @@ mod tests {
     // --- EpicSubstatus / epic_substatus ---
 
     fn test_epic() -> Epic {
-        Epic {
-            id: EpicId(1),
-            title: "Test".to_string(),
-            description: "".to_string(),
-            status: TaskStatus::Backlog,
-            plan_path: None,
-            sort_order: None,
-            completed_at: None,
-            auto_dispatch: true,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            group_by_repo: false,
-            feed_append_only: false,
-            feed_role: FeedRole::None,
-            origin: EpicOrigin::Manual,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        }
+        EpicBuilder::new(1)
+            .title("Test")
+            .auto_dispatch(true)
+            .build()
     }
 
     fn test_task() -> Task {

@@ -42,6 +42,10 @@ pub use tmux_window::test_tmux_window;
 pub use tmux_window::TmuxWindow;
 
 #[cfg(any(test, feature = "test-support"))]
+mod epic_builder;
+#[cfg(any(test, feature = "test-support"))]
+pub use epic_builder::EpicBuilder;
+#[cfg(any(test, feature = "test-support"))]
 mod task_builder;
 #[cfg(any(test, feature = "test-support"))]
 pub use task_builder::TaskBuilder;
