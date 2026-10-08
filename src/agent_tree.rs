@@ -18,14 +18,16 @@ use std::path::{Path, PathBuf};
 /// baseline: the index for unstaged work, the parent for a commit. Doubles as the badge vocabulary — see the
 /// spec's `FileChange` enum, which is deliberately one enum for both so a
 /// badge cannot claim something git did not say.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum FileChange {
     Added,
     Modified,
     Deleted,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TreeNodeKind {
     File,
     Directory,
@@ -42,7 +44,7 @@ pub enum TreeNodeKind {
 /// Both numbers may legitimately be zero. A permission-only change is a real
 /// change that moved no lines, which is also why this is not collapsed into a
 /// single signed total.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
 pub struct LineCounts {
     pub added: u32,
     pub removed: u32,

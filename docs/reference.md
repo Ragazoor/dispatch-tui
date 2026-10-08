@@ -52,6 +52,18 @@ It is drawn by the dispatch plugin's hooks module (`plugin/hooks/register.tsx`),
 first piece of the move in `docs/plans/mods-agent-tree-design.md`; the companion
 pane's own agents section stays until that move is done.
 
+### Changed-files pane (`/dispatch-tree`)
+
+Inside a dispatched agent's Claude Code session, type `/dispatch-tree` to open a
+pane with the same tree the companion pane draws: unstaged work by default, with
+`[Added]`/`[Modified]`/`[Deleted]` badges and `+N -M` counts, every directory open.
+A **Show** picker below it lists "Unstaged work" and the agent's commits since the
+fork point; pick one to see that commit against its parent. The pane asks the board
+once for the task's worktree and base branch, then runs `dispatch agent-changes`
+once a second, so it needs a `dispatch` on `PATH` new enough to have that
+subcommand. A failed read keeps the last tree and shows why in red. Spec: "Agent
+Tree Mod Pane" in `docs/specs/agent-tree.allium`.
+
 ### Agent-tree diff pane
 
 Splits the companion pane's column when you open your first diff: the tree keeps the
@@ -168,6 +180,7 @@ dispatch caller-headers                          # headersHelper: always emits X
 # Agent-tree companion pane
 dispatch agent-tree <task-id>                    # standalone file-tree renderer for one agent
 dispatch agent-diff <task-id>                    # the diff pane below it; split by the tree, not by hand
+dispatch agent-changes --root <dir> --base <branch> [--commit <id>]  # tree + commits as JSON, for /dispatch-tree
 dispatch toggle-agent-tree-pane <window>         # bound to a tmux key; not for manual use
 
 # statusLine decorator (wired into ~/.claude/dispatch-statusline.json by

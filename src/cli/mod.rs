@@ -16,6 +16,7 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
+pub mod agent_changes;
 pub mod agent_diff;
 pub mod agent_tree;
 pub mod agent_tree_agents;

@@ -23,7 +23,10 @@
 --           which lists every task with a live agent window and jumps to the
 --           selected one's window; and the AGENT LIST MOD PANE, the same list
 --           drawn by the dispatch plugin's Claude Code mod inside the agent's
---           own session (see "Agent List Mod Pane").
+--           own session (see "Agent List Mod Pane"); and the AGENT TREE MOD
+--           PANE, the tree and its commit picker drawn by the same mod, from
+--           the same git query run by the dispatch binary (see "Agent Tree
+--           Mod Pane").
 -- Excludes: Task-activity classification and the activity-signal hook (see
 --           agent-health.allium — HookPreToolUse fires for both PreToolUse and
 --           PostToolUse and is NOT modified by anything in this spec);
@@ -311,6 +314,54 @@ contract BoardPaneView {
         -- recorded — and no others. The pane does not re-derive it.
 }
 
+-- The read the agent tree mod pane makes of the dispatch binary: one run of
+-- `dispatch agent-changes`, which asks git both questions the companion pane
+-- asks, with the companion pane's own code, and prints both answers as one
+-- JSON object. Stated as a contract because the binary is another program:
+-- it can be missing from PATH, older than the mod, or slow.
+contract AgentChangesCommand {
+    -- Both answers for the worktree at `root`. `commit` is the source
+    -- (AgentTreeSourceIsOneSelection): null for unstaged work, a commit id
+    -- for that commit. Each half succeeds or fails on its own; a run that
+    -- could not start, overran the mod's wait, or printed something that is
+    -- not this report fails both halves with the same reason.
+    agent_changes: (root: String, base_branch: String, commit: String?) -> AgentChangesReport
+
+    @invariant SameQueryAsTheCompanionPane
+        -- The tree half is git_changes(root, commit) and the commits half is
+        -- git_branch_commits(root, base_branch), exactly as RefreshAgentTree
+        -- and RefreshAgentTreeCommitList run them, and the tree is shaped by
+        -- the same changed_tree. The mod re-derives none of it; it draws.
+
+    @invariant RunningChangesNothing
+        -- As ReadOnlyObservation: git is asked, nothing is checked out,
+        -- staged or written, and the board is not contacted.
+}
+
+-- One drawn row of the mod's tree, as the binary hands it over, in display
+-- order (RowsPutAFoldersOwnFilesFirst, depth first).
+value AgentTreeModRow {
+    depth: Integer          -- 0 for a top-level row
+    name: String            -- a chain-merged directory's whole route (MergedDirectoryChainRows)
+    path: String            -- relative to the root; for a file, git's own path
+    kind: TreeNodeKind
+    badge: FileChange?      -- null exactly for directories
+    -- The counts this row DRAWS, not the node's sum: null for a directory
+    -- that holds another directory (CountsShowOnTheFolderNearestTheFiles,
+    -- with every directory expanded), and null where AgentTreeNode.counts is.
+    counts: LineCounts?
+}
+
+-- Each half of one agent_changes run: ok with its value, or a reason.
+value AgentChangesReport {
+    tree_ok: Boolean
+    rows: [AgentTreeModRow]      -- when tree_ok
+    tree_failure: String?        -- when not tree_ok
+    commits_ok: Boolean
+    commits: [AgentCommit]       -- when commits_ok
+    commits_failure: String?     -- when not commits_ok
+}
+
 ------------------------------------------------------------
 -- Entities and Variants
 ------------------------------------------------------------
@@ -555,6 +606,48 @@ entity AgentListModPane {
 
     error_notice: String?
     notice_source: AgentListNoticeSource when error_notice != null
+
+    transitions status {
+        closed -> open
+        open -> closed
+    }
+}
+
+-- The dispatch mod's agent tree pane: a Claude Code Pane inside one agent's
+-- session (see "Agent Tree Mod Pane"). One per session. Everything but status
+-- and the timer lives in the host's session state ($.state), as
+-- AgentListModPane's does, so a module reload or a close and reopen keeps
+-- the last tree.
+entity AgentTreeModPane {
+    status: open | closed
+
+    -- From the git branch, as AgentListModPane.task_id.
+    task_id: Integer?
+
+    -- waiting until the board names the task's worktree; unresolved when it
+    -- names none. Never times out: a mod pane is opened by the person, who
+    -- can read the wait and close it.
+    task_resolution: waiting | resolved | unresolved
+    root: String?           -- PaneTask.worktree, when resolved
+    base_branch: String?    -- PaneTask.base_branch, when resolved
+
+    -- The last successful tree read for the selected source.
+    rows: [AgentTreeModRow]
+    -- Whether a tree read has succeeded for the selected source yet.
+    has_tree: Boolean
+
+    listed_commits: [AgentCommit]
+    -- null shows unstaged work (the default), a commit id shows that commit.
+    selected_commit: String?
+
+    last_read_at: Timestamp
+
+    -- One notice per writer, each drawn on its own line: a Claude Code pane
+    -- has room for more than one, unlike the companion pane's border.
+    board_notice: String?     -- the board could not be read while waiting
+    tree_notice: String?      -- the tree half failed
+    commits_notice: String?   -- the commits half failed
+    startup_failure: String?  -- why the task is unresolved
 
     transitions status {
         closed -> open
@@ -2525,6 +2618,233 @@ rule AgentListModPaneJumpFailureIsVisible {
         -- window's row; the notice stays until the next pick.
 }
 
+-- == Agent Tree Mod Pane ==
+--
+-- The companion pane's tree and commits section, drawn by the dispatch mod
+-- inside the agent's own session (docs/plans/mods-agent-tree-design.md, step
+-- 2). The same source, the same query, the same tree; only the drawing moves.
+-- The companion pane stays until the mod reaches parity, and the two share no
+-- state: picking a commit in one does not pick it in the other.
+--
+-- The git work stays in Rust. The mod runs `dispatch agent-changes` and draws
+-- what it prints (AgentChangesCommand), because the binary already holds the
+-- tested query and tree shaping, and the mod already needs the board, which
+-- that binary runs, for the task's worktree and base branch. A binary on PATH
+-- that is older than the mod has no such subcommand; the run fails and the
+-- notice says so.
+
+rule OpenAgentTreeModPane {
+    -- The person types /dispatch-tree in the agent's session.
+    when: OpenAgentTreeModPane(user, pane)
+
+    ensures: pane.status = open
+    ensures: pane.task_id = branch_task_id(pane)
+
+    @guidance
+        -- As OpenAgentListModPane: the branch is read once, on opening.
+        -- Opening an open pane only shows it. A reopened pane shows the last
+        -- tree at once and reads again from there.
+        --
+        -- A reopen whose branch names a DIFFERENT task starts over: waiting,
+        -- no root, no rows, no commits, unstaged work, no notices. The last
+        -- tree belongs to the other task's worktree and must not be drawn
+        -- under this one.
+}
+
+rule CloseAgentTreeModPane {
+    -- The person closes the pane (Esc, the close mark).
+    when: CloseAgentTreeModPane(user, pane)
+
+    requires: pane.status = open
+
+    ensures: pane.status = closed
+
+    @guidance
+        -- A closed pane reads nothing: every reading rule below requires an
+        -- open one.
+}
+
+rule AgentTreeModPaneResolvesItsTask {
+    -- An open, waiting pane asks the board for its task on the timer.
+    when: pane: AgentTreeModPane.last_read_at + config.agent_tree_refresh_interval <= now
+
+    requires: pane.status = open
+    requires: pane.task_id != null
+    requires: pane.task_resolution = waiting
+    requires: pane_view(pane.task_id).ok
+    requires: pane_view(pane.task_id).value.task != null
+    requires: pane_view(pane.task_id).value.task.worktree != null
+
+    let task = pane_view(pane.task_id).value.task
+
+    ensures: pane.last_read_at = now - config.agent_tree_refresh_interval
+    ensures: pane.task_resolution = resolved
+    ensures: pane.root = task.worktree
+    ensures: pane.base_branch = task.base_branch
+    ensures: pane.board_notice = null
+
+    @guidance
+        -- An answer whose task carries no base branch is not a PaneView
+        -- (PaneTask.base_branch is never null): it is a failed read, taken
+        -- by AgentTreeModPaneWaitsForItsTask, never a guess at "main".
+        --
+        -- pane_view is BoardPaneView's, asked exactly as
+        -- RefreshAgentListModPane asks it (POST /pane-view on DISPATCH_PORT,
+        -- the same 2 second wait). The stamp is set one interval back so the
+        -- first tree read follows at once rather than a tick later.
+        --
+        -- The task is resolved once. The board is not asked again while the
+        -- pane is open: the worktree and base branch do not change under a
+        -- running agent, and the tree must go on working if the board stops.
+}
+
+rule AgentTreeModPaneWaitsForItsTask {
+    -- The board did not answer, or does not hold the task yet.
+    when: pane: AgentTreeModPane.last_read_at + config.agent_tree_refresh_interval <= now
+
+    requires: pane.status = open
+    requires: pane.task_id != null
+    requires: pane.task_resolution = waiting
+    requires: not pane_view(pane.task_id).ok
+              or pane_view(pane.task_id).value.task = null
+
+    ensures: pane.last_read_at = now
+    ensures: pane.board_notice =
+        if pane_view(pane.task_id).ok: null
+        else: pane_view_failure_reason(pane.task_id)
+
+    @guidance
+        -- A board that is down says so in the notice; a board that is up
+        -- but has not got the row yet is the plain wait. Either way the pane
+        -- asks again next tick and never gives up on its own.
+}
+
+rule AgentTreeModPaneTaskHasNoWorktree {
+    when: pane: AgentTreeModPane.last_read_at + config.agent_tree_refresh_interval <= now
+
+    requires: pane.status = open
+    requires: pane.task_id != null
+    requires: pane.task_resolution = waiting
+    requires: pane_view(pane.task_id).ok
+    requires: pane_view(pane.task_id).value.task != null
+    requires: pane_view(pane.task_id).value.task.worktree = null
+
+    ensures: pane.last_read_at = now
+    ensures: pane.task_resolution = unresolved
+    ensures: pane.startup_failure = "Task has no worktree."
+    ensures: pane.board_notice = null
+
+    @guidance
+        -- Final for this pane: there is nothing to ask git about. Reopening
+        -- does not retry; a task gains no worktree under a running agent.
+}
+
+rule RefreshAgentTreeModPane {
+    -- A resolved, open pane runs the binary on the timer and takes each half
+    -- of its answer on its own: a working half replaces what is shown and
+    -- clears its own notice, a failed half keeps what is shown and says why.
+    when: pane: AgentTreeModPane.last_read_at + config.agent_tree_refresh_interval <= now
+
+    requires: pane.status = open
+    requires: pane.task_resolution = resolved
+
+    let report = agent_changes(pane.root, pane.base_branch, pane.selected_commit)
+
+    -- The selection's commit left a working list (RefreshAgentTreeCommitList's
+    -- fallback). This run's tree is that commit's, so it is not drawn.
+    let fell_back = report.commits_ok
+                    and old(pane.selected_commit) != null
+                    and not report.commits.any(c => c.id = old(pane.selected_commit))
+
+    ensures: pane.last_read_at =
+        if fell_back: now - config.agent_tree_refresh_interval
+        else: now
+
+    ensures: pane.rows =
+        if fell_back: []
+        else if report.tree_ok: report.rows
+        else: old(pane.rows)
+    ensures: pane.has_tree =
+        if fell_back: false
+        else: old(pane.has_tree) or report.tree_ok
+    ensures: pane.tree_notice =
+        if fell_back or report.tree_ok: null
+        else: report.tree_failure
+
+    ensures: pane.listed_commits =
+        if report.commits_ok: report.commits
+        else: old(pane.listed_commits)
+    ensures: pane.commits_notice =
+        if report.commits_ok: null
+        else: report.commits_failure
+
+    -- The fallback goes back to unstaged work, silently, and reads it at
+    -- once. A failed list keeps the selection.
+    ensures: pane.selected_commit =
+        if fell_back: null
+        else: old(pane.selected_commit)
+
+    @guidance
+        -- == One run, two answers ==
+        -- The companion pane reads the tree and the commits on two timers of
+        -- the same length; the mod asks for both in one run, so one tick
+        -- costs one process. The halves still fail apart, as
+        -- AgentTreeGitFailureKeepsLastGoodTree and
+        -- AgentTreeCommitListFailureKeepsLastList have them: a base branch
+        -- that will not resolve fails the commits and leaves the tree
+        -- working.
+        --
+        -- == One run at a time ==
+        -- A tick that comes while a run is still going is skipped, so a slow
+        -- answer never lands after a newer one. The mod waits 15 seconds for
+        -- a run, above the binary's own steps (config.agent_tree_git_timeout
+        -- each), and a run that overruns fails both halves.
+        --
+        -- == A run that lands after the source changed ==
+        -- An answer is for the source it was asked about. One that arrives
+        -- after SelectAgentTreeModSource changed the source is dropped, not
+        -- drawn, so a tree is never drawn under the other source's name, and
+        -- the new source is read straight after it.
+        --
+        -- == `dispatch agent-changes` ==
+        -- `dispatch agent-changes --root <worktree> --base <base_branch>
+        -- [--commit <id>]` prints one JSON object and exits 0:
+        --
+        --   {"tree":    {"rows": [AgentTreeModRow...]} | {"error": "<reason>"},
+        --    "commits": {"commits": [{"id", "subject"}...]} | {"error": "<reason>"}}
+        --
+        -- A row is {"depth", "name", "path", "kind", "badge", "counts"},
+        -- kind "file" or "directory", badge "added", "modified", "deleted"
+        -- or null, counts {"added", "removed"} or null. Any half, row or
+        -- commit not in this shape makes the whole output not a report,
+        -- which fails both halves; nothing is skipped, since the binary is
+        -- dispatch's own and a bad row means the two disagree. A non-zero exit
+        -- means the arguments were wrong; the mod reports stderr as the
+        -- reason for both halves.
+}
+
+rule SelectAgentTreeModSource {
+    -- The person picks a row of the source picker: "Unstaged work" or one
+    -- of the listed commits.
+    when: SelectAgentTreeModSource(user, pane, commit)
+
+    requires: pane.status = open
+    requires: commit = null or pane.listed_commits.any(c => c.id = commit)
+    requires: commit != pane.selected_commit
+
+    ensures: pane.selected_commit = commit
+    -- As SelectAgentTreeSource: the old source's tree is never drawn under
+    -- the new source's name, and the new one is read now.
+    ensures: pane.rows = []
+    ensures: pane.has_tree = false
+    ensures: pane.tree_notice = null
+    ensures: pane.last_read_at = now - config.agent_tree_refresh_interval
+
+    @guidance
+        -- Selecting changes only what the pane shows (ReadOnlyObservation).
+        -- The companion pane's selection is its own and is not touched.
+}
+
 ------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------
@@ -3576,6 +3896,77 @@ surface AgentListModPaneView {
         -- surface whose element table has no Select (mobile, today) draws
         -- the same rows as plain text, without the jump; the list is still
         -- worth reading there.
+}
+
+surface AgentTreeModPaneView {
+    facing user: User
+
+    -- The pane the dispatch mod draws inside the agent's own Claude Code
+    -- session, opened by /dispatch-tree.
+    context pane: AgentTreeModPane
+
+    exposes:
+        pane.task_id
+        pane.task_resolution
+        pane.rows
+        pane.has_tree
+        pane.listed_commits
+        pane.selected_commit
+        pane.board_notice
+        pane.tree_notice
+        pane.commits_notice
+        pane.startup_failure
+
+    contracts:
+        demands BoardPaneView
+        demands AgentChangesCommand
+
+    provides:
+        OpenAgentTreeModPane(user, pane)                -- /dispatch-tree
+        CloseAgentTreeModPane(user, pane)               -- Esc, close mark
+        SelectAgentTreeModSource(user, pane, commit)    -- arrows, Enter in the picker
+
+    @guarantee AgentTreeModPaneSaysWhyItIsEmpty
+        -- An empty pane always says which kind of empty it is:
+        --   no task id        "Not in a dispatch task worktree." (no reads)
+        --   waiting           "Waiting for task <id>…"
+        --   unresolved        pane.startup_failure
+        --   not read yet      "Reading changes…"
+        --   read, nothing     "No unstaged changes." for unstaged work,
+        --                     "No changes in this commit." for a commit
+        -- Notices, when set, show above everything else, each on its own
+        -- line and wrapped rather than cut, in the error colour, whether or
+        -- not there are rows.
+
+    @guarantee AgentTreeModSourceLine
+        -- Above the tree, one line names the source the tree shows:
+        -- "Unstaged work", or "Commit <short id> <subject>". The mod's form
+        -- of TreeTitleNamesItsSource; a pane's title is fixed when it opens.
+
+    @guarantee AgentTreeModRowsReadAsTheCompanionPanes
+        -- Each row is indented two columns per depth. A directory row is
+        -- its name, a chain-merged route with its leading segments dimmed
+        -- and its last in the ordinary colour (MergedDirectoryChainRows). A
+        -- file row is its last path segment, then its badge, `[Added]` green,
+        -- `[Modified]` yellow, `[Deleted]` red, then any counts as `+<added>`
+        -- green and `-<removed>` red. A directory with counts draws them the
+        -- same way. Rows are not wrapped.
+
+    @guarantee AgentTreeModEveryDirectoryIsOpen
+        -- Every directory row is expanded and none can be collapsed: Claude
+        -- Code's elements have no tree, and every directory is the route to
+        -- a change (DirectoryExpansionFollowsChangedDescendants). The pane
+        -- scrolls when the tree is longer than it is tall.
+
+    @guarantee AgentTreeModSourcePicker
+        -- Below the tree, a Claude Code Select labelled "Show" lists
+        -- "Unstaged work" first, then each listed commit as `<short id>
+        -- <subject>` (CommitRowShowsShortIdAndSubject), newest first. The
+        -- selected source carries a trailing dot. Picking a row is
+        -- SelectAgentTreeModSource. The picker is drawn once the first
+        -- commits read succeeds, even with no commits, so unstaged work is
+        -- always pickable back. A surface with no Select draws no picker
+        -- and shows unstaged work.
 }
 
 ------------------------------------------------------------

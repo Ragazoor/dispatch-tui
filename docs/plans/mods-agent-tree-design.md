@@ -18,7 +18,7 @@ itself. The three features fit that model.
 
 | Feature | Data source | Code |
 | --- | --- | --- |
-| Agent tree (changed files, +/- counts) | git only: merge-base, `diff --name-status`, `--numstat`, untracked | `src/cli/agent_tree.rs::git_changes`, `src/agent_tree.rs` |
+| Agent tree (changed files, +/- counts) | git only: unstaged work against the index (`diff --name-status`, `--numstat`, untracked) or one picked commit; merge-base only for the commit list (changed after this doc, in ecf87c45) | `src/cli/agent_tree.rs::git_changes`, `src/agent_tree.rs` |
 | Diff viewer | git, same baseline; open files shared through `<git dir>/dispatch-agent-tree.json` | `src/cli/agent_diff.rs`, `src/agent_tree_open_set.rs`, `src/agent_tree_diff_pane.rs` |
 | Active agent list | board `pane_view` HTTP call, `live_agents` (Running or Review with a tmux window) | `src/cli/agent_tree_agents.rs`, `src/mcp/handlers/hooks.rs::handle_pane_view` |
 
@@ -76,6 +76,8 @@ Tracked as an epic. General guideline only; details are decided per task.
 1. Spike: load a hooks-module mod in a dispatched agent session and find the
    board port and task id.
 2. Mod scaffold and active agent list.
-3. Agent tree pane (changed files via git).
+3. Agent tree pane (changed files via git). Done in #28719 as `/dispatch-tree`:
+   the git work stays in Rust behind `dispatch agent-changes` (JSON), and the
+   mod only draws it (spec: "Agent Tree Mod Pane").
 4. Diff viewer inside the pane.
 5. Retire the Rust agent-tree and diff panes, tmux plumbing and spec rules.

@@ -161,6 +161,21 @@ enum Commands {
         #[command(flatten)]
         board: dispatch_tui::hooks::BoardAddress,
     },
+    /// Print the changed-file tree and the agent's commits for a worktree as
+    /// one JSON object, for the dispatch mod's agent tree pane to draw (see
+    /// docs/specs/agent-tree.allium: AgentChangesCommand). Reads git only;
+    /// opens no store and does not contact the board.
+    AgentChanges {
+        /// The task's worktree
+        #[arg(long)]
+        root: PathBuf,
+        /// The task's base branch, which the commit list is measured from
+        #[arg(long)]
+        base: String,
+        /// Show this commit against its parent instead of unstaged work
+        #[arg(long)]
+        commit: Option<String>,
+    },
     /// statusLine decorator for Claude Code: record the subscription
     /// rate-limit windows from the hook payload on stdin, then run the
     /// user's previous statusLine command and print its output verbatim.
@@ -801,6 +816,9 @@ fn main() -> Result<()> {
         Commands::ToggleAgentTreePane { window } => {
             cmd_toggle_agent_tree_pane(&cli.data_dir, window)
         }
+        Commands::AgentChanges { root, base, commit } => {
+            dispatch_tui::cli::agent_changes::run(&root, &base, commit.as_deref())
+        }
         // One connect, one small request, one response — and the connection
         // task the client spawns is driven by this same `block_on` while the
         // main task awaits the response.
@@ -908,7 +926,8 @@ async fn run_async(
         | Commands::CallerHeaders
         | Commands::VerifyFeed { .. }
         | Commands::Uninstall { .. }
-        | Commands::ToggleAgentTreePane { .. } => {
+        | Commands::ToggleAgentTreePane { .. }
+        | Commands::AgentChanges { .. } => {
             unreachable!("synchronous subcommands are routed by main, not run_async")
         }
     }
