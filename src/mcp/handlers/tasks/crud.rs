@@ -178,15 +178,9 @@ async fn handle_mark_task_done(
         );
     }
 
-    let task = match state.db.get_task(task_id).await {
-        Ok(Some(t)) => t,
-        Ok(None) => {
-            return service_err_to_response(
-                id,
-                ServiceError::NotFound(format!("Task {} not found", task_id.0)),
-            )
-        }
-        Err(e) => return service_err_to_response(id, ServiceError::Internal(e)),
+    let task = match state.task_svc.get_task(task_id).await {
+        Ok(t) => t,
+        Err(e) => return service_err_to_response(id, e),
     };
 
     let text = match super::wrap_up::perform_close(

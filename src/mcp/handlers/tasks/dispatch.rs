@@ -26,9 +26,9 @@ pub(in crate::mcp::handlers) async fn auto_dispatch_next(
     // launch an agent on an epic whose operator turned chaining off. Every
     // non-dispatch outcome here is indistinguishable from the documented
     // normal stops.
-    let epic = match state.db.get_epic(epic_id).await {
-        Ok(Some(epic)) => epic,
-        Ok(None) => {
+    let epic = match state.epic_svc.get_epic(epic_id).await {
+        Ok(epic) => epic,
+        Err(crate::service::ServiceError::NotFound(_)) => {
             tracing::warn!("auto_dispatch_next: epic #{} not found", epic_id.0);
             return None;
         }
@@ -139,15 +139,9 @@ pub(crate) async fn handle_dispatch_task(
     };
     let task_id = parsed.task_id;
 
-    let task = match state.db.get_task(task_id).await {
-        Ok(Some(t)) => t,
-        Ok(None) => {
-            return service_err_to_response(
-                id,
-                crate::service::ServiceError::NotFound(format!("task #{} not found", task_id.0)),
-            )
-        }
-        Err(e) => return JsonRpcResponse::err(id, INTERNAL_ERROR, format!("db error: {e:#}")),
+    let task = match state.task_svc.get_task(task_id).await {
+        Ok(t) => t,
+        Err(e) => return service_err_to_response(id, e),
     };
 
     let epic_id = task.epic_id;
@@ -222,15 +216,9 @@ async fn not_in_backlog_response(
     id: Option<Value>,
     task_id: TaskId,
 ) -> JsonRpcResponse {
-    let current = match state.db.get_task(task_id).await {
-        Ok(Some(t)) => t.status.to_string(),
-        Ok(None) => {
-            return service_err_to_response(
-                id,
-                crate::service::ServiceError::NotFound(format!("task #{} not found", task_id.0)),
-            )
-        }
-        Err(e) => return JsonRpcResponse::err(id, INTERNAL_ERROR, format!("db error: {e:#}")),
+    let current = match state.task_svc.get_task(task_id).await {
+        Ok(t) => t.status.to_string(),
+        Err(e) => return service_err_to_response(id, e),
     };
     JsonRpcResponse::err(
         id,

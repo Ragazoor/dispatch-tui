@@ -79,7 +79,10 @@ impl ChainFixture {
     /// is the `close_persisted = false` branch of `ExitSession` /
     /// `ExitSessionViaMcp`.
     async fn with_failing_close() -> Self {
-        Self::build(Some(Arc::new(FailingCloseTaskService))).await
+        let svc = Arc::new(FailingCloseTaskService::default());
+        let fx = Self::build(Some(svc.clone())).await;
+        let _ = svc.db.set(fx.db.clone());
+        fx
     }
 
     /// Like [`ChainFixture::new`], but with a `task_svc` whose
@@ -87,7 +90,10 @@ impl ChainFixture {
     /// having taken the task first. Every other method panics, so a caller that
     /// dispatches without claiming is caught rather than silently passing.
     async fn with_lost_claim() -> Self {
-        Self::build(Some(Arc::new(LostClaimTaskService))).await
+        let svc = Arc::new(LostClaimTaskService::default());
+        let fx = Self::build(Some(svc.clone())).await;
+        let _ = svc.db.set(fx.db.clone());
+        fx
     }
 
     /// Like [`ChainFixture::new`], but wires a completion signal for
@@ -814,10 +820,28 @@ async fn exit_session_chain_reports_no_failure_when_dispatch_succeeds() {
 /// default from `TaskServiceApiStub` — which is itself an assertion: if the
 /// chain ever fired on this path it would panic on `claim_next_backlog_task`
 /// rather than pass quietly.
-struct FailingCloseTaskService;
+#[derive(Default)]
+struct FailingCloseTaskService {
+    /// Bound by the fixture once its database exists; backs the real read the
+    /// handler now makes through the service.
+    db: std::sync::OnceLock<Arc<dyn crate::store::TaskStore>>,
+}
 
 #[async_trait::async_trait]
 impl crate::service::TaskServiceApiStub for FailingCloseTaskService {
+    async fn get_task(
+        &self,
+        task_id: crate::models::TaskId,
+    ) -> Result<crate::models::Task, crate::service::ServiceError> {
+        let db = self.db.get().expect("db is bound by the fixture");
+        db.get_task(task_id)
+            .await
+            .map_err(crate::service::ServiceError::Internal)?
+            .ok_or_else(|| {
+                crate::service::ServiceError::NotFound(format!("task {task_id} not found"))
+            })
+    }
+
     async fn close_session(
         &self,
         _task_id: crate::models::TaskId,
@@ -844,10 +868,28 @@ crate::task_service_api!(service_api_stub_bridge, FailingCloseTaskService);
 /// asserted against the real seam in
 /// `service::tasks::tests::dispatch_seam::dispatch_reports_a_lost_claim_and_provisions_nothing`;
 /// what is under test here is only the response the handler shapes from it.
-struct LostClaimTaskService;
+#[derive(Default)]
+struct LostClaimTaskService {
+    /// Bound by the fixture once its database exists; backs the real read the
+    /// handler now makes through the service.
+    db: std::sync::OnceLock<Arc<dyn crate::store::TaskStore>>,
+}
 
 #[async_trait::async_trait]
 impl crate::service::TaskServiceApiStub for LostClaimTaskService {
+    async fn get_task(
+        &self,
+        task_id: crate::models::TaskId,
+    ) -> Result<crate::models::Task, crate::service::ServiceError> {
+        let db = self.db.get().expect("db is bound by the fixture");
+        db.get_task(task_id)
+            .await
+            .map_err(crate::service::ServiceError::Internal)?
+            .ok_or_else(|| {
+                crate::service::ServiceError::NotFound(format!("task {task_id} not found"))
+            })
+    }
+
     async fn dispatch(
         &self,
         _request: crate::service::DispatchRequest,

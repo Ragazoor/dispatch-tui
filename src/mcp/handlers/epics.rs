@@ -123,7 +123,7 @@ pub(super) async fn handle_get_epic(
                 status = epic.status.as_str(),
             );
             if let Some(parent_id) = epic.parent_epic_id {
-                match state.db.get_epic(parent_id).await.ok().flatten() {
+                match state.epic_svc.get_epic(parent_id).await.ok() {
                     Some(parent) => {
                         text.push_str(&format!("\nParent: {parent_id} {}", parent.title));
                     }

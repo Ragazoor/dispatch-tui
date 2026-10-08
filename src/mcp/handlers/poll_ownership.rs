@@ -63,11 +63,7 @@ pub(crate) async fn handle_override_poll_owner(
 /// resolves to nothing is a `NotFound` error, not a `PollOwner` row silently
 /// created for a task/epic that was never real.
 async fn override_task(state: &McpState, task_id: TaskId) -> Result<String, ServiceError> {
-    match state.db.get_task(task_id).await {
-        Ok(Some(_)) => {}
-        Ok(None) => return Err(ServiceError::NotFound(format!("task {task_id} not found"))),
-        Err(e) => return Err(ServiceError::Internal(e)),
-    }
+    state.task_svc.get_task(task_id).await?;
     state
         .db
         .override_poll_owner(PollScopeId::Task(task_id))
@@ -77,11 +73,7 @@ async fn override_task(state: &McpState, task_id: TaskId) -> Result<String, Serv
 }
 
 async fn override_epic(state: &McpState, epic_id: EpicId) -> Result<String, ServiceError> {
-    match state.db.get_epic(epic_id).await {
-        Ok(Some(_)) => {}
-        Ok(None) => return Err(ServiceError::NotFound(format!("epic {epic_id} not found"))),
-        Err(e) => return Err(ServiceError::Internal(e)),
-    }
+    state.epic_svc.get_epic(epic_id).await?;
     state
         .db
         .override_poll_owner(PollScopeId::Epic(epic_id))
