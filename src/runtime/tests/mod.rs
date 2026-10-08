@@ -240,10 +240,7 @@ pub(super) async fn make_runtime(
             store.clone(),
             runner.clone(),
         )),
-        epic_svc: Arc::new(crate::service::EpicService::new(
-            store.clone(),
-            store.clone(),
-        )),
+        epic_svc: Arc::new(crate::service::EpicService::new(store.clone())),
         feed_runner: Some(feed_runner),
         feed_invalidate_tx,
         feed_sync_guard,

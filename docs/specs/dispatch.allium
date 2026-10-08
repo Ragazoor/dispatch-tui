@@ -206,22 +206,18 @@ rule DispatchTask {
     -- HostTracksWorktree forbids and which is_locally_owned then reads as
     -- "unowned" rather than "owned by this machine".
     --
-    -- Resolving it at the top of the dispatch removes the dilemma rather than
-    -- picking a side. At that point nothing has been provisioned, so a host
-    -- that cannot be resolved simply aborts the dispatch and releases the
-    -- claim, and the write below is left with a value it already holds. The
-    -- invariant is upheld by ordering, not by best-effort logging.
-    --
-    -- Reaching that abort at all is near-unreachable in a drawn board:
-    -- MintHostIdentity (host.allium) runs at startup, and a launch whose
-    -- identity cannot be read or written stops before the first frame
-    -- (startup.allium: AbortWhenTheHostIdentityStoreIsUnusable). The arm
-    -- exists because this rule must hold on its own terms — entry points that
-    -- never ran a TUI bootstrap reach it too — not because a drawn board is
-    -- expected to take it.
-    --
-    -- The id is immutable after its first mint, so it is resolved once per
-    -- process and reused; only the first dispatch can reach the failure arm.
+    -- The fix is to resolve it before the dispatch can start at all. Every
+    -- process resolves this install's Host id once, before it builds its store
+    -- handle -- a board at launch (MintHostIdentity, host.allium; a launch
+    -- whose identity cannot be read or written stops before the first frame,
+    -- startup.allium: AbortWhenTheHostIdentityStoreIsUnusable), a one-shot
+    -- command from the host file it refuses to run without (cli.allium:
+    -- CliCommandsNeedAHostFile). The handle carries that id, the claim's
+    -- is_locally_owned reads it, and the stamp below writes the same value.
+    -- So no entry point reaches a dispatch without a host, and there is no
+    -- abort arm to take: the invariant is upheld by construction, not by
+    -- best-effort logging. One source also means the claim and the stamp
+    -- cannot name two different hosts.
 
     -- WHAT THE LAUNCHED AGENT READS IS NOT SPECIFIED HERE. The prompt skeleton,
     -- the design step a no-plan prompt names and the rule that no trailing line

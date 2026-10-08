@@ -117,22 +117,11 @@ impl TaskService {
             }
         }
 
-        // Resolved here, before anything is provisioned, and deliberately not
-        // at the write below: core/Task's `HostTracksWorktree` pairs `host`
-        // with `worktree`, so a host that cannot be resolved must stop the
-        // dispatch while there is still no worktree to orphan. Failing at the
-        // write instead would leave a provisioned directory recorded with
-        // `host` null — the one row the invariant forbids. Cached on the
-        // service, so only the first dispatch of a process can reach this arm.
-        let local_host_id = match self.local_host_id().await {
-            Ok(id) => id.to_string(),
-            Err(e) => {
-                let reason = format!("failed to resolve this machine's host identity: {e:#}");
-                tracing::error!(task_id = task_id.0, "dispatch aborted: {reason}");
-                self.release_claim_logged(task_id).await;
-                return DispatchOutcome::Failed(reason);
-            }
-        };
+        // The host the stamp below records: the one the store handle was
+        // built with, so it names the machine the claim just checked. Known
+        // before anything is provisioned, so `HostTracksWorktree` holds by
+        // construction (`dispatch.allium: DispatchTask`).
+        let local_host_id = self.local_host_id().to_string();
 
         // The prologue runs a local embedding inference and several writes, so
         // it happens before the task is handed to the blocking pool.

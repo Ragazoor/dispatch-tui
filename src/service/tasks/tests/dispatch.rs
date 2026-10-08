@@ -92,6 +92,31 @@ mod dispatch_seam {
         );
     }
 
+    /// The stamp is the host the store handle was built with — the same one the
+    /// claim's `is_locally_owned` reads — not a second read of the host file.
+    /// With no host file at all there is nothing to re-read, and the dispatch
+    /// still records this machine (`dispatch.allium: DispatchTask`, "THE HOST
+    /// IS RESOLVED BEFORE ANYTHING IS PROVISIONED").
+    #[tokio::test]
+    async fn dispatch_stamps_the_host_the_store_was_built_with() {
+        let empty = tempfile::tempdir().unwrap();
+        let db: Arc<dyn store::TaskStore> = Arc::new(Store::in_memory_with_host_file(empty.path()));
+        let runner = DispatchScript::dispatch().shared_runner();
+        let (svc, task, _dir) = fixture(&db, runner).await;
+        let id = task.id;
+
+        let outcome = svc
+            .dispatch(request(task, DispatchMode::Dispatch, DispatchClaim::Take))
+            .await;
+
+        assert!(
+            matches!(outcome, DispatchOutcome::Launched(_)),
+            "expected Launched, got {outcome:?}"
+        );
+        let stored = svc.get_task(id).await.unwrap();
+        assert_eq!(stored.host.as_deref(), Some(crate::store::MEMORY_HOST_ID));
+    }
+
     /// A dispatch that fails after winning the claim owes the release: the task
     /// must be dispatchable again, exactly as it was before the attempt.
     #[tokio::test]
@@ -181,52 +206,6 @@ mod dispatch_seam {
         let stored = svc.get_task(task.id).await.unwrap();
         assert_eq!(stored.status, TaskStatus::Backlog, "left exactly as it was");
         assert_eq!(stored.host.as_deref(), Some("some-other-machine"));
-    }
-
-    /// `DispatchTask`'s host resolution happens BEFORE provisioning, so an
-    /// unreadable settings store aborts the dispatch instead of recording a
-    /// worktree with `host` null — the row core/Task's `HostTracksWorktree`
-    /// forbids. This is the arm that has no test before now: while the id was
-    /// read at the write instead, the only available outcome was that forbidden
-    /// row, logged and carried on from.
-    ///
-    /// The identity is broken by replacing `host.json` with a directory, which
-    /// nothing can read as a host file. The claim is passed as already `Held`
-    /// so the dispatch reaches the host resolution under test rather than
-    /// stopping at the claim.
-    #[tokio::test]
-    async fn dispatch_aborts_when_the_host_identity_cannot_be_resolved() {
-        let host_dir = tempfile::tempdir().unwrap();
-        let concrete = Arc::new(Store::in_memory_with_host_file(host_dir.path()));
-        let db: Arc<dyn store::TaskStore> = concrete.clone();
-        let runner = Arc::new(MockProcessRunner::new(vec![]));
-        let (svc, task, _dir) = fixture(&db, runner.clone()).await;
-        let id = task.id;
-
-        std::fs::create_dir(crate::host_file::host_file_path(host_dir.path())).unwrap();
-
-        let outcome = svc
-            .dispatch(request(
-                task.clone(),
-                DispatchMode::Dispatch,
-                DispatchClaim::Held,
-            ))
-            .await;
-
-        assert!(
-            matches!(outcome, DispatchOutcome::Failed(_)),
-            "expected Failed, got {outcome:?}"
-        );
-        assert!(
-            runner.recorded_calls().is_empty(),
-            "an unresolvable host must provision nothing: {:?}",
-            runner.recorded_calls()
-        );
-        let stored = svc.get_task(id).await.unwrap();
-        assert!(
-            stored.worktree.is_none() && stored.host.is_none(),
-            "HostTracksWorktree: neither field may be written when the other cannot be"
-        );
     }
 
     /// The same exclusion under real concurrency: two callers race the seam and

@@ -693,6 +693,14 @@ pub trait RepoConfigStore: RepoConfigRead {
 /// in `docs/specs/core.allium`.
 #[async_trait::async_trait]
 pub trait HostStore: Send + Sync {
+    /// This install's `Host` id, as the handle was built with it. Resolved
+    /// once per process before the handle exists (`host.allium:
+    /// MintHostIdentity` at a board's launch, the host file for a one-shot
+    /// command), so it cannot fail here. The claim's `is_locally_owned` reads
+    /// the same value, so the claim and the dispatch's host stamp agree
+    /// (`dispatch.allium: DispatchTask`).
+    fn host_id(&self) -> &str;
+
     /// Mint this install's Host id if it does not already exist — an opaque
     /// generated id, nothing else — and return the current `(id, label)`
     /// either way. `label` is `None` until an operator names this machine via

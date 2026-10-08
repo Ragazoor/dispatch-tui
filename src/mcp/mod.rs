@@ -15,9 +15,7 @@ use crate::board_event::BoardEvent;
 use crate::embeddings::EmbeddingService;
 use crate::models::{EpicId, TaskId};
 use crate::process::ProcessRunner;
-use crate::service::{
-    EpicService, EpicServiceApi, LearningService, LearningServiceApi, TaskService, TaskServiceApi,
-};
+use crate::service::{EpicServiceApi, LearningServiceApi, Services, TaskServiceApi};
 use crate::store;
 
 /// Identifies a fire-and-forget background write performed by the MCP handler.
@@ -127,15 +125,30 @@ pub(crate) struct TestHooks {
 }
 
 impl McpState {
+    /// A state with its own services, built from `deps`. For a server that
+    /// is not the board's (the tests); the board shares its own through
+    /// [`with_services`](Self::with_services).
     pub fn new(deps: McpDeps, notify_tx: Option<mpsc::UnboundedSender<BoardEvent>>) -> Self {
-        let task_svc: Arc<dyn TaskServiceApi> =
-            Arc::new(TaskService::new(deps.db.clone(), deps.runner.clone()));
-        let epic_svc: Arc<dyn EpicServiceApi> =
-            Arc::new(EpicService::new(deps.db.clone(), deps.db.clone()));
-        let learning_svc: Arc<dyn LearningServiceApi> = Arc::new(LearningService::new(
+        let services = Services::new(
             deps.db.clone(),
+            deps.runner.clone(),
             deps.embedding_service.clone(),
-        ));
+        );
+        Self::with_services(deps, services, notify_tx)
+    }
+
+    /// A state over services the caller already built — the board's, so the
+    /// MCP server and the TUI share one set (`Services`).
+    pub fn with_services(
+        deps: McpDeps,
+        services: Services,
+        notify_tx: Option<mpsc::UnboundedSender<BoardEvent>>,
+    ) -> Self {
+        let Services {
+            tasks: task_svc,
+            epics: epic_svc,
+            learnings: learning_svc,
+        } = services;
         // Narrow the write-capable dependency handle to the read-only surface
         // consumers are allowed to touch. Mutations go through the services above.
         let db: Arc<dyn store::TaskReadStore> = deps.db.clone();
@@ -243,6 +256,10 @@ pub fn router_with_bg_done(
 ) -> Router {
     let mut state = McpState::new(deps, notify_tx);
     state.test_hooks.bg_write_done_tx = bg_write_done_tx;
+    router_over(state)
+}
+
+fn router_over(state: McpState) -> Router {
     let state = Arc::new(state);
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))
@@ -279,13 +296,15 @@ pub async fn bind(port: u16) -> anyhow::Result<tokio::net::TcpListener> {
         .with_context(|| format!("binding agent port {port}"))
 }
 
-/// Serve the MCP API on a listener [`bind`] already claimed.
+/// Serve the MCP API on a listener [`bind`] already claimed, through the
+/// board's own `services`.
 pub async fn serve_on(
     listener: tokio::net::TcpListener,
     deps: McpDeps,
+    services: Services,
     notify_tx: mpsc::UnboundedSender<BoardEvent>,
 ) -> anyhow::Result<()> {
-    let app = router(deps, Some(notify_tx));
+    let app = router_over(McpState::with_services(deps, services, Some(notify_tx)));
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -309,5 +328,37 @@ mod port_tests {
             err.to_string().contains(&port.to_string()),
             "the operator must be told which port is taken, got: {err}"
         );
+    }
+}
+
+#[cfg(test)]
+mod services_tests {
+    use super::*;
+
+    /// The board builds its services once and hands the same ones to the MCP
+    /// server, so an agent's call and a keypress go through one `TaskService`
+    /// (one clock, one runner) rather than two built from the same handles.
+    #[tokio::test]
+    async fn with_services_uses_the_services_it_is_given() {
+        let db: Arc<dyn store::TaskStore> = Arc::new(store::Store::open_in_memory().await.unwrap());
+        let runner = crate::process::MockProcessRunner::unused();
+        let embedding_service = EmbeddingService::new_test();
+        let services =
+            crate::service::Services::new(db.clone(), runner.clone(), embedding_service.clone());
+
+        let state = McpState::with_services(
+            McpDeps {
+                db,
+                runner,
+                embedding_service,
+                data_dir: std::env::temp_dir(),
+            },
+            services.clone(),
+            None,
+        );
+
+        assert!(Arc::ptr_eq(&state.task_svc, &services.tasks));
+        assert!(Arc::ptr_eq(&state.epic_svc, &services.epics));
+        assert!(Arc::ptr_eq(&state.learning_svc, &services.learnings));
     }
 }

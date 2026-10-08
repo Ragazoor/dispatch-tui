@@ -176,9 +176,11 @@ a field; they are not redundant with the destructuring.
 | Consumer | Holds |
 |----------|-------|
 | `TaskService` | `Arc<dyn TaskStore>` (write + read — its dispatch prologue needs the read bundle; see below) |
-| `EpicService` | `Arc<dyn TaskAndEpicStore>` (write) **and** `Arc<dyn LearningStore>` (its repo-group cleanup's learnings write — see the store seam below) |
+| `EpicService` | takes one `Arc<dyn TaskStore>` and narrows it to `Arc<dyn TaskAndEpicStore>` (write) plus `Arc<dyn LearningStore>` (its repo-group cleanup's learnings write), so the two cannot be different stores |
 | `McpState`, `TuiRuntime` | `Arc<dyn TaskReadStore>` (no task/epic mutations — see caveat below) |
 | `FeedRunner`, `TuiRuntime::feed_db` | `Arc<dyn TaskStore>` (write — sanctioned feed-mutation consumers) |
+
+The three services are built once per process, as `service::Services` (`src/service/services.rs`). The board builds one set in `TuiRuntime::bootstrap_inner` and hands it to both the TUI runtime and the MCP server (`mcp::serve_on` → `McpState::with_services`); `McpState::new` builds its own only for a server that is not the board's, which in practice means tests.
 
 `Arc<dyn TaskStore>` coerces to any narrower trait object at call sites via Rust's trait-object upcasting (stabilised in 1.86). If you need to split a wide `Arc<dyn TaskStore>` into a narrower one, use a typed `let` binding: `let d: Arc<dyn EpicCrud> = task_store_arc.clone();`.
 

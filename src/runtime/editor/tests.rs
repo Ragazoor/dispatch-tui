@@ -260,7 +260,7 @@ pub(super) fn editor_runtime_on_host(
     let feed_sync_guard = feed_runner.sync_guard();
     TuiRuntime {
         task_svc: Arc::new(crate::service::TaskService::new(db.clone(), runner.clone())),
-        epic_svc: Arc::new(crate::service::EpicService::new(db.clone(), db.clone())),
+        epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
         feed_runner: Some(feed_runner),
         // Never started by these fixtures — see the field's doc comment.
         feed_sync_guard,

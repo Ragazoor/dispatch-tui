@@ -147,22 +147,21 @@ fn count_progress(tasks: &[&Task]) -> (usize, usize) {
 
 pub struct EpicService {
     pub db: Arc<dyn store::TaskAndEpicStore>,
-    /// The local half, held only for the repo-group cleanup rule: deleting an
-    /// empty `RepoGroup` sub-epic re-scopes its learnings onto the parent
-    /// first. Separate from `db` because the two sit on opposite sides of the
-    /// store seam — see "The store seam" in `docs/conventions.md`.
+    /// The same store as `db`, narrowed to its learnings, for the repo-group
+    /// cleanup rule: deleting an empty `RepoGroup` sub-epic re-scopes its
+    /// learnings onto the parent first.
     learnings: Arc<dyn store::LearningStore>,
     clock: Arc<dyn crate::clock::Clock>,
 }
 
 impl EpicService {
-    pub fn new(
-        db: Arc<dyn store::TaskAndEpicStore>,
-        learnings: Arc<dyn store::LearningStore>,
-    ) -> Self {
+    /// One handle, narrowed here: the epic writes and the learnings the
+    /// repo-group cleanup re-scopes are the same store, so a caller cannot
+    /// hand in two that disagree.
+    pub fn new(db: Arc<dyn store::TaskStore>) -> Self {
         Self {
-            db,
-            learnings,
+            db: db.clone(),
+            learnings: db,
             clock: Arc::new(crate::clock::SystemClock),
         }
     }

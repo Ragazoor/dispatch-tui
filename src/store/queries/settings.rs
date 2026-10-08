@@ -138,6 +138,10 @@ impl super::super::RepoConfigStore for Store {
 
 #[async_trait::async_trait]
 impl super::super::HostStore for Store {
+    fn host_id(&self) -> &str {
+        &self.host
+    }
+
     async fn ensure_host_identity(&self) -> Result<(String, Option<String>)> {
         // The identity is READ from the host file, never minted here: minting
         // is the board launch's `host_file::resolve_for_launch`, and a

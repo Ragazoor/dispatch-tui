@@ -299,6 +299,7 @@ async fn start_services_after_connect(
     emb_svc: Arc<EmbeddingService>,
     mcp_listener: tokio::net::TcpListener,
     mcp_deps: mcp::McpDeps,
+    services: crate::service::Services,
     mcp_notify_tx: mpsc::UnboundedSender<crate::board_event::BoardEvent>,
 ) {
     // Provision the managed feed-epic tree from the reviews/CVE config. It
@@ -318,7 +319,7 @@ async fn start_services_after_connect(
     // The port was claimed above, before the board could take the screen;
     // a connection that arrived in between waited in the listen backlog.
     tokio::spawn(async move {
-        if let Err(e) = mcp::serve_on(mcp_listener, mcp_deps, mcp_notify_tx).await {
+        if let Err(e) = mcp::serve_on(mcp_listener, mcp_deps, services, mcp_notify_tx).await {
             eprintln!("MCP server error: {e}");
         }
     });
@@ -1073,6 +1074,11 @@ impl TuiRuntime {
 
         let emb_svc = finish_embedding_load(emb_load).await?;
 
+        // Built once and shared: the MCP server and the TUI runtime go
+        // through the same services (`crate::service::Services`).
+        let services =
+            crate::service::Services::new(database.clone(), runner.clone(), emb_svc.clone());
+
         let mcp_deps = mcp::McpDeps {
             db: database.clone(),
             runner: runner.clone(),
@@ -1087,6 +1093,7 @@ impl TuiRuntime {
             emb_svc.clone(),
             mcp_listener,
             mcp_deps,
+            services.clone(),
             mcp_notify_tx,
         )
         .await;
@@ -1102,9 +1109,9 @@ impl TuiRuntime {
         // (`ConnectionIndicator`).
 
         let (runtime, msg_rx) = Self::build_runtime(
-            &database,
             &runner,
             &emb_svc,
+            services,
             &parts,
             &host_id,
             feed_notify_tx,
@@ -1150,14 +1157,15 @@ impl TuiRuntime {
     /// Wire the services, the feed runner and the message channel around an
     /// already-connected store. Nothing here touches the network or the terminal.
     fn build_runtime(
-        database: &Arc<store::Store>,
         runner: &Arc<dyn ProcessRunner>,
         emb_svc: &Arc<EmbeddingService>,
+        services: crate::service::Services,
         parts: &StoreParts,
         host_id: &str,
         feed_notify_tx: mpsc::UnboundedSender<crate::board_event::BoardEvent>,
         paths: &StartupPaths,
     ) -> (TuiRuntime, mpsc::UnboundedReceiver<Message>) {
+        let database = &parts.database;
         let (msg_tx, msg_rx) = mpsc::unbounded_channel::<Message>();
         // Hoisted above `FeedRunner::new` so both it and the runtime's own
         // `board_reads` field share one handle — `FeedTick`'s host-scoping
@@ -1173,20 +1181,10 @@ impl TuiRuntime {
         );
         let feed_invalidate_tx = Some(feed_runner.epic_invalidate_tx());
         let feed_sync_guard = feed_runner.sync_guard();
-        let task_svc = Arc::new(crate::service::TaskService::new(
-            database.clone(),
-            runner.clone(),
-        ));
         let runtime = TuiRuntime {
-            task_svc,
-            epic_svc: Arc::new(crate::service::EpicService::new(
-                database.clone(),
-                database.clone(),
-            )),
-            learning_svc: Arc::new(crate::service::LearningService::new(
-                database.clone(),
-                emb_svc.clone(),
-            )),
+            task_svc: services.tasks,
+            epic_svc: services.epics,
+            learning_svc: services.learnings,
             feed_runner: Some(feed_runner),
             feed_invalidate_tx,
             feed_sync_guard,

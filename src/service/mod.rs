@@ -3,6 +3,7 @@ pub mod epics;
 mod grouping;
 pub mod learnings;
 pub mod managed_feeds;
+mod services;
 pub mod tasks;
 pub mod usage;
 
@@ -18,6 +19,7 @@ pub use managed_feeds::{
     ensure_managed_epics, provision_managed_feeds_from_settings, read_managed_feed_settings,
     write_managed_feed_settings, ManagedFeedSettings, ManagedFeedSettingsPatch,
 };
+pub use services::Services;
 pub use tasks::wrap_up_block_message;
 pub use tasks::{
     CloseSessionOutcome, ClosedSession, CreateTaskParams, DispatchClaim, DispatchOutcome,
