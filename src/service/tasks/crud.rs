@@ -473,7 +473,7 @@ impl TaskService {
     /// Called only after the Done write has already persisted, and never
     /// awaited by the caller — deliberately: `update_task`/`close_session` run
     /// on the TUI's synchronous command-drain loop
-    /// (`src/runtime/mod.rs::run_loop`), which does not redraw or read input
+    /// (`src/runtime/event_loop.rs::run_loop`), which does not redraw or read input
     /// again until every queued command's future resolves. Awaiting an actual
     /// `gh` network round trip inline there — bounded by
     /// `SUBPROCESS_TIMEOUT` (120s) — would freeze the whole TUI on the

@@ -16,7 +16,8 @@ to look.
 | `src/worktree_admin.rs` | `worktree_admin_dir` — the linked worktree's git administrative directory, read from the `.git` pointer file. Two subsystems put per-task files there for the same three reasons: git never reports them, `git worktree remove` deletes them, and they are per worktree |
 | `src/hooks/` | The hook client: turns `hook-*` and `pr-gate` argv into a `HookRequest` and posts it to the running board. Opens no database — held by `no_installed_hook_entry_point_creates_a_database` in `tests/hooks.rs` |
 | `src/cli/statusline.rs` | `dispatch statusline` decorator: records the subscription rate-limit windows from Claude Code's statusLine hook payload to a snapshot file, then runs the user's previous statusLine command and prints its output verbatim. Never fails (always exits 0) and never opens the database — see the module doc comment |
-| `src/runtime/mod.rs` | Async event loop (`tokio::select!`), bridges TUI ↔ MCP ↔ shell commands; `TICK_INTERVAL`, `execute_commands` |
+| `src/runtime/mod.rs` | `run_tui`, `TuiRuntime` and startup wiring; bridges TUI ↔ MCP ↔ shell commands; `TICK_INTERVAL` |
+| `src/runtime/event_loop.rs` | Async event loop (`tokio::select!` over `LoopEvent`), `apply_loop_event`, `run_loop`, `execute_commands`, frame-rate cap |
 | `src/runtime/commands.rs` | `Command` side-effect dispatcher (called by `execute_commands`) |
 | `src/runtime/tasks.rs` | Per-command runtime handlers for tasks (refresh, dispatch, finish, etc.) |
 | `src/runtime/{editor,epics,learnings,pr,settings,split}.rs` | Domain-specific runtime helpers |
