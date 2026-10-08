@@ -260,67 +260,6 @@ impl App {
         )]
     }
 
-    pub(in crate::tui) fn handle_input_char(&mut self, c: char) -> Vec<Command> {
-        // Per spec (RepoPathPicker.NoPrintableShortcut): every printable
-        // character filters; no digit/letter is a select shortcut.
-        // The list cursor resets to 0 whenever the query changes.
-        if self.input.mode.is_repo_picker() {
-            self.input.repo_cursor = 0;
-        }
-        self.input.caret =
-            crate::tui::text_caret::insert(&mut self.input.buffer, self.input.caret, c);
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_input_backspace(&mut self) -> Vec<Command> {
-        // Per spec: the list cursor resets to 0 whenever the query changes
-        if self.input.mode.is_repo_picker() {
-            self.input.repo_cursor = 0;
-        }
-        self.input.caret =
-            crate::tui::text_caret::delete_before(&mut self.input.buffer, self.input.caret);
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_input_delete_forward(&mut self) -> Vec<Command> {
-        if self.input.mode.is_repo_picker() {
-            self.input.repo_cursor = 0;
-        }
-        self.input.caret =
-            crate::tui::text_caret::delete_after(&mut self.input.buffer, self.input.caret);
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_cursor_left(&mut self) -> Vec<Command> {
-        self.input.caret = crate::tui::text_caret::move_left(self.input.caret);
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_cursor_right(&mut self) -> Vec<Command> {
-        self.input.caret = crate::tui::text_caret::move_right(&self.input.buffer, self.input.caret);
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_cursor_word_left(&mut self) -> Vec<Command> {
-        self.input.caret = crate::tui::text_caret::word_left(&self.input.buffer, self.input.caret);
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_cursor_word_right(&mut self) -> Vec<Command> {
-        self.input.caret = crate::tui::text_caret::word_right(&self.input.buffer, self.input.caret);
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_cursor_home(&mut self) -> Vec<Command> {
-        self.input.caret = crate::tui::text_caret::home();
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_cursor_end(&mut self) -> Vec<Command> {
-        self.input.caret = crate::tui::text_caret::end(&self.input.buffer);
-        vec![]
-    }
-
     pub(in crate::tui) fn handle_start_quick_dispatch_selection(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::QuickDispatch;
         self.input.repo_cursor = 0;

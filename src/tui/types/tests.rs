@@ -245,3 +245,60 @@ fn status_clear_drops_message_timestamp_and_stickiness() {
     assert!(status.message_set_at.is_none());
     assert!(!status.message_sticky);
 }
+
+// -- InputState text editing --
+
+fn input_with(buffer: &str, caret: usize) -> InputState {
+    let mut input = InputState::default();
+    input.set_buffer(buffer.to_string());
+    input.caret = caret;
+    input
+}
+
+#[test]
+fn input_insert_char_puts_it_at_the_caret() {
+    let mut input = input_with("ac", 1);
+    input.insert_char('b');
+    assert_eq!((input.buffer.as_str(), input.caret), ("abc", 2));
+}
+
+#[test]
+fn input_backspace_and_delete_forward_edit_around_the_caret() {
+    let mut input = input_with("abc", 2);
+    input.backspace();
+    assert_eq!((input.buffer.as_str(), input.caret), ("ac", 1));
+    input.delete_forward();
+    assert_eq!((input.buffer.as_str(), input.caret), ("a", 1));
+}
+
+#[test]
+fn input_edits_in_a_repo_picker_reset_the_list_cursor() {
+    for edit in [
+        (|i: &mut InputState| i.insert_char('x')) as fn(&mut InputState),
+        InputState::backspace,
+        InputState::delete_forward,
+    ] {
+        let mut input = input_with("abc", 1);
+        input.mode = InputMode::InputRepoPath;
+        input.repo_cursor = 3;
+        edit(&mut input);
+        assert_eq!(input.repo_cursor, 0);
+    }
+}
+
+#[test]
+fn input_caret_moves_stay_within_the_buffer() {
+    let mut input = input_with("ab cd", 3);
+    input.cursor_left();
+    assert_eq!(input.caret, 2);
+    input.cursor_right();
+    assert_eq!(input.caret, 3);
+    input.cursor_home();
+    assert_eq!(input.caret, 0);
+    input.cursor_end();
+    assert_eq!(input.caret, 5);
+    input.cursor_word_left();
+    assert_eq!(input.caret, 3);
+    input.cursor_word_right();
+    assert_eq!(input.caret, 5);
+}

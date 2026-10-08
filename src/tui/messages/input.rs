@@ -67,15 +67,42 @@ impl InputMessage {
             }
             InputMessage::SubmitWrapUpMode(mode) => app.handle_submit_wrap_up_mode(mode),
             InputMessage::ArmPhoenix => app.handle_arm_phoenix(),
-            InputMessage::InputChar(c) => app.handle_input_char(c),
-            InputMessage::InputBackspace => app.handle_input_backspace(),
-            InputMessage::InputDeleteForward => app.handle_input_delete_forward(),
-            InputMessage::CursorLeft => app.handle_cursor_left(),
-            InputMessage::CursorRight => app.handle_cursor_right(),
-            InputMessage::CursorWordLeft => app.handle_cursor_word_left(),
-            InputMessage::CursorWordRight => app.handle_cursor_word_right(),
-            InputMessage::CursorHome => app.handle_cursor_home(),
-            InputMessage::CursorEnd => app.handle_cursor_end(),
+            InputMessage::InputChar(c) => {
+                app.input.insert_char(c);
+                vec![]
+            }
+            InputMessage::InputBackspace => {
+                app.input.backspace();
+                vec![]
+            }
+            InputMessage::InputDeleteForward => {
+                app.input.delete_forward();
+                vec![]
+            }
+            InputMessage::CursorLeft => {
+                app.input.cursor_left();
+                vec![]
+            }
+            InputMessage::CursorRight => {
+                app.input.cursor_right();
+                vec![]
+            }
+            InputMessage::CursorWordLeft => {
+                app.input.cursor_word_left();
+                vec![]
+            }
+            InputMessage::CursorWordRight => {
+                app.input.cursor_word_right();
+                vec![]
+            }
+            InputMessage::CursorHome => {
+                app.input.cursor_home();
+                vec![]
+            }
+            InputMessage::CursorEnd => {
+                app.input.cursor_end();
+                vec![]
+            }
             InputMessage::StartQuickDispatchSelection => {
                 app.handle_start_quick_dispatch_selection()
             }

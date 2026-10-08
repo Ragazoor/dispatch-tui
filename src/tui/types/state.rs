@@ -218,6 +218,55 @@ impl InputState {
         self.caret = 0;
     }
 
+    /// Reset the picker's list cursor when the query is about to change.
+    fn reset_picker_cursor(&mut self) {
+        if self.mode.is_repo_picker() {
+            self.repo_cursor = 0;
+        }
+    }
+
+    /// Type `c` at the caret. In a repo picker every printable character
+    /// filters (RepoPathPicker.NoPrintableShortcut) and the list cursor
+    /// returns to 0.
+    pub(in crate::tui) fn insert_char(&mut self, c: char) {
+        self.reset_picker_cursor();
+        self.caret = crate::tui::text_caret::insert(&mut self.buffer, self.caret, c);
+    }
+
+    pub(in crate::tui) fn backspace(&mut self) {
+        self.reset_picker_cursor();
+        self.caret = crate::tui::text_caret::delete_before(&mut self.buffer, self.caret);
+    }
+
+    pub(in crate::tui) fn delete_forward(&mut self) {
+        self.reset_picker_cursor();
+        self.caret = crate::tui::text_caret::delete_after(&mut self.buffer, self.caret);
+    }
+
+    pub(in crate::tui) fn cursor_left(&mut self) {
+        self.caret = crate::tui::text_caret::move_left(self.caret);
+    }
+
+    pub(in crate::tui) fn cursor_right(&mut self) {
+        self.caret = crate::tui::text_caret::move_right(&self.buffer, self.caret);
+    }
+
+    pub(in crate::tui) fn cursor_word_left(&mut self) {
+        self.caret = crate::tui::text_caret::word_left(&self.buffer, self.caret);
+    }
+
+    pub(in crate::tui) fn cursor_word_right(&mut self) {
+        self.caret = crate::tui::text_caret::word_right(&self.buffer, self.caret);
+    }
+
+    pub(in crate::tui) fn cursor_home(&mut self) {
+        self.caret = crate::tui::text_caret::home();
+    }
+
+    pub(in crate::tui) fn cursor_end(&mut self) {
+        self.caret = crate::tui::text_caret::end(&self.buffer);
+    }
+
     /// Whether the in-flight draft has armed the phoenix flag.
     ///
     /// One accessor because four surfaces must agree on this bit — the tag
