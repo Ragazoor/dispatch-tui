@@ -620,7 +620,7 @@ fn resumed_seeds_last_pre_tool_use_at() {
         id: TaskId(1),
         tmux_window: test_tmux_window("task-1"),
     }));
-    let task = app.find_task(TaskId(1)).unwrap();
+    let task = app.board.find_task(TaskId(1)).unwrap();
     let stamp = task
         .last_pre_tool_use_at
         .expect("resume should seed last_pre_tool_use_at");
@@ -644,6 +644,7 @@ fn conflict_flag_clears_on_dispatch() {
     let mut app = App::new(vec![{ make_task(1, TaskStatus::Review) }]);
     app.find_task_mut(TaskId(1)).unwrap().sub_status = SubStatus::Conflict;
     assert!(app
+        .board
         .find_task(TaskId(1))
         .is_some_and(|t| t.sub_status == SubStatus::Conflict));
 
@@ -652,6 +653,7 @@ fn conflict_flag_clears_on_dispatch() {
         tmux_window: test_tmux_window("task-1"),
     }));
     assert!(!app
+        .board
         .find_task(TaskId(1))
         .is_some_and(|t| t.sub_status == SubStatus::Conflict));
 }
@@ -666,6 +668,7 @@ fn conflict_flag_clears_on_move_backward() {
         direction: MoveDirection::Backward,
     }));
     assert!(!app
+        .board
         .find_task(TaskId(1))
         .is_some_and(|t| t.sub_status == SubStatus::Conflict));
 }
@@ -690,7 +693,7 @@ fn pr_merged_moves_to_done_and_detaches() {
 
     let cmds = app.update(Message::Pr(PrMessage::Merged(TaskId(1))));
 
-    let task = app.find_task(TaskId(1)).unwrap();
+    let task = app.board.find_task(TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     assert!(task.tmux_window.is_none(), "tmux window should be cleared");
     assert!(task.worktree.is_some(), "worktree should be preserved");
@@ -732,7 +735,7 @@ fn pr_closed_stays_in_review_and_marks_sub_status() {
 
     let cmds = app.update(Message::Pr(PrMessage::Closed(TaskId(1))));
 
-    let task = app.find_task(TaskId(1)).unwrap();
+    let task = app.board.find_task(TaskId(1)).unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Review,
@@ -772,7 +775,7 @@ fn pr_closed_overrides_conflict_sub_status() {
 
     app.update(Message::Pr(PrMessage::Closed(TaskId(1))));
 
-    let task = app.find_task(TaskId(1)).unwrap();
+    let task = app.board.find_task(TaskId(1)).unwrap();
     assert_eq!(task.sub_status, SubStatus::PrClosed);
 }
 
@@ -840,7 +843,7 @@ fn pr_closed_ignores_non_review_task() {
 
     let cmds = app.update(Message::Pr(PrMessage::Closed(TaskId(1))));
 
-    let task = app.find_task(TaskId(1)).unwrap();
+    let task = app.board.find_task(TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Done, "status should be unchanged");
     assert!(cmds.is_empty(), "no commands expected for non-review task");
 }
@@ -920,7 +923,7 @@ fn tick_reclassifies_running_task_to_stale_when_pre_tool_use_is_old() {
     app.board.tasks[0].last_pre_tool_use_at = Some(old);
 
     let cmds = app.update(Message::System(SystemMessage::Tick));
-    let task = app.find_task(TaskId(3)).unwrap();
+    let task = app.board.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::Stale);
     assert!(cmds.iter().any(|c| {
         if let Command::Task(TaskCommand::BatchPatchSubStatus { updates }) = c {
@@ -943,7 +946,7 @@ fn tick_reclassifies_running_task_to_needs_input_when_notification_newer() {
     app.board.tasks[0].last_notification_at = Some(now - chrono::Duration::seconds(5));
 
     app.update(Message::System(SystemMessage::Tick));
-    let task = app.find_task(TaskId(3)).unwrap();
+    let task = app.board.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::NeedsInput);
 }
 
@@ -956,7 +959,7 @@ fn tick_does_not_overwrite_crashed() {
     app.board.tasks[0].last_pre_tool_use_at = Some(old);
 
     app.update(Message::System(SystemMessage::Tick));
-    let task = app.find_task(TaskId(3)).unwrap();
+    let task = app.board.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::Crashed);
 }
 
@@ -969,7 +972,7 @@ fn tick_does_not_overwrite_conflict() {
     app.board.tasks[0].last_pre_tool_use_at = Some(old);
 
     app.update(Message::System(SystemMessage::Tick));
-    let task = app.find_task(TaskId(3)).unwrap();
+    let task = app.board.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::Conflict);
 }
 
@@ -979,7 +982,7 @@ fn crashed_detection_sets_substatus_and_persists() {
     app.board.tasks[0].tmux_window = Some(test_tmux_window("win-3"));
 
     let cmds = app.update(Message::Task(TaskMessage::AgentCrashed(TaskId(3))));
-    let task = app.find_task(TaskId(3)).unwrap();
+    let task = app.board.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::Crashed);
     assert!(cmds
         .iter()
@@ -1007,11 +1010,11 @@ fn crash_emits_a_non_draining_subagent_clear() {
         "a crash must clear subagents without draining to Review"
     );
     assert_eq!(
-        app.find_task(TaskId(1)).unwrap().live_subagents,
+        app.board.find_task(TaskId(1)).unwrap().live_subagents,
         0,
         "the board repaints immediately, without waiting for the DB round trip"
     );
-    assert!(!app.find_task(TaskId(1)).unwrap().stop_pending);
+    assert!(!app.board.find_task(TaskId(1)).unwrap().stop_pending);
 }
 
 #[test]
@@ -1019,7 +1022,7 @@ fn crashed_skips_non_running_task() {
     let mut app = App::new(vec![make_task(3, TaskStatus::Review)]);
 
     let cmds = app.update(Message::Task(TaskMessage::AgentCrashed(TaskId(3))));
-    let task = app.find_task(TaskId(3)).unwrap();
+    let task = app.board.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::AwaitingReview); // unchanged
     assert!(cmds.is_empty());
 }
@@ -1059,7 +1062,7 @@ fn pr_review_state_updates_substatus() {
         id,
         review_decision: Some(ReviewDecision::Approved),
     }));
-    let task = app.find_task(id).unwrap();
+    let task = app.board.find_task(id).unwrap();
     assert_eq!(task.sub_status, SubStatus::Approved);
     assert!(cmds
         .iter()
@@ -1089,7 +1092,7 @@ fn pr_review_state_changes_requested() {
         id,
         review_decision: Some(ReviewDecision::ChangesRequested),
     }));
-    let task = app.find_task(id).unwrap();
+    let task = app.board.find_task(id).unwrap();
     assert_eq!(task.sub_status, SubStatus::ChangesRequested);
     assert!(cmds
         .iter()
@@ -1101,14 +1104,17 @@ fn pr_review_state_ignores_non_review_task() {
     let mut app = make_app();
     let id = TaskId(3);
     // Task 3 is Running by default in make_app
-    assert_eq!(app.find_task(id).unwrap().status, TaskStatus::Running);
+    assert_eq!(app.board.find_task(id).unwrap().status, TaskStatus::Running);
     let cmds = app.update(Message::Pr(PrMessage::ReviewState {
         id,
         review_decision: Some(ReviewDecision::Approved),
     }));
     assert!(cmds.is_empty());
     // sub_status should not have changed
-    assert_ne!(app.find_task(id).unwrap().sub_status, SubStatus::Approved);
+    assert_ne!(
+        app.board.find_task(id).unwrap().sub_status,
+        SubStatus::Approved
+    );
 }
 
 #[test]
@@ -1122,7 +1128,10 @@ fn pr_review_state_preserves_conflict_substatus() {
         review_decision: Some(ReviewDecision::Approved),
     }));
     assert!(cmds.is_empty());
-    assert_eq!(app.find_task(id).unwrap().sub_status, SubStatus::Conflict);
+    assert_eq!(
+        app.board.find_task(id).unwrap().sub_status,
+        SubStatus::Conflict
+    );
 }
 
 #[test]
@@ -1749,7 +1758,7 @@ fn manual_move_review_to_running_seeds_last_pre_tool_use_at() {
         direction: MoveDirection::Backward,
     }));
 
-    let t = app.find_task(TaskId(1)).expect("task");
+    let t = app.board.find_task(TaskId(1)).expect("task");
     assert_eq!(t.status, TaskStatus::Running);
     assert!(t.last_pre_tool_use_at.is_some(), "seed missing");
     assert!(
@@ -2554,7 +2563,7 @@ fn a_permanent_failure_below_the_threshold_does_not_give_up() {
     assert_eq!(state.consecutive_permanent_failures, 1);
     assert!(!state.gave_up(), "one failure must not give up");
     assert_eq!(
-        app.find_task(TaskId(1)).unwrap().sub_status,
+        app.board.find_task(TaskId(1)).unwrap().sub_status,
         SubStatus::AwaitingReview,
         "sub_status must not change before the threshold"
     );
@@ -2577,7 +2586,7 @@ fn the_threshold_permanent_failure_gives_up_and_marks_pr_unreachable() {
     let state = app.agents.pr_poll.get(&TaskId(1)).expect("state recorded");
     assert!(state.gave_up(), "the threshold failure must give up");
     assert_eq!(
-        app.find_task(TaskId(1)).unwrap().sub_status,
+        app.board.find_task(TaskId(1)).unwrap().sub_status,
         SubStatus::PrUnreachable,
         "giving up must mark the task pr_unreachable"
     );

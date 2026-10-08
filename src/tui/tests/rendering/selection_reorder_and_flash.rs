@@ -161,8 +161,8 @@ async fn reorder_task_down_swaps_sort_order() {
     ));
 
     // After reorder, task 1 should have a higher sort value than task 2
-    let t1 = app.find_task(TaskId(1)).unwrap();
-    let t2 = app.find_task(TaskId(2)).unwrap();
+    let t1 = app.board.find_task(TaskId(1)).unwrap();
+    let t2 = app.board.find_task(TaskId(2)).unwrap();
     let eff1 = t1.sort_order.unwrap_or(t1.id.0);
     let eff2 = t2.sort_order.unwrap_or(t2.id.0);
     assert!(
@@ -221,8 +221,8 @@ async fn reorder_task_up_swaps_sort_order() {
     ));
 
     // After reorder, task 2 should have a lower sort value than task 1
-    let t1 = app.find_task(TaskId(1)).unwrap();
-    let t2 = app.find_task(TaskId(2)).unwrap();
+    let t1 = app.board.find_task(TaskId(1)).unwrap();
+    let t2 = app.board.find_task(TaskId(2)).unwrap();
     let eff1 = t1.sort_order.unwrap_or(t1.id.0);
     let eff2 = t2.sort_order.unwrap_or(t2.id.0);
     assert!(
@@ -260,8 +260,18 @@ async fn reorder_task_down_swaps_completed_at_within_done_column() {
         crate::tui::messages::TaskMessage::ReorderItem(1),
     ));
 
-    let at1 = app.find_task(TaskId(1)).unwrap().completed_at.unwrap();
-    let at2 = app.find_task(TaskId(2)).unwrap().completed_at.unwrap();
+    let at1 = app
+        .board
+        .find_task(TaskId(1))
+        .unwrap()
+        .completed_at
+        .unwrap();
+    let at2 = app
+        .board
+        .find_task(TaskId(2))
+        .unwrap()
+        .completed_at
+        .unwrap();
     assert!(
         at1 < at2,
         "task 1 ({at1}) should be after task 2 ({at2}) after move down"

@@ -14,6 +14,7 @@ impl App {
         // a refresh can never run a command, a grouping mode or a removal
         // policy the user has since changed.
         let title = self
+            .board
             .find_epic(id)
             .filter(|e| e.feed_command.is_some())
             .map(|e| e.title.clone());

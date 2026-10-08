@@ -484,11 +484,13 @@ impl App {
         self.input.task_draft.as_ref()
     }
     pub fn is_stale(&self, id: TaskId) -> bool {
-        self.find_task(id)
+        self.board
+            .find_task(id)
             .is_some_and(|t| t.sub_status == SubStatus::Stale)
     }
     pub fn is_crashed(&self, id: TaskId) -> bool {
-        self.find_task(id)
+        self.board
+            .find_task(id)
             .is_some_and(|t| t.sub_status == SubStatus::Crashed)
     }
     pub fn selected_tasks(&self) -> &HashSet<TaskId> {
@@ -557,6 +559,7 @@ impl App {
         if count == 1 {
             let (&id, _) = self.dispatching.iter().next()?;
             let label = self
+                .board
                 .find_task(id)
                 .map(|t| {
                     let trimmed = t.title.trim();
@@ -590,7 +593,7 @@ impl App {
     /// asserted here. It is a property of the callers, not of this setter, and a
     /// `debug_assert` would fire on any test that drives the marker directly.
     pub(in crate::tui) fn mark_dispatching(&mut self, id: TaskId) {
-        if self.find_task(id).is_none() {
+        if self.board.find_task(id).is_none() {
             return;
         }
         self.dispatching.insert(id, Instant::now());
@@ -650,10 +653,6 @@ impl App {
             .is_some_and(|s| self.view().is_flattened_for_status(s))
     }
 
-    pub(in crate::tui) fn find_task(&self, id: TaskId) -> Option<&Task> {
-        self.board.tasks.iter().find(|t| t.id == id)
-    }
-
     pub(in crate::tui) fn find_task_mut(&mut self, id: TaskId) -> Option<&mut Task> {
         // Rebuild index if missing or stale (e.g. direct board.tasks mutation in
         // tests, or a wholesale same-length replacement of board.tasks with a
@@ -674,10 +673,6 @@ impl App {
         }
         let i = self.layout.task_index.as_ref()?.get(&id).copied()?;
         self.board.tasks.get_mut(i)
-    }
-
-    pub(in crate::tui) fn find_epic(&self, id: EpicId) -> Option<&Epic> {
-        self.board.epics.iter().find(|e| e.id == id)
     }
 
     /// Remove all in-memory agent tracking state for a task.
@@ -766,7 +761,11 @@ impl App {
     pub(in crate::tui) fn handle_detach_tmux(&mut self, ids: Vec<TaskId>) -> Vec<Command> {
         let detachable: Vec<TaskId> = ids
             .iter()
-            .filter(|&&id| self.find_task(id).is_some_and(|t| t.tmux_window.is_some()))
+            .filter(|&&id| {
+                self.board
+                    .find_task(id)
+                    .is_some_and(|t| t.tmux_window.is_some())
+            })
             .copied()
             .collect();
 

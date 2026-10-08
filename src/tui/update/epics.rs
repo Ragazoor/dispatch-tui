@@ -199,7 +199,7 @@ impl App {
     pub(in crate::tui) fn handle_confirm_delete_epic(&mut self) -> Vec<Command> {
         if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
             let id = epic.id;
-            if !self.epic_subtree_all_done(id) {
+            if !self.board.epic_subtree_all_done(id) {
                 let title = truncate_title(&epic.title, TITLE_DISPLAY_LENGTH);
                 self.status.set(format!(
                     "Cannot delete epic {title}: unfinished work in its subtree"
@@ -212,18 +212,6 @@ impl App {
                 .set(format!("Delete epic {title} and subtasks? [y/n]"));
         }
         vec![]
-    }
-
-    /// `epics.allium: ConfirmDeleteEpic`'s guard — every task anywhere in
-    /// `id`'s subtree, at any depth, is done. An epic with no tasks at all
-    /// (an empty subtree) qualifies vacuously.
-    pub(in crate::tui) fn epic_subtree_all_done(&self, id: EpicId) -> bool {
-        let subtree = descendant_epic_ids(id, &self.board.epics);
-        self.board
-            .tasks
-            .iter()
-            .filter(|t| t.epic_id.is_some_and(|eid| subtree.contains(&eid)))
-            .all(|t| t.status == TaskStatus::Done)
     }
 
     pub(in crate::tui) fn handle_move_epic_status(

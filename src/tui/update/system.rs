@@ -128,7 +128,7 @@ impl App {
             .board
             .split
             .pinned_task_id
-            .and_then(|id| self.find_task(id))
+            .and_then(|id| self.board.find_task(id))
             .and_then(|t| t.tmux_window.clone());
         vec![Command::Split(crate::tui::commands::SplitCommand::Exit {
             pane_id,
@@ -219,6 +219,7 @@ impl App {
 
         if self.notifications_enabled {
             let title = self
+                .board
                 .find_task(task_id)
                 .map(|t| t.title.clone())
                 .unwrap_or_default();

@@ -83,6 +83,7 @@ impl App {
         let status = match ids.as_slice() {
             [single] => {
                 let title = self
+                    .board
                     .find_task(*single)
                     .map(|t| truncate_title(&t.title, TITLE_DISPLAY_LENGTH))
                     .unwrap_or_default();
@@ -196,6 +197,7 @@ impl App {
             return None;
         }
         let task = self
+            .board
             .find_task(id)
             .filter(|t| t.status == TaskStatus::Backlog)
             .map(|t| Box::new(t.clone()))?;
@@ -215,6 +217,7 @@ impl App {
     ) -> Vec<Command> {
         if self.is_dispatching(task_id)
             || !self
+                .board
                 .find_task(task_id)
                 .is_some_and(|t| t.status == TaskStatus::Backlog)
         {

@@ -28,6 +28,35 @@ pub struct BoardState {
     pub(in crate::tui) flattened: bool,
 }
 
+impl BoardState {
+    pub(in crate::tui) fn find_task(&self, id: TaskId) -> Option<&Task> {
+        self.tasks.iter().find(|t| t.id == id)
+    }
+
+    pub(in crate::tui) fn find_epic(&self, id: EpicId) -> Option<&Epic> {
+        self.epics.iter().find(|e| e.id == id)
+    }
+
+    /// `epics.allium: ConfirmDeleteEpic`'s guard — every task anywhere in
+    /// `id`'s subtree, at any depth, is done. An epic with no tasks at all
+    /// (an empty subtree) qualifies vacuously.
+    pub(in crate::tui) fn epic_subtree_all_done(&self, id: EpicId) -> bool {
+        let subtree = crate::models::descendant_epic_ids(id, &self.epics);
+        self.tasks
+            .iter()
+            .filter(|t| t.epic_id.is_some_and(|eid| subtree.contains(&eid)))
+            .all(|t| t.status == TaskStatus::Done)
+    }
+
+    /// Look up the title of an epic by ID.
+    pub(in crate::tui) fn epic_title(&self, id: EpicId) -> Option<&str> {
+        self.epics
+            .iter()
+            .find(|e| e.id == id)
+            .map(|e| e.title.as_str())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // StatusState — transient status messages and error popups
 // ---------------------------------------------------------------------------

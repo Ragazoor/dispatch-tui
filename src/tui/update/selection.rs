@@ -262,11 +262,13 @@ impl App {
         let epic_ids: Vec<EpicId> = self.select.epics.iter().copied().collect();
 
         let bad_task = task_ids.iter().copied().find(|id| {
-            self.find_task(*id)
+            self.board
+                .find_task(*id)
                 .is_some_and(|t| t.status != TaskStatus::Done)
         });
         if let Some(id) = bad_task {
             let title = self
+                .board
                 .find_task(id)
                 .map(|t| crate::tui::truncate_title(&t.title, crate::tui::TITLE_DISPLAY_LENGTH))
                 .unwrap_or_default();
@@ -277,7 +279,7 @@ impl App {
         let bad_epic = epic_ids
             .iter()
             .copied()
-            .find(|id| !self.epic_subtree_all_done(*id));
+            .find(|id| !self.board.epic_subtree_all_done(*id));
         if let Some(id) = bad_epic {
             let title = self
                 .board
@@ -305,7 +307,7 @@ impl App {
         for id in task_ids {
             // A task inside a deleted epic's subtree is already gone — the
             // epic teardown above dropped it from the board.
-            if self.find_task(id).is_some() {
+            if self.board.find_task(id).is_some() {
                 cmds.extend(self.teardown_task_for_batch(id, guard.clone()));
                 surviving_task_ids.push(id);
             }
@@ -366,7 +368,8 @@ impl App {
                 .iter()
                 .copied()
                 .filter(|id| {
-                    self.find_task(*id)
+                    self.board
+                        .find_task(*id)
                         .is_some_and(|t| t.status == TaskStatus::Review)
                 })
                 .collect();

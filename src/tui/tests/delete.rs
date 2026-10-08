@@ -99,7 +99,7 @@ fn x_on_a_done_task_asks_to_delete_it() {
         msg.contains("Delete") && msg.contains("[y/n]"),
         "the prompt names the delete, got {msg:?}"
     );
-    assert!(app.find_task(TaskId(1)).is_some());
+    assert!(app.board.find_task(TaskId(1)).is_some());
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn confirming_delete_of_a_done_task_removes_it_from_the_board() {
 
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(
-        app.find_task(TaskId(1)).is_none(),
+        app.board.find_task(TaskId(1)).is_none(),
         "the task leaves the board outright — there is no archived state"
     );
     assert!(
@@ -174,7 +174,10 @@ fn declining_the_delete_leaves_the_done_task_in_place() {
 
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.is_empty(), "declining emits nothing, got {cmds:?}");
-    assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Done);
+    assert_eq!(
+        app.board.find_task(TaskId(1)).unwrap().status,
+        TaskStatus::Done
+    );
 }
 
 /// The target is the task under the cursor when `x` was pressed. A refresh
@@ -208,7 +211,7 @@ fn delete_targets_the_task_at_x_press_not_at_y_press() {
     let cmds = press(&mut app, 'y');
 
     assert!(
-        app.find_task(drifted_onto).is_some(),
+        app.board.find_task(drifted_onto).is_some(),
         "the task the cursor drifted onto must NOT be deleted"
     );
     assert!(
@@ -243,10 +246,10 @@ fn x_on_an_all_done_task_selection_deletes_them_all_after_confirmation() {
 
     let cmds = press(&mut app, 'y');
 
-    assert!(app.find_task(TaskId(1)).is_none());
-    assert!(app.find_task(TaskId(2)).is_none());
+    assert!(app.board.find_task(TaskId(1)).is_none());
+    assert!(app.board.find_task(TaskId(2)).is_none());
     assert!(
-        app.find_task(TaskId(3)).is_some(),
+        app.board.find_task(TaskId(3)).is_some(),
         "unselected task untouched"
     );
     let mut deleted = deleted_task_ids(&cmds);
@@ -278,8 +281,14 @@ fn x_on_a_mixed_task_selection_deletes_nothing() {
     let cmds = press(&mut app, 'y');
 
     assert!(deleted_task_ids(&cmds).is_empty(), "got {cmds:?}");
-    assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Done);
-    assert_eq!(app.find_task(TaskId(2)).unwrap().status, TaskStatus::Done);
+    assert_eq!(
+        app.board.find_task(TaskId(1)).unwrap().status,
+        TaskStatus::Done
+    );
+    assert_eq!(
+        app.board.find_task(TaskId(2)).unwrap().status,
+        TaskStatus::Done
+    );
 }
 
 // --- Single epic --------------------------------------------------------------
@@ -444,7 +453,7 @@ fn batch_delete_with_a_non_done_task_deletes_nothing() {
     assert_eq!(app.board.epics.len(), 1);
     assert_eq!(app.board.tasks.len(), 2);
     assert_eq!(
-        app.find_task(TaskId(5)).unwrap().status,
+        app.board.find_task(TaskId(5)).unwrap().status,
         TaskStatus::Backlog
     );
     assert!(
@@ -466,7 +475,7 @@ fn batch_delete_with_an_epic_holding_unfinished_work_deletes_nothing() {
     assert!(deleted_task_ids(&cmds).is_empty(), "got {cmds:?}");
     assert!(deleted_epic_ids(&cmds).is_empty(), "got {cmds:?}");
     assert!(
-        app.find_task(TaskId(5)).is_some(),
+        app.board.find_task(TaskId(5)).is_some(),
         "the Done task is spared too"
     );
     assert_eq!(app.board.epics.len(), 2);

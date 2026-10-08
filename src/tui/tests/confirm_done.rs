@@ -109,8 +109,14 @@ fn x_key_on_all_review_selection_enters_confirm_done_not_archive() {
         app.input.mode
     );
     app.handle_key(make_key(KeyCode::Char('y')));
-    assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Done);
-    assert_eq!(app.find_task(TaskId(2)).unwrap().status, TaskStatus::Done);
+    assert_eq!(
+        app.board.find_task(TaskId(1)).unwrap().status,
+        TaskStatus::Done
+    );
+    assert_eq!(
+        app.board.find_task(TaskId(2)).unwrap().status,
+        TaskStatus::Done
+    );
 }
 
 #[test]
@@ -134,9 +140,12 @@ fn x_key_on_mixed_status_selection_moves_non_done_to_done() {
         app.input.mode
     );
     app.handle_key(make_key(KeyCode::Char('y')));
-    assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Done);
     assert_eq!(
-        app.find_task(TaskId(2)).unwrap().status,
+        app.board.find_task(TaskId(1)).unwrap().status,
+        TaskStatus::Done
+    );
+    assert_eq!(
+        app.board.find_task(TaskId(2)).unwrap().status,
         TaskStatus::Done,
         "the already-Done task in the selection is left untouched"
     );

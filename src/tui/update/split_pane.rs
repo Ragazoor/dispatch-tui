@@ -47,7 +47,7 @@ impl App {
     /// windowless task is routed by status there instead — it never reaches
     /// this handler — so there is no user-facing "no session" case to report.
     pub(in crate::tui) fn handle_swap_split_pane(&mut self, task_id: TaskId) -> Vec<Command> {
-        let task = match self.find_task(task_id) {
+        let task = match self.board.find_task(task_id) {
             Some(t) => t,
             None => return vec![],
         };
@@ -92,7 +92,7 @@ impl App {
             .board
             .split
             .pinned_task_id
-            .and_then(|id| self.find_task(id))
+            .and_then(|id| self.board.find_task(id))
             .and_then(|t| t.tmux_window.clone().zip(t.worktree.clone()));
         self.board.split.in_flight = Some(InFlight::swap());
         vec![Command::Split(crate::tui::commands::SplitCommand::Swap {

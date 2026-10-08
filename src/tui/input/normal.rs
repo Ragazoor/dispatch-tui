@@ -274,7 +274,8 @@ impl App {
                 .iter()
                 .copied()
                 .filter(|id| {
-                    self.find_task(*id)
+                    self.board
+                        .find_task(*id)
                         .is_some_and(|t| t.status != crate::models::TaskStatus::Done)
                 })
                 .collect();
@@ -356,7 +357,8 @@ impl App {
         }
         .or_else(|| {
             self.current_epic_id().and_then(|id| {
-                self.find_epic(id)
+                self.board
+                    .find_epic(id)
                     .filter(|e| e.feed_command.is_some())
                     .map(|e| e.id)
             })

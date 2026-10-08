@@ -39,8 +39,14 @@ fn batch_move_multiple_steps() {
     ));
     app.handle_key(make_key(KeyCode::Char('L')));
 
-    assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Review);
-    assert_eq!(app.find_task(TaskId(2)).unwrap().status, TaskStatus::Review);
+    assert_eq!(
+        app.board.find_task(TaskId(1)).unwrap().status,
+        TaskStatus::Review
+    );
+    assert_eq!(
+        app.board.find_task(TaskId(2)).unwrap().status,
+        TaskStatus::Review
+    );
 }
 
 #[test]

@@ -978,7 +978,7 @@ fn confirm_detach_tmux_clears_window() {
         "tmux_window should be cleared"
     );
     assert_ne!(
-        app.find_task(TaskId(1)).unwrap().sub_status,
+        app.board.find_task(TaskId(1)).unwrap().sub_status,
         SubStatus::Stale,
         "stale tracking should be cleared"
     );

@@ -9,7 +9,7 @@ use super::super::App;
 impl App {
     pub(in crate::tui) fn handle_kill_and_retry(&mut self, id: TaskId) -> Vec<Command> {
         self.input.mode = InputMode::ConfirmRetry(id);
-        let task = self.find_task(id);
+        let task = self.board.find_task(id);
 
         // An unprovisioned task has no worktree to resume into, so [r] would
         // dead-end on "Cannot resume: task has no worktree". Offer only the

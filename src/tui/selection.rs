@@ -24,15 +24,6 @@ impl App {
         items.into_iter().filter(|i| i.is_selectable()).nth(row)
     }
 
-    /// Look up the title of an epic by ID.
-    pub fn epic_title(&self, id: EpicId) -> Option<&str> {
-        self.board
-            .epics
-            .iter()
-            .find(|e| e.id == id)
-            .map(|e| e.title.as_str())
-    }
-
     /// Return the currently selected task (if the cursor is on a task), or None
     /// if the cursor is on an epic or the column is empty.
     pub fn selected_task(&self) -> Option<&Task> {

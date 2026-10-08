@@ -18,7 +18,7 @@ impl App {
         if self.board.split.active && self.board.split.pinned_task_id == Some(id) {
             return vec![];
         }
-        if let Some(task) = self.find_task(id) {
+        if let Some(task) = self.board.find_task(id) {
             if task.status == TaskStatus::Running {
                 // Running task lost its window — likely crashed
                 return self.handle_agent_crashed(id);
@@ -96,7 +96,7 @@ impl App {
     /// state when the task leaves the triggering state.
     fn detect_task_transition_notifications(&mut self, new_task: &Task) -> Vec<Command> {
         let mut cmds = Vec::new();
-        let old_task = self.find_task(new_task.id);
+        let old_task = self.board.find_task(new_task.id);
         let was_needs_input = old_task.is_some_and(|t| t.sub_status == SubStatus::NeedsInput);
         let was_review = old_task.is_some_and(|t| t.status == TaskStatus::Review);
         let old_peer_message_sent_at = old_task.and_then(|t| t.last_peer_message_sent_at);
@@ -512,6 +512,7 @@ impl App {
     pub(in crate::tui) fn handle_agent_crashed(&mut self, id: TaskId) -> Vec<Command> {
         // Only applies to Running tasks
         if !self
+            .board
             .find_task(id)
             .is_some_and(|t| t.status == TaskStatus::Running)
         {
@@ -538,7 +539,7 @@ impl App {
             // the Crashed-and-in-Review contradiction from this bit any more.
             task.stop_pending = false;
         }
-        if let Some(task) = self.find_task(id) {
+        if let Some(task) = self.board.find_task(id) {
             cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
                 crate::tui::commands::PersistFields::from_task(task),
             )));
@@ -555,7 +556,7 @@ impl App {
             .set(format!("Task {id} agent crashed - press d to retry",));
 
         if self.notifications_enabled {
-            if let Some(task) = self.find_task(id) {
+            if let Some(task) = self.board.find_task(id) {
                 cmds.push(Command::System(
                     crate::tui::commands::SystemCommand::SendNotification {
                         title: format!("Task #{}: {}", task.id.0, task.title),
@@ -570,7 +571,7 @@ impl App {
 
     pub(in crate::tui) fn handle_resume_task(&mut self, id: TaskId) -> Vec<Command> {
         let local_host_id = self.local_host_id().map(str::to_string);
-        if let Some(task) = self.find_task(id) {
+        if let Some(task) = self.board.find_task(id) {
             if !matches!(
                 task.status,
                 TaskStatus::Running | TaskStatus::Review | TaskStatus::Done

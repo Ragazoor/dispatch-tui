@@ -663,11 +663,11 @@ fn batch_move_forward_moves_all_selected() {
 
     // Both should now be Running
     assert_eq!(
-        app.find_task(TaskId(1)).unwrap().status,
+        app.board.find_task(TaskId(1)).unwrap().status,
         TaskStatus::Running
     );
     assert_eq!(
-        app.find_task(TaskId(2)).unwrap().status,
+        app.board.find_task(TaskId(2)).unwrap().status,
         TaskStatus::Running
     );
     // Should have PersistTask commands
@@ -715,10 +715,19 @@ fn batch_move_backward() {
 
     app.handle_key(make_key(KeyCode::Char('H')));
 
-    assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Review);
-    assert_eq!(app.find_task(TaskId(2)).unwrap().status, TaskStatus::Review);
+    assert_eq!(
+        app.board.find_task(TaskId(1)).unwrap().status,
+        TaskStatus::Review
+    );
+    assert_eq!(
+        app.board.find_task(TaskId(2)).unwrap().status,
+        TaskStatus::Review
+    );
     // Task 3 not selected, should remain Done
-    assert_eq!(app.find_task(TaskId(3)).unwrap().status, TaskStatus::Done);
+    assert_eq!(
+        app.board.find_task(TaskId(3)).unwrap().status,
+        TaskStatus::Done
+    );
 }
 
 #[test]
@@ -729,7 +738,7 @@ fn single_task_operations_work_without_selection() {
     // Single move should still work
     let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert_eq!(
-        app.find_task(TaskId(1)).unwrap().status,
+        app.board.find_task(TaskId(1)).unwrap().status,
         TaskStatus::Running
     );
     assert!(!cmds.is_empty());
@@ -1412,7 +1421,7 @@ fn move_task_forward_resets_substatus() {
         id,
         direction: MoveDirection::Forward,
     }));
-    let task = app.find_task(id).unwrap();
+    let task = app.board.find_task(id).unwrap();
     assert_eq!(task.status, TaskStatus::Review);
     assert_eq!(task.sub_status, SubStatus::AwaitingReview);
 }
@@ -1425,7 +1434,7 @@ fn move_task_backward_resets_substatus() {
         id,
         direction: MoveDirection::Backward,
     }));
-    let task = app.find_task(id).unwrap();
+    let task = app.board.find_task(id).unwrap();
     assert_eq!(task.status, TaskStatus::Backlog);
     assert_eq!(task.sub_status, SubStatus::None);
 }
@@ -1447,7 +1456,7 @@ fn shift_l_with_mixed_selection_moves_tasks_only() {
     app.handle_key(make_key(KeyCode::Char('L')));
     // Task should move forward
     assert_eq!(
-        app.find_task(TaskId(1)).unwrap().status,
+        app.board.find_task(TaskId(1)).unwrap().status,
         TaskStatus::Running
     );
 }
@@ -2545,7 +2554,7 @@ fn reorder_task_down_into_epic_persists_both_and_swaps_sort_order() {
         crate::tui::messages::TaskMessage::ReorderItem(1),
     ));
 
-    let task = app.find_task(TaskId(1)).unwrap();
+    let task = app.board.find_task(TaskId(1)).unwrap();
     let epic = app.board.epics.iter().find(|e| e.id == EpicId(10)).unwrap();
     assert_eq!(task.sort_order, Some(10));
     assert_eq!(epic.sort_order, Some(1));
@@ -2574,7 +2583,7 @@ fn reorder_epic_up_into_task_persists_both_and_swaps_sort_order() {
         crate::tui::messages::TaskMessage::ReorderItem(-1),
     ));
 
-    let task = app.find_task(TaskId(1)).unwrap();
+    let task = app.board.find_task(TaskId(1)).unwrap();
     let epic = app.board.epics.iter().find(|e| e.id == EpicId(10)).unwrap();
     assert_eq!(epic.sort_order, Some(1));
     assert_eq!(task.sort_order, Some(10));
@@ -2599,7 +2608,7 @@ fn reorder_tied_effective_sort_moving_down_offsets_mover_by_plus_one() {
         crate::tui::messages::TaskMessage::ReorderItem(1),
     ));
 
-    let task = app.find_task(TaskId(7)).unwrap();
+    let task = app.board.find_task(TaskId(7)).unwrap();
     let epic = app.board.epics.iter().find(|e| e.id == EpicId(7)).unwrap();
     assert_eq!(task.sort_order, Some(8), "tied mover moving down gets +1");
     assert_eq!(epic.sort_order, Some(7));
@@ -2617,7 +2626,7 @@ fn reorder_tied_effective_sort_moving_up_offsets_mover_by_minus_one() {
         crate::tui::messages::TaskMessage::ReorderItem(-1),
     ));
 
-    let task = app.find_task(TaskId(8)).unwrap();
+    let task = app.board.find_task(TaskId(8)).unwrap();
     let epic = app.board.epics.iter().find(|e| e.id == EpicId(8)).unwrap();
     assert_eq!(epic.sort_order, Some(7), "tied mover moving up gets -1");
     assert_eq!(task.sort_order, Some(8));

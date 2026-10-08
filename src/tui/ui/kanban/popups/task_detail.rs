@@ -48,7 +48,7 @@ fn metadata_lines(app: &App, task: &Task) -> Vec<Line<'static>> {
     field("Repo:  ", task.repo_path.clone());
 
     if let Some(epic_id) = task.epic_id {
-        let epic_title = app.epic_title(epic_id).unwrap_or("").to_string();
+        let epic_title = app.board.epic_title(epic_id).unwrap_or("").to_string();
         field("Epic:  ", format!("#{} — {}", epic_id, epic_title));
     }
 
