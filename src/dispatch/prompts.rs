@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::models::{EpicId, FeedRole, Learning, RetrievalSource, Task, TaskId, TaskTag};
-use crate::service::embeddings::{
+use crate::embeddings::{
     deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, EmbeddingService,
     RagRankParams,
 };
+use crate::models::{EpicId, FeedRole, Learning, RetrievalSource, Task, TaskId, TaskTag};
 use crate::store;
 
 use crate::claude_paths::{claude_dir_name, plugin_dir_rel, statusline_settings_name};
@@ -1041,7 +1041,7 @@ impl Default for PromptContext<'_> {
     }
 }
 
-pub use crate::service::embeddings::RAG_SIMILARITY_THRESHOLD as DISPATCH_RAG_THRESHOLD;
+pub use crate::embeddings::RAG_SIMILARITY_THRESHOLD as DISPATCH_RAG_THRESHOLD;
 
 /// Build the learning injections for a dispatch prompt using the RAG pipeline.
 ///

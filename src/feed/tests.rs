@@ -8,14 +8,14 @@ use super::exec::AlwaysFailRunner;
 
 // --- FeedRunner tests ---
 
-fn make_runner(db: Arc<Store>) -> (FeedRunner, mpsc::UnboundedReceiver<McpEvent>) {
+fn make_runner(db: Arc<Store>) -> (FeedRunner, mpsc::UnboundedReceiver<BoardEvent>) {
     make_runner_with_runner(db, Arc::new(AlwaysFailRunner))
 }
 
 fn make_runner_with_runner(
     db: Arc<Store>,
     runner: Arc<dyn ProcessRunner>,
-) -> (FeedRunner, mpsc::UnboundedReceiver<McpEvent>) {
+) -> (FeedRunner, mpsc::UnboundedReceiver<BoardEvent>) {
     let (tx, rx) = mpsc::unbounded_channel();
     let board_reads: Arc<dyn crate::sync::BoardReads> = db.clone();
     (
@@ -61,7 +61,7 @@ async fn tick_background_task_upserts_tasks() {
 
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent::Refresh")
+        .expect("timed out waiting for BoardEvent::Refresh")
         .expect("channel closed");
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -94,7 +94,7 @@ async fn tick_done_epic_moves_to_backlog_when_new_feed_tasks_added() {
 
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent")
+        .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
     // After the feed adds a new backlog task, the epic must regress to backlog.
@@ -123,7 +123,7 @@ async fn tick_valid_json_upserts_tasks() {
 
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent::Refresh")
+        .expect("timed out waiting for BoardEvent::Refresh")
         .expect("channel closed");
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -155,7 +155,7 @@ async fn tick_stderr_on_zero_exit_does_not_suppress_sync() {
 
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent::Refresh")
+        .expect("timed out waiting for BoardEvent::Refresh")
         .expect("channel closed");
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -422,7 +422,7 @@ async fn tick_persists_feed_tag() {
 
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent::Refresh")
+        .expect("timed out waiting for BoardEvent::Refresh")
         .expect("channel closed");
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -829,7 +829,7 @@ async fn tick_done_epic_grouped_moves_to_backlog_when_new_feed_tasks_added() {
 
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent")
+        .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
     // After the feed adds a new backlog task into a sub-epic, the parent
@@ -922,7 +922,7 @@ async fn tick_grouped_uses_other_for_no_url() {
 /// Drain all pending `EpicChanged` events, returning once the channel has
 /// been quiet for the timeout window. Used by routing tests to wait for the
 /// spawned reconcile(s) to finish without `tokio::time::sleep`.
-async fn drain_events(rx: &mut mpsc::UnboundedReceiver<McpEvent>) {
+async fn drain_events(rx: &mut mpsc::UnboundedReceiver<BoardEvent>) {
     while tokio::time::timeout(Duration::from_secs(2), rx.recv())
         .await
         .is_ok_and(|m| m.is_some())
@@ -1164,7 +1164,7 @@ async fn start_background_task_eventually_runs_feed_command() {
     // the EpicChanged event the background task emits after upserting.
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent")
+        .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1196,7 +1196,7 @@ async fn tick_github_url_resolves_to_known_repo_path() {
     // Await the background upsert deterministically.
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent")
+        .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1225,7 +1225,7 @@ async fn tick_no_matching_repo_stores_empty_sentinel() {
 
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent")
+        .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1251,7 +1251,7 @@ async fn tick_empty_url_stores_empty_sentinel() {
 
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent")
+        .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1336,7 +1336,7 @@ async fn tick_resolves_default_branch_per_unique_repo() {
     // Await the spawned task finishing its writes deterministically.
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent")
+        .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1376,7 +1376,7 @@ async fn tick_falls_back_to_main_when_origin_head_missing() {
     runner.tick().await;
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent")
+        .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1538,7 +1538,7 @@ async fn tick_re_queries_after_epic_changed_invalidation() {
     runner.tick().await;
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent after cache invalidation")
+        .expect("timed out waiting for BoardEvent after cache invalidation")
         .expect("channel closed");
 
     let tasks = db.list_tasks_for_epic(epic2.id).await.unwrap();
@@ -1564,7 +1564,7 @@ async fn tick_non_github_url_stores_empty_sentinel() {
 
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent")
+        .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();

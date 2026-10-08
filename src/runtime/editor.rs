@@ -14,10 +14,10 @@ use crate::editor::{
     format_editor_content, format_epic_for_editor, parse_editor_content, parse_epic_editor_output,
     TaskEditApplied,
 };
+#[cfg(test)]
+use crate::embeddings::EmbeddingService;
 use crate::models::TmuxWindow;
 use crate::process::ProcessRunner;
-#[cfg(test)]
-use crate::service::embeddings::EmbeddingService;
 use crate::service::{UpdateEpicParams, UpdateTaskParams};
 use crate::tui::{App, Command, EditKind, EditorOutcome, Message};
 use crate::{models, tmux};

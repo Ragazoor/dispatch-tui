@@ -8,7 +8,7 @@ When an MCP handler mutates the database, the TUI must refresh to show the chang
 MCP handler (e.g. handle_update_task)
   → mutates via state.task_svc / state.epic_svc   # never state.db — that's a compile error
   → calls state.notify()                          # McpState method
-    → sends McpEvent::Refresh via mpsc::UnboundedSender
+    → sends BoardEvent::Refresh via mpsc::UnboundedSender
       → runtime event loop receives it             # tokio::select! in run_event_loop()
         → calls rt.exec_refresh_from_db(app)
           → reads all tasks/epics from DB
@@ -17,12 +17,12 @@ MCP handler (e.g. handle_update_task)
 ```
 
 Key types in the chain:
-- `McpEvent` (`src/mcp/mod.rs::McpEvent`) — `Refresh` (catch-all full reload), `TaskChanged(TaskId)` / `EpicChanged(EpicId)` (targeted single-row reloads, preferred when the changed entity is known)
+- `BoardEvent` (`src/board_event.rs::BoardEvent`) — `Refresh` (catch-all full reload), `TaskChanged(TaskId)` / `EpicChanged(EpicId)` (targeted single-row reloads, preferred when the changed entity is known)
 - `McpState::notify()` — fire-and-forget send on the channel
 - `TuiRuntime::exec_refresh_from_db()` (`src/runtime/tasks.rs`) — reloads tasks, epics, and usage from DB
 - `TaskMessage::Refresh` (`src/tui/messages/task.rs`) — carries the fresh task list into the App, wrapped as `Message::Task`
 
-Agent-to-agent messaging (task #4098) no longer has an `McpEvent` of its own —
+Agent-to-agent messaging (task #4098) no longer has an `BoardEvent` of its own —
 agents call Claude Code's native `SendMessage` directly, and dispatch observes
 it via the Claude Code hook pipeline rather than through this MCP-server
 notification channel. The observed timestamps
@@ -35,7 +35,7 @@ accordingly. See `HookPeerMessageSent` in `docs/specs/agent-health.allium`.
 Hooks deliberately do **not** reach that channel. Every Claude Code hook now
 posts to `/hook`, served by the same Axum router as `/mcp`
 (`src/mcp/handlers/hooks.rs::handle_hook`), but an applied event emits no
-`McpEvent`: a `PreToolUse` arrives on every tool call of every live session, so
+`BoardEvent`: a `PreToolUse` arrives on every tool call of every live session, so
 a notification each would cost one extra row read and one full repaint per tool
 call, in the process that also draws the board. The tick-driven refresh that
 picked these writes up when hooks wrote to the database directly still does, at

@@ -11,10 +11,10 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
 
-use crate::mcp::McpEvent;
+use crate::board_event::BoardEvent;
+use crate::models::{decide_poll_action, PollAction};
 use crate::models::{Epic, EpicId, MIN_FEED_INTERVAL_SECS};
 use crate::process::ProcessRunner;
-use crate::runtime::poll_ownership::{decide_poll_action, PollAction};
 use crate::store::{RemovedFeedTask, TaskStore};
 
 pub(crate) use cycle::{FeedCycle, FeedCycleOutcome};
@@ -228,7 +228,7 @@ fn epic_due(epic: &Epic, last_run: &HashMap<EpicId, Instant>, now: Instant) -> b
 
 pub struct FeedRunner {
     db: Arc<dyn TaskStore>,
-    notify: mpsc::UnboundedSender<McpEvent>,
+    notify: mpsc::UnboundedSender<BoardEvent>,
     runner: Arc<dyn ProcessRunner>,
     last_run: HashMap<EpicId, Instant>,
     /// Cached result of "does any epic have a feed command?".
@@ -258,7 +258,7 @@ pub struct FeedRunner {
     /// Test-only join handles for the jobs spawned by `tick`. Production keeps
     /// firing-and-forgetting: the field, and the push that fills it, exist only
     /// under `cfg(test)`. Tests need it because some feed-cycle outcomes
-    /// deliberately send no `McpEvent` — the degraded-empty-emission guard
+    /// deliberately send no `BoardEvent` — the degraded-empty-emission guard
     /// (feeds.allium: DegradedEmptyEmission) returns before any sync — so
     /// awaiting `rx` is not a usable completion signal there, and sleeping is
     /// banned by `./scripts/check-no-test-sleep.sh`.
@@ -269,7 +269,7 @@ pub struct FeedRunner {
 impl FeedRunner {
     pub fn new(
         db: Arc<dyn TaskStore>,
-        notify: mpsc::UnboundedSender<McpEvent>,
+        notify: mpsc::UnboundedSender<BoardEvent>,
         runner: Arc<dyn ProcessRunner>,
         board_reads: Arc<dyn crate::sync::BoardReads>,
         host_id: String,
@@ -300,7 +300,7 @@ impl FeedRunner {
     }
 
     /// Await every job spawned by the ticks run so far, draining the handle
-    /// list. Deterministic replacement for "wait for an `McpEvent`" in tests
+    /// list. Deterministic replacement for "wait for an `BoardEvent`" in tests
     /// covering paths that emit no event.
     #[cfg(test)]
     pub(crate) async fn join_spawned_jobs(&mut self) {
@@ -493,7 +493,7 @@ impl FeedRunner {
                 // RoleRoutedFeedSync).
                 FeedCycleOutcome::Synced { affected_epics, .. } => {
                     for id in affected_epics {
-                        let _ = notify.send(McpEvent::EpicChanged(id));
+                        let _ = notify.send(BoardEvent::EpicChanged(id));
                     }
                 }
                 // Both already logged by the cycle. The auto-poll path adds

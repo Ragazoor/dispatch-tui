@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use crate::embeddings::{serialize_embedding, EmbeddingService};
 use crate::models::{LearningKind, LearningScope, TaskStatus};
-use crate::service::embeddings::{serialize_embedding, EmbeddingService};
 use crate::store::{
     CreateLearningRow, CreateTaskRequest, LearningRetrievalStore, LearningStore, Store, TaskCrud,
     TaskRead,

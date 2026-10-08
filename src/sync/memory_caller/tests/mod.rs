@@ -1,8 +1,8 @@
 //! Tests for the in-process reducer twin, one file per domain.
 
 use super::*;
+use crate::clock::FixedClock;
 use crate::models::EpicId;
-use crate::service::FixedClock;
 use chrono::{TimeZone, Utc};
 
 /// A valid `created_at`/`updated_at` for fixtures — `required_timestamp`

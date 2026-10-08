@@ -178,7 +178,7 @@ mod epic_tests {
     /// `set_managed_feed_config` notifies the runtime, not stay stranded behind the
     /// FeedRunner's `any_feed_cmds == Some(false)` short-circuit until an unrelated
     /// EpicChanged or a restart. MCP is now the only configuration path, so the
-    /// `McpEvent::Refresh` arm is the only thing that can invalidate the cache.
+    /// `BoardEvent::Refresh` arm is the only thing that can invalidate the cache.
     #[tokio::test]
     async fn mcp_refresh_invalidates_feed_runner_cache_after_enabling_a_feed() {
         let (mut rt, mut app) = test_runtime().await;
@@ -203,7 +203,11 @@ mod epic_tests {
             .await
             .unwrap();
         rt.epic_svc.provision_managed_feeds(settings).await.unwrap();
-        apply_loop_event(&mut app, LoopEvent::Mcp(mcp::McpEvent::Refresh), &rt);
+        apply_loop_event(
+            &mut app,
+            LoopEvent::Mcp(crate::board_event::BoardEvent::Refresh),
+            &rt,
+        );
 
         // The refresh must have invalidated the cache so the next tick re-queries
         // and discovers the freshly-provisioned reviews_parent feed command.

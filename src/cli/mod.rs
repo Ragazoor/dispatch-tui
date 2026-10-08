@@ -36,18 +36,6 @@ pub(crate) fn half_page(viewport_rows: usize) -> usize {
     (viewport_rows / 2).max(1)
 }
 
-/// The usage event for a pane keypress that took effect: the row's action id
-/// and the key as the board records it. `PanesRecordUsageLikeTheBoard` in
-/// `docs/specs/keybindings.allium`.
-pub(crate) fn pane_key_event(action: &str, label: &str) -> crate::models::UsageEvent {
-    crate::models::UsageEvent {
-        category: crate::models::UsageCategory::Keybinding,
-        action: action.to_string(),
-        detail: Some(label.to_string()),
-        actor: crate::models::UsageActor::Human,
-    }
-}
-
 /// Sends a pane's keypress usage to the running board, which records it
 /// (`PanesReadThroughTheBoard`: a pane opens no store connection of its own,
 /// so its presses reach the usage store the way its reads do, over the

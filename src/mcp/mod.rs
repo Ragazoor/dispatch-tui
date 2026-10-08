@@ -11,61 +11,14 @@ use uuid::Uuid;
 use axum::{routing::post, Router};
 use tokio::sync::mpsc;
 
+use crate::board_event::BoardEvent;
+use crate::embeddings::EmbeddingService;
 use crate::models::{EpicId, TaskId};
 use crate::process::ProcessRunner;
-use crate::service::embeddings::EmbeddingService;
 use crate::service::{
     EpicService, EpicServiceApi, LearningService, LearningServiceApi, TaskService, TaskServiceApi,
 };
 use crate::store;
-
-/// Events sent from the MCP server to the TUI runtime.
-#[derive(Debug)]
-pub enum McpEvent {
-    /// Catch-all "I don't know what changed" — full reload of tasks, epics, and usage.
-    /// Prefer the targeted variants below when the changed entity is known.
-    Refresh,
-    /// A single task changed — reload just that row.
-    TaskChanged(TaskId),
-    /// A single epic changed — reload just that row (and the epic's task list,
-    /// since feed-sync changes appear here as a batch update for the epic).
-    EpicChanged(EpicId),
-    /// A `wrap_up(rebase)` succeeded, so the repository's local base branch was
-    /// just fast-forwarded and its drift changed (docs/specs/repo-sync.allium:
-    /// rule RefreshRepoSyncStateAfterRebase). Carries the repository taken from
-    /// the rebased branch's task, which in practice always names one; the
-    /// consumer still treats an empty path as "no repository" and measures
-    /// nothing, so a future emitter that cannot resolve one has a safe encoding.
-    BranchRebased { repo_path: String },
-    /// An agent was launched off-board — by the `dispatch_task` tool or by epic
-    /// auto-dispatch chaining — so the repository's worktree provisioning just
-    /// fetched `origin/<base>` and its drift measurement is out of date
-    /// (docs/specs/repo-sync.allium: rule RefreshRepoSyncStateAfterDispatch).
-    /// That rule's obligation is per-event, not per-surface: the board emits its
-    /// own refresh command directly, and these two paths owe the same refresh.
-    ///
-    /// Carries the repository rather than the task, for the same reason
-    /// [`McpEvent::BranchRebased`] does: the emitter already holds the task that
-    /// names it, and no other key identifies a repository unambiguously. No mode
-    /// travels with it because neither emitter can produce the one mode the rule
-    /// excludes — `resume` provisions nothing and has no MCP entry point.
-    AgentLaunched { repo_path: String },
-    /// An epic's auto-dispatch chain claimed a subtask and then failed to
-    /// provision it, so the subtask was released back to backlog and the epic
-    /// stopped progressing (docs/specs/epics.allium: rule
-    /// `SurfaceAutoDispatchFailure`).
-    ///
-    /// Carries the subtask, its epic and the reason, because all three are
-    /// needed to say anything useful: the board marks the card, names the task
-    /// in a status message, and reports why. Only the two failure arms that
-    /// already hold a claimed subtask emit it — an unresolvable epic or an
-    /// errored claim fails before one is selected and stays log-only.
-    AutoDispatchFailed {
-        task_id: TaskId,
-        epic_id: EpicId,
-        reason: String,
-    },
-}
 
 /// Identifies a fire-and-forget background write performed by the MCP handler.
 ///
@@ -137,7 +90,7 @@ pub struct McpState {
     pub epic_svc: Arc<dyn EpicServiceApi>,
     pub learning_svc: Arc<dyn LearningServiceApi>,
     /// When set, MCP sends events after mutations to trigger TUI updates.
-    pub notify_tx: Option<mpsc::UnboundedSender<McpEvent>>,
+    pub notify_tx: Option<mpsc::UnboundedSender<BoardEvent>>,
     // Deliberately no `runner`: no handler shells out. Every subprocess a
     // handler used to reach for — the dispatch provisioning, the wrap-up
     // rebase, the session-close tmux teardown — now happens behind
@@ -174,7 +127,7 @@ pub(crate) struct TestHooks {
 }
 
 impl McpState {
-    pub fn new(deps: McpDeps, notify_tx: Option<mpsc::UnboundedSender<McpEvent>>) -> Self {
+    pub fn new(deps: McpDeps, notify_tx: Option<mpsc::UnboundedSender<BoardEvent>>) -> Self {
         let task_svc: Arc<dyn TaskServiceApi> =
             Arc::new(TaskService::new(deps.db.clone(), deps.runner.clone()));
         let epic_svc: Arc<dyn EpicServiceApi> =
@@ -205,7 +158,7 @@ impl McpState {
 
     pub fn notify(&self) {
         if let Some(tx) = &self.notify_tx {
-            let _ = tx.send(McpEvent::Refresh);
+            let _ = tx.send(BoardEvent::Refresh);
         }
     }
 
@@ -221,7 +174,7 @@ impl McpState {
     /// runtime reload one row instead of all tasks.
     pub fn notify_task_changed(&self, task_id: TaskId) {
         if let Some(tx) = &self.notify_tx {
-            let _ = tx.send(McpEvent::TaskChanged(task_id));
+            let _ = tx.send(BoardEvent::TaskChanged(task_id));
         }
     }
 
@@ -229,7 +182,7 @@ impl McpState {
     /// updates and for feed-sync batches (one event per sync, not per task).
     pub fn notify_epic_changed(&self, epic_id: EpicId) {
         if let Some(tx) = &self.notify_tx {
-            let _ = tx.send(McpEvent::EpicChanged(epic_id));
+            let _ = tx.send(BoardEvent::EpicChanged(epic_id));
         }
     }
 
@@ -238,7 +191,7 @@ impl McpState {
     /// (docs/specs/repo-sync.allium: rule RefreshRepoSyncStateAfterRebase).
     pub(crate) fn notify_branch_rebased(&self, repo_path: &str) {
         if let Some(tx) = &self.notify_tx {
-            let _ = tx.send(McpEvent::BranchRebased {
+            let _ = tx.send(BoardEvent::BranchRebased {
                 repo_path: repo_path.to_string(),
             });
         }
@@ -251,7 +204,7 @@ impl McpState {
     /// provisioning moved nothing.
     pub(crate) fn notify_agent_launched(&self, repo_path: &str) {
         if let Some(tx) = &self.notify_tx {
-            let _ = tx.send(McpEvent::AgentLaunched {
+            let _ = tx.send(BoardEvent::AgentLaunched {
                 repo_path: repo_path.to_string(),
             });
         }
@@ -276,7 +229,7 @@ impl McpState {
     }
 }
 
-pub fn router(deps: McpDeps, notify_tx: Option<mpsc::UnboundedSender<McpEvent>>) -> Router {
+pub fn router(deps: McpDeps, notify_tx: Option<mpsc::UnboundedSender<BoardEvent>>) -> Router {
     router_with_bg_done(deps, notify_tx, None)
 }
 
@@ -285,7 +238,7 @@ pub fn router(deps: McpDeps, notify_tx: Option<mpsc::UnboundedSender<McpEvent>>)
 /// tests await detached writes deterministically instead of sleeping.
 pub fn router_with_bg_done(
     deps: McpDeps,
-    notify_tx: Option<mpsc::UnboundedSender<McpEvent>>,
+    notify_tx: Option<mpsc::UnboundedSender<BoardEvent>>,
     bg_write_done_tx: Option<mpsc::UnboundedSender<BackgroundWrite>>,
 ) -> Router {
     let mut state = McpState::new(deps, notify_tx);
@@ -330,7 +283,7 @@ pub async fn bind(port: u16) -> anyhow::Result<tokio::net::TcpListener> {
 pub async fn serve_on(
     listener: tokio::net::TcpListener,
     deps: McpDeps,
-    notify_tx: mpsc::UnboundedSender<McpEvent>,
+    notify_tx: mpsc::UnboundedSender<BoardEvent>,
 ) -> anyhow::Result<()> {
     let app = router(deps, Some(notify_tx));
     axum::serve(listener, app).await?;

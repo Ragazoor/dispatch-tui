@@ -71,6 +71,21 @@ pub struct UsageEvent {
     pub actor: UsageActor,
 }
 
+impl UsageEvent {
+    /// The usage event for a pane keypress that took effect: the row's action
+    /// id and the key as the board records it. `PanesRecordUsageLikeTheBoard`
+    /// in `docs/specs/keybindings.allium`. Built by the panes (`src/cli/`) and
+    /// by the hook handler that records them (`src/mcp/handlers/hooks.rs`).
+    pub(crate) fn pane_key(action: &str, label: &str) -> Self {
+        UsageEvent {
+            category: UsageCategory::Keybinding,
+            action: action.to_string(),
+            detail: Some(label.to_string()),
+            actor: UsageActor::Human,
+        }
+    }
+}
+
 /// Aggregated usage row returned by query_usage.
 #[derive(Debug, Clone)]
 pub struct UsageSummary {
@@ -93,6 +108,15 @@ mod tests {
     fn usage_category_and_actor_all_have_every_variant() {
         assert_eq!(UsageCategory::ALL.len(), 2);
         assert_eq!(UsageActor::ALL.len(), 2);
+    }
+
+    #[test]
+    fn a_pane_key_is_a_human_keybinding_with_its_label_as_detail() {
+        let event = UsageEvent::pane_key("open_diff", "Enter");
+        assert_eq!(event.category, UsageCategory::Keybinding);
+        assert_eq!(event.action, "open_diff");
+        assert_eq!(event.detail.as_deref(), Some("Enter"));
+        assert_eq!(event.actor, UsageActor::Human);
     }
 
     #[test]

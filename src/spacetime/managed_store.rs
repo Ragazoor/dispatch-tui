@@ -46,7 +46,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::process::ProcessRunner;
-use crate::startup::StartupAbort;
+use crate::startup_abort::StartupAbort;
 
 /// `startup.allium`'s `config.managed_store_address`. Loopback only.
 pub const MANAGED_STORE_ADDRESS: &str = "127.0.0.1:3000";

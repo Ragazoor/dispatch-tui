@@ -554,9 +554,7 @@ fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
     if !spacetime_available_or_skip() {
         return;
     }
-    use dispatch_tui::service::embeddings::{
-        rag_rank_learnings, serialize_embedding, RagRankParams,
-    };
+    use dispatch_tui::embeddings::{rag_rank_learnings, serialize_embedding, RagRankParams};
     use dispatch_tui::store::LearningFilter;
 
     let instance = Instance::start("module-test");
@@ -643,12 +641,7 @@ fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
 
         let decoded: Vec<(dispatch_tui::models::Learning, Vec<f32>)> = candidates
             .into_iter()
-            .map(|(l, bytes)| {
-                (
-                    l,
-                    dispatch_tui::service::embeddings::deserialize_embedding(&bytes),
-                )
-            })
+            .map(|(l, bytes)| (l, dispatch_tui::embeddings::deserialize_embedding(&bytes)))
             .collect();
 
         let ranked = rag_rank_learnings(

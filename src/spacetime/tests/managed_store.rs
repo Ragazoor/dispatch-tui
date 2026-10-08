@@ -25,7 +25,7 @@ use crate::spacetime::managed_store::{
     SpacetimeCliPublisher, StoreSelection, MANAGED_DATABASE_NAME, MANAGED_STORE_ADDRESS,
     MANAGED_STORE_START_TIMEOUT, MANAGED_STORE_STOP_TIMEOUT, MODULE_HASH_FILE,
 };
-use crate::startup::StartupAbort;
+use crate::startup_abort::StartupAbort;
 
 const EMBEDDED: &str = "sha256:embedded";
 const OLDER: &str = "sha256:older";

@@ -152,7 +152,7 @@ pub struct EpicService {
     /// first. Separate from `db` because the two sit on opposite sides of the
     /// store seam — see "The store seam" in `docs/conventions.md`.
     learnings: Arc<dyn store::LearningStore>,
-    clock: Arc<dyn crate::service::Clock>,
+    clock: Arc<dyn crate::clock::Clock>,
 }
 
 impl EpicService {
@@ -163,14 +163,14 @@ impl EpicService {
         Self {
             db,
             learnings,
-            clock: Arc::new(crate::service::SystemClock),
+            clock: Arc::new(crate::clock::SystemClock),
         }
     }
 
     /// Override the clock used for the Done-transition completion stamp.
     /// Tests inject a `FixedClock` for determinism; mirrors
     /// `TaskService::with_clock`.
-    pub fn with_clock(mut self, clock: Arc<dyn crate::service::Clock>) -> Self {
+    pub fn with_clock(mut self, clock: Arc<dyn crate::clock::Clock>) -> Self {
         self.clock = clock;
         self
     }

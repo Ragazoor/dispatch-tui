@@ -655,7 +655,7 @@ mod tests {
         let db: Arc<dyn crate::store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
         let svc: Arc<dyn LearningServiceApi> = Arc::new(LearningService::new(
             db,
-            crate::service::embeddings::EmbeddingService::new_test(),
+            crate::embeddings::EmbeddingService::new_test(),
         ));
 
         let id = svc

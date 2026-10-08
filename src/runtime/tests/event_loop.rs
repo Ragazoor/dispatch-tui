@@ -75,7 +75,7 @@ fn status_info(text: &str) -> Message {
 async fn next_loop_event_drains_messages_in_order() {
     let (_key_tx, mut key_rx) = mpsc::unbounded_channel::<KeyEvent>();
     let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<Message>();
-    let (_mcp_tx, mut mcp_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
+    let (_mcp_tx, mut mcp_rx) = mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
     let mut tick = quiet_tick();
 
     msg_tx.send(status_info("first")).unwrap();
@@ -229,7 +229,11 @@ async fn apply_loop_event_mcp_refresh_spawns_and_yields_no_commands() {
     let (rt, mut app) = test_runtime().await;
     app.dirty = false;
 
-    let cmds = apply_loop_event(&mut app, LoopEvent::Mcp(mcp::McpEvent::Refresh), &rt);
+    let cmds = apply_loop_event(
+        &mut app,
+        LoopEvent::Mcp(crate::board_event::BoardEvent::Refresh),
+        &rt,
+    );
 
     assert!(app.dirty, "an MCP event must mark the app dirty");
     assert!(
@@ -261,7 +265,7 @@ async fn apply_loop_event_mcp_task_changed_spawns_a_targeted_refresh() {
 
     let cmds = apply_loop_event(
         &mut app,
-        LoopEvent::Mcp(mcp::McpEvent::TaskChanged(id)),
+        LoopEvent::Mcp(crate::board_event::BoardEvent::TaskChanged(id)),
         &rt,
     );
 
@@ -294,7 +298,7 @@ async fn apply_loop_event_mcp_epic_changed_spawns_a_targeted_refresh() {
 
     let cmds = apply_loop_event(
         &mut app,
-        LoopEvent::Mcp(mcp::McpEvent::EpicChanged(epic.id)),
+        LoopEvent::Mcp(crate::board_event::BoardEvent::EpicChanged(epic.id)),
         &rt,
     );
 
@@ -323,7 +327,7 @@ async fn run_loop_exits_cleanly_on_quit_sequence() {
 
     let (key_tx, mut key_rx) = mpsc::unbounded_channel::<KeyEvent>();
     let (_msg_tx, mut msg_rx) = mpsc::unbounded_channel::<Message>();
-    let (_mcp_tx, mut mcp_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
+    let (_mcp_tx, mut mcp_rx) = mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
     let mut tick = quiet_tick();
 
     // q opens the quit confirm; y confirms. FIFO ordering guarantees q first.
@@ -364,7 +368,7 @@ async fn run_loop_starts_a_live_feed_runner_before_the_first_command() {
 
     let (key_tx, mut key_rx) = mpsc::unbounded_channel::<KeyEvent>();
     let (_msg_tx, mut msg_rx) = mpsc::unbounded_channel::<Message>();
-    let (_mcp_tx, mut mcp_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
+    let (_mcp_tx, mut mcp_rx) = mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
     let mut tick = quiet_tick();
 
     key_tx.send(KeyEvent::from(KeyCode::Char('q'))).unwrap();

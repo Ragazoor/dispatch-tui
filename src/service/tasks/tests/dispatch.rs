@@ -43,7 +43,7 @@ mod dispatch_seam {
         DispatchRequest {
             task,
             mode,
-            emb_svc: crate::service::embeddings::EmbeddingService::new_test(),
+            emb_svc: crate::embeddings::EmbeddingService::new_test(),
             epic_ctx: None,
             claim,
         }

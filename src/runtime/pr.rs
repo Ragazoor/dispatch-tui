@@ -1,5 +1,5 @@
-use super::poll_ownership::{decide_poll_action, PollAction};
 use super::*;
+use crate::models::{decide_poll_action, PollAction};
 
 impl TuiRuntime {
     pub(super) fn exec_check_pr_status(

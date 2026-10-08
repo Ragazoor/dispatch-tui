@@ -51,11 +51,11 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use common::spacetime_instance::{
     column, describe, module_path, spacetime_available_or_skip, Instance,
 };
+use dispatch_tui::clock::{Clock, SystemClock};
 use dispatch_tui::models::{
     EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource,
     SubStatus, TaskId, TaskStatus,
 };
-use dispatch_tui::service::{Clock, SystemClock};
 use dispatch_tui::spacetime::bindings;
 use dispatch_tui::sync::{
     MemoryReducerCaller, ReducerCaller, SdkReducerCaller, SettledIdentity, SharedRows,

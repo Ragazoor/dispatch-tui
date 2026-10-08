@@ -106,7 +106,7 @@ pub(in crate::mcp::handlers) async fn auto_dispatch_next(
             // established, and a consumer that reloaded first would paint the
             // released card before knowing it is stalled.
             if let Some(reason) = failure {
-                let _ = tx.send(crate::mcp::McpEvent::AutoDispatchFailed {
+                let _ = tx.send(crate::board_event::BoardEvent::AutoDispatchFailed {
                     task_id: next_id,
                     epic_id,
                     reason,
@@ -117,10 +117,10 @@ pub(in crate::mcp::handlers) async fn auto_dispatch_next(
             // stale. Sent ahead of the row reloads because it is the fact the
             // dispatch established; a dispatch that failed established nothing.
             if launched {
-                let _ = tx.send(crate::mcp::McpEvent::AgentLaunched { repo_path });
+                let _ = tx.send(crate::board_event::BoardEvent::AgentLaunched { repo_path });
             }
-            let _ = tx.send(crate::mcp::McpEvent::TaskChanged(next_id));
-            let _ = tx.send(crate::mcp::McpEvent::EpicChanged(epic_id));
+            let _ = tx.send(crate::board_event::BoardEvent::TaskChanged(next_id));
+            let _ = tx.send(crate::board_event::BoardEvent::EpicChanged(epic_id));
         }
     });
 

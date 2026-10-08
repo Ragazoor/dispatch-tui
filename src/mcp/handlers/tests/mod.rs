@@ -21,11 +21,11 @@ use serde_json::{json, Value};
 
 use tokio::sync::mpsc;
 
+use crate::embeddings::{serialize_embedding, EmbeddingService};
 use crate::mcp::identity::{CallerIdentity, IdentityError};
 use crate::mcp::{BackgroundWrite, McpDeps, McpState};
 use crate::models::{SubStatus, TaskStatus};
 use crate::process::{MockProcessRunner, ProcessRunner};
-use crate::service::embeddings::{serialize_embedding, EmbeddingService};
 use crate::store::{self, CreateLearningRow, CreateTaskRequest, Store};
 
 use super::dispatch::{handle_mcp, tool_definitions};
@@ -37,7 +37,7 @@ use super::types::{JsonRpcRequest, JsonRpcResponse};
 /// `ChainFixture`) delegates, so the wiring exists once.
 async fn test_state_with_overrides(
     runner: Arc<dyn ProcessRunner>,
-    notify_tx: Option<mpsc::UnboundedSender<crate::mcp::McpEvent>>,
+    notify_tx: Option<mpsc::UnboundedSender<crate::board_event::BoardEvent>>,
     task_svc: Option<Arc<dyn crate::service::TaskServiceApi>>,
 ) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
     test_state_with_overrides_and_bg_done(runner, notify_tx, task_svc, None).await
@@ -49,7 +49,7 @@ async fn test_state_with_overrides(
 /// instead of sleeping.
 async fn test_state_with_overrides_and_bg_done(
     runner: Arc<dyn ProcessRunner>,
-    notify_tx: Option<mpsc::UnboundedSender<crate::mcp::McpEvent>>,
+    notify_tx: Option<mpsc::UnboundedSender<crate::board_event::BoardEvent>>,
     task_svc: Option<Arc<dyn crate::service::TaskServiceApi>>,
     bg_write_done_tx: Option<mpsc::UnboundedSender<BackgroundWrite>>,
 ) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
@@ -62,7 +62,7 @@ async fn test_state_with_overrides_and_bg_done(
 fn state_over(
     db: Arc<dyn store::TaskStore>,
     runner: Arc<dyn ProcessRunner>,
-    notify_tx: Option<mpsc::UnboundedSender<crate::mcp::McpEvent>>,
+    notify_tx: Option<mpsc::UnboundedSender<crate::board_event::BoardEvent>>,
     task_svc: Option<Arc<dyn crate::service::TaskServiceApi>>,
     bg_write_done_tx: Option<mpsc::UnboundedSender<BackgroundWrite>>,
 ) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {

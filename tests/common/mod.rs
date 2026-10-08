@@ -14,9 +14,9 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tower::ServiceExt;
 
+use dispatch_tui::embeddings::EmbeddingService;
 use dispatch_tui::mcp::BackgroundWrite;
 use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
-use dispatch_tui::service::embeddings::EmbeddingService;
 use dispatch_tui::store::{self, Store};
 
 pub async fn test_router() -> (axum::Router, Arc<dyn store::TaskStore>) {

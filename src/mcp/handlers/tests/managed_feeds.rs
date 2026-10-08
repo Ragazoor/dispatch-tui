@@ -243,7 +243,7 @@ async fn set_provisions_managed_epics() {
 }
 
 /// The save must notify the runtime. This is load-bearing rather than cosmetic:
-/// the runtime's `McpEvent::Refresh` arm is what invalidates the `FeedRunner`'s
+/// the runtime's `BoardEvent::Refresh` arm is what invalidates the `FeedRunner`'s
 /// `any_feed_cmds` cache (see the invalidation invariant in
 /// `docs/specs/feeds.allium`), so without this notification a feed enabled here
 /// on a previously feed-less instance is provisioned but never polled — stranded
@@ -254,7 +254,8 @@ async fn set_provisions_managed_epics() {
 /// `src/runtime/tests/feeds.rs::mcp_refresh_invalidates_feed_runner_cache_after_enabling_a_feed`.
 #[tokio::test]
 async fn set_notifies_the_runtime_so_the_feed_cache_is_invalidated() {
-    let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel::<crate::mcp::McpEvent>();
+    let (notify_tx, mut notify_rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
     let (state, _db) = super::test_state_with_overrides(
         Arc::new(crate::process::MockProcessRunner::new(vec![]))
             as Arc<dyn crate::process::ProcessRunner>,
@@ -267,9 +268,9 @@ async fn set_notifies_the_runtime_so_the_feed_cache_is_invalidated() {
 
     let event = notify_rx
         .try_recv()
-        .expect("save must emit an McpEvent so the runtime invalidates the feed cache");
+        .expect("save must emit an BoardEvent so the runtime invalidates the feed cache");
     assert!(
-        matches!(event, crate::mcp::McpEvent::Refresh),
+        matches!(event, crate::board_event::BoardEvent::Refresh),
         "expected Refresh (the arm that invalidates the feed cache), got {event:?}"
     );
 }

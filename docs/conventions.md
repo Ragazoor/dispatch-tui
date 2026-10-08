@@ -402,7 +402,7 @@ Because the record is one more `Command` in the returned vec, a test that assert
 
 `let _ = expr` silences the `#[must_use]` warning on a result or value. The one sanctioned pattern is:
 
-- **Fire-and-forget channel sends** — `let _ = tx.send(McpEvent::Refresh)` in `src/mcp/mod.rs`: the send can only fail if the receiver has dropped (TUI exited), which is fine to ignore
+- **Fire-and-forget channel sends** — `let _ = tx.send(BoardEvent::Refresh)` in `src/mcp/mod.rs`: the send can only fail if the receiver has dropped (TUI exited), which is fine to ignore
 
 **Do not use it to discard a DB write's `Result`.** A second write that completes an entity (e.g. the follow-up `patch_epic` in `EpicService::create_epic` that applies `sort_order` / `feed_command` / `feed_interval_secs`) is part of the operation, not a "non-critical" extra: swallowing its error returns a success the caller can't trust. Propagate with `?`, and re-read (or otherwise refresh) so the returned entity reflects the write rather than the pre-patch insert result.
 
@@ -654,14 +654,14 @@ The test-code check has one escape hatch, for the single shape a grep cannot tel
 
 Use whichever of these fits the thing you're waiting on:
 
-- **An event the production code already emits.** The feed runner sends `McpEvent::EpicChanged` after each upsert, so feed tests await that instead of sleeping:
+- **An event the production code already emits.** The feed runner sends `BoardEvent::EpicChanged` after each upsert, so feed tests await that instead of sleeping:
 
   ```rust
   let (mut runner, mut rx) = make_runner(db.clone());
   runner.tick().await;
   tokio::time::timeout(Duration::from_secs(5), rx.recv())
       .await
-      .expect("timed out waiting for McpEvent")
+      .expect("timed out waiting for BoardEvent")
       .expect("channel closed");
   ```
 

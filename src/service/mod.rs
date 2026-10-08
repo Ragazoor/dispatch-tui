@@ -1,6 +1,4 @@
 pub mod api;
-pub mod clock;
-pub mod embeddings;
 pub mod epics;
 mod grouping;
 pub mod learnings;
@@ -11,7 +9,6 @@ pub mod usage;
 pub use api::{EpicServiceApi, LearningServiceApi, TaskServiceApi};
 #[cfg(test)]
 pub use api::{LearningServiceApiStub, MockLearningService, TaskServiceApiStub};
-pub use clock::{Clock, FixedClock, SystemClock};
 pub use epics::{
     require_epic_accepting_work, CreateEpicParams, EpicService, UpdateEpicParams, UpdateEpicResult,
 };

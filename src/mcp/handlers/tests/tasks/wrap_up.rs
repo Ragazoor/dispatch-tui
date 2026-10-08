@@ -1168,7 +1168,7 @@ async fn update_task_status_recalculates_epic_status() {
 /// Helper: creates a test state with a real notification channel.
 async fn test_state_with_notify() -> (
     Arc<McpState>,
-    tokio::sync::mpsc::UnboundedReceiver<crate::mcp::McpEvent>,
+    tokio::sync::mpsc::UnboundedReceiver<crate::board_event::BoardEvent>,
 ) {
     let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
@@ -1206,7 +1206,7 @@ async fn update_task_sends_refresh_notification() {
         .try_recv()
         .expect("expected notification after update_task");
     assert!(
-        matches!(event, crate::mcp::McpEvent::TaskChanged(t) if t == task_id),
+        matches!(event, crate::board_event::BoardEvent::TaskChanged(t) if t == task_id),
         "expected TaskChanged({task_id:?}), got {event:?}"
     );
 }
@@ -1230,7 +1230,7 @@ async fn create_task_sends_refresh_notification() {
         .try_recv()
         .expect("expected notification after create_task");
     assert!(
-        matches!(event, crate::mcp::McpEvent::TaskChanged(_)),
+        matches!(event, crate::board_event::BoardEvent::TaskChanged(_)),
         "expected TaskChanged, got {event:?}"
     );
 }
@@ -1969,7 +1969,7 @@ async fn exit_session_emits_refresh_after_done_patch() {
         .try_recv()
         .expect("expected TaskChanged after closing exit_session");
     assert!(
-        matches!(event, crate::mcp::McpEvent::TaskChanged(t) if t == task_id),
+        matches!(event, crate::board_event::BoardEvent::TaskChanged(t) if t == task_id),
         "expected TaskChanged({task_id:?}), got {event:?}"
     );
 }

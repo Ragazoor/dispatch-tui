@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
+use dispatch_tui::board_event::BoardEvent;
 use dispatch_tui::feed::FeedRunner;
-use dispatch_tui::mcp::McpEvent;
 use dispatch_tui::store::{EpicCrud, EpicPatch, EpicRead, Store};
 
 use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
@@ -24,10 +24,10 @@ impl ProcessRunner for AlwaysFailRunner {
     }
 }
 
-async fn wait_for_refresh(rx: &mut mpsc::UnboundedReceiver<McpEvent>) {
+async fn wait_for_refresh(rx: &mut mpsc::UnboundedReceiver<BoardEvent>) {
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timed out waiting for McpEvent::Refresh")
+        .expect("timed out waiting for BoardEvent::Refresh")
         .expect("channel closed");
 }
 

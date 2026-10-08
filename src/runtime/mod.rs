@@ -57,9 +57,9 @@ const AGENT_TREE_TOGGLE_COMMAND: &str = concat!(
     " toggle-agent-tree-pane '#{window_name}'\""
 );
 
+use crate::embeddings::EmbeddingService;
 use crate::models::{TaskId, TmuxWindow};
 use crate::process::{ProcessRunner, RealProcessRunner};
-use crate::service::embeddings::EmbeddingService;
 use crate::service::FieldUpdate;
 use crate::store::{RepoConfigRead, TaskRead};
 use crate::tui::{
@@ -258,7 +258,7 @@ struct Bootstrap {
     store_server: String,
     app: App,
     runtime: TuiRuntime,
-    mcp_notify_rx: mpsc::UnboundedReceiver<mcp::McpEvent>,
+    mcp_notify_rx: mpsc::UnboundedReceiver<crate::board_event::BoardEvent>,
     msg_rx: mpsc::UnboundedReceiver<Message>,
 }
 
@@ -313,7 +313,7 @@ impl StoreParts {
             rows.clone(),
             reducer_caller.clone(),
             settled_identity.clone(),
-            Arc::new(crate::service::SystemClock),
+            Arc::new(crate::clock::SystemClock),
             host_id.to_string(),
             data_dir,
         ));
@@ -481,7 +481,7 @@ async fn start_services_after_connect(
     emb_svc: Arc<EmbeddingService>,
     mcp_listener: tokio::net::TcpListener,
     mcp_deps: mcp::McpDeps,
-    mcp_notify_tx: mpsc::UnboundedSender<mcp::McpEvent>,
+    mcp_notify_tx: mpsc::UnboundedSender<crate::board_event::BoardEvent>,
 ) {
     // Provision the managed feed-epic tree from the reviews/CVE config. It
     // creates shared rows, which needs the identity settled just above
@@ -1022,7 +1022,7 @@ pub(crate) async fn backfill_embeddings(
     db: Arc<dyn crate::store::LearningStore + Send + Sync>,
     emb_svc: Arc<EmbeddingService>,
 ) -> Result<()> {
-    use crate::service::embeddings::{embed_text_for_learning, serialize_embedding};
+    use crate::embeddings::{embed_text_for_learning, serialize_embedding};
 
     let missing = db.list_learnings_missing_embedding().await?;
     if missing.is_empty() {
@@ -1145,7 +1145,6 @@ mod commands;
 mod editor;
 mod epics;
 mod learnings;
-pub(crate) mod poll_ownership;
 mod pr;
 mod repo_sync;
 mod settings;
@@ -1266,7 +1265,8 @@ impl TuiRuntime {
         let runner: Arc<dyn ProcessRunner> = Arc::new(RealProcessRunner::with_claude_json(
             paths.claude_json_path.clone(),
         ));
-        let (mcp_notify_tx, mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
+        let (mcp_notify_tx, mcp_notify_rx) =
+            mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
         let feed_notify_tx = mcp_notify_tx.clone();
 
         name_the_host(host_label, &database).await?;
@@ -1366,7 +1366,7 @@ impl TuiRuntime {
         emb_svc: &Arc<EmbeddingService>,
         parts: &StoreParts,
         host_id: &str,
-        feed_notify_tx: mpsc::UnboundedSender<mcp::McpEvent>,
+        feed_notify_tx: mpsc::UnboundedSender<crate::board_event::BoardEvent>,
         paths: &StartupPaths,
     ) -> (TuiRuntime, mpsc::UnboundedReceiver<Message>) {
         let (msg_tx, msg_rx) = mpsc::unbounded_channel::<Message>();
@@ -1470,7 +1470,7 @@ impl TuiRuntime {
 enum LoopEvent {
     Key(crossterm::event::KeyEvent),
     Message(Message),
-    Mcp(mcp::McpEvent),
+    Mcp(crate::board_event::BoardEvent),
     Tick,
 }
 
@@ -1480,7 +1480,7 @@ enum LoopEvent {
 async fn next_loop_event(
     key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
     msg_rx: &mut mpsc::UnboundedReceiver<Message>,
-    mcp_notify_rx: &mut mpsc::UnboundedReceiver<mcp::McpEvent>,
+    mcp_notify_rx: &mut mpsc::UnboundedReceiver<crate::board_event::BoardEvent>,
     tick_interval: &mut tokio::time::Interval,
 ) -> LoopEvent {
     tokio::select! {
@@ -1514,7 +1514,7 @@ fn apply_loop_event(app: &mut App, event: LoopEvent, rt: &TuiRuntime) -> Vec<Com
             // arrive back via msg_rx and are applied on the next iteration.
             app.dirty = true;
             match event {
-                mcp::McpEvent::Refresh => {
+                crate::board_event::BoardEvent::Refresh => {
                     // A broad refresh may follow a managed-feed config save
                     // (set_managed_feed_config) that enabled a feed on a
                     // previously feed-less instance. Invalidate the FeedRunner
@@ -1525,18 +1525,18 @@ fn apply_loop_event(app: &mut App, event: LoopEvent, rt: &TuiRuntime) -> Vec<Com
                     drop(rt.spawn_refresh_from_db());
                     vec![]
                 }
-                mcp::McpEvent::TaskChanged(task_id) => {
+                crate::board_event::BoardEvent::TaskChanged(task_id) => {
                     drop(rt.spawn_refresh_task(task_id));
                     vec![]
                 }
-                mcp::McpEvent::EpicChanged(epic_id) => {
+                crate::board_event::BoardEvent::EpicChanged(epic_id) => {
                     // Invalidate the FeedRunner's cache so the next tick re-queries
                     // for feed commands (e.g. a newly added feed_command becomes visible).
                     rt.invalidate_feed_cache();
                     drop(rt.spawn_refresh_epic(epic_id));
                     vec![]
                 }
-                mcp::McpEvent::BranchRebased { repo_path } => {
+                crate::board_event::BoardEvent::BranchRebased { repo_path } => {
                     // A rebase wrap-up pulled origin/<base> and fast-forwarded
                     // local <base>, so the refs are current and no fetch is
                     // needed. An unresolved repository measures nothing.
@@ -1545,7 +1545,7 @@ fn apply_loop_event(app: &mut App, event: LoopEvent, rt: &TuiRuntime) -> Vec<Com
                     }
                     vec![]
                 }
-                mcp::McpEvent::AgentLaunched { repo_path } => {
+                crate::board_event::BoardEvent::AgentLaunched { repo_path } => {
                     // RefreshRepoSyncStateAfterDispatch: provisioning the agent's
                     // worktree already fetched origin/<base>, so this is a local
                     // ref read at no network cost. The board's own dispatch takes
@@ -1554,7 +1554,7 @@ fn apply_loop_event(app: &mut App, event: LoopEvent, rt: &TuiRuntime) -> Vec<Com
                     drop(rt.exec_refresh_repo_sync(repo_path, false));
                     vec![]
                 }
-                mcp::McpEvent::AutoDispatchFailed {
+                crate::board_event::BoardEvent::AutoDispatchFailed {
                     task_id,
                     epic_id,
                     reason,
@@ -1596,7 +1596,7 @@ async fn run_loop<B: Backend>(
     terminal: &mut Terminal<B>,
     key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
     msg_rx: &mut mpsc::UnboundedReceiver<Message>,
-    mcp_notify_rx: &mut mpsc::UnboundedReceiver<mcp::McpEvent>,
+    mcp_notify_rx: &mut mpsc::UnboundedReceiver<crate::board_event::BoardEvent>,
     tick_interval: &mut tokio::time::Interval,
     rt: &mut TuiRuntime,
 ) -> Result<()> {

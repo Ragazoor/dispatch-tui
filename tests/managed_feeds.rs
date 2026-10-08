@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
+use dispatch_tui::board_event::BoardEvent;
 use dispatch_tui::feed::FeedRunner;
-use dispatch_tui::mcp::McpEvent;
 use dispatch_tui::models::{Epic, FeedRole};
 use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
 use dispatch_tui::service::provision_managed_feeds_from_settings;
@@ -68,7 +68,7 @@ async fn provisioned_reviews_tick_routes_into_role_sub_epics() {
     }
 
     // Drive a tick: only the parent + cve are polled (sub-epics have no command).
-    let (tx, mut rx) = mpsc::unbounded_channel::<McpEvent>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<BoardEvent>();
     let board_reads: Arc<dyn dispatch_tui::sync::BoardReads> = db.clone();
     let mut runner = FeedRunner::new(
         db.clone(),
@@ -79,7 +79,7 @@ async fn provisioned_reviews_tick_routes_into_role_sub_epics() {
     );
     runner.tick().await;
 
-    // Wait until both syncs have landed (background tasks emit McpEvents).
+    // Wait until both syncs have landed (background tasks emit BoardEvents).
     loop {
         let my_tasks = db.list_tasks_for_epic(my.id).await.unwrap();
         let team_tasks = db.list_tasks_for_epic(team.id).await.unwrap();

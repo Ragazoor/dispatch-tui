@@ -621,7 +621,7 @@ pub struct DispatchInputs {
 pub async fn prepare_inputs(
     db: &dyn crate::store::TaskReadStore,
     task: &Task,
-    emb_svc: &std::sync::Arc<crate::service::embeddings::EmbeddingService>,
+    emb_svc: &std::sync::Arc<crate::embeddings::EmbeddingService>,
 ) -> DispatchInputs {
     let epic_ctx = EpicContext::from_db(task, db).await;
     prepare_inputs_with_epic_ctx(db, task, emb_svc, epic_ctx).await
@@ -633,7 +633,7 @@ pub async fn prepare_inputs(
 pub async fn prepare_inputs_with_epic_ctx(
     db: &dyn crate::store::TaskReadStore,
     task: &Task,
-    emb_svc: &std::sync::Arc<crate::service::embeddings::EmbeddingService>,
+    emb_svc: &std::sync::Arc<crate::embeddings::EmbeddingService>,
     epic_ctx: Option<EpicContext>,
 ) -> DispatchInputs {
     let injected = build_and_record_injections(db, task, emb_svc).await;

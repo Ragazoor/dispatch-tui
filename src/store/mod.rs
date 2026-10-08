@@ -1183,7 +1183,7 @@ pub struct Store {
     /// Who the board is writing as. Read per write, not resolved at
     /// construction — see [`crate::sync::WriterIdentity`].
     identity: Arc<dyn crate::sync::WriterIdentity>,
-    clock: Arc<dyn crate::service::Clock>,
+    clock: Arc<dyn crate::clock::Clock>,
     /// This machine's `Host` id, resolved once at bootstrap.
     ///
     /// Unlike the user identity this is known before any connection — it is
@@ -1218,7 +1218,7 @@ impl Store {
         rows: Arc<crate::sync::SharedRows>,
         caller: Arc<dyn crate::sync::ReducerCaller>,
         identity: Arc<dyn crate::sync::WriterIdentity>,
-        clock: Arc<dyn crate::service::Clock>,
+        clock: Arc<dyn crate::clock::Clock>,
         host: String,
         data_dir: &Path,
     ) -> Self {
@@ -1272,7 +1272,7 @@ impl Store {
     pub fn in_memory_with_host_file(data_dir: &Path) -> Self {
         use crate::sync as s;
         let rows = Arc::new(s::SharedRows::new());
-        let clock: Arc<dyn crate::service::Clock> = Arc::new(crate::service::SystemClock);
+        let clock: Arc<dyn crate::clock::Clock> = Arc::new(crate::clock::SystemClock);
         let caller: Arc<dyn s::ReducerCaller> = Arc::new(
             s::memory_caller::MemoryReducerCaller::new(rows.clone(), clock.clone()),
         );

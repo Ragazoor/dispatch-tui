@@ -2,12 +2,12 @@ use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
 
-use crate::models::{
-    Learning, LearningId, LearningKind, LearningScope, LearningVerdict, RetrievalSource, TaskId,
-};
-use crate::service::embeddings::{
+use crate::embeddings::{
     deserialize_candidate_rows, embed_text_for_learning, embed_text_for_query, rag_rank_learnings,
     serialize_embedding, EmbeddingService, RagRankParams, RAG_SIMILARITY_THRESHOLD,
+};
+use crate::models::{
+    Learning, LearningId, LearningKind, LearningScope, LearningVerdict, RetrievalSource, TaskId,
 };
 use crate::store::{self, CreateLearningRow, LearningFilter};
 
@@ -414,11 +414,11 @@ mod learning_tests {
     use std::sync::Arc;
 
     use super::{CreateLearningParams, LearningService, QueryLearningsParams};
+    use crate::embeddings::EmbeddingService;
     use crate::models::{
         LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict, RetrievalSource,
         TaskId, TaskStatus,
     };
-    use crate::service::embeddings::EmbeddingService;
     use crate::service::ServiceError;
     use crate::store::{CreateTaskRequest, Store, TaskStore};
 

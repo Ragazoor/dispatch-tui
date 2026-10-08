@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::startup::StartupAbort;
+use crate::startup_abort::StartupAbort;
 
 #[cfg(test)]
 mod tests;

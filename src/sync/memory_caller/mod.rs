@@ -40,11 +40,11 @@ use chrono::{DateTime, Utc};
 
 use dispatch_spacetime_module as module;
 
+use crate::clock::Clock;
 use crate::models::{
     EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource,
     SubStatus, TaskId,
 };
-use crate::service::Clock;
 use crate::spacetime::bindings;
 
 use super::rows::SharedRows;

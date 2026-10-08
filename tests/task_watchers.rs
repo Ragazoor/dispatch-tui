@@ -18,11 +18,11 @@ use std::sync::Arc;
 
 use serde_json::json;
 
+use dispatch_tui::embeddings::EmbeddingService;
 use dispatch_tui::mcp::identity::HEADER_KIND;
 use dispatch_tui::mcp::McpDeps;
 use dispatch_tui::models::{test_tmux_window, TaskStatus};
 use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
-use dispatch_tui::service::embeddings::EmbeddingService;
 use dispatch_tui::service::{TaskService, UpdateTaskParams};
 use dispatch_tui::store::{self, CreateTaskRequest, Store, TaskCrud};
 

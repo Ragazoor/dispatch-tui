@@ -48,7 +48,7 @@ use "./core.allium" as core
 -- (see Scope Model above), not by who created it or which machine they were
 -- on.
 --
--- The RAG ranking itself (rag_rank_learnings, src/service/embeddings.rs) is
+-- The RAG ranking itself (rag_rank_learnings, src/embeddings.rs) is
 -- unchanged and backend-agnostic: it scores whatever (Learning, embedding)
 -- rows it is handed by cosine similarity, client-side; it was unchanged by
 -- the move from SQLite to the SpacetimeDB subscription. Moving the storage
@@ -166,7 +166,7 @@ use "./core.allium" as core
 --   Similarity threshold:
 --     - Candidates whose cosine similarity is below a fixed cutoff of 0.25 are
 --       excluded outright. (Hardcoded as RAG_SIMILARITY_THRESHOLD in
---       src/service/embeddings.rs — not a config parameter.)
+--       src/embeddings.rs — not a config parameter.)
 --
 --   Ranking score for surviving candidates:
 --     score = cosine * (1 + scope_multiplier)
@@ -178,7 +178,7 @@ use "./core.allium" as core
 --     - upvote_boost is a monotonic function of upvote_count
 --     - tag_boost adds a fixed boost of 0.05 per matching tag, i.e.
 --       0.05 * |tags ∩ tag_filter|
---   These scoring weights are fixed constants in src/service/embeddings.rs,
+--   These scoring weights are fixed constants in src/embeddings.rs,
 --   not config parameters.
 --
 --   BREAKING CHANGE — tag_filter semantics:
@@ -589,7 +589,7 @@ rule QueryLearningsViaMcp {
         -- Similarity threshold:
         --   Candidates with cosine similarity below a fixed cutoff of 0.25 are
         --   excluded outright (RAG_SIMILARITY_THRESHOLD in
-        --   src/service/embeddings.rs — a hardcoded const, not a config param).
+        --   src/embeddings.rs — a hardcoded const, not a config param).
         --
         -- Scoring formula (applied to surviving candidates):
         --   score = cosine * (1 + scope_multiplier)
@@ -598,7 +598,7 @@ rule QueryLearningsViaMcp {
         --   where scope_multiplier is a fixed per-scope weight (epic = 0.30,
         --   repo = 0.20, user = 0.10), upvote_boost is a monotonic function of
         --   upvote_count, and tag_boost = 0.05 * |tags ∩ tag_filter|. These
-        --   weights are fixed constants in src/service/embeddings.rs.
+        --   weights are fixed constants in src/embeddings.rs.
         --
         -- Retrieval unions: user + repo:<task.repo_path>
         -- + epic:<task.epic_id> (if task has an epic). task-scoped learnings are excluded from

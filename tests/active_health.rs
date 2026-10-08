@@ -3,8 +3,9 @@
 
 use std::sync::Arc;
 
+use dispatch_tui::clock::FixedClock;
 use dispatch_tui::models::{HookEventKind, SubStatus, TaskStatus};
-use dispatch_tui::service::{CreateTaskParams, FixedClock, TaskService, UpdateTaskParams};
+use dispatch_tui::service::{CreateTaskParams, TaskService, UpdateTaskParams};
 use dispatch_tui::store::Store;
 
 #[tokio::test]

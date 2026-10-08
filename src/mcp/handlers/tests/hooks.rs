@@ -1,15 +1,15 @@
 use super::*;
 
+use crate::board_event::BoardEvent;
 use crate::hooks::wire::{HookRequest, ObservedEvent};
 use crate::mcp::handlers::hooks::handle_hook;
-use crate::mcp::McpEvent;
 use crate::models::{HookEventKind, TaskId};
 
 /// task #4967: a hook event that the board applies successfully must push a
 /// per-task refresh, so the card's label updates without waiting on the
 /// tick-driven poll (agent-health.allium: HookEventsPushALiveRefresh).
 async fn assert_pushes_task_changed(kind: HookEventKind) {
-    let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<McpEvent>();
+    let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<BoardEvent>();
     let (state, _db) = test_state_with_overrides(
         Arc::new(MockProcessRunner::new(vec![])),
         Some(notify_tx),
@@ -22,7 +22,7 @@ async fn assert_pushes_task_changed(kind: HookEventKind) {
     let _ = handle_hook(State(state), Json(request)).await;
 
     match notify_rx.recv().await {
-        Some(McpEvent::TaskChanged(id)) => assert_eq!(id, task_id),
+        Some(BoardEvent::TaskChanged(id)) => assert_eq!(id, task_id),
         other => panic!("expected TaskChanged({task_id:?}), got {other:?}"),
     }
 }
@@ -44,7 +44,7 @@ async fn notification_pushes_task_changed() {
 /// a row that isn't there.
 #[tokio::test]
 async fn missing_task_does_not_push_task_changed() {
-    let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<McpEvent>();
+    let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<BoardEvent>();
     let (state, _db) = test_state_with_overrides(
         Arc::new(MockProcessRunner::new(vec![])),
         Some(notify_tx),
@@ -70,7 +70,7 @@ async fn missing_task_does_not_push_task_changed() {
 /// push a task refresh (`PanesRecordUsageLikeTheBoard`).
 #[tokio::test]
 async fn a_pane_keypress_is_recorded_as_keybinding_usage() {
-    let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<McpEvent>();
+    let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<BoardEvent>();
     let (state, db) = test_state_with_overrides(
         Arc::new(MockProcessRunner::new(vec![])),
         Some(notify_tx),

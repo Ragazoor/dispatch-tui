@@ -208,8 +208,8 @@ mod prepare_inputs {
 
     #[tokio::test]
     async fn prepare_inputs_reads_epic_context_and_injections() {
+        use crate::embeddings::{serialize_embedding, EmbeddingService};
         use crate::models::{LearningKind, LearningScope, RetrievalSource};
-        use crate::service::embeddings::{serialize_embedding, EmbeddingService};
         use crate::store::CreateLearningRow;
 
         let (rt, _app) = test_runtime().await;
@@ -266,7 +266,7 @@ mod prepare_inputs {
 
     #[tokio::test]
     async fn prepare_inputs_with_epic_ctx_uses_the_supplied_context() {
-        use crate::service::embeddings::EmbeddingService;
+        use crate::embeddings::EmbeddingService;
 
         let (rt, _app) = test_runtime().await;
         let db = rt.db_write().clone();
@@ -308,8 +308,8 @@ mod backfill_embeddings {
 
     #[tokio::test]
     async fn backfill_fills_missing_embeddings() {
+        use crate::embeddings::EmbeddingService;
         use crate::models::{LearningKind, LearningScope};
-        use crate::service::embeddings::EmbeddingService;
         use crate::store::{CreateLearningRow, LearningStore};
 
         let db = Arc::new(Store::open_in_memory().await.unwrap());
@@ -384,8 +384,8 @@ mod backfill_embeddings {
 
     #[tokio::test]
     async fn backfill_is_noop_when_no_missing_embeddings() {
+        use crate::embeddings::{serialize_embedding, EmbeddingService};
         use crate::models::{LearningKind, LearningScope};
-        use crate::service::embeddings::{serialize_embedding, EmbeddingService};
         use crate::store::{CreateLearningRow, LearningStore};
 
         let db = Arc::new(Store::open_in_memory().await.unwrap());
@@ -643,7 +643,7 @@ mod repo_sync {
 
         let cmds = apply_loop_event(
             &mut app,
-            LoopEvent::Mcp(mcp::McpEvent::BranchRebased {
+            LoopEvent::Mcp(crate::board_event::BoardEvent::BranchRebased {
                 repo_path: "/repo".to_string(),
             }),
             &rt,
@@ -678,7 +678,7 @@ mod repo_sync {
 
         let cmds = apply_loop_event(
             &mut app,
-            LoopEvent::Mcp(mcp::McpEvent::AgentLaunched {
+            LoopEvent::Mcp(crate::board_event::BoardEvent::AgentLaunched {
                 repo_path: "/repo".to_string(),
             }),
             &rt,
@@ -708,7 +708,7 @@ mod repo_sync {
 
         apply_loop_event(
             &mut app,
-            LoopEvent::Mcp(mcp::McpEvent::BranchRebased {
+            LoopEvent::Mcp(crate::board_event::BoardEvent::BranchRebased {
                 repo_path: String::new(),
             }),
             &rt,
@@ -729,7 +729,7 @@ mod repo_sync {
 
         let cmds = apply_loop_event(
             &mut app,
-            LoopEvent::Mcp(mcp::McpEvent::AutoDispatchFailed {
+            LoopEvent::Mcp(crate::board_event::BoardEvent::AutoDispatchFailed {
                 task_id: TaskId(1),
                 epic_id: crate::models::EpicId(9),
                 reason: "no such repo".to_string(),
@@ -793,7 +793,7 @@ mod bootstrap {
     fn test_store_with(data_dir: &Path, connector: Arc<dyn StoreConnector>) -> StoreParts {
         use crate::sync as sy;
         let rows = Arc::new(sy::SharedRows::new());
-        let clock: Arc<dyn crate::service::Clock> = Arc::new(crate::service::SystemClock);
+        let clock: Arc<dyn crate::clock::Clock> = Arc::new(crate::clock::SystemClock);
         let reducer_caller: Arc<dyn sy::ReducerCaller> = Arc::new(
             sy::memory_caller::MemoryReducerCaller::new(rows.clone(), clock.clone()),
         );

@@ -21,8 +21,8 @@ fn task_svc(db: &Arc<dyn store::TaskStore>) -> TaskService {
 /// reads in one test can tie; advance this instead.
 fn task_svc_with_fixed_clock(
     db: &Arc<dyn store::TaskStore>,
-) -> (TaskService, crate::service::FixedClock) {
-    let clock = crate::service::FixedClock::new(chrono::Utc::now());
+) -> (TaskService, crate::clock::FixedClock) {
+    let clock = crate::clock::FixedClock::new(chrono::Utc::now());
     (task_svc(db).with_clock(Arc::new(clock.clone())), clock)
 }
 

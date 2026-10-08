@@ -57,7 +57,7 @@ pub struct DispatchRequest {
     /// [`DispatchMode::for_task`]; the TUI carries the operator's choice.
     pub mode: DispatchMode,
     /// Embedding service backing the learning injections.
-    pub emb_svc: Arc<crate::service::embeddings::EmbeddingService>,
+    pub emb_svc: Arc<crate::embeddings::EmbeddingService>,
     /// Pre-resolved epic banner, for a caller that already holds the epic row
     /// (the chain reads it to check `auto_dispatch`). `None` means "read it
     /// from the service's own handle" — which is also what a task with no epic

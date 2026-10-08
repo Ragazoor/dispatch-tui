@@ -10,11 +10,11 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::clock::{Clock, FixedClock};
 use crate::models::{
     EpicId, LearningId, NotificationWrite, PollScopeId, RetrievalSource, StopOutcome, SubStatus,
     SubagentDrain, TaskId, TaskStatus, UserPromptOutcome,
 };
-use crate::service::{Clock, FixedClock};
 use crate::spacetime::bindings;
 use crate::store::{
     CreateTaskRequest, EpicCrud, LearningRetrievalStore, LearningStore, PollOwnershipStore,

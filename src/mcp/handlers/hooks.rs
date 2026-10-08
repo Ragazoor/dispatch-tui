@@ -82,7 +82,7 @@ async fn observe(state: &McpState, event: ObservedEvent) -> ObserveOutcome {
     if let ObservedEvent::PaneKey { action, key, .. } = &event {
         crate::service::record_usage_event_logged(
             state.db.as_ref(),
-            &crate::cli::pane_key_event(action, key),
+            &crate::models::UsageEvent::pane_key(action, key),
         )
         .await;
         return ObserveOutcome::Applied;

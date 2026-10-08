@@ -62,8 +62,8 @@ to look.
 | `src/service/api.rs` | Service trait objects (`TaskServiceApi`, `EpicServiceApi`, `LearningServiceApi`) + `MockLearningService` for injection in tests. Each seam's signature list lives once, in a spec macro (`task_service_api!`, …) replayed into emitter macros that generate the trait, the delegating impl, and the test-only `*ServiceApiStub` mock scaffolding |
 | `src/service/grouping.rs` | Repo-grouping: routes tasks of a `group_by_repo` epic into per-repo `RepoGroup` sub-epics |
 | `src/service/managed_feeds.rs` | Managed feed config read/write (`get`/`set_managed_feed_config`) |
-| `src/service/embeddings.rs` | `EmbeddingService` — text embedding computation used by RAG and learning search |
-| `src/service/clock.rs` | `Clock` trait + `SystemClock`/`FixedClock` for injectable time in services/tests |
+| `src/embeddings.rs` | `EmbeddingService` — text embedding computation used by RAG and learning search. A leaf module: `dispatch` (prompt RAG) and `service` (learnings) both depend on it, not on each other |
+| `src/clock.rs` | `Clock` trait + `SystemClock`/`FixedClock`: injectable time for services, the store and the reducer callers. A leaf module, so `sync` and `store` need not depend on `service` |
 | `src/store/mod.rs` | The `*Store` trait hierarchy (`TaskStore`, `TaskReadStore`, …), `Store` — their one implementation, over the connection's `SharedRows` (reads), a `ReducerCaller` (writes) and `host.json` (identity) — and `patch_struct!` behind the `TaskPatch`/`EpicPatch` builders |
 | `src/store/decode.rs` | The decode-fallback counter (`bump_decode_fallback`, `drop_undecodable`) and `parse_datetime`, shared by the readers that decode the store's rows |
 | `src/store/queries/{tasks,epics,learnings,settings,usage,board}.rs` | `impl <Trait> for Store` per domain — a read queries the rows, a write encodes its row and makes one reducer call; `settings.rs` also holds the host-file identity calls and the identity key names, `board.rs` the `BoardReads` impl, and `mod.rs` the helpers several writes share |
@@ -95,9 +95,11 @@ to look.
 | `src/sync/board_reads.rs` | The board's card-read handle: `BoardReads` (`TaskRead + EpicRead + RepoConfigRead`, plus `poll_owner` and `revision`), implemented by `Store`. `TuiRuntime::board_reads` holds it |
 | `src/spacetime/` | The store as the rest of the app sees it: `managed_store.rs` (bring up, adopt, publish to and stop the local instance), `cli_store.rs` (a `SharedStore` over the `spacetime` CLI), `store.rs` (the store trait and an in-process model), `snapshot.rs` / `restore.rs` / `import.rs` (backup, write-back and the add-only import of the old store), `bindings/` (generated, never hand-edited) |
 | `src/startup/` | What happens between `dispatch tui` and the first frame: `config.rs` (configuration drift check), `host.rs` (host-label gate), `launch.rs` (obtain the tmux session), `retire.rs` (retire the previous board window), `store_pin.rs` (the `store-identity` pin that stops a launch reaching the wrong store). See `docs/specs/startup.allium` |
+| `src/startup_abort.rs` | `StartupAbort`, every reason the board stops before it draws. A leaf module, so `host_file` and `spacetime::managed_store` return it without depending on `startup`; the operator wording (`StartupAbort::message`) stays in `src/startup/launch.rs` |
 | `src/host_file/` | `host.json`, this install's identity file, written whole by rename. See `docs/specs/host.allium` |
 | `src/keybindings.rs`, `src/keybindings/` | The keybinding table: the one place every key is declared, read by the key handlers, the `?` overlay and `list_keybindings`. See `docs/specs/keybindings.allium` |
 | `src/backoff.rs` | Exponential backoff shared by the PR poller and the board's store connection |
+| `src/board_event.rs` | `BoardEvent`, the change notifications the MCP server and feed runner send the board runtime |
 | `src/sync/rows.rs` | `SharedRows` — what the subscription has delivered, decoded and ordered exactly as each SQL `ORDER BY` orders it, plus the change signal that redraws the board without polling. Not a cache: no read-through, cleared on disconnect |
 | `src/sync/writes.rs` | `ReducerCaller` — the transport every `Store` write goes through — with `ReducerOutcome` (the store's verdict on a call), `WriterIdentity`/`SettledIdentity` (who a write is stamped with) and `push_host_registration` |
 | `src/sync/decode.rs` | One store row → one domain value, undoing the module's sentinels. The twin of `db::queries::row_to_task`; `sync::tests::decode` is what keeps the two from drifting |
@@ -112,7 +114,7 @@ to look.
 | `src/setup/{confirm,config_update,uninstall}.rs` | `Confirmer` prompts (and `FakeConfirmer`), config drift detection and update, uninstall and purge |
 | `src/setup/{config,plugins,hooks}.rs` | MCP config merging, plugin installation, git hook installation |
 | `src/setup/statusline.rs` | Generates `~/.claude/dispatch-statusline.json`, the `--settings` file that wires the `dispatch statusline` decorator into every dispatch-spawned Claude session; discovers the user's pre-existing statusLine command to chain to |
-| `src/mcp/mod.rs` | MCP server bootstrap (Axum router), `McpState`, `McpEvent` notification enum |
+| `src/mcp/mod.rs` | MCP server bootstrap (Axum router), `McpState` |
 | `src/mcp/identity.rs` | `CallerIdentity` / `IdentityError` and `from_headers` — parses `X-Caller-Task-Id` / `X-Caller-Kind` into a typed caller |
 | `src/mcp/middleware.rs` | `extract_caller_identity` Axum middleware — attaches `Result<CallerIdentity, IdentityError>` to every request's extensions |
 | `src/mcp/trajectory.rs` | Per-task audit log of MCP tool calls, appended under the worktree's `trajectories/` dir (see `docs/specs/observability.allium`) |

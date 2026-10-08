@@ -154,7 +154,7 @@ pub struct TaskService {
     /// handle is what keeps the prologue's reads and the service's writes on
     /// the same database by construction.
     pub db: Arc<dyn store::TaskStore>,
-    clock: Arc<dyn crate::service::Clock>,
+    clock: Arc<dyn crate::clock::Clock>,
     pub(super) runner: Arc<dyn crate::process::ProcessRunner>,
     /// This install's `Host` id, resolved once and reused.
     ///
@@ -194,7 +194,7 @@ impl TaskService {
     ) -> Self {
         Self {
             db,
-            clock: Arc::new(crate::service::SystemClock),
+            clock: Arc::new(crate::clock::SystemClock),
             runner,
             local_host_id: tokio::sync::OnceCell::new(),
             #[cfg(test)]
@@ -231,13 +231,13 @@ impl TaskService {
     }
 
     /// Override the clock used for timestamping. Tests inject a
-    /// [`FixedClock`](crate::service::FixedClock) so timestamp-dependent flows
+    /// [`FixedClock`](crate::clock::FixedClock) so timestamp-dependent flows
     /// (hook-event ordering) are deterministic without sleeping.
     ///
     /// Unlike the runner, this stays an optional builder on purpose:
     /// `SystemClock` only reads the wall clock, so an un-injected default
     /// costs determinism, never a real side effect.
-    pub fn with_clock(mut self, clock: Arc<dyn crate::service::Clock>) -> Self {
+    pub fn with_clock(mut self, clock: Arc<dyn crate::clock::Clock>) -> Self {
         self.clock = clock;
         self
     }

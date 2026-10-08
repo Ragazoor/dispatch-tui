@@ -22,12 +22,12 @@ async fn auto_dispatch_next_returns_none_for_missing_epic() {
 }
 
 async fn wait_for_task_changed(
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::mcp::McpEvent>,
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::board_event::BoardEvent>,
     expected_id: crate::models::TaskId,
 ) {
     loop {
         match rx.recv().await {
-            Some(crate::mcp::McpEvent::TaskChanged(id)) if id == expected_id => break,
+            Some(crate::board_event::BoardEvent::TaskChanged(id)) if id == expected_id => break,
             Some(_) => continue,
             None => panic!("notification channel closed before dispatch completed"),
         }
@@ -51,7 +51,7 @@ struct ChainFixture {
     repo_path: String,
     db: Arc<dyn store::TaskStore>,
     state: Arc<McpState>,
-    notify_rx: tokio::sync::mpsc::UnboundedReceiver<crate::mcp::McpEvent>,
+    notify_rx: tokio::sync::mpsc::UnboundedReceiver<crate::board_event::BoardEvent>,
     /// The same runner the state holds, kept concrete so a test can inspect
     /// which commands the close path actually issued.
     runner: Arc<MockProcessRunner>,
@@ -107,7 +107,8 @@ impl ChainFixture {
         let repo_path = dir.path().to_str().unwrap().to_string();
         std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
-        let (notify_tx, notify_rx) = tokio::sync::mpsc::unbounded_channel::<crate::mcp::McpEvent>();
+        let (notify_tx, notify_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
         let (bg_tx, bg_rx) = tokio::sync::mpsc::unbounded_channel::<crate::mcp::BackgroundWrite>();
         let (state, db) = test_state_with_overrides_and_bg_done(
             runner.clone() as Arc<dyn ProcessRunner>,
@@ -174,7 +175,8 @@ impl ChainFixture {
         let repo_path = dir.path().to_str().unwrap().to_string();
         std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
-        let (notify_tx, notify_rx) = tokio::sync::mpsc::unbounded_channel::<crate::mcp::McpEvent>();
+        let (notify_tx, notify_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
         let (state, db) = test_state_with_overrides(
             runner.clone() as Arc<dyn ProcessRunner>,
             Some(notify_tx),
@@ -756,7 +758,7 @@ async fn exit_session_chain_reports_a_failed_dispatch_to_the_board() {
 
     loop {
         match fx.notify_rx.recv().await {
-            Some(crate::mcp::McpEvent::AutoDispatchFailed {
+            Some(crate::board_event::BoardEvent::AutoDispatchFailed {
                 task_id,
                 epic_id: eid,
                 reason,
@@ -769,7 +771,7 @@ async fn exit_session_chain_reports_a_failed_dispatch_to_the_board() {
                 );
                 break;
             }
-            Some(crate::mcp::McpEvent::TaskChanged(id)) if id == next => {
+            Some(crate::board_event::BoardEvent::TaskChanged(id)) if id == next => {
                 panic!("TaskChanged for the reverted subtask arrived before AutoDispatchFailed")
             }
             Some(_) => continue,
@@ -796,8 +798,8 @@ async fn exit_session_chain_reports_no_failure_when_dispatch_succeeds() {
     // path would have emitted is already in the channel by the time it arrives.
     loop {
         match fx.notify_rx.recv().await {
-            Some(crate::mcp::McpEvent::TaskChanged(id)) if id == next => break,
-            Some(crate::mcp::McpEvent::AutoDispatchFailed { .. }) => {
+            Some(crate::board_event::BoardEvent::TaskChanged(id)) if id == next => break,
+            Some(crate::board_event::BoardEvent::AutoDispatchFailed { .. }) => {
                 panic!("a successful chained dispatch must report no failure")
             }
             Some(_) => continue,
@@ -1517,12 +1519,12 @@ fn dispatch_task_success_text_names_a_created_worktree() {
 /// the events already queued. Non-blocking: every emitter below has finished its
 /// notifications by the time the caller awaits it.
 fn saw_agent_launched(
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::mcp::McpEvent>,
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::board_event::BoardEvent>,
     repo_path: &str,
 ) -> bool {
     let mut seen = false;
     while let Ok(event) = rx.try_recv() {
-        if matches!(&event, crate::mcp::McpEvent::AgentLaunched { repo_path: p } if p == repo_path)
+        if matches!(&event, crate::board_event::BoardEvent::AgentLaunched { repo_path: p } if p == repo_path)
         {
             seen = true;
         }
@@ -1589,10 +1591,12 @@ async fn the_auto_dispatch_chain_notifies_that_the_repo_needs_remeasuring() {
     let mut launched = false;
     loop {
         match fx.notify_rx.recv().await {
-            Some(crate::mcp::McpEvent::AgentLaunched { repo_path: p }) if p == repo_path => {
+            Some(crate::board_event::BoardEvent::AgentLaunched { repo_path: p })
+                if p == repo_path =>
+            {
                 launched = true;
             }
-            Some(crate::mcp::McpEvent::TaskChanged(id)) if id == next => break,
+            Some(crate::board_event::BoardEvent::TaskChanged(id)) if id == next => break,
             Some(_) => continue,
             None => panic!("notification channel closed before the chain finished"),
         }

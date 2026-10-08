@@ -1,4 +1,5 @@
-//! Clock abstraction for the service layer.
+//! Clock abstraction: the injectable source of "now" for the service layer,
+//! the store and the reducer callers beneath it.
 //!
 //! Production uses [`SystemClock`] (wall-clock `Utc::now()`). Tests inject
 //! [`FixedClock`] to make timestamp-dependent behaviour deterministic without
@@ -11,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Duration, Utc};
 
-/// Source of "now" for the service layer.
+/// Source of "now".
 pub trait Clock: Send + Sync {
     /// The current instant.
     fn now(&self) -> DateTime<Utc>;

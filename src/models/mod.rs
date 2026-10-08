@@ -18,6 +18,7 @@
 //! - [`columns`] — `ColumnSection`, the sub-status sections inside a board column
 //! - [`interval`] — the interval literal (`10m`, `600`) every cadence field takes
 //! - [`url`] — typed task URLs
+//! - [`poll_owner`] / [`poll_action`] — `core/PollOwner` scopes and the per-tick claim decision
 
 // `define_id_newtype!` is `#[macro_export]`ed (crate root); consuming modules
 // bring it into scope with `use crate::define_id_newtype;`.
@@ -73,3 +74,6 @@ pub use url::{TaskUrl, UrlType};
 
 mod poll_owner;
 pub use poll_owner::PollScopeId;
+
+mod poll_action;
+pub(crate) use poll_action::{decide_poll_action, PollAction};

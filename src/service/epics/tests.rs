@@ -397,7 +397,7 @@ async fn update_epic_sets_group_by_repo() {
     assert!(updated.group_by_repo);
 }
 
-fn epic_svc_with_clock(db: Arc<Store>, clock: Arc<dyn crate::service::Clock>) -> EpicService {
+fn epic_svc_with_clock(db: Arc<Store>, clock: Arc<dyn crate::clock::Clock>) -> EpicService {
     EpicService::new(db.clone(), db).with_clock(clock)
 }
 
@@ -406,7 +406,7 @@ async fn update_epic_entering_done_stamps_completed_at() {
     let db = Arc::new(Store::open_in_memory().await.unwrap());
     let epic = db.create_epic("Test", "", None).await.unwrap();
     let now = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
-    let clock = Arc::new(crate::service::FixedClock::new(now));
+    let clock = Arc::new(crate::clock::FixedClock::new(now));
     let svc = epic_svc_with_clock(db.clone(), clock);
 
     svc.update_epic(UpdateEpicParams {
