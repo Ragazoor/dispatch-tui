@@ -701,18 +701,8 @@ async fn stress_db_with_many_tasks() {
     use crate::store::{CreateTaskRequest, TaskCrud, TaskRead};
     for i in 0..500 {
         db.create_task(CreateTaskRequest {
-            title: &format!("Task {i}"),
             description: "stress test",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture(&format!("Task {i}"), "/repo")
         })
         .await
         .unwrap();

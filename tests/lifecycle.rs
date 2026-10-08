@@ -41,18 +41,9 @@ async fn full_lifecycle() {
     // 1. Create task with a plan: simulate what exec_insert_task does (DB insert + TaskCreated message)
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "Fix auth bug",
             description: "Users can't log in",
-            repo_path: "/repo",
             plan: Some("plan.md"),
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Fix auth bug", "/repo")
         })
         .await
         .unwrap();

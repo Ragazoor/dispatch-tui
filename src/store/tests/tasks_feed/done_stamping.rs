@@ -138,18 +138,9 @@ async fn create_task_stamps_a_task_created_straight_into_done() {
     let before = chrono::Utc::now() - chrono::Duration::seconds(1);
     let id = db
         .create_task(CreateTaskRequest {
-            title: "Already finished",
             description: "d",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Done,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Already finished", "/repo")
         })
         .await
         .unwrap();
@@ -174,18 +165,8 @@ async fn create_task_does_not_stamp_a_task_created_outside_done() {
     let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
-            title: "Open",
             description: "d",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Open", "/repo")
         })
         .await
         .unwrap();

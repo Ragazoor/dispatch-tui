@@ -20,18 +20,8 @@ async fn task_identity_writes_trajectory_entry() {
 
     let task_id: TaskId = db
         .create_task(CreateTaskRequest {
-            title: "trajectory-test-task",
-            description: "",
-            repo_path: "/r",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("trajectory-test-task", "/r")
         })
         .await
         .unwrap();
@@ -102,18 +92,8 @@ async fn task_identity_without_worktree_still_writes_trajectory() {
 
     let task_id: TaskId = db
         .create_task(CreateTaskRequest {
-            title: "no-worktree-task",
-            description: "",
-            repo_path: "/r",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("no-worktree-task", "/r")
         })
         .await
         .unwrap();

@@ -217,18 +217,9 @@ mod prepare_inputs {
         let epic = db.create_epic("Chained Epic", "desc", None).await.unwrap();
         let task_id = db
             .create_task(CreateTaskRequest {
-                title: "title",
                 description: "desc",
-                repo_path: "/repo/a",
-                plan: None,
-                status: models::TaskStatus::Backlog,
-                base_branch: "main",
                 epic_id: Some(epic.id),
-                sort_order: None,
-                tag: None,
-                wrap_up_mode: None,
-                auto_run_plan: false,
-                phoenix: false,
+                ..CreateTaskRequest::fixture("title", "/repo/a")
             })
             .await
             .unwrap();

@@ -154,18 +154,9 @@ async fn new_task_in(
     state
         .db_write()
         .create_task(CreateTaskRequest {
-            title,
             description: "context resources fixture task",
-            repo_path: "/repo/context",
-            plan: None,
             status,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture(title, "/repo/context")
         })
         .await
         .unwrap()

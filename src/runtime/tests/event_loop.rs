@@ -121,18 +121,8 @@ async fn apply_loop_event_tick_triggers_window_sweep() {
     let db = test_db().await;
     let id = db
         .create_task(CreateTaskRequest {
-            title: "windowed",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
             status: models::TaskStatus::Running,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: "main",
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("windowed", "/repo")
         })
         .await
         .unwrap();

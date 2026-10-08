@@ -15,18 +15,8 @@ const NOW: &str = "2026-09-19 00:00:00.000";
 
 fn a_request() -> CreateTaskRequest<'static> {
     CreateTaskRequest {
-        title: "t",
         description: "d",
-        repo_path: "/repo",
-        plan: None,
-        status: TaskStatus::Backlog,
-        base_branch: "main",
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
+        ..CreateTaskRequest::fixture("t", "/repo")
     }
 }
 

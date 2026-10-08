@@ -417,7 +417,7 @@ mod learning_tests {
     use crate::embeddings::EmbeddingService;
     use crate::models::{
         LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict, RetrievalSource,
-        TaskId, TaskStatus,
+        TaskId,
     };
     use crate::service::ServiceError;
     use crate::store::{CreateTaskRequest, Store, TaskStore};
@@ -436,22 +436,9 @@ mod learning_tests {
     }
 
     async fn seed_task(db: &Arc<dyn TaskStore>) -> TaskId {
-        db.create_task(CreateTaskRequest {
-            title: "test task",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
-        .await
-        .unwrap()
+        db.create_task(CreateTaskRequest::fixture("test task", "/repo"))
+            .await
+            .unwrap()
     }
 
     async fn seed_approved_learning(svc: &LearningService) -> LearningId {

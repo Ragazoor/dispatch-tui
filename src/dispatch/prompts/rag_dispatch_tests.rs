@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::embeddings::{serialize_embedding, EmbeddingService};
-use crate::models::{LearningKind, LearningScope, TaskStatus};
+use crate::models::{LearningKind, LearningScope};
 use crate::store::{
     CreateLearningRow, CreateTaskRequest, LearningRetrievalStore, LearningStore, Store, TaskCrud,
     TaskRead,
@@ -22,18 +22,8 @@ async fn seed_db() -> Arc<Store> {
 async fn make_task(db: &Arc<Store>) -> crate::models::Task {
     let id = db
         .create_task(CreateTaskRequest {
-            title: "test task",
             description: "test description",
-            repo_path: "/repo/test",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("test task", "/repo/test")
         })
         .await
         .unwrap();

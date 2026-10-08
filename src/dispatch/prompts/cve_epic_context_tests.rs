@@ -1,22 +1,14 @@
 use super::*;
-use crate::models::{FeedRole, TaskStatus};
+use crate::models::FeedRole;
 use crate::store::{CreateTaskRequest, EpicCrud, EpicRead, Store, TaskCrud, TaskRead};
 
 async fn task_in_epic(db: &Store, epic_id: EpicId) -> crate::models::Task {
     let id = db
         .create_task(CreateTaskRequest {
-            title: "[HIGH] repo: CVE-1",
             description: "d",
-            repo_path: "/repo/test",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
             epic_id: Some(epic_id),
-            sort_order: None,
             tag: Some(TaskTag::Fix),
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("[HIGH] repo: CVE-1", "/repo/test")
         })
         .await
         .unwrap();

@@ -603,18 +603,8 @@ async fn get_task_found() {
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "My Task",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
-            status: crate::models::TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("My Task", "/repo")
         })
         .await
         .unwrap();
@@ -778,18 +768,8 @@ async fn update_task_accepts_string_task_id() {
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "Test",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
-            status: crate::models::TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Test", "/repo")
         })
         .await
         .unwrap();

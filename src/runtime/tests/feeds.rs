@@ -1088,18 +1088,8 @@ mod epic_group_by_repo_migration {
         let _task_id = rt
             .db_write()
             .create_task(CreateTaskRequest {
-                title: "task on root",
-                description: "",
-                repo_path: "/x/alpha",
-                plan: None,
-                status: models::TaskStatus::Backlog,
-                base_branch: "main",
                 epic_id: Some(root.id),
-                sort_order: None,
-                tag: None,
-                wrap_up_mode: None,
-                auto_run_plan: false,
-                phoenix: false,
+                ..CreateTaskRequest::fixture("task on root", "/x/alpha")
             })
             .await
             .unwrap();

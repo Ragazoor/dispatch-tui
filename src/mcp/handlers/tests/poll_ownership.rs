@@ -4,18 +4,9 @@ async fn make_task(state: &Arc<McpState>, title: &str) -> crate::models::TaskId 
     state
         .db_write()
         .create_task(CreateTaskRequest {
-            title,
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Review,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture(title, "/repo")
         })
         .await
         .unwrap()

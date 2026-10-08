@@ -129,18 +129,8 @@ async fn exec_refresh_from_db_syncs_external_changes() {
     // Insert directly into DB, bypassing app
     rt.db_write()
         .create_task(CreateTaskRequest {
-            title: "External",
             description: "Added via CLI",
-            repo_path: "/repo",
-            plan: None,
-            status: models::TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("External", "/repo")
         })
         .await
         .unwrap();
@@ -156,18 +146,9 @@ async fn exec_refresh_from_db_returns_commands_from_refresh() {
     // Insert a task directly into DB as Running
     rt.db_write()
         .create_task(CreateTaskRequest {
-            title: "Test",
             description: "Desc",
-            repo_path: "/repo",
-            plan: None,
             status: models::TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Test", "/repo")
         })
         .await
         .unwrap();

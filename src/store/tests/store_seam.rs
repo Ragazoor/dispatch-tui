@@ -41,18 +41,8 @@ async fn the_store_reaches_every_shared_table() {
     // tasks
     let task_id = shared
         .create_task(CreateTaskRequest {
-            title: "Task",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
             epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Task", "/repo")
         })
         .await
         .unwrap();

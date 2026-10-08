@@ -233,18 +233,10 @@ impl ChainFixture {
         let id = self
             .db
             .create_task(CreateTaskRequest {
-                title,
-                description: "",
-                repo_path: repo_path.unwrap_or(&self.repo_path),
                 plan: Some("docs/plan.md"),
-                status: TaskStatus::Backlog,
-                base_branch: "main",
                 epic_id,
                 sort_order,
-                tag: None,
-                wrap_up_mode: None,
-                auto_run_plan: false,
-                phoenix: false,
+                ..CreateTaskRequest::fixture(title, repo_path.unwrap_or(&self.repo_path))
             })
             .await
             .unwrap();
@@ -1220,18 +1212,9 @@ async fn wrap_up_rebase_preserves_tmux_window() {
 
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "Rebase Preserve Window",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Review,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Rebase Preserve Window", "/repo")
         })
         .await
         .unwrap();
@@ -1291,18 +1274,9 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
 
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "Conflict Sub",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Review,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Conflict Sub", "/repo")
         })
         .await
         .unwrap();
@@ -1363,18 +1337,9 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
 
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "Stale Conflict",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Review,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Stale Conflict", "/repo")
         })
         .await
         .unwrap();
@@ -1618,18 +1583,9 @@ async fn dispatch_task_returns_error_for_non_backlog_task() {
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "Running Task",
             description: "already running",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Running Task", "/repo")
         })
         .await
         .unwrap();

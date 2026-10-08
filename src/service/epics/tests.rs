@@ -845,18 +845,8 @@ async fn progress_aggregates_descendants_for_grouped_epic() {
         .await
         .unwrap();
     db.create_task(crate::store::CreateTaskRequest {
-        title: "t",
-        description: "",
-        repo_path: "/x/alpha",
-        plan: None,
-        status: crate::models::TaskStatus::Backlog,
-        base_branch: "main",
         epic_id: Some(sub),
-        sort_order: None,
-        tag: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
+        ..crate::store::CreateTaskRequest::fixture("t", "/x/alpha")
     })
     .await
     .unwrap();

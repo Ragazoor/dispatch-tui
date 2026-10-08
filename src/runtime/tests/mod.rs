@@ -288,18 +288,10 @@ async fn create_task_returning(
 ) -> anyhow::Result<models::Task> {
     let id = db
         .create_task(CreateTaskRequest {
-            title,
             description,
-            repo_path,
             plan,
             status,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture(title, repo_path)
         })
         .await?;
     db.get_task(id)

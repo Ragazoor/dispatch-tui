@@ -101,18 +101,8 @@ async fn sync_grouped_feed(
 /// epic is the same at all call sites, which is why this is a helper.
 async fn create_manual_task(db: &Store, title: &str, epic: EpicId) -> TaskId {
     db.create_task(CreateTaskRequest {
-        title,
-        description: "",
-        repo_path: "/repo",
-        plan: None,
-        status: TaskStatus::Backlog,
-        base_branch: "main",
         epic_id: Some(epic),
-        sort_order: None,
-        tag: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
+        ..CreateTaskRequest::fixture(title, "/repo")
     })
     .await
     .unwrap()

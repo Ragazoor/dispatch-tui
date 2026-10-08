@@ -803,18 +803,8 @@ fn backlog_row(id: i64, sort_order: Option<i64>, host: &str, phoenix: bool) -> b
 
 fn a_request() -> CreateTaskRequest<'static> {
     CreateTaskRequest {
-        title: "t",
         description: "d",
-        repo_path: "/repo",
-        plan: None,
-        status: TaskStatus::Backlog,
-        base_branch: "main",
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
+        ..CreateTaskRequest::fixture("t", "/repo")
     }
 }
 

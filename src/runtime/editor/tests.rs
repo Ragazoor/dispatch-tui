@@ -366,19 +366,9 @@ async fn exec_pop_out_editor_launches_the_resolved_editor_argv() {
 async fn seed_task(db: &dyn crate::store::TaskStore) -> models::Task {
     let id = db
         .create_task(CreateTaskRequest {
-            title: "Original title",
             description: "Original desc",
-            repo_path: "/orig/repo",
             plan: Some("docs/plan.md"),
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Original title", "/orig/repo")
         })
         .await
         .unwrap();

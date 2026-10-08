@@ -5,7 +5,7 @@
 //! worktree gating still keys on host.
 
 use super::{accepted, ScriptedConnector};
-use crate::models::{EpicId, TaskStatus};
+use crate::models::EpicId;
 use crate::store::{
     CreateTaskRequest, EpicCrud, HostStore, IdentityCredentialStore, Store, SubscriptionStore,
     TaskCrud,
@@ -344,18 +344,9 @@ async fn new_backlog_task(
     title: &str,
 ) -> crate::models::TaskId {
     db.create_task(CreateTaskRequest {
-        title,
-        description: "",
-        repo_path: "/repo",
-        plan: None,
-        status: TaskStatus::Backlog,
-        base_branch: "main",
         epic_id: Some(epic),
         sort_order: Some(1),
-        tag: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
+        ..CreateTaskRequest::fixture(title, "/repo")
     })
     .await
     .unwrap()

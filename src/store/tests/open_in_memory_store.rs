@@ -11,20 +11,7 @@ async fn the_board_reads_and_the_store_answer_from_the_same_rows() {
     let before = board.revision().await;
 
     let id = db
-        .create_task(CreateTaskRequest {
-            title: "drawn",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskRequest::fixture("drawn", "/repo"))
         .await
         .unwrap();
 
@@ -52,20 +39,7 @@ async fn a_handle_with_no_host_file_refuses_identity() {
 async fn attached_handle_round_trips_a_task_through_the_store() {
     let db = Store::open_in_memory().await.unwrap();
     let id = db
-        .create_task(CreateTaskRequest {
-            title: "via store",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskRequest::fixture("via store", "/repo"))
         .await
         .unwrap();
     assert_eq!(db.get_task(id).await.unwrap().unwrap().title, "via store");

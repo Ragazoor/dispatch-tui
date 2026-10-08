@@ -621,18 +621,8 @@ mod fetch_caller_task_tests {
         let db = Store::open_in_memory().await.unwrap();
         let task_id = db
             .create_task(CreateTaskRequest {
-                title: "caller",
-                description: "",
-                repo_path: "/repo",
-                plan: None,
                 status: TaskStatus::Running,
-                base_branch: "main",
-                epic_id: None,
-                sort_order: None,
-                tag: None,
-                wrap_up_mode: None,
-                auto_run_plan: false,
-                phoenix: false,
+                ..CreateTaskRequest::fixture("caller", "/repo")
             })
             .await
             .unwrap();

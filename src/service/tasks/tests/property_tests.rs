@@ -131,18 +131,9 @@ proptest! {
             let epic = db.create_epic("E", "", None).await.unwrap();
             for status in &task_statuses {
                 db.create_task(CreateTaskRequest {
-                    title: "t",
-                    description: "",
-                    repo_path: "/r",
-                    plan: None,
                     status: *status,
-                    base_branch: "main",
                     epic_id: Some(epic.id),
-                    sort_order: None,
-                    tag: None,
-                    wrap_up_mode: None,
-                    auto_run_plan: false,
-                    phoenix: false,
+                    ..CreateTaskRequest::fixture("t", "/r")
                 })
                 .await
                 .unwrap();

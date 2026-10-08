@@ -49,18 +49,10 @@ async fn make_task(
     state
         .db_write()
         .create_task(CreateTaskRequest {
-            title,
-            description: "",
-            repo_path: "/repo",
-            plan: None,
             status,
             base_branch,
             epic_id,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture(title, "/repo")
         })
         .await
         .unwrap()

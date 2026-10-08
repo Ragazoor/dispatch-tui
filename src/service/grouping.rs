@@ -159,7 +159,7 @@ async fn delete_if_empty_repo_group(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{EpicId, LearningKind, LearningScope, LearningStatus, TaskStatus};
+    use crate::models::{EpicId, LearningKind, LearningScope, LearningStatus};
     use crate::store::{
         CreateLearningRow, EpicCrud, EpicRead, LearningFilter, LearningStore, Store, TaskCrud,
         TaskPatch,
@@ -171,18 +171,8 @@ mod tests {
 
     async fn add_task(db: &Store, epic: EpicId, repo: &str) -> crate::models::TaskId {
         db.create_task(crate::store::CreateTaskRequest {
-            title: "t",
-            description: "",
-            repo_path: repo,
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
             epic_id: Some(epic),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..crate::store::CreateTaskRequest::fixture("t", repo)
         })
         .await
         .unwrap()

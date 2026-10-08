@@ -106,22 +106,9 @@ pub async fn post_mcp(router: axum::Router, headers: &[(&str, &str)], body: Valu
 pub async fn seed_task(db: &Store, title: &str) -> dispatch_tui::models::TaskId {
     use dispatch_tui::store::{CreateTaskRequest, TaskCrud};
 
-    db.create_task(CreateTaskRequest {
-        title,
-        description: "",
-        repo_path: "/tmp/test-repo",
-        plan: None,
-        status: dispatch_tui::models::TaskStatus::Backlog,
-        base_branch: "main",
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
-    })
-    .await
-    .unwrap()
+    db.create_task(CreateTaskRequest::fixture(title, "/tmp/test-repo"))
+        .await
+        .unwrap()
 }
 
 /// [`seed_task`], then moved to Running with the given sub-status — the state

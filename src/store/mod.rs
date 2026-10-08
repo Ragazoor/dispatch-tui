@@ -1,4 +1,6 @@
 mod decode;
+#[cfg(any(test, feature = "test-support"))]
+mod fixtures;
 mod queries;
 
 /// The `settings` keys naming an install's machine identity. Production keeps

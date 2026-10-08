@@ -18,35 +18,15 @@ async fn full_epic_lifecycle() {
     // 2. Create subtasks linked to epic
     let sub1 = db
         .create_task(CreateTaskRequest {
-            title: "Extract middleware",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Extract middleware", "/repo")
         })
         .await
         .unwrap();
     let sub2 = db
         .create_task(CreateTaskRequest {
-            title: "Add JWT validation",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Add JWT validation", "/repo")
         })
         .await
         .unwrap();
@@ -97,18 +77,9 @@ async fn delete_epic_with_a_learning_referencing_a_subtask_succeeds() {
 
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "Subtask",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Done,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Subtask", "/repo")
         })
         .await
         .unwrap();
@@ -156,18 +127,8 @@ async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
     assert_eq!(epic.status, TaskStatus::Backlog);
 
     let req = |title: &'static str| CreateTaskRequest {
-        title,
         description: "desc",
-        repo_path: "/repo",
-        plan: None,
-        status: TaskStatus::Backlog,
-        base_branch: "main",
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
+        ..CreateTaskRequest::fixture(title, "/repo")
     };
 
     let t1 = db.create_task(req("Task 1")).await.unwrap();

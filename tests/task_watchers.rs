@@ -60,18 +60,9 @@ async fn subscribe_then_finish_delivers_notification() {
 
     let watcher_id = db
         .create_task(CreateTaskRequest {
-            title: "Watcher agent",
             description: "watches task B",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Watcher agent", "/repo")
         })
         .await
         .unwrap();
@@ -87,18 +78,9 @@ async fn subscribe_then_finish_delivers_notification() {
     // 3. Create task B (the target), status Running.
     let target_id = db
         .create_task(CreateTaskRequest {
-            title: "Target task",
             description: "gets watched",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Target task", "/repo")
         })
         .await
         .unwrap();

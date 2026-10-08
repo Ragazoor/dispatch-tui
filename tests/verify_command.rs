@@ -4,7 +4,6 @@
 //! the repo_path from a real task row.
 
 use dispatch_tui::dispatch::fetch_verify_command;
-use dispatch_tui::models::TaskStatus;
 use dispatch_tui::store::{CreateTaskRequest, RepoConfigStore, Store, TaskCrud, TaskRead};
 
 #[tokio::test]
@@ -21,18 +20,8 @@ async fn verify_command_lookup_matches_task_repo_path() {
     // Create a real task row with repo_path pointing at that repo.
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "Test task",
             description: "desc",
-            repo_path: "/home/me/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Test task", "/home/me/repo")
         })
         .await
         .unwrap();

@@ -116,37 +116,14 @@ async fn get_epic_shows_subtask_summary() {
     let t1 = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "Sub 1",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Done,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Sub 1", "/repo")
         })
         .await
         .unwrap();
     let t2 = state
         .db_write()
-        .create_task(CreateTaskRequest {
-            title: "Sub 2",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskRequest::fixture("Sub 2", "/repo"))
         .await
         .unwrap();
     state
@@ -252,37 +229,14 @@ async fn list_epics_shows_subtask_counts() {
     let t1 = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "Done",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Done,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Done", "/repo")
         })
         .await
         .unwrap();
     let t2 = state
         .db_write()
-        .create_task(CreateTaskRequest {
-            title: "Pending",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskRequest::fixture("Pending", "/repo"))
         .await
         .unwrap();
     state
@@ -729,20 +683,7 @@ async fn create_epic_tool_schema_includes_parent_epic_id() {
 async fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models::TaskId {
     state
         .db_write()
-        .create_task(CreateTaskRequest {
-            title: "Test task",
-            description: "",
-            repo_path: repo,
-            plan: None,
-            status: crate::models::TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskRequest::fixture("Test task", repo))
         .await
         .unwrap()
 }
@@ -861,18 +802,8 @@ async fn record_learning_derives_scope_ref_for_epic() {
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "T",
-            description: "",
-            repo_path: "/r",
-            plan: None,
-            status: crate::models::TaskStatus::Backlog,
-            base_branch: "main",
             epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("T", "/r")
         })
         .await
         .unwrap();

@@ -153,18 +153,8 @@ async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
     // Manually created task linked to the epic (no external_id)
     let manual_task_id = db
         .create_task(CreateTaskRequest {
-            title: "Manual",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
             epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Manual", "/repo")
         })
         .await
         .unwrap();

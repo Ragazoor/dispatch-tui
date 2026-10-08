@@ -50,18 +50,9 @@ async fn create_task_via_task_header_does_not_inherit_epic() {
     let epic = db.create_epic("e", "", None).await.unwrap();
     let parent_id = db
         .create_task(CreateTaskRequest {
-            title: "parent",
-            description: "",
-            repo_path: "/r",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
             epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("parent", "/r")
         })
         .await
         .unwrap();

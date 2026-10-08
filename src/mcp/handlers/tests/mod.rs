@@ -168,18 +168,8 @@ async fn create_task_fixture_at(state: &Arc<McpState>, repo_path: &str) -> crate
     state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "Test Task",
             description: "test description",
-            repo_path,
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Test Task", repo_path)
         })
         .await
         .unwrap()
@@ -204,18 +194,11 @@ async fn create_running_task_with_window_in(
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "Running Task",
             description: "description",
-            repo_path,
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
             epic_id,
             sort_order: Some(0),
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Running Task", repo_path)
         })
         .await
         .unwrap();

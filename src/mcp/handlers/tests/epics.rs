@@ -122,18 +122,8 @@ async fn get_epic_matches_list_epics_progress_for_grouped_epic() {
     state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "t",
-            description: "",
-            repo_path: "/x/alpha",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
             epic_id: Some(sub),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("t", "/x/alpha")
         })
         .await
         .unwrap();
@@ -181,37 +171,14 @@ async fn get_epic_shows_subtask_summary() {
     let t1 = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "Sub 1",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Done,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Sub 1", "/repo")
         })
         .await
         .unwrap();
     let t2 = state
         .db_write()
-        .create_task(CreateTaskRequest {
-            title: "Sub 2",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskRequest::fixture("Sub 2", "/repo"))
         .await
         .unwrap();
     state
@@ -317,37 +284,14 @@ async fn list_epics_shows_subtask_counts() {
     let t1 = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "Done",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Done,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Done", "/repo")
         })
         .await
         .unwrap();
     let t2 = state
         .db_write()
-        .create_task(CreateTaskRequest {
-            title: "Pending",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskRequest::fixture("Pending", "/repo"))
         .await
         .unwrap();
     state

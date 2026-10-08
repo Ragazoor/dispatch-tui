@@ -9,18 +9,8 @@ mod spawn_refresh_from_db_via_msg_tx {
         let db = test_db().await;
         // Create a task so the refresh has something to send.
         db.create_task(crate::store::CreateTaskRequest {
-            title: "test task",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
-            status: crate::models::TaskStatus::Backlog,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: "main",
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..crate::store::CreateTaskRequest::fixture("test task", "/repo")
         })
         .await
         .unwrap();
@@ -206,18 +196,9 @@ mod spawn_refresh_epic {
         let rt = make_runtime(db.clone(), tx, runner).await;
         let epic = db.create_epic("Feed Epic", "desc", None).await.unwrap();
         db.create_task(crate::store::CreateTaskRequest {
-            title: "Feed Task",
             description: "from feed",
-            repo_path: "/repo",
-            plan: None,
-            status: models::TaskStatus::Backlog,
-            base_branch: "main",
             epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..crate::store::CreateTaskRequest::fixture("Feed Task", "/repo")
         })
         .await
         .unwrap();

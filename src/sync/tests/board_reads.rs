@@ -19,20 +19,7 @@ use crate::store::{CreateTaskRequest, EpicRead, RepoConfigRead, Store, TaskCrud,
 async fn nothing_is_read_through_to_the_local_store() {
     let db = Store::open_in_memory().await.unwrap();
     let any_task = db
-        .create_task(CreateTaskRequest {
-            title: "elsewhere",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: crate::models::TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskRequest::fixture("elsewhere", "/repo"))
         .await
         .unwrap();
     assert!(

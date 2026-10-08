@@ -43,18 +43,8 @@ async fn wrap_up_rejects_backlog_task() {
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "T",
             description: "d",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("T", "/repo")
         })
         .await
         .unwrap();
@@ -87,18 +77,9 @@ async fn wrap_up_accepts_running_blocked_task() {
 
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "My Task",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("My Task", "/repo")
         })
         .await
         .unwrap();
@@ -144,18 +125,9 @@ async fn wrap_up_accepts_running_active_task() {
 
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "T",
             description: "d",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("T", "/repo")
         })
         .await
         .unwrap();
@@ -203,18 +175,9 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
 
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "T",
             description: "d",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("T", "/repo")
         })
         .await
         .unwrap();
@@ -273,18 +236,9 @@ async fn wrap_up_task_no_worktree() {
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "T",
             description: "d",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Review,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("T", "/repo")
         })
         .await
         .unwrap();
@@ -307,18 +261,9 @@ async fn wrap_up_invalid_action() {
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "T",
             description: "d",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Review,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("T", "/repo")
         })
         .await
         .unwrap();
@@ -359,18 +304,9 @@ async fn wrap_up_rebase_returns_started() {
 
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "My Task",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Review,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("My Task", "/repo")
         })
         .await
         .unwrap();
@@ -468,18 +404,9 @@ async fn wrap_up_done_returns_exit_token() {
 
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "T",
             description: "d",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("T", "/repo")
         })
         .await
         .unwrap();
@@ -545,18 +472,9 @@ async fn wrap_up_pr_defers_review_and_url_to_exit_session() {
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "PR Task",
             description: "d",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("PR Task", "/repo")
         })
         .await
         .unwrap();
@@ -610,18 +528,9 @@ async fn wrap_up_pr_response_contains_token_and_no_retro_instruction() {
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "T",
             description: "d",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("T", "/repo")
         })
         .await
         .unwrap();
@@ -708,18 +617,9 @@ fn rebase_ok_runner() -> Arc<dyn ProcessRunner> {
 async fn create_wrappable_task(db: &Arc<dyn store::TaskStore>) -> crate::models::TaskId {
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "T",
             description: "d",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("T", "/repo")
         })
         .await
         .unwrap();
@@ -830,18 +730,9 @@ async fn wrap_up_pr_success_includes_verify_reminder_when_configured() {
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "T",
             description: "d",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("T", "/repo")
         })
         .await
         .unwrap();
@@ -935,18 +826,9 @@ async fn wrap_up_rebase_conflict_returns_error() {
 
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "Conflict Task",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Review,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Conflict Task", "/repo")
         })
         .await
         .unwrap();
@@ -998,18 +880,9 @@ async fn wrap_up_rebase_dirty_primary_worktree_returns_error() {
 
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "Dirty Primary Task",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Review,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Dirty Primary Task", "/repo")
         })
         .await
         .unwrap();
@@ -1072,18 +945,9 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
 
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "Wrong Branch",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Review,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Wrong Branch", "/repo")
         })
         .await
         .unwrap();
@@ -1119,20 +983,7 @@ async fn update_task_status_recalculates_epic_status() {
     let epic = state.db_write().create_epic("E", "", None).await.unwrap();
     let task_id = state
         .db_write()
-        .create_task(CreateTaskRequest {
-            title: "T",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskRequest::fixture("T", "/repo"))
         .await
         .unwrap();
     state
@@ -1282,18 +1133,9 @@ async fn seed_task_with_worktree(
 ) -> crate::models::TaskId {
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: &format!("Task {suffix}"),
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture(&format!("Task {suffix}"), "/repo")
         })
         .await
         .unwrap();
@@ -1759,18 +1601,9 @@ async fn wrap_up_rebase_does_not_kill_window() {
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "Rebase Task",
             description: "description",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Rebase Task", "/repo")
         })
         .await
         .unwrap();
@@ -1999,18 +1832,9 @@ async fn wrap_up_then_exit_session_end_to_end() {
     let epic = db.create_epic("E2E Epic", "", None).await.unwrap();
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "E2E Task",
             description: "desc",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("E2E Task", "/repo")
         })
         .await
         .unwrap();
@@ -2108,18 +1932,9 @@ async fn wrap_up_done_defers_done_transition_to_exit_session() {
 
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "Done Task",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
             wrap_up_mode: Some(crate::models::WrapUpMode::Done),
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Done Task", "/repo")
         })
         .await
         .unwrap();
@@ -2214,18 +2029,8 @@ async fn wrap_up_done_recalculates_epic_status() {
     let epic = db.create_epic("E", "", None).await.unwrap();
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "T",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("T", "/repo")
         })
         .await
         .unwrap();
@@ -2294,18 +2099,8 @@ async fn wrap_up_pr_recalculates_epic_status() {
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
-            title: "T",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
             status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("T", "/repo")
         })
         .await
         .unwrap();
@@ -2410,18 +2205,9 @@ async fn dispatch_task_recalculates_epic_status() {
     let epic = db.create_epic("E", "", None).await.unwrap();
     let task_id = db
         .create_task(CreateTaskRequest {
-            title: "Dispatch Me",
             description: "d",
-            repo_path: &repo_path,
             plan: Some("docs/plan.md"),
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Dispatch Me", &repo_path)
         })
         .await
         .unwrap();

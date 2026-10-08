@@ -194,18 +194,8 @@ async fn delete_stale_subtree_feed_tasks_never_reports_manual_tasks() {
 
     let manual = db
         .create_task(CreateTaskRequest {
-            title: "Manual",
-            description: "",
-            repo_path: "/repo/a",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
             epic_id: Some(sub.id),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Manual", "/repo/a")
         })
         .await
         .unwrap();
@@ -261,18 +251,8 @@ async fn delete_stale_subtree_feed_tasks_scopes_to_subtree_and_keeps_set() {
     // A manual task (no external_id) in child_a must survive.
     let manual_id = db
         .create_task(CreateTaskRequest {
-            title: "Manual",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
             epic_id: Some(child_a.id),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskRequest::fixture("Manual", "/repo")
         })
         .await
         .unwrap();
