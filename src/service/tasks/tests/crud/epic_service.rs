@@ -259,17 +259,8 @@ async fn list_epics_with_progress() {
 
     task_svc
         .create_task(CreateTaskParams {
-            title: "Sub1".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
             epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("Sub1", "/repo".to_string())
         })
         .await
         .unwrap();
@@ -299,50 +290,23 @@ async fn list_epics_with_progress_multiple_epics() {
     // 2 tasks in E1
     let t1 = task_svc
         .create_task(CreateTaskParams {
-            title: "T1".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
             epic_id: Some(e1.id),
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("T1", "/repo".to_string())
         })
         .await
         .unwrap();
     task_svc
         .create_task(CreateTaskParams {
-            title: "T2".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
             epic_id: Some(e1.id),
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("T2", "/repo".to_string())
         })
         .await
         .unwrap();
     // 1 task in E2
     task_svc
         .create_task(CreateTaskParams {
-            title: "T3".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
             epic_id: Some(e2.id),
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("T3", "/repo".to_string())
         })
         .await
         .unwrap();
@@ -376,17 +340,8 @@ async fn update_task_status_recalculates_epic() {
 
     let task_id = task_svc
         .create_task(CreateTaskParams {
-            title: "Sub".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
             epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("Sub", "/repo".to_string())
         })
         .await
         .unwrap();
@@ -413,17 +368,8 @@ async fn get_epic_with_subtasks() {
 
     task_svc
         .create_task(CreateTaskParams {
-            title: "Sub".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
             epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("Sub", "/repo".to_string())
         })
         .await
         .unwrap();

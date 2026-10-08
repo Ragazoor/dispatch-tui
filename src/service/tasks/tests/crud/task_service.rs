@@ -9,17 +9,8 @@ async fn create_and_get_task() {
 
     let id = svc
         .create_task(CreateTaskParams {
-            title: "Test".into(),
             description: "desc".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("Test", "/repo".to_string())
         })
         .await
         .unwrap();
@@ -36,17 +27,9 @@ async fn create_task_with_tag() {
 
     let id = svc
         .create_task(CreateTaskParams {
-            title: "Bug fix".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
             sort_order: Some(5),
             tag: Some(TaskTag::Bug),
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("Bug fix", "/repo".to_string())
         })
         .await
         .unwrap();
@@ -63,17 +46,8 @@ async fn create_task_with_sort_order() {
 
     let id = svc
         .create_task(CreateTaskParams {
-            title: "Sorted".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
             sort_order: Some(42),
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("Sorted", "/repo".to_string())
         })
         .await
         .unwrap();
@@ -88,19 +62,7 @@ async fn update_task_status() {
     let svc = task_svc(&db);
 
     let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
         .await
         .unwrap();
 
@@ -122,19 +84,7 @@ async fn update_task_no_fields_returns_error() {
     let svc = task_svc(&db);
 
     let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
         .await
         .unwrap();
 
@@ -151,19 +101,7 @@ async fn update_task_params_builder_compiles() {
     let svc = task_svc(&db);
 
     let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
         .await
         .unwrap();
 
@@ -181,19 +119,7 @@ async fn update_task_invalid_substatus_for_status() {
     let svc = task_svc(&db);
 
     let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
         .await
         .unwrap();
 
@@ -405,21 +331,9 @@ async fn list_tasks_with_filter() {
     let db = test_db().await;
     let svc = task_svc(&db);
 
-    svc.create_task(CreateTaskParams {
-        title: "T1".into(),
-        description: "".into(),
-        repo_path: "/repo".to_string(),
-        plan_path: None,
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        base_branch: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
-    })
-    .await
-    .unwrap();
+    svc.create_task(CreateTaskParams::fixture("T1", "/repo".to_string()))
+        .await
+        .unwrap();
 
     let tasks = svc
         .list_tasks(ListTasksFilter {
@@ -460,19 +374,7 @@ async fn update_task_with_epic_linkage() {
         .unwrap();
 
     let id = task_svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
         .await
         .unwrap();
 
@@ -500,17 +402,8 @@ async fn update_task_status_recalculates_parent_epic() {
 
     let id = task_svc
         .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
             epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("T", "/repo".to_string())
         })
         .await
         .unwrap();
@@ -544,17 +437,8 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
 
     let id = task_svc
         .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
             epic_id: Some(epic_a.id),
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("T", "/repo".to_string())
         })
         .await
         .unwrap();

@@ -135,17 +135,9 @@ async fn epic_with_backlog_subtasks(
     for i in 1..=count {
         let id = task_svc
             .create_task(CreateTaskParams {
-                title: format!("Sub {i}"),
-                description: "".into(),
-                repo_path: "/repo".to_string(),
-                plan_path: None,
                 epic_id: Some(epic.id),
                 sort_order: Some(i),
-                tag: None,
-                base_branch: None,
-                wrap_up_mode: None,
-                auto_run_plan: false,
-                phoenix: false,
+                ..CreateTaskParams::fixture(format!("Sub {i}"), "/repo".to_string())
             })
             .await
             .unwrap();

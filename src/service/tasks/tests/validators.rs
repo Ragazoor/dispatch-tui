@@ -21,17 +21,8 @@ async fn update_task_worktree_set_persists() {
     let svc = task_svc(&db);
     let id = svc
         .create_task(CreateTaskParams {
-            title: "t".into(),
             description: "d".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("t", "/repo".to_string())
         })
         .await
         .unwrap();
@@ -56,17 +47,8 @@ async fn update_task_worktree_clear_sets_null() {
     let svc = task_svc(&db);
     let id = svc
         .create_task(CreateTaskParams {
-            title: "t".into(),
             description: "d".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("t", "/repo".to_string())
         })
         .await
         .unwrap();
@@ -100,17 +82,8 @@ async fn update_task_pr_url_set_and_clear() {
     let svc = task_svc(&db);
     let id = svc
         .create_task(CreateTaskParams {
-            title: "t".into(),
             description: "d".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("t", "/repo".to_string())
         })
         .await
         .unwrap();

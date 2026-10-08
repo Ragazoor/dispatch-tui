@@ -41,19 +41,7 @@ fn task_svc_with_runner(
 }
 
 fn make_task_params(repo_path: &str) -> CreateTaskParams {
-    CreateTaskParams {
-        title: "T".into(),
-        description: "".into(),
-        repo_path: repo_path.to_string(),
-        plan_path: None,
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        base_branch: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
-    }
+    CreateTaskParams::fixture("T", repo_path.to_string())
 }
 
 /// `make_task_params` with the base branch named, so creating the task makes
@@ -77,17 +65,8 @@ async fn make_epic(svc: &EpicService, title: &str) -> crate::models::Epic {
 /// Helper: create a backlog task in the given (optional) epic.
 async fn make_task(svc: &TaskService, epic_id: Option<EpicId>) -> TaskId {
     svc.create_task(CreateTaskParams {
-        title: "T".into(),
-        description: "".into(),
-        repo_path: "/repo".to_string(),
-        plan_path: None,
         epic_id,
-        sort_order: None,
-        tag: None,
-        base_branch: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
+        ..CreateTaskParams::fixture("T", "/repo".to_string())
     })
     .await
     .unwrap()

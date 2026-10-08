@@ -9,17 +9,9 @@ async fn create_task_returning_gives_full_task() {
 
     let task = svc
         .create_task_returning(CreateTaskParams {
-            title: "Full task".into(),
             description: "desc".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
             tag: Some(TaskTag::Feature),
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("Full task", "/repo".to_string())
         })
         .await
         .unwrap();
@@ -37,17 +29,9 @@ async fn create_task_with_auto_run_plan_true_persists() {
 
     let task = svc
         .create_task_returning(CreateTaskParams {
-            title: "T".to_string(),
             description: "d".to_string(),
-            repo_path: "/r".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
             auto_run_plan: true,
-            phoenix: false,
+            ..CreateTaskParams::fixture("T".to_string(), "/r".to_string())
         })
         .await
         .unwrap();
@@ -67,17 +51,8 @@ async fn create_task_returning_with_epic() {
 
     let task = tsvc
         .create_task_returning(CreateTaskParams {
-            title: "Sub".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
             epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("Sub", "/repo".to_string())
         })
         .await
         .unwrap();
@@ -98,17 +73,10 @@ async fn create_task_returning_sets_all_optional_fields_atomically() {
 
     let task = tsvc
         .create_task_returning(CreateTaskParams {
-            title: "Atomic".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
             epic_id: Some(epic.id),
             sort_order: Some(3),
             tag: Some(TaskTag::Feature),
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("Atomic", "/repo".to_string())
         })
         .await
         .unwrap();
@@ -126,19 +94,7 @@ async fn delete_task_removes_it() {
     let svc = task_svc(&db);
 
     let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
         .await
         .unwrap();
     // The store only deletes a finished task.
@@ -168,19 +124,7 @@ async fn update_task_sets_worktree_and_tmux_window() {
     let svc = task_svc(&db);
 
     let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
         .await
         .unwrap();
 
@@ -209,19 +153,7 @@ async fn update_task_clears_worktree() {
     let svc = task_svc(&db);
 
     let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
         .await
         .unwrap();
 
@@ -260,19 +192,7 @@ async fn update_task_allows_done_status() {
     let svc = task_svc(&db);
 
     let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
         .await
         .unwrap();
 
@@ -441,35 +361,14 @@ async fn list_tasks_filters_by_epic_id() {
 
     let id1 = svc
         .create_task(CreateTaskParams {
-            title: "In epic".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
             epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..CreateTaskParams::fixture("In epic", "/repo".to_string())
         })
         .await
         .unwrap();
 
     let _id2 = svc
-        .create_task(CreateTaskParams {
-            title: "No epic".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("No epic", "/repo".to_string()))
         .await
         .unwrap();
 
@@ -489,37 +388,13 @@ async fn list_tasks_filters_by_repo_paths() {
     let db = test_db().await;
     let svc = task_svc(&db);
 
-    svc.create_task(CreateTaskParams {
-        title: "Repo A".into(),
-        description: "".into(),
-        repo_path: "/repo/a".to_string(),
-        plan_path: None,
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        base_branch: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
-    })
-    .await
-    .unwrap();
+    svc.create_task(CreateTaskParams::fixture("Repo A", "/repo/a".to_string()))
+        .await
+        .unwrap();
 
-    svc.create_task(CreateTaskParams {
-        title: "Repo B".into(),
-        description: "".into(),
-        repo_path: "/repo/b".to_string(),
-        plan_path: None,
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        base_branch: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
-    })
-    .await
-    .unwrap();
+    svc.create_task(CreateTaskParams::fixture("Repo B", "/repo/b".to_string()))
+        .await
+        .unwrap();
 
     let tasks = svc
         .list_tasks(ListTasksFilter {
@@ -538,37 +413,13 @@ async fn list_tasks_excludes_caller_task() {
     let svc = task_svc(&db);
 
     let id1 = svc
-        .create_task(CreateTaskParams {
-            title: "T1".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T1", "/repo".to_string()))
         .await
         .unwrap();
 
-    svc.create_task(CreateTaskParams {
-        title: "T2".into(),
-        description: "".into(),
-        repo_path: "/repo".to_string(),
-        plan_path: None,
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        base_branch: None,
-        wrap_up_mode: None,
-        auto_run_plan: false,
-        phoenix: false,
-    })
-    .await
-    .unwrap();
+    svc.create_task(CreateTaskParams::fixture("T2", "/repo".to_string()))
+        .await
+        .unwrap();
 
     let tasks = svc
         .list_tasks(ListTasksFilter {

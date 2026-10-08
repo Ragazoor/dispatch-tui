@@ -87,19 +87,7 @@ async fn update_task_toctou_last_write_wins() {
     let svc_b = task_svc(&db);
 
     let id = svc_a
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
         .await
         .unwrap();
 
@@ -142,19 +130,7 @@ async fn update_task_sub_status_validated_against_persisted_status() {
     let svc_b = task_svc(&db);
 
     let id = svc_a
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
         .await
         .unwrap();
 
@@ -593,19 +569,7 @@ async fn record_hook_event_noop_for_non_running_task() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/repo".to_string()))
         .await
         .unwrap();
 
@@ -1679,17 +1643,8 @@ async fn update_repo_path_reroutes_within_grouped_epic() {
         .unwrap();
     let task = svc
         .create_task_returning(crate::service::CreateTaskParams {
-            title: "t".into(),
-            description: String::new(),
-            repo_path: "/x/alpha".into(),
-            plan_path: None,
             epic_id: Some(root.id),
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
+            ..crate::service::CreateTaskParams::fixture("t", "/x/alpha")
         })
         .await
         .unwrap();
@@ -1728,19 +1683,7 @@ async fn move_task_to_grouped_epic_routes_into_sub_epic() {
 
     // Create a standalone task with a known repo path.
     let task_id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/x/dispatch".into(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/x/dispatch"))
         .await
         .unwrap();
 
@@ -1775,19 +1718,7 @@ async fn move_task_to_non_grouped_epic_lands_directly() {
     let plain = db.create_epic("plain", "", None).await.unwrap();
 
     let task_id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/x/dispatch".into(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("T", "/x/dispatch"))
         .await
         .unwrap();
 
@@ -1815,17 +1746,15 @@ async fn phoenix_task(db: &Arc<dyn store::TaskStore>, epic_id: Option<EpicId>) -
     let svc = task_svc(db);
     let id = svc
         .create_task(CreateTaskParams {
-            title: "Weekly dep audit".into(),
             description: "check every direct dependency".into(),
-            repo_path: "/repo".to_string(),
             plan_path: Some("/repo/docs/plans/audit.md".to_string()),
             epic_id,
-            sort_order: None,
             tag: Some(TaskTag::Chore),
             base_branch: Some("develop".to_string()),
             wrap_up_mode: Some(crate::models::WrapUpMode::Done),
             auto_run_plan: true,
             phoenix: true,
+            ..CreateTaskParams::fixture("Weekly dep audit", "/repo".to_string())
         })
         .await
         .unwrap();

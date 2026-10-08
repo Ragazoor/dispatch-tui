@@ -23,19 +23,7 @@ async fn hook_event_flow_drives_sub_status_and_lifecycle() {
         .with_clock(Arc::new(clock.clone()));
 
     let id = svc
-        .create_task(CreateTaskParams {
-            title: "active health".into(),
-            description: "".into(),
-            repo_path: "/repo".into(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+        .create_task(CreateTaskParams::fixture("active health", "/repo"))
         .await
         .unwrap();
 

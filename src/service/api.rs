@@ -603,19 +603,10 @@ mod tests {
         ));
 
         let id = svc
-            .create_task(CreateTaskParams {
-                title: "delegated".to_string(),
-                description: String::new(),
-                repo_path: "/repo".to_string(),
-                plan_path: None,
-                epic_id: None,
-                sort_order: None,
-                tag: None,
-                base_branch: None,
-                wrap_up_mode: None,
-                auto_run_plan: false,
-                phoenix: false,
-            })
+            .create_task(CreateTaskParams::fixture(
+                "delegated".to_string(),
+                "/repo".to_string(),
+            ))
             .await
             .unwrap();
 
