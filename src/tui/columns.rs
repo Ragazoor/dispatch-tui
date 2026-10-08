@@ -726,13 +726,14 @@ impl App {
         status: TaskStatus,
         section: ColumnSection,
     ) -> bool {
-        self.column_has_rendered_fold(status) && self.is_section_collapsed(status, section)
+        self.column_has_rendered_fold(status) && self.folds.is_collapsed(status, section)
     }
 
     /// Whether `ref_` draws folded *right now*, on the same terms as
     /// `section_renders_collapsed` (board-layout.allium: "Epic Folding").
     pub(in crate::tui) fn epic_group_renders_folded(&self, ref_: EpicFoldRef) -> bool {
-        self.column_has_rendered_fold(ref_.status) && self.is_epic_folded(ref_.status, ref_.epic)
+        self.column_has_rendered_fold(ref_.status)
+            && self.epic_folds.is_folded(ref_.status, ref_.epic)
     }
 
     /// Count the column items that can hold the cursor, for a status. Use this

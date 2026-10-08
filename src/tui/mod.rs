@@ -843,17 +843,6 @@ impl App {
         !self.search.query.is_empty()
     }
 
-    /// Whether the user has folded `section` in the `status` column. Note this
-    /// is the *recorded* state — a live search query forces a folded section
-    /// open without clearing it (see `section_renders_collapsed`).
-    pub(in crate::tui) fn is_section_collapsed(
-        &self,
-        status: TaskStatus,
-        section: crate::models::ColumnSection,
-    ) -> bool {
-        self.folds.is_collapsed(status, section)
-    }
-
     /// Whether any fold — a section fold or an epic fold — actually takes
     /// effect in this column right now.
     ///
@@ -872,36 +861,11 @@ impl App {
         self.invalidate_layout_cache();
     }
 
-    /// Fold or unfold one section. Writes the recorded set only — the caller
-    /// owns moving the cursor and persisting (tasks.allium:
-    /// ToggleSectionCollapse).
-    pub(in crate::tui) fn toggle_section_collapse(
-        &mut self,
-        status: TaskStatus,
-        section: crate::models::ColumnSection,
-    ) {
-        self.folds.toggle(status, section);
-    }
-
-    /// Whether the user has folded `epic`'s flattened group in the `status`
-    /// column. Note this is the *recorded* state — a live search query forces
-    /// a folded group open without clearing it (see `epic_group_renders_folded`).
-    pub(in crate::tui) fn is_epic_folded(&self, status: TaskStatus, epic: EpicId) -> bool {
-        self.epic_folds.is_folded(status, epic)
-    }
-
     /// Replace the whole folded-epic set, as the startup restore does. Not a
     /// toggle: it installs what storage held rather than editing it.
     pub fn set_epic_folds(&mut self, folds: EpicFoldState) {
         self.epic_folds = folds;
         self.invalidate_layout_cache();
-    }
-
-    /// Fold or unfold one flattened epic group. Writes the recorded set only —
-    /// the caller owns moving the cursor and persisting (tasks.allium:
-    /// ToggleEpicFold).
-    pub(in crate::tui) fn toggle_epic_fold(&mut self, status: TaskStatus, epic: EpicId) {
-        self.epic_folds.toggle(status, epic);
     }
 
     /// The status of the column the cursor is in, or `None` on the select-all

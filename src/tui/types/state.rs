@@ -464,6 +464,18 @@ pub struct SelectionState {
 }
 
 impl SelectionState {
+    pub(in crate::tui) fn toggle_task(&mut self, id: TaskId) {
+        if !self.tasks.remove(&id) {
+            self.tasks.insert(id);
+        }
+    }
+
+    pub(in crate::tui) fn toggle_epic(&mut self, id: EpicId) {
+        if !self.epics.remove(&id) {
+            self.epics.insert(id);
+        }
+    }
+
     pub fn has_selection(&self) -> bool {
         !self.tasks.is_empty() || !self.epics.is_empty()
     }

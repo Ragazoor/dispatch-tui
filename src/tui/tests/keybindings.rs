@@ -176,7 +176,8 @@ fn app_for(binding: &KeyBinding) -> App {
             a.sub_status = SubStatus::NeedsInput;
             let mut app = App::new(vec![a]);
             app.selection_mut().set_column(2);
-            app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+            app.folds
+                .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
             app.selection_mut().set_row(2, 0);
             app
         }
@@ -187,7 +188,7 @@ fn app_for(binding: &KeyBinding) -> App {
             app.board.epics = vec![make_epic(10)];
             app.board.flattened = true;
             app.selection_mut().set_column(2);
-            app.toggle_epic_fold(TaskStatus::Running, EpicId(10));
+            app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
             app.selection_mut().set_row(2, 0);
             app
         }

@@ -11,7 +11,7 @@ fn a_fresh_board_has_nothing_folded() {
     for &status in TaskStatus::ALL {
         for &section in ColumnSection::ALL {
             assert!(
-                !app.is_section_collapsed(status, section),
+                !app.folds.is_collapsed(status, section),
                 "{status:?}/{section:?}"
             );
         }
@@ -21,10 +21,16 @@ fn a_fresh_board_has_nothing_folded() {
 #[test]
 fn toggling_folds_then_unfolds() {
     let mut app = App::new(vec![]);
-    app.toggle_section_collapse(TaskStatus::Review, ColumnSection::Approved);
-    assert!(app.is_section_collapsed(TaskStatus::Review, ColumnSection::Approved));
-    app.toggle_section_collapse(TaskStatus::Review, ColumnSection::Approved);
-    assert!(!app.is_section_collapsed(TaskStatus::Review, ColumnSection::Approved));
+    app.folds
+        .toggle(TaskStatus::Review, ColumnSection::Approved);
+    assert!(app
+        .folds
+        .is_collapsed(TaskStatus::Review, ColumnSection::Approved));
+    app.folds
+        .toggle(TaskStatus::Review, ColumnSection::Approved);
+    assert!(!app
+        .folds
+        .is_collapsed(TaskStatus::Review, ColumnSection::Approved));
 }
 
 /// `conflict` is a section in both Running and Review, and the two fold
@@ -32,15 +38,21 @@ fn toggling_folds_then_unfolds() {
 #[test]
 fn the_same_section_in_two_columns_folds_independently() {
     let mut app = App::new(vec![]);
-    app.toggle_section_collapse(TaskStatus::Review, ColumnSection::Conflict);
-    assert!(app.is_section_collapsed(TaskStatus::Review, ColumnSection::Conflict));
-    assert!(!app.is_section_collapsed(TaskStatus::Running, ColumnSection::Conflict));
+    app.folds
+        .toggle(TaskStatus::Review, ColumnSection::Conflict);
+    assert!(app
+        .folds
+        .is_collapsed(TaskStatus::Review, ColumnSection::Conflict));
+    assert!(!app
+        .folds
+        .is_collapsed(TaskStatus::Running, ColumnSection::Conflict));
 }
 
 #[test]
 fn only_the_column_holding_a_fold_reports_one() {
     let mut app = App::new(vec![]);
-    app.toggle_section_collapse(TaskStatus::Review, ColumnSection::Approved);
+    app.folds
+        .toggle(TaskStatus::Review, ColumnSection::Approved);
     assert!(app.column_has_rendered_fold(TaskStatus::Review));
     assert!(!app.column_has_rendered_fold(TaskStatus::Running));
 }
@@ -51,11 +63,13 @@ fn only_the_column_holding_a_fold_reports_one() {
 #[test]
 fn a_live_search_query_means_no_column_has_a_rendered_fold() {
     let mut app = App::new(vec![]);
-    app.toggle_section_collapse(TaskStatus::Review, ColumnSection::Approved);
+    app.folds
+        .toggle(TaskStatus::Review, ColumnSection::Approved);
     app.search.query = "anything".to_string();
     assert!(!app.column_has_rendered_fold(TaskStatus::Review));
     assert!(
-        app.is_section_collapsed(TaskStatus::Review, ColumnSection::Approved),
+        app.folds
+            .is_collapsed(TaskStatus::Review, ColumnSection::Approved),
         "and the recorded fold is untouched"
     );
 }

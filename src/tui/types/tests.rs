@@ -302,3 +302,16 @@ fn input_caret_moves_stay_within_the_buffer() {
     input.cursor_word_right();
     assert_eq!(input.caret, 5);
 }
+
+// -- SelectionState --
+
+#[test]
+fn selection_toggles_flip_membership() {
+    let mut select = SelectionState::default();
+    select.toggle_task(TaskId(1));
+    select.toggle_epic(EpicId(2));
+    assert!(select.tasks.contains(&TaskId(1)) && select.epics.contains(&EpicId(2)));
+    select.toggle_task(TaskId(1));
+    select.toggle_epic(EpicId(2));
+    assert!(!select.has_selection());
+}

@@ -138,7 +138,8 @@ fn a_folded_section_keeps_its_header_and_drops_its_cards() {
         running(2, SubStatus::NeedsInput),
         running(3, SubStatus::NeedsInput),
     ]);
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
 
     assert_eq!(
         headers(&app, TaskStatus::Running),
@@ -159,7 +160,8 @@ fn a_folded_header_reports_how_many_cards_it_hides() {
         running(2, SubStatus::NeedsInput),
         running(3, SubStatus::Active),
     ]);
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
     assert_eq!(
         hidden_counts(&app, TaskStatus::Running),
         vec![(ColumnSection::NeedsInput, 2)]
@@ -177,7 +179,8 @@ fn the_hidden_count_excludes_filtered_out_cards() {
 
     let mut app = App::new(vec![a, b]);
     app.set_repo_filter(["/keep".to_string()].into_iter().collect());
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
 
     assert_eq!(
         hidden_counts(&app, TaskStatus::Running),
@@ -190,7 +193,8 @@ fn the_hidden_count_excludes_filtered_out_cards() {
 #[test]
 fn a_folded_section_with_no_cards_renders_no_header() {
     let mut app = App::new(vec![running(1, SubStatus::Active)]);
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::Crashed);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::Crashed);
     assert_eq!(
         headers(&app, TaskStatus::Running),
         vec![ColumnSection::Active]
@@ -208,7 +212,8 @@ fn folding_a_flattened_section_takes_its_decoration_with_it() {
     let mut app = App::new(vec![owned, orphan, running(3, SubStatus::Active)]);
     app.board.epics = vec![make_epic(10)];
     app.board.flattened = true;
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
 
     let items = app.column_items_for_status_with_placements(TaskStatus::Running, None);
     assert!(
@@ -229,7 +234,8 @@ fn a_search_match_forces_its_folded_section_open() {
     let mut a = running(1, SubStatus::NeedsInput);
     a.title = "needle".to_string();
     let mut app = App::new(vec![a, running(2, SubStatus::Active)]);
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
     app.search.query = "needle".to_string();
 
     assert_eq!(
@@ -250,11 +256,14 @@ fn the_search_override_does_not_clear_the_recorded_fold() {
     let mut a = running(1, SubStatus::NeedsInput);
     a.title = "needle".to_string();
     let mut app = App::new(vec![a]);
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
     app.search.query = "needle".to_string();
     let _ = task_ids(&app, TaskStatus::Running);
 
-    assert!(app.is_section_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
+    assert!(app
+        .folds
+        .is_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
 
     app.search.query.clear();
     assert_eq!(
@@ -291,8 +300,12 @@ fn cursor_section(app: &App) -> Option<ColumnSection> {
 fn z_on_a_card_folds_that_cards_section() {
     let mut app = folding_app();
     app.handle_key(make_key(KeyCode::Char('z')));
-    assert!(app.is_section_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
-    assert!(!app.is_section_collapsed(TaskStatus::Running, ColumnSection::Active));
+    assert!(app
+        .folds
+        .is_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
+    assert!(!app
+        .folds
+        .is_collapsed(TaskStatus::Running, ColumnSection::Active));
 }
 
 #[test]
@@ -300,7 +313,9 @@ fn z_on_the_resulting_header_unfolds_it() {
     let mut app = folding_app();
     app.handle_key(make_key(KeyCode::Char('z')));
     app.handle_key(make_key(KeyCode::Char('z')));
-    assert!(!app.is_section_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
+    assert!(!app
+        .folds
+        .is_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
 }
 
 /// Folding leaves the cursor on the folded section's own header. Asserted from
@@ -340,10 +355,13 @@ fn space_and_enter_unfold_a_folded_header() {
     for key in [KeyCode::Char(' '), KeyCode::Enter] {
         let mut app = folding_app();
         app.handle_key(make_key(KeyCode::Char('z')));
-        assert!(app.is_section_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
+        assert!(app
+            .folds
+            .is_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
         app.handle_key(make_key(key));
         assert!(
-            !app.is_section_collapsed(TaskStatus::Running, ColumnSection::NeedsInput),
+            !app.folds
+                .is_collapsed(TaskStatus::Running, ColumnSection::NeedsInput),
             "{key:?} should unfold"
         );
     }
@@ -367,7 +385,7 @@ fn z_is_a_no_op_in_a_column_without_sections() {
         app.handle_key(make_key(KeyCode::Char('z')));
         for &section in ColumnSection::ALL {
             assert!(
-                !app.is_section_collapsed(status, section),
+                !app.folds.is_collapsed(status, section),
                 "{status:?}/{section:?}"
             );
         }
@@ -379,7 +397,9 @@ fn z_is_a_no_op_on_the_select_all_cursor_position() {
     let mut app = folding_app();
     app.selection_mut().on_select_all = true;
     app.handle_key(make_key(KeyCode::Char('z')));
-    assert!(!app.is_section_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
+    assert!(!app
+        .folds
+        .is_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
 }
 
 #[test]
@@ -388,7 +408,7 @@ fn z_is_a_no_op_in_an_empty_column() {
     app.selection_mut().set_column(2);
     app.handle_key(make_key(KeyCode::Char('z')));
     for &section in ColumnSection::ALL {
-        assert!(!app.is_section_collapsed(TaskStatus::Running, section));
+        assert!(!app.folds.is_collapsed(TaskStatus::Running, section));
     }
 }
 
@@ -401,7 +421,8 @@ fn z_toggles_the_recorded_state_under_a_search_override() {
     a.title = "needle".to_string();
     let mut app = App::new(vec![a]);
     app.selection_mut().set_column(2);
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
     app.search.query = "needle".to_string();
 
     // The card is rendered (override), so the cursor is on it.
@@ -409,7 +430,8 @@ fn z_toggles_the_recorded_state_under_a_search_override() {
     app.handle_key(make_key(KeyCode::Char('z')));
 
     assert!(
-        !app.is_section_collapsed(TaskStatus::Running, ColumnSection::NeedsInput),
+        !app.folds
+            .is_collapsed(TaskStatus::Running, ColumnSection::NeedsInput),
         "z should have recorded the section as unfolded"
     );
 }
@@ -441,7 +463,8 @@ fn card_actions_are_no_ops_on_a_folded_header() {
             "{key:?} changed the board on a header"
         );
         assert!(
-            app.is_section_collapsed(TaskStatus::Running, ColumnSection::NeedsInput),
+            app.folds
+                .is_collapsed(TaskStatus::Running, ColumnSection::NeedsInput),
             "{key:?} should not have unfolded the section"
         );
     }
@@ -467,7 +490,8 @@ fn a_selected_card_stays_selected_while_its_section_is_folded() {
     let mut app = folding_app();
     app.update(Message::SelectAllColumn);
     assert_eq!(app.select.tasks.len(), 3);
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
     assert_eq!(app.select.tasks.len(), 3, "folding must not deselect");
 }
 
@@ -484,7 +508,8 @@ fn only_a_folded_section_is_selectable() {
 
     // And through the real board, to pin that the builder emits the right one.
     let mut app = folding_app();
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
     let items = app.column_items_for_status_with_placements(TaskStatus::Running, None);
     let kinds: Vec<bool> = items
         .iter()
@@ -504,7 +529,8 @@ fn only_a_folded_section_is_selectable() {
 #[test]
 fn anchor_is_some_exactly_where_an_item_is_selectable() {
     let mut app = folding_app();
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
     for status in [TaskStatus::Running, TaskStatus::Backlog] {
         for item in app.column_items_for_status_with_placements(status, None) {
             assert_eq!(
@@ -522,7 +548,8 @@ fn anchor_is_some_exactly_where_an_item_is_selectable() {
 fn the_item_count_counts_a_folded_header_and_not_its_cards() {
     let mut app = folding_app();
     assert_eq!(app.column_item_count(TaskStatus::Running), 3);
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
     assert_eq!(
         app.column_item_count(TaskStatus::Running),
         2,
@@ -533,7 +560,8 @@ fn the_item_count_counts_a_folded_header_and_not_its_cards() {
 #[test]
 fn j_and_k_step_onto_a_folded_header_and_past_an_expanded_one() {
     let mut app = folding_app();
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
     app.selection_mut().set_row(2, 0);
 
     // Row 0 is the folded header.
@@ -614,7 +642,8 @@ fn a_folded_section_losing_its_last_card_drops_the_header() {
         "the emptied section's header is gone"
     );
     assert!(
-        app.is_section_collapsed(TaskStatus::Running, ColumnSection::NeedsInput),
+        app.folds
+            .is_collapsed(TaskStatus::Running, ColumnSection::NeedsInput),
         "and the fold is still recorded, so the header returns folded"
     );
     let col = app.selection().column();
@@ -638,7 +667,8 @@ fn the_column_header_count_ignores_folding() {
         "expected RUNNING 3 before folding"
     );
 
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
     let buf = render_to_buffer(&mut app, 120, 40);
     assert!(
         buffer_contains_ignore_case(&buf, "RUNNING 3"),
@@ -651,8 +681,9 @@ fn the_column_header_count_ignores_folding() {
 #[test]
 fn rendering_a_folded_section_in_the_focused_column_does_not_panic() {
     let mut app = folding_app();
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::Active);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds.toggle(TaskStatus::Running, ColumnSection::Active);
     let buf = render_to_buffer(&mut app, 120, 40);
     assert!(buffer_contains(&buf, "needs input"));
 }
@@ -660,7 +691,8 @@ fn rendering_a_folded_section_in_the_focused_column_does_not_panic() {
 #[test]
 fn a_folded_header_draws_its_count_and_marker() {
     let mut app = folding_app();
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
     let buf = render_to_buffer(&mut app, 120, 40);
     assert!(
         buffer_contains(&buf, "needs input (2) \u{22ef}"),
@@ -694,7 +726,8 @@ fn a_fold_holds_inside_an_epic_view() {
 
     let mut app = App::new(vec![a, b]);
     app.board.epics = vec![make_epic(10)];
-    app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
+    app.folds
+        .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
         EpicId(10),
     )));
@@ -722,7 +755,9 @@ fn a_fold_made_inside_an_epic_view_holds_on_the_board() {
     app.handle_key(make_key(KeyCode::Char('z')));
 
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Exit));
-    assert!(app.is_section_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
+    assert!(app
+        .folds
+        .is_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
 }
 
 /// Split view insets the same four columns inside a focus border, so their
@@ -732,7 +767,9 @@ fn folding_works_in_split_view() {
     let mut app = folding_app();
     app.board.split.active = true;
     app.handle_key(make_key(KeyCode::Char('z')));
-    assert!(app.is_section_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
+    assert!(app
+        .folds
+        .is_collapsed(TaskStatus::Running, ColumnSection::NeedsInput));
 
     let buf = render_to_buffer(&mut app, 120, 40);
     assert!(
@@ -768,7 +805,8 @@ fn z_on_an_epic_card_folds_its_section_with_a_cold_cache() {
 
     app.handle_key(make_key(KeyCode::Char('z')));
     assert!(
-        app.is_section_collapsed(TaskStatus::Running, ColumnSection::Active),
+        app.folds
+            .is_collapsed(TaskStatus::Running, ColumnSection::Active),
         "z on an epic card should fold the section it renders under"
     );
 }

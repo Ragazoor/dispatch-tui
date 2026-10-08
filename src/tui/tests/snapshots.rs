@@ -61,7 +61,8 @@ fn snapshot_folded_review_section() {
     }
     let mut app = App::new(tasks);
     app.selection_mut().set_column(3); // Review = nav col 3
-    app.toggle_section_collapse(TaskStatus::Review, ColumnSection::Approved);
+    app.folds
+        .toggle(TaskStatus::Review, ColumnSection::Approved);
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }

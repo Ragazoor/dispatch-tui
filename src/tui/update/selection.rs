@@ -7,26 +7,17 @@ use super::super::App;
 
 impl App {
     pub(in crate::tui) fn handle_toggle_select(&mut self, id: TaskId) -> Vec<Command> {
-        if self.select.tasks.contains(&id) {
-            self.select.tasks.remove(&id);
-        } else {
-            self.select.tasks.insert(id);
-        }
+        self.select.toggle_task(id);
         vec![]
     }
 
     pub(in crate::tui) fn handle_toggle_select_epic(&mut self, id: EpicId) -> Vec<Command> {
-        if self.select.epics.contains(&id) {
-            self.select.epics.remove(&id);
-        } else {
-            self.select.epics.insert(id);
-        }
+        self.select.toggle_epic(id);
         vec![]
     }
 
     pub(in crate::tui) fn handle_clear_selection(&mut self) -> Vec<Command> {
-        self.select.tasks.clear();
-        self.select.epics.clear();
+        self.select.clear();
         self.selection_mut().on_select_all = false;
         vec![]
     }
@@ -52,13 +43,13 @@ impl App {
             return vec![];
         };
 
-        self.toggle_section_collapse(status, section);
+        self.folds.toggle(status, section);
 
         // Where the cursor goes: onto the section's own header when folding,
         // onto its first card when unfolding. Either way it stays in the
         // section the user acted on. Resolved before the write so the anchor
         // lookup and `selection_mut()` do not overlap.
-        let target = if self.is_section_collapsed(status, section) {
+        let target = if self.folds.is_collapsed(status, section) {
             Some(ColumnAnchor::Section(SectionRef::new(status, section)))
         } else {
             // `None` here means the section holds nothing, so unfolding
@@ -148,9 +139,9 @@ impl App {
             return vec![];
         };
 
-        self.toggle_epic_fold(fold_ref.status, fold_ref.epic);
+        self.epic_folds.toggle(fold_ref.status, fold_ref.epic);
 
-        let target = if self.is_epic_folded(fold_ref.status, fold_ref.epic) {
+        let target = if self.epic_folds.is_folded(fold_ref.status, fold_ref.epic) {
             Some(ColumnAnchor::EpicFold(fold_ref))
         } else {
             self.first_card_anchor_in_epic_group(fold_ref.status, fold_ref.epic)
@@ -324,8 +315,7 @@ impl App {
                 epic_ids,
             },
         ));
-        self.select.tasks.clear();
-        self.select.epics.clear();
+        self.select.clear();
         cmds
     }
 
