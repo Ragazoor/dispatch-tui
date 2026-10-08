@@ -28,7 +28,7 @@ pub use config::{has_dispatch_entry, merge_mcp_config, remove_mcp_config, MergeR
 pub use config_update::*;
 pub use confirm::*;
 pub(crate) use plugins::built_in_skills_dir;
-pub use plugins::{remove_plugin, seed_feed_epics};
+pub use plugins::remove_plugin;
 pub use uninstall::*;
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@
 --        items (PRs, security alerts, anything emitting JSON) as tasks under
 --        an Epic.
 -- Includes: FeedItem schema, upsert semantics, status preservation, polling
---           cadence, error handling, the seeded example epic, the verify-feed
+--           cadence, error handling, the verify-feed
 --           validator CLI, the role-routed reconcile path that splits a
 --           single PR-review emission across My/Team/Bots sub-epics, and the
 --           append-only mode for sources that emit events rather than
@@ -670,8 +670,7 @@ rule InstallShippedFeedScripts {
     -- reported as `failed` carrying the error text, and setup proceeds to
     -- the remaining scripts, to the config files
     -- (InstallShippedFeedConfigs), and to everything downstream of them:
-    -- MCP config, plugin install, statusline, tmux, and SeedExampleFeedEpic's
-    -- seeding. Failures are per-script and independent; four scripts landing
+    -- MCP config, plugin install, statusline and tmux. Failures are per-script and independent; four scripts landing
     -- fine and one failing is four scripts installed.
     --
     -- A BACKUP failure ABANDONS the script before the write: nothing is
@@ -930,66 +929,20 @@ rule ReportShippedFeedScripts {
 }
 
 -- == Setup seeding ==
-
-rule SeedExampleFeedEpic {
-    when: BoardOpensItsDatabase(data_dir)
-
-    -- On first-run setup, dispatch creates exactly one example feed epic
-    -- so the kanban board is not empty and the user has a working
-    -- reference for the script + epic plumbing. The seeding is
-    -- idempotent: if any epic already has feed_command pointing at the
-    -- installed example script, no new epic is created.
-    --
-    -- Seeding OWNS NO FILES. Getting fetch-dependabot.sh and the config
-    -- files it sources (repos.conf, which repos to poll; bots.conf, which
-    -- bot authors to filter on) onto disk is InstallShippedFeedScripts and
-    -- InstallShippedFeedConfigs above; this rule only wires an epic to a
-    -- path those rules have already guaranteed exists. The script is inert
-    -- without both confs, which is why the conf rule is not optional —
-    -- seeding an epic wired to a command the user has no file to configure
-    -- would produce a feed that silently emits nothing.
-    -- (`<data_dir>` is the data directory — storage.allium: DataDirectory,
-    -- the data directory.)
-    --
-    -- The seeding itself is UNCHANGED by the install rules above: still
-    -- exactly one example epic, still idempotent, still keyed on the
-    -- installed script's path. A script that gets UPDATED keeps its path,
-    -- so an update never orphans the seeded epic's feed_command.
-    --
-    -- If fetch-dependabot.sh is the script that FAILED to write, seeding
-    -- proceeds unchanged. The path is still the right one to seed against:
-    -- it is where dispatch installs that script, a later setup retries the
-    -- write, and the epic is keyed on the path rather than on the file's
-    -- existence. Skipping the seeding would instead make the example epic
-    -- depend on the outcome of an unrelated filesystem error, and once a run
-    -- has seeded nothing there is no later run that notices it should have —
-    -- this rule only ever creates the epic when none points at the path, not
-    -- when the file appears. The user sees the failure on the `Feed scripts`
-    -- line (ReportShippedFeedScripts) and the epic's first cycle fails
-    -- visibly until the retry lands, which is the same shape as any other
-    -- broken feed_command.
-
-    ensures:
-        let script_path = installed_script_path(data_dir, "fetch-dependabot.sh")
-        if not exists Epic where Epic.feed_command = script_path:
-            Epic.created(
-                title:              "Dependabot",
-                feed_command:       script_path,
-                feed_interval_secs: 300,
-                sort_order:         0
-            )
-
-    @guidance
-        -- Implementation: src/setup/plugins.rs::seed_feed_epics (re-exported
-        -- via `pub use` in src/setup/mod.rs). It installs nothing: the path
-        -- comes from src/setup/plugins.rs::installed_script_path, the same
-        -- function the installer derives it from, so the two cannot disagree
-        -- about where the script is.
-        -- The embedded script source: scripts/fetch-dependabot.sh
-        -- (included via include_str!).
-        -- Coverage: src/setup/plugins.rs tests prefixed with seed_feed_epics_,
-        -- including seed_feed_epics_writes_no_files.
-}
+--
+-- NO EXAMPLE FEED EPIC IS SEEDED. Starting the board never creates a feed
+-- epic wired to fetch-dependabot.sh. An earlier rule did, keyed on "no epic
+-- has feed_command = the installed script's path", so an operator who deleted
+-- that "Dependabot" epic got it back on the next start. It was also redundant:
+-- the managed reviews tree (My / Team / Bots sub-epics) already surfaces bot
+-- PRs, Dependabot's included. The only feed epics that appear on their own are
+-- the managed ones provisioned from settings (ProvisionManagedEpics, epics.allium), which
+-- the operator controls through those settings.
+--
+-- fetch-dependabot.sh itself is still installed (InstallShippedFeedScripts) so
+-- an operator can wire an epic to it by hand; installing the file creates no
+-- row. A store that already holds a "Dependabot" epic from before keeps it
+-- until the operator deletes it, and it then stays deleted.
 
 ------------------------------------------------------------
 -- Rules

@@ -1196,16 +1196,10 @@ mod bootstrap {
         );
     }
 
-    /// docs/specs/startup.allium, scope note: the example feed epic is a row
-    /// in dispatch's own store, not operator configuration, so it is not gated
-    /// on the startup consent prompt.
-    ///
-    /// It lives here rather than beside that prompt because it needs the first
-    /// store connection, which that prompt runs before. (The stand-in store
-    /// here is an in-memory SQLite handle, unrouted, so the row is read back
-    /// from the runtime's own handle.)
+    /// docs/specs/feeds.allium, "Setup seeding": no example feed epic is
+    /// seeded. A deleted "Dependabot" epic used to come back on every start.
     #[tokio::test]
-    async fn bootstrap_seeds_the_example_feed_epic_without_asking() {
+    async fn bootstrap_seeds_no_example_feed_epic() {
         let (_dir, data_dir, paths) = fixture().await;
 
         let bootstrap =
@@ -1217,8 +1211,8 @@ mod bootstrap {
             .await
             .unwrap();
         assert!(
-            epics.iter().any(|e| e.feed_command.is_some()),
-            "a fresh database must get its example feed epic, with no prompt: {epics:?}"
+            !epics.iter().any(|e| e.title == "Dependabot"),
+            "startup must not create a Dependabot epic: {epics:?}"
         );
     }
 

@@ -8,8 +8,6 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use crate::store::{EpicCrud, EpicPatch, EpicRead, Store};
-
 // The entire plugin/ directory is embedded at compile time. Any file added to
 // plugin/ is automatically picked up — no manual registration required.
 pub(super) static PLUGIN_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/plugin");
@@ -720,42 +718,6 @@ fn install_if_absent(path: &std::path::Path, content: &str) -> Result<()> {
             Err(anyhow::Error::new(e).context(format!("Failed to create {}", path.display())))
         }
     }
-}
-
-/// Seed exactly one example feed epic ("Dependabot") wired to the installed
-/// example script. Idempotent: re-running does not duplicate the epic.
-///
-/// Installs nothing itself — [`install_shipped_feed_scripts`] and
-/// [`install_shipped_feed_configs`] own every file under `<data_dir>/scripts/`.
-/// If `fetch-dependabot.sh` was the script that failed to write, seeding still
-/// proceeds: the path is the right one to seed against either way, and a later
-/// setup retries the write. Skipping would make the example epic depend on an
-/// unrelated filesystem error that no later run notices.
-pub async fn seed_feed_epics(db: &Store, data_dir: &Path) -> Result<()> {
-    let script_path = installed_script_path(data_dir, "fetch-dependabot.sh");
-    let cmd = script_path
-        .to_str()
-        .context("example script path is not valid UTF-8")?;
-
-    let already_seeded = db
-        .list_epics()
-        .await?
-        .iter()
-        .any(|e| e.feed_command.as_deref() == Some(cmd));
-    if already_seeded {
-        return Ok(());
-    }
-
-    let epic = db.create_epic("Dependabot", "", None).await?;
-    db.patch_epic(
-        epic.id,
-        &EpicPatch::new()
-            .feed_command(Some(cmd))
-            .feed_interval_secs(Some(300))
-            .sort_order(Some(0)),
-    )
-    .await?;
-    Ok(())
 }
 
 #[cfg(test)]

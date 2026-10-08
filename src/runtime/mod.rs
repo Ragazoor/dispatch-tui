@@ -500,19 +500,17 @@ async fn read_launch_identity(data_dir: &Path) -> Result<(String, Option<String>
 /// epics, backfill embeddings, and serve agents.
 async fn start_services_after_connect(
     database: &Arc<store::Store>,
-    data_dir: &Path,
     emb_svc: Arc<EmbeddingService>,
     mcp_listener: tokio::net::TcpListener,
     mcp_deps: mcp::McpDeps,
     mcp_notify_tx: mpsc::UnboundedSender<mcp::McpEvent>,
 ) {
-    // Seed the example feed epic for a store that has none, and provision
-    // the managed feed-epic tree from the reviews/CVE config. Both create
-    // shared rows, which needs the identity settled just above
-    // (sync.allium: CreatesRequireASettledIdentity) — which is why they
-    // run here rather than when the database opens. Idempotent and
-    // best-effort: a failure here must not block startup.
-    seed_and_provision_feeds(database, data_dir).await;
+    // Provision the managed feed-epic tree from the reviews/CVE config. It
+    // creates shared rows, which needs the identity settled just above
+    // (sync.allium: CreatesRequireASettledIdentity) — which is why it runs
+    // here rather than when the database opens. Idempotent and best-effort:
+    // a failure here must not block startup.
+    provision_managed_feeds(database).await;
 
     // Backfill embeddings for any learnings that were created before the model
     // was available. Fire-and-forget: partial work is retried on next startup.
@@ -1021,12 +1019,9 @@ async fn finish_embedding_load(_load: EmbeddingLoad) -> Result<Arc<EmbeddingServ
     Ok(EmbeddingService::new_noop())
 }
 
-/// Seed the example feed epic and provision the managed feed-epic tree.
-/// Idempotent and best-effort: a failure is logged and never blocks startup.
-async fn seed_and_provision_feeds(database: &Arc<store::Store>, data_dir: &Path) {
-    if let Err(e) = crate::setup::seed_feed_epics(database, data_dir).await {
-        tracing::warn!("Example feed epic seeding failed: {e:#}");
-    }
+/// Provision the managed feed-epic tree. Idempotent and best-effort: a
+/// failure is logged and never blocks startup.
+async fn provision_managed_feeds(database: &Arc<store::Store>) {
     if let Err(e) = crate::service::provision_managed_feeds_from_settings(&**database).await {
         tracing::warn!("Managed feed provisioning failed: {e:#}");
     }
@@ -1325,7 +1320,6 @@ impl TuiRuntime {
 
         start_services_after_connect(
             &database,
-            &data_dir,
             emb_svc.clone(),
             mcp_listener,
             mcp_deps,

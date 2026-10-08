@@ -402,8 +402,7 @@ async fn cmd_tui(
     // It reads a dozen files, walks the installed plugin tree, spawns a tmux
     // subprocess and may block on stdin waiting for an answer, so it runs on a
     // blocking thread rather than inline on the async runtime. It touches no
-    // database: the example feed epic is seeded by `runtime::bootstrap`, which
-    // already holds the board's own connection.
+    // database.
     let setup_paths = paths.setup_paths()?;
     let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
     let startup_data_dir = data_dir.to_path_buf();

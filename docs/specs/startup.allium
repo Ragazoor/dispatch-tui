@@ -33,14 +33,15 @@
 --           that writes it are host.allium's (RenameHost) — this spec governs
 --           only when the operator is asked for one and what happens when they
 --           cannot be.
---           Also excluded: seeding the example feed epic (see feeds.allium),
---           which adds an epic row to dispatch's own shared store — not a file
---           in the operator's configuration — and so is not a configuration
---           artefact and is not gated on consent. It happens once the board's
---           first store connection is up (a created row needs the settled
---           identity — sync.allium: CreatesRequireASettledIdentity), not here;
+--           Also excluded: provisioning the managed feed epics (see
+--           feeds.allium), which adds epic rows to dispatch's own shared
+--           store — not a file in the operator's configuration — and so is not
+--           a configuration artefact and is not gated on consent. It happens
+--           once the board's first store connection is up (a created row needs
+--           the settled identity — sync.allium: CreatesRequireASettledIdentity),
+--           not here;
 --           doing it beside the consent prompt would come before any
---           connection exists, and would leave a fresh store unseeded on every
+--           connection exists, and would leave a fresh store unprovisioned on every
 --           machine whose configuration was already current.
 --
 --           THE SHIPPED FEED SCRIPTS ARE THE EXCEPTION TO THAT REASONING, and
@@ -1452,7 +1453,7 @@ rule ConnectToTheNamedStoreOnceTheHostIsNamed {
         -- host identity because the subscription is scoped by host id
         -- (settings are this host's), and before BoardDrawn because
         -- everything the board reads while it starts — repo paths, settings,
-        -- the example feed epic it seeds — is a
+        -- the managed feed epics it provisions — is a
         -- shared row, and a board that read them before the store answered
         -- would read nothing.
         --
