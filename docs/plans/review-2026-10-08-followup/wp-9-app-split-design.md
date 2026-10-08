@@ -41,3 +41,10 @@ and the form handlers call it; forms then proves the pattern.
 - It does not move handlers that need status + board + input. Splitting those
   would mean passing three sub-states into each, with no gain in clarity.
 - It does not change `update()`'s routing or the `Message`/`Command` types.
+
+## Outcome
+
+`impl App` methods: **353 → 297** (24 blocks). Slices 1–4 and 6 landed as
+planned. Slice 5 is `BoardView` in `src/tui/columns.rs` (`app.view()`); its
+methods take `self` by value, since the view is `Copy`. `compute_epic_stats`,
+which nothing called, was deleted. The `&mut self` cache methods stay on `App`.
