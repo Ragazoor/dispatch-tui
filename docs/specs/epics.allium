@@ -1564,7 +1564,7 @@ rule ArchivedStatusMigration {
         -- StoreInUseNeverOpensSqlite, CodeNeverTouchesLegacyDatabase), and
         -- `dispatch spacetime seed` and
         -- `dispatch spacetime dump`, which used to open their SQLite source
-        -- through `Database::open` and so run v106 first, are removed. v106
+        -- through `Store::open` and so run v106 first, are removed. v106
         -- was deleted with the rest of the migrations (task #36865), and this
         -- rule stays as the record of what the removal did. An old snapshot file with archived rows
         -- is refused as above, and there is no longer a supported route that

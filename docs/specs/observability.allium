@@ -771,7 +771,7 @@ surface StatusLineDecorator {
         -- handed, because the same spelling composes just as quietly
         -- elsewhere: src/tmux.rs::tmux_conf_path resolves through the same
         -- reader, and src/models/paths.rs::expand_tilde and
-        -- src/lib.rs::default_db_path apply the rule to their own fallbacks —
+        -- src/lib.rs::default_data_dir apply the rule to their own fallbacks —
         -- neither has a Result to report an absence through, so each stays
         -- put instead. expand_tilde is the one that matters most: it is what
         -- src/dispatch/trust.rs::project_key keys the trust store on, so
