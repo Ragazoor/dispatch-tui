@@ -453,15 +453,13 @@ impl App {
     pub fn mode(&self) -> &InputMode {
         &self.input.mode
     }
-    pub fn input_buffer(&self) -> &str {
-        &self.input.buffer
-    }
     pub fn split_active(&self) -> bool {
         self.board.split.active
     }
     pub fn split_focused(&self) -> bool {
         self.board.split.focused
     }
+    #[cfg(any(test, feature = "test-support"))]
     pub fn status_message(&self) -> Option<&str> {
         self.status.message.as_deref()
     }

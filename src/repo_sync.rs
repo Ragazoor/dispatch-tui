@@ -38,6 +38,7 @@ impl AheadBehind {
     /// `ahead = 0`, merge commit otherwise) rather than a branch on this
     /// value, so it stays a `derived` value on `AheadBehind`
     /// (`docs/specs/repo-sync.allium`) with no direct caller.
+    #[cfg(test)]
     pub fn is_diverged(&self) -> bool {
         self.ahead > 0 && self.behind > 0
     }
@@ -349,7 +350,9 @@ pub struct RepoSyncState {
 impl RepoSyncState {
     /// Whether the repository could be measured. An unmeasured repository is
     /// distinct from a clean one and must never be presented as clean
-    /// (`UnmeasuredIsNeverPresentedAsClean`).
+    /// (`UnmeasuredIsNeverPresentedAsClean`). `dispatch repo status` honours
+    /// it by matching on `counts` directly, so only the tests call this.
+    #[cfg(test)]
     pub fn is_measured(&self) -> bool {
         self.counts.is_some()
     }

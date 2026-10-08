@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use http_body_util::BodyExt;
 use hyper_util::rt::TokioIo;
 
-use crate::models::{HookEventKind, NotificationKind};
+use crate::models::{HookEventKind, NotificationKind, TaskId};
 use wire::{Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, Question, HOOK_PATH};
 
 /// How long a hook waits on the board before giving up on it.
@@ -145,7 +145,7 @@ where
 /// `dispatch hook <id> <kind> [--kind <notification_kind>]`.
 pub async fn run_event(
     port: u16,
-    id: i64,
+    id: TaskId,
     kind: &str,
     notification_kind: Option<&str>,
 ) -> Result<()> {
@@ -189,7 +189,7 @@ pub enum SubagentAction {
 /// `dispatch hook-subagent <id> start|stop|clear`.
 pub async fn run_subagent(
     port: u16,
-    id: i64,
+    id: TaskId,
     action: SubagentAction,
     agent_id: Option<String>,
     session_id: Option<String>,
@@ -231,7 +231,7 @@ pub async fn run_subagent(
 /// (and, when resolvable, the target's) row and appends the sender's
 /// trajectory entry — the only audit record a native `SendMessage` gets,
 /// since it never reaches dispatch's own MCP server.
-pub async fn run_peer_message(port: u16, id: i64, target: String, body: String) -> Result<()> {
+pub async fn run_peer_message(port: u16, id: TaskId, target: String, body: String) -> Result<()> {
     deliver(
         port,
         ObservedEvent::PeerMessage {
@@ -247,7 +247,7 @@ pub async fn run_peer_message(port: u16, id: i64, target: String, body: String) 
 /// (agent-tree.allium: BoardPaneView). Every failure -- unreachable, too slow,
 /// refused, an answer this version cannot read -- is an `Err` naming the
 /// address tried, never an empty view.
-pub async fn fetch_pane_view(port: u16, task_id: i64) -> Result<wire::PaneView> {
+pub async fn fetch_pane_view(port: u16, task_id: TaskId) -> Result<wire::PaneView> {
     let request = wire::PaneViewRequest { task_id };
     tokio::time::timeout(
         DELIVERY_TIMEOUT,
@@ -279,7 +279,7 @@ pub enum GateVerdict {
 /// between an agent and its submission. The gate is a one-time reminder
 /// rather than enforcement, which is what makes that trade the right way
 /// round. See `PrLearningsGate` in `docs/specs/pr-workflow.allium`.
-pub async fn run_pr_gate(port: u16, id: i64) -> Result<GateVerdict> {
+pub async fn run_pr_gate(port: u16, id: TaskId) -> Result<GateVerdict> {
     match send(port, &HookRequest::Ask(Question::PrGate { task_id: id })).await? {
         HookResponse::Answer(Answer::PrGate { reminder }) => Ok(match reminder {
             Some(text) => GateVerdict::Block(text),
@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn a_notification_subtype_survives_the_wire() {
         let request = HookRequest::Observe(ObservedEvent::Event {
-            task_id: 7,
+            task_id: TaskId(7),
             kind: HookEventKind::Notification(Some(NotificationKind::AuthSuccess)),
         });
         let json = serde_json::to_string(&request).unwrap();
@@ -319,24 +319,44 @@ mod tests {
     #[test]
     fn an_observation_and_a_question_are_distinct_on_the_wire() {
         let observed = serde_json::to_string(&HookRequest::Observe(ObservedEvent::SubagentClear {
-            task_id: 1,
+            task_id: TaskId(1),
         }))
         .unwrap();
         let asked =
-            serde_json::to_string(&HookRequest::Ask(Question::PrGate { task_id: 1 })).unwrap();
+            serde_json::to_string(&HookRequest::Ask(Question::PrGate { task_id: TaskId(1) }))
+                .unwrap();
         assert_ne!(observed, asked);
+    }
+
+    /// A task id is a bare number on the wire. The hook binary on `PATH` need
+    /// not be the build the board runs, so the JSON shape must not change
+    /// with the Rust type that carries the id.
+    #[test]
+    fn a_task_id_is_a_bare_number_on_the_wire() {
+        let observed = HookRequest::Observe(ObservedEvent::SubagentClear { task_id: TaskId(7) });
+        let json = r#"{"hook":"observe","event":"subagent_clear","task_id":7}"#;
+        assert_eq!(serde_json::to_string(&observed).unwrap(), json);
+        assert_eq!(serde_json::from_str::<HookRequest>(json).unwrap(), observed);
+
+        let pane = wire::PaneViewRequest { task_id: TaskId(9) };
+        let json = r#"{"task_id":9}"#;
+        assert_eq!(serde_json::to_string(&pane).unwrap(), json);
+        assert_eq!(
+            serde_json::from_str::<wire::PaneViewRequest>(json).unwrap(),
+            pane
+        );
     }
 
     #[test]
     fn every_observation_reports_its_task() {
         assert_eq!(
             ObservedEvent::PeerMessage {
-                task_id: 42,
+                task_id: TaskId(42),
                 target: "task-1".into(),
                 body: "x".into(),
             }
             .task_id(),
-            42
+            TaskId(42)
         );
     }
 }

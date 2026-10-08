@@ -25,8 +25,8 @@ impl CallerIdentity {
         match (task_id_header, kind_header) {
             (Some(_), Some(_)) => Err(IdentityError::Conflict),
             (Some(raw), None) => raw
-                .parse::<i64>()
-                .map(|n| CallerIdentity::Task(TaskId(n)))
+                .parse::<TaskId>()
+                .map(CallerIdentity::Task)
                 .map_err(|_| IdentityError::InvalidTaskId(raw.to_string())),
             (None, Some(k)) if k == KIND_SESSION => Ok(CallerIdentity::Session),
             (None, Some(other)) => Err(IdentityError::UnknownKind(other.to_string())),

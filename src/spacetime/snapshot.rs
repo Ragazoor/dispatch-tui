@@ -638,6 +638,7 @@ impl Snapshot {
     /// Rows in a deterministic order, for comparing two snapshots. A dump does
     /// not promise row order, so comparing snapshots directly would report a
     /// difference that is not one.
+    #[cfg(test)]
     pub fn canonical_rows(&self) -> Vec<(SharedTable, Vec<String>)> {
         let mut out: Vec<(SharedTable, Vec<String>)> = self
             .extracts

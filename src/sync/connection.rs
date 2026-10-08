@@ -76,6 +76,7 @@ pub enum ConnectionStatus {
 
 impl ConnectionStatus {
     /// Whether the board should be telling the operator something is wrong.
+    #[cfg(test)]
     pub fn is_healthy(self) -> bool {
         matches!(self, Self::Connecting | Self::Connected)
     }

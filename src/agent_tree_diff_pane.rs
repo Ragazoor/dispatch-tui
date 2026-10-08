@@ -18,6 +18,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
+use crate::models::TaskId;
 use crate::process::ProcessRunner;
 use crate::tmux::{self, PANE_ROLE_DIFF, PANE_ROLE_OPTION};
 
@@ -72,7 +73,7 @@ fn existing_diff_pane(my_pane: &str, runner: &dyn ProcessRunner) -> Result<Optio
 pub fn reconcile_diff_pane(
     my_pane: &str,
     data_dir: &Path,
-    task_id: i64,
+    task_id: TaskId,
     worktree: &Path,
     anything_open: bool,
     runner: &dyn ProcessRunner,
@@ -91,7 +92,7 @@ pub fn reconcile_diff_pane(
 fn split_diff_pane(
     my_pane: &str,
     data_dir: &Path,
-    task_id: i64,
+    task_id: TaskId,
     worktree: &Path,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
@@ -161,7 +162,7 @@ mod tests {
     fn opening_the_first_diff_splits_a_pane_below_the_tree() {
         let runner = no_pane_then_split();
 
-        reconcile_diff_pane("%2", db(), 42, worktree(), true, &runner).unwrap();
+        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
 
         let calls = runner.flattened_calls();
         assert!(
@@ -177,7 +178,7 @@ mod tests {
     fn the_diff_pane_is_told_which_database_and_task_to_read() {
         let runner = no_pane_then_split();
 
-        reconcile_diff_pane("%2", db(), 42, worktree(), true, &runner).unwrap();
+        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
 
         let split = &runner.flattened_calls()[1];
         assert!(split.contains("--data-dir /data"), "got {split}");
@@ -188,7 +189,7 @@ mod tests {
     fn the_new_pane_is_marked_with_the_diff_role() {
         let runner = no_pane_then_split();
 
-        reconcile_diff_pane("%2", db(), 42, worktree(), true, &runner).unwrap();
+        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
 
         let mark = &runner.flattened_calls()[2];
         assert!(
@@ -203,7 +204,7 @@ mod tests {
     fn opening_a_second_diff_reuses_the_pane_that_is_already_there() {
         let runner = existing_pane(vec![]);
 
-        reconcile_diff_pane("%2", db(), 42, worktree(), true, &runner).unwrap();
+        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
 
         assert_eq!(runner.flattened_calls().len(), 1, "lookup only");
     }
@@ -212,7 +213,7 @@ mod tests {
     fn closing_the_last_diff_kills_the_pane() {
         let runner = existing_pane(vec![MockProcessRunner::ok()]);
 
-        reconcile_diff_pane("%2", db(), 42, worktree(), false, &runner).unwrap();
+        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), false, &runner).unwrap();
 
         assert_eq!(
             runner.flattened_calls()[1],
@@ -228,7 +229,7 @@ mod tests {
             b"%1 \n%2 agent_tree\n",
         )]);
 
-        reconcile_diff_pane("%2", db(), 42, worktree(), false, &runner).unwrap();
+        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), false, &runner).unwrap();
 
         assert_eq!(runner.flattened_calls().len(), 1);
     }
@@ -244,7 +245,7 @@ mod tests {
             MockProcessRunner::ok(),
         ]);
 
-        reconcile_diff_pane("%2", db(), 42, worktree(), true, &runner).unwrap();
+        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
 
         let calls = runner.flattened_calls();
         assert!(
@@ -260,7 +261,8 @@ mod tests {
     fn a_failed_role_lookup_is_an_error_rather_than_a_second_pane() {
         let runner = MockProcessRunner::new(vec![MockProcessRunner::fail("no server running")]);
 
-        let err = reconcile_diff_pane("%2", db(), 42, worktree(), true, &runner).unwrap_err();
+        let err =
+            reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap_err();
 
         assert!(
             format!("{err:#}").contains("existing diff pane"),
@@ -278,6 +280,6 @@ mod tests {
             MockProcessRunner::fail("unknown option"),
         ]);
 
-        assert!(reconcile_diff_pane("%2", db(), 42, worktree(), true, &runner).is_ok());
+        assert!(reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).is_ok());
     }
 }

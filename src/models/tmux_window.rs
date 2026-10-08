@@ -134,6 +134,7 @@ impl TmuxWindow {
 
     /// The name as an owned `String`, for the DB write boundary. Consumes the
     /// `Cow` rather than copying out of it.
+    #[cfg(test)]
     pub fn into_string(self) -> String {
         self.0.into_owned()
     }

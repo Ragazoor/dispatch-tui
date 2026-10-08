@@ -49,7 +49,7 @@ pub(crate) fn dispatch_entry_identifying(
     entry.remove("headersHelper");
     entry.insert(
         "headers".to_string(),
-        json!({ crate::mcp::identity::HEADER_TASK_ID: task_id.0.to_string() }),
+        json!({ crate::mcp::identity::HEADER_TASK_ID: task_id.to_string() }),
     );
     Some(json!({ "mcpServers": { SERVER_NAME: Value::Object(entry) } }))
 }

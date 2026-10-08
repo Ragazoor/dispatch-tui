@@ -177,6 +177,7 @@ impl App {
     }
 
     /// Return tasks for a given status in the current view.
+    #[cfg(test)]
     pub fn tasks_by_status(&self, status: TaskStatus) -> Vec<&Task> {
         self.tasks_for_current_view()
             .into_iter()

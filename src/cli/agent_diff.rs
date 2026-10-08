@@ -32,6 +32,7 @@ use ratatui::{Frame, Terminal};
 use crate::agent_tree::parse_untracked;
 use crate::cli::agent_tree::{GIT_TIMEOUT, REFRESH_INTERVAL};
 use crate::git::{git_error, git_in, run_git, COULD_NOT_RUN_GIT};
+use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::tui::ui::palette::{FG, GREEN, RED, YELLOW};
 
@@ -747,7 +748,7 @@ fn run_loop<B: Backend>(
 /// Takes the task id rather than a worktree path so the two panes cannot
 /// disagree about which worktree they are looking at, and so this pane reads
 /// the same selected source the tree publishes.
-pub async fn run(board_port: u16, task_id: i64) -> Result<()> {
+pub async fn run(board_port: u16, task_id: TaskId) -> Result<()> {
     let source = crate::cli::BoardPaneSource { port: board_port };
     let mut usage = crate::cli::PaneUsage::new(board_port, task_id);
     let result = crate::cli::with_pane_task(

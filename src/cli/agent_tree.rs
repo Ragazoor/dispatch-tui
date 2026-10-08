@@ -1356,7 +1356,7 @@ fn navigate_half_page(
 pub(crate) struct DiffPaneContext<'a> {
     pub root: &'a Path,
     pub data_dir: &'a Path,
-    pub task_id: i64,
+    pub task_id: TaskId,
 }
 
 /// Publish the open set and make the panes agree with it.
@@ -1647,11 +1647,11 @@ fn refresh(root: &Path, runner: &dyn ProcessRunner, tree: &mut TreeNode, state: 
 /// doc comment). Resolves the task's worktree and base branch from the board once,
 /// then re-queries git on a 1-second timer and lists the agent's commits on a
 /// worker thread.
-pub async fn run(data_dir: &Path, board_port: u16, task_id: i64) -> Result<()> {
+pub async fn run(data_dir: &Path, board_port: u16, task_id: TaskId) -> Result<()> {
     // The task and the live-agent list come from the running board, which
     // already holds them (`PanesReadThroughTheBoard`).
     let source = std::sync::Arc::new(crate::cli::BoardPaneSource { port: board_port });
-    let (agent_reads, poller) = spawn_agent_list_poller(source.clone(), TaskId(task_id));
+    let (agent_reads, poller) = spawn_agent_list_poller(source.clone(), task_id);
     let mut usage = crate::cli::PaneUsage::new(board_port, task_id);
 
     let result = crate::cli::with_pane_task(
@@ -1698,7 +1698,7 @@ pub(crate) async fn read_agent_rows(
     source: &dyn crate::cli::PaneViewSource,
     own: TaskId,
 ) -> Result<Vec<AgentRow>, String> {
-    let view = source.pane_view(own.0).await.map_err(|e| {
+    let view = source.pane_view(own).await.map_err(|e| {
         format!(
             "could not read the agent list from the board at {}: {e:#}",
             source.board_address()
@@ -1709,14 +1709,14 @@ pub(crate) async fn read_agent_rows(
         .into_iter()
         .filter_map(|agent| {
             Some(AgentRow {
-                id: TaskId(agent.id),
+                id: agent.id,
                 title: agent.title,
                 window: TmuxWindow::parse(&agent.tmux_window)?,
-                is_own: agent.id == own.0,
+                is_own: agent.id == own,
             })
         })
         .collect();
-    rows.sort_by_key(|row| row.id.0);
+    rows.sort_by_key(|row| row.id);
     Ok(rows)
 }
 

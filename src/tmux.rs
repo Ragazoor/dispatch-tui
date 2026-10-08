@@ -572,15 +572,6 @@ pub fn new_window_in_session_running(
     Ok(())
 }
 
-/// The name of the session the calling process is inside.
-pub fn current_session_name(pane: Option<&str>, runner: &dyn ProcessRunner) -> Result<String> {
-    run_checked_stdout(
-        runner,
-        &display_message_args(pane, "#{session_name}"),
-        "display-message",
-    )
-}
-
 /// Where the calling process is: its session, its window's name, and how many
 /// panes that window holds.
 ///
@@ -944,6 +935,7 @@ pub(crate) fn display_message_args<'a>(pane: Option<&'a str>, format: &'a str) -
 
 /// Return the name of the window `pane` is in — [`self_pane_id`] on the real
 /// path. With `None`, tmux answers about the session's *active* window instead.
+#[cfg(any(test, feature = "test-support"))]
 pub fn current_window_name(pane: Option<&str>, runner: &dyn ProcessRunner) -> Result<String> {
     run_checked_stdout(runner, &display_message_args(pane, "#W"), "display-message")
 }

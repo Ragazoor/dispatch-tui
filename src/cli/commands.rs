@@ -194,12 +194,12 @@ pub async fn prune_repo_paths(database: &Store, out: &mut dyn Write) -> Result<(
 /// once [`resolve_plan_path`] has answered.
 pub async fn attach_plan(
     database: Arc<Store>,
-    id: i64,
+    id: TaskId,
     plan_path: &str,
     out: &mut dyn Write,
 ) -> Result<()> {
     let svc = crate::service::TaskService::new_with_real_runner(database);
-    match svc.attach_plan(TaskId(id), plan_path).await {
+    match svc.attach_plan(id, plan_path).await {
         Ok(()) => writeln!(out, "Plan attached to task #{id}: {plan_path}")?,
         Err(crate::service::ServiceError::NotFound(_)) => {
             anyhow::bail!("Task {id} not found");

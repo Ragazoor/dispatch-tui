@@ -47,7 +47,7 @@ async fn the_board_answers_with_the_tasks_worktree_and_base_branch() {
         .await
         .unwrap();
 
-    let view = fetch_pane_view(board.port, id.0)
+    let view = fetch_pane_view(board.port, id)
         .await
         .expect("a running board must answer a pane's read");
 
@@ -67,7 +67,7 @@ async fn the_board_answers_with_the_tasks_worktree_and_base_branch() {
 async fn a_task_the_board_does_not_hold_is_answered_with_a_null_task() {
     let board = spawn_board().await;
 
-    let view = fetch_pane_view(board.port, 999_999)
+    let view = fetch_pane_view(board.port, TaskId(999_999))
         .await
         .expect("a missing row is an answer, not a failure");
 
@@ -80,7 +80,7 @@ async fn a_task_without_a_worktree_is_answered_as_present_without_one() {
     let board = spawn_board().await;
     let id = seed_task(&board.db, "No worktree").await;
 
-    let view = fetch_pane_view(board.port, id.0).await.expect("answered");
+    let view = fetch_pane_view(board.port, id).await.expect("answered");
 
     assert_eq!(
         view.task,
@@ -104,12 +104,12 @@ async fn live_agents_are_exactly_the_boards_live_agents_by_id() {
     seed_with(data_dir, "backlog, window", TaskStatus::Backlog, true).await;
     seed_with(data_dir, "done, window", TaskStatus::Done, true).await;
 
-    let view = fetch_pane_view(board.port, running.0)
+    let view = fetch_pane_view(board.port, running)
         .await
         .expect("answered");
 
-    let ids: Vec<i64> = view.live_agents.iter().map(|a| a.id).collect();
-    assert_eq!(ids, vec![review.0, running.0]);
+    let ids: Vec<TaskId> = view.live_agents.iter().map(|a| a.id).collect();
+    assert_eq!(ids, vec![review, running]);
     let first = &view.live_agents[0];
     assert_eq!(first.title, "review, window");
     assert_eq!(first.tmux_window, format!("task-{}", review.0));
@@ -124,7 +124,7 @@ async fn asking_changes_no_row() {
     let before = board.db.list_all().await.unwrap();
 
     for _ in 0..3 {
-        fetch_pane_view(board.port, id.0).await.expect("answered");
+        fetch_pane_view(board.port, id).await.expect("answered");
     }
 
     let after = board.db.list_all().await.unwrap();
@@ -148,7 +148,7 @@ async fn asking_pushes_no_refresh_to_the_board() {
         },
         Some(notify_tx),
     );
-    let body = serde_json::to_vec(&PaneViewRequest { task_id: 1 }).unwrap();
+    let body = serde_json::to_vec(&PaneViewRequest { task_id: TaskId(1) }).unwrap();
 
     let response = router
         .oneshot(
@@ -180,7 +180,7 @@ async fn asking_pushes_no_refresh_to_the_board() {
 async fn an_unreachable_board_is_a_failed_read_naming_the_address() {
     let port = dead_port().await;
 
-    let err = fetch_pane_view(port, 1)
+    let err = fetch_pane_view(port, TaskId(1))
         .await
         .expect_err("no board, no view");
 

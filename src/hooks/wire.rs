@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{HookEventKind, SubagentEvent};
+use crate::models::{HookEventKind, SubagentEvent, TaskId};
 
 /// The path the board serves hook deliveries on, beside `/mcp`.
 pub const HOOK_PATH: &str = "/hook";
@@ -38,7 +38,10 @@ pub enum HookRequest {
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum ObservedEvent {
     /// `dispatch hook <id> <kind>`: a timestamp-or-status signal.
-    Event { task_id: i64, kind: HookEventKind },
+    Event {
+        task_id: TaskId,
+        kind: HookEventKind,
+    },
     /// `dispatch hook-subagent <id> start|stop`.
     ///
     /// Carries the identifiers rather than a [`SubagentEvent`], which also has
@@ -46,7 +49,7 @@ pub enum ObservedEvent {
     /// must not be representable on the wire. The board builds the
     /// [`SubagentEvent`] from these.
     Subagent {
-        task_id: i64,
+        task_id: TaskId,
         agent_id: String,
         session_id: String,
         /// `false` is a start, `true` a stop. The two differ in nothing but
@@ -57,10 +60,10 @@ pub enum ObservedEvent {
     /// `SessionStart` produces. A different event from a subagent stopping,
     /// not a third value of one: it voids a deferred Stop where a stop would
     /// apply it.
-    SubagentClear { task_id: i64 },
+    SubagentClear { task_id: TaskId },
     /// `dispatch hook-peer-message <id> --target <to> --body <body>`.
     PeerMessage {
-        task_id: i64,
+        task_id: TaskId,
         target: String,
         body: String,
     },
@@ -69,14 +72,14 @@ pub enum ObservedEvent {
     /// no store connection, so the board records the usage event
     /// (`PanesRecordUsageLikeTheBoard` in `docs/specs/keybindings.allium`).
     PaneKey {
-        task_id: i64,
+        task_id: TaskId,
         action: String,
         key: String,
     },
 }
 
 impl ObservedEvent {
-    pub fn task_id(&self) -> i64 {
+    pub fn task_id(&self) -> TaskId {
         match self {
             Self::Event { task_id, .. }
             | Self::Subagent { task_id, .. }
@@ -108,11 +111,11 @@ impl ObservedEvent {
 #[serde(tag = "question", rename_all = "snake_case")]
 pub enum Question {
     /// `dispatch pr-gate <id>`: may this task create its PR yet?
-    PrGate { task_id: i64 },
+    PrGate { task_id: TaskId },
 }
 
 impl Question {
-    pub fn task_id(&self) -> i64 {
+    pub fn task_id(&self) -> TaskId {
         match self {
             Self::PrGate { task_id } => *task_id,
         }
@@ -156,7 +159,7 @@ pub const PANE_VIEW_PATH: &str = "/pane-view";
 /// A pane renderer's question: what does the board hold for this task?
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneViewRequest {
-    pub task_id: i64,
+    pub task_id: TaskId,
 }
 
 /// `agent-tree.allium`'s `PaneView`: the pane's task, when the board's rows
@@ -182,7 +185,7 @@ pub struct PaneTask {
 /// to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneAgent {
-    pub id: i64,
+    pub id: TaskId,
     pub title: String,
     /// The task's recorded tmux window (always present: a live agent has one).
     pub tmux_window: String,

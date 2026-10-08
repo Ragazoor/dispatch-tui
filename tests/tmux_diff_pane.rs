@@ -16,13 +16,13 @@ use std::path::Path;
 
 use dispatch_tui::agent_tree_diff_pane::reconcile_diff_pane;
 use dispatch_tui::dispatch;
-use dispatch_tui::models::test_tmux_window;
+use dispatch_tui::models::{test_tmux_window, TaskId};
 use dispatch_tui::tmux::{PANE_ROLE_AGENT_TREE, PANE_ROLE_DIFF, PANE_ROLE_OPTION};
 
 use tmux_harness::{await_stub_line, stub_lines, tmux_available_or_skip, StubLine, TmuxServer};
 
 const WINDOW: &str = "task-42";
-const TASK_ID: i64 = 42;
+const TASK_ID: TaskId = TaskId(42);
 
 /// The pane runs `dispatch agent-diff`, and the harness already stubs the
 /// `dispatch` binary — so the process that starts records its own cwd and argv

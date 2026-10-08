@@ -118,6 +118,7 @@ impl FieldUpdate {
     /// Translate the legacy MCP convention where `Some("")` means "clear to
     /// NULL", `Some(v)` means "set to v", and `None` means "do not touch" into
     /// an `Option<FieldUpdate>` patch value.
+    #[cfg(test)]
     pub fn from_optional_string(s: Option<String>) -> Option<FieldUpdate> {
         match s {
             None => None,

@@ -52,7 +52,7 @@ pub async fn handle_pane_view(
     let failed = |e: anyhow::Error| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"));
     let task = state
         .db
-        .get_task(TaskId(request.task_id))
+        .get_task(request.task_id)
         .await
         .map_err(failed)?
         .map(|task| PaneTask {
@@ -67,7 +67,7 @@ pub async fn handle_pane_view(
         .into_iter()
         .filter_map(|task| {
             Some(PaneAgent {
-                id: task.id.0,
+                id: task.id,
                 title: task.title,
                 tmux_window: task.tmux_window?.as_str().to_string(),
             })
@@ -87,7 +87,7 @@ async fn observe(state: &McpState, event: ObservedEvent) -> ObserveOutcome {
         .await;
         return ObserveOutcome::Applied;
     }
-    let task_id = TaskId(event.task_id());
+    let task_id = event.task_id();
     match apply(state, task_id, event).await {
         Ok(()) => {
             // agent-health.allium: HookEventsPushALiveRefresh. Scoped to this
@@ -143,7 +143,7 @@ async fn apply(
 }
 
 async fn answer(state: &McpState, question: Question) -> Answer {
-    let task_id = TaskId(question.task_id());
+    let task_id = question.task_id();
     match question {
         // The gate answers the agent's tool call rather than observing it, so
         // its verdict is the response rather than a side effect. It is on the

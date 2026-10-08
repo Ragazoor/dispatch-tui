@@ -3,6 +3,7 @@
 
 use anyhow::anyhow;
 
+use crate::models::TaskStatus;
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::TasksTableAccess as _;
 use crate::sync::writes::{DrainReadBack, ReducerOutcome};
@@ -24,10 +25,10 @@ pub(super) fn subagent_drain_read_back(
     }
 }
 
-/// Whether a task row's `status` is the module's spelling of `review`. One
-/// predicate rather than the string literal compared twice.
+/// Whether a task row's `status` parses as [`TaskStatus::Review`]. One
+/// predicate for the two read-backs that need it.
 pub(super) fn is_review(status: &str) -> bool {
-    status == "review"
+    TaskStatus::parse(status) == Some(TaskStatus::Review)
 }
 
 /// Fold a raw reducer answer that has NO application-level refusal into its

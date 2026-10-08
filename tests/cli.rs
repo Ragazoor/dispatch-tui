@@ -20,6 +20,7 @@ use tempfile::NamedTempFile;
 
 use common::seed_task;
 use dispatch_tui::cli::commands;
+use dispatch_tui::models::TaskId;
 use dispatch_tui::store::{Store, TaskRead};
 
 /// A fresh in-memory store for the in-process command tests. The temp file is
@@ -324,7 +325,7 @@ async fn plan_attaches_to_existing_task() {
     let plan_path = commands::resolve_plan_path(attach_plan.path()).unwrap();
 
     let mut out = Vec::new();
-    commands::attach_plan(db.clone(), id.0, &plan_path, &mut out)
+    commands::attach_plan(db.clone(), id, &plan_path, &mut out)
         .await
         .unwrap();
     let stdout = String::from_utf8(out).unwrap();
@@ -348,7 +349,7 @@ async fn plan_nonexistent_task_fails() {
     let attach_plan = make_plan_file("Orphan Plan", "No task.");
     let plan_path = commands::resolve_plan_path(attach_plan.path()).unwrap();
 
-    let err = commands::attach_plan(db.clone(), 9999, &plan_path, &mut Vec::new())
+    let err = commands::attach_plan(db.clone(), TaskId(9999), &plan_path, &mut Vec::new())
         .await
         .expect_err("attaching a plan to a missing task must fail");
     assert!(

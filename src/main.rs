@@ -5,6 +5,7 @@ use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
 use dispatch_tui::hooks::{self, SubagentAction};
+use dispatch_tui::models::TaskId;
 use dispatch_tui::tui::ui::truncate;
 use dispatch_tui::{dispatch, runtime, startup};
 
@@ -58,7 +59,7 @@ enum Commands {
     /// Attach a plan file to an existing task
     Plan {
         /// Task ID
-        id: i64,
+        id: TaskId,
         /// Path to the plan file
         path: PathBuf,
     },
@@ -74,7 +75,7 @@ enum Commands {
     /// Record a Claude Code hook event for a task
     Hook {
         /// Task ID
-        id: i64,
+        id: TaskId,
         /// Hook event kind: pre_tool_use | notification | stop
         kind: String,
         /// Notification subtype from the payload's `notification_type` field
@@ -98,7 +99,7 @@ enum Commands {
     /// `docs/specs/agent-health.allium`.
     HookSubagent {
         /// Task ID
-        id: i64,
+        id: TaskId,
         /// What happened to the subagent
         #[arg(value_enum)]
         action: SubagentAction,
@@ -121,7 +122,7 @@ enum Commands {
     /// `docs/specs/agent-health.allium`'s `HookPeerMessageSent`.
     HookPeerMessage {
         /// Task ID of the sending agent
-        id: i64,
+        id: TaskId,
         /// The `SendMessage` tool call's target session name
         /// (`tool_input.to`), e.g. `task-42` — may carry a disambiguating
         /// `" [ref]"` suffix, which [`service::TaskService::record_peer_message_sent`]
@@ -143,7 +144,7 @@ enum Commands {
     /// tmux pane.
     AgentTree {
         /// Task ID whose worktree to render
-        task_id: i64,
+        task_id: TaskId,
         #[command(flatten)]
         board: dispatch_tui::hooks::BoardAddress,
     },
@@ -157,7 +158,7 @@ enum Commands {
     /// the same selected source.
     AgentDiff {
         /// Task ID whose open diffs to render
-        task_id: i64,
+        task_id: TaskId,
         #[command(flatten)]
         board: dispatch_tui::hooks::BoardAddress,
     },
@@ -179,7 +180,7 @@ enum Commands {
     /// to block (Claude Code PreToolUse block signal), 0 to allow.
     PrGate {
         /// Task ID
-        id: i64,
+        id: TaskId,
         /// Unlike the four hook subcommands, a board that cannot be reached
         /// here does not block the gated tool call — the gate fails open.
         #[command(flatten)]
@@ -430,7 +431,11 @@ async fn cmd_tui(
     .await
 }
 
-async fn cmd_agent_tree(data_dir: &std::path::Path, board_port: u16, task_id: i64) -> Result<()> {
+async fn cmd_agent_tree(
+    data_dir: &std::path::Path,
+    board_port: u16,
+    task_id: TaskId,
+) -> Result<()> {
     // The renderer owns the alternate screen, so its warnings cannot go to
     // stderr — they go to `app.log` next to the database, like the board's.
     // Without this every `tracing::warn!` in the renderer went nowhere, which
@@ -442,7 +447,11 @@ async fn cmd_agent_tree(data_dir: &std::path::Path, board_port: u16, task_id: i6
 
 /// The diff pane beneath the tree. Same alternate-screen constraint as
 /// [`cmd_agent_tree`], so the same best-effort log redirection.
-async fn cmd_agent_diff(data_dir: &std::path::Path, board_port: u16, task_id: i64) -> Result<()> {
+async fn cmd_agent_diff(
+    data_dir: &std::path::Path,
+    board_port: u16,
+    task_id: TaskId,
+) -> Result<()> {
     let _ = init_app_log_subscriber(data_dir);
     dispatch_tui::cli::agent_diff::run(board_port, task_id).await
 }
@@ -711,7 +720,7 @@ async fn cmd_prune_repo_paths(
 async fn cmd_plan(
     data_dir: &std::path::Path,
     store_server: Option<String>,
-    id: i64,
+    id: TaskId,
     path: PathBuf,
 ) -> Result<()> {
     use dispatch_tui::cli::commands;

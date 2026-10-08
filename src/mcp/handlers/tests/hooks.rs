@@ -3,7 +3,7 @@ use super::*;
 use crate::hooks::wire::{HookRequest, ObservedEvent};
 use crate::mcp::handlers::hooks::handle_hook;
 use crate::mcp::McpEvent;
-use crate::models::HookEventKind;
+use crate::models::{HookEventKind, TaskId};
 
 /// task #4967: a hook event that the board applies successfully must push a
 /// per-task refresh, so the card's label updates without waiting on the
@@ -18,10 +18,7 @@ async fn assert_pushes_task_changed(kind: HookEventKind) {
     .await;
     let task_id = create_task_fixture(&state).await;
 
-    let request = HookRequest::Observe(ObservedEvent::Event {
-        task_id: task_id.0,
-        kind,
-    });
+    let request = HookRequest::Observe(ObservedEvent::Event { task_id, kind });
     let _ = handle_hook(State(state), Json(request)).await;
 
     match notify_rx.recv().await {
@@ -56,7 +53,7 @@ async fn missing_task_does_not_push_task_changed() {
     .await;
 
     let request = HookRequest::Observe(ObservedEvent::Event {
-        task_id: 999_999,
+        task_id: TaskId(999_999),
         kind: HookEventKind::PreToolUse,
     });
     let _ = handle_hook(State(state), Json(request)).await;
@@ -81,7 +78,7 @@ async fn a_pane_keypress_is_recorded_as_keybinding_usage() {
     )
     .await;
     let request = HookRequest::Observe(ObservedEvent::PaneKey {
-        task_id: 1,
+        task_id: TaskId(1),
         action: "navigate_half_page".to_string(),
         key: "d".to_string(),
     });

@@ -3406,7 +3406,7 @@ struct FakeBoard(std::result::Result<crate::hooks::wire::PaneView, String>);
 
 #[async_trait::async_trait]
 impl crate::cli::PaneViewSource for FakeBoard {
-    async fn pane_view(&self, _task_id: i64) -> anyhow::Result<crate::hooks::wire::PaneView> {
+    async fn pane_view(&self, _task_id: TaskId) -> anyhow::Result<crate::hooks::wire::PaneView> {
         self.0.clone().map_err(|e| anyhow::anyhow!(e))
     }
     fn board_address(&self) -> String {
@@ -3416,7 +3416,7 @@ impl crate::cli::PaneViewSource for FakeBoard {
 
 fn pane_agent(id: i64) -> crate::hooks::wire::PaneAgent {
     crate::hooks::wire::PaneAgent {
-        id,
+        id: TaskId(id),
         title: format!("task {id}"),
         tmux_window: format!("task-{id}"),
     }

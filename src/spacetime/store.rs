@@ -217,6 +217,7 @@ impl MemoryStore {
     }
 
     /// The id the next generated insert will receive.
+    #[cfg(test)]
     pub fn next_generated_id(&self, table: SharedTable) -> i64 {
         self.lock().next_id.get(&table).copied().unwrap_or(1)
     }
