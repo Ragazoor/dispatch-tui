@@ -563,7 +563,9 @@ fn hook_entry_point_subcommands() -> Vec<String> {
         .match_indices("hooks/scripts/")
         .map(|(i, m)| {
             let rest = &hooks_json[i + m.len()..];
-            let end = rest.find('"').expect("a quoted script path");
+            // The path ends at the JSON string's close, or at the escaped
+            // quote that wraps it for paths with spaces.
+            let end = rest.find(['"', '\\']).expect("a quoted script path");
             rest[..end].to_string()
         })
         .collect();
