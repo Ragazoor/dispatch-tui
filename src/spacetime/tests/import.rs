@@ -156,6 +156,31 @@ async fn a_live_task_in_a_dropped_epic_arrives_with_no_epic_and_the_importer_as_
     assert_eq!(by_id(&tasks, 3)["epic_id"], 7);
 }
 
+/// `OrphansLeaveTheirDroppedEpic`: a live sub-epic becomes a root epic.
+#[tokio::test]
+async fn a_live_epic_under_a_dropped_parent_arrives_as_a_root_epic() {
+    let mut source = snapshot_of_a_populated_board().await;
+    set(
+        &mut source,
+        SharedTable::Epics,
+        9,
+        "parent_epic_id",
+        Value::from(7),
+    );
+    archive(&mut source, SharedTable::Epics, 7);
+    let target = store_for(&source);
+
+    let report = import_old_store(&target, &source, OPERATOR).await.unwrap();
+
+    let epics = rows(&target, SharedTable::Epics).await;
+    let orphan = by_id(&epics, 9);
+    assert!(
+        matches!(orphan.get("parent_epic_id"), Some(Value::Null)) || orphan["parent_epic_id"] == 0
+    );
+    // Only tasks are reported as orphaned; a re-homed epic is not.
+    assert!(!report.orphaned.contains(&9));
+}
+
 /// `ImportOldStore`: the next task the store creates cannot collide.
 #[tokio::test]
 async fn a_task_created_after_an_import_gets_an_id_past_every_imported_one() {

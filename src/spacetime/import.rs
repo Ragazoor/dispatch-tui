@@ -218,6 +218,65 @@ fn row_key_display(table: SharedTable, row: &Row) -> String {
         .join("/")
 }
 
+/// The ids of the removed-status tasks and epics `prepare` leaves out.
+struct DroppedIds {
+    tasks: BTreeSet<i64>,
+    epics: BTreeSet<i64>,
+}
+
+impl DroppedIds {
+    /// Whether `row` is itself removed or depends on a removed task or epic.
+    fn drops(&self, table: SharedTable, row: &Row) -> bool {
+        match table {
+            SharedTable::Tasks | SharedTable::Epics => is_dropped_status(row),
+            SharedTable::TaskSubagents => {
+                id_of(row, "task_id").is_some_and(|t| self.tasks.contains(&t))
+            }
+            SharedTable::TaskWatchers => {
+                [id_of(row, "watcher_task_id"), id_of(row, "target_task_id")]
+                    .into_iter()
+                    .flatten()
+                    .any(|t| self.tasks.contains(&t))
+            }
+            SharedTable::Subscriptions => {
+                id_of(row, "epic_id").is_some_and(|e| self.epics.contains(&e))
+            }
+            SharedTable::PollOwners => {
+                row.get("scope").and_then(Value::as_str) == Some("epic")
+                    && id_of(row, "scope_id").is_some_and(|e| self.epics.contains(&e))
+            }
+            _ => false,
+        }
+    }
+
+    /// Point a kept row whose epic was dropped at the root instead: a task
+    /// moves to epic 0 under `operator`, an epic becomes a root epic.
+    fn rehome_orphan(
+        &self,
+        table: SharedTable,
+        row: &mut Row,
+        operator: &str,
+        report: &mut ImportReport,
+    ) {
+        let parent_column = match table {
+            SharedTable::Tasks => "epic_id",
+            SharedTable::Epics => "parent_epic_id",
+            _ => return,
+        };
+        if !id_of(row, parent_column).is_some_and(|e| self.epics.contains(&e)) {
+            return;
+        }
+        row.insert(parent_column.into(), Value::from(0));
+        if table != SharedTable::Tasks {
+            return;
+        }
+        row.insert("owner".into(), Value::from(operator));
+        if let Some(id) = id_of(row, "id") {
+            report.orphaned.push(id);
+        }
+    }
+}
+
 /// The source with removed-status rows and their dependents gone, and orphans
 /// re-homed. A copy: the source is never altered.
 fn prepare(source: &Snapshot, operator: &str, report: &mut ImportReport) -> Snapshot {
@@ -233,57 +292,22 @@ fn prepare(source: &Snapshot, operator: &str, report: &mut ImportReport) -> Snap
             })
             .unwrap_or_default()
     };
-    let dropped_tasks = ids_of(SharedTable::Tasks);
-    let dropped_epics = ids_of(SharedTable::Epics);
+    let dropped = DroppedIds {
+        tasks: ids_of(SharedTable::Tasks),
+        epics: ids_of(SharedTable::Epics),
+    };
 
     let mut extracts = Vec::new();
     for extract in source.extracts() {
         let table = extract.table;
         let mut rows = Vec::with_capacity(extract.rows.len());
         for row in &extract.rows {
-            let drop = match table {
-                SharedTable::Tasks | SharedTable::Epics => is_dropped_status(row),
-                SharedTable::TaskSubagents => {
-                    id_of(row, "task_id").is_some_and(|t| dropped_tasks.contains(&t))
-                }
-                SharedTable::TaskWatchers => {
-                    [id_of(row, "watcher_task_id"), id_of(row, "target_task_id")]
-                        .into_iter()
-                        .flatten()
-                        .any(|t| dropped_tasks.contains(&t))
-                }
-                SharedTable::Subscriptions => {
-                    id_of(row, "epic_id").is_some_and(|e| dropped_epics.contains(&e))
-                }
-                SharedTable::PollOwners => {
-                    row.get("scope").and_then(Value::as_str) == Some("epic")
-                        && id_of(row, "scope_id").is_some_and(|e| dropped_epics.contains(&e))
-                }
-                _ => false,
-            };
-            if drop {
+            if dropped.drops(table, row) {
                 *report.dropped.entry(table).or_default() += 1;
                 continue;
             }
             let mut row = row.clone();
-            match table {
-                SharedTable::Tasks => {
-                    if id_of(&row, "epic_id").is_some_and(|e| dropped_epics.contains(&e)) {
-                        row.insert("epic_id".into(), Value::from(0));
-                        row.insert("owner".into(), Value::from(operator));
-                        if let Some(id) = id_of(&row, "id") {
-                            report.orphaned.push(id);
-                        }
-                    }
-                }
-                SharedTable::Epics
-                    if id_of(&row, "parent_epic_id")
-                        .is_some_and(|e| dropped_epics.contains(&e)) =>
-                {
-                    row.insert("parent_epic_id".into(), Value::from(0));
-                }
-                _ => {}
-            }
+            dropped.rehome_orphan(table, &mut row, operator, report);
             rows.push(row);
         }
         extracts.push(TableExtract::new(table, extract.columns.clone(), rows));

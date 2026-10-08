@@ -486,76 +486,109 @@ pub fn install_shipped_feed_scripts(
     let mut reports = Vec::with_capacity(SHIPPED_SCRIPTS.len());
 
     for file in SHIPPED_SCRIPTS {
-        let ShippedFile {
-            name,
-            content: shipped,
-        } = file;
-        let path = installed_script_path(data_dir, name);
-
-        // One read answers all three cases. Only NotFound is an empty slot: a
-        // file that exists but cannot be read (wrong permissions, not UTF-8) is
-        // unknown provenance, and treating it as absent would overwrite it with
-        // no prompt and no backup.
-        let report = match fs::read_to_string(&path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                match write_shipped_script(&path, shipped) {
-                    Ok(()) => {
-                        manifest.insert(name.to_string(), script_digest(shipped));
-                        ShippedScriptReport::new(name, path, ShippedScriptOutcome::Installed)
-                    }
-                    Err(e) => ShippedScriptReport::failed(name, path, e),
-                }
-            }
-            Ok(ref current) if current == shipped => {
-                // The content is right, so there is nothing to write — but the
-                // MODE may still be wrong. `write_shipped_script` writes before
-                // it chmods, so a chmod that raised on an earlier run left the
-                // right bytes behind a mode the feed runner cannot execute.
-                // Matching on content alone would adopt that file as in_sync
-                // and record a digest for it, and the failure would never be
-                // reported again. Repair it here instead.
-                match ensure_executable(&path) {
-                    Ok(()) => {
-                        manifest.insert(name.to_string(), script_digest(shipped));
-                        ShippedScriptReport::new(name, path, ShippedScriptOutcome::InSync)
-                    }
-                    Err(e) => ShippedScriptReport::failed(name, path, e),
-                }
-            }
-            current => {
-                // `recorded == digest(on_disk)` is false when there is no entry
-                // AND when the file changed, so one test covers both meanings
-                // of unknown provenance. An unreadable file has no digest at
-                // all and lands here too.
-                let proven = current.ok().is_some_and(|c| {
-                    manifest
-                        .get(name)
-                        .is_some_and(|rec| *rec == script_digest(&c))
-                });
-                if proven {
-                    match write_shipped_script(&path, shipped) {
-                        Ok(()) => {
-                            manifest.insert(name.to_string(), script_digest(shipped));
-                            ShippedScriptReport::new(name, path, ShippedScriptOutcome::Updated)
-                        }
-                        Err(e) => ShippedScriptReport::failed(name, path, e),
-                    }
-                } else {
-                    install_unknown_provenance_script(
-                        name,
-                        path,
-                        shipped,
-                        confirmer,
-                        &mut manifest,
-                    )?
-                }
-            }
-        };
-        reports.push(report);
+        reports.push(install_one_shipped_script(
+            data_dir,
+            file,
+            confirmer,
+            &mut manifest,
+        )?);
     }
 
     write_script_manifest(data_dir, &manifest);
     Ok(reports)
+}
+
+/// One script's pass through the four branches of
+/// [`install_shipped_feed_scripts`].
+fn install_one_shipped_script(
+    data_dir: &Path,
+    file: ShippedFile,
+    confirmer: Option<&dyn super::Confirmer>,
+    manifest: &mut std::collections::BTreeMap<String, String>,
+) -> Result<ShippedScriptReport> {
+    let ShippedFile {
+        name,
+        content: shipped,
+    } = file;
+    let path = installed_script_path(data_dir, name);
+
+    // One read answers all three cases. Only NotFound is an empty slot: a
+    // file that exists but cannot be read (wrong permissions, not UTF-8) is
+    // unknown provenance, and treating it as absent would overwrite it with
+    // no prompt and no backup.
+    let current = match fs::read_to_string(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let written = write_shipped_script(&path, shipped);
+            return Ok(record_shipped_script(
+                written,
+                name,
+                path,
+                shipped,
+                ShippedScriptOutcome::Installed,
+                manifest,
+            ));
+        }
+        current => current,
+    };
+    if current.as_deref().is_ok_and(|c| c == shipped) {
+        // The content is right, so there is nothing to write — but the
+        // MODE may still be wrong. `write_shipped_script` writes before
+        // it chmods, so a chmod that raised on an earlier run left the
+        // right bytes behind a mode the feed runner cannot execute.
+        // Matching on content alone would adopt that file as in_sync
+        // and record a digest for it, and the failure would never be
+        // reported again. Repair it here instead.
+        let repaired = ensure_executable(&path);
+        return Ok(record_shipped_script(
+            repaired,
+            name,
+            path,
+            shipped,
+            ShippedScriptOutcome::InSync,
+            manifest,
+        ));
+    }
+
+    // `recorded == digest(on_disk)` is false when there is no entry
+    // AND when the file changed, so one test covers both meanings
+    // of unknown provenance. An unreadable file has no digest at
+    // all and lands here too.
+    let recorded = manifest.get(name);
+    let proven = current
+        .ok()
+        .is_some_and(|c| recorded.is_some_and(|rec| *rec == script_digest(&c)));
+    if !proven {
+        return install_unknown_provenance_script(name, path, shipped, confirmer, manifest);
+    }
+    let written = write_shipped_script(&path, shipped);
+    Ok(record_shipped_script(
+        written,
+        name,
+        path,
+        shipped,
+        ShippedScriptOutcome::Updated,
+        manifest,
+    ))
+}
+
+/// Report `outcome` and record the shipped digest when `step` succeeded; a
+/// failed step reports `Failed` and records nothing, so dispatch never claims
+/// provenance over a file it did not successfully write.
+fn record_shipped_script(
+    step: Result<()>,
+    name: &str,
+    path: PathBuf,
+    shipped: &str,
+    outcome: ShippedScriptOutcome,
+    manifest: &mut std::collections::BTreeMap<String, String>,
+) -> ShippedScriptReport {
+    match step {
+        Ok(()) => {
+            manifest.insert(name.to_string(), script_digest(shipped));
+            ShippedScriptReport::new(name, path, outcome)
+        }
+        Err(e) => ShippedScriptReport::failed(name, path, e),
+    }
 }
 
 /// Branch 4: the file differs and dispatch cannot prove it wrote it.
@@ -601,16 +634,18 @@ fn install_unknown_provenance_script(
             format!("Failed to back up to {}: {e}", backup.display()),
         ));
     }
-    let mut report = match write_shipped_script(&path, shipped) {
-        Ok(()) => {
-            manifest.insert(name.to_string(), script_digest(shipped));
-            ShippedScriptReport::new(name, path, ShippedScriptOutcome::Updated)
-        }
-        // The backup was already taken, so it is on disk whether or not the
-        // write landed — and a failure here is precisely when the user needs
-        // to find it. `backup_path` is set below for both arms.
-        Err(e) => ShippedScriptReport::failed(name, path, e),
-    };
+    let written = write_shipped_script(&path, shipped);
+    let mut report = record_shipped_script(
+        written,
+        name,
+        path,
+        shipped,
+        ShippedScriptOutcome::Updated,
+        manifest,
+    );
+    // The backup was already taken, so it is on disk whether or not the
+    // write landed — and a failure here is precisely when the user needs
+    // to find it.
     report.backup_path = Some(backup);
     Ok(report)
 }
