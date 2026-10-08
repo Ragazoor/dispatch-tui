@@ -32,6 +32,7 @@ pub mod spacetime;
 pub mod startup;
 pub mod startup_abort;
 pub mod store;
+pub mod store_connection;
 pub mod sync;
 #[cfg(test)]
 mod test_log;

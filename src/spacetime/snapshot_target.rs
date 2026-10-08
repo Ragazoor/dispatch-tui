@@ -1,5 +1,9 @@
-//! The shared store as this subsystem needs to see it, and an in-process model
-//! of it.
+//! [`SnapshotTarget`] — the store as a restore or an import writes into it —
+//! and [`MemoryStore`], an in-process model of it.
+//!
+//! Named for its role rather than "store": the crate already has `store::Store`
+//! (the app's one store handle), `sync::SyncStore` and the managed store's
+//! process lifecycle (`managed_store.rs`), and none of those is this.
 //!
 //! Spec: `docs/specs/spacetime-seed.allium` — `IdSequence` and the
 //! `BurnIdSequences` rule.
@@ -27,7 +31,7 @@ use super::snapshot::{Row, SharedTable, Snapshot, TableExtract};
 /// running it again finishes the job rather than duplicating it. That is what
 /// the idempotency tests pin.
 #[async_trait]
-pub trait SharedStore: Send + Sync {
+pub trait SnapshotTarget: Send + Sync {
     /// The names of a table's columns, as this store has them.
     ///
     /// This is what a restore checks a snapshot against, in place of a version
@@ -233,7 +237,7 @@ impl MemoryStore {
     /// the real store does: the id is a primary key, and a reducer whose insert
     /// violates it aborts. Modelled rather than glossed over, because it is the
     /// constraint that decides the order of a restore — see
-    /// [`SharedStore::advance_id_sequence_past`].
+    /// [`SnapshotTarget::advance_id_sequence_past`].
     pub async fn insert_generating_id(&self, table: SharedTable) -> Result<i64> {
         let Some(column) = table.id_column() else {
             anyhow::bail!("{} does not generate ids", table.name());
@@ -263,7 +267,7 @@ impl MemoryStore {
 }
 
 #[async_trait]
-impl SharedStore for MemoryStore {
+impl SnapshotTarget for MemoryStore {
     async fn columns(&self, table: SharedTable) -> Result<Vec<String>> {
         Ok(self.lock().columns.get(&table).cloned().unwrap_or_default())
     }

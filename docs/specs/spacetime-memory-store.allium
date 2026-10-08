@@ -22,7 +22,7 @@
 --           epics.allium; the identity and subscription rules a real board
 --           follows live in host.allium and sync.allium. This file only
 --           asserts that MemoryReducerCaller reaches the outcomes those
---           files already describe. The seed/restore JSON store (spacetime::store::MemoryStore in
+--           files already describe. The seed/restore JSON store (spacetime::snapshot_target::MemoryStore in
 --           code) are unrelated, orthogonal tools with no domain semantics
 --           of their own and are untouched by this file.
 -- Dependencies: ReducerDomain's members correspond to the shared tables and

@@ -598,7 +598,7 @@ fn cmd_caller_headers() -> Result<()> {
 /// then load — lives in `spacetime::restore`, not here; this is argument
 /// handling and file I/O.
 async fn cmd_spacetime(action: SpacetimeAction) -> Result<()> {
-    use dispatch_tui::spacetime::{self, SharedStore as _};
+    use dispatch_tui::spacetime::{self, SnapshotTarget as _};
 
     match action {
         SpacetimeAction::DumpServer {
@@ -691,7 +691,7 @@ async fn cmd_repo(
 ) -> Result<()> {
     use dispatch_tui::cli::commands;
     // Repo paths and their verify commands are shared rows.
-    let store = runtime::open_cli_store(data_dir, store_server).await?;
+    let store = dispatch_tui::store_connection::open_cli_store(data_dir, store_server).await?;
     let database = &*store.database;
     let mut out = std::io::stdout();
     match action {
@@ -713,7 +713,7 @@ async fn cmd_prune_repo_paths(
     data_dir: &std::path::Path,
     store_server: Option<String>,
 ) -> Result<()> {
-    let store = runtime::open_cli_store(data_dir, store_server).await?;
+    let store = dispatch_tui::store_connection::open_cli_store(data_dir, store_server).await?;
     dispatch_tui::cli::commands::prune_repo_paths(&store.database, &mut std::io::stdout()).await
 }
 
@@ -725,7 +725,7 @@ async fn cmd_plan(
 ) -> Result<()> {
     use dispatch_tui::cli::commands;
     let plan_path = commands::resolve_plan_path(&path)?;
-    let store = runtime::open_cli_store(data_dir, store_server).await?;
+    let store = dispatch_tui::store_connection::open_cli_store(data_dir, store_server).await?;
     commands::attach_plan(
         store.database.clone(),
         id,

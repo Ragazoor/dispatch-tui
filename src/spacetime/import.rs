@@ -16,7 +16,7 @@ use super::restore::{burn_id_sequences, implausible_ceiling, schema_refusal, Res
 use super::snapshot::{
     Refusal, RefusalReason, Row, SharedTable, Snapshot, TableExtract, SNAPSHOT_FORMAT_VERSION,
 };
-use super::store::{key_columns, row_key, SharedStore};
+use super::snapshot_target::{key_columns, row_key, SnapshotTarget};
 
 /// What an import did, per table. Printed to the operator.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -115,7 +115,7 @@ fn is_dropped_status(row: &Row) -> bool {
 /// Spec: `ImportOldStore`. Every check runs before the burn and the first row,
 /// so a refusal leaves the target untouched.
 pub async fn import_old_store(
-    target: &dyn SharedStore,
+    target: &dyn SnapshotTarget,
     source: &Snapshot,
     operator: &str,
 ) -> Result<ImportReport, RestoreError> {

@@ -16,7 +16,7 @@ use anyhow::{bail, Context, Result};
 use crate::spacetime::managed_store::{
     probe_address, ManagedAddressState, ManagedStore, SpacetimeStartSpawner, StoreSpawner,
 };
-use crate::spacetime::{SharedStore, Snapshot, SpacetimeCliStore};
+use crate::spacetime::{Snapshot, SnapshotTarget, SpacetimeCliStore};
 
 /// Where the old rows are read from.
 #[derive(Debug, PartialEq, Eq)]
@@ -112,7 +112,7 @@ async fn read_data_dir_with(
     data_dir: &Path,
     spawner: &dyn StoreSpawner,
     start_timeout: Duration,
-    store_at: &dyn Fn(&str) -> Arc<dyn SharedStore>,
+    store_at: &dyn Fn(&str) -> Arc<dyn SnapshotTarget>,
 ) -> Result<Snapshot> {
     if !data_dir.is_dir() {
         bail!("{} is not a directory", data_dir.display());
@@ -233,7 +233,8 @@ async fn run(
     }
     let snapshot = read_source(source).await?;
 
-    let connected = crate::runtime::open_cli_store(data_dir, Some(server.to_string())).await?;
+    let connected =
+        crate::store_connection::open_cli_store(data_dir, Some(server.to_string())).await?;
     let operator = crate::store::HostStore::user_identity(&*connected.database)
         .await?
         .context("connected to the store, but no user identity was stored")?;
@@ -331,7 +332,7 @@ mod tests {
         dir
     }
 
-    fn memory_store(_: &str) -> Arc<dyn SharedStore> {
+    fn memory_store(_: &str) -> Arc<dyn SnapshotTarget> {
         Arc::new(MemoryStore::new())
     }
 

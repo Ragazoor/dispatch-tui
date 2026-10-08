@@ -11,7 +11,8 @@
 
 use super::{snapshot_of_a_populated_board, store_for};
 use crate::spacetime::{
-    import_old_store, restore, MemoryStore, RefusalReason, Row, SharedStore, SharedTable, Snapshot,
+    import_old_store, restore, MemoryStore, RefusalReason, Row, SharedTable, Snapshot,
+    SnapshotTarget,
 };
 use serde_json::Value;
 

@@ -827,7 +827,6 @@ async fn exec_save_repo_path_expands_tilde() {
     assert!(!db_paths.iter().any(|p| p.starts_with("~/")));
 }
 
-mod cli_store_identity;
 mod command_dispatch;
 mod event_loop;
 mod feeds;

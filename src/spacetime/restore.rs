@@ -6,7 +6,7 @@
 //! is `SeedSharedStore`'s, in `seed.rs`, not one of these five).
 
 use super::snapshot::{Refusal, RefusalReason, SharedTable, Snapshot, SNAPSHOT_FORMAT_VERSION};
-use super::store::SharedStore;
+use super::snapshot_target::SnapshotTarget;
 
 /// Why a restore did not complete.
 ///
@@ -62,7 +62,7 @@ impl std::error::Error for RestoreError {}
 /// refusal knows the store is untouched, which is what makes it safe to fix the
 /// input and retry, during exactly the incident where retrying is the only move
 /// left.
-pub async fn restore(store: &dyn SharedStore, snapshot: &Snapshot) -> Result<(), RestoreError> {
+pub async fn restore(store: &dyn SnapshotTarget, snapshot: &Snapshot) -> Result<(), RestoreError> {
     if snapshot.format_version != SNAPSHOT_FORMAT_VERSION {
         // A newer snapshot read by an older tool is the dangerous direction:
         // the fields it does not understand are the ones it would drop.
@@ -95,7 +95,7 @@ pub async fn restore(store: &dyn SharedStore, snapshot: &Snapshot) -> Result<(),
     // discarding ids 1, 2, 3 and so on — exactly the ids about to be written.
     // Run afterwards, every one of those generated ids collides with a row that
     // is now there, and a rejected insert aborts the reducer. See
-    // `SharedStore::advance_id_sequence_past`.
+    // `SnapshotTarget::advance_id_sequence_past`.
     burn_id_sequences(store, snapshot).await?;
 
     for extract in snapshot.extracts() {
@@ -124,7 +124,7 @@ pub async fn restore(store: &dyn SharedStore, snapshot: &Snapshot) -> Result<(),
 /// A table absent from the snapshot altogether is not this check's business; it
 /// has no columns to disagree about, and `completeness_refusal` catches it.
 pub(super) async fn schema_refusal(
-    store: &dyn SharedStore,
+    store: &dyn SnapshotTarget,
     snapshot: &Snapshot,
 ) -> Result<Option<Refusal>, RestoreError> {
     for extract in snapshot.extracts() {
@@ -267,7 +267,7 @@ pub(super) fn implausible_ceiling(snapshot: &Snapshot) -> Option<Refusal> {
 /// another. A table with no rows has ceiling 0, its counter is already past
 /// that, and the burn is a no-op rather than a special case.
 pub(super) async fn burn_id_sequences(
-    store: &dyn SharedStore,
+    store: &dyn SnapshotTarget,
     snapshot: &Snapshot,
 ) -> Result<(), RestoreError> {
     for table in SharedTable::ALL

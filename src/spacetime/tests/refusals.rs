@@ -9,7 +9,7 @@
 
 use super::snapshot_of_a_populated_board;
 use crate::spacetime::{
-    restore, MemoryStore, RefusalReason, SharedStore, SharedTable, SHARED_TABLE_COUNT,
+    restore, MemoryStore, RefusalReason, SharedTable, SnapshotTarget, SHARED_TABLE_COUNT,
 };
 
 /// A newer snapshot read by an older tool is the dangerous direction: the

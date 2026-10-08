@@ -868,7 +868,7 @@ rule BoardReadsFromTheSubscription {
         -- BoardWritesThroughTheStore had stopped writing: a task created a
         -- moment earlier answered "not found". In the implementation every
         -- `store::Store` read answers from the connection's `SharedRows`, the
-        -- rows its writes' reducers land in (`runtime::StoreParts::build`).
+        -- rows its writes' reducers land in (`store_connection::StoreParts::build`).
 }
 
 rule SubscribedRowsArriveUnasked {

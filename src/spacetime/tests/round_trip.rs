@@ -4,7 +4,7 @@
 //! addresses" guidance, and `TableExtract.EveryRowCarriesItsId`.
 
 use super::snapshot_of_a_populated_board;
-use crate::spacetime::{restore, SharedStore, SharedTable};
+use crate::spacetime::{restore, SharedTable, SnapshotTarget};
 
 /// Every id arrives on the far side as itself.
 #[tokio::test]

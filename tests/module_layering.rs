@@ -3,7 +3,8 @@
 //! Each rule names a source directory and the `crate::` modules it must not
 //! import. `feed` sits below `runtime` and `mcp`; `mcp` below `cli`; the
 //! storage and identity layers below `startup`; `sync` and `dispatch` below
-//! `service`. A shared type both sides need belongs in a leaf module
+//! `service`; `cli` below `runtime`, sharing the store wiring
+//! (`store_connection`) with it instead. A shared type both sides need belongs in a leaf module
 //! (`models`, `clock`, `embeddings`, …) that each depends on downward.
 //! Test files are scanned too: a test reaching upward pins the edge just as
 //! firmly as production code does.
@@ -33,6 +34,8 @@ const RULES: &[(&str, &[&str])] = &[
     ("store", &["startup"]),
     ("service", &["startup"]),
     ("dispatch", &["service"]),
+    ("cli", &["runtime"]),
+    ("store_connection", &["runtime", "cli"]),
 ];
 
 /// Every `crate::<module>` path a line names, including the members of a

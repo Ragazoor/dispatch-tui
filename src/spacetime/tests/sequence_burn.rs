@@ -24,7 +24,7 @@
 //! is the single place to change it, and every test below inherits the fix.
 
 use super::snapshot_of_a_populated_board;
-use crate::spacetime::{restore, MemoryStore, SharedStore, SharedTable};
+use crate::spacetime::{restore, MemoryStore, SharedTable, SnapshotTarget};
 
 /// The trap itself, stated as a test so the model cannot drift away from the
 /// behaviour it is modelling without something going red.

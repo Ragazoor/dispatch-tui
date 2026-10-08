@@ -9,7 +9,7 @@
 //! bad one.
 
 use super::snapshot_of_a_populated_board;
-use crate::spacetime::{restore, MemoryStore, SharedStore, SharedTable};
+use crate::spacetime::{restore, MemoryStore, SharedTable, SnapshotTarget};
 
 #[tokio::test]
 async fn restoring_twice_does_not_duplicate_rows() {

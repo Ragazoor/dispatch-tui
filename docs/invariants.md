@@ -16,7 +16,7 @@ Bare `unwrap()`/`expect()` outside tests are clippy-warned but only hard-fail vi
 
 **One store, no routing layer**: `TaskStore` is the one complete store and SpacetimeDB is mandatory. `Store` implements every store trait directly over the connection's `SharedRows` (reads) and a `ReducerCaller` (writes); there are no port traits between them and no optional parts, so no handle can write to one place and read from another. A new shared method is its trait method plus its body in `src/store/queries/`; `src/sync/tests/writes.rs::every_store_mutation_reaches_the_transport` checks that every write makes its reducer call. See "The store seam" in `docs/conventions.md`.
 
-**No local database**: dispatch links no SQLite (`storage.allium: StoreInUseNeverOpensSqlite`; `tests/no_legacy_database.rs::dispatch_links_no_sqlite`). `Store` (`src/store/mod.rs`) keeps no data of its own: `runtime::StoreParts::build` builds it over a fresh connection's rows, and `Store::open_in_memory()` is the test double — the same `Store` over an in-memory reducer caller, so tests go through the same trait implementations as production.
+**No local database**: dispatch links no SQLite (`storage.allium: StoreInUseNeverOpensSqlite`; `tests/no_legacy_database.rs::dispatch_links_no_sqlite`). `Store` (`src/store/mod.rs`) keeps no data of its own: `store_connection::StoreParts::build` builds it over a fresh connection's rows, and `Store::open_in_memory()` is the test double — the same `Store` over an in-memory reducer caller, so tests go through the same trait implementations as production.
 
 **Render-panic policy**: a guarded `unreachable!()` in a render match arm is fine when an upstream filter/type already rules that arm out (e.g. `ColumnItem` variants stripped before the match in `src/tui/ui/kanban/columns.rs`) — but MCP handlers and `src/tui/input.rs` must never panic, guarded or not. See "Rendering purity" in `docs/conventions.md`.
 
@@ -25,6 +25,10 @@ Bare `unwrap()`/`expect()` outside tests are clippy-warned but only hard-fail vi
 **Unsafe policy**: any `unsafe` block requires a `// SAFETY:` comment justifying why the invariant holds, plus reviewer sign-off. Full policy in `docs/conventions.md`.
 
 **Tag system**: `TaskTag` is a kanban label with exactly two behavioural readers (`DispatchMode::for_task` and `TaskTag::is_review`). See "Tag system" in `docs/conventions.md` before assuming a tag does anything.
+
+**What "store" names**: `store::Store` is the app's one store handle (every read and write); `store_connection::StoreParts` builds it and makes its first connection, for the board and the one-shot commands alike; `sync::SyncStore` is the narrow trait the connection loop needs from it; `spacetime::SnapshotTarget` is what a backup restore or an import writes into (`SpacetimeCliStore`, `MemoryStore`); and `spacetime::managed_store` is the local `spacetime` process's lifecycle. Name a new one for its role, not "store".
+
+**Module layering** (test-enforced): lower layers never import higher ones — no `feed → runtime`/`mcp`, `mcp → cli`, `cli → runtime`, `host_file`/`spacetime`/`sync`/`store`/`service → startup`, `sync → service` or `dispatch → service`. A type both sides need goes in a leaf (`models`, `clock`, `embeddings`, `board_event`, `startup_abort`, `store_connection`). `tests/module_layering.rs::lower_layers_do_not_import_higher_ones` holds the rule list.
 
 **Read-side layering** (convention, not compiler-enforced): zero `tui → db`, `tui → tmux`, `mcp → tui`, or `service → tui` references; `models` is a true leaf. Keep new read paths on the same seam the rest of the layer uses.
 

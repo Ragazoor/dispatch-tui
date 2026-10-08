@@ -29,7 +29,7 @@
 //! which `tests::bindings_parity` is what catches.
 //!
 //! The one non-obvious obligation is the id-sequence burn. See
-//! [`store::SharedStore::advance_id_sequence_past`] and, for why it cannot be
+//! [`snapshot_target::SnapshotTarget::advance_id_sequence_past`] and, for why it cannot be
 //! skipped, `tests::sequence_burn`.
 
 #[rustfmt::skip]
@@ -39,7 +39,7 @@ mod import;
 pub mod managed_store;
 mod restore;
 mod snapshot;
-mod store;
+mod snapshot_target;
 
 #[cfg(test)]
 mod tests;
@@ -51,4 +51,4 @@ pub use snapshot::{
     Refusal, RefusalReason, Row, Sentinel, SharedTable, Snapshot, TableExtract, SHARED_TABLE_COUNT,
     SNAPSHOT_FORMAT_VERSION,
 };
-pub use store::{MemoryStore, SharedStore};
+pub use snapshot_target::{MemoryStore, SnapshotTarget};

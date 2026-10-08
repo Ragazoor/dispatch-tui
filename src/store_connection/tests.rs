@@ -24,8 +24,7 @@ async fn a_cli_store_with_no_user_identity_refuses_and_writes_nothing() {
     .unwrap();
     let before = std::fs::read(&path).unwrap();
 
-    let result =
-        crate::runtime::open_cli_store(dir.path(), Some("http://127.0.0.1:1".to_string())).await;
+    let result = super::open_cli_store(dir.path(), Some("http://127.0.0.1:1".to_string())).await;
 
     let err = match result {
         Ok(_) => panic!("a null user identity must be refused"),

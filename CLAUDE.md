@@ -117,7 +117,7 @@ This file is intentionally slim — it is loaded into every agent's context. Sea
 - **Mutation boundary** — task/epic writes go through `TaskServiceApi`/`EpicServiceApi`, never `state.db`.
 - **Dispatch seam** — launching an agent is `TaskService::dispatch`; extend it, never re-derive it.
 - **Layout-cache coherence**, **board read source**, **one store, no routing layer**, **DB connection model** — the TUI and storage seams.
-- **Render-panic policy**, **unsafe policy**, **tag system**, **read-side layering**, **`#[cfg(test)]` gating**, **workhorse macros**, **timing constants**.
+- **Render-panic policy**, **unsafe policy**, **tag system**, **read-side layering**, **module layering**, **`#[cfg(test)]` gating**, **workhorse macros**, **timing constants**.
 - Bare `unwrap()`/`expect()` outside tests only hard-fail under `cargo clippy --all-targets -- -D warnings` (the pre-push hook).
 
 Read these on demand:

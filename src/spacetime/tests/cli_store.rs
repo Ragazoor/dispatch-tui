@@ -17,7 +17,7 @@ use std::process::Output;
 use std::sync::Arc;
 
 use crate::process::MockProcessRunner;
-use crate::spacetime::{SharedStore, SharedTable, SpacetimeCliStore};
+use crate::spacetime::{SharedTable, SnapshotTarget, SpacetimeCliStore};
 
 use MockProcessRunner as Mock;
 

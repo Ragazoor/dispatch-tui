@@ -1,4 +1,4 @@
-//! A [`SharedStore`] that talks to SpacetimeDB by running the `spacetime` CLI.
+//! A [`SnapshotTarget`] that talks to SpacetimeDB by running the `spacetime` CLI.
 //!
 //! Spec: `docs/specs/spacetime-seed.allium`.
 //!
@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex};
 use crate::process::{stderr_str, stdout_str, ProcessRunner, SUBPROCESS_TIMEOUT};
 
 use super::snapshot::{Row, SharedTable};
-use super::store::SharedStore;
+use super::snapshot_target::SnapshotTarget;
 
 /// How many bytes of encoded rows travel in one `spacetime call`.
 ///
@@ -254,7 +254,7 @@ impl SpacetimeCliStore {
 }
 
 #[async_trait]
-impl SharedStore for SpacetimeCliStore {
+impl SnapshotTarget for SpacetimeCliStore {
     /// The server's own column names for a table.
     ///
     /// Asked of the server rather than held as a constant, for the same reason
