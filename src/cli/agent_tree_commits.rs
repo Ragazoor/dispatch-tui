@@ -19,6 +19,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::cli::agent_tree_agents::border_style;
+use crate::cli::list_cursor::ListCursor;
 use crate::tui::ui::palette::YELLOW;
 
 /// The most rows the section takes from the pane, "unstaged work" included —
@@ -93,44 +94,26 @@ impl CommitsSection {
         self.cursor.checked_sub(1).and_then(|i| self.commits.get(i))
     }
 
-    /// The last row's index: "unstaged work" is always row 0.
-    fn last(&self) -> usize {
-        self.commits.len()
-    }
-
-    pub fn up(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
-    }
-
-    pub fn down(&mut self) {
-        self.cursor = (self.cursor + 1).min(self.last());
-    }
-
-    pub fn top(&mut self) {
-        self.cursor = 0;
-    }
-
-    pub fn bottom(&mut self) {
-        self.cursor = self.last();
-    }
-
-    fn half_page(&self) -> usize {
-        crate::cli::half_page(self.viewport_rows)
-    }
-
-    pub fn half_page_down(&mut self) {
-        self.cursor = (self.cursor + self.half_page()).min(self.last());
-    }
-
-    pub fn half_page_up(&mut self) {
-        self.cursor = self.cursor.saturating_sub(self.half_page());
-    }
-
     /// Rows the section wants, borders included: "unstaged work" plus one per
     /// commit, capped at [`MAX_ROWS`].
     pub fn height(&self) -> u16 {
         let rows = (self.commits.len() + 1).min(MAX_ROWS);
         u16::try_from(rows + 2).unwrap_or(u16::MAX)
+    }
+}
+
+impl ListCursor for CommitsSection {
+    fn cursor_mut(&mut self) -> &mut usize {
+        &mut self.cursor
+    }
+
+    /// The last row's index: "unstaged work" is always row 0.
+    fn last(&self) -> usize {
+        self.commits.len()
+    }
+
+    fn viewport_rows(&self) -> usize {
+        self.viewport_rows
     }
 }
 

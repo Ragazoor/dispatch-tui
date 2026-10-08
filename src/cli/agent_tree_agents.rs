@@ -13,6 +13,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
+use crate::cli::list_cursor::ListCursor;
 use crate::models::{TaskId, TmuxWindow};
 
 /// The most rows the section takes from the pane — the spec's
@@ -74,44 +75,26 @@ impl AgentsSection {
             .map(|row| row.window.clone())
     }
 
-    fn last(&self) -> usize {
-        self.rows.len().saturating_sub(1)
-    }
-
-    pub fn up(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
-    }
-
-    pub fn down(&mut self) {
-        self.cursor = (self.cursor + 1).min(self.last());
-    }
-
-    pub fn top(&mut self) {
-        self.cursor = 0;
-    }
-
-    pub fn bottom(&mut self) {
-        self.cursor = self.last();
-    }
-
-    fn half_page(&self) -> usize {
-        crate::cli::half_page(self.viewport_rows)
-    }
-
-    pub fn half_page_down(&mut self) {
-        self.cursor = (self.cursor + self.half_page()).min(self.last());
-    }
-
-    pub fn half_page_up(&mut self) {
-        self.cursor = self.cursor.saturating_sub(self.half_page());
-    }
-
     /// Rows the section wants, borders included: one per agent up to
     /// `MAX_ROWS`, and one empty row when there are none so the section — and
     /// Tab's destination — is still visible.
     pub fn height(&self) -> u16 {
         let rows = self.rows.len().clamp(1, MAX_ROWS);
         u16::try_from(rows + 2).unwrap_or(u16::MAX)
+    }
+}
+
+impl ListCursor for AgentsSection {
+    fn cursor_mut(&mut self) -> &mut usize {
+        &mut self.cursor
+    }
+
+    fn last(&self) -> usize {
+        self.rows.len().saturating_sub(1)
+    }
+
+    fn viewport_rows(&self) -> usize {
+        self.viewport_rows
     }
 }
 

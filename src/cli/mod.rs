@@ -24,6 +24,7 @@ pub mod agent_tree_agents;
 pub mod agent_tree_commits;
 pub mod caller_headers;
 pub mod commands;
+pub mod list_cursor;
 pub mod statusline;
 pub mod store_import;
 

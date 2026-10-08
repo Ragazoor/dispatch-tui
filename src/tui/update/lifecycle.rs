@@ -167,20 +167,12 @@ impl App {
         id: TaskId,
         mode: DispatchMode,
     ) -> Vec<Command> {
-        if self.dispatching.contains_key(&id) {
+        let Some(task) = self.claim_for_dispatch(id) else {
             return vec![];
-        }
-        let task = self
-            .find_task(id)
-            .filter(|t| t.status == TaskStatus::Backlog)
-            .map(|t| Box::new(t.clone()));
-        if let Some(task) = task {
-            self.mark_dispatching(id);
-            return vec![Command::Task(
-                crate::tui::commands::TaskCommand::DispatchAgent { task, mode },
-            )];
-        }
-        vec![]
+        };
+        vec![Command::Task(
+            crate::tui::commands::TaskCommand::DispatchAgent { task, mode },
+        )]
     }
 
     pub(in crate::tui) fn handle_trust_and_dispatch(
@@ -188,20 +180,27 @@ impl App {
         id: TaskId,
         mode: DispatchMode,
     ) -> Vec<Command> {
-        if self.dispatching.contains_key(&id) {
+        let Some(task) = self.claim_for_dispatch(id) else {
             return vec![];
+        };
+        vec![Command::Task(
+            crate::tui::commands::TaskCommand::TrustAndDispatch { task, mode },
+        )]
+    }
+
+    /// The guard shared by [`Self::handle_dispatch_task`] and
+    /// [`Self::handle_trust_and_dispatch`]: a Backlog task not already
+    /// dispatching is marked dispatching and returned; anything else is `None`.
+    fn claim_for_dispatch(&mut self, id: TaskId) -> Option<Box<Task>> {
+        if self.dispatching.contains_key(&id) {
+            return None;
         }
         let task = self
             .find_task(id)
             .filter(|t| t.status == TaskStatus::Backlog)
-            .map(|t| Box::new(t.clone()));
-        if let Some(task) = task {
-            self.mark_dispatching(id);
-            return vec![Command::Task(
-                crate::tui::commands::TaskCommand::TrustAndDispatch { task, mode },
-            )];
-        }
-        vec![]
+            .map(|t| Box::new(t.clone()))?;
+        self.mark_dispatching(id);
+        Some(task)
     }
 
     /// Result of `CheckTrustAndDispatch` finding the repo untrusted: enter the

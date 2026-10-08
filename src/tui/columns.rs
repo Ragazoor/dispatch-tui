@@ -231,68 +231,63 @@ impl App {
         {
             self.invalidate_layout_cache();
         }
-        if self.layout.epic_stats_cache.is_none() {
-            // Build the children map once; store it so callers can reuse it.
-            let children_map = crate::models::build_children_map(&self.board.epics);
-            let stats = Arc::new(self.compute_epic_stats_with_map(&children_map));
-
-            // Build epic_filter_cache: (epic_repo_matches, epic_matches) per epic,
-            // using the already-built children_map so descendant traversal is O(1) per epic.
-            // Computed before children_map is moved into children_map_cache.
-            let filter_cache: HashMap<EpicId, (bool, bool)> = {
-                let tasks = &self.board.tasks;
-                let filter = &self.filter;
-                self.board
-                    .epics
-                    .iter()
-                    .map(|e| {
-                        let epic_ids =
-                            crate::models::descendant_epic_ids_with_map(e.id, &children_map);
-                        let repo_matches = epic_repo_matches_for_ids(tasks, filter, &epic_ids);
-                        let active_matches = if !filter.only_active {
-                            true
-                        } else {
-                            epic_active_matches_for_ids(tasks, &epic_ids)
-                        };
-                        (e.id, (repo_matches, active_matches))
-                    })
-                    .collect()
-            };
-            self.layout.epic_filter_cache = Some(filter_cache);
-            self.layout.children_map_cache = Some(children_map);
-
-            // Build column_anchor_cache: sorted selectable items per status.
-            // Hoist tasks_for_current_view() and the search pass out of the loop
-            // so each is computed once, not once per status.
-            let view_tasks = self.tasks_for_current_view();
-            let pass = self.epic_search_pass();
-            let placements = self.compute_epic_placements();
-            let mut anchor_cache: HashMap<TaskStatus, Vec<ColumnAnchor>> = HashMap::new();
-            for &status in TaskStatus::ALL.iter() {
-                let anchors: Vec<ColumnAnchor> = self
-                    .column_items_for_status_with_view_tasks(
-                        status,
-                        Some(&placements),
-                        &view_tasks,
-                        &pass,
-                    )
-                    .into_iter()
-                    .filter_map(|item| item.anchor())
-                    .collect();
-                anchor_cache.insert(status, anchors);
-            }
-            self.layout.column_anchor_cache = Some(anchor_cache);
-
-            self.layout.epic_placements_cache = Some(Arc::new(self.compute_epic_placements()));
-            self.layout.epic_stats_cache = Some(Arc::clone(&stats));
-            self.layout.layout_cache_fingerprint = Some(fingerprint);
-            return stats;
+        if let Some(arc) = &self.layout.epic_stats_cache {
+            return Arc::clone(arc);
         }
-        if let Some(ref arc) = self.layout.epic_stats_cache {
-            Arc::clone(arc)
-        } else {
-            unreachable!("epic_stats_cache is set in the branch above")
+        // Build the children map once; store it so callers can reuse it.
+        let children_map = crate::models::build_children_map(&self.board.epics);
+        let stats = Arc::new(self.compute_epic_stats_with_map(&children_map));
+
+        // Build epic_filter_cache: (epic_repo_matches, epic_matches) per epic,
+        // using the already-built children_map so descendant traversal is O(1) per epic.
+        // Computed before children_map is moved into children_map_cache.
+        let filter_cache: HashMap<EpicId, (bool, bool)> = {
+            let tasks = &self.board.tasks;
+            let filter = &self.filter;
+            self.board
+                .epics
+                .iter()
+                .map(|e| {
+                    let epic_ids = crate::models::descendant_epic_ids_with_map(e.id, &children_map);
+                    let repo_matches = epic_repo_matches_for_ids(tasks, filter, &epic_ids);
+                    let active_matches = if !filter.only_active {
+                        true
+                    } else {
+                        epic_active_matches_for_ids(tasks, &epic_ids)
+                    };
+                    (e.id, (repo_matches, active_matches))
+                })
+                .collect()
+        };
+        self.layout.epic_filter_cache = Some(filter_cache);
+        self.layout.children_map_cache = Some(children_map);
+
+        // Build column_anchor_cache: sorted selectable items per status.
+        // Hoist tasks_for_current_view() and the search pass out of the loop
+        // so each is computed once, not once per status.
+        let view_tasks = self.tasks_for_current_view();
+        let pass = self.epic_search_pass();
+        let placements = self.compute_epic_placements();
+        let mut anchor_cache: HashMap<TaskStatus, Vec<ColumnAnchor>> = HashMap::new();
+        for &status in TaskStatus::ALL.iter() {
+            let anchors: Vec<ColumnAnchor> = self
+                .column_items_for_status_with_view_tasks(
+                    status,
+                    Some(&placements),
+                    &view_tasks,
+                    &pass,
+                )
+                .into_iter()
+                .filter_map(|item| item.anchor())
+                .collect();
+            anchor_cache.insert(status, anchors);
         }
+        self.layout.column_anchor_cache = Some(anchor_cache);
+
+        self.layout.epic_placements_cache = Some(Arc::new(self.compute_epic_placements()));
+        self.layout.epic_stats_cache = Some(Arc::clone(&stats));
+        self.layout.layout_cache_fingerprint = Some(fingerprint);
+        stats
     }
 
     /// Fingerprint of the board state feeding `epic_stats_cache`,

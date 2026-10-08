@@ -35,6 +35,7 @@ use crate::cli::agent_tree_agents::{border_style, render_agents, AgentRow, Agent
 use crate::cli::agent_tree_commits::{
     render_commits, short_id, AgentCommit, CommitsSection, COMMITS_REFRESH_INTERVAL,
 };
+use crate::cli::list_cursor::ListCursor;
 use crate::git::{git_error, git_in, run_git, COULD_NOT_RUN_GIT};
 use crate::models::{TaskId, TmuxWindow};
 use crate::process::{ProcessRunner, RealProcessRunner};
