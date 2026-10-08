@@ -7,23 +7,8 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::agent_tree::list_cursor::ListCursor;
 use crate::agent_tree::model::{TreeNode, TreeNodeKind};
-use crate::agent_tree::state::{Focus, Notice, RenderState};
+use crate::agent_tree::state::{Focus, RenderState};
 use crate::models::TmuxWindow;
-use crate::process::ProcessRunner;
-
-/// Select `window`, reporting a failure in the pane's notice — the spec's
-/// `JumpToAgentWindow` and `AgentTreeAgentJumpFailureIsVisible`. The commonest
-/// failure is a window that closed since the list was last read.
-pub(crate) fn jump_to_agent(
-    window: &TmuxWindow,
-    state: &mut RenderState,
-    runner: &dyn ProcessRunner,
-) {
-    if let Err(e) = crate::tmux::select_window(window, runner) {
-        tracing::warn!(window = window.as_str(), error = %format!("{e:#}"), "agent-tree: jump failed");
-        state.notice = Some(Notice::agent_jump(format!("{e:#}")));
-    }
-}
 
 /// What the event loop should do after `handle_key` has processed a key.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,7 +28,7 @@ pub enum KeyAction {
     JumpTo(TmuxWindow),
     /// Space or Enter in the commits section selected a different source
     /// (`SelectAgentTreeSource`). The loop drops the old source's tree,
-    /// publishes the selection and re-queries — see [`adopt_selected_source`].
+    /// publishes the selection and re-queries — see [`crate::agent_tree::run::adopt_selected_source`].
     SourceChanged,
 }
 

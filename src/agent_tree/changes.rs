@@ -37,6 +37,9 @@ use crate::process::ProcessRunner;
 /// commands) runs on its own worker, never in this loop.
 pub(crate) const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The most commits listed — the spec's `config.agent_tree_commits_max_listed`.
+pub(crate) const MAX_LISTED: usize = 50;
+
 /// The commit where this worktree forked from `git_ref`, or git's own error if
 /// the ref does not resolve.
 fn merge_base(root: &str, git_ref: &str, runner: &dyn ProcessRunner) -> Result<String> {
@@ -114,11 +117,7 @@ fn is_ancestor(
 /// the one returned — that is the name the user put on the task, so it is the
 /// one they can act on. A ranking probe that could not answer is a different
 /// thing and fails the whole query; see [`is_ancestor`].
-pub(crate) fn fork_point(
-    root: &str,
-    base_branch: &str,
-    runner: &dyn ProcessRunner,
-) -> Result<String> {
+fn fork_point(root: &str, base_branch: &str, runner: &dyn ProcessRunner) -> Result<String> {
     let local = merge_base(root, base_branch, runner);
     let remote = merge_base(root, &crate::git::origin_ref(base_branch), runner);
 
@@ -232,7 +231,7 @@ pub fn git_changes(
 }
 
 /// The agent's own commits for the commits section: the newest
-/// [`crate::agent_tree::render::commits::MAX_LISTED`] commits reachable from HEAD
+/// [`MAX_LISTED`] commits reachable from HEAD
 /// and not from this worktree's [`fork_point`] from `base_branch`, newest
 /// first — the spec's `git_branch_commits` (`RefreshAgentTreeCommitList`,
 /// `AgentTreeBaselineIsTaskBaseBranch`).
@@ -244,10 +243,7 @@ pub fn git_branch_commits(
     let root = root.to_string_lossy().into_owned();
     let fork = fork_point(&root, base_branch, runner)?;
     let range = format!("{fork}..HEAD");
-    let max = format!(
-        "--max-count={}",
-        crate::agent_tree::render::commits::MAX_LISTED
-    );
+    let max = format!("--max-count={}", MAX_LISTED);
     let listing = run_git(
         runner,
         &root,

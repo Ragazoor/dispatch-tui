@@ -234,7 +234,7 @@ fn no_pane_renderer_source_opens_the_store() {
     files.push(src.join("cli/agent_diff.rs"));
     const FORBIDDEN: &[&str] = &["open_cli_store", "crate::store::", "TaskRead", "Store"];
     for file in &files {
-        let source = std::fs::read_to_string(file).unwrap();
+        let source = common::repo_file(&file.to_string_lossy());
         for needle in FORBIDDEN {
             assert!(
                 !source.contains(needle),

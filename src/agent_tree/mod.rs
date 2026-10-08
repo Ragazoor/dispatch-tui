@@ -5,8 +5,9 @@
 //! Both panes run as processes of their own in tmux, started by the
 //! `dispatch agent-tree` and `dispatch agent-diff` subcommands; `crate::cli`
 //! holds only those thin entry points. The board side — opening and closing
-//! the panes beside an agent — is `crate::dispatch`, which reaches in here for
-//! the [`diff_pane`] tmux effect and the [`open_set`] the two panes share.
+//! the panes beside an agent — is `crate::dispatch`, which reaches in here only
+//! to empty the [`open_set`] the two panes share. The diff pane's tmux effect
+//! ([`diff_pane`]) is driven from the tree's own loop, not from the board.
 //!
 //! - [`model`]: the pure tree, built from what git printed.
 //! - [`changes`]: the git queries behind the tree and the commits section.

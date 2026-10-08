@@ -3,16 +3,17 @@
 
 use super::changes::*;
 use super::keys::*;
+use super::list_cursor::ListCursor;
+use super::model::tests::nul_stream;
 use super::model::*;
+use super::pane::buffer_to_string;
+use super::render::agents::AgentRow;
+use super::render::commits::MAX_ROWS as COMMITS_MAX_ROWS;
 use super::render::commits::*;
 use super::render::*;
 use super::run::*;
 use super::state::*;
 use super::test_repo::TestRepo;
-use crate::agent_tree::list_cursor::ListCursor;
-use crate::agent_tree::pane::buffer_to_string;
-use crate::agent_tree::render::agents::AgentRow;
-use crate::agent_tree::render::commits::{CommitsSection, MAX_ROWS as COMMITS_MAX_ROWS};
 use crate::keybindings::{bindings_in, KeyContext, KeyNamespace, ANY_OTHER_KEY};
 use crate::models::{test_tmux_window, TaskId};
 use crate::palette::{FG, MUTED, RED};
@@ -350,8 +351,8 @@ fn failing_git_rig(stderr: &str) -> MockProcessRunner {
 /// The one-commit form's two answers: name-and-status, then counts.
 fn commit_rig(diff: &[&str], numstat: &[&str]) -> MockProcessRunner {
     MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(nul(diff).as_bytes()),
-        MockProcessRunner::ok_with_stdout(nul(numstat).as_bytes()),
+        MockProcessRunner::ok_with_stdout(nul_stream(diff).as_bytes()),
+        MockProcessRunner::ok_with_stdout(nul_stream(numstat).as_bytes()),
     ])
 }
 
@@ -377,15 +378,10 @@ fn unstaged_out_counted(
     untracked: &[&str],
 ) -> Vec<Result<std::process::Output>> {
     vec![
-        MockProcessRunner::ok_with_stdout(nul(diff).as_bytes()),
-        MockProcessRunner::ok_with_stdout(nul(numstat).as_bytes()),
-        MockProcessRunner::ok_with_stdout(nul(untracked).as_bytes()),
+        MockProcessRunner::ok_with_stdout(nul_stream(diff).as_bytes()),
+        MockProcessRunner::ok_with_stdout(nul_stream(numstat).as_bytes()),
+        MockProcessRunner::ok_with_stdout(nul_stream(untracked).as_bytes()),
     ]
-}
-
-/// A `-z` stream: NUL after every field, exactly as git emits it.
-fn nul(fields: &[&str]) -> String {
-    fields.iter().map(|f| format!("{f}\0")).collect()
 }
 
 impl KeyRig {

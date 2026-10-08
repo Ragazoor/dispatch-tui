@@ -252,7 +252,7 @@ fn a_path_reported_by_both_queries_keeps_the_counts_it_has() {
 
 /// Build a `-z` name-status stream: NUL after every field, including the
 /// last, exactly as git emits it.
-fn nul_stream(fields: &[&str]) -> String {
+pub(in crate::agent_tree) fn nul_stream(fields: &[&str]) -> String {
     fields.iter().map(|f| format!("{f}\0")).collect()
 }
 

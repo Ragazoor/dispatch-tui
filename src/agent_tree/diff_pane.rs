@@ -30,7 +30,7 @@ use crate::tmux::{self, PANE_ROLE_DIFF, PANE_ROLE_OPTION};
 /// Deliberately the larger share of that column: the tree is a list of short
 /// path segments and stays legible in a few rows, while reading the change is
 /// the point of opening it.
-pub const DIFF_PANE_PERCENT: u8 = 66;
+const DIFF_PANE_PERCENT: u8 = 66;
 
 /// The pane this process is running in, from `$TMUX_PANE`.
 ///

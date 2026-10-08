@@ -216,7 +216,7 @@ pub(crate) enum StartupStep {
 
 /// How long a pane waits for its task row before giving up
 /// (`agent-tree.allium`: `config.agent_tree_startup_wait`).
-pub(crate) const STARTUP_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+const STARTUP_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// How often the wait re-reads the board and redraws.
 const STARTUP_POLL: std::time::Duration = std::time::Duration::from_millis(200);

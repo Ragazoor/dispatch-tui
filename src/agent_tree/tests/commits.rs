@@ -39,7 +39,7 @@ impl KeyRig {
 /// screen, at most fifty commits listed.
 #[test]
 fn the_commits_sections_config_defaults() {
-    use crate::agent_tree::render::commits::{COMMITS_REFRESH_INTERVAL, MAX_LISTED};
+    use crate::agent_tree::{changes::MAX_LISTED, run::COMMITS_REFRESH_INTERVAL};
     assert_eq!(COMMITS_REFRESH_INTERVAL, std::time::Duration::from_secs(1));
     assert_eq!(COMMITS_MAX_ROWS, 6);
     assert_eq!(MAX_LISTED, 50);

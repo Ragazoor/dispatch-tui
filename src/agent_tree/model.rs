@@ -571,4 +571,4 @@ fn compute_expansion(node: &mut TreeNode) -> bool {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

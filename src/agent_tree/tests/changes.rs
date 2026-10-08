@@ -628,10 +628,7 @@ fn only_the_newest_fifty_commits_are_listed() {
     }
 
     let commits = real_commits(&repo);
-    assert_eq!(
-        commits.len(),
-        crate::agent_tree::render::commits::MAX_LISTED
-    );
+    assert_eq!(commits.len(), crate::agent_tree::changes::MAX_LISTED);
     assert_eq!(commits.first().map(|c| c.subject.as_str()), Some("c55"));
     assert_eq!(commits.last().map(|c| c.subject.as_str()), Some("c6"));
 }

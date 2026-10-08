@@ -17,7 +17,7 @@ mod common;
 
 use std::path::PathBuf;
 
-/// `(directory under src/, modules it must not import)`.
+/// `(module under src/, a directory or one file; modules it must not import)`.
 const RULES: &[(&str, &[&str])] = &[
     ("feed", &["runtime", "mcp"]),
     ("mcp", &["cli"]),
@@ -28,7 +28,22 @@ const RULES: &[(&str, &[&str])] = &[
     ("service", &["startup"]),
     ("dispatch", &["service"]),
     ("cli", &["runtime", "tui"]),
-    ("agent_tree", &["runtime", "tui", "cli", "mcp"]),
+    (
+        "agent_tree",
+        &[
+            "runtime",
+            "tui",
+            "cli",
+            "mcp",
+            "dispatch",
+            "service",
+            "store",
+            "sync",
+            "startup",
+            "spacetime",
+        ],
+    ),
+    ("palette", &["tui", "agent_tree"]),
     ("store_connection", &["runtime", "cli"]),
 ];
 
@@ -111,7 +126,14 @@ fn lower_layers_do_not_import_higher_ones() {
     let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut offenders = Vec::new();
     for (dir, forbidden) in RULES {
-        for file in common::rust_files(&src.join(dir), false) {
+        // A module is a directory, or a single `<name>.rs` file.
+        let module_dir = src.join(dir);
+        let files = if module_dir.is_dir() {
+            common::rust_files(&module_dir, false)
+        } else {
+            vec![src.join(format!("{dir}.rs"))]
+        };
+        for file in files {
             let body = std::fs::read_to_string(&file).unwrap();
             for module in crate_modules(&body) {
                 if forbidden.contains(&module.as_str()) {

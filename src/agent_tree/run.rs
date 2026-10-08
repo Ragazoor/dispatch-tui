@@ -16,10 +16,10 @@ use ratatui::backend::Backend;
 use ratatui::Terminal;
 
 use crate::agent_tree::changes::{git_branch_commits, git_changes};
-use crate::agent_tree::keys::{handle_key, jump_to_agent, KeyAction};
+use crate::agent_tree::keys::{handle_key, KeyAction};
 use crate::agent_tree::model::{build_tree, TreeNode};
 use crate::agent_tree::render::agents::AgentRow;
-use crate::agent_tree::render::commits::{AgentCommit, COMMITS_REFRESH_INTERVAL};
+use crate::agent_tree::render::commits::AgentCommit;
 use crate::agent_tree::render::render_pane;
 use crate::agent_tree::state::{Notice, RenderState};
 use crate::models::{TaskId, TmuxWindow};
@@ -30,6 +30,23 @@ use crate::process::{ProcessRunner, RealProcessRunner};
 /// poll timeout, so a key press and a plain timer tick share one wait.
 pub(crate) const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
+/// The section's re-read cadence — `config.agent_tree_commits_refresh_interval`.
+pub(crate) const COMMITS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Select `window`, reporting a failure in the pane's notice — the spec's
+/// `JumpToAgentWindow` and `AgentTreeAgentJumpFailureIsVisible`. The commonest
+/// failure is a window that closed since the list was last read.
+pub(crate) fn jump_to_agent(
+    window: &TmuxWindow,
+    state: &mut RenderState,
+    runner: &dyn ProcessRunner,
+) {
+    if let Err(e) = crate::tmux::select_window(window, runner) {
+        tracing::warn!(window = window.as_str(), error = %format!("{e:#}"), "agent-tree: jump failed");
+        state.notice = Some(Notice::agent_jump(format!("{e:#}")));
+    }
+}
+
 /// Everything the loop needs to keep the diff pane in step with the open set:
 /// the worktree both panes read, and which database and task the pane below
 /// should open.
@@ -37,7 +54,7 @@ pub(crate) const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 /// Bundled because they travel together and none means anything without the
 /// others — `root` alone cannot name the pane's task, and the task id alone
 /// cannot say which database holds it.
-pub(crate) struct DiffPaneContext<'a> {
+struct DiffPaneContext<'a> {
     pub root: &'a Path,
     pub data_dir: &'a Path,
     pub task_id: TaskId,
@@ -152,11 +169,11 @@ pub(super) fn adopt_tree(rebuilt: TreeNode, tree: &mut TreeNode, state: &mut Ren
 /// Reads of the board's task list for the agents section, one per
 /// `AGENTS_REFRESH_INTERVAL`, produced off the render loop so a slow database
 /// never delays a keypress or a git tick.
-pub(crate) type AgentReads = std::sync::mpsc::Receiver<Result<Vec<AgentRow>, String>>;
+type AgentReads = std::sync::mpsc::Receiver<Result<Vec<AgentRow>, String>>;
 
 /// The agents section's re-read cadence — the spec's
 /// `config.agent_tree_agents_refresh_interval`.
-pub(crate) const AGENTS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const AGENTS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Take every read that has arrived since the last pass. Only the newest one
 /// matters for the rows, but each is adopted in turn so a failure followed by
@@ -170,7 +187,7 @@ fn drain_agent_reads(agent_reads: &AgentReads, state: &mut RenderState) {
 /// Reads of the agent's commits for the commits section, one per
 /// `COMMITS_REFRESH_INTERVAL`, produced off the render loop: resolving the fork
 /// point runs up to four git commands, which must never delay a keypress.
-pub(crate) type CommitReads = std::sync::mpsc::Receiver<Result<Vec<AgentCommit>, String>>;
+type CommitReads = std::sync::mpsc::Receiver<Result<Vec<AgentCommit>, String>>;
 
 /// Take every read that has arrived since the last pass, each in turn so a
 /// failure followed by a recovery leaves no stale notice behind. When a read

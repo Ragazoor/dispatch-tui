@@ -10,8 +10,6 @@
 //! [`crate::agent_tree::changes::git_branch_commits`], and the selection itself lives on
 //! the pane's `RenderState`.
 
-use std::time::Duration;
-
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -25,12 +23,6 @@ use crate::palette::YELLOW;
 /// The most rows the section takes from the pane, "unstaged work" included —
 /// the spec's `config.agent_tree_commits_max_rows`.
 pub(crate) const MAX_ROWS: usize = 6;
-
-/// The most commits listed — the spec's `config.agent_tree_commits_max_listed`.
-pub(crate) const MAX_LISTED: usize = 50;
-
-/// The section's re-read cadence — `config.agent_tree_commits_refresh_interval`.
-pub(crate) const COMMITS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
 /// One of the agent's own commits, as the section lists it — the spec's
 /// `AgentCommit`.

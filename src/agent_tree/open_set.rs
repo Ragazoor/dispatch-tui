@@ -32,7 +32,7 @@ const SELECTED_SOURCE_FILE: &str = "dispatch-agent-tree-source.json";
 
 /// Where this worktree's open set lives, or `None` when the path is not a
 /// linked worktree and so has no admin directory to put it in.
-pub fn open_set_path(worktree_path: &str) -> Option<PathBuf> {
+fn open_set_path(worktree_path: &str) -> Option<PathBuf> {
     Some(worktree_admin_dir(worktree_path)?.join(OPEN_SET_FILE))
 }
 
