@@ -75,6 +75,10 @@ expect 1 src/thing/tests.rs 'fn f() {
     std::thread::sleep(d);
 }' 'std::thread::sleep in a tests.rs file fails'
 
+expect 1 src/thing/view_tests.rs 'fn f() {
+    std::thread::sleep(d);
+}' 'std::thread::sleep in a *_tests.rs file fails'
+
 # The allow marker is applied by one pattern-agnostic pass, so the two placements
 # are pinned once here and the `.elapsed()` cases below need not repeat them.
 expect 0 tests/it.rs 'fn f() {

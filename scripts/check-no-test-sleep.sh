@@ -14,7 +14,7 @@
 #     sleep, and TTL/interval checks all over the TUI read `.elapsed()`.
 #
 # "Test code" means a test file — anything under tests/, under a src/**/tests/
-# directory, or named tests.rs — **or** an inline `#[cfg(test)] mod <name> { …
+# directory, or named tests.rs or *_tests.rs — **or** an inline `#[cfg(test)] mod <name> { …
 # }` block inside a production file. Inline modules used to be a documented
 # blind spot; they are now tracked by the awk pass below, which opens a region
 # at a top-level `#[cfg(test)]` immediately followed by `mod <name> {` (with or
@@ -62,8 +62,8 @@ test_hits=$(
         FNR == 1 {
             in_mod = 0
             pending = 0
-            # Whole-file test code: tests/…, src/**/tests/…, or …/tests.rs.
-            test_file = (FILENAME ~ /(^|\/)tests\//) || (FILENAME ~ /(^|\/)tests\.rs$/)
+            # Whole-file test code: tests/…, src/**/tests/…, or …/tests.rs, …/*_tests.rs.
+            test_file = (FILENAME ~ /(^|\/)tests\//) || (FILENAME ~ /(^|\/)([a-z0-9_]+_)?tests\.rs$/)
         }
         !test_file {
             if ($0 ~ /^#\[cfg\(test\)\]$/) { pending = 1; next }

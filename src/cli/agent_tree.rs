@@ -1228,7 +1228,6 @@ fn run_tree_action(
     action: &str,
     key: KeyEvent,
 ) -> Option<KeyAction> {
-    use crate::keybindings::KeyNamespace;
     let half_page = state.half_page();
     let result = match action {
         "exit_pane" => KeyAction::Exit,
@@ -1254,59 +1253,19 @@ fn run_tree_action(
         // and nothing is expanded to reach a target. With nothing selected
         // yet they all land on the first row, as `j`/`k` do from that state.
         "navigate_row" => {
-            let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
-            match (ns, down) {
-                (KeyNamespace::AgentTreeAgents, true) => state.agents.down(),
-                (KeyNamespace::AgentTreeAgents, false) => state.agents.up(),
-                (KeyNamespace::AgentTreeCommits, true) => state.commits.down(),
-                (KeyNamespace::AgentTreeCommits, false) => state.commits.up(),
-                (_, true) => {
-                    state.tree_state.key_down();
-                }
-                (_, false) => {
-                    state.tree_state.key_up();
-                }
-            }
+            navigate_row(state, ns, key);
             KeyAction::Continue
         }
         "navigate_row_first" => {
-            if ns == KeyNamespace::AgentTreeAgents {
-                state.agents.top();
-            } else if ns == KeyNamespace::AgentTreeCommits {
-                state.commits.top();
-            } else {
-                state.tree_state.select_first();
-            }
+            navigate_to_edge(state, ns, Edge::First);
             KeyAction::Continue
         }
         "navigate_row_last" => {
-            if ns == KeyNamespace::AgentTreeAgents {
-                state.agents.bottom();
-            } else if ns == KeyNamespace::AgentTreeCommits {
-                state.commits.bottom();
-            } else {
-                state.tree_state.select_last();
-            }
+            navigate_to_edge(state, ns, Edge::Last);
             KeyAction::Continue
         }
         "navigate_half_page" => {
-            let down = matches!(key.code, KeyCode::Char('d' | 'D'));
-            match (ns, down) {
-                (KeyNamespace::AgentTreeAgents, true) => state.agents.half_page_down(),
-                (KeyNamespace::AgentTreeAgents, false) => state.agents.half_page_up(),
-                (KeyNamespace::AgentTreeCommits, true) => state.commits.half_page_down(),
-                (KeyNamespace::AgentTreeCommits, false) => state.commits.half_page_up(),
-                (_, true) => {
-                    state.tree_state.select_relative(|current| {
-                        current.map_or(0, |c| c.saturating_add(half_page))
-                    });
-                }
-                (_, false) => {
-                    state.tree_state.select_relative(|current| {
-                        current.map_or(0, |c| c.saturating_sub(half_page))
-                    });
-                }
-            }
+            navigate_half_page(state, ns, key, half_page);
             KeyAction::Continue
         }
         "collapse_directory" => {
@@ -1347,6 +1306,80 @@ fn run_tree_action(
         _ => return None,
     };
     Some(result)
+}
+
+/// Which end of a section a jump motion lands on.
+enum Edge {
+    First,
+    Last,
+}
+
+/// `j`/`k` and the arrow keys: one row in the focused section.
+// `TreeState`'s navigation methods return whether anything changed; the loop
+// redraws unconditionally, so the answer is discarded. The jump motions
+// resolve against the identifiers of the last render — the visible rows — so
+// a collapsed directory's children are skipped and nothing is expanded to
+// reach a target. With nothing selected yet they all land on the first row,
+// as `j`/`k` do from that state.
+fn navigate_row(state: &mut RenderState, ns: crate::keybindings::KeyNamespace, key: KeyEvent) {
+    use crate::keybindings::KeyNamespace;
+    let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
+    match (ns, down) {
+        (KeyNamespace::AgentTreeAgents, true) => state.agents.down(),
+        (KeyNamespace::AgentTreeAgents, false) => state.agents.up(),
+        (KeyNamespace::AgentTreeCommits, true) => state.commits.down(),
+        (KeyNamespace::AgentTreeCommits, false) => state.commits.up(),
+        (_, true) => {
+            state.tree_state.key_down();
+        }
+        (_, false) => {
+            state.tree_state.key_up();
+        }
+    }
+}
+
+/// `gg` and `G`: jump to the first or last row of the focused section.
+fn navigate_to_edge(state: &mut RenderState, ns: crate::keybindings::KeyNamespace, edge: Edge) {
+    use crate::keybindings::KeyNamespace;
+    match (ns, edge) {
+        (KeyNamespace::AgentTreeAgents, Edge::First) => state.agents.top(),
+        (KeyNamespace::AgentTreeAgents, Edge::Last) => state.agents.bottom(),
+        (KeyNamespace::AgentTreeCommits, Edge::First) => state.commits.top(),
+        (KeyNamespace::AgentTreeCommits, Edge::Last) => state.commits.bottom(),
+        (_, Edge::First) => {
+            state.tree_state.select_first();
+        }
+        (_, Edge::Last) => {
+            state.tree_state.select_last();
+        }
+    }
+}
+
+/// `d`/`u`: half a page in the focused section.
+fn navigate_half_page(
+    state: &mut RenderState,
+    ns: crate::keybindings::KeyNamespace,
+    key: KeyEvent,
+    half_page: usize,
+) {
+    use crate::keybindings::KeyNamespace;
+    let down = matches!(key.code, KeyCode::Char('d' | 'D'));
+    match (ns, down) {
+        (KeyNamespace::AgentTreeAgents, true) => state.agents.half_page_down(),
+        (KeyNamespace::AgentTreeAgents, false) => state.agents.half_page_up(),
+        (KeyNamespace::AgentTreeCommits, true) => state.commits.half_page_down(),
+        (KeyNamespace::AgentTreeCommits, false) => state.commits.half_page_up(),
+        (_, true) => {
+            state
+                .tree_state
+                .select_relative(|current| current.map_or(0, |c| c.saturating_add(half_page)));
+        }
+        (_, false) => {
+            state
+                .tree_state
+                .select_relative(|current| current.map_or(0, |c| c.saturating_sub(half_page)));
+        }
+    }
 }
 
 /// Everything the loop needs to keep the diff pane in step with the open set:
