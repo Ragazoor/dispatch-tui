@@ -446,8 +446,6 @@ fn e_key_directly_emits_edit_task() {
 #[test]
 fn confirm_retry_r_key_emits_resume() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
-    app.board.tasks[0].tmux_window = Some(test_tmux_window("task-4"));
-    app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
 
     let cmds = app.handle_key(make_key(KeyCode::Char('r')));
@@ -461,8 +459,6 @@ fn confirm_retry_r_key_emits_resume() {
 #[test]
 fn confirm_retry_f_key_emits_fresh() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
-    app.board.tasks[0].tmux_window = Some(test_tmux_window("task-4"));
-    app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
 
     let cmds = app.handle_key(make_key(KeyCode::Char('f')));

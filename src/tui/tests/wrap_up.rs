@@ -189,11 +189,7 @@ fn todo_keys_are_inert_on_the_board() {
 
 #[test]
 fn w_key_is_inert_on_review_task_with_worktree() {
-    let mut app = App::new(vec![{
-        let mut t = make_task(1, TaskStatus::Review);
-        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-        t
-    }]);
+    let mut app = App::new(vec![{ make_task(1, TaskStatus::Review) }]);
     let mode_before = app.input.mode.clone();
 
     let cmds = app.handle_key(make_key(KeyCode::Char('W')));
@@ -220,8 +216,7 @@ fn w_key_is_inert_on_epic() {
 
 #[test]
 fn status_bar_no_longer_shows_wrap_up_hint_for_review_task() {
-    let mut task = make_task(1, TaskStatus::Review);
-    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    let task = make_task(1, TaskStatus::Review);
     let mut app = App::new(vec![task]);
     // Navigate to Review column (index 2)
     for _ in 0..2 {

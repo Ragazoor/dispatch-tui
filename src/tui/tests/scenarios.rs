@@ -1,7 +1,7 @@
 use crossterm::event::KeyCode;
 
 use super::super::{App, Command, InputMode, Message};
-use super::{make_app, make_epic, make_key, make_task};
+use super::{make_app, make_app_with_epic_selected, make_epic, make_key, make_task};
 use crate::models::{TaskId, TaskStatus};
 
 /// Drives an `App` through a sequence of key events, collecting all `Command`s emitted.
@@ -219,15 +219,6 @@ fn make_app_with_feed_epic_selected() -> super::App {
     app
 }
 
-fn make_app_with_non_feed_epic_selected() -> super::App {
-    use super::App;
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-    app.board.epics = vec![make_epic(10)]; // no feed_command
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 1);
-    app
-}
-
 #[test]
 fn r_on_feed_epic_card_emits_trigger_command() {
     let mut s = Scenario::with_app(make_app_with_feed_epic_selected());
@@ -243,7 +234,7 @@ fn r_on_feed_epic_card_emits_trigger_command() {
 
 #[test]
 fn r_on_non_feed_epic_card_does_nothing() {
-    let mut s = Scenario::with_app(make_app_with_non_feed_epic_selected());
+    let mut s = Scenario::with_app(make_app_with_epic_selected());
     s.key(KeyCode::Char('r'));
     assert!(
         !s.commands.iter().any(|c| matches!(

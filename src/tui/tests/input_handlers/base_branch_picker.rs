@@ -964,7 +964,6 @@ fn esc_clears_mixed_selection() {
 #[test]
 fn confirm_detach_tmux_clears_window() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Review)]);
-    app.board.tasks[0].tmux_window = Some(test_tmux_window("task-1"));
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::DetachTmux(TaskId(1)),
@@ -1000,7 +999,6 @@ fn confirm_detach_tmux_clears_window() {
 #[test]
 fn confirm_detach_tmux_emits_a_draining_subagent_clear() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Review)]);
-    app.board.tasks[0].tmux_window = Some(test_tmux_window("task-1"));
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::DetachTmux(TaskId(1)),
     ));
@@ -1022,8 +1020,7 @@ fn confirm_detach_tmux_emits_a_draining_subagent_clear() {
 
 #[test]
 fn confirm_detach_tmux_y_detaches() {
-    let mut task = make_task(3, TaskStatus::Review);
-    task.tmux_window = Some(test_tmux_window("task-3"));
+    let task = make_task(3, TaskStatus::Review);
     let mut app = App::new(vec![task]);
     app.input.mode = InputMode::ConfirmDetachTmux(vec![TaskId(3)]);
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));

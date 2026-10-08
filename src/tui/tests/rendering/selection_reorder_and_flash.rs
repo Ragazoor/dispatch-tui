@@ -351,7 +351,6 @@ async fn render_card_conflict_shows_rebase_conflict() {
 #[tokio::test]
 async fn render_card_detached_shows_detached() {
     let mut task = make_task(1, TaskStatus::Running);
-    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.tmux_window = None; // detached: worktree present but no tmux
     task.sub_status = SubStatus::Active;
     let mut app = App::new(vec![task]);
@@ -366,7 +365,6 @@ async fn render_card_detached_shows_detached() {
 #[tokio::test]
 async fn render_card_detached_review_shows_pr_label() {
     let mut task = make_task(1, TaskStatus::Review);
-    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.tmux_window = None; // detached
     task.url = Some(crate::models::TaskUrl::new(
         "https://github.com/acme/app/pull/42",
@@ -416,8 +414,6 @@ async fn render_card_running_shows_running() {
 #[tokio::test]
 async fn render_card_review_pr_shows_pr_number() {
     let mut task = make_task(1, TaskStatus::Review);
-    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    task.tmux_window = Some(test_tmux_window("task-1"));
     task.url = Some(crate::models::TaskUrl::new(
         "https://github.com/acme/app/pull/99",
         crate::models::UrlType::Pr,

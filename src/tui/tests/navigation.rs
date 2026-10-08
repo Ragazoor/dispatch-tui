@@ -316,9 +316,7 @@ fn error_sets_error_popup() {
 
 #[test]
 fn move_backward_from_running_detaches_but_keeps_worktree() {
-    let mut task = make_task(4, TaskStatus::Running);
-    task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
-    task.tmux_window = Some(test_tmux_window("task-4"));
+    let task = make_task(4, TaskStatus::Running);
     let mut app = App::new(vec![task]);
 
     let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
@@ -363,7 +361,6 @@ fn move_backward_from_running_without_dispatch_fields() {
 #[test]
 fn move_forward_to_done_enters_confirm_mode() {
     let mut task = make_task(5, TaskStatus::Review);
-    task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = None; // session closed, but worktree remains
     let mut app = App::new(vec![task]);
 
@@ -398,9 +395,7 @@ fn single_move_to_done_records_the_task_in_pending_done() {
 
 #[test]
 fn move_forward_to_done_with_live_window_enters_confirm_mode() {
-    let mut task = make_task(5, TaskStatus::Review);
-    task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
-    task.tmux_window = Some(test_tmux_window("task-5"));
+    let task = make_task(5, TaskStatus::Review);
     let mut app = App::new(vec![task]);
 
     let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
@@ -416,8 +411,7 @@ fn move_forward_to_done_with_live_window_enters_confirm_mode() {
 
 #[test]
 fn space_key_with_live_window_jumps() {
-    let mut task = make_task(4, TaskStatus::Running);
-    task.tmux_window = Some(test_tmux_window("task-4"));
+    let task = make_task(4, TaskStatus::Running);
     let mut app = App::new(vec![task]);
     app.selection_mut().set_column(2); // Running = nav col 2
     let cmds = app.handle_key(make_key(KeyCode::Char(' ')));
@@ -510,7 +504,6 @@ fn resumed_unknown_id_is_noop() {
 #[test]
 fn resumed_sets_status_to_running() {
     let mut task = make_task(4, TaskStatus::Review);
-    task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = None;
     let mut app = App::new(vec![task]);
 
@@ -1465,7 +1458,6 @@ fn shift_l_with_mixed_selection_moves_tasks_only() {
 #[test]
 fn detach_tmux_single_sets_confirm_mode() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Review)]);
-    app.board.tasks[0].tmux_window = Some(test_tmux_window("task-1"));
 
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::DetachTmux(TaskId(1)),
@@ -1483,7 +1475,6 @@ fn detach_tmux_single_sets_confirm_mode() {
 fn detach_tmux_running_task_with_window_is_detachable() {
     // Running tasks with a tmux window should pass the detach filter.
     let mut app = App::new(vec![make_task(1, TaskStatus::Running)]);
-    app.board.tasks[0].tmux_window = Some(test_tmux_window("task-1"));
 
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::DetachTmux(TaskId(1)),
@@ -1837,8 +1828,7 @@ fn tick_without_split_does_not_check_pane() {
 
 #[test]
 fn tick_skips_capture_for_split_pinned_task() {
-    let mut task = make_task(4, TaskStatus::Running);
-    task.tmux_window = Some(test_tmux_window("task-4"));
+    let task = make_task(4, TaskStatus::Running);
     let mut app = App::new(vec![task]);
 
     // Pin task 4 in split mode

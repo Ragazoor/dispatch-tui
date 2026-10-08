@@ -264,10 +264,7 @@ fn epic_text_input_unrecognized_key_is_noop() {
 }
 
 fn make_app_confirm_delete_epic() -> App {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-    app.board.epics = vec![make_epic(10)];
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 1); // cursor on epic (same priority as task, sorts after by id)
+    let mut app = make_app_with_epic_selected();
     app.input.mode = InputMode::ConfirmDeleteEpic;
     app.status.message = Some("Delete epic \"Epic 10\" and subtasks? [y/n]".to_string());
     app
@@ -275,10 +272,7 @@ fn make_app_confirm_delete_epic() -> App {
 
 #[test]
 fn confirm_delete_epic_enters_mode_with_title() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-    app.board.epics = vec![make_epic(10)];
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 1); // cursor on epic (same priority as task, sorts after by id)
+    let mut app = make_app_with_epic_selected();
     app.update(Message::Epic(
         crate::tui::messages::EpicMessage::ConfirmDelete,
     ));

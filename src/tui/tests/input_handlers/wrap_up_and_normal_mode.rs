@@ -144,8 +144,7 @@ fn wrap_up_mode_enter_keeps_prefilled_value_from_copy_task() {
 
 #[test]
 fn space_key_on_split_pinned_task_focuses_pane() {
-    let mut task = make_task(4, TaskStatus::Running);
-    task.tmux_window = Some(test_tmux_window("task-4"));
+    let task = make_task(4, TaskStatus::Running);
     let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
@@ -175,8 +174,7 @@ fn space_key_on_epic_enters_epic_view() {
 
 #[test]
 fn space_on_task_in_active_split_swaps_pane() {
-    let mut task = make_task(3, TaskStatus::Running);
-    task.tmux_window = Some(test_tmux_window("task-3"));
+    let task = make_task(3, TaskStatus::Running);
     let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%10".to_string());
