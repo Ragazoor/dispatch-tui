@@ -148,7 +148,7 @@ impl<'a> BoardView<'a> {
     /// O(epics × tasks).
     ///
     /// Cached alongside the rest of the layout cache — see
-    /// [`Self::cached_epic_stats`]. Placement moves with the search query and
+    /// `Self::cached_epic_stats`. Placement moves with the search query and
     /// the filters as well as with the board, which is why
     /// `compute_layout_fingerprint` folds those in.
     pub(in crate::tui) fn compute_epic_placements(self) -> EpicPlacementMap {
@@ -723,7 +723,7 @@ impl<'a> BoardView<'a> {
 
     /// Selectable item counts for every board column, in `TaskStatus::ALL`
     /// order, from one board scan and one search pass. Used by
-    /// [`Self::clamp_selection`], which needs all four counts in one action and
+    /// `Self::clamp_selection`, which needs all four counts in one action and
     /// interleaves `selection_mut()` writes — so it takes the counts up front
     /// rather than holding a board borrow across the writes.
     pub(in crate::tui) fn column_item_counts(self) -> [usize; TaskStatus::COLUMN_COUNT] {

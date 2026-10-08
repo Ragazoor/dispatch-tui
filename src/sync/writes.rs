@@ -14,7 +14,7 @@
 //! Everything interesting here is the encoding and the refusal path, and
 //! neither needs a server. Splitting the transport out means the tests for both
 //! run in CI, where no SpacetimeDB exists — the same reason
-//! [`super::StoreConnector`] is a trait. [`SdkReducerCaller`] is the one
+//! [`super::StoreConnector`] is a trait. [`SdkReducerCaller`](crate::sync::sdk_connector::SdkReducerCaller) is the one
 //! implementation that talks to a real store.
 //!
 //! # Nothing here retries

@@ -186,7 +186,7 @@ fn await_pane_gone(
 /// Retire any board in `session` so this process can draw in its own window.
 /// `startup.allium`'s `LaunchBoardInsideExistingSession`.
 ///
-/// The inside-tmux counterpart of [`restart_in_session`]: this process already
+/// The inside-tmux counterpart of [`restart_in_session`](crate::startup::launch::restart_in_session): this process already
 /// has a window, so there is nothing to enter and nothing to attach to. Only
 /// one retire outcome stops it — a board window that would not close, which
 /// would leave two boards in one session.

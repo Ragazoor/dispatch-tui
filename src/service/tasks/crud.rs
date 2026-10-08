@@ -171,7 +171,7 @@ impl TaskService {
     ///
     /// Required, not defaulted: `TaskService` really does shell out (see
     /// `watchers.rs`), so a default would let a test silently touch the host.
-    /// Tests pass [`MockProcessRunner::unused`](crate::process::MockProcessRunner::unused);
+    /// Tests pass `MockProcessRunner::unused`;
     /// production says so by name via
     /// [`new_with_real_runner`](Self::new_with_real_runner).
     pub fn new(
@@ -594,7 +594,7 @@ impl TaskService {
     /// concurrent update between the two is theoretically possible but benign
     /// in practice — Dispatch is a single-process tokio runtime with
     /// cooperative scheduling, so no two MCP handlers run truly concurrently
-    /// on the same task. SQLite serialises writes regardless.
+    /// on the same task. The store serialises writes regardless.
     async fn validate_sub_status(
         &self,
         task_id: TaskId,
@@ -1276,7 +1276,7 @@ impl TaskService {
     ///
     /// Returns the claimed task with its `Running` status applied, or `Ok(None)`
     /// when no backlog subtask remains. Selecting and claiming are a single
-    /// conditional write ([`store::TaskStore::try_claim_next_backlog_task`]), so
+    /// conditional write (`store::TaskStore::try_claim_next_backlog_task`), so
     /// there is no window in which a concurrent caller can take the row this one
     /// picked: two concurrent callers claim two *different* subtasks, never the
     /// same one — the guarantee `AutoDispatchNextSubtask` in
@@ -1322,7 +1322,7 @@ impl TaskService {
     /// someone else got there first (or the task is gone); the caller must
     /// provision nothing and launch no agent.
     ///
-    /// One conditional write ([`store::TaskStore::try_claim_backlog_task`]), sharing
+    /// One conditional write (`store::TaskStore::try_claim_backlog_task`), sharing
     /// its SET list with the by-epic claim so "what a claim writes" has a single
     /// definition. Being one statement is what keeps the caller's side simple:
     /// the claim can never half-apply, so `Err` means nothing was written and

@@ -2,7 +2,7 @@
 //! origin on its own default branch.
 //!
 //! Spec: `docs/specs/repo-sync.allium` (the `RepoSyncEngine` contract and the
-//! `SyncRepo` rule). Structured like [`crate::dispatch::finish`] — synchronous,
+//! `SyncRepo` rule). Structured like `crate::dispatch::finish` — synchronous,
 //! [`ProcessRunner`]-driven, with no TUI or database coupling, so the same three
 //! operations back the board action and the CLI.
 

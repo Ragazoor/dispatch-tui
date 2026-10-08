@@ -124,7 +124,7 @@ impl App {
         self.context_holds_cached(context, &std::cell::OnceCell::new())
     }
 
-    /// [`Self::context_holds`] with the activation rung memoised in `rung`, so
+    /// `Self::context_holds` with the activation rung memoised in `rung`, so
     /// a lookup that tests several `task_*` rows rebuilds the column once.
     fn context_holds_cached(
         &self,

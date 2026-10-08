@@ -87,7 +87,7 @@ patch_struct! {
     ///
     /// `live_subagents` is deliberately **absent**: it is a denormalised
     /// `COUNT(*)` over `task_subagents`, owned exclusively by the transactional
-    /// writes in [`queries::subagents`]. Leaving it out of the patch surface
+    /// writes in `queries::subagents`. Leaving it out of the patch surface
     /// makes "no handler can desync the count" a compile-time property rather
     /// than a convention. `stop_pending` is patch-driven and stays — but for
     /// *clearing* only: the sole writer that may set it true is

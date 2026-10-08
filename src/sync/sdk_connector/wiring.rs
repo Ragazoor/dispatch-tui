@@ -1,4 +1,4 @@
-//! Row callbacks: pointing the SDK's table events at [`SharedRows`], and the
+//! Row callbacks: pointing the SDK's table events at [`SharedRows`](crate::sync::SharedRows), and the
 //! sub-epic walk that widens the subscription as epics arrive.
 
 use spacetimedb_sdk::{DbContext, Table as _, TableWithPrimaryKey as _};
@@ -27,7 +27,7 @@ impl SpacetimeSdkConnector {
     ///
     /// **An update is an upsert, not a patch.** The SDK hands over the old row
     /// and the new one; only the new one is kept, because
-    /// [`SharedRows`] is keyed by id and a row's id cannot change.
+    /// [`SharedRows`](crate::sync::SharedRows) is keyed by id and a row's id cannot change.
     pub(super) fn wire_rows(&self, connection: &DbConnection) {
         let db = connection.db();
         self.wire_tables(db);

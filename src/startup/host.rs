@@ -76,8 +76,8 @@ pub(crate) fn resolve_host_label(
 
 /// Real, blocking entry point for the host-label gate: constructs the
 /// stdin-backed prompter and this machine's hostname, then delegates to
-/// [`resolve_host_label`]. Mirrors [`resolve_startup_config`]'s split from
-/// [`resolve_startup_config_in`] — callers on an async runtime must run this
+/// [`resolve_host_label`]. Mirrors [`resolve_startup_config`](crate::startup::config::resolve_startup_config)'s split from
+/// `resolve_startup_config_in` — callers on an async runtime must run this
 /// on a blocking thread, since it may block on stdin waiting for an answer.
 pub fn resolve_host_label_interactively(
     current_label: Option<String>,

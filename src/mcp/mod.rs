@@ -100,7 +100,7 @@ pub struct McpState {
     pub embedding_service: Arc<EmbeddingService>,
     /// In-memory tokens issued by wrap_up, consumed by exit_session.
     pub(crate) exit_tokens: Arc<RwLock<HashMap<TaskId, ExitToken>>>,
-    /// Dispatch data directory (parent of the SQLite DB). Trajectory files are
+    /// Dispatch data directory (where the store's local files live). Trajectory files are
     /// written here under `trajectories/<task_id>.jsonl`.
     pub data_dir: std::path::PathBuf,
     /// Fields that exist only to make async tests deterministic. See [`TestHooks`].

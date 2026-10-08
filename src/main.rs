@@ -85,7 +85,7 @@ enum Commands {
         ///
         /// Deliberately NOT a `ValueEnum` like the `hook-subagent` action:
         /// that graceful degradation is load-bearing (see
-        /// [`models::NotificationKind::parse`] and `agent-health.allium`), so a
+        /// `models::NotificationKind::parse` and `agent-health.allium`), so a
         /// notification subtype Claude Code adds later must reach the fallback
         /// path rather than make clap exit 2 inside a fire-and-forget hook.
         #[arg(long = "kind")]
@@ -125,7 +125,7 @@ enum Commands {
         id: TaskId,
         /// The `SendMessage` tool call's target session name
         /// (`tool_input.to`), e.g. `task-42` — may carry a disambiguating
-        /// `" [ref]"` suffix, which [`service::TaskService::record_peer_message_sent`]
+        /// `" [ref]"` suffix, which `service::TaskService::record_peer_message_sent`
         /// strips before matching dispatch's own naming convention.
         #[arg(long)]
         target: String,

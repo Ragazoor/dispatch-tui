@@ -118,7 +118,7 @@ pub(in crate::sync) fn subscription_queries(
 /// Spec: `sync.allium`'s `ASubEpicOfAFollowedEpicIsAskedForToo`. The second
 /// query is what walks the tree — the store's SQL cannot follow a parent
 /// chain, so each level is asked for by the one above it, and each sub-epic
-/// that arrives is asked for in turn by [`SubtreeCover`]. The sub-epic's own
+/// that arrives is asked for in turn by [`SubtreeCover`](crate::sync::subtree::SubtreeCover). The sub-epic's own
 /// row needs no query of its own: its parent's sub-epics ask already covers it.
 pub(in crate::sync) fn subtree_queries(epic: i64) -> Vec<String> {
     vec![

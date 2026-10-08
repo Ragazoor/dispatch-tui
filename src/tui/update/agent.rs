@@ -62,7 +62,7 @@ impl App {
     /// changed).
     ///
     /// Uses per-task content comparison rather than timestamps alone because
-    /// SQLite's `datetime('now')` has 1-second granularity — rapid writes
+    /// A task's `updated_at` has 1-second granularity — rapid writes
     /// within the same second share the same `updated_at` and would be
     /// silently skipped if we relied on timestamps exclusively.
     fn tasks_changed(old: &[Task], new: &[Task]) -> bool {
@@ -70,7 +70,7 @@ impl App {
             return true;
         }
         // Build a lookup map for O(n) per-task comparison.
-        // SQLite's `datetime('now')` has 1-second granularity, so comparing
+        // `updated_at` has 1-second granularity, so comparing
         // only timestamps would miss rapid DB writes within the same second.
         let old_by_id: std::collections::HashMap<TaskId, &Task> =
             old.iter().map(|t| (t.id, t)).collect();
@@ -263,7 +263,7 @@ impl App {
         self.spinner_tick = (self.spinner_tick + 1) % DISPATCH_SPINNER_FRAMES;
     }
 
-    /// Clear message-flash indicators older than [`MESSAGE_FLASH_TTL`].
+    /// Clear message-flash indicators older than [`MESSAGE_FLASH_TTL`](crate::tui::MESSAGE_FLASH_TTL).
     ///
     /// Shares that constant with the card renderer on purpose: the sweep and the
     /// draw decision must agree on the threshold, or the map and the screen

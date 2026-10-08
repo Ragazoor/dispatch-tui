@@ -23,7 +23,7 @@ use wire::{Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, Que
 /// A hook runs inside the agent's own tool call, which does not proceed until
 /// the hook returns, so an unbounded wait would let one stalled board hang
 /// every session on the machine. Before hooks went over HTTP the equivalent
-/// bound was SQLite's own busy timeout; this is what replaces it. The budget
+/// bound was the local database's own busy timeout; this is what replaces it. The budget
 /// covers the whole exchange — connect, request and response — because a
 /// board that has accepted the connection but cannot answer is the case worth
 /// bounding, and it is generous relative to the work (a loopback round trip

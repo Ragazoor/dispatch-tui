@@ -4,7 +4,7 @@
 //! Here rather than in `src/main.rs` so they can be run against a handle the
 //! caller supplies. The binary hands them a store-backed one
 //! (`store_connection::open_cli_store` — the store is mandatory, task #4916); the tests
-//! hand them SQLite, the stand-in until Phase 12b (#4975). Output goes to the
+//! hand them an in-memory store (`Store::open_in_memory`). Output goes to the
 //! writers passed in, which the binary points at stdout and stderr.
 
 use std::io::Write;

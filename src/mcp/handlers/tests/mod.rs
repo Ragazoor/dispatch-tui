@@ -58,7 +58,7 @@ async fn test_state_with_overrides_and_bg_done(
 }
 
 /// Build the `McpState` over `db`. Split from the constructor above so a test
-/// can bring a SQLite-only handle.
+/// can bring an in-memory-only handle.
 fn state_over(
     db: Arc<dyn store::TaskStore>,
     runner: Arc<dyn ProcessRunner>,

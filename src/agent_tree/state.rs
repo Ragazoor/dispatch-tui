@@ -138,7 +138,7 @@ pub struct RenderState {
     /// docs/specs/agent-tree.allium for why a clock would buy nothing here.
     pub(super) pending_g: bool,
     /// Rows the tree had to draw into at the last render — the pane's height
-    /// less its two borders. Recorded by [`render`] because the half-page
+    /// less its two borders. Recorded by [`render`](crate::agent_tree::render::render) because the half-page
     /// motions are defined against the *visible* height, which only the
     /// renderer knows, and `handle_key` never sees a `Rect`.
     pub(super) viewport_rows: usize,
@@ -185,7 +185,7 @@ impl RenderState {
     /// The paths whose diffs are open, in the set's own order — which is NOT
     /// tree order, and has not been since a folder's own files started sorting
     /// ahead of its subfolders. The diff pane re-applies the row order itself
-    /// (`crate::agent_tree::model::compare_in_tree_order`); nothing here depends on
+    /// (`crate::agent_tree::model::file_paths_in_tree_order`); nothing here depends on
     /// the order the set happens to iterate in.
     pub fn open_diffs(&self) -> &BTreeSet<PathBuf> {
         &self.open_diffs

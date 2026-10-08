@@ -37,6 +37,7 @@ printf 'Fixture root doc.\n' >"$WORKDIR/CLAUDE.md"
 
 cat >"$WORKDIR/src/store/mod.rs" <<'RS'
 /// Calls `ghost_helper` — a name that exists in no code, only in this comment.
+pub mod store {}
 pub fn real_function(opt_value: Option<u32>) -> Option<u32> {
     opt_value
 }
@@ -214,6 +215,23 @@ expect 0 src/scratch.rs '/// Wired to `FeedJob::run_*` handlers.' \
     'a `*` wildcard stem is not a citation'
 expect 0 docs/specs/scratch.allium '-- Coverage: src/feed/nowhere.rs::ghost_*.' \
     'a `*` wildcard stem on a path::symbol is not a citation'
+
+# --- Lowercase module paths (`db::queries::row_to_task`). ------------------
+# A backticked path made only of lowercase segments names a function by module.
+# The twin of `Type::method` above; docs/module-map.md once cited a deleted
+# `db::queries::row_to_task` and nothing flagged it.
+expect 1 docs/scratch.md 'The twin of `db::queries::ghost_function`.' \
+    'backticked lowercase module path naming a deleted function fails'
+expect 0 docs/scratch.md 'See `store::real_function` for that.' \
+    'backticked lowercase module path whose segments all resolve passes'
+expect 1 src/scratch.rs '/// Calls `store::queries::ghost_function`.' \
+    'lowercase module path naming a deleted function fails in a Rust doc comment'
+expect 0 docs/scratch.md 'Formerly `db::queries::ghost_function`. <!-- allow-phantom-symbol: removed -->' \
+    'marker suppresses a stale lowercase module path'
+expect 0 docs/scratch.md 'Uses `std::env::set_var` and `clippy::some_lint`.' \
+    'std and clippy paths name external items and are not checked'
+expect 0 docs/scratch.md 'Wired to `store::real_*` handlers.' \
+    'a `*` wildcard stem on a lowercase module path is not a citation'
 
 # --- Long bare snake_case names: the stale-test-name shape (#3989). --------
 # Only tokens with at least four underscores are candidates. That threshold is

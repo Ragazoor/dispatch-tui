@@ -16,7 +16,7 @@ use chrono::Utc;
 
 /// A plain Running task with no activity stamps.
 ///
-/// Deliberately not `subagents::set_running`, which also stamps
+/// Deliberately not `subagents::set_running` (allow-phantom-symbol: removed helper), which also stamps
 /// `last_pre_tool_use_at` and `last_notification_at` — every assertion below
 /// turns on one of those still being null when the write under test runs.
 async fn running_task(db: &Store) -> Task {

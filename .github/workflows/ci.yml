@@ -136,6 +136,38 @@ jobs:
       - name: Run clippy
         run: cargo clippy --target x86_64-unknown-linux-gnu --all-targets -- -D warnings
 
+  # Rustdoc links need the compiler, so this is a job of its own rather than a
+  # step in `gates`. The self-test is a plain shell script over canned output.
+  rustdoc:
+    name: Rustdoc links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      # See the Test job's cache step for why ~/.cache/ort.pyke.io is here.
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/ort.pyke.io
+            target
+          key: ${{ runner.os }}-cargo-v2-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-v2-
+
+      - name: Self-test the rustdoc link checker
+        run: bash ./scripts/test-check-rustdoc-links.sh
+
+      - name: Validate rustdoc links
+        run: ./scripts/check-rustdoc-links.sh
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

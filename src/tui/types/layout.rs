@@ -132,7 +132,7 @@ impl ColumnItem<'_> {
 // ---------------------------------------------------------------------------
 
 /// Identifies which item the cursor is anchored to across column refreshes.
-/// Task and Epic IDs come from separate SQLite sequences and can overlap,
+/// Task and Epic IDs come from separate id sequences and can overlap,
 /// so we use a discriminated enum rather than a bare i64.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnAnchor {

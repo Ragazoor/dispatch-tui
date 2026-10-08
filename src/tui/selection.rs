@@ -41,7 +41,7 @@ impl App {
     }
 
     /// [`Self::clamp_selection`] against counts already taken from
-    /// [`Self::column_item_counts`], for a caller that needs them for its own
+    /// `Self::column_item_counts`, for a caller that needs them for its own
     /// reasons too and would otherwise scan the board a second time. Counts
     /// depend only on board data, so taking them before an unrelated selection
     /// change is equivalent to taking them after.

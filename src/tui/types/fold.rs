@@ -15,7 +15,7 @@ pub const COLLAPSED_SECTIONS_KEY: &str = "collapsed_sections";
 ///
 /// A persisted preference, unlike `BoardState.flattened` and the selection:
 /// "not this pile, not now" outlives a session. It lives here beside
-/// [`FilterState`] rather than on `BoardState`, which holds ephemeral board
+/// [`FilterState`](crate::tui::types::state::FilterState) rather than on `BoardState`, which holds ephemeral board
 /// content.
 ///
 /// A `BTreeSet` rather than a `HashSet` so [`Self::serialise`] has a stable

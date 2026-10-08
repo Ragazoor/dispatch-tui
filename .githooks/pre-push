@@ -25,6 +25,12 @@ echo "doc-headings..."
 echo "doc-headings self-test..."
 bash ./scripts/test-check-doc-headings.sh
 
+echo "rustdoc-links self-test..."
+bash ./scripts/test-check-rustdoc-links.sh
+
+echo "rustdoc-links..."
+./scripts/check-rustdoc-links.sh
+
 echo "no-test-sleep..."
 ./scripts/check-no-test-sleep.sh
 

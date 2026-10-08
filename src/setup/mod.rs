@@ -38,7 +38,7 @@ pub use uninstall::*;
 /// Path to Claude Code's user-global configuration directory (`~/.claude`).
 ///
 /// Every caller resolves this once and then passes the result around — see
-/// [`SetupPaths::resolve`], [`UninstallPaths::resolve`] and
+/// `SetupPaths::resolve`, [`UninstallPaths::resolve`] and
 /// `runtime::StartupPaths::resolve`. Nothing re-derives it mid-flow, which is
 /// what lets a test point a whole flow at a temp directory.
 ///

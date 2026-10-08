@@ -331,7 +331,7 @@ pub trait ProcessRunner: Send + Sync {
     ///
     /// The default does the real scan, same asymmetry as [`Self::agent_binaries`]
     /// and for the same reason: production behaves correctly without opting in.
-    /// [`MockProcessRunner`] overrides it to a fixed `false` instead — sccache
+    /// `MockProcessRunner` overrides it to a fixed `false` instead — sccache
     /// is genuinely absent from most test environments, and a scan that
     /// answered "yes" only on the machines that happen to have it installed
     /// would make launch tests flaky on exactly the axis they must not depend

@@ -1,4 +1,4 @@
-//! A [`StoreConnector`] over the SpacetimeDB Rust SDK.
+//! A [`StoreConnector`](crate::sync::connector::StoreConnector) over the SpacetimeDB Rust SDK.
 //!
 //! Spec: `docs/specs/sync.allium`'s `StoreBoundary` surface. This is one
 //! implementation of it; nothing above it can tell which it got, which is what
@@ -51,13 +51,13 @@ use crate::sync::SharedRows;
 pub struct SpacetimeSdkConnector {
     /// The database's name or identity on the server, e.g. `dispatch`.
     ///
-    /// Separate from the `server` passed to [`StoreConnector::connect`]: a
+    /// Separate from the `server` passed to [`StoreConnector::connect`](crate::sync::connector::StoreConnector::connect): a
     /// server hosts many databases, and the one this board wants is a property
     /// of the connector rather than of the address.
     database: String,
     /// The live connection, once there is one.
     ///
-    /// Behind a mutex because [`StoreConnector`] takes `&self` — a connector is
+    /// Behind a mutex because [`StoreConnector`](crate::sync::connector::StoreConnector) takes `&self` — a connector is
     /// shared, and a connection is the mutable thing it holds.
     connection: Mutex<Option<Arc<DbConnection>>>,
     /// The subscription this board currently holds, if any.
@@ -82,7 +82,7 @@ pub struct SpacetimeSdkConnector {
     /// registered once per connection and outlive the call that made them: they
     /// fire on the SDK's own thread, for as long as the connection is up.
     rows: Arc<SharedRows>,
-    /// A drop the SDK reported and [`StoreConnector::take_drop`] has not yet
+    /// A drop the SDK reported and [`StoreConnector::take_drop`](crate::sync::connector::StoreConnector::take_drop) has not yet
     /// handed over.
     ///
     /// The SDK's `on_disconnect` fires on its own thread and there is nothing

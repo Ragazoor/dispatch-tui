@@ -3,7 +3,7 @@
 //! Several domain enums (`TaskStatus`, `SubStatus`, `TaskTag`, `WrapUpMode`)
 //! persist as fixed strings (DB columns, MCP wire values) and each used to
 //! hand-roll an identical `as_str`/`parse`/`Display`/`FromStr`
-//! quartet. [`define_str_enum!`] generates that quartet from a single
+//! quartet. `define_str_enum!` generates that quartet from a single
 //! variant-to-string table, so adding a variant touches one place instead of
 //! four. The enum's own `#[derive(...)]` and serde attributes are untouched —
 //! this macro only adds impls on top of an already-declared enum.

@@ -177,7 +177,7 @@ fn new_window_name() -> TmuxWindow {
 impl TuiRuntime {
     /// Entry point for `EditorCommand::PopOut`. Opens the editor in a new
     /// tmux window, spawns a watcher task, and emits an
-    /// [`EditorMessage::Result`] when the editor exits.
+    /// `EditorMessage::Result` when the editor exits.
     pub(super) fn exec_pop_out_editor(&self, app: &mut App, kind: EditKind) {
         // Enforce "one editor at a time".
         let mut guard = match self.editor_session.lock() {

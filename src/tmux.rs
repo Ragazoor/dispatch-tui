@@ -72,7 +72,7 @@ fn run_checked_timeout(runner: &dyn ProcessRunner, args: &[&str], context: &str)
 pub(crate) const WINDOW_PANE_FORMAT: &str = "#{pane_active} #{pane_id} #{window_name}";
 
 /// Opening of the `-f` filter [`window_filter`] builds. Split out so
-/// [`window_name_in_lookup`] can invert it.
+/// `window_name_in_lookup` can invert it.
 const WINDOW_FILTER_PREFIX: &str = "#{==:#{window_name},";
 
 /// The `(pane_id, window_name)` of each **active** pane in a listing formatted

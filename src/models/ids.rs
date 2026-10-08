@@ -1,7 +1,7 @@
 //! ID newtypes.
 //!
 //! Domain entities use zero-cost `i64` newtypes (`TaskId`, `EpicId`,
-//! `LearningId`) instead of bare integers. The [`define_id_newtype!`] macro
+//! `LearningId`) instead of bare integers. The `define_id_newtype!` macro
 //! generates each wrapper with `Display`, `From`/`Into<i64>`, `FromStr`,
 //! `Serialize`/`Deserialize`, and a set of unit tests.
 //!

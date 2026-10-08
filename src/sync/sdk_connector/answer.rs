@@ -52,10 +52,10 @@ pub(super) fn fire<T>(tx: oneshot::Sender<T>, answer: T) {
 /// the operator which.
 ///
 /// A REFUSAL IS NOT AN ERROR HERE. It comes back as
-/// [`ReducerOutcome::Refused`], because at this layer the store was reached and
+/// [`ReducerOutcome::Refused`](crate::sync::writes::ReducerOutcome::Refused), because at this layer the store was reached and
 /// answered — which is a different thing from the store being unreachable, and
 /// one caller (the claim) treats them differently. Turning a refusal into an
-/// error is [`ReducerOutcome::into_result`], one level up.
+/// error is [`ReducerOutcome::into_result`](crate::sync::writes::ReducerOutcome::into_result), one level up.
 ///
 /// The two things that ARE errors:
 ///
@@ -63,8 +63,8 @@ pub(super) fn fire<T>(tx: oneshot::Sender<T>, answer: T) {
 ///   * the connection dropped before an answer came, which is the one outcome
 ///     where the caller genuinely cannot know whether the write landed.
 ///
-/// Generic over the payload `T` rather than fixed to [`ReducerOutcome`]: most
-/// callers still send that (via [`outcome_of`]/[`outcome_with_ids`]), but the
+/// Generic over the payload `T` rather than fixed to [`ReducerOutcome`](crate::sync::writes::ReducerOutcome): most
+/// callers still send that (via `outcome_of`/`outcome_with_ids`), but the
 /// agent-session-state methods below send a smaller, precisely typed answer
 /// instead of squeezing theirs into `ReducerOutcome`'s `Vec<i64>`.
 pub(super) async fn awaiting_answer<T, F>(what: &str, invoke: F) -> anyhow::Result<T>

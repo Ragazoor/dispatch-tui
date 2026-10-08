@@ -132,6 +132,11 @@ TOKEN_RE='^[a-z][a-z0-9]*(_[a-z0-9]+)+(\(\))?$'
 SPECSYM_RE="[A-Za-z0-9_./-]+[.]allium's [A-Z][A-Za-z0-9_]*"
 PATHSYM_RE='[A-Za-z0-9_./-]+[.]rs::[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*'
 TYPESYM_RE='[A-Z][A-Za-z0-9]*(::[A-Za-z_][A-Za-z0-9_]*)+'
+# modsym — a BACKTICKED all-lowercase module path, `db::queries::row_to_task`.
+#   Backticks are required: unbackticked, a lowercase `a::b` is indistinguishable
+#   from ordinary prose and `use` paths. Checked like typesym, segment by
+#   segment against the global index.
+MODSYM_RE='`[a-z_][a-z0-9_]*(::[a-z_][a-z0-9_]*)+`'
 # Spelled out rather than written `{4,}`: interval expressions are not portable
 # across awk implementations.
 BARE_RE='^[a-z][a-z0-9]*(_[a-z0-9]+)(_[a-z0-9]+)(_[a-z0-9]+)(_[a-z0-9]+)(_[a-z0-9]+)*$'
@@ -223,7 +228,7 @@ extract_candidates() {
     local file="$1" isrs=0
     [[ "$file" == *.rs ]] && isrs=1
     awk -v isrs="$isrs" -v marker="$MARKER" -v specre="$SPECSYM_RE" \
-        -v pathre="$PATHSYM_RE" -v typere="$TYPESYM_RE" -v barere="$BARE_RE" '
+        -v pathre="$PATHSYM_RE" -v typere="$TYPESYM_RE" -v modre="$MODSYM_RE" -v barere="$BARE_RE" '
         # Emit every match of re as kind, replacing it with a space so the
         # remaining shapes cannot re-match the same text.
         #
@@ -251,6 +256,7 @@ extract_candidates() {
                 line = harvest(line, specre, "specsym")
                 line = harvest(line, pathre, "pathsym")
                 line = harvest(line, typere, "typesym")
+                line = harvest(line, modre, "modsym")
                 line = harvest(line, "`[^`]+`", "span")
                 # Whatever is left is unbackticked prose. Tokenise it into whole
                 # identifiers so the bare pattern can be anchored — awk has no
@@ -326,7 +332,12 @@ for TARGET in "${TARGETS[@]}"; do
             [[ "$flag" == 1 ]] && continue
             report "$TARGET:$lineno cites $token, but \`$missing\` does not occur in $path"
             ;;
-        typesym)
+        typesym | modsym)
+            token="${token#\`}"
+            token="${token%\`}"
+            # Paths rooted in the standard library or a lint tool name items
+            # this repo does not define; they can never resolve here.
+            case "${token%%::*}" in std | core | alloc | clippy | rustdoc) continue ;; esac
             missing=""
             IFS=':' read -ra segments <<<"$token"
             for segment in "${segments[@]}"; do

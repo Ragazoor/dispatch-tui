@@ -448,8 +448,8 @@ impl SharedTable {
             | SharedTable::TaskSubagents
             | SharedTable::RepoPaths
             | SharedTable::RepoBaseBranches
-            // None of these exist in SQLite at all, so none has a column to
-            // reconcile. See `dump::is_sqlite_backed`.
+            // These tables never had a pre-store counterpart, so none has a
+            // column to reconcile.
             | SharedTable::Hosts
             | SharedTable::Subscriptions
             | SharedTable::PollOwners
@@ -686,7 +686,7 @@ impl Snapshot {
     }
 
     /// Remove a table's extract. Test scaffolding for the refusal path: a
-    /// snapshot this malformed cannot be produced by [`super::dump_from_sqlite`].
+    /// snapshot this malformed cannot be produced by a live store dump.
     #[cfg(any(test, feature = "test-support"))]
     pub fn drop_extract(&mut self, table: SharedTable) {
         self.extracts.retain(|e| e.table != table);

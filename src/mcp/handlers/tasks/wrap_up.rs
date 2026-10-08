@@ -201,7 +201,7 @@ pub(crate) async fn handle_wrap_up(
     }
 }
 
-/// What applying a [`CloseSessionOutcome`] made of the close, once
+/// What applying a [`CloseSessionOutcome`](crate::service::CloseSessionOutcome) made of the close, once
 /// [`perform_close`] has taken care of the tmux teardown. Callers still shape
 /// their own response text from this — wording differs between `exit_session`
 /// (which always had a live window, per its own precondition) and update_task's
@@ -218,7 +218,7 @@ pub(super) enum ClosePathOutcome {
     Persisted,
 }
 
-/// Apply `outcome` via [`TaskService::close_session`], notify, and tear down
+/// Apply `outcome` via [`TaskService::close_session`](crate::service::TaskService::close_session), notify, and tear down
 /// any live tmux window in the background — the tail every route to
 /// Done/Review shares once it holds a validated `(task, outcome)` pair.
 /// `task` supplies the epic_id for the epic-changed notification; its own

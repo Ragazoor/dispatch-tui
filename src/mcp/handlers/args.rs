@@ -7,7 +7,7 @@
 //! disagreement between the first two into a runtime `-32602` rather than a
 //! build error.
 //!
-//! [`mcp_args!`] collapses those three into one field list, in the same spirit
+//! `mcp_args!` collapses those three into one field list, in the same spirit
 //! as `mcp_tools!` (which generates the tool registry) and `service_api!`
 //! (which generates the service seam). Each field is declared once and expands
 //! to all three surfaces, so a field cannot exist in the struct and be missing

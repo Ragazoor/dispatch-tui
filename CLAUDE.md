@@ -32,7 +32,7 @@ cargo run -- tui
 
 **`--data-dir` names a directory** (`DISPATCH_DATA_DIR`). The old `--db` flag is gone.
 
-**The lib target runs in ~10s; a cold full run (including compile) is ~80s.** Run it in the foreground — don't background it. In a *fresh worktree* the first compile is slower than that and a cold `cargo test` can pass 120s, which is Claude Code's default Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
+**The lib target runs in ~4s once built (measured 3.5s, 5582 tests); a cold full run (including compile) is ~80s.** Run it in the foreground — don't background it. In a *fresh worktree* the first compile is slower than that and a cold `cargo test` can pass 120s, which is Claude Code's default Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
 
 **Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. Always pass `--engine llvm`: the default engine scores ~1.8 points lower than CI's floor assumes. With `spacetime` on `PATH` the live-store tests run under it too, as in CI; that is slower, not broken. Other caveats are in [docs/testing.md](docs/testing.md).
 
@@ -46,15 +46,17 @@ A fresh clone must point git at the tracked hooks once: `git config core.hooksPa
 
 **Install `sccache`** (`sudo dnf install sccache`): dispatch sets `RUSTC_WRAPPER=sccache` on agent windows when it is on `PATH` (`DispatchedAgentsShareASccacheNotATargetDir` in `docs/specs/dispatch.allium`). Do not share a `CARGO_TARGET_DIR` across worktrees. Raise the cache cap with `SCCACHE_CACHE_SIZE` (e.g. `50G`).
 
-The pre-push hook (`.githooks/pre-push`) runs `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, the three doc checkers (`check-doc-paths.sh`, `check-doc-symbols.sh`, `check-doc-headings.sh`, each with a self-test), `check-no-test-sleep.sh`, `test-fetch-reviews.sh` and the spacetime module check. `cargo test` is not part of the hook; run it yourself before pushing. To exempt a deliberate citation, annotate it with `allow-phantom-symbol: <why>` or `allow-phantom-heading: <why>`.
+The pre-push hook (`.githooks/pre-push`) runs `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `check-rustdoc-links.sh` (rustdoc `[`Item`]` links in `src/`; its own CI job), the three doc checkers (`check-doc-paths.sh`, `check-doc-symbols.sh`, `check-doc-headings.sh`, each with a self-test), `check-no-test-sleep.sh`, `test-fetch-reviews.sh` and the spacetime module check. `cargo test` is not part of the hook; run it yourself before pushing. To exempt a deliberate citation, annotate it with `allow-phantom-symbol: <why>` or `allow-phantom-heading: <why>`.
 
 **That `cargo fmt` step has no `--check`.** Pushing reformats your working tree in place, so a push can leave you with unstaged changes you did not make. Run `cargo fmt` yourself before committing and the step becomes a no-op.
+
+`check-doc-symbols.sh` also scans `///` and `//!` doc comments in `src/`, but not plain `//` comments; backticked lowercase module paths (`db::queries::f`) are checked too.
 
 Cite `path::symbol` (`src/feed/exec.rs::exec_feed_command`) rather than `file:NN` in docs: a symbol is checked against the real file, a line number only for existence. See "`file:NN` vs `path::symbol` citations" in `docs/conventions.md`.
 
 ### CI
 
-CI runs Test, Clippy, Format, Coverage and Gate scripts (a mirror of the pre-push hook). Coverage is gated. Details: [docs/testing.md](docs/testing.md).
+CI runs Test, Clippy, Rustdoc links, Format, Coverage and Gate scripts (a mirror of the pre-push hook). Coverage is gated. Details: [docs/testing.md](docs/testing.md).
 
 ## Running & Debugging Locally
 
@@ -69,6 +71,10 @@ Logs do not go to stderr — stderr belongs to the TUI. They append to `app.log`
 **Never run `tmux kill-server`, and never drive tmux by hand without an explicit `-L <unique-socket>`.** You run inside the operator's own tmux server, next to every other agent. A glob loop that matches nothing falls back to the default socket and kills them all. Test real tmux through `tests/tmux_harness/mod.rs`, which gives each test a private socket.
 
 **`tmux display-message -p` without `-t` answers about the session's *active* window, not yours.** Pass `tmux::self_pane_id()` (`$TMUX_PANE`) as the target. Read the env at the entry point and pass it down; mock tests cannot catch this.
+
+## Store Layering
+
+`store::Store` is the board's one read/write handle (`TaskStore` and friends narrow it). It talks to the shared store through the `sync` adapters: `sync::writes` for reducer calls, `sync::sdk_connector` for the SpacetimeDB SDK. `spacetime/` holds the server lifecycle (`managed_store.rs`), generated `bindings/` and snapshot tooling. `sync/memory_caller/` is the in-memory test double, conformance-checked by `tests/memory_caller_conformance.rs`. See [docs/module-map.md](docs/module-map.md).
 
 ## External Dependencies
 

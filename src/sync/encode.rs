@@ -84,7 +84,7 @@ pub(super) fn verdict_inputs(
 }
 
 /// The module's `record_notification` mode string for a write that reaches
-/// the store; `None` for [`NotificationWrite::Ignore`], which never does.
+/// the store; `None` for [`NotificationWrite::Ignore`](crate::models::agent_events::NotificationWrite::Ignore), which never does.
 pub(super) fn notification_mode(write: crate::models::NotificationWrite) -> Option<&'static str> {
     use crate::models::NotificationWrite as W;
     match write {

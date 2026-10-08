@@ -208,7 +208,7 @@ pub async fn detect_default_branch_async(
 /// The single place the crate decides that the remote is called `origin`.
 /// Everything that reaches for a base branch's remote counterpart goes through
 /// here — provisioning a worktree's start point
-/// ([`crate::dispatch::worktree`]), measuring drift and merging
+/// (`crate::dispatch::worktree`), measuring drift and merging
 /// ([`crate::repo_sync`]), and resolving the agent tree's diff baseline
 /// (`crate::agent_tree::changes`).
 ///
@@ -233,7 +233,7 @@ pub fn origin_ref(base_branch: &str) -> String {
 ///
 /// Callers decide what each outcome *means*, and all three answer differently:
 ///
-/// - [`crate::dispatch::finish::finish_task`] skips its pull on `Ok(false)` but
+/// - `crate::dispatch::finish::finish_task` skips its pull on `Ok(false)` but
 ///   fails outright on `Err`, because a git it cannot spawn is a real failure it
 ///   should name rather than rebase past.
 /// - `classify_fetch_failure` (`src/dispatch/worktree.rs`) grants the
@@ -260,7 +260,7 @@ pub(crate) fn has_origin_remote(
 /// The repo's currently checked-out branch name.
 ///
 /// One of the three preflight reads shared by the rebase path
-/// ([`crate::dispatch::finish::finish_task`]) and the repo-sync path
+/// (`crate::dispatch::finish::finish_task`) and the repo-sync path
 /// ([`crate::repo_sync::sync_repo`]). Both need to know they are on the base
 /// branch before writing, because rebase, merge and push all act on whatever is
 /// checked out. Returns the branch rather than a yes/no so each caller can name
@@ -314,7 +314,7 @@ fn porcelain_entries(output: &Output) -> Vec<(String, String)> {
 
 /// Every dirty/untracked path from a `git status --porcelain` run.
 ///
-/// Shared by the rebase path ([`crate::dispatch::finish::finish_task`]) and the
+/// Shared by the rebase path (`crate::dispatch::finish::finish_task`) and the
 /// repo-sync path ([`crate::repo_sync::sync_repo`]) so that "is this checkout
 /// dirty?" has exactly one answer.
 pub(crate) fn parse_porcelain_files(output: &Output) -> Vec<String> {

@@ -919,7 +919,7 @@ rule HideAgentTreePane {
         --
         -- == What this replaced, part 2: focus ==
         -- Before either form of marker, the kill target used to be "the window's single INACTIVE pane"
-        -- (`tmux::inactive_pane_id`), justified by every split helper passing
+        -- (`tmux::inactive_pane_id`, allow-phantom-symbol: removed), justified by every split helper passing
         -- `-d`, which leaves focus on the agent's own pane at split time. That
         -- is a property of the split, not of the window, and it failed in two
         -- ways once the user was involved:

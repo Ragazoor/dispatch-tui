@@ -140,7 +140,7 @@ static DEPENDABOT_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Strip the sentence punctuation a version picks up when the match came from
-/// the PR body rather than the title — Dependabot writes "Bumps [foo] from
+/// the PR body rather than the title — Dependabot writes "Bumps \[foo\] from
 /// 1.2.3 to 1.2.4." with a full stop the version regex would otherwise keep.
 /// Trailing, never leading: a version's own dots are load-bearing.
 fn trim_version(v: &str) -> String {

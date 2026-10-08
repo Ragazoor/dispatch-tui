@@ -66,7 +66,7 @@ const AGENT_TREE_SUBCOMMAND: &str = "agent-tree";
 /// Identified by the role marker [`spawn_agent_tree_pane`] writes on the pane,
 /// matched on its exact value: true whatever has focus, however many panes the
 /// window has, and whatever any of them happen to be running. Both heuristics
-/// this replaced failed on one of those — `tmux::inactive_pane_id` asked "which
+/// this replaced failed on one of those — `tmux::inactive_pane_id` (removed; allow-phantom-symbol: history) asked "which
 /// pane is not focused?" (the user must focus the companion pane to press a key
 /// in it, and an editor pane makes a third), and matching `#{pane_start_command}`
 /// re-derived identity from a command line, which had to be defended against a
@@ -338,7 +338,7 @@ pub fn resync_agent_tree_pane(window: &TmuxWindow, runner: &dyn ProcessRunner) {
 /// `.claude-prompt`, delete it, and run `claude` with `launch_flags` and the
 /// prompt.
 ///
-/// `claude` must already be one shell word ([`AgentBinaries::claude_quoted`]).
+/// `claude` must already be one shell word ([`AgentBinaries::claude_quoted`](crate::process::AgentBinaries::claude_quoted)).
 /// It is passed as bash's `$0`, *after* the single-quoted script body rather
 /// than inside it: inside, it would sit under two quoting layers (the pane's
 /// shell strips the outer quotes, then bash parses what is left) and a path

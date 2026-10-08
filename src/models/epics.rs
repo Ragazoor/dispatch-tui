@@ -67,7 +67,7 @@ impl Epic {
 /// The routing role an epic plays within a feed hierarchy. `None` is the
 /// default for ordinary epics; the other variants tag a feed sub-epic so PR
 /// items can be routed to the right bucket (reviews requested of me, my team,
-/// bots, CVEs, etc.). Stored in the SQLite `epics.feed_role` TEXT column as the
+/// bots, CVEs, etc.). Stored in the store's `epics.feed_role` text column as the
 /// kebab-case string (mirrors `TaskTag`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -126,7 +126,7 @@ impl std::str::FromStr for FeedRole {
 
 /// How an epic was created. `Manual` is any user-created epic (TUI / MCP).
 /// `RepoGroup` is an auto-created per-repo sub-epic produced by repo grouping.
-/// Stored in the SQLite `epics.origin` TEXT column as the kebab-case string.
+/// Stored in the store's `epics.origin` text column as the kebab-case string.
 /// This is the safety boundary for grouping: routing, flatten, and reroute only
 /// ever touch `RepoGroup` sub-epics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

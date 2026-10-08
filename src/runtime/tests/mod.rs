@@ -157,7 +157,7 @@ async fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
     assert_eq!(calls[1].1, vec!["unbind-key", AGENT_TREE_TOGGLE_KEY]);
 }
 
-/// One in-memory SQLite database, shared by every service the fixture builds.
+/// One in-memory store, shared by every service the fixture builds.
 ///
 /// Returns the concrete `Arc<Store>` rather than `Arc<dyn store::TaskStore>` so
 /// `make_runtime` can derive every trait object it needs from the *same*
