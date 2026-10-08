@@ -30,7 +30,8 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{Frame, Terminal};
 
 use crate::agent_tree::parse_untracked;
-use crate::cli::agent_tree::{run_git, GIT_TIMEOUT, REFRESH_INTERVAL};
+use crate::cli::agent_tree::{GIT_TIMEOUT, REFRESH_INTERVAL};
+use crate::git::{git_error, git_in, run_git, COULD_NOT_RUN_GIT};
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::tui::ui::palette::{FG, GREEN, RED, YELLOW};
 
@@ -139,40 +140,39 @@ pub fn file_diff(
         // diff is taken against nothing: every line an addition. `--no-index`
         // exits 1 when the sides differ, which is the whole point here.
         None if untracked.contains(path) => {
-            let output = runner
-                .run_with_timeout(
-                    "git",
-                    &[
-                        "-C",
-                        &root,
-                        "diff",
-                        "--no-index",
-                        "--no-renames",
-                        "--",
-                        "/dev/null",
-                        &path_arg,
-                    ],
-                    GIT_TIMEOUT,
-                )
-                .context("could not run git")?;
+            let output = git_in(
+                runner,
+                &root,
+                &[
+                    "diff",
+                    "--no-index",
+                    "--no-renames",
+                    "--",
+                    "/dev/null",
+                    &path_arg,
+                ],
+                GIT_TIMEOUT,
+            )
+            .context(COULD_NOT_RUN_GIT)?;
             match output.status.code() {
                 Some(0 | 1) => String::from_utf8_lossy(&output.stdout).into_owned(),
-                _ => return Err(crate::cli::agent_tree::git_error(&output)),
+                _ => return Err(git_error(&output)),
             }
         }
         // `--` separates the revision from the pathspec, so a path that looks
         // like a ref ("main", "HEAD") is still read as a path.
         None => run_git(
             runner,
-            &["-C", &root, "diff", "--no-renames", "--", &path_arg],
+            &root,
+            &["diff", "--no-renames", "--", &path_arg],
+            GIT_TIMEOUT,
         )?,
         // `git show` diffs a commit against its first parent, and a root
         // commit against the empty tree; `--format=` suppresses the header.
         Some(commit) => run_git(
             runner,
+            &root,
             &[
-                "-C",
-                &root,
                 "show",
                 "--first-parent",
                 "--format=",
@@ -181,6 +181,7 @@ pub fn file_diff(
                 "--",
                 &path_arg,
             ],
+            GIT_TIMEOUT,
         )?,
     };
 
@@ -223,17 +224,9 @@ pub fn untracked_paths(
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
-    let mut args: Vec<&str> = vec![
-        "-C",
-        &root,
-        "ls-files",
-        "--others",
-        "--exclude-standard",
-        "-z",
-        "--",
-    ];
+    let mut args: Vec<&str> = vec!["ls-files", "--others", "--exclude-standard", "-z", "--"];
     args.extend(paths.iter().map(String::as_str));
-    let listing = run_git(runner, &args)?;
+    let listing = run_git(runner, &root, &args, GIT_TIMEOUT)?;
     Ok(parse_untracked(&listing)
         .into_iter()
         .map(|change| change.path)
@@ -569,7 +562,7 @@ fn open_files_fingerprint(
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
 
-    let mut args: Vec<&str> = vec!["-C", &root_arg];
+    let mut args: Vec<&str> = Vec::new();
     match commit {
         // Unstaged work: the working tree against the index, naming no
         // revision — the same comparison the tree's counts answer.
@@ -586,7 +579,7 @@ fn open_files_fingerprint(
         ]),
     }
     args.extend(paths.iter().map(String::as_str));
-    let mut fingerprint = run_git(runner, &args)?;
+    let mut fingerprint = run_git(runner, &root_arg, &args, GIT_TIMEOUT)?;
 
     if commit.is_none() {
         // The counts never see an untracked path. Which open paths are

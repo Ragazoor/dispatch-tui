@@ -7,7 +7,8 @@ use crate::process::ProcessRunner;
 use crate::tmux;
 
 use super::git_output::{WORKTREE_ALREADY_REMOVED, WORKTREE_LOCKED};
-use crate::process::stderr_str;
+use crate::git::{git_checked, git_in, git_in_unbounded, prune_worktrees, GitFailure};
+use crate::process::{stderr_str, SUBPROCESS_TIMEOUT};
 
 /// Bounded retry budget for `git fetch origin <base>` during worktree
 /// provisioning. Smooths over transient failures (e.g. ref-lock contention
@@ -183,16 +184,10 @@ fn classify_fetch_failure(
         Err(_) => return FetchFailure::Unreachable,
     }
     let refspec = format!("refs/heads/{base}");
-    let probe = runner.run_with_timeout(
-        "git",
-        &[
-            "-C",
-            repo_path,
-            "ls-remote",
-            "--exit-code",
-            "origin",
-            &refspec,
-        ],
+    let probe = git_in(
+        runner,
+        repo_path,
+        &["ls-remote", "--exit-code", "origin", &refspec],
         timeout,
     );
     match probe {
@@ -228,10 +223,9 @@ fn fetch_origin(
     };
     let mut last_err = String::new();
     for attempt in 1..=max_attempts {
-        match runner.run_with_timeout("git", &["-C", repo_path, "fetch", "origin", base], timeout) {
-            Ok(output) if output.status.success() => return Ok(FetchOutcome::Fetched),
-            Ok(output) => last_err = stderr_str(&output),
-            Err(e) => last_err = e.to_string(),
+        match git_checked(runner, repo_path, &["fetch", "origin", base], timeout) {
+            Ok(_) => return Ok(FetchOutcome::Fetched),
+            Err(failure) => last_err = failure.detail(),
         }
         // Classify once, on the first failure: the answer cannot change between
         // attempts, and a 404 must not burn the retry budget.
@@ -333,18 +327,18 @@ fn ensure_local_base_resolves(
     // a commit can be reached under this name, which is exactly what
     // `git worktree add` is about to ask.
     let peeled = format!("{base}^{{commit}}");
-    let resolves = runner
-        .run_with_timeout(
-            "git",
-            &["-C", repo_path, "rev-parse", "--verify", "--quiet", &peeled],
-            timeout,
-        )
-        .map(|output| output.status.success())
-        // A probe that could not be spawned has answered nothing. Treating
-        // that as "absent" would abort a dispatch over a process-spawn hiccup,
-        // so it defers to `git worktree add`, which fails clearly on a real
-        // absence anyway.
-        .unwrap_or(true);
+    let resolves = git_in(
+        runner,
+        repo_path,
+        &["rev-parse", "--verify", "--quiet", &peeled],
+        timeout,
+    )
+    .map(|output| output.status.success())
+    // A probe that could not be spawned has answered nothing. Treating
+    // that as "absent" would abort a dispatch over a process-spawn hiccup,
+    // so it defers to `git worktree add`, which fails clearly on a real
+    // absence anyway.
+    .unwrap_or(true);
 
     anyhow::ensure!(
         resolves,
@@ -624,30 +618,19 @@ fn add_worktree(
     // Best-effort: the add is the step whose success decides the dispatch,
     // and its error is the one worth reporting. See
     // `StaleAdminRecordIsPrunedBeforeWorktreeAdd` in docs/specs/dispatch.allium.
-    let _ = runner.run_with_timeout("git", &["-C", repo_path, "worktree", "prune"], timeout);
+    prune_worktrees(runner, repo_path, timeout);
 
-    let mut args = vec![
-        "-C",
-        &repo_path,
-        "worktree",
-        "add",
-        &worktree_path,
-        "-B",
-        &worktree_name,
-    ];
+    let mut args = vec!["worktree", "add", worktree_path, "-B", worktree_name];
     if let Some(sp) = start_ref {
         args.push(sp);
     }
-    let output = runner
-        .run_with_timeout("git", &args, timeout)
-        .context("failed to run git worktree add")?;
-    anyhow::ensure!(
-        output.status.success(),
-        "git worktree add failed: {}",
-        stderr_str(&output)
-    );
-
-    Ok(())
+    match git_checked(runner, repo_path, &args, timeout) {
+        Ok(_) => Ok(()),
+        Err(GitFailure::Spawn(e)) => Err(e.context("failed to run git worktree add")),
+        Err(GitFailure::Exit(output)) => {
+            anyhow::bail!("git worktree add failed: {}", stderr_str(&output))
+        }
+    }
 }
 
 /// Create a git worktree and open a tmux window.
@@ -828,9 +811,10 @@ fn remove_worktree_and_branch(
     // outcome of 2a like any other, and the worktree is no less on disk for it
     // — so it falls through to 2b rather than returning early. Only the lock
     // arm below skips the delete.
-    let outcome = runner.run(
-        "git",
-        &["-C", &repo, "worktree", "remove", "--force", worktree_path],
+    let outcome = git_in_unbounded(
+        runner,
+        &repo,
+        &["worktree", "remove", "--force", worktree_path],
     );
     let failure = match &outcome {
         Err(error) => Some(format!("failed to run git worktree remove: {error:#}")),
@@ -868,7 +852,7 @@ fn remove_worktree_and_branch(
             // the record still claims the branch. So it runs BEFORE step 3.
             // Best-effort: prune only drops records whose directory is gone,
             // which the delete above has just made true for this one.
-            let _ = runner.run("git", &["-C", &repo, "worktree", "prune"]);
+            prune_worktrees(runner, &repo, SUBPROCESS_TIMEOUT);
         }
         // Git removed its own record here, so there is nothing to prune.
         None => delete_leftover_worktree_dir(&repo, worktree_path)?,
@@ -876,7 +860,12 @@ fn remove_worktree_and_branch(
 
     if let Some(branch) = branch_from_worktree(worktree_path) {
         // Best-effort: ignore errors (branch may not exist).
-        let _ = runner.run("git", &["-C", &repo, "branch", "-D", &branch]);
+        let _ = git_in(
+            runner,
+            &repo,
+            &["branch", "-D", &branch],
+            SUBPROCESS_TIMEOUT,
+        );
     }
 
     Ok(())

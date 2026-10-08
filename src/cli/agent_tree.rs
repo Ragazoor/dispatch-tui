@@ -35,8 +35,9 @@ use crate::cli::agent_tree_agents::{border_style, render_agents, AgentRow, Agent
 use crate::cli::agent_tree_commits::{
     render_commits, short_id, AgentCommit, CommitsSection, COMMITS_REFRESH_INTERVAL,
 };
+use crate::git::{git_error, git_in, run_git, COULD_NOT_RUN_GIT};
 use crate::models::{TaskId, TmuxWindow};
-use crate::process::{stderr_str, ProcessRunner, RealProcessRunner};
+use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::tui::ui::palette::{FG, GREEN, MUTED, RED, YELLOW};
 
 /// Redraw cadence — see `docs/specs/agent-tree.allium`'s
@@ -340,7 +341,7 @@ pub fn build_tree_items(
 /// The commit where this worktree forked from `git_ref`, or git's own error if
 /// the ref does not resolve.
 fn merge_base(root: &str, git_ref: &str, runner: &dyn ProcessRunner) -> Result<String> {
-    let sha = run_git(runner, &["-C", root, "merge-base", "HEAD", git_ref])?
+    let sha = run_git(runner, root, &["merge-base", "HEAD", git_ref], GIT_TIMEOUT)?
         .trim()
         .to_string();
     // Git prints a commit id whenever it exits zero, so this is defensive
@@ -372,20 +373,13 @@ fn is_ancestor(
     descendant: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<bool> {
-    let output = runner
-        .run_with_timeout(
-            "git",
-            &[
-                "-C",
-                root,
-                "merge-base",
-                "--is-ancestor",
-                ancestor,
-                descendant,
-            ],
-            GIT_TIMEOUT,
-        )
-        .context("could not run git")?;
+    let output = git_in(
+        runner,
+        root,
+        &["merge-base", "--is-ancestor", ancestor, descendant],
+        GIT_TIMEOUT,
+    )
+    .context(COULD_NOT_RUN_GIT)?;
     match output.status.code() {
         Some(0) => Ok(true),
         Some(1) => Ok(false),
@@ -473,14 +467,18 @@ pub fn git_changes(
         None => (
             run_git(
                 runner,
-                &["-C", &root, "diff", "--name-status", "--no-renames", "-z"],
+                &root,
+                &["diff", "--name-status", "--no-renames", "-z"],
+                GIT_TIMEOUT,
             )?,
             // The SAME comparison and the same rename setting as the diff
             // above: one question asked twice, so a row's badge and its
             // numbers cannot answer different ones.
             run_git(
                 runner,
-                &["-C", &root, "diff", "--numstat", "--no-renames", "-z"],
+                &root,
+                &["diff", "--numstat", "--no-renames", "-z"],
+                GIT_TIMEOUT,
             )?,
         ),
         // `git show --first-parent --format=` is the commit against its first
@@ -488,9 +486,8 @@ pub fn git_changes(
         Some(commit) => (
             run_git(
                 runner,
+                &root,
                 &[
-                    "-C",
-                    &root,
                     "show",
                     "--first-parent",
                     "--format=",
@@ -499,12 +496,12 @@ pub fn git_changes(
                     "-z",
                     commit,
                 ],
+                GIT_TIMEOUT,
             )?,
             run_git(
                 runner,
+                &root,
                 &[
-                    "-C",
-                    &root,
                     "show",
                     "--first-parent",
                     "--format=",
@@ -513,6 +510,7 @@ pub fn git_changes(
                     "-z",
                     commit,
                 ],
+                GIT_TIMEOUT,
             )?,
         ),
     };
@@ -525,14 +523,9 @@ pub fn git_changes(
         // it and there is nothing to attach (UntrackedFilesHaveNoLineCounts).
         let untracked = run_git(
             runner,
-            &[
-                "-C",
-                &root,
-                "ls-files",
-                "--others",
-                "--exclude-standard",
-                "-z",
-            ],
+            &root,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+            GIT_TIMEOUT,
         )?;
         changes.extend(parse_untracked(&untracked));
     }
@@ -555,7 +548,9 @@ pub fn git_branch_commits(
     let max = format!("--max-count={}", crate::cli::agent_tree_commits::MAX_LISTED);
     let listing = run_git(
         runner,
-        &["-C", &root, "log", &max, "--format=%H %s", &range],
+        &root,
+        &["log", &max, "--format=%H %s", &range],
+        GIT_TIMEOUT,
     )?;
     Ok(listing
         .lines()
@@ -568,37 +563,6 @@ pub fn git_branch_commits(
             }
         })
         .collect())
-}
-
-/// Run one git command, returning its stdout or an error carrying git's own
-/// first line of stderr — that line is what reaches the user's border, so it
-/// has to say something they can act on ("unknown revision", "index.lock").
-///
-/// Stdout is returned untrimmed. [`crate::process::stdout_str`] trims the whole
-/// buffer, which would eat a leading space off the first `-z` path; these two
-/// commands emit NUL-delimited records where every byte between delimiters
-/// belongs to the filename.
-pub(crate) fn run_git(runner: &dyn ProcessRunner, args: &[&str]) -> Result<String> {
-    let output = runner
-        .run_with_timeout("git", args, GIT_TIMEOUT)
-        .context("could not run git")?;
-    if !output.status.success() {
-        return Err(git_error(&output));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-/// Git's own first line of stderr, as an error. Shared by every caller here
-/// because that line is what reaches the user's border and all of them need it
-/// to say the same kind of thing.
-pub(crate) fn git_error(output: &std::process::Output) -> anyhow::Error {
-    let stderr = stderr_str(output);
-    let detail = stderr
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or("git failed");
-    anyhow!("git: {detail}")
 }
 
 /// Tree-widget navigation/expansion state, plus the set of directories the

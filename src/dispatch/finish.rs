@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::git::parse_unmerged_files;
+use crate::git::{abort, abort_after_conflict, git_checked, GitFailure};
 use crate::models::expand_tilde;
 use crate::process::ProcessRunner;
 
@@ -145,27 +145,19 @@ fn pull_base(
     if !has_remote {
         return Ok(());
     }
-    let output = runner
-        .run_with_timeout(
-            "git",
-            &[
-                "-C",
-                repo_path,
-                "pull",
-                "--no-rebase",
-                "origin",
-                base_branch,
-            ],
-            timeout,
-        )
-        .map_err(|e| FinishError::Other(format!("Failed to pull: {e}")))?;
-    if !output.status.success() {
-        return Err(FinishError::Other(format!(
+    match git_checked(
+        runner,
+        repo_path,
+        &["pull", "--no-rebase", "origin", base_branch],
+        timeout,
+    ) {
+        Ok(_) => Ok(()),
+        Err(GitFailure::Spawn(e)) => Err(FinishError::Other(format!("Failed to pull: {e}"))),
+        Err(GitFailure::Exit(output)) => Err(FinishError::Other(format!(
             "Failed to pull {base_branch}: {}",
             stderr_str(&output)
-        )));
+        ))),
     }
-    Ok(())
 }
 
 /// Step 4: rebase `branch` onto `base_branch` (from the worktree, where the
@@ -177,37 +169,27 @@ fn rebase_branch(
     runner: &dyn ProcessRunner,
     timeout: Duration,
 ) -> FinishResult {
-    let output = runner
-        .run_with_timeout("git", &["-C", worktree, "rebase", base_branch], timeout)
-        .map_err(|e| FinishError::Other(format!("Failed to run git rebase: {e}")))?;
-    if output.status.success() {
-        return Ok(());
-    }
+    let output = match git_checked(runner, worktree, &["rebase", base_branch], timeout) {
+        Ok(_) => return Ok(()),
+        Err(GitFailure::Spawn(e)) => {
+            return Err(FinishError::Other(format!("Failed to run git rebase: {e}")))
+        }
+        Err(GitFailure::Exit(output)) => output,
+    };
     let stderr = stderr_str(&output);
     let stdout = stdout_str(&output);
     let is_conflict = is_rebase_conflict(&stdout, &stderr);
 
-    // Read the conflicted file(s) out of the worktree's own status
-    // while the rebase is still mid-flight — `rebase --abort` below
-    // clears this state, so it must be gathered first.
-    let conflicted_files = if is_conflict {
-        runner
-            .run_with_timeout("git", &["-C", worktree, "status", "--porcelain"], timeout)
-            .map(|o| parse_unmerged_files(&o))
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-
-    let _ = runner.run_with_timeout("git", &["-C", worktree, "rebase", "--abort"], timeout);
-
-    if is_conflict {
-        return Err(FinishError::RebaseConflict {
-            branch: branch.to_string(),
-            files: conflicted_files,
-        });
+    // A conflict's files are read before the abort clears them
+    // (`ConflictFilesCapturedBeforeAbort`); any other failure just aborts.
+    if !is_conflict {
+        abort(runner, worktree, "rebase", timeout);
+        return Err(FinishError::Other(format!("Rebase failed: {}", stderr)));
     }
-    Err(FinishError::Other(format!("Rebase failed: {}", stderr)))
+    Err(FinishError::RebaseConflict {
+        branch: branch.to_string(),
+        files: abort_after_conflict(runner, worktree, "rebase", timeout),
+    })
 }
 
 /// Step 5: fast-forward the base branch to the rebased branch.
@@ -218,20 +200,16 @@ fn fast_forward_base(
     runner: &dyn ProcessRunner,
     timeout: Duration,
 ) -> FinishResult {
-    let output = runner
-        .run_with_timeout(
-            "git",
-            &["-C", repo_path, "merge", "--ff-only", branch],
-            timeout,
-        )
-        .map_err(|e| FinishError::Other(format!("Failed to fast-forward {base_branch}: {e}")))?;
-    if !output.status.success() {
-        return Err(FinishError::Other(format!(
+    match git_checked(runner, repo_path, &["merge", "--ff-only", branch], timeout) {
+        Ok(_) => Ok(()),
+        Err(GitFailure::Spawn(e)) => Err(FinishError::Other(format!(
+            "Failed to fast-forward {base_branch}: {e}"
+        ))),
+        Err(GitFailure::Exit(output)) => Err(FinishError::Other(format!(
             "Fast-forward failed after rebase: {}",
             stderr_str(&output)
-        )));
+        ))),
     }
-    Ok(())
 }
 
 #[cfg(test)]

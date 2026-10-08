@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 
+use crate::git::{abort_after_conflict, git_checked, GitFailure};
 use crate::models::expand_tilde;
 use crate::process::{stderr_str, stdout_str, ProcessRunner, SUBPROCESS_TIMEOUT};
 
@@ -139,23 +140,18 @@ pub fn ahead_behind(
     runner: &dyn ProcessRunner,
 ) -> Option<AheadBehind> {
     let repo_path = expand_tilde(repo_path);
-    let output = runner
-        .run_with_timeout(
-            "git",
-            &[
-                "-C",
-                &repo_path,
-                "rev-list",
-                "--count",
-                "--left-right",
-                &count_range(base_branch),
-            ],
-            SUBPROCESS_TIMEOUT,
-        )
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
+    let output = git_checked(
+        runner,
+        &repo_path,
+        &[
+            "rev-list",
+            "--count",
+            "--left-right",
+            &count_range(base_branch),
+        ],
+        SUBPROCESS_TIMEOUT,
+    )
+    .ok()?;
     let stdout = stdout_str(&output);
     let mut fields = stdout.split_whitespace();
     let ahead = fields.next()?.parse().ok()?;
@@ -178,20 +174,16 @@ pub fn fetch_base(
     runner: &dyn ProcessRunner,
 ) -> Result<(), String> {
     let repo_path = expand_tilde(repo_path);
-    let output = runner
-        .run_with_timeout(
-            "git",
-            &["-C", &repo_path, "fetch", "origin", base_branch],
-            SUBPROCESS_TIMEOUT,
-        )
-        .map_err(|e| format!("Failed to fetch origin {base_branch}: {e}"))?;
-    if output.status.success() {
-        return Ok(());
-    }
-    Err(format!(
-        "Failed to fetch origin {base_branch}: {}",
-        stderr_str(&output)
-    ))
+    let detail = match git_checked(
+        runner,
+        &repo_path,
+        &["fetch", "origin", base_branch],
+        SUBPROCESS_TIMEOUT,
+    ) {
+        Ok(_) => return Ok(()),
+        Err(failure) => failure.detail(),
+    };
+    Err(format!("Failed to fetch origin {base_branch}: {detail}"))
 }
 
 /// Bring the repository's primary checkout into step with `origin/<base_branch>`
@@ -291,33 +283,21 @@ fn merge_origin_base(
     base_branch: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<(), SyncError> {
-    let output = runner
-        .run_with_timeout(
-            "git",
-            &[
-                "-C",
-                repo,
-                "merge",
-                "--no-edit",
-                &crate::git::origin_ref(base_branch),
-            ],
-            SUBPROCESS_TIMEOUT,
-        )
-        .map_err(|e| SyncError::Other(format!("Failed to run git merge: {e}")))?;
-    if output.status.success() {
-        return Ok(());
-    }
-    // Read the conflicted paths from the repo's own status *before*
-    // aborting — the abort clears them (`ConflictFilesCapturedBeforeAbort`).
-    let conflicted = runner
-        .run_with_timeout(
-            "git",
-            &["-C", repo, "status", "--porcelain"],
-            SUBPROCESS_TIMEOUT,
-        )
-        .map(|o| crate::git::parse_unmerged_files(&o))
-        .unwrap_or_default();
-    let _ = runner.run_with_timeout("git", &["-C", repo, "merge", "--abort"], SUBPROCESS_TIMEOUT);
+    let output = match git_checked(
+        runner,
+        repo,
+        &["merge", "--no-edit", &crate::git::origin_ref(base_branch)],
+        SUBPROCESS_TIMEOUT,
+    ) {
+        Ok(_) => return Ok(()),
+        Err(GitFailure::Spawn(e)) => {
+            return Err(SyncError::Other(format!("Failed to run git merge: {e}")))
+        }
+        Err(GitFailure::Exit(output)) => output,
+    };
+    // The conflicted paths are read before the abort clears them
+    // (`ConflictFilesCapturedBeforeAbort`).
+    let conflicted = abort_after_conflict(runner, repo, "merge", SUBPROCESS_TIMEOUT);
     if !conflicted.is_empty() {
         return Err(SyncError::MergeConflict { files: conflicted });
     }
@@ -329,19 +309,18 @@ fn merge_origin_base(
 
 /// Push the checked-out base to `origin`.
 fn push_base(repo: &str, base_branch: &str, runner: &dyn ProcessRunner) -> Result<(), SyncError> {
-    let output = runner
-        .run_with_timeout(
-            "git",
-            &["-C", repo, "push", "origin", base_branch],
-            SUBPROCESS_TIMEOUT,
-        )
-        .map_err(|e| SyncError::Other(format!("Failed to run git push: {e}")))?;
-    if !output.status.success() {
-        return Err(SyncError::PushRejected {
+    match git_checked(
+        runner,
+        repo,
+        &["push", "origin", base_branch],
+        SUBPROCESS_TIMEOUT,
+    ) {
+        Ok(_) => Ok(()),
+        Err(GitFailure::Spawn(e)) => Err(SyncError::Other(format!("Failed to run git push: {e}"))),
+        Err(GitFailure::Exit(output)) => Err(SyncError::PushRejected {
             stderr: stderr_str(&output),
-        });
+        }),
     }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
