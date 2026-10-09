@@ -835,7 +835,9 @@ fn remove_worktree_and_branch(
             if stderr.contains(WORKTREE_ALREADY_REMOVED) {
                 tracing::info!(worktree_path, "worktree already unregistered");
             } else {
-                tracing::warn!(
+                // Expected recovery: the delete below fixes it, and a failed
+                // delete is returned to the caller, which reports it.
+                tracing::info!(
                     worktree_path,
                     stderr = %stderr,
                     "git worktree remove failed; deleting the directory directly"

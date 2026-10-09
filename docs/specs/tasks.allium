@@ -1149,9 +1149,10 @@ rule MoveTaskToEpic {
 -- git's exit code. The reason is the table above: the two outcomes where git
 -- FAILS are exactly the two where it removes nothing, so a failure is the case
 -- most in need of 2b, not a reason to skip it. A 2a failure whose directory 2b
--- then removes is a released worktree, and step 2 succeeds. The deletion is
--- warn-logged, and step 3 still runs — the branch is as orphaned as it is on
--- the success path.
+-- then removes is a released worktree, and step 2 succeeds. That recovery is
+-- expected, so it is info-logged, not warned: a failure to recover is what
+-- surfaces, as the step's error. Step 3 still runs — the branch is as orphaned
+-- as it is on the success path.
 --
 -- "Every outcome" includes 2a not producing an exit code at all — git missing
 -- from PATH, a spawn failure. The worktree is no less on disk for it, so that
