@@ -1,6 +1,6 @@
 //! Capturing `tracing` output in tests.
 //!
-//! Warn-level logging is behaviour the specs name explicitly
+//! Warn- and debug-level logging is behaviour the specs name explicitly
 //! (`DbCallSlowWarning`, `TrajectoryWriteFailureIsSilent`,
 //! `UsageWriteFailureIsSilent` in `docs/specs/observability.allium`), so tests
 //! need to assert on it. This is the one harness for doing that — don't grow a
@@ -43,6 +43,7 @@ where
     let subscriber = tracing_subscriber::fmt()
         .with_writer(make_writer)
         .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
     body().await;

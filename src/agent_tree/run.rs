@@ -330,7 +330,11 @@ pub(super) fn refresh(
             adopt_tree(build_tree(root, &fresh), tree, state);
         }
         Err(e) => {
-            tracing::warn!(
+            // DEBUG, not WARN: the failure is expected (a deleted worktree, an
+            // index lock, a timeout) and already reaches the user as the pane's
+            // notice. A pane left open on a removed worktree retries every tick,
+            // so WARN here wrote one line a second for as long as it stayed open.
+            tracing::debug!(
                 root = %root.display(),
                 selected_commit = state.selected_commit.as_deref(),
                 // `{e:#}` so the log carries the cause (timeout, spawn failure), not

@@ -653,7 +653,9 @@ fn refresh(
             }
         }
         Err(e) => {
-            tracing::warn!(
+            // DEBUG for the same reason as the tree's query: the pane's notice
+            // already tells the user, and the retry repeats every tick.
+            tracing::debug!(
                 root = %root.display(),
                 // `{e:#}` so the log carries the cause (timeout, spawn failure), not
                 // just the outermost context.
