@@ -129,7 +129,7 @@ to look.
 | `src/mcp/handlers/tasks/dispatch.rs` | Dispatch handlers: `dispatch_task`, plus `auto_dispatch_next` (the epic chain fired by `exit_session`) |
 | `src/mcp/handlers/tasks/wrap_up.rs` | Wrap-up handlers: `wrap_up`, `exit_session` |
 | `src/mcp/handlers/tasks/verify.rs` | Verify handler: `set_verify_command` |
-| `src/mcp/handlers/tasks/watch.rs` | Task-watcher handlers: `subscribe_to_task`, `unsubscribe_from_task` |
+| `src/mcp/handlers/tasks/watch.rs` | Task-watcher handlers: `watch_task` |
 | `src/mcp/handlers/epics.rs` | Epic tool handlers (thin wrappers): parse JSON-RPC args → call `EpicService` → format response |
 | `src/mcp/handlers/learnings.rs` | Knowledge base tool handlers |
 | `src/mcp/handlers/managed_feeds.rs` | Managed feed config tool handlers (`get`/`set_managed_feed_config`) |

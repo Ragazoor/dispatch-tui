@@ -7,7 +7,7 @@
 -- Excludes: Task status lifecycle itself, including the ConfirmDone/
 --           PR-merge/exit_session/dispatch-update paths that
 --           produce the Done transitions this spec reacts to
---           (see tasks.allium); the subscribe_to_task/unsubscribe_from_task
+--           (see tasks.allium); the watch_task
 --           MCP tool argument contracts (see mcp-task-tools.allium); domain
 --           model (see core.allium). The tmux-injection + .claude-messages
 --           delivery mechanism (write_message_file/notify_tmux,
@@ -163,7 +163,7 @@ rule NotifyWatchersOnFinish {
 -- introduces.
 --
 -- Consequence: when a feed-synced task is auto-completed via that path, a
--- task watching it via subscribe_to_task will NOT trigger a notification —
+-- task watching it via watch_task will NOT trigger a notification —
 -- DetectTaskDone above only observes transitions produced through
 -- TaskService's own write paths. Only the TUI/MCP-driven paths
 -- (ConfirmDone, PR-merge/close, exit_session) trigger notification. Such a

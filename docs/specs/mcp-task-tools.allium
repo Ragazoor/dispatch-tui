@@ -2,7 +2,7 @@
 -- mcp-task-tools.allium
 --
 -- Scope: MCP tools for task management (create, get, update, list,
---        dispatch, subscribe/unsubscribe-to-task, query-usage,
+--        dispatch, watch-task, query-usage,
 --        set-verify-command) and the CLI plan-attachment surface; the
 --        standard every tool description and agent-facing skill is held to;
 --        context via MCP — the read-only resources the dispatch MCP server
@@ -11,8 +11,7 @@
 --        resources/list, resources/read and their tool twin read_context.
 -- Excludes: Task lifecycle (see tasks.allium); dispatch/retry (see dispatch.allium);
 --           MCP epic tools (see epics.allium); learnings tools (see learnings.allium);
---           the task-watcher domain rules underlying subscribe_to_task/
---           unsubscribe_from_task (see task-watchers.allium); agent-to-agent
+--           the task-watcher domain rules underlying watch_task (see task-watchers.allium); agent-to-agent
 --           messaging, which is no longer a dispatch MCP tool — see
 --           HookPeerMessageSent in agent-health.allium.
 
@@ -1071,43 +1070,40 @@ rule DispatchTaskViaMcp {
 -- `2026-08-15-send-message-delivery-hardening-design.md`'s pane-content
 -- probe.
 
-rule SubscribeToTaskViaMcp {
-    when: McpSubscribeToTask(watcher_task, target_task)
+rule WatchTaskViaMcp {
+    when: McpWatchTask(watcher_task, target_task, watch)
 
     requires: watcher_task != null
     requires: target_task != null
+    -- `watch` is required, with no default: a caller states whether it is
+    -- starting or cancelling a watch rather than the handler guessing.
 
-    ensures: SubscribeToTask(watcher: watcher_task, target: target_task)
+    ensures:
+        if watch:
+            SubscribeToTask(watcher: watcher_task, target: target_task)
+        else:
+            UnsubscribeFromTask(watcher: watcher_task, target: target_task)
 
     @guidance
-        -- subscribe_to_task(watcher_task_id, target_task_id) registers a
-        -- one-shot watch: watcher_task is notified via a tmux-injected
-        -- message once target_task reaches Done (or is deleted first). Both ids must resolve to existing tasks — an unresolved
-        -- id is rejected the same way any other MCP tool rejects a task id
-        -- that does not exist.
-        -- Self-watch rejection, the already_finished short-circuit, and
+        -- watch_task(watcher_task_id, target_task_id, watch) is the one tool
+        -- for both halves of the watcher capability (it replaced the
+        -- separate subscribe_to_task / unsubscribe_from_task tools).
+        -- watch=true registers a one-shot watch: watcher_task is notified
+        -- via a tmux-injected message once target_task reaches Done (or is
+        -- deleted first). Both ids must resolve to existing tasks — an
+        -- unresolved id is rejected the same way any other MCP tool rejects
+        -- a task id that does not exist.
+        -- Self-watch rejection, the already_finished short-circuit (the
+        -- caller is told immediately and nothing is registered), and
         -- idempotency on an existing unfinished (watcher, target) pair are
         -- all enforced by the underlying SubscribeToTask rule — see
         -- task-watchers.allium, which also owns the TaskWatcher entity this
         -- tool creates rows in.
-        -- Handled by handle_subscribe_to_task in
-        -- src/mcp/handlers/tasks/watch.rs.
-}
-
-rule UnsubscribeFromTaskViaMcp {
-    when: McpUnsubscribeFromTask(watcher_task, target_task)
-
-    requires: watcher_task != null
-    requires: target_task != null
-
-    ensures: UnsubscribeFromTask(watcher: watcher_task, target: target_task)
-
-    @guidance
-        -- unsubscribe_from_task(watcher_task_id, target_task_id) removes a
-        -- specific (watcher, target) subscription; idempotent no-op if none
-        -- exists — see the UnsubscribeFromTask rule in task-watchers.allium.
-        -- Handled by handle_unsubscribe_from_task in
-        -- src/mcp/handlers/tasks/watch.rs.
+        -- watch=false removes a specific (watcher, target) subscription;
+        -- idempotent no-op if none exists — see the UnsubscribeFromTask rule
+        -- in task-watchers.allium.
+        -- Handled by handle_watch_task in src/mcp/handlers/tasks/watch.rs.
+        -- Annotated idempotent: both directions are safe to repeat.
 }
 
 -- == Poll ownership ==
@@ -1153,7 +1149,7 @@ rule OverridePollOwnerViaMcp {
         --
         -- Both ids must resolve to existing rows — an unresolved id is
         -- rejected the same way any other MCP tool rejects a task id that
-        -- does not exist (see SubscribeToTaskViaMcp above), rather than
+        -- does not exist (see WatchTaskViaMcp above), rather than
         -- silently creating a PollOwner row for a task or epic that was
         -- never real.
         --

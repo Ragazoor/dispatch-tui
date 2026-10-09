@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! End-to-end integration test: full task-watcher flow — subscribe, finish,
-//! notified. Exercises the production MCP router (`subscribe_to_task`) plus
+//! notified. Exercises the production MCP router (`watch_task`) plus
 //! `TaskService::update_task` (the ConfirmDone-equivalent status transition)
 //! together, over a real in-memory `Store` and a `MockProcessRunner`, to
 //! lock in the wiring from `docs/specs/task-watchers.allium` as a regression
@@ -85,7 +85,7 @@ async fn subscribe_then_finish_delivers_notification() {
         .await
         .unwrap();
 
-    // 4. Call subscribe_to_task(A, B) via the MCP router.
+    // 4. Call watch_task(A, B) via the MCP router.
     let resp = common::post_mcp(
         router,
         &[(HEADER_KIND, "session")],
@@ -93,10 +93,11 @@ async fn subscribe_then_finish_delivers_notification() {
             "jsonrpc": "2.0", "id": 1,
             "method": "tools/call",
             "params": {
-                "name": "subscribe_to_task",
+                "name": "watch_task",
                 "arguments": {
                     "watcher_task_id": watcher_id.0,
-                    "target_task_id": target_id.0
+                    "target_task_id": target_id.0,
+                    "watch": true
                 }
             }
         }),

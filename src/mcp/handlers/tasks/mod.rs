@@ -29,7 +29,7 @@ pub(super) use crud::{
 };
 pub(super) use dispatch::handle_dispatch_task;
 pub(super) use verify::handle_set_verify_command;
-pub(super) use watch::{handle_subscribe_to_task, handle_unsubscribe_from_task};
+pub(super) use watch::handle_watch_task;
 pub(super) use wrap_up::{handle_exit_session, handle_wrap_up};
 
 // ---------------------------------------------------------------------------
@@ -267,20 +267,12 @@ pub(super) struct SetVerifyCommandArgs {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SubscribeToTaskArgs {
+pub(super) struct WatchTaskArgs {
     #[serde(deserialize_with = "deserialize_flexible_id")]
     pub(super) watcher_task_id: TaskId,
     #[serde(deserialize_with = "deserialize_flexible_id")]
     pub(super) target_task_id: TaskId,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct UnsubscribeFromTaskArgs {
-    #[serde(deserialize_with = "deserialize_flexible_id")]
-    pub(super) watcher_task_id: TaskId,
-    #[serde(deserialize_with = "deserialize_flexible_id")]
-    pub(super) target_task_id: TaskId,
+    pub(super) watch: bool,
 }
 
 #[derive(Deserialize)]

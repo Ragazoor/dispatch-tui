@@ -17,7 +17,7 @@ async fn make_task(
 }
 
 #[tokio::test]
-async fn subscribe_to_task_registers_watch() {
+async fn watch_task_on_registers_watch() {
     let state = test_state().await;
     let watcher = make_task(&state, "Watcher", TaskStatus::Running).await;
     let target = make_task(&state, "Target", TaskStatus::Running).await;
@@ -26,8 +26,8 @@ async fn subscribe_to_task_registers_watch() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "subscribe_to_task",
-            "arguments": {"watcher_task_id": watcher.0, "target_task_id": target.0}
+            "name": "watch_task",
+            "arguments": {"watcher_task_id": watcher.0, "target_task_id": target.0, "watch": true}
         })),
     )
     .await;
@@ -39,7 +39,7 @@ async fn subscribe_to_task_registers_watch() {
 }
 
 #[tokio::test]
-async fn subscribe_to_task_already_finished_does_not_register() {
+async fn watch_task_on_already_finished_does_not_register() {
     let state = test_state().await;
     let watcher = make_task(&state, "Watcher", TaskStatus::Running).await;
     let target = make_task(&state, "Target", TaskStatus::Done).await;
@@ -48,8 +48,8 @@ async fn subscribe_to_task_already_finished_does_not_register() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "subscribe_to_task",
-            "arguments": {"watcher_task_id": watcher.0, "target_task_id": target.0}
+            "name": "watch_task",
+            "arguments": {"watcher_task_id": watcher.0, "target_task_id": target.0, "watch": true}
         })),
     )
     .await;
@@ -65,7 +65,7 @@ async fn subscribe_to_task_already_finished_does_not_register() {
 }
 
 #[tokio::test]
-async fn subscribe_to_task_rejects_self_watch() {
+async fn watch_task_on_rejects_self_watch() {
     let state = test_state().await;
     let task = make_task(&state, "Solo", TaskStatus::Running).await;
 
@@ -73,8 +73,8 @@ async fn subscribe_to_task_rejects_self_watch() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "subscribe_to_task",
-            "arguments": {"watcher_task_id": task.0, "target_task_id": task.0}
+            "name": "watch_task",
+            "arguments": {"watcher_task_id": task.0, "target_task_id": task.0, "watch": true}
         })),
     )
     .await;
@@ -86,7 +86,7 @@ async fn subscribe_to_task_rejects_self_watch() {
 }
 
 #[tokio::test]
-async fn unsubscribe_from_task_removes_watch() {
+async fn watch_task_off_removes_watch() {
     let state = test_state().await;
     let watcher = make_task(&state, "Watcher", TaskStatus::Running).await;
     let target = make_task(&state, "Target", TaskStatus::Running).await;
@@ -100,8 +100,8 @@ async fn unsubscribe_from_task_removes_watch() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "unsubscribe_from_task",
-            "arguments": {"watcher_task_id": watcher.0, "target_task_id": target.0}
+            "name": "watch_task",
+            "arguments": {"watcher_task_id": watcher.0, "target_task_id": target.0, "watch": false}
         })),
     )
     .await;
@@ -114,4 +114,66 @@ async fn unsubscribe_from_task_removes_watch() {
         .await
         .unwrap()
         .is_empty());
+}
+
+#[tokio::test]
+async fn watch_task_off_without_subscription_succeeds() {
+    let state = test_state().await;
+    let watcher = make_task(&state, "Watcher", TaskStatus::Running).await;
+    let target = make_task(&state, "Target", TaskStatus::Running).await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "watch_task",
+            "arguments": {"watcher_task_id": watcher.0, "target_task_id": target.0, "watch": false}
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(text.contains("No longer watching"), "got: {text}");
+}
+
+#[tokio::test]
+async fn watch_task_requires_watch_argument() {
+    let state = test_state().await;
+    let watcher = make_task(&state, "Watcher", TaskStatus::Running).await;
+    let target = make_task(&state, "Target", TaskStatus::Running).await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "watch_task",
+            "arguments": {"watcher_task_id": watcher.0, "target_task_id": target.0}
+        })),
+    )
+    .await;
+
+    assert_error(&resp, "watch");
+    assert!(state
+        .db_write()
+        .list_watchers_of(target)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn old_watch_tools_are_gone() {
+    let state = test_state().await;
+    for name in ["subscribe_to_task", "unsubscribe_from_task"] {
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": name,
+                "arguments": {"watcher_task_id": 1, "target_task_id": 2}
+            })),
+        )
+        .await;
+        assert_error(&resp, "Unknown tool");
+    }
 }

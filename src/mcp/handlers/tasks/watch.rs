@@ -4,22 +4,31 @@ use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::service::SubscribeOutcome;
 
-use super::{
-    parse_args, service_err_to_response, JsonRpcResponse, SubscribeToTaskArgs,
-    UnsubscribeFromTaskArgs,
-};
+use super::{parse_args, service_err_to_response, JsonRpcResponse, WatchTaskArgs};
 
-pub(crate) async fn handle_subscribe_to_task(
+pub(crate) async fn handle_watch_task(
     state: &McpState,
     id: Option<Value>,
-    _identity: &CallerIdentity,
+    identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
-    let parsed: SubscribeToTaskArgs = match parse_args(&id, args) {
+    let parsed: WatchTaskArgs = match parse_args(&id, args) {
         Ok(v) => v,
         Err(e) => return e,
     };
+    if parsed.watch {
+        subscribe(state, id, identity, parsed).await
+    } else {
+        unsubscribe(state, id, identity, parsed).await
+    }
+}
 
+async fn subscribe(
+    state: &McpState,
+    id: Option<Value>,
+    _identity: &CallerIdentity,
+    parsed: WatchTaskArgs,
+) -> JsonRpcResponse {
     match state
         .task_svc
         .subscribe_to_task(parsed.watcher_task_id, parsed.target_task_id)
@@ -43,17 +52,12 @@ pub(crate) async fn handle_subscribe_to_task(
     }
 }
 
-pub(crate) async fn handle_unsubscribe_from_task(
+async fn unsubscribe(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
-    args: Value,
+    parsed: WatchTaskArgs,
 ) -> JsonRpcResponse {
-    let parsed: UnsubscribeFromTaskArgs = match parse_args(&id, args) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-
     match state
         .task_svc
         .unsubscribe_from_task(parsed.watcher_task_id, parsed.target_task_id)

@@ -399,29 +399,21 @@ it along with the tmux window. Errors if the task is not in backlog status or th
             "required": ["task_id"]
         };
 
-    async write "subscribe_to_task" => tasks::handle_subscribe_to_task,
-        "Subscribe to be notified when another task finishes (reaches Done) or is deleted first. If the target has already finished, you're told immediately instead of being subscribed. Delivery is a one-shot nudge into your tmux session — it fires once and the subscription is then spent.",
+    async idempotent "watch_task" => tasks::handle_watch_task,
+        "Start or cancel a watch on another task. With watch=true, you are notified when the target \
+finishes (reaches Done) or is deleted first; if it has already finished, you are told immediately \
+instead of being subscribed. Delivery is a one-shot nudge into your tmux session — it fires once \
+and the watch is then spent. With watch=false, the watch is cancelled: idempotent, it succeeds \
+whether or not such a watch exists, so it is safe to call speculatively. You do not need to cancel \
+after a notification has fired; cancel when you stop caring about the target before it finishes.",
         {
             "type": "object",
             "properties": {
                 "watcher_task_id": { "type": "integer", "description": "Your own task ID (the one to notify)" },
-                "target_task_id": { "type": "integer", "description": "ID of the task to watch for completion" }
+                "target_task_id": { "type": "integer", "description": "ID of the task to watch for completion" },
+                "watch": { "type": "boolean", "description": "true to start watching, false to cancel the watch" }
             },
-            "required": ["watcher_task_id", "target_task_id"]
-        };
-
-    async idempotent "unsubscribe_from_task" => tasks::handle_unsubscribe_from_task,
-        "Cancel a watch previously registered with subscribe_to_task. Idempotent: it succeeds \
-whether or not such a subscription exists, so it is safe to call speculatively. You do not need it \
-after a notification has fired — delivery is one-shot and spends the subscription. Use it when you \
-stop caring about the target before it finishes.",
-        {
-            "type": "object",
-            "properties": {
-                "watcher_task_id": { "type": "integer", "description": "Your own task ID" },
-                "target_task_id": { "type": "integer", "description": "ID of the task you were watching" }
-            },
-            "required": ["watcher_task_id", "target_task_id"]
+            "required": ["watcher_task_id", "target_task_id", "watch"]
         };
 
     async idempotent "override_poll_owner" => poll_ownership::handle_override_poll_owner,
