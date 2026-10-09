@@ -467,9 +467,6 @@ pub(crate) async fn handle_list_tasks(
         Err(resp) => return resp,
     };
     tracing::info!(status = ?parsed.status, identity = ?identity, "MCP list_tasks");
-    if let Err(resp) = super::super::types::check_limit(&id, parsed.limit) {
-        return resp;
-    }
 
     let (derived_epic_id, exclude_task_id) =
         match resolve_list_scope(state, &id, identity, &parsed).await {

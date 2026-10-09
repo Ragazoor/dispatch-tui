@@ -87,3 +87,21 @@ pub use poll_owner::PollScopeId;
 
 mod poll_action;
 pub(crate) use poll_action::{decide_poll_action, PollAction};
+
+/// Whether `query` matches an item with this `title` and `description`.
+///
+/// The query splits on whitespace into words; every word must be a
+/// case-insensitive substring of the title or the description. A blank query
+/// has no words and matches everything. See `ListTasksViaMcp` in
+/// `docs/specs/mcp-task-tools.allium`.
+pub fn text_query_matches(query: &str, title: &str, description: &str) -> bool {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    if words.is_empty() {
+        return true;
+    }
+    let title = title.to_lowercase();
+    let description = description.to_lowercase();
+    words
+        .iter()
+        .all(|w| title.contains(w.as_str()) || description.contains(w.as_str()))
+}

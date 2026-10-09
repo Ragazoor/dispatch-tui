@@ -45,7 +45,7 @@ pub(super) struct ListEpicsArgs {
     #[serde(default)]
     pub(super) query: Option<String>,
     #[serde(default)]
-    pub(super) limit: Option<usize>,
+    pub(super) limit: Option<std::num::NonZeroUsize>,
 }
 
 #[derive(Deserialize)]
@@ -180,9 +180,6 @@ pub(super) async fn handle_list_epics(
     };
     tracing::info!(parent_epic_id = ?parsed.parent_epic_id, recursive = parsed.recursive, "MCP list_epics");
 
-    if let Err(resp) = super::types::check_limit(&id, parsed.limit) {
-        return resp;
-    }
     let epics = match state
         .epic_svc
         .list_epics_with_progress_under(parsed.parent_epic_id, parsed.recursive)

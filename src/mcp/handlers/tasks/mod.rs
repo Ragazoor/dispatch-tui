@@ -199,7 +199,7 @@ pub(super) struct ListTasksArgs {
     #[serde(default)]
     pub(super) query: Option<String>,
     #[serde(default)]
-    pub(super) limit: Option<usize>,
+    pub(super) limit: Option<std::num::NonZeroUsize>,
 }
 
 #[derive(Deserialize)]
