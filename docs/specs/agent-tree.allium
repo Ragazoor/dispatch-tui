@@ -1371,7 +1371,8 @@ rule RefreshAgentTree {
         --   A, and every untracked path from the unstaged form's
         --   third step                                          -> added
         --   D                                                   -> deleted
-        --   M, T (type change), and anything else recognised     -> modified
+        --   M, T (type change), U (unmerged: the agent is mid-merge
+        --   or mid-rebase with the path in conflict)            -> modified
         -- A letter this mapping does not recognise is skipped rather than
         -- guessed at, in line with this repo's soft-fail-decoding convention,
         -- and so is a malformed output line. One unparseable line must not

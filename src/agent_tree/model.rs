@@ -129,7 +129,8 @@ impl TreeNode {
 /// similarity-scored letters (`R100`, `C75`) does not need stripping first.
 /// See the spec's `CollapsedGitStatusLetters` note for why three values are
 /// enough: `T` (type change) is a modification as far as a file tree is
-/// concerned, and `R`/`C` never arrive because rename detection is off.
+/// concerned, `U` (unmerged, while the agent is mid-merge) is a modification
+/// the user needs to see, and `R`/`C` never arrive because rename detection is off.
 ///
 /// An unrecognised letter yields `None` and the line is skipped — this repo's
 /// soft-fail-decoding convention. One unparseable line must not blank the tree.
@@ -137,7 +138,7 @@ fn change_from_status(status: &str) -> Option<FileChange> {
     match status.chars().next()? {
         'A' => Some(FileChange::Added),
         'D' => Some(FileChange::Deleted),
-        'M' | 'T' => Some(FileChange::Modified),
+        'M' | 'T' | 'U' => Some(FileChange::Modified),
         _ => None,
     }
 }

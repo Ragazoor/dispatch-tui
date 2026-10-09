@@ -285,7 +285,7 @@ fn type_change_is_reported_as_modified() {
 /// lines around it.
 #[test]
 fn unrecognised_status_letter_is_skipped_not_guessed() {
-    let out = nul_stream(&["M", "keep.rs", "U", "conflicted.rs", "A", "also-keep.rs"]);
+    let out = nul_stream(&["M", "keep.rs", "?", "odd.rs", "A", "also-keep.rs"]);
     let out = out.as_str();
     assert_eq!(
         parse_name_status(out),
@@ -293,6 +293,17 @@ fn unrecognised_status_letter_is_skipped_not_guessed() {
             changed("keep.rs", FileChange::Modified),
             changed("also-keep.rs", FileChange::Added),
         ]
+    );
+}
+
+/// `U` is what git reports for a path in conflict while the agent is
+/// mid-merge. It is a change the user needs to see, so it is a modification,
+/// not an unknown letter.
+#[test]
+fn unmerged_status_is_reported_as_modified() {
+    assert_eq!(
+        parse_name_status(&nul_stream(&["U", "src/conflict.rs"])),
+        vec![changed("src/conflict.rs", FileChange::Modified)]
     );
 }
 
