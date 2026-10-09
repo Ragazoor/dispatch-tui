@@ -8,7 +8,7 @@ use serde_json::json;
 use super::{call, extract_response_text, test_state};
 
 #[tokio::test]
-async fn get_returns_current_config() {
+async fn no_args_returns_current_config() {
     let state = test_state().await;
     state
         .db
@@ -24,7 +24,7 @@ async fn get_returns_current_config() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "get_managed_feed_config", "arguments": {} })),
+        Some(json!({ "name": "managed_feed_config", "arguments": {} })),
     )
     .await;
 
@@ -34,12 +34,12 @@ async fn get_returns_current_config() {
 }
 
 #[tokio::test]
-async fn get_empty_reports_unset() {
+async fn no_args_on_empty_reports_unset() {
     let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "get_managed_feed_config", "arguments": {} })),
+        Some(json!({ "name": "managed_feed_config", "arguments": {} })),
     )
     .await;
     let text = extract_response_text(&resp);
@@ -51,13 +51,13 @@ use std::sync::Arc;
 use crate::mcp::McpState;
 use crate::models::FeedRole;
 
-/// Issue a set_managed_feed_config call and discard the response (used by the
+/// Issue a managed_feed_config call with arguments and discard the response (used by the
 /// success-path tests that assert on persisted state, not the reply text).
 async fn set(state: &Arc<McpState>, args: serde_json::Value) {
     call(
         state,
         "tools/call",
-        Some(json!({ "name": "set_managed_feed_config", "arguments": args })),
+        Some(json!({ "name": "managed_feed_config", "arguments": args })),
     )
     .await;
 }
@@ -152,7 +152,7 @@ async fn set_negative_interval_rejected() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "set_managed_feed_config",
+            "name": "managed_feed_config",
             "arguments": { "reviews_interval_secs": -5 }
         })),
     )
@@ -191,7 +191,7 @@ async fn set_sub_floor_interval_rejected() {
             &state,
             "tools/call",
             Some(json!({
-                "name": "set_managed_feed_config",
+                "name": "managed_feed_config",
                 "arguments": {
                     "reviews_command": "/scripts/fetch-reviews.sh",
                     "reviews_interval_secs": bad
@@ -273,4 +273,109 @@ async fn set_notifies_the_runtime_so_the_feed_cache_is_invalidated() {
         matches!(event, crate::board_event::BoardEvent::Refresh),
         "expected Refresh (the arm that invalidates the feed cache), got {event:?}"
     );
+}
+
+/// A call with no arguments is a pure read: it must not provision the managed
+/// epic tree and must not notify the runtime (epics.allium:
+/// ManagedFeedConfigViaMcp).
+#[tokio::test]
+async fn no_args_is_read_only() {
+    let (notify_tx, mut notify_rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
+    let (state, _db) = super::test_state_with_overrides(
+        Arc::new(crate::process::MockProcessRunner::new(vec![]))
+            as Arc<dyn crate::process::ProcessRunner>,
+        Some(notify_tx),
+        None,
+    )
+    .await;
+    // Store a command directly, so a (wrongly) provisioning read would create epics.
+    state
+        .db
+        .set_reviews_feed_command(Some("/r.sh"))
+        .await
+        .unwrap();
+
+    call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "managed_feed_config", "arguments": {} })),
+    )
+    .await;
+
+    assert!(
+        state.db.list_epics().await.is_empty(),
+        "a read must not provision epics"
+    );
+    assert!(
+        notify_rx.try_recv().is_err(),
+        "a read must not notify the runtime"
+    );
+}
+
+/// A write replies with the resulting config, so no second call is needed.
+#[tokio::test]
+async fn write_returns_resulting_config() {
+    let state = test_state().await;
+    state
+        .db
+        .set_cve_feed_command(Some("/old-cve.sh"))
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "managed_feed_config",
+            "arguments": { "reviews_command": "/r.sh", "reviews_interval_secs": 120 }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(text.contains("/r.sh"), "got: {text}");
+    assert!(text.contains("120"), "got: {text}");
+    assert!(
+        text.contains("/old-cve.sh"),
+        "omitted fields appear unchanged, got: {text}"
+    );
+}
+
+/// The old two-tool names are gone.
+#[test]
+fn old_tool_names_are_gone() {
+    for old in ["get_managed_feed_config", "set_managed_feed_config"] {
+        assert!(
+            !crate::mcp::handlers::dispatch::TOOL_NAMES.contains(&old),
+            "{old} must be merged into managed_feed_config"
+        );
+    }
+}
+
+/// Each field on its own, including an explicit null, makes the call a write.
+/// Guards `ManagedFeedConfigArgs::is_read` against a field it forgets to count.
+#[tokio::test]
+async fn any_single_field_makes_the_call_a_write() {
+    for args in [
+        json!({ "reviews_command": null }),
+        json!({ "reviews_interval_secs": null }),
+        json!({ "cve_command": null }),
+        json!({ "cve_interval_secs": null }),
+    ] {
+        let (notify_tx, mut notify_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
+        let (state, _db) = super::test_state_with_overrides(
+            Arc::new(crate::process::MockProcessRunner::new(vec![]))
+                as Arc<dyn crate::process::ProcessRunner>,
+            Some(notify_tx),
+            None,
+        )
+        .await;
+        set(&state, args.clone()).await;
+        assert!(
+            notify_rx.try_recv().is_ok(),
+            "{args} must be treated as a write"
+        );
+    }
 }

@@ -404,7 +404,7 @@ Managed epics are identified by **role**, not title: rename `My Reviews` to
 for a managed root to opt out into: if you **delete** it (with its subtree all
 done), dispatch re-provisions it on the next run for as long as its command is
 still configured. To actually opt out, clear the command via
-`set_managed_feed_config` instead of deleting the epic — a re-provisioned epic
+`managed_feed_config` instead of deleting the epic — a re-provisioned epic
 also starts with no retired-feed-item records, so any still-open item you had
 deleted reappears. The three review sub-epics carry **no** `feed_command` of
 their own — only the parent is polled, and the parent's single emission fans
@@ -412,10 +412,12 @@ out to them.
 
 > **Configuring the scripts.** The four settings are read **at TUI startup** to
 > provision the managed tree, and are configured **only over MCP** — there is no
-> in-app editor. Use the `set_managed_feed_config` tool to write them (each field
-> is optional: omit to leave unchanged, pass `null` to clear) and
-> `get_managed_feed_config` to read them back. A save re-provisions the managed
-> tree immediately, so no restart is needed.
+> in-app editor. Use the `managed_feed_config` tool: with no arguments it reads
+> the settings; with arguments it writes them (each field is optional: omit to
+> leave unchanged, pass `null` to clear) and replies with the result. A write
+> re-provisions the managed tree immediately, so no restart is needed. The tool is
+> annotated as a write (idempotent, not read-only) because its hints cannot
+> describe both calls.
 
 ### Migration: remove old hand-wired review/dependabot epics
 

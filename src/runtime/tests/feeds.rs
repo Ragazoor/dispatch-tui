@@ -175,7 +175,7 @@ mod epic_tests {
     /// Regression for learning #162, ported from the retired TUI `[C]` save path
     /// (docs/plans/archive/2026-07-31-3809-keybinding-pruning-implementation.md §6): a freshly-enabled
     /// feed on a previously feed-less instance must become pollable after
-    /// `set_managed_feed_config` notifies the runtime, not stay stranded behind the
+    /// `managed_feed_config` notifies the runtime, not stay stranded behind the
     /// FeedRunner's `any_feed_cmds == Some(false)` short-circuit until an unrelated
     /// EpicChanged or a restart. MCP is now the only configuration path, so the
     /// `BoardEvent::Refresh` arm is the only thing that can invalidate the cache.
@@ -194,7 +194,7 @@ mod epic_tests {
         );
 
         // Enable the reviews feed and provision it, exactly as
-        // set_managed_feed_config does, then deliver the notification it sends.
+        // managed_feed_config does, then deliver the notification it sends.
         rt.database
             .set_reviews_feed_command(Some("reviews.sh"))
             .await

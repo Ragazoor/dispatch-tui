@@ -544,25 +544,22 @@ exist.",
             "required": ["learning_id"]
         };
 
-    async read_only "get_managed_feed_config" => managed_feeds::handle_get_managed_feed_config,
-        "Return the current managed-feed configuration: the PR-reviews and CVE feed commands and \
-their poll intervals (in seconds). Read-only and argument-free. Unset values are reported as \
-unset, which is how you tell a disabled feed from one running on the default interval. Read it \
-before calling set_managed_feed_config, since that tool leaves any field you omit unchanged.",
-        { "type": "object", "properties": {} };
-
-    async idempotent "set_managed_feed_config" => managed_feeds::handle_set_managed_feed_config,
-        "Set or clear the managed-feed configuration (PR-reviews and CVE feed commands + poll \
-intervals). Each field is triple-state: omit to leave unchanged, pass null to clear, or pass a \
-value to set. Saving re-provisions the managed epic tree, so enabling a feed creates its epics \
-immediately. Intervals are in seconds; omit an interval to fall back to the default feed interval.",
+    async idempotent "managed_feed_config" => managed_feeds::handle_managed_feed_config,
+        "Read or change the managed-feed configuration: the PR-reviews and CVE feed commands and \
+their poll intervals (in seconds). Call it with no arguments to only read the current values; \
+that call changes nothing. Pass any field to change it: each field is triple-state — omit to \
+leave unchanged, pass null to clear, or pass a value to set. Either way the reply is the \
+resulting configuration, and unset values are reported as unset, which is how you tell a \
+disabled feed from one running on the default interval. A change re-provisions the managed epic \
+tree, so enabling a feed creates its epics immediately. Omit an interval to fall back to the \
+default feed interval.",
         {
             "type": "object",
             "properties": {
-                "reviews_command": { "type": ["string", "null"], "description": "Script emitting the involved-PR feed. Pass null to clear (disables the reviews subtree)." },
-                "reviews_interval_secs": { "type": ["integer", "null"], "description": "Poll cadence for the reviews feed, in seconds. Minimum 60; a lower value is rejected. Pass null to clear (falls back to the 60s default)." },
-                "cve_command": { "type": ["string", "null"], "description": "Script emitting the security/CVE feed. Pass null to clear (disables the CVE epic)." },
-                "cve_interval_secs": { "type": ["integer", "null"], "description": "Poll cadence for the CVE feed, in seconds. Minimum 60; a lower value is rejected. Pass null to clear (falls back to the 60s default)." }
+                "reviews_command": { "type": ["string", "null"], "description": "Script emitting the involved-PR feed. Pass null to clear (disables the reviews subtree). Omit to leave unchanged." },
+                "reviews_interval_secs": { "type": ["integer", "null"], "description": "Poll cadence for the reviews feed, in seconds. Minimum 60; a lower value is rejected. Pass null to clear (falls back to the 60s default). Omit to leave unchanged." },
+                "cve_command": { "type": ["string", "null"], "description": "Script emitting the security/CVE feed. Pass null to clear (disables the CVE epic). Omit to leave unchanged." },
+                "cve_interval_secs": { "type": ["integer", "null"], "description": "Poll cadence for the CVE feed, in seconds. Minimum 60; a lower value is rejected. Pass null to clear (falls back to the 60s default). Omit to leave unchanged." }
             }
         };
 

@@ -65,7 +65,7 @@ to look.
 | `src/service/api.rs` | Service trait objects (`TaskServiceApi`, `EpicServiceApi`, `LearningServiceApi`) + `MockLearningService` for injection in tests. Each seam's signature list lives once, in a spec macro (`task_service_api!`, …) replayed into emitter macros that generate the trait, the delegating impl, and the test-only `*ServiceApiStub` mock scaffolding |
 | `src/service/services.rs` | `Services` — the task, epic and learning services, built once per process and shared by the TUI runtime and the MCP server |
 | `src/service/grouping.rs` | Repo-grouping: routes tasks of a `group_by_repo` epic into per-repo `RepoGroup` sub-epics |
-| `src/service/managed_feeds.rs` | Managed feed config read/write (`get`/`set_managed_feed_config`) |
+| `src/service/managed_feeds.rs` | Managed feed config read/write (`managed_feed_config`) |
 | `src/embeddings.rs` | `EmbeddingService` — text embedding computation used by RAG and learning search. A leaf module: `dispatch` (prompt RAG) and `service` (learnings) both depend on it, not on each other |
 | `src/clock.rs` | `Clock` trait + `SystemClock`/`FixedClock`: injectable time for services, the store and the reducer callers. A leaf module, so `sync` and `store` need not depend on `service` |
 | `src/store_connection/` | `StoreParts` (the `Store` and the connection pieces behind it), `connect_first`, and `open_cli_store`, a one-shot command's own connection. Shared by the board (`src/runtime/`) and the commands (`src/cli/`, `src/main.rs`) |
@@ -132,7 +132,7 @@ to look.
 | `src/mcp/handlers/tasks/watch.rs` | Task-watcher handlers: `watch_task` |
 | `src/mcp/handlers/epics.rs` | Epic tool handlers (thin wrappers): parse JSON-RPC args → call `EpicService` → format response |
 | `src/mcp/handlers/learnings.rs` | Knowledge base tool handlers |
-| `src/mcp/handlers/managed_feeds.rs` | Managed feed config tool handlers (`get`/`set_managed_feed_config`) |
+| `src/mcp/handlers/managed_feeds.rs` | Managed feed config tool handlers (`managed_feed_config`) |
 | `src/mcp/handlers/types.rs` | JSON-RPC request/response types, flexible integer deserializer |
 | `src/mcp/handlers/tests/mod.rs` | MCP handler integration tests entry point |
 | `src/mcp/handlers/tests/tasks/mod.rs` | Task test entry point: module declarations and shared helpers |

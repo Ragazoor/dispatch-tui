@@ -1053,7 +1053,7 @@ rule FeedTick {
         -- The obligation on a handler is therefore to EMIT one of those two
         -- events — a handler that emits neither (or only TaskChanged) inherits
         -- nothing. Today's feed-enabling emitters:
-        --   1. MCP set_managed_feed_config -> BoardEvent::Refresh
+        --   1. MCP managed_feed_config (write calls) -> BoardEvent::Refresh
         --   2. MCP epic mutations           -> BoardEvent::EpicChanged
         -- Regression coverage, one test per link in that chain:
         -- src/mcp/handlers/tests/managed_feeds.rs::set_notifies_the_runtime_so_the_feed_cache_is_invalidated

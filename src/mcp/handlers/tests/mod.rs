@@ -1134,10 +1134,6 @@ fn subset_enum_consts_have_every_intended_variant() {
 /// registered tool with a minimal valid payload plus one bogus field — the
 /// per-field/per-value behaviour of each struct is covered by that handler's
 /// own tests elsewhere in this suite.
-///
-/// `get_managed_feed_config` is intentionally absent: it takes zero arguments
-/// and its handler never parses `args` at all, so there is no struct for
-/// `deny_unknown_fields` to guard.
 #[tokio::test]
 async fn every_tool_with_args_rejects_unknown_field() {
     let state = test_state().await;
@@ -1176,24 +1172,19 @@ async fn every_tool_with_args_rejects_unknown_field() {
             "exit_session",
             json!({"task_id": 1, "token": "t", "action": "rebase"}),
         ),
-        ("set_managed_feed_config", json!({})),
+        ("managed_feed_config", json!({})),
         ("query_usage", json!({})),
         ("list_keybindings", json!({})),
         ("read_context", json!({"uri": "dispatch://task/self"})),
         ("override_poll_owner", json!({"task_id": 1})),
     ];
 
-    let no_arg_tools = ["get_managed_feed_config"];
-    let covered: std::collections::BTreeSet<&str> = payloads
-        .iter()
-        .map(|(n, _)| *n)
-        .chain(no_arg_tools)
-        .collect();
+    let covered: std::collections::BTreeSet<&str> = payloads.iter().map(|(n, _)| *n).collect();
     let all_tools: std::collections::BTreeSet<&str> =
         super::dispatch::TOOL_NAMES.iter().copied().collect();
     assert_eq!(
         covered, all_tools,
-        "every registered tool must appear either in `payloads` or `no_arg_tools`"
+        "every registered tool must appear in `payloads`"
     );
 
     for (name, base_args) in payloads {
@@ -1362,7 +1353,6 @@ fn tool_definitions_carry_annotations() {
         "get_epic",
         "list_epics",
         "query_learnings",
-        "get_managed_feed_config",
         "query_usage",
         "read_context",
         "list_keybindings",
@@ -1403,6 +1393,29 @@ fn tool_definitions_carry_annotations() {
             assert!(!destructive, "{name}: a read-only tool is not destructive");
         }
     }
+}
+
+/// epics.allium: ManagedFeedConfigViaMcp @guidance. The merged tool reads on a
+/// no-argument call but writes otherwise, and its hints can say only one thing:
+/// not read-only, not destructive, idempotent.
+#[test]
+fn managed_feed_config_is_declared_a_write_not_a_read() {
+    let defs = tool_definitions();
+    let tool = defs["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "managed_feed_config")
+        .expect("managed_feed_config is registered");
+    let ann = &tool["annotations"];
+    assert_eq!(ann["readOnlyHint"], false);
+    assert_eq!(ann["destructiveHint"], false);
+    assert_eq!(ann["idempotentHint"], true);
+    let desc = tool["description"].as_str().unwrap();
+    assert!(
+        desc.contains("no arguments"),
+        "the description must say a no-argument call only reads: {desc}"
+    );
 }
 
 /// mcp-task-tools.allium: ToolsAdvertiseAnnotations. Every argument of every

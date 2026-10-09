@@ -93,7 +93,7 @@ fn apply_board_event(
     match event {
         BoardEvent::Refresh => {
             // A broad refresh may follow a managed-feed config save
-            // (set_managed_feed_config) that enabled a feed on a
+            // (managed_feed_config) that enabled a feed on a
             // previously feed-less instance. Invalidate the FeedRunner
             // cache so the next tick re-queries for feed commands and
             // starts polling the freshly-provisioned epics rather than

@@ -19,7 +19,7 @@ use "./core.allium" as core
 -- exactly as for hand-made feed epics.
 --
 -- NOTE — these four settings are editable ONLY over MCP, via
--- set_managed_feed_config (read back with get_managed_feed_config). There is no
+-- managed_feed_config (a call with no arguments reads them back). There is no
 -- in-app TUI editor. On save, that surface persists the settings and re-fires
 -- ProvisionManagedEpics, so a newly-enabled feed provisions its epic tree
 -- without a restart.
@@ -725,21 +725,22 @@ rule UpdateEpicViaMcp {
         -- reads or writes it.
 }
 
-rule GetManagedFeedConfigViaMcp {
-    when: McpGetManagedFeedConfig()
+rule ManagedFeedConfigViaMcp {
+    when: McpManagedFeedConfig(reviews_command?, reviews_interval_secs?,
+                               cve_command?, cve_interval_secs?)
 
-    -- Returns the four managed-feed config settings (reviews/CVE feed
-    -- commands and their poll intervals). Unset values are reported as
-    -- unset. Takes no arguments.
-    ensures: ManagedFeedConfigRetrieved()
-}
-
-rule SetManagedFeedConfigViaMcp {
-    when: McpSetManagedFeedConfig(reviews_command?, reviews_interval_secs?,
-                                  cve_command?, cve_interval_secs?)
-
+    -- One tool both reads and writes the four managed-feed config settings
+    -- (reviews/CVE feed commands and their poll intervals). It replaces the
+    -- former get_managed_feed_config / set_managed_feed_config pair, whose
+    -- write half told callers to read with the other tool first.
+    --
     -- Each field is triple-state JSON: omitted = leave the stored value
     -- unchanged; explicit null = clear to null; a value = set.
+    --
+    -- A call with NO fields is a pure read: it changes nothing, does not
+    -- re-provision and does not notify the runtime. A call with at least one
+    -- field (null counts as a field) is a write. Either way the reply is the
+    -- resulting config, with unset values reported as unset.
     --
     -- Both intervals are bound by the universal feed-cadence floor
     -- (core.allium: "Interval literals", CLAIM 2), rejected with a -32602
@@ -765,16 +766,30 @@ rule SetManagedFeedConfigViaMcp {
     ensures:
         if cve_interval_secs != omitted: config.cve_feed_interval_secs = cve_interval_secs
 
-    -- After persisting, re-materialise the managed epic tree from the new
-    -- config.
-    ensures: ProvisionManagedEpics()
+    -- After persisting a write, re-materialise the managed epic tree from the
+    -- new config. A pure read skips this.
+    ensures:
+        if reviews_command != omitted or reviews_interval_secs != omitted
+           or cve_command != omitted or cve_interval_secs != omitted:
+            ProvisionManagedEpics()
+
+    ensures: ManagedFeedConfigRetrieved()
 
     @guidance
-        -- This is the only configuration path: persist the four settings, then
-        -- fire ProvisionManagedEpics and refresh the board. A call with no
-        -- fields is a harmless no-op that still re-provisions and reports the
-        -- current config. feed commands are not newline-validated (they are
-        -- shell scripts run via sh -c, matching feed_command on epics).
+        -- This is the only configuration path: persist the settings, then fire
+        -- ProvisionManagedEpics and refresh the board. Feed commands are not
+        -- newline-validated (they are shell scripts run via sh -c, matching
+        -- feed_command on epics).
+        --
+        -- Annotations. The tool's MCP hints can say only one thing, and the
+        -- no-argument call is a read while any other call is a write. The
+        -- declared access class is idempotent: readOnlyHint = false (honest
+        -- for the write path; a client must not auto-approve it as a read),
+        -- destructiveHint = false (a later call can set any value back) and
+        -- idempotentHint = true (repeating the same call leaves the same
+        -- state). Declaring read_only would be wrong for the write path, which
+        -- is the riskier error. The description says plainly that a call with
+        -- no arguments only reads.
 }
 
 rule ReparentEpicFromTui {
@@ -1271,7 +1286,7 @@ rule ProvisionManagedEpics {
     -- Idempotently materialises the managed feed epic tree from the
     -- config surface above. Fires on TUI startup, reading the current
     -- reviews/CVE feed configuration, AND whenever the config is saved via
-    -- SetManagedFeedConfigViaMcp. Running it repeatedly converges on the same
+    -- ManagedFeedConfigViaMcp. Running it repeatedly converges on the same
     -- tree without creating duplicates: every managed epic is matched by the PAIR
     -- (feed_role, expected parent) — NEVER by title, so a user who renames
     -- any managed epic keeps that rename across re-runs. The parent half of
@@ -1386,7 +1401,7 @@ rule ProvisionManagedEpics {
         -- never written for an existing epic. A managed epic the user
         -- deleted (epics.allium: DeleteEpic) is absent, so the next run
         -- creates it again for as long as its command is configured. The
-        -- opt-out is clearing the command via set_managed_feed_config, not
+        -- opt-out is clearing the command via managed_feed_config, not
         -- deleting the epic: there is no longer an archived state for a
         -- deleted managed epic to linger in as a "do not resurrect" marker.
         -- A re-provisioned epic starts with no RetiredFeedItems — its

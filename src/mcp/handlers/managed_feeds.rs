@@ -12,7 +12,7 @@ use super::types::{
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetManagedFeedConfigArgs {
+pub(super) struct ManagedFeedConfigArgs {
     #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub(super) reviews_command: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_nullable_flexible_i64")]
@@ -21,6 +21,16 @@ pub(super) struct SetManagedFeedConfigArgs {
     pub(super) cve_command: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_nullable_flexible_i64")]
     pub(super) cve_interval_secs: Option<Option<i64>>,
+}
+
+impl ManagedFeedConfigArgs {
+    /// True when no field was supplied (an explicit `null` counts as supplied).
+    fn is_read(&self) -> bool {
+        self.reviews_command.is_none()
+            && self.reviews_interval_secs.is_none()
+            && self.cve_command.is_none()
+            && self.cve_interval_secs.is_none()
+    }
 }
 
 fn fmt_opt_str(v: Option<&str>) -> String {
@@ -56,33 +66,33 @@ async fn config_summary(state: &McpState, heading: &str) -> anyhow::Result<Strin
     ))
 }
 
-pub(super) async fn handle_get_managed_feed_config(
-    state: &McpState,
-    id: Option<Value>,
-    _identity: &CallerIdentity,
-    _args: Value,
-) -> JsonRpcResponse {
-    tracing::info!("MCP get_managed_feed_config");
-    match config_summary(state, "Managed-feed config:").await {
-        Ok(text) => JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]})),
-        Err(e) => service_err_to_response(
-            id,
-            ServiceError::Internal(e.context("failed to read managed feed config")),
-        ),
-    }
-}
-
-pub(super) async fn handle_set_managed_feed_config(
+/// Read or write the managed-feed config. A call with no fields is a pure read
+/// (no provisioning, no notification); any field makes it a write. Both reply
+/// with the resulting config. See `ManagedFeedConfigViaMcp` in
+/// `docs/specs/epics.allium`.
+pub(super) async fn handle_managed_feed_config(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
-    let parsed = match parse_args::<SetManagedFeedConfigArgs>(&id, args) {
+    let parsed = match parse_args::<ManagedFeedConfigArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!("MCP set_managed_feed_config");
+    tracing::info!("MCP managed_feed_config");
+
+    if parsed.is_read() {
+        return match config_summary(state, "Managed-feed config:").await {
+            Ok(text) => {
+                JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
+            }
+            Err(e) => service_err_to_response(
+                id,
+                ServiceError::Internal(e.context("failed to read managed feed config")),
+            ),
+        };
+    }
 
     // Interval validation is NOT done here. The floor is a domain invariant of
     // the field rather than a property of this entry point, so it lives in the
