@@ -1,0 +1,101 @@
+<title>Board Graph</title>
+<style>
+:root{
+  /* layout: one node graph of the epic tree, work packages as brackets on the right */
+  --bg:#f6f7f9;--fg:#1c2330;--muted:#5d6878;--line:#d5dae2;--panel:#ffffff;
+  --backlog:#9aa5b5;--running:#2f7de1;--review:#d9892b;--done:#3f9d6b;--accent:#8a4fd1;
+  --font:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12161d;--fg:#e4e8ee;--muted:#93a0b2;--line:#2b3340;--panel:#1a202a;
+  --backlog:#6f7b8c;--running:#5b9cf0;--review:#e8a24d;--done:#55b985;--accent:#b88af0;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12161d;--fg:#e4e8ee;--muted:#93a0b2;--line:#2b3340;--panel:#1a202a;
+  --backlog:#6f7b8c;--running:#5b9cf0;--review:#e8a24d;--done:#55b985;--accent:#b88af0;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);padding-inline:16px;padding-block:20px}
+.wrap{max-width:1200px;margin:0 auto}
+h1{font-size:1.4rem;margin:0 0 4px}
+p.sub{color:var(--muted);margin:0 0 14px;max-width:75ch;line-height:1.5;font-size:.9rem}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.8rem;color:var(--muted);margin-bottom:10px;align-items:center}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}
+.legend label{display:flex;gap:5px;align-items:center;cursor:pointer}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px;overflow:auto;max-height:75vh;touch-action:pan-x pan-y;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.zoom{margin-left:auto;color:var(--muted)}
+svg.g{display:block;height:auto}
+svg text{fill:var(--fg);font-family:var(--font)}
+svg .m{fill:var(--muted)}
+#tip{position:fixed;pointer-events:none;background:var(--fg);color:var(--bg);font-size:.78rem;padding:5px 8px;border-radius:4px;display:none;z-index:5;max-width:260px}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<div class="wrap">
+<h1>Board graph</h1>
+<p class="sub" id="sub"></p>
+<div class="legend"><span><i style="background:var(--backlog)"></i>Backlog</span><span><i style="background:var(--running)"></i>Ongoing</span><span><i style="background:var(--done)"></i>Done</span><span><i style="background:none;border:2px solid var(--accent)"></i>Work package</span>
+<label><input type="checkbox" id="hideDone"> Hide finished epics</label><span class="zoom">Pinch to zoom</span></div>
+<div class="panel" id="view"></div>
+</div>
+<div id="tip"></div>
+<script>
+/* DATA is replaced by the refresh task. epics: parent=null for roots. t = own task counts by status.
+   packages: items are epic ids (task items carry their epic id in e). */
+const DATA = /*DATA*/{"generated":"example","epics":[],"packages":[]}/*END*/;
+const K=["b","r","v","d"],COL={b:"var(--backlog)",r:"var(--running)",v:"var(--review)",d:"var(--done)"};
+const NAMES={b:"backlog",r:"running",v:"review",d:"done"};
+const NS="http://www.w3.org/2000/svg";
+const tip=document.getElementById("tip");
+function el(t,a,p){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);p&&p.appendChild(e);return e}
+function showTip(e,txt){tip.style.display="block";tip.style.left=Math.min(e.clientX+12,innerWidth-270)+"px";tip.style.top=(e.clientY+12)+"px";tip.textContent=txt}
+function hideTip(){tip.style.display="none"}
+function build(){
+  const by=new Map();DATA.epics.forEach(e=>by.set(e.id,{...e,kids:[],own:{b:0,r:0,v:0,d:0,...(e.t||{})}}));
+  const root={id:0,name:"Board",kids:[],own:{b:0,r:0,v:0,d:0},isRoot:true};
+  by.forEach(n=>{(by.get(n.parent)||root).kids.push(n)});
+  (function sum(n){n.tot={...n.own};n.kids.forEach(c=>{sum(c);K.forEach(k=>n.tot[k]+=c.tot[k])});n.size=K.reduce((a,k)=>a+n.tot[k],0);n.open=n.size-n.tot.d;n.finished=n.open===0;})(root);
+  const cnt={};by.forEach(n=>cnt[n.name]=(cnt[n.name]||0)+1);
+  by.forEach(n=>{const par=by.get(n.parent);n.label=cnt[n.name]>1&&par?`${n.name} · ${par.name}`:n.name});
+  return {root,by};
+}
+let zoom=1;
+function draw(){
+  const {root,by}=build(),host=document.getElementById("view");host.innerHTML="";
+  const hide=document.getElementById("hideDone").checked;
+  const vis=n=>!(hide&&n.finished&&!n.isRoot);
+  const rowH=24,colW=170;let leaves=0;const order=[];
+  (function pos(n,d){n.d=d;const ks=n.kids.filter(vis);order.push(n);
+    if(!ks.length){n.y=leaves++*rowH}else{ks.forEach(c=>pos(c,d+1));n.y=(ks[0].y+ks[ks.length-1].y)/2}})(root,0);
+  const maxd=Math.max(...order.map(n=>n.d));
+  const pk=DATA.packages.map(p=>({...p,nodes:p.items.map(i=>by.get(i)).filter(n=>n&&vis(n)&&order.includes(n))})).filter(p=>p.nodes.length);
+  const treeW=(maxd+1)*colW+240,W=treeW+pk.length*22+140,H=Math.max(leaves,1)*rowH+30;
+  const svg=el("svg",{viewBox:`0 0 ${W} ${H}`,class:"g",style:`width:${zoom*100}%`,role:"img","aria-label":"Epic tree with work package links"},host);
+  const X=n=>20+n.d*colW,Y=n=>n.y+16;
+  order.forEach(n=>n.kids.filter(vis).forEach(c=>el("path",{d:`M${X(n)},${Y(n)} C${X(n)+colW/2},${Y(n)} ${X(c)-colW/2},${Y(c)} ${X(c)},${Y(c)}`,fill:"none",stroke:"var(--line)","stroke-width":1.5},svg)));
+  // work package brackets on the right
+  pk.forEach((p,i)=>{const bx=treeW+i*22,ys=p.nodes.map(Y),y0=Math.min(...ys),y1=Math.max(...ys);
+    const g=el("g",{},svg);
+    el("path",{d:`M${bx},${y0-6} V${y1+6}`,stroke:"var(--accent)","stroke-width":2.5,"stroke-linecap":"round"},g);
+    p.nodes.forEach(n=>el("path",{d:`M${X(n)+8},${Y(n)} H${bx}`,stroke:"var(--accent)","stroke-width":1,"stroke-dasharray":"2 4",opacity:.7},g));
+    const t=el("text",{x:bx+6,y:y0-8,"font-size":11,"font-weight":600,transform:`rotate(0)`},g);t.style.fill="var(--accent)";t.textContent=p.title;
+    g.addEventListener("mousemove",e=>showTip(e,`Work package #${p.id}: ${p.title} (${p.nodes.length} linked)`));g.addEventListener("mouseleave",hideTip)});
+  order.forEach(n=>{
+    const r=n.isRoot?5:3+Math.min(Math.sqrt(n.open)*1.3,11),g=el("g",{},svg);
+    const mixk=n.finished?"d":(n.tot.r||n.tot.v||n.tot.d?"r":"b"),done=n.size?n.tot.d/n.size:0;
+    el("circle",{cx:X(n),cy:Y(n),r,fill:COL[mixk],opacity:n.finished?.55:1,stroke:"var(--bg)","stroke-width":2},g);
+    if(n.open&&done>0)el("circle",{cx:X(n),cy:Y(n),r:r+3,fill:"none",stroke:"var(--done)","stroke-width":2,"stroke-dasharray":`${2*Math.PI*(r+3)*done} 999`,transform:`rotate(-90 ${X(n)} ${Y(n)})`},g);
+    if(!n.isRoot){const t=el("text",{x:X(n)+r+6,y:Y(n)+4,"font-size":12},g);t.textContent=`${n.label}  ${n.tot.d}/${n.size}`}
+    g.addEventListener("mousemove",e=>showTip(e,`${n.name}${n.id?" #"+n.id:""}: ${n.size} tasks, `+K.map(k=>n.tot[k]+" "+NAMES[k]).join(", ")));g.addEventListener("mouseleave",hideTip)});
+  document.getElementById("sub").textContent=`Epics are nodes, sized by open tasks and coloured backlog (nothing started), ongoing (some work started or finished) or done (all finished). The green ring is the share done. Purple brackets on the right join the epics of one work package. Generated ${DATA.generated}: ${root.size} tasks, ${DATA.epics.length} epics, ${DATA.packages.length} work packages.`;
+}
+document.getElementById("hideDone").onchange=draw;
+const view=document.getElementById("view");
+function zset(z,px,py){const fx=(view.scrollLeft+px)/view.scrollWidth,fy=(view.scrollTop+py)/view.scrollHeight;
+  zoom=Math.min(Math.max(z,1),12);view.querySelector("svg").style.width=zoom*100+"%";
+  view.scrollLeft=fx*view.scrollWidth-px;view.scrollTop=fy*view.scrollHeight-py}
+let p0=null;
+const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
+const mid=t=>{const r=view.getBoundingClientRect();return[(t[0].clientX+t[1].clientX)/2-r.left,(t[0].clientY+t[1].clientY)/2-r.top]};
+view.addEventListener("touchstart",e=>{if(e.touches.length===2){p0={d:dist(e.touches),z:zoom}}else{p0=null}},{passive:true});
+view.addEventListener("touchmove",e=>{if(p0&&e.touches.length===2){e.preventDefault();const[x,y]=mid(e.touches);zset(p0.z*dist(e.touches)/p0.d,x,y)}},{passive:false});
+view.addEventListener("touchend",()=>{p0=null});
+view.addEventListener("wheel",e=>{if(e.ctrlKey){e.preventDefault();const r=view.getBoundingClientRect();zset(zoom*Math.exp(-e.deltaY*0.01),e.clientX-r.left,e.clientY-r.top)}},{passive:false});
+draw();
+</script>
