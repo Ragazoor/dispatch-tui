@@ -1501,7 +1501,7 @@ fn retro_admission_test_is_next_agent_benefit_not_doc_accuracy() {
     // how retro came to file 38 one-line doc chores. The bar is now
     // whether the *next* agent would do better, and each finding must
     // trace to a concrete moment this session actually lost time on.
-    let section = retro_section("## step 2:");
+    let section = retro_section("## what is worth changing");
     assert!(
         section.contains("would the next agent do better"),
         "retro's admission test must be whether the next agent benefits, \
@@ -1531,7 +1531,7 @@ fn retro_first_step_asks_whether_user_corrected_or_steered_you() {
     // notable" is a real answer. (The Step-1-to-Step-2 linkage is
     // asserted separately, by the "concrete moment" check in
     // `retro_admission_test_is_next_agent_benefit_not_doc_accuracy`.)
-    let section = retro_section("## step 1:");
+    let section = retro_section("## what to look for");
     assert!(
         section.contains("correct") && section.contains("steer"),
         "retro's first step must ask whether the user corrected or \
@@ -1550,7 +1550,7 @@ fn retro_first_step_scopes_out_self_discovered_gaps() {
     // that failed until the right invocation was found is a tooling
     // problem — neither is feedback from the user, so Step 1 must not
     // invite them back in as findings.
-    let section = retro_section("## step 1:");
+    let section = retro_section("## what to look for");
     assert!(
         section.contains("weed"),
         "retro's first step must route spec-code alignment to the weed \
@@ -1568,7 +1568,7 @@ fn retro_first_step_names_code_review_and_design_examples() {
     // Step 1's checklist must give the agent concrete shapes of user
     // feedback to look for, and must say this counts even when it cost
     // no time in the moment — design/style feedback rarely does.
-    let section = retro_section("## step 1:");
+    let section = retro_section("## what to look for");
     assert!(
         section.contains("code review"),
         "retro's first step must prompt for feedback given during a \
@@ -1612,7 +1612,7 @@ fn retro_skill_permits_fixing_small_context_drift_in_session() {
         "retro must no longer ban editing outright — fixing small context \
          drift in place is now its job"
     );
-    let section = retro_section("## step 3:");
+    let section = retro_section("## fix it or file it");
     assert!(
         section.contains("fix it yourself"),
         "retro must tell the agent to fix small context drift in this session"
@@ -1630,7 +1630,7 @@ fn retro_skill_forbids_speccing_unimplemented_behaviour() {
     // documentation catching up. One describing behaviour the code lacks is
     // a design change, and this repo runs those spec -> tests -> code with
     // their own dispatch — so retro must file it, not write it.
-    let section = retro_section("## step 3:");
+    let section = retro_section("## fix it or file it");
     assert!(
         section.contains("already implemented"),
         "retro may only edit a spec to describe behaviour this session \
@@ -1708,7 +1708,7 @@ fn retro_step_2_asks_whether_root_cause_is_outside_this_repo() {
     // Step 2 asked where the root cause actually lived, so this passed
     // retro's own rubric as closed. Step 2 must now ask that question for
     // every finding, in addition to the next-agent-benefit test.
-    let section = retro_section("## step 2:");
+    let section = retro_section("## what is worth changing");
     assert!(
         section.contains("root cause"),
         "retro's Step 2 must ask whether a finding's root cause lies \
