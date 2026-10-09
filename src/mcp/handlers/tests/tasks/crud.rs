@@ -121,9 +121,9 @@ async fn update_task_maps_every_advertised_field_to_params() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
+            "name": "update_tasks",
             "arguments": {
-                "task_id": task_id.0,
+                "task_ids": [task_id.0],
                 "status": "running",
                 "plan_path": "/plans/p.md",
                 "title": "new title",
@@ -183,8 +183,8 @@ async fn update_task_valid() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "running" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "running" }
         })),
     )
     .await;
@@ -204,8 +204,8 @@ async fn update_task_invalid_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "bogus" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "bogus" }
         })),
     )
     .await;
@@ -225,8 +225,8 @@ async fn update_task_rejects_archived_as_an_unknown_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "archived" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "archived" }
         })),
     )
     .await;
@@ -254,8 +254,8 @@ async fn update_task_done_marks_task_done_for_session_caller() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "done" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "done" }
         })),
     )
     .await;
@@ -294,8 +294,8 @@ async fn update_task_done_reclose_keeps_existing_completed_at() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "done" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "done" }
         })),
     )
     .await;
@@ -305,8 +305,8 @@ async fn update_task_done_reclose_keeps_existing_completed_at() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "done" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "done" }
         })),
     )
     .await;
@@ -331,8 +331,8 @@ async fn update_task_done_rejects_when_combined_with_other_fields() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "done", "title": "new title" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "done", "title": "new title" }
         })),
     )
     .await;
@@ -361,8 +361,8 @@ async fn update_task_done_rejects_when_combined_with_bare_url_type() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "done", "url_type": "pr" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "done", "url_type": "pr" }
         })),
     )
     .await;
@@ -387,9 +387,9 @@ async fn update_task_done_combined_with_url_reports_the_close_only_error_first()
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
+            "name": "update_tasks",
             "arguments": {
-                "task_id": task_id.0,
+                "task_ids": [task_id.0],
                 "status": "done",
                 "url": "https://github.com/acme/repo/pull/1"
             }
@@ -412,8 +412,8 @@ async fn update_task_done_rejects_dispatched_agent_closing_its_own_task() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "done" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "done" }
         })),
         CallerIdentity::Task(task_id),
     )
@@ -434,8 +434,8 @@ async fn update_task_done_allows_dispatched_agent_closing_a_different_task() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": other_task.0, "status": "done" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [other_task.0], "status": "done" }
         })),
         CallerIdentity::Task(caller_task),
     )
@@ -458,8 +458,8 @@ async fn update_task_done_unknown_task_errors() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": 9999, "status": "done" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [9999], "status": "done" }
         })),
     )
     .await;
@@ -481,8 +481,8 @@ async fn update_task_done_reachable_from_backlog_with_no_window_or_epic() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "done" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "done" }
         })),
     )
     .await;
@@ -507,8 +507,8 @@ async fn update_task_still_allows_other_statuses() {
             &state,
             "tools/call",
             Some(json!({
-                "name": "update_task",
-                "arguments": { "task_id": task_id.0, "status": status }
+                "name": "update_tasks",
+                "arguments": { "task_ids": [task_id.0], "status": status }
             })),
         )
         .await;
@@ -552,8 +552,8 @@ async fn update_task_done_rejection_does_not_block_leaving_done() {
             &state,
             "tools/call",
             Some(json!({
-                "name": "update_task",
-                "arguments": { "task_id": task_id.0, "status": status }
+                "name": "update_tasks",
+                "arguments": { "task_ids": [task_id.0], "status": status }
             })),
         )
         .await;
@@ -579,7 +579,7 @@ async fn update_task_missing_args() {
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "update_task", "arguments": {} })),
+        Some(json!({ "name": "update_tasks", "arguments": {} })),
     )
     .await;
     assert!(is_error(&resp));
@@ -766,8 +766,8 @@ async fn update_task_accepts_string_task_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0.to_string(), "status": "running" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0.to_string()], "status": "running" }
         })),
     )
     .await;

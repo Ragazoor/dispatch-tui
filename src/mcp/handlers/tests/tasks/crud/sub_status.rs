@@ -21,8 +21,8 @@ async fn update_task_sets_sub_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "sub_status": "needs_input" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "sub_status": "needs_input" }
         })),
     )
     .await;
@@ -54,8 +54,8 @@ async fn update_task_rejects_invalid_sub_status_for_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "sub_status": "approved" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "sub_status": "approved" }
         })),
     )
     .await;
@@ -79,8 +79,8 @@ async fn update_task_rejects_bogus_sub_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "sub_status": "bogus" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "sub_status": "bogus" }
         })),
     )
     .await;
@@ -105,8 +105,8 @@ async fn update_task_sub_status_with_status_change() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "review", "sub_status": "approved" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "review", "sub_status": "approved" }
         })),
     )
     .await;
@@ -136,8 +136,8 @@ async fn update_task_status_running_with_needs_input() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "running", "sub_status": "needs_input" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "running", "sub_status": "needs_input" }
         })),
     )
     .await;
@@ -166,8 +166,8 @@ async fn update_task_sub_status_invalid_for_new_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "review", "sub_status": "active" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "review", "sub_status": "active" }
         })),
     )
     .await;
@@ -256,8 +256,8 @@ async fn update_task_nonexistent_task_returns_error() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": 9999, "status": "running" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [9999], "status": "running" }
         })),
     )
     .await;
@@ -273,8 +273,8 @@ async fn update_task_invalid_tag() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "tag": "invalid_tag" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "tag": "invalid_tag" }
         })),
     )
     .await;
@@ -291,8 +291,8 @@ async fn update_task_valid_tag() {
             &state,
             "tools/call",
             Some(json!({
-                "name": "update_task",
-                "arguments": { "task_id": task_id.0, "tag": tag }
+                "name": "update_tasks",
+                "arguments": { "task_ids": [task_id.0], "tag": tag }
             })),
         )
         .await;
@@ -317,8 +317,8 @@ async fn update_task_rejects_epic_tag() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "tag": "epic" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "tag": "epic" }
         })),
     )
     .await;
@@ -342,8 +342,8 @@ async fn update_task_sets_epic_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "epic_id": epic.id.0 }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "epic_id": epic.id.0 }
         })),
     )
     .await;
@@ -367,8 +367,8 @@ async fn update_task_sort_order() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "sort_order": 42 }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "sort_order": 42 }
         })),
     )
     .await;

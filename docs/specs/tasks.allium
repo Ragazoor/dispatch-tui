@@ -158,7 +158,7 @@ rule CreateTask {
         -- MCP create_task tool. It defaults to false.
         -- Quick-dispatch (CreateQuickTask) does not offer it — a quick task is
         -- a one-off by construction, and the agent can set the flag through
-        -- update_task once it knows what the work is. Quick-dispatch offers no
+        -- update_tasks once it knows what the work is. Quick-dispatch offers no
         -- tag picker either, so there is nowhere for the p key to live.
         -- What the flag then does is PhoenixRespawn, below; setting it at
         -- creation has no effect until the task first reaches done.
@@ -183,7 +183,7 @@ rule SetWrapUpMode {
 
     @guidance
         -- Sets or clears the preferred wrap-up path on an existing task.
-        -- Exposed via MCP update_task(wrap_up_mode: "rebase"|"pr"|"done"|null)
+        -- Exposed via MCP update_tasks(wrap_up_mode: "rebase"|"pr"|"done"|null)
         -- and the task editor (WRAP_UP_MODE section).
         -- mode = null clears the preference; the next wrap-up will prompt
         -- the user to choose.
@@ -280,7 +280,7 @@ rule CreateQuickTask {
         -- When invoked from the epic view, epic_id is set to the
         -- current epic, linking the quick task as a subtask.
         -- The task title defaults to "Quick task"; the agent is expected
-        -- to rename the task via update_task once the user describes the
+        -- to rename the task via update_tasks once the user describes the
         -- goal. The quick-dispatch agent uses a dedicated prompt
         -- (build_quick_dispatch_prompt) that opens by asking the user what
         -- they want to achieve, and then names the same design step every
@@ -438,7 +438,7 @@ rule ConfirmDone {
         -- through, so it fires without each rule naming it. The other routes
         -- in: PrMerged and ExitSession's non-pr branch (both in
         -- pr-workflow.allium), close_session (mcp-task-tools.allium), the MCP
-        -- update_task tool, and a feed upsert whose item arrives with status
+        -- update_tasks tool, and a feed upsert whose item arrives with status
         -- done (feeds.allium). PrClosed (pr-workflow.allium) is NOT one of
         -- these — a closed PR no longer transitions the task into done.
         --
@@ -950,7 +950,7 @@ rule MoveTaskToEpic {
         -- on a task card (when `m` is pressed on an epic card it runs the
         -- epic ReparentEpic flow instead — see epics.allium). Operates on
         -- the single selected task. The epic-existence precondition is
-        -- enforced by the handler, so the MCP relink path (update_task with
+        -- enforced by the handler, so the MCP relink path (update_tasks with
         -- an epic_id, mcp-task-tools.allium) is held to it too.
         --
         -- A collapsible tree overlay lists only epics that are relevant
@@ -1263,7 +1263,7 @@ rule MoveTaskToEpic {
 -- provision_worktree — reaching the column through
 -- src/mcp/handlers/tasks/dispatch.rs or src/runtime/tasks.rs::exec_persist_task.
 -- No other surface can introduce one: CopyTask copies into a draft that has no
--- worktree field, the MCP update_task schema does not expose worktree, the feed
+-- worktree field, the MCP update_tasks schema does not expose worktree, the feed
 -- upsert omits the column, and no CLI subcommand writes it. A hand-edited
 -- database could fabricate two rows on one path; that is not a supported input.
 --
@@ -1844,7 +1844,7 @@ rule EditTask {
 -- refuses status=done outright, same as it always has):
 --   - wrap_up + exit_session (ExitSessionViaMcp, pr-workflow.allium): the
 --     agent's own explicit session-close, gated on an exit token.
---   - update_task's dedicated status="done" call (MarkTaskDoneViaMcp,
+--   - update_tasks' dedicated status="done" call (MarkTaskDoneViaMcp,
 --     mcp-task-tools.allium): a session caller, or a dispatched agent acting
 --     on a task OTHER than its own — never a dispatched agent closing
 --     itself, which must still go through the first path. No exit token;
@@ -1856,7 +1856,7 @@ rule EditTask {
 -- GitHub constitutes human confirmation via the code review process.
 
 -- DispatchMcpToolsAreTransparent: Dispatch MCP tool calls (get_task,
--- wrap_up, update_task, etc.) must not trigger automatic status
+-- wrap_up, update_tasks, etc.) must not trigger automatic status
 -- transitions. They are management operations, not implementation work.
 -- The PreToolUse hook filters them out before `dispatch hook` is even
 -- called. Non-MCP tools (Bash, Read, etc.) do reach the hook, but they

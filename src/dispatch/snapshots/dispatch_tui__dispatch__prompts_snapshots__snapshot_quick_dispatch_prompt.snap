@@ -9,13 +9,13 @@ Task:
   Title: Quick task
   Description: 
 
-This is a quick-dispatched task with a placeholder title. Start by asking the user what they want to achieve. Once you understand the goal, call `update_task` with a descriptive `title` (and optionally `description`) to rename the task on the kanban board.
+This is a quick-dispatched task with a placeholder title. Start by asking the user what they want to achieve. Once you understand the goal, call `update_tasks` with a descriptive `title` (and optionally `description`) to rename the task on the kanban board.
 
 Then, before making any changes:
 
 Design the solution spec-first: elicit the intended behaviour with `allium:elicit`, capture it in docs/specs/ with `allium:tend`, generate tests with `allium:propagate` and confirm they fail before you write any code, implement the minimum that makes them pass, then check spec and code agree with `allium:weed`.
 
-Writing a plan to docs/plans/ and attaching it with update_task is your judgement call, not a requirement — do it only if the implementation is big enough that its steps are worth recording.
+Writing a plan to docs/plans/ and attaching it with update_tasks is your judgement call, not a requirement — do it only if the implementation is big enough that its steps are worth recording.
 
 The spec is not the end of the task — implement it in this same session (or, for an epic-decomposition task, create work packages for its subtasks instead) and verify your work before wrapping up.
 

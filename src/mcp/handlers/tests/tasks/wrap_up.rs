@@ -917,8 +917,8 @@ async fn update_task_status_recalculates_epic_status() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "running" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "running" }
         })),
     )
     .await;
@@ -956,8 +956,8 @@ async fn update_task_sends_refresh_notification() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "running" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "running" }
         })),
     )
     .await;
@@ -1007,8 +1007,8 @@ async fn failed_update_does_not_send_notification() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "bogus" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "bogus" }
         })),
     )
     .await;

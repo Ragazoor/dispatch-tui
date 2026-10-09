@@ -244,11 +244,11 @@ use "./core.allium" as core
 -- not a gate.
 --
 -- The config-gated record_learning nudge is a separate behaviour on a separate
--- tool: an update_task call that performs PR finalisation (status = review plus a
+-- tool: an update_tasks call that performs PR finalisation (status = review plus a
 -- pr-typed url on a task that had no url) appends it when
 -- core/config.learning_reflection_enabled = true. See mcp-task-tools.allium:
 -- PrFinalisationReflectionNudge. Because the wrap_up → exit_session path mutates
--- status and url through the service layer rather than the update_task tool, that
+-- status and url through the service layer rather than the update_tasks tool, that
 -- nudge never appears in the normal wrap-up flow.
 
 ------------------------------------------------------------
@@ -432,7 +432,7 @@ rule WrapUpRateLearningNudge {
 -- exit_session(task, has_learnings?) reflect-then-close design is gone.)
 -- This file's concern is only the learning-related side effects around the
 -- wrap-up sequence: WrapUpRateLearningNudge above, the separate config-gated
--- record_learning nudge on update_task (mcp-task-tools.allium:
+-- record_learning nudge on update_tasks (mcp-task-tools.allium:
 -- PrFinalisationReflectionNudge), plus the injections described in Dispatch
 -- Prompt Augmentation.
 

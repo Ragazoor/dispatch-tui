@@ -335,11 +335,11 @@ rule ComposeAgentPrompt {
     @guarantee ThePromptNamesNoToolMerelyToSayItExists
         -- Dispatch's MCP tools reach the agent as real tool schemas, so prompt
         -- prose that lists them ("the dispatch MCP tools are available —
-        -- get_task, update_task") shadows that list: it states no fact the
+        -- get_task, update_tasks") shadows that list: it states no fact the
         -- schema lacks, and it goes stale the moment the tool set changes,
         -- with nothing checking it. A tool is named in a prompt only where the
         -- prompt asks for a SPECIFIC call the schema cannot imply — quick
-        -- dispatch naming update_task for the rename off its placeholder
+        -- dispatch naming update_tasks for the rename off its placeholder
         -- title. What a tool does belongs in that tool's own description; see
         -- the tool-description standard at the head of mcp-task-tools.allium.
         --
@@ -559,7 +559,7 @@ rule NameTheDesignStep {
         -- paraphrases it can only drift from it.
         --
         -- What the two branches say identically: writing a docs/plans/ doc
-        -- and attaching it via update_task is the agent's judgement call,
+        -- and attaching it via update_tasks is the agent's judgement call,
         -- not a requirement; and the design step is explicitly not the end
         -- of the task — implementation must follow in the same session,
         -- except for an epic-decomposition task, for which creating work
@@ -655,7 +655,7 @@ rule NameTheDesignStep {
         -- steps share (DesignStepMatchesTheReposSpecs): the design step is not
         -- the end of the task — implementation follows in the same session,
         -- except that an epic-decomposition task creates work packages for its
-        -- subtasks instead — and a docs/plans/ doc attached via update_task is
+        -- subtasks instead — and a docs/plans/ doc attached via update_tasks is
         -- the agent's judgement call, not a requirement.
 
     @guidance
@@ -1080,11 +1080,11 @@ rule RenderDependencyBumpRunbook {
         --
         --   - external_id alone says only that SOME feed created the task.
         --     The CVE feed sets one too, and lists alerts by repo rather than
-        --     PRs by author. Its task carries tag fix, but `update_task` will
+        --     PRs by author. Its task carries tag fix, but `update_tasks` will
         --     retag anything dependabot with no is_review guard, so the tag is
         --     not proof of which feed produced the row.
         --   - a pr-typed url alone says only that someone recorded a PR.
-        --     `update_task` takes a url and the dependabot tag together, so a
+        --     `update_tasks` takes a url and the dependabot tag together, so a
         --     hand-created task can carry one with no feed involved.
         --
         -- The two are decided by ONE branch, not two agreeing ones. The
@@ -1104,7 +1104,7 @@ rule RenderDependencyBumpRunbook {
         --
         -- AReviewTaggedFeedItemNamesItsPr in feeds.allium is the other half of
         -- the pair, and it constrains the emitted FeedItem, NOT the persisted
-        -- row: on-conflict url preservation and `update_task` can both leave a
+        -- row: on-conflict url preservation and `update_tasks` can both leave a
         -- feed-created review task without a pr url later. That is why the
         -- prompt gate re-reads the task's url rather than trusting the
         -- emission rule to have held.

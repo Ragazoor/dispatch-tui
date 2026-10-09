@@ -9,5 +9,5 @@ This is a Dependabot PR review, not a code-edit task: do not edit files or write
 
 {{MERGE}}ASK THE USER:
    - Write one direct question that says why you did not approve, with whatever the human needs to decide: the Bump line above, and the CI or changelog findings where they matter. If Kognic's GitHub App `kognic-github-app` blocked the merge, name its verdict.
-   - Call update_task(task_id={{TASK_ID}}, sub_status="needs_input") to flag the task on the kanban board.
+   - Call update_tasks(task_ids=[{{TASK_ID}}], sub_status="needs_input") to flag the task on the kanban board.
    - Stop and wait for the user's reply; the task stays open for them.

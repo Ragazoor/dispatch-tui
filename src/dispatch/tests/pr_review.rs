@@ -1402,7 +1402,7 @@ fn quick_dispatch_sends_rename_prompt() {
         "prompt should mention placeholder title"
     );
     assert!(
-        prompt.contains("update_task"),
-        "prompt should mention update_task for rename"
+        prompt.contains("update_tasks"),
+        "prompt should mention update_tasks for rename"
     );
 }

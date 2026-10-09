@@ -900,7 +900,7 @@ rule AutoDispatchNextSubtask {
         -- rebases onto base_branch server-side, action = pr records the PR the
         -- work landed in, action = done is the caller stating the task needed
         -- neither. All three chain. What does NOT chain is any other route
-        -- into Done — update_task(status = "done") (MarkTaskDoneViaMcp in
+        -- into Done — update_tasks(status = "done") (MarkTaskDoneViaMcp in
         -- mcp-task-tools.allium) and moving a card to Done in the TUI both
         -- close the task without emitting SessionClosed, because neither has a
         -- wrap_up behind it and so neither can say anything about base_branch.

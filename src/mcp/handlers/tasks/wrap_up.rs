@@ -204,7 +204,7 @@ pub(crate) async fn handle_wrap_up(
 /// What applying a [`CloseSessionOutcome`](crate::service::CloseSessionOutcome) made of the close, once
 /// [`perform_close`] has taken care of the tmux teardown. Callers still shape
 /// their own response text from this — wording differs between `exit_session`
-/// (which always had a live window, per its own precondition) and update_task's
+/// (which always had a live window, per its own precondition) and update_tasks's
 /// dedicated `status="done"` path (which may not) — but neither re-derives the
 /// mechanics themselves.
 pub(super) enum ClosePathOutcome {
@@ -225,7 +225,7 @@ pub(super) enum ClosePathOutcome {
 /// status/window fields are not read after this point — the close's own
 /// return value is authoritative.
 ///
-/// Shared by `handle_exit_session` (below) and update_task's dedicated
+/// Shared by `handle_exit_session` (below) and update_tasks's dedicated
 /// `status="done"` handler (`MarkTaskDoneViaMcp`, mcp-task-tools.allium) —
 /// see that rule's `@guidance` for why a second copy of this sequence is
 /// exactly the hazard worth avoiding here.

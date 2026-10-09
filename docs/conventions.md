@@ -158,7 +158,7 @@ use a free function with an explicit `<'a>` — as `with_status_transition` in
 `UpdateTaskParams::updated_field_names` (`src/service/tasks/params.rs`) and
 `UpdateEpicParams::updated_field_names` (`src/service/epics.rs`) use the identical exhaustive
 destructuring, and for a load-bearing reason: `has_any_field()` is defined as
-`!updated_field_names().is_empty()`, and both `update_task` and `update_epic` reject the whole
+`!updated_field_names().is_empty()`, and both `update_tasks` and `update_epic` reject the whole
 request with `"At least one field must be provided"` when it returns false. Omit one entry and
 an update that sets *only* that field is refused — with a message saying the opposite of what
 happened. Adding a field without naming it in the pattern is a compile error; naming it without

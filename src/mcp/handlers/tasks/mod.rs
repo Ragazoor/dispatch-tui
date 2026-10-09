@@ -24,8 +24,7 @@ mod watch;
 mod wrap_up;
 
 pub(super) use crud::{
-    handle_create_task, handle_get_task, handle_list_tasks, handle_query_usage, handle_update_task,
-    handle_update_tasks,
+    handle_create_task, handle_get_task, handle_list_tasks, handle_query_usage, handle_update_tasks,
 };
 pub(super) use dispatch::handle_dispatch_task;
 pub(super) use verify::handle_set_verify_command;
@@ -37,10 +36,10 @@ pub(super) use wrap_up::{handle_exit_session, handle_wrap_up};
 // ---------------------------------------------------------------------------
 
 mcp_args! {
-    /// Arguments for the `update_task` MCP tool.
+    /// Arguments for one task of the `update_tasks` MCP tool (the handler adds `task_id` per id).
     ///
     /// The task-field set is declared exactly once, here: the struct, the
-    /// tool's JSON input schema (`update_task_schema`, wired into `mcp_tools!`)
+    /// tool's JSON input schema (`update_task_schema`, the base of `update_tasks_schema`)
     /// and the arg→[`UpdateTaskParams`] mapping (`apply_to_params`) all expand
     /// from this list. Adding a field means adding one line.
     ///
@@ -157,8 +156,8 @@ mcp_args! {
     };
 }
 
-/// The `update_tasks` input schema: `update_task`'s, with `task_ids` in place
-/// of `task_id`, so the two field sets cannot drift apart.
+/// The `update_tasks` input schema: `UpdateTaskArgs`' fields, with `task_ids` in place
+/// of `task_id`, so the field set is declared once.
 pub(super) fn update_tasks_schema() -> serde_json::Value {
     let mut schema = update_task_schema();
     if let Some(props) = schema["properties"].as_object_mut() {

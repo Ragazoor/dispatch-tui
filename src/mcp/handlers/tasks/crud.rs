@@ -14,7 +14,7 @@ use super::{
     JsonRpcResponse, ListTasksArgs, QueryUsageArgs, StatusFilter, UpdateTaskArgs, INVALID_PARAMS,
 };
 
-pub(crate) async fn handle_update_task(
+async fn handle_update_task(
     state: &McpState,
     id: Option<Value>,
     identity: &CallerIdentity,
@@ -25,7 +25,7 @@ pub(crate) async fn handle_update_task(
         Err(resp) => return resp,
     };
     let task_id = parsed.task_id;
-    tracing::info!(task_id = task_id.0, status = ?parsed.status, "MCP update_task");
+    tracing::info!(task_id = task_id.0, status = ?parsed.status, "MCP update_tasks (one task)");
 
     // status="done" is a dedicated close-only path (MarkTaskDoneViaMcp,
     // mcp-task-tools.allium). Checked FIRST, against the raw parsed args —
@@ -90,9 +90,11 @@ pub(crate) async fn handle_update_task(
 // update_tasks
 // ---------------------------------------------------------------------------
 
-/// `update_tasks`: `update_task` applied to each of `task_ids` in turn, with
-/// the same field set, reported per task. Not atomic — a failure on one task
-/// neither stops nor rolls back the others. See `UpdateTasksViaMcp` in
+/// `update_tasks`, the one MCP update tool: [`handle_update_task`] applied to
+/// each of `task_ids` in turn, with the same field set. With several ids the
+/// reply is per task and the call is not atomic — a failure on one task
+/// neither stops nor rolls back the others. With exactly one id the reply is
+/// the single-task reply, errors included. See `UpdateTasksViaMcp` in
 /// `docs/specs/mcp-task-tools.allium`.
 pub(crate) async fn handle_update_tasks(
     state: &McpState,
@@ -156,6 +158,11 @@ pub(crate) async fn handle_update_tasks(
         return resp;
     }
     tracing::info!(count = task_ids.len(), "MCP update_tasks");
+
+    if let [only] = task_ids[..] {
+        fields.insert("task_id".into(), json!(only.0));
+        return handle_update_task(state, id, identity, Value::Object(fields)).await;
+    }
 
     let mut lines = Vec::with_capacity(task_ids.len() + 1);
     let mut updated = 0;
@@ -237,7 +244,7 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
     .collect()
 }
 
-/// `update_task(status="done")`: a dedicated close-only call — see
+/// `update_tasks(status="done")`: a dedicated close-only call — see
 /// `MarkTaskDoneViaMcp` (docs/specs/mcp-task-tools.allium). Reachable for a
 /// session caller or a dispatched agent acting on a task other than its own;
 /// never for a dispatched agent closing itself (that stays wrap_up +
@@ -271,7 +278,7 @@ async fn handle_mark_task_done(
         return service_err_to_response(
             id,
             ServiceError::Validation(
-                "Cannot mark your own task done via update_task — call wrap_up then exit_session instead."
+                "Cannot mark your own task done via update_tasks — call wrap_up then exit_session instead."
                     .into(),
             ),
         );

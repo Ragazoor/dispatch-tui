@@ -92,7 +92,7 @@ mod tests {
     #[tokio::test]
     async fn append_creates_file_with_valid_json_line() {
         let dir = tempdir().unwrap();
-        let entry = make_entry("update_task");
+        let entry = make_entry("update_tasks");
         append_entry(dir.path(), &entry).await;
         let content =
             tokio::fs::read_to_string(dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"))
@@ -102,7 +102,7 @@ mod tests {
         let parsed: Value = serde_json::from_str(content.trim()).unwrap();
         assert_eq!(parsed["schema_version"], "1.0.0");
         assert_eq!(parsed["task_id"], 42);
-        assert_eq!(parsed["method"], "update_task");
+        assert_eq!(parsed["method"], "update_tasks");
         assert_eq!(parsed["duration_ms"], 10);
     }
 

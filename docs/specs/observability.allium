@@ -57,7 +57,7 @@ value TrajectoryEntry {
     schema_version: String     -- semver string, e.g. "1.0.0"
     timestamp:      Timestamp  -- UTC, RFC 3339
     task_id:        String     -- stringified Task.id of the caller
-    method:         String     -- MCP tool name (e.g. "update_task")
+    method:         String     -- MCP tool name (e.g. "update_tasks")
     args:           String     -- full tool arguments as received, JSON-encoded
     result:         String     -- response payload on success (JSON-encoded);
                                -- on failure, the JSON object {"error": "<msg>"}
@@ -170,7 +170,7 @@ rule TrajectoryAppend {
         -- the parent directory is auto-created so there is no noop-on-missing-
         -- dir behaviour.
         -- Implementation lives behind the MCP handler dispatch boundary so
-        -- that every tool call (create_task, update_task, query_learnings,
+        -- that every tool call (create_task, update_tasks, query_learnings,
         -- record_learning, query_usage, watch_task, dispatch_task,
         -- list_tasks, list_epics, …) is captured uniformly. A native
         -- SendMessage call between agents never reaches this boundary at

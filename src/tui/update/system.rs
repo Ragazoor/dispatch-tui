@@ -78,7 +78,7 @@ impl App {
                     // Quick dispatch runs no tag picker, so there is nowhere
                     // for the p key that arms phoenix to live — and a quick
                     // task is a one-off by construction anyway. The agent can
-                    // arm the flag through update_task once it knows the work.
+                    // arm the flag through update_tasks once it knows the work.
                     phoenix: false,
                 },
                 epic_id,

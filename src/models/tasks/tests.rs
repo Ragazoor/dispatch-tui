@@ -249,7 +249,7 @@ mod wrap_up_mode_tests {
         }
     }
 
-    /// `WrapUpMode::ALL` backs the create_task/update_task MCP schema's
+    /// `WrapUpMode::ALL` backs the create_task/update_tasks MCP schema's
     /// wrap_up_mode enum (dispatch.rs) — a variant added there without
     /// updating `ALL` would silently under-advertise it.
     #[test]

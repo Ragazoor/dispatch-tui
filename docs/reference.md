@@ -184,7 +184,7 @@ reports whatever the local refs say. A repository that cannot be measured shows
 `repo sync` attempts every target and exits non-zero if any of them failed.
 
 Tasks are created and mutated via the MCP tools (`create_task`,
-`update_task`) — there is no CLI subcommand for creating, listing or
+`update_tasks`) — there is no CLI subcommand for creating, listing or
 updating a task.
 
 ## Configuration

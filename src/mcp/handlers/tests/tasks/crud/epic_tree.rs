@@ -349,13 +349,13 @@ async fn update_tasks_handles_a_repeated_id_once() {
     .await;
     let text = extract_response_text(&resp);
 
-    assert_eq!(text.lines().count(), 2, "{text}");
-    assert!(text.ends_with("Updated 1 of 1 tasks."), "{text}");
+    assert_eq!(text, format!("Task {id} updated (title)"));
 }
 
 #[tokio::test]
-async fn update_tasks_applies_update_task_guards_per_task() {
-    // status=done must be the only field set — the same guard update_task has.
+async fn update_tasks_applies_the_done_guard_to_a_single_id_as_an_error() {
+    // status=done must be the only field set. With one id the failure is a
+    // real error response, not a "failed:" line inside a success.
     let state = test_state().await;
     let id = make_task(&state, "a", None, TaskStatus::Review, "main").await;
 
@@ -365,14 +365,82 @@ async fn update_tasks_applies_update_task_guards_per_task() {
         json!({ "task_ids": [id.0], "status": "done", "title": "x" }),
     )
     .await;
-    let text = extract_response_text(&resp);
 
-    assert!(text.contains(&format!("Task {id} failed: ")), "{text}");
-    assert!(text.contains("only field set"), "{text}");
+    assert_error(&resp, "only field set");
     assert_eq!(
         state.db.get_task(id).await.unwrap().status,
         TaskStatus::Review
     );
+}
+
+#[tokio::test]
+async fn update_tasks_applies_the_done_guard_per_task_with_several_ids() {
+    let state = test_state().await;
+    let a = make_task(&state, "a", None, TaskStatus::Review, "main").await;
+    let b = make_task(&state, "b", None, TaskStatus::Review, "main").await;
+
+    let resp = tool(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [a.0, b.0], "status": "done", "title": "x" }),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+
+    assert!(text.contains(&format!("Task {a} failed: ")), "{text}");
+    assert!(text.contains("only field set"), "{text}");
+    assert!(text.ends_with("Updated 0 of 2 tasks."), "{text}");
+}
+
+/// UpdateTasksViaMcp: with one id the reply is the single-task line, with no
+/// count trailer.
+#[tokio::test]
+async fn update_tasks_with_one_id_replies_with_the_single_task_line() {
+    let state = test_state().await;
+    let id = make_task(&state, "a", None, TaskStatus::Backlog, "main").await;
+
+    let resp = tool(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [id.0], "base_branch": "master" }),
+    )
+    .await;
+
+    assert!(!is_error(&resp), "{:?}", resp.result);
+    assert_eq!(
+        extract_response_text(&resp),
+        format!("Task {id} updated (base_branch)")
+    );
+}
+
+/// UpdateTasksViaMcp: with one id a failure is an error response, so a caller
+/// that checks for errors sees it.
+#[tokio::test]
+async fn update_tasks_with_one_unknown_id_is_an_error() {
+    let state = test_state().await;
+
+    let resp = tool(
+        &state,
+        "update_tasks",
+        json!({ "task_ids": [9999], "base_branch": "master" }),
+    )
+    .await;
+
+    assert!(is_error(&resp), "{:?}", resp.result);
+    assert!(!extract_response_text(&resp).contains("failed:"));
+}
+
+/// UpdateTasksViaMcp: update_task is gone — one tool updates tasks.
+#[tokio::test]
+async fn update_task_is_not_a_tool() {
+    let state = test_state().await;
+    let resp = call(&state, "tools/list", None).await;
+    let tools = resp.result.unwrap()["tools"].clone();
+    assert!(tools
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|t| t["name"] != "update_task"));
 }
 
 #[tokio::test]
@@ -412,42 +480,35 @@ async fn update_tasks_rejects_task_id() {
     assert_eq!(state.db.get_task(id).await.unwrap().title, "a");
 }
 
-/// update_tasks advertises exactly update_task's field set, with task_ids in
-/// place of task_id, so the two never drift apart.
+/// update_tasks advertises every field `UpdateTaskArgs` accepts, with task_ids
+/// selecting the tasks and no task_id.
 #[tokio::test]
-async fn update_tasks_schema_is_update_tasks_fields_with_task_ids() {
+async fn update_tasks_schema_is_update_task_args_with_task_ids() {
     let state = test_state().await;
     let resp = call(&state, "tools/list", None).await;
     let tools = resp.result.unwrap()["tools"].clone();
-    let schema = |name: &str| {
-        tools
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|t| t["name"] == name)
-            .unwrap_or_else(|| panic!("{name} not listed"))["inputSchema"]
-            .clone()
-    };
-    let keys = |s: &Value| {
-        let mut k: Vec<String> = s["properties"]
-            .as_object()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect();
-        k.sort();
-        k
-    };
-
-    let single = schema("update_task");
-    let bulk = schema("update_tasks");
-    let mut expected: Vec<String> = keys(&single)
-        .into_iter()
-        .filter(|k| k != "task_id")
+    let bulk = tools
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "update_tasks")
+        .expect("update_tasks not listed")["inputSchema"]
+        .clone();
+    let mut keys: Vec<String> = bulk["properties"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    keys.sort();
+    let mut expected: Vec<String> = crate::mcp::handlers::tasks::UpdateTaskArgs::FIELD_NAMES
+        .iter()
+        .filter(|k| **k != "task_id")
+        .map(|k| k.to_string())
         .chain(std::iter::once("task_ids".to_string()))
         .collect();
     expected.sort();
 
-    assert_eq!(keys(&bulk), expected);
+    assert_eq!(keys, expected);
     assert_eq!(bulk["required"], json!(["task_ids"]));
 }

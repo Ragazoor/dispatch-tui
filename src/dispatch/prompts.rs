@@ -239,7 +239,7 @@ pub(super) fn tdd_instruction() -> &'static str {
 }
 
 // There is deliberately no "the dispatch MCP tools are available (get_task,
-// update_task)" line here any more. Both tools reach the agent as real tool
+// update_tasks)" line here any more. Both tools reach the agent as real tool
 // schemas, and naming them again in prompt prose shadows that list: it states
 // no fact the schema lacks, and it goes stale the moment the tool set changes.
 // `get_task`'s own description now carries what the prose was standing in for —
@@ -294,7 +294,7 @@ capture it in docs/specs/ with `allium:tend`, generate tests with `allium:propag
 confirm they fail before you write any code, implement the minimum that makes them pass, then \
 check spec and code agree with `allium:weed`.\n\
 \n\
-Writing a plan to docs/plans/ and attaching it with update_task is your judgement call, \
+Writing a plan to docs/plans/ and attaching it with update_tasks is your judgement call, \
 not a requirement — do it only if the implementation is big enough that its steps are \
 worth recording.\n\
 \n\
@@ -321,7 +321,7 @@ pub(super) fn brainstorm_instruction() -> &'static str {
     "Design the solution with the `superpowers:brainstorming` skill before you write any \
 code. This repo has no Allium specs, so brainstorming is the design step.\n\
 \n\
-Writing a plan to docs/plans/ and attaching it with update_task is your judgement call, \
+Writing a plan to docs/plans/ and attaching it with update_tasks is your judgement call, \
 not a requirement — do it only if the implementation is big enough that its steps are \
 worth recording.\n\
 \n\
@@ -887,7 +887,7 @@ repo too, so none of them need `--repo`."
         None => (
             format!(
                 "PR: not recorded on this task. Find its URL in the task description, then call \
-update_task(task_id={task_id_str}, url=<URL>, url_type=\"pr\") before going on."
+update_tasks(task_ids=[{task_id_str}], url=<URL>, url_type=\"pr\") before going on."
             ),
             String::new(),
         ),
@@ -918,7 +918,7 @@ pub(super) fn build_quick_dispatch_prompt(
     let is_cve = is_cve_task(ctx.tag, epic);
     let addendum = format!(
         "This is a quick-dispatched task with a placeholder title. Start by asking the user \
-what they want to achieve. Once you understand the goal, call `update_task` with a \
+what they want to achieve. Once you understand the goal, call `update_tasks` with a \
 descriptive `title` (and optionally `description`) to rename the task on the kanban board.\n\
 \n\
 Then, before making any changes:\n\
@@ -1017,7 +1017,7 @@ pub struct PromptContext<'a> {
     ///
     /// Read only by the dependabot runbook, to decide whether to tell the
     /// agent the PR author was already filtered. Deliberately NOT derived from
-    /// `pr_url`: `update_task` takes a url and the dependabot tag together, so
+    /// `pr_url`: `update_tasks` takes a url and the dependabot tag together, so
     /// a hand-created task can carry a PR without any feed having filtered
     /// anything. See `AReviewRunbookCarriesOnlyTheBranchThatApplies` in
     /// `docs/specs/dispatch-prompt.allium`.

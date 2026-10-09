@@ -109,9 +109,9 @@ async fn update_task_with_base_branch_updates_it() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
+            "name": "update_tasks",
             "arguments": {
-                "task_id": task_id.0,
+                "task_ids": [task_id.0],
                 "base_branch": "release/2.0"
             }
         })),
@@ -395,9 +395,9 @@ async fn update_task_pr_finalisation_appends_reflection_nudge_by_default() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
+            "name": "update_tasks",
             "arguments": {
-                "task_id": task_id.0,
+                "task_ids": [task_id.0],
                 "url": "https://github.com/org/repo/pull/7", "url_type": "pr",
                 "status": "review"
             }
@@ -434,9 +434,9 @@ async fn update_task_pr_finalisation_omits_nudge_when_disabled() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
+            "name": "update_tasks",
             "arguments": {
-                "task_id": task_id.0,
+                "task_ids": [task_id.0],
                 "url": "https://github.com/org/repo/pull/7", "url_type": "pr",
                 "status": "review"
             }
@@ -471,9 +471,9 @@ async fn update_task_pr_set_without_status_does_not_nudge() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
+            "name": "update_tasks",
             "arguments": {
-                "task_id": task_id.0,
+                "task_ids": [task_id.0],
                 "url": "https://github.com/org/repo/pull/7", "url_type": "pr"
             }
         })),
@@ -506,9 +506,9 @@ async fn update_task_status_review_without_pr_url_change_does_not_nudge() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
+            "name": "update_tasks",
             "arguments": {
-                "task_id": task_id.0,
+                "task_ids": [task_id.0],
                 "status": "review"
             }
         })),
@@ -551,9 +551,9 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
+            "name": "update_tasks",
             "arguments": {
-                "task_id": task_id.0,
+                "task_ids": [task_id.0],
                 "url": "https://github.com/org/repo/pull/2", "url_type": "pr",
                 "status": "review"
             }
@@ -903,8 +903,8 @@ async fn update_task_sets_and_clears_phoenix() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "phoenix": true }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "phoenix": true }
         })),
     )
     .await;
@@ -914,8 +914,8 @@ async fn update_task_sets_and_clears_phoenix() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "phoenix": false }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "phoenix": false }
         })),
     )
     .await;
@@ -932,8 +932,8 @@ async fn update_task_omitting_phoenix_leaves_it_alone() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "phoenix": true }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "phoenix": true }
         })),
     )
     .await;
@@ -942,8 +942,8 @@ async fn update_task_omitting_phoenix_leaves_it_alone() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "title": "renamed" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "title": "renamed" }
         })),
     )
     .await;
@@ -975,8 +975,8 @@ async fn get_task_shows_phoenix_when_set_and_omits_it_otherwise() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "phoenix": true }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "phoenix": true }
         })),
     )
     .await;

@@ -442,7 +442,7 @@ fn spec_first_instruction_does_not_name_allium_loop() {
 }
 
 /// The two clauses both design steps share survive the rewrite: the plan doc
-/// is the agent's judgement call, attached via update_task, and only when it
+/// is the agent's judgement call, attached via update_tasks, and only when it
 /// is worth it.
 #[test]
 fn spec_first_instruction_keeps_the_plan_doc_a_judgement_call() {
@@ -452,7 +452,7 @@ fn spec_first_instruction_keeps_the_plan_doc_a_judgement_call() {
         "spec_first_instruction should mark the plan doc as the agent's call, got: {text}"
     );
     assert!(
-        text.contains("docs/plans/") && text.contains("update_task"),
+        text.contains("docs/plans/") && text.contains("update_tasks"),
         "spec_first_instruction should still say where an optional plan goes \
 and how to attach it, got: {text}"
     );
@@ -520,7 +520,7 @@ fn brainstorm_instruction_shares_the_optional_plan_and_no_stopping_point_clauses
         "the plan doc should still be offered as the agent's call, got: {text}"
     );
     assert!(
-        text.contains("update_task"),
+        text.contains("update_tasks"),
         "the fallback should say how an optional plan gets attached, got: {text}"
     );
     assert!(
@@ -579,7 +579,7 @@ fn quick_dispatch_design_step_follows_the_repos_specs() {
     );
     // The rename step is unchanged — only the design step swaps.
     assert!(
-        text.contains("call `update_task` with a"),
+        text.contains("call `update_tasks` with a"),
         "quick dispatch should still ask the agent to rename the task, got: {text}"
     );
 }
@@ -1089,7 +1089,7 @@ fn build_prompt_with_dependabot_tag_includes_review_section() {
     assert!(text.contains("gh pr diff"));
     assert!(text.contains("gh pr checks"));
     // No pr_url on this context, so the find-it-yourself step survives.
-    assert!(text.contains("update_task(task_id=42, url="));
+    assert!(text.contains("update_tasks(task_ids=[42], url="));
     assert!(text.contains("url_type=\"pr\""));
     assert!(text.contains("needs_input"));
     // 1.0.0 -> 1.0.1 is a patch, so this prompt takes the merge route and
@@ -1521,7 +1521,7 @@ fn a_recorded_pr_url_replaces_the_extract_it_yourself_step() {
     );
     assert!(
         !text.contains("url_type="),
-        "nothing left to record, so the update_task(url=…) step must go, got: {text}"
+        "nothing left to record, so the update_tasks(url=…) step must go, got: {text}"
     );
     assert!(
         !text.contains("--repo <owner/repo>"),
@@ -1547,7 +1547,7 @@ fn without_a_recorded_pr_url_the_runbook_still_asks_the_agent_to_find_it() {
         &ctx,
     );
     assert!(
-        text.contains("update_task(task_id=7, url=<URL>, url_type=\"pr\")"),
+        text.contains("update_tasks(task_ids=[7], url=<URL>, url_type=\"pr\")"),
         "got: {text}"
     );
 }
@@ -1904,7 +1904,7 @@ fn a_feed_created_task_that_names_no_pr_makes_no_claim_about_a_filter() {
 }
 
 /// Provenance is read from external_id, not from having a PR url — a
-/// hand-created task can carry one, since update_task takes a url and the
+/// hand-created task can carry one, since update_tasks takes a url and the
 /// dependabot tag together.
 #[test]
 fn a_pr_url_alone_does_not_make_a_task_feed_created() {

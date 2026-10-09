@@ -560,12 +560,12 @@ fn tool_description(name: &str) -> String {
 /// and the recovery move"). Asserted on substrings rather than the whole string
 /// so the prose can be reworded, but the load-bearing facts cannot quietly go
 /// missing: that an existing worktree is REUSED, that its uncommitted changes
-/// survive, and that the way back into a crashed task is update_task to backlog
+/// survive, and that the way back into a crashed task is update_tasks to backlog
 /// then dispatch_task again.
 #[test]
 fn dispatch_task_description_advertises_worktree_reuse_and_the_recovery_move() {
     let desc = tool_description("dispatch_task");
-    for needle in ["reused", "uncommitted", "update_task", "backlog"] {
+    for needle in ["reused", "uncommitted", "update_tasks", "backlog"] {
         assert!(
             desc.contains(needle),
             "dispatch_task description must mention '{needle}', got: {desc}"
@@ -579,7 +579,7 @@ fn dispatch_task_description_advertises_worktree_reuse_and_the_recovery_move() {
 /// path deletes a task describes a tool that does not exist.
 #[test]
 fn update_task_status_description_tells_no_resume_story_and_no_delete_aside() {
-    let update = tool_def("update_task");
+    let update = tool_def("update_tasks");
     let status = update["inputSchema"]["properties"]["status"]["description"]
         .as_str()
         .unwrap()
@@ -587,7 +587,7 @@ fn update_task_status_description_tells_no_resume_story_and_no_delete_aside() {
     for needle in ["resum", "reuse", "worktree", "delete"] {
         assert!(
             !status.contains(needle),
-            "update_task.status must not carry {needle:?} — the resume story is \
+            "update_tasks.status must not carry {needle:?} — the resume story is \
 dispatch_task's and there is no delete tool, got: {status}"
         );
     }
@@ -595,7 +595,7 @@ dispatch_task's and there is no delete tool, got: {status}"
     // wrap_up response, not in an argument description.
     assert!(
         !status.contains("exit_session"),
-        "update_task.status must not restate the wrap_up/exit_session sequence, got: {status}"
+        "update_tasks.status must not restate the wrap_up/exit_session sequence, got: {status}"
     );
 }
 
@@ -629,7 +629,7 @@ fn set_verify_command_description_names_the_surfaces_that_carry_the_command() {
 /// that list is the first thing a caller reads. Derived from each tool's own
 /// schema rather than hardcoded, so a field added to the argument set fails
 /// here until the description learns about it — the drift that left seven of
-/// `update_task`'s fifteen fields unadvertised.
+/// `update_tasks`'s fifteen fields unadvertised.
 ///
 /// Applies to every `update_*` tool rather than one hand-picked tool, so which
 /// of them carries the guarantee is not a judgement call.
@@ -646,9 +646,12 @@ fn every_update_tool_description_names_every_field_it_accepts() {
         let name = tool["name"].as_str().unwrap();
         let desc = tool["description"].as_str().unwrap();
         let props = tool["inputSchema"]["properties"].as_object().unwrap();
-        // `update_task` selects with task_id, `update_epic` with epic_id: the
-        // tool's own name gives the selector, which is not a mutable field.
-        let selector = format!("{}_id", name.trim_start_matches("update_"));
+        // `update_tasks` selects with task_ids, `update_epic` with epic_id: the
+        // selector is not a mutable field.
+        let selector = match name {
+            "update_tasks" => "task_ids".to_string(),
+            _ => format!("{}_id", name.trim_start_matches("update_")),
+        };
         for field in props.keys() {
             if *field == selector {
                 continue;
@@ -662,7 +665,7 @@ fn every_update_tool_description_names_every_field_it_accepts() {
     }
     assert!(
         checked >= 2,
-        "expected update_task and update_epic, saw {checked}"
+        "expected update_tasks and update_epic, saw {checked}"
     );
 }
 
@@ -1139,7 +1142,6 @@ async fn every_tool_with_args_rejects_unknown_field() {
     let state = test_state().await;
 
     let payloads: &[(&str, Value)] = &[
-        ("update_task", json!({"task_id": 1})),
         ("update_tasks", json!({"task_ids": [1]})),
         ("get_task", json!({"task_id": 1})),
         (

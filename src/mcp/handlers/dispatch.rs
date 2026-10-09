@@ -140,7 +140,7 @@ macro_rules! mcp_tools {
 // `&'static str`s twice.
 // ---------------------------------------------------------------------------
 
-// `pub(super)` because the `update_task` schema is generated from the
+// `pub(super)` because the `update_tasks` schema is generated from the
 // `mcp_args!` field list in `tasks::mod` and calls this from there. The helper
 // stays here with its siblings rather than following its caller.
 pub(super) fn task_tag_enum_values() -> Vec<&'static str> {
@@ -169,20 +169,14 @@ fn task_status_enum_values() -> Vec<&'static str> {
 // ---------------------------------------------------------------------------
 
 mcp_tools! {
-    async idempotent "update_task" => tasks::handle_update_task,
-        "Update a task in place. Accepts status, sub_status, title, description, repo_path, \
-plan_path, sort_order, url, url_type, tag, epic_id, base_branch, wrap_up_mode, auto_run_plan and \
-phoenix. At least one field besides task_id must be provided; every field left out is untouched.",
-        // Generated from the `mcp_args!` field list in `tasks::mod`.
-        (tasks::update_task_schema());
-
     async idempotent "update_tasks" => tasks::handle_update_tasks,
-        "Update many tasks with one call. Takes task_ids plus update_task's fields: status, \
-sub_status, title, description, repo_path, plan_path, sort_order, url, url_type, tag, epic_id, \
-base_branch, wrap_up_mode, auto_run_plan and phoenix. Applies them to each task exactly as \
-update_task would, including its guards. Every named task is \
-updated whatever its status; pick the ids with list_tasks (epic_id, recursive, status, base_branch). \
-Not atomic: the reply has one line per task, success or failure, then a count.",
+        "Update one or many tasks. Pass task_ids (one id updates one task) plus the fields to set: \
+status, sub_status, title, description, repo_path, plan_path, sort_order, url, url_type, tag, \
+epic_id, base_branch, wrap_up_mode, auto_run_plan and phoenix. At least one field must be \
+provided; every field left out is untouched. Every named task is updated whatever its status; \
+pick many ids with list_tasks (epic_id, recursive, status, base_branch). With one id the reply is \
+\"Task N updated (fields)\" or an error. With several it is not atomic: one line per task, success \
+or failure, then a count.",
         (tasks::update_tasks_schema());
 
     async read_only "get_task" => tasks::handle_get_task,
@@ -384,7 +378,7 @@ no worktree directory yet, one is CREATED — from the task's base branch, or fr
 branch for a review task carrying a PR url. If it already exists it is \
 REUSED as-is — its branch, its commits and its uncommitted changes are all still there, and the \
 agent starts in them. So a crashed or stalled task is resumed in place: set it back to backlog \
-with update_task, then dispatch_task it. Tell the resumed agent in the task what its worktree \
+with update_tasks, then dispatch_task it. Tell the resumed agent in the task what its worktree \
 already holds — it is a new agent and has none of the previous session's context. Waits for the \
 dispatch to complete; the success text says whether the worktree was created or reused, and names \
 it along with the tmux window. Errors if the task is not in backlog status or the dispatch fails.",

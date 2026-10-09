@@ -445,7 +445,7 @@ rule HookSubagentStop {
         -- has one further clear point that touches no rows at all: any
         -- status write that moves the task out of running clears it in the
         -- same write — the manual moves and ConfirmDone (tasks.allium), MCP
-        -- update_task (mcp-task-tools.allium) and the session close
+        -- update_tasks (mcp-task-tools.allium) and the session close
         -- (pr-workflow.allium: ExitSession). A deferred Stop belongs to the
         -- turn the task was running under, so letting the bit outlive that
         -- turn would let a later drain flip the task out of a status a human
@@ -743,7 +743,7 @@ rule HookNotification {
         --
         -- CLI surface note: `dispatch hook <id> notification [--kind K]` is a
         -- non-MCP, hook-driven entry point implemented by cmd_hook. Unlike the
-        -- MCP update_task tool — which blocks generic transitions into `done`
+        -- MCP update_tasks tool — which blocks generic transitions into `done`
         -- so agents cannot self-promote past Review — the hook CLI drives the
         -- lifecycle steps that agents must not perform on their own.
 }

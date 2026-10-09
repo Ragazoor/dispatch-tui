@@ -21,7 +21,7 @@ These sources contain the latest project state. Consult them before generating i
 
 ### DevX (Developer Workflow)
 - `src/dispatch.rs` — Agent dispatch: worktree creation, tmux window, prompt construction
-- `src/mcp/handlers.rs` — MCP tool implementations (update_task, add_note, get_task, create_task)
+- `src/mcp/handlers.rs` — MCP tool implementations (update_tasks, add_note, get_task, create_task)
 - `src/mcp/mod.rs` — Axum MCP server setup
 - `src/runtime.rs` — TUI main loop, command execution, startup/shutdown
 - `src/plan.rs` — Plan file metadata parsing for plan-to-task pipeline
@@ -51,7 +51,7 @@ Elm Architecture — terminal events produce Messages, `App::update()` returns `
 Press `d` on a Ready task → creates git worktree (`.worktrees/<id>-<slug>`) → opens tmux window → launches `claude --prompt "<task description>"` in interactive mode. Agent can report status via MCP tools.
 
 ### MCP Server
-Runs on `localhost:3142` alongside the TUI. Tools: `update_task`, `add_note`, `get_task`, `create_task`.
+Runs on `localhost:3142` alongside the TUI. Tools: `update_tasks`, `add_note`, `get_task`, `create_task`.
 
 ### Task Creation
 Tasks can be created via:

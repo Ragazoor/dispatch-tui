@@ -282,7 +282,7 @@ fn build_quick_dispatch_prompt_contains_rename_instruction() {
     );
     assert!(prompt.contains("42"));
     assert!(prompt.contains("Quick task"));
-    assert!(prompt.contains("update_task"));
+    assert!(prompt.contains("update_tasks"));
     assert!(prompt.contains("title"));
     assert!(prompt.contains("placeholder"));
 }
@@ -291,9 +291,9 @@ fn build_quick_dispatch_prompt_contains_rename_instruction() {
 fn build_quick_dispatch_prompt_names_update_task_for_the_rename() {
     let prompt =
         build_quick_dispatch_prompt(TaskId(1), "Quick task", "", None, &PromptContext::default());
-    // update_task is named because the prompt asks for a specific call — the
+    // update_tasks is named because the prompt asks for a specific call — the
     // rename off the placeholder title — not as a general tool notice.
-    assert!(prompt.contains("update_task"));
+    assert!(prompt.contains("update_tasks"));
     assert!(!prompt.contains("dispatch MCP tools"));
     assert!(!prompt.contains("add_note"));
 }
@@ -506,7 +506,7 @@ fn spec_first_instruction_stays_compact() {
         instruction.len()
     );
     assert!(instruction.contains("allium:elicit"));
-    assert!(instruction.contains("update_task"));
+    assert!(instruction.contains("update_tasks"));
     assert!(instruction.contains("docs/plans/"));
 }
 

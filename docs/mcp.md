@@ -119,7 +119,7 @@ curl -s -X POST http://127.0.0.1:3142/mcp \
 curl -s -X POST http://127.0.0.1:3142/mcp \
   -H 'Content-Type: application/json' \
   -H 'X-Caller-Task-Id: 42' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_task","arguments":{"task_id":42,"status":"done"}}}' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_tasks","arguments":{"task_ids":[42],"status":"done"}}}' \
   | jq
 ```
 

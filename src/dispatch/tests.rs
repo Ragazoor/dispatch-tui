@@ -53,7 +53,7 @@ fn tdd_instruction_mentions_tests_first() {
 fn spec_first_instruction_mentions_docs_plans_and_update_task() {
     let instr = spec_first_instruction();
     assert!(instr.contains("docs/plans/"));
-    assert!(instr.contains("update_task"));
+    assert!(instr.contains("update_tasks"));
 }
 
 #[test]
@@ -317,7 +317,7 @@ fn build_prompt_without_plan_says_where_an_optional_plan_goes() {
         "no-plan prompt should say where a plan goes if the agent writes one"
     );
     assert!(
-        prompt.contains("update_task"),
+        prompt.contains("update_tasks"),
         "no-plan prompt should say how to attach that plan via MCP"
     );
 }
@@ -391,7 +391,7 @@ fn build_prompt_with_plan_asks_permission_before_implementing() {
 ///
 /// Quick dispatch's rename is the one surviving case, and the only example
 /// `ThePromptNamesNoToolMerelyToSayItExists` still gives: nothing in
-/// `update_task`'s schema can imply that *this* task arrived with a
+/// `update_tasks`'s schema can imply that *this* task arrived with a
 /// placeholder title and needs renaming off it before anything else.
 ///
 /// It used to assert `query_learnings` in the no-plan prompt instead, on the
@@ -406,7 +406,7 @@ fn build_prompt_names_the_tools_it_actually_needs_the_agent_to_call() {
     let prompt =
         build_quick_dispatch_prompt(TaskId(1), "Quick task", "", None, &PromptContext::default());
     assert!(
-        prompt.contains("call `update_task` with a descriptive `title`"),
+        prompt.contains("call `update_tasks` with a descriptive `title`"),
         "quick dispatch must name the specific rename call its schema cannot \
 imply, got: {prompt}"
     );

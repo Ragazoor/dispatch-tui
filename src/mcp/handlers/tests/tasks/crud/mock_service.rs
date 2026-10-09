@@ -120,8 +120,8 @@ async fn update_task_with_plan() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "ready", "plan_path": "/path/to/plan.md" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "ready", "plan_path": "/path/to/plan.md" }
         })),
     )
     .await;
@@ -148,8 +148,8 @@ async fn update_task_title_only() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "title": "New Title" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "title": "New Title" }
         })),
     )
     .await;
@@ -180,8 +180,8 @@ async fn update_task_status_optional() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "title": "Renamed" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "title": "Renamed" }
         })),
     )
     .await;
@@ -208,8 +208,8 @@ async fn update_task_title_and_description() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "title": "New", "description": "new desc" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "title": "New", "description": "new desc" }
         })),
     )
     .await;
@@ -236,8 +236,8 @@ async fn update_task_repo_path() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "repo_path": "/new/repo" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "repo_path": "/new/repo" }
         })),
     )
     .await;
@@ -268,8 +268,8 @@ async fn update_task_no_fields_errors() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0 }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0] }
         })),
     )
     .await;
@@ -292,9 +292,9 @@ async fn patch_task_sets_multiple_fields() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
+            "name": "update_tasks",
             "arguments": {
-                "task_id": task_id.0,
+                "task_ids": [task_id.0],
                 "status": "ready",
                 "title": "Updated Title"
             }
@@ -325,8 +325,8 @@ async fn update_task_without_plan_preserves_existing() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "ready" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "status": "ready" }
         })),
     )
     .await;
@@ -356,9 +356,9 @@ async fn update_task_sets_pr_fields() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
+            "name": "update_tasks",
             "arguments": {
-                "task_id": task_id.0,
+                "task_ids": [task_id.0],
                 "url": "https://github.com/org/repo/pull/99",
                 "url_type": "pr"
             }
@@ -390,9 +390,9 @@ async fn update_task_rejects_unknown_url_type() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
+            "name": "update_tasks",
             "arguments": {
-                "task_id": task_id.0,
+                "task_ids": [task_id.0],
                 "url": "https://x/y",
                 "url_type": "bogus"
             }
@@ -415,9 +415,9 @@ async fn update_task_rejects_unknown_url_type_even_without_a_url() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
+            "name": "update_tasks",
             "arguments": {
-                "task_id": task_id.0,
+                "task_ids": [task_id.0],
                 "title": "t",
                 "url_type": "bogus"
             }
@@ -435,9 +435,9 @@ async fn update_task_url_without_type_is_rejected() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
+            "name": "update_tasks",
             "arguments": {
-                "task_id": task_id.0,
+                "task_ids": [task_id.0],
                 "url": "https://x/y"
             }
         })),
@@ -457,8 +457,8 @@ async fn update_task_sets_wrap_up_mode() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "wrap_up_mode": "rebase" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "wrap_up_mode": "rebase" }
         })),
     )
     .await;
@@ -483,8 +483,8 @@ async fn update_task_wrap_up_mode_all_variants() {
             &state,
             "tools/call",
             Some(json!({
-                "name": "update_task",
-                "arguments": { "task_id": task_id.0, "wrap_up_mode": input }
+                "name": "update_tasks",
+                "arguments": { "task_ids": [task_id.0], "wrap_up_mode": input }
             })),
         )
         .await;
@@ -512,8 +512,8 @@ async fn update_task_clears_wrap_up_mode_with_null() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "wrap_up_mode": "pr" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "wrap_up_mode": "pr" }
         })),
     )
     .await;
@@ -524,8 +524,8 @@ async fn update_task_clears_wrap_up_mode_with_null() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "wrap_up_mode": null }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "wrap_up_mode": null }
         })),
     )
     .await;
@@ -551,8 +551,8 @@ async fn update_task_rejects_invalid_wrap_up_mode() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "wrap_up_mode": "teleport" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "wrap_up_mode": "teleport" }
         })),
     )
     .await;
@@ -620,8 +620,8 @@ async fn update_task_sets_auto_run_plan() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "auto_run_plan": true }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "auto_run_plan": true }
         })),
     )
     .await;
@@ -641,8 +641,8 @@ async fn get_task_shows_wrap_up_mode() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "wrap_up_mode": "rebase" }
+            "name": "update_tasks",
+            "arguments": { "task_ids": [task_id.0], "wrap_up_mode": "rebase" }
         })),
     )
     .await;

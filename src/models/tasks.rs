@@ -44,7 +44,7 @@ impl TaskStatus {
         TaskStatus::Done,
     ];
 
-    /// Statuses settable through the `update_task` MCP tool. `Done` IS
+    /// Statuses settable through the `update_tasks` MCP tool. `Done` IS
     /// advertised, but only reachable through the dedicated close-only path
     /// (`MarkTaskDoneViaMcp`) — `UpdateTaskViaMcp`'s own `requires: status !=
     /// done` still refuses it on the generic multi-field rule. Kept as its
@@ -246,7 +246,7 @@ impl SubStatus {
         SubStatus::PrUnreachable,
     ];
 
-    /// Sub-statuses advertised by the `update_task` MCP tool's schema.
+    /// Sub-statuses advertised by the `update_tasks` MCP tool's schema.
     /// Excludes `pr_closed` and `pr_unreachable`: both are derived from GitHub
     /// PR polling (`PollPrStatus` / `PrPollGaveUp`), not values an agent
     /// should set by hand.

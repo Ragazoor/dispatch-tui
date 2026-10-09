@@ -280,8 +280,8 @@ impl ChainFixture {
             &self.state,
             "tools/call",
             Some(json!({
-                "name": "update_task",
-                "arguments": { "task_id": task_id.0, "status": "done" }
+                "name": "update_tasks",
+                "arguments": { "task_ids": [task_id.0], "status": "done" }
             })),
         )
         .await
