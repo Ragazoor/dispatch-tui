@@ -62,7 +62,7 @@ pub async fn ensure_managed_epics(
     // Snapshot once: role lookups read from this list. Creating one role never
     // affects the lookup of another (roles are distinct), and within a single
     // call we never create the same role twice.
-    let epics = db.list_epics().await?;
+    let epics = db.list_epics().await;
 
     if let Some(cmd) = reviews_command {
         let parent_id = ensure_role_epic(
@@ -265,7 +265,7 @@ mod tests {
     async fn ensure_managed_epics_creates_tree() {
         let db = Store::open_in_memory().unwrap();
         ensure(&db).await;
-        let epics = db.list_epics().await.unwrap();
+        let epics = db.list_epics().await;
 
         for role in [
             FeedRole::ReviewsParent,
@@ -310,7 +310,7 @@ mod tests {
         let db = Store::open_in_memory().unwrap();
         ensure(&db).await;
         ensure(&db).await;
-        let epics = db.list_epics().await.unwrap();
+        let epics = db.list_epics().await;
         assert_eq!(
             epics.len(),
             5,
@@ -322,14 +322,14 @@ mod tests {
     async fn ensure_preserves_user_rename() {
         let db = Store::open_in_memory().unwrap();
         ensure(&db).await;
-        let my_id = by_role(&db.list_epics().await.unwrap(), FeedRole::MyReviews)[0].id;
+        let my_id = by_role(&db.list_epics().await, FeedRole::MyReviews)[0].id;
         db.patch_epic(my_id, &EpicPatch::new().title("My PRs"))
             .await
             .unwrap();
 
         ensure(&db).await;
 
-        let epics = db.list_epics().await.unwrap();
+        let epics = db.list_epics().await;
         let my = by_role(&epics, FeedRole::MyReviews);
         assert_eq!(my.len(), 1, "rename must not spawn a duplicate");
         assert_eq!(my[0].id, my_id);
@@ -344,12 +344,12 @@ mod tests {
     async fn ensure_recreates_a_deleted_managed_epic() {
         let db = Store::open_in_memory().unwrap();
         ensure(&db).await;
-        let bots_id = by_role(&db.list_epics().await.unwrap(), FeedRole::Bots)[0].id;
+        let bots_id = by_role(&db.list_epics().await, FeedRole::Bots)[0].id;
         db.delete_epic(bots_id).await.unwrap();
 
         ensure(&db).await;
 
-        let epics = db.list_epics().await.unwrap();
+        let epics = db.list_epics().await;
         let bots = by_role(&epics, FeedRole::Bots);
         assert_eq!(bots.len(), 1, "the role must be re-provisioned");
         assert_ne!(
@@ -363,7 +363,7 @@ mod tests {
         let db = Store::open_in_memory().unwrap();
         provision_managed_feeds_from_settings(&db).await.unwrap();
         assert!(
-            db.list_epics().await.unwrap().is_empty(),
+            db.list_epics().await.is_empty(),
             "no config -> no managed epics"
         );
     }
@@ -376,7 +376,7 @@ mod tests {
         db.set_cve_feed_command(Some(CVE)).await.unwrap();
         provision_managed_feeds_from_settings(&db).await.unwrap();
 
-        let epics = db.list_epics().await.unwrap();
+        let epics = db.list_epics().await;
         assert_eq!(
             epics.len(),
             5,

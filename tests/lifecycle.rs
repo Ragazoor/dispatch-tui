@@ -65,7 +65,7 @@ async fn full_lifecycle() {
     assert_ne!(app.tasks()[0].id, TaskId(0), "ID should be assigned by DB");
 
     // Verify DB has the task
-    let db_task = db.get_task(task_id).await.unwrap().unwrap();
+    let db_task = db.get_task(task_id).await.unwrap();
     assert_eq!(db_task.title, "Fix auth bug");
 
     // 2. Dispatch directly from Backlog (task has a plan) → Dispatch command issued
@@ -137,7 +137,7 @@ async fn full_lifecycle() {
     execute(&db, &cmds).await;
     assert_eq!(app.tasks()[0].status, TaskStatus::Done);
 
-    let db_task = db.get_task(task_id).await.unwrap().unwrap();
+    let db_task = db.get_task(task_id).await.unwrap();
     assert_eq!(db_task.status, TaskStatus::Done);
 
     // 6. Delete → leaves the board immediately, but the row delete is gated on
@@ -162,7 +162,7 @@ async fn full_lifecycle() {
         dispatch_tui::tui::commands::CleanupFollowUp::DeleteRow
     );
     assert!(
-        db.get_task(task_id).await.unwrap().is_some(),
+        db.get_task(task_id).await.is_some(),
         "the row must outlive the delete until the worktree is actually released"
     );
 
@@ -175,6 +175,6 @@ async fn full_lifecycle() {
     ));
     execute(&db, &cmds).await;
 
-    let db_task = db.get_task(task_id).await.unwrap();
+    let db_task = db.get_task(task_id).await;
     assert!(db_task.is_none());
 }

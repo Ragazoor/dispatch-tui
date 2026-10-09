@@ -15,7 +15,7 @@ async fn upsert_feed_tasks_creates_tasks() {
         .await
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 2);
     let mut titles: Vec<&str> = tasks.iter().map(|t| t.title.as_str()).collect();
     titles.sort();
@@ -65,7 +65,7 @@ async fn upsert_feed_tasks_rejects_mismatched_slice_lengths() {
     );
 
     // No tasks should have been written on either failed call.
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert!(tasks.is_empty(), "no tasks should be written on mismatch");
 }
 
@@ -84,7 +84,7 @@ async fn upsert_feed_tasks_idempotent() {
         .await
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1, "second call should not create duplicate");
     assert_eq!(tasks[0].title, "Task One");
 }
@@ -110,7 +110,7 @@ async fn upsert_feed_tasks_inserts_no_task_for_a_retired_external_id() {
     }
 
     assert!(
-        db.list_tasks_for_epic(epic.id).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(epic.id).await.is_empty(),
         "a deleted feed task's external_id is retired: re-emission must insert nothing"
     );
 }
@@ -131,7 +131,7 @@ async fn upsert_feed_tasks_additive_inserts_no_task_for_a_retired_external_id() 
         .unwrap();
 
     assert!(
-        db.list_tasks_for_epic(epic.id).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(epic.id).await.is_empty(),
         "the additive upsert must refuse a retired id exactly like the reconcile one"
     );
 }
@@ -156,7 +156,6 @@ async fn upsert_feed_tasks_still_inserts_ids_that_are_not_retired() {
     let ids: Vec<String> = db
         .list_tasks_for_epic(epic.id)
         .await
-        .unwrap()
         .into_iter()
         .filter_map(|t| t.external_id)
         .collect();
@@ -313,7 +312,7 @@ async fn deleting_a_second_task_for_an_already_retired_id_is_a_no_op_on_the_reco
     db.delete_task(second.id)
         .await
         .expect("retiring an id that is already retired must not fail the delete");
-    assert!(db.get_task(second.id).await.unwrap().is_none());
+    assert!(db.get_task(second.id).await.is_none());
 
     upsert(&db, epic.id, &[make_feed_item("dup", "Again")]).await;
     assert!(

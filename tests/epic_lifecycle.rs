@@ -34,14 +34,14 @@ async fn full_epic_lifecycle() {
     db.set_task_epic_id(sub2, Some(epic.id)).await.unwrap();
 
     // 3. Verify epic status is Backlog (new epics start as Backlog)
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 
     // 4. Move epic status to Running
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Running))
         .await
         .unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Running);
 
     // 5. Move all subtasks to Done. The shared store derives the epic's
@@ -52,14 +52,14 @@ async fn full_epic_lifecycle() {
     db.patch_task(sub2, &TaskPatch::new().status(TaskStatus::Done))
         .await
         .unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Done);
 
     // 6. Delete epic cascades
     db.delete_epic(epic.id).await.unwrap();
-    assert!(db.get_epic(epic.id).await.unwrap().is_none());
-    assert!(db.get_task(sub1).await.unwrap().is_none());
-    assert!(db.get_task(sub2).await.unwrap().is_none());
+    assert!(db.get_epic(epic.id).await.is_none());
+    assert!(db.get_task(sub1).await.is_none());
+    assert!(db.get_task(sub2).await.is_none());
 }
 
 /// Regression: deleting an epic must not violate FK constraints from
@@ -104,8 +104,8 @@ async fn delete_epic_with_a_learning_referencing_a_subtask_succeeds() {
         .await
         .expect("a learning referencing a doomed subtask must not block the delete");
 
-    assert!(db.get_epic(epic.id).await.unwrap().is_none());
-    assert!(db.get_task(task_id).await.unwrap().is_none());
+    assert!(db.get_epic(epic.id).await.is_none());
+    assert!(db.get_task(task_id).await.is_none());
     let learning = db
         .get_learning(learning_id)
         .await
@@ -142,7 +142,7 @@ async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
         .unwrap();
     db.recalculate_epic_status(epic.id).await.unwrap();
     assert_eq!(
-        db.get_epic(epic.id).await.unwrap().unwrap().status,
+        db.get_epic(epic.id).await.unwrap().status,
         TaskStatus::Backlog,
         "epic should stay backlog while t1 is running"
     );
@@ -153,7 +153,7 @@ async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
         .unwrap();
     db.recalculate_epic_status(epic.id).await.unwrap();
     assert_eq!(
-        db.get_epic(epic.id).await.unwrap().unwrap().status,
+        db.get_epic(epic.id).await.unwrap().status,
         TaskStatus::Backlog,
         "epic should stay backlog while t1 is in review"
     );
@@ -164,7 +164,7 @@ async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
         .unwrap();
     db.recalculate_epic_status(epic.id).await.unwrap();
     assert_eq!(
-        db.get_epic(epic.id).await.unwrap().unwrap().status,
+        db.get_epic(epic.id).await.unwrap().status,
         TaskStatus::Backlog,
         "epic should stay backlog while t2 is still backlog"
     );
@@ -175,7 +175,7 @@ async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
         .unwrap();
     db.recalculate_epic_status(epic.id).await.unwrap();
     assert_eq!(
-        db.get_epic(epic.id).await.unwrap().unwrap().status,
+        db.get_epic(epic.id).await.unwrap().status,
         TaskStatus::Done,
         "epic should auto-move to done when all tasks are done"
     );

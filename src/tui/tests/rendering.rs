@@ -707,7 +707,7 @@ async fn stress_db_with_many_tasks() {
         .await
         .unwrap();
     }
-    let tasks = db.list_all().await.unwrap();
+    let tasks = db.list_all().await;
     assert_eq!(tasks.len(), 500);
 
     // Create app from DB tasks and verify navigation works

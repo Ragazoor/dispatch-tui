@@ -82,8 +82,8 @@ There is no SQLite, and no handle without a store: every part of a `Store` is
 required. A test whose subject is the host file itself uses
 `Store::in_memory_with_host_file(dir)`; a fault it needs to inject (an
 unreadable host file) is injected with a replaced `host.json`. Reads answer
-from in-memory rows and cannot fail, so a read-error arm in a service is not
-reachable from a test; a write fault is injected with a refusing
+from in-memory rows and are infallible by signature (no `Result`), so a read-error arm does not
+exist; a write fault is injected with a refusing
 `ReducerCaller` (see `RecordingCaller` in `src/sync/tests/writes.rs`).
 
 ## Snapshot tests

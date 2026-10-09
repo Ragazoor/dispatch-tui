@@ -194,7 +194,7 @@ pub(crate) async fn run_feed_sync(
         // not just the one cycle after a toggle.
         let has_repo_group_sub_epic = db
             .list_sub_epics(epic_id)
-            .await?
+            .await
             .iter()
             .any(|e| e.origin == crate::models::EpicOrigin::RepoGroup);
         if has_repo_group_sub_epic {

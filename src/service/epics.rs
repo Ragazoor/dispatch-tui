@@ -18,7 +18,7 @@ pub async fn require_epic_accepting_work(
     epic_id: EpicId,
 ) -> Result<Epic, ServiceError> {
     db.get_epic(epic_id)
-        .await?
+        .await
         .ok_or_else(|| ServiceError::NotFound(format!("Epic {} not found", epic_id.0)))
 }
 
@@ -217,7 +217,7 @@ impl EpicService {
         validate_feed_interval("feed_interval_secs", params.feed_interval_secs)?;
 
         if let Some(parent_id) = params.parent_epic_id {
-            self.db.get_epic(parent_id).await?.ok_or_else(|| {
+            self.db.get_epic(parent_id).await.ok_or_else(|| {
                 ServiceError::NotFound(format!("Parent epic {} not found", parent_id.0))
             })?;
         }
@@ -255,7 +255,7 @@ impl EpicService {
     pub async fn get_epic(&self, epic_id: EpicId) -> Result<Epic, ServiceError> {
         self.db
             .get_epic(epic_id)
-            .await?
+            .await
             .ok_or_else(|| ServiceError::NotFound(format!("Epic {} not found", epic_id.0)))
     }
 
@@ -264,11 +264,7 @@ impl EpicService {
         epic_id: EpicId,
     ) -> Result<(Epic, Vec<Task>), ServiceError> {
         let epic = self.get_epic(epic_id).await?;
-        let subtasks = self
-            .db
-            .list_tasks_for_epic(epic.id)
-            .await
-            .unwrap_or_default();
+        let subtasks = self.db.list_tasks_for_epic(epic.id).await;
         Ok((epic, subtasks))
     }
 
@@ -287,17 +283,13 @@ impl EpicService {
     ) -> Result<(Epic, usize, usize), ServiceError> {
         let epic = self.get_epic(epic_id).await?;
         if !epic.group_by_repo {
-            let subtasks = self
-                .db
-                .list_tasks_for_epic(epic.id)
-                .await
-                .unwrap_or_default();
+            let subtasks = self.db.list_tasks_for_epic(epic.id).await;
             let (done, total) = count_progress(&subtasks.iter().collect::<Vec<_>>());
             return Ok((epic, done, total));
         }
 
-        let all_epics = self.db.list_epics().await?;
-        let all_tasks = self.db.list_all_tasks_with_epic_id().await?;
+        let all_epics = self.db.list_epics().await;
+        let all_tasks = self.db.list_all_tasks_with_epic_id().await;
         let tasks_by_epic = Self::group_tasks_by_epic(&all_tasks);
         let children = crate::models::build_children_map(&all_epics);
         let (done, total) = Self::epic_progress(&epic, &tasks_by_epic, &children);
@@ -341,15 +333,15 @@ impl EpicService {
     }
 
     pub async fn list_epics(&self) -> Result<Vec<Epic>, ServiceError> {
-        Ok(self.db.list_epics().await?)
+        Ok(self.db.list_epics().await)
     }
 
     pub async fn list_root_epics(&self) -> Result<Vec<Epic>, ServiceError> {
-        Ok(self.db.list_root_epics().await?)
+        Ok(self.db.list_root_epics().await)
     }
 
     pub async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>, ServiceError> {
-        Ok(self.db.list_sub_epics(parent_id).await?)
+        Ok(self.db.list_sub_epics(parent_id).await)
     }
 
     pub async fn list_epics_with_progress(
@@ -373,7 +365,7 @@ impl EpicService {
                 "recursive needs parent_epic_id: without it every epic is already listed".into(),
             ));
         }
-        let epics = self.list_epics().await?;
+        let epics = self.db.list_epics().await;
         let children = crate::models::build_children_map(&epics);
         let keep: Option<std::collections::HashSet<EpicId>> = match parent {
             None => None,
@@ -387,7 +379,7 @@ impl EpicService {
             }
             Some(p) => Some(children.get(&p).into_iter().flatten().copied().collect()),
         };
-        let all_subtasks = self.db.list_all_tasks_with_epic_id().await?;
+        let all_subtasks = self.db.list_all_tasks_with_epic_id().await;
         let tasks_by_epic = Self::group_tasks_by_epic(&all_subtasks);
 
         let result = epics
@@ -422,7 +414,7 @@ impl EpicService {
         validate_feed_interval("feed_interval_secs", params.feed_interval_secs.flatten())?;
 
         let epic_id = params.epic_id;
-        let existing = self.db.get_epic(epic_id).await?;
+        let existing = self.db.get_epic(epic_id).await;
 
         Self::check_append_only_compatible(&params, existing.as_ref())?;
 
@@ -433,7 +425,7 @@ impl EpicService {
         // no other prior-fetch to reuse (the RepoGroup-reparent guard below
         // does its own, gated on a different condition).
         if let Some(new_status) = params.status {
-            if let Some(prior_epic) = self.db.get_epic(params.epic_id).await? {
+            if let Some(prior_epic) = self.db.get_epic(params.epic_id).await {
                 if let Some(at) = completed_at_for_status_transition(
                     prior_epic.status,
                     new_status,
@@ -636,7 +628,7 @@ impl EpicService {
                     "Setting this parent would create a cycle in the epic hierarchy".into(),
                 ));
             }
-            match self.db.get_epic(current).await? {
+            match self.db.get_epic(current).await {
                 Some(e) => current_opt = e.parent_epic_id,
                 None => return Ok(()),
             }
@@ -749,7 +741,7 @@ fn collect_subtree_blockers<'a>(
     out: &'a mut SubtreeBlockers,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ServiceError>> + Send + 'a>> {
     Box::pin(async move {
-        for t in db.list_tasks_for_epic(epic_id).await? {
+        for t in db.list_tasks_for_epic(epic_id).await {
             let lower = out
                 .first_undone
                 .as_ref()
@@ -759,8 +751,8 @@ fn collect_subtree_blockers<'a>(
             }
         }
         out.unreadable
-            .extend(db.list_undecodable_task_ids_for_epic(epic_id).await?);
-        for sub in db.list_sub_epics(epic_id).await? {
+            .extend(db.list_undecodable_task_ids_for_epic(epic_id).await);
+        for sub in db.list_sub_epics(epic_id).await {
             collect_subtree_blockers(db, sub.id, out).await?;
         }
         Ok(())

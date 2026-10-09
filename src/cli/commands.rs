@@ -43,13 +43,13 @@ pub async fn clear_verify(database: &Store, path: &str, out: &mut dyn Write) -> 
 
 /// `dispatch repo list`.
 pub async fn list_repos(database: &Store, out: &mut dyn Write) -> Result<()> {
-    let paths = database.list_repo_paths().await?;
+    let paths = database.list_repo_paths().await;
     if paths.is_empty() {
         writeln!(out, "No repo paths configured.")?;
         return Ok(());
     }
     for p in paths {
-        match database.get_verify_command(&p).await? {
+        match database.get_verify_command(&p).await {
             Some(cmd) => writeln!(out, "{p}\tverify: {cmd}")?,
             None => writeln!(out, "{p}")?,
         }
@@ -64,7 +64,7 @@ pub async fn list_repos(database: &Store, out: &mut dyn Write) -> Result<()> {
 /// (`UnmeasuredIsNeverPresentedAsClean`) and, when the fetch was the cause, its
 /// fetch error instead.
 pub async fn repo_status(database: &Store, no_fetch: bool, out: &mut dyn Write) -> Result<()> {
-    let paths = database.list_repo_paths().await?;
+    let paths = database.list_repo_paths().await;
     if paths.is_empty() {
         writeln!(out, "No repo paths configured.")?;
         return Ok(());
@@ -124,7 +124,7 @@ pub async fn repo_sync(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> Result<()> {
-    let saved = database.list_repo_paths().await?;
+    let saved = database.list_repo_paths().await;
     let targets: Vec<String> = match &path {
         Some(p) => {
             let expanded = expand_tilde(p);
@@ -172,7 +172,7 @@ pub async fn repo_sync(
 /// `dispatch prune-repo-paths` — forget every saved repo path that no longer
 /// exists on disk.
 pub async fn prune_repo_paths(database: &Store, out: &mut dyn Write) -> Result<()> {
-    let paths = database.list_repo_paths().await?;
+    let paths = database.list_repo_paths().await;
     let total = paths.len();
     let mut removed = 0;
     for p in &paths {

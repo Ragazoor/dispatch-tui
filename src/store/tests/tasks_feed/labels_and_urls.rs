@@ -56,7 +56,7 @@ async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
         .await
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].labels, vec!["scala-common".to_string()]);
     assert_eq!(tasks[0].sort_order, Some(1));
@@ -83,7 +83,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
         .await
         .unwrap();
     // Simulate user moving the task — status & repo_path must be preserved.
-    let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
+    let task_id = db.list_tasks_for_epic(epic.id).await[0].id;
     db.patch_task(
         task_id,
         &TaskPatch::new()
@@ -110,7 +110,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
         .await
         .unwrap();
 
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.labels,
         vec!["repo-a".to_string(), "security".to_string()],
@@ -152,7 +152,7 @@ async fn upsert_feed_tasks_sets_wrap_up_mode_on_insert() {
     .await
     .unwrap();
 
-    let mut tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let mut tasks = db.list_tasks_for_epic(epic.id).await;
     tasks.sort_by_key(|t| t.sort_order);
     assert_eq!(tasks.len(), 2);
     assert_eq!(
@@ -179,7 +179,7 @@ async fn upsert_feed_tasks_preserves_wrap_up_mode_on_conflict() {
         .unwrap();
 
     // User changes the wrap-up choice manually.
-    let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
+    let task_id = db.list_tasks_for_epic(epic.id).await[0].id;
     db.patch_task(
         task_id,
         &TaskPatch::new().wrap_up_mode(Some(crate::models::WrapUpMode::Rebase)),
@@ -192,7 +192,7 @@ async fn upsert_feed_tasks_preserves_wrap_up_mode_on_conflict() {
         .await
         .unwrap();
 
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.wrap_up_mode,
         Some(crate::models::WrapUpMode::Rebase),
@@ -254,7 +254,7 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
     .await
     .unwrap();
 
-    let mut tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let mut tasks = db.list_tasks_for_epic(epic.id).await;
     tasks.sort_by(|a, b| a.external_id.cmp(&b.external_id));
     assert_eq!(tasks.len(), 3);
     assert_eq!(
@@ -305,7 +305,7 @@ async fn upsert_feed_tasks_leaves_pr_url_null_when_item_url_empty() {
         .await
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert!(tasks[0].url.is_none());
 }
@@ -331,9 +331,9 @@ async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
         .unwrap();
-    let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
+    let task_id = db.list_tasks_for_epic(epic.id).await[0].id;
     assert!(
-        db.get_task(task_id).await.unwrap().unwrap().url.is_none(),
+        db.get_task(task_id).await.unwrap().url.is_none(),
         "precondition: url is null after first upsert"
     );
 
@@ -351,7 +351,7 @@ async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
     .await
     .unwrap();
 
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.url.as_ref().map(|u| u.url.as_str()),
         Some("https://github.com/org/repo/pull/42"),
@@ -384,7 +384,7 @@ async fn upsert_feed_tasks_preserves_pr_url_on_conflict() {
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
         .unwrap();
-    let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
+    let task_id = db.list_tasks_for_epic(epic.id).await[0].id;
     let manual = crate::models::TaskUrl::new(
         "https://github.com/org/repo/pull/999",
         crate::models::UrlType::Pr,
@@ -398,7 +398,7 @@ async fn upsert_feed_tasks_preserves_pr_url_on_conflict() {
         .await
         .unwrap();
 
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.url.as_ref().map(|u| u.url.as_str()),
         Some("https://github.com/org/repo/pull/999")
@@ -429,7 +429,7 @@ async fn feed_upsert_infers_url_type_and_backfills_atomically() {
     db.upsert_feed_tasks(epic.id, &items, &["/r".into()], &main_branches(1))
         .await
         .unwrap();
-    let t = db.list_tasks_for_epic(epic.id).await.unwrap().remove(0);
+    let t = db.list_tasks_for_epic(epic.id).await.remove(0);
     assert_eq!(
         t.url,
         Some(TaskUrl::new("https://github.com/o/r/pull/5", UrlType::Pr))
@@ -440,7 +440,7 @@ async fn feed_upsert_infers_url_type_and_backfills_atomically() {
     db.upsert_feed_tasks(epic.id, &items, &["/r".into()], &main_branches(1))
         .await
         .unwrap();
-    let t = db.list_tasks_for_epic(epic.id).await.unwrap().remove(0);
+    let t = db.list_tasks_for_epic(epic.id).await.remove(0);
     assert_eq!(
         t.url,
         Some(TaskUrl::new("https://github.com/o/r/pull/5", UrlType::Pr)),
@@ -478,7 +478,7 @@ async fn upsert_feed_tasks_explicit_url_type_wins_over_inference() {
     .await
     .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     let by_ext = |ext: &str| {
         tasks
             .iter()
@@ -508,9 +508,9 @@ async fn upsert_feed_tasks_backfill_uses_declared_url_type() {
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
         .unwrap();
-    let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
+    let task_id = db.list_tasks_for_epic(epic.id).await[0].id;
     assert!(
-        db.get_task(task_id).await.unwrap().unwrap().url.is_none(),
+        db.get_task(task_id).await.unwrap().url.is_none(),
         "precondition: url is null after first upsert"
     );
 
@@ -530,7 +530,7 @@ async fn upsert_feed_tasks_backfill_uses_declared_url_type() {
     .await
     .unwrap();
 
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.url,
         Some(TaskUrl::new(alert_url, UrlType::SecurityAlert)),
@@ -550,7 +550,7 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
         .unwrap();
-    let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
+    let task_id = db.list_tasks_for_epic(epic.id).await[0].id;
 
     // The dispatched agent records a learning referencing the task as its source.
     db.create_learning(CreateLearningRow {
@@ -574,7 +574,7 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
         .await
         .expect("stale feed task with associated learning should be purgeable");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].external_id.as_deref(), Some("ext-2"));
 }

@@ -12,7 +12,7 @@ async fn upsert_feed_tasks_uses_resolved_repo_path() {
         .await
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks[0].repo_path, "/resolved/local/repo");
 }
 
@@ -28,7 +28,7 @@ async fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
         .await
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks[0].repo_path, "");
 }
 
@@ -47,7 +47,7 @@ async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
     )
     .await
     .unwrap();
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks[0].repo_path, "/first/path");
 
     // Second upsert: different path provided — ON CONFLICT should NOT update repo_path
@@ -73,7 +73,7 @@ async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
     .await
     .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks[0].title, "Updated Title");
     assert_eq!(
         tasks[0].repo_path, "/first/path",
@@ -96,7 +96,7 @@ async fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
         .await
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     let resolved = tasks
         .iter()
         .find(|t| t.external_id.as_deref() == Some("ext-1"))
@@ -133,7 +133,7 @@ async fn upsert_feed_tasks_stores_per_task_base_branch() {
         .await
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     let by_ext = |ext: &str| {
         tasks
             .iter()
@@ -172,7 +172,7 @@ async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
     // Feed fetch returns nothing — only manual task should survive
     db.upsert_feed_tasks(epic.id, &[], &[], &[]).await.unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(
         tasks.len(),
         1,
@@ -203,7 +203,7 @@ async fn upsert_feed_tasks_persists_tag() {
         .await
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].tag, Some(crate::models::TaskTag::PrReview));
 }
@@ -247,7 +247,7 @@ async fn upsert_feed_tasks_updates_tag_on_conflict() {
         .await
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].tag, Some(crate::models::TaskTag::Fix));
 }

@@ -1239,7 +1239,7 @@ async fn generic_persist_does_not_clobber_the_subagent_count() {
     let svc = task_svc(&db);
     let id = create_running_task(&svc, SubStatus::Active).await;
 
-    let snapshot = db.get_task(id).await.unwrap().unwrap();
+    let snapshot = db.get_task(id).await.unwrap();
     assert_eq!(snapshot.live_subagents, 0);
 
     db.subagent_start(id, "a1", "s1", chrono::Utc::now())
@@ -1255,7 +1255,7 @@ async fn generic_persist_does_not_clobber_the_subagent_count() {
     .await
     .unwrap();
 
-    let reread = db.get_task(id).await.unwrap().unwrap();
+    let reread = db.get_task(id).await.unwrap();
     assert_eq!(
         reread.live_subagents, 1,
         "a generic persist must not overwrite the hook-owned count"
@@ -1655,12 +1655,8 @@ async fn update_repo_path_reroutes_within_grouped_epic() {
     .await
     .unwrap();
 
-    let reloaded = db.get_task(task.id).await.unwrap().unwrap();
-    let placed = db
-        .get_epic(reloaded.epic_id.unwrap())
-        .await
-        .unwrap()
-        .unwrap();
+    let reloaded = db.get_task(task.id).await.unwrap();
+    let placed = db.get_epic(reloaded.epic_id.unwrap()).await.unwrap();
     assert_eq!(placed.title, "beta");
 }
 
@@ -1698,7 +1694,7 @@ async fn move_task_to_grouped_epic_routes_into_sub_epic() {
         "task must NOT be placed directly on the grouped root"
     );
     let placed_id = task.epic_id.expect("task must have an epic");
-    let placed = db.get_epic(placed_id).await.unwrap().unwrap();
+    let placed = db.get_epic(placed_id).await.unwrap();
     assert_eq!(
         placed.origin,
         crate::models::EpicOrigin::RepoGroup,

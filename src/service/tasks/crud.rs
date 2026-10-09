@@ -234,7 +234,7 @@ impl TaskService {
         // The shared store's `patch_task` is a deliberate no-op on a missing
         // id (hooks race with deletes), so the not-found answer is this
         // service's to give — see `UpdateTaskViaMcp` in mcp-task-tools.allium.
-        if !self.db.task_exists(task_id).await? {
+        if !self.db.task_exists(task_id).await {
             return Err(Self::task_not_found(task_id));
         }
         let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
@@ -254,7 +254,7 @@ impl TaskService {
         );
         let needs_prior = params.epic_id.is_some() || params.status.is_some();
         let prior = if needs_prior {
-            self.db.get_task(task_id).await?
+            self.db.get_task(task_id).await
         } else {
             None
         };
@@ -393,7 +393,7 @@ impl TaskService {
         let prior = self
             .db
             .get_task(task_id)
-            .await?
+            .await
             .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", task_id.0)))?;
 
         // `pr_url` is bound out here rather than inside the builder because
@@ -566,7 +566,7 @@ impl TaskService {
         let task = self
             .db
             .get_task(task_id)
-            .await?
+            .await
             .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", task_id.0)))?;
         let old_epic_id = task.epic_id;
 
@@ -605,13 +605,7 @@ impl TaskService {
         };
         let effective_status = match params.status {
             Some(s) => Some(s),
-            None => self
-                .db
-                .get_task(task_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|t| t.status),
+            None => self.db.get_task(task_id).await.map(|t| t.status),
         };
         if let Some(eff) = effective_status {
             if !ss.is_valid_for(eff) {
@@ -670,7 +664,7 @@ impl TaskService {
 
     /// Recalculate the parent epic of the given task, if it has one.
     async fn recalculate_epic_for_task(&self, task_id: TaskId) {
-        if let Ok(Some(task)) = self.db.get_task(task_id).await {
+        if let Some(task) = self.db.get_task(task_id).await {
             if let Some(epic_id) = task.epic_id {
                 self.recalculate_epic(epic_id).await;
             }
@@ -827,13 +821,8 @@ impl TaskService {
             return;
         }
 
-        let task = match self.db.get_task(task_id).await {
-            Ok(Some(t)) => t,
-            Ok(None) => return,
-            Err(e) => {
-                tracing::error!(task_id = task_id.0, error = %e, "phoenix respawn: re-read failed");
-                return;
-            }
+        let Some(task) = self.db.get_task(task_id).await else {
+            return;
         };
         // `FeedTasksAreExempt`: a feed epic reconciles its own rows, so a copy
         // would either duplicate the row the feed is about to re-ingest or be
@@ -956,7 +945,7 @@ impl TaskService {
     pub async fn get_task(&self, task_id: TaskId) -> Result<Task, ServiceError> {
         self.db
             .get_task(task_id)
-            .await?
+            .await
             .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", task_id.0)))
     }
 
@@ -977,12 +966,12 @@ impl TaskService {
     }
 
     pub async fn list_tasks(&self, filter: ListTasksFilter) -> Result<Vec<Task>, ServiceError> {
-        let tasks = self.db.list_all().await?;
+        let tasks = self.db.list_all().await;
 
         let epic_scope: Option<std::collections::HashSet<EpicId>> = match filter.epic_id {
             Some(eid) if filter.recursive => Some(crate::models::descendant_epic_ids(
                 eid,
-                &self.db.list_epics().await?,
+                &self.db.list_epics().await,
             )),
             Some(eid) => Some(std::iter::once(eid).collect()),
             None => None,
@@ -1092,7 +1081,7 @@ impl TaskService {
                 // `status = running` guard, which cannot self-correct, rides in
                 // the write.
                 let task =
-                    self.db.get_task(id).await?.ok_or_else(|| {
+                    self.db.get_task(id).await.ok_or_else(|| {
                         ServiceError::NotFound(format!("Task {} not found", id.0))
                     })?;
                 let activity = classify_agent_activity(
@@ -1133,7 +1122,7 @@ impl TaskService {
         sender_id: TaskId,
         target_name: &str,
     ) -> Result<(), ServiceError> {
-        if !self.db.task_exists(sender_id).await? {
+        if !self.db.task_exists(sender_id).await {
             return Err(Self::task_not_found(sender_id));
         }
 
@@ -1191,7 +1180,7 @@ impl TaskService {
         id: TaskId,
         event: SubagentEvent,
     ) -> Result<(), ServiceError> {
-        if !self.db.task_exists(id).await? {
+        if !self.db.task_exists(id).await {
             return Err(Self::task_not_found(id));
         }
 
@@ -1255,7 +1244,7 @@ impl TaskService {
     /// landing in that window would be counted against a task whose bit is
     /// about to be wiped. The single transaction rules that out.
     pub async fn clear_subagents_no_drain(&self, id: TaskId) -> Result<(), ServiceError> {
-        if !self.db.task_exists(id).await? {
+        if !self.db.task_exists(id).await {
             return Err(Self::task_not_found(id));
         }
         self.db.subagent_clear_and_void_pending_stop(id).await?;
@@ -1293,7 +1282,7 @@ impl TaskService {
         // prior selection.
         self.db
             .get_epic(epic_id)
-            .await?
+            .await
             .ok_or_else(|| ServiceError::NotFound(format!("Epic {} not found", epic_id.0)))?;
 
         let Some(claimed_id) = self.db.try_claim_next_backlog_task(epic_id).await? else {
@@ -1307,7 +1296,7 @@ impl TaskService {
         // Re-read rather than mirroring the claim's SET list here: the row is
         // the truth, and hand-copying it silently drifts (the DB also stamps
         // `updated_at`, which no in-memory copy would carry).
-        Ok(self.db.get_task(claimed_id).await?)
+        Ok(self.db.get_task(claimed_id).await)
     }
 
     /// Atomically claim one specific `Backlog` task for dispatch, moving it to

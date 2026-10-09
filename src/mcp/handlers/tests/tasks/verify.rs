@@ -21,7 +21,7 @@ async fn set_verify_command_stores_and_returns_confirmation() {
         "response should echo the command; got: {text}"
     );
 
-    let stored = state.db.get_verify_command("/my/repo").await.unwrap();
+    let stored = state.db.get_verify_command("/my/repo").await;
     assert_eq!(stored, Some("make test".to_string()));
 }
 
@@ -68,6 +68,6 @@ async fn set_verify_command_clears_when_command_omitted() {
         "response should say cleared; got: {text}"
     );
 
-    let stored = state.db.get_verify_command("/my/repo").await.unwrap();
+    let stored = state.db.get_verify_command("/my/repo").await;
     assert_eq!(stored, None);
 }

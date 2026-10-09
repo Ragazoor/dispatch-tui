@@ -249,22 +249,7 @@ pub(super) async fn sync_grouped_feed(
     super::drop_closed_retired_feed_items(db, parent_id, &entries, mode).await;
     let groups = group_by_repo(entries);
 
-    let existing_sub_epics = match db.list_sub_epics(parent_id).await {
-        Ok(e) => e,
-        Err(err) => {
-            tracing::warn!(
-                epic_id = parent_id.0,
-                "sync_grouped_feed: list_sub_epics failed: {err:#}"
-            );
-            // list_sub_epics failed: no sub-epic was written, so none is
-            // notified. The parent stays in `affected_epics` regardless — the
-            // caller has always notified it unconditionally.
-            return super::FeedSyncOutcome {
-                affected_epics: vec![parent_id],
-                removed: vec![],
-            };
-        }
-    };
+    let existing_sub_epics = db.list_sub_epics(parent_id).await;
 
     // Every sub-epic `list_sub_epics` returns is live — deleting one removes
     // the row outright (task #4971), so there is no archived state left to

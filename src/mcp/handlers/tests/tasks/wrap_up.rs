@@ -396,7 +396,7 @@ async fn wrap_up_done_returns_exit_token() {
         assert_no_retro_instruction("done", &text);
     }
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Running,
@@ -448,7 +448,7 @@ async fn wrap_up_pr_defers_review_and_url_to_exit_session() {
         error_message(&resp)
     );
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Running,
@@ -781,7 +781,7 @@ async fn wrap_up_rebase_conflict_returns_error() {
 
     assert_error(&resp, "conflict");
     assert_error(&resp, "foo.rs");
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Review,
@@ -835,7 +835,7 @@ async fn wrap_up_rebase_dirty_primary_worktree_returns_error() {
         !error_text.to_lowercase().contains("rebase conflict"),
         "dirty primary worktree must not be reported as a rebase conflict, got: {error_text}"
     );
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Review,
@@ -889,7 +889,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
     .await;
 
     assert_error(&resp, "not on main");
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Review,
@@ -929,7 +929,7 @@ async fn update_task_status_recalculates_epic_status() {
     );
 
     // Epic stays in backlog (running tasks do not auto-advance)
-    let epic = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = state.db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 }
 // =======================================================================
@@ -1125,7 +1125,7 @@ async fn exit_session_rebase_closes_session_in_one_call() {
     let resp = close_session_via_mcp(&state, task_id, WrapUpAction::Rebase).await;
 
     assert_eq!(extract_response_text(&resp), "Session closed.");
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert!(task.tmux_window.is_none());
     assert_eq!(task.status, TaskStatus::Done);
     assert_eq!(task.sub_status, SubStatus::default_for(TaskStatus::Done));
@@ -1138,7 +1138,7 @@ async fn exit_session_done_closes_session_in_one_call() {
     let resp = close_session_via_mcp(&state, task_id, WrapUpAction::Done).await;
 
     assert_eq!(extract_response_text(&resp), "Session closed.");
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert!(task.tmux_window.is_none());
     assert_eq!(task.status, TaskStatus::Done);
 }
@@ -1150,7 +1150,7 @@ async fn exit_session_pr_sets_review_and_url() {
     let resp = close_session_via_mcp(&state, task_id, WrapUpAction::Pr).await;
 
     assert_eq!(extract_response_text(&resp), "Session closed.");
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert!(task.tmux_window.is_none());
     assert_eq!(task.status, TaskStatus::Review);
     assert_eq!(task.sub_status, SubStatus::default_for(TaskStatus::Review));
@@ -1178,7 +1178,7 @@ async fn exit_session_pr_without_pr_url_errors() {
     .await;
     assert_error(&resp, "pr_url");
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Running,
@@ -1211,7 +1211,7 @@ async fn exit_session_action_mismatch_errors() {
     .await;
     assert_error(&resp, "rebase");
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Running,
@@ -1326,7 +1326,7 @@ async fn exit_session_full_flow_rebase() {
     .await;
     assert_eq!(extract_response_text(&close_resp), "Session closed.");
 
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     assert!(task.tmux_window.is_none());
 }
@@ -1520,7 +1520,7 @@ async fn wrap_up_rebase_does_not_kill_window() {
     )
     .await;
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     // tmux_window must NOT be cleared — exit_session owns the window kill.
     assert!(
         task.tmux_window.is_some(),
@@ -1550,7 +1550,7 @@ async fn exit_session_marks_task_done_with_no_epic() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     assert_eq!(task.sub_status, SubStatus::default_for(TaskStatus::Done));
     assert!(task.tmux_window.is_none());
@@ -1583,7 +1583,7 @@ async fn exit_session_already_done_task_stays_done() {
     )
     .await;
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     assert!(task.tmux_window.is_none());
 }
@@ -1603,7 +1603,7 @@ async fn exit_session_recalculates_epic_status() {
         .recalculate_epic_status(epic.id)
         .await
         .unwrap();
-    let epic_before = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic_before = state.db.get_epic(epic.id).await.unwrap();
     assert_ne!(
         epic_before.status,
         TaskStatus::Done,
@@ -1621,7 +1621,7 @@ async fn exit_session_recalculates_epic_status() {
     )
     .await;
 
-    let epic_after = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic_after = state.db.get_epic(epic.id).await.unwrap();
     assert_eq!(
         epic_after.status,
         TaskStatus::Done,
@@ -1655,7 +1655,7 @@ async fn exit_session_resets_sub_status_to_default_for_done() {
     )
     .await;
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     assert_eq!(
         task.sub_status,
@@ -1686,7 +1686,7 @@ async fn exit_session_emits_refresh_after_done_patch() {
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
     // DB must already be Done by the time the Refresh fires.
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Done);
 
     let event = rx
@@ -1734,7 +1734,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
     .await
     .unwrap();
     db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic_before = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic_before = db.get_epic(epic.id).await.unwrap();
     assert_ne!(epic_before.status, TaskStatus::Done);
 
     let resp = call(
@@ -1748,7 +1748,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let after_wrap_up = db.get_task(task_id).await.unwrap().unwrap();
+    let after_wrap_up = db.get_task(task_id).await.unwrap();
     assert_eq!(
         after_wrap_up.status,
         TaskStatus::Running,
@@ -1758,7 +1758,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
         after_wrap_up.tmux_window.is_some(),
         "after wrap_up: tmux_window must be preserved"
     );
-    let epic_after_wrap_up = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic_after_wrap_up = db.get_epic(epic.id).await.unwrap();
     assert_eq!(
         epic_after_wrap_up.status, epic_before.status,
         "after wrap_up: epic status must not change"
@@ -1785,7 +1785,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
     .await;
     assert!(close_resp.error.is_none(), "{:?}", close_resp.error);
 
-    let final_task = db.get_task(task_id).await.unwrap().unwrap();
+    let final_task = db.get_task(task_id).await.unwrap();
     assert_eq!(final_task.status, TaskStatus::Done);
     assert_eq!(
         final_task.sub_status,
@@ -1793,7 +1793,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
     );
     assert!(final_task.tmux_window.is_none());
 
-    let final_epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let final_epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(
         final_epic.status,
         TaskStatus::Done,
@@ -1847,7 +1847,7 @@ async fn wrap_up_done_defers_done_transition_to_exit_session() {
         "response should mention done action, got: {text}"
     );
 
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Running,
@@ -1872,7 +1872,7 @@ async fn wrap_up_done_defers_done_transition_to_exit_session() {
         })),
     )
     .await;
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Done,
@@ -1922,7 +1922,7 @@ async fn wrap_up_done_recalculates_epic_status() {
         error_message(&resp)
     );
 
-    let epic_after_wrap_up = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic_after_wrap_up = db.get_epic(epic.id).await.unwrap();
     assert_ne!(
         epic_after_wrap_up.status,
         TaskStatus::Done,
@@ -1947,7 +1947,7 @@ async fn wrap_up_done_recalculates_epic_status() {
     )
     .await;
 
-    let epic_after_close = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic_after_close = db.get_epic(epic.id).await.unwrap();
     assert_eq!(
         epic_after_close.status,
         TaskStatus::Done,
@@ -1989,7 +1989,7 @@ async fn wrap_up_pr_recalculates_epic_status() {
         .recalculate_epic_status(epic.id)
         .await
         .unwrap();
-    let epic_before = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic_before = state.db.get_epic(epic.id).await.unwrap();
     assert_ne!(epic_before.status, TaskStatus::Done, "precondition");
 
     let resp = call(
@@ -2004,7 +2004,7 @@ async fn wrap_up_pr_recalculates_epic_status() {
         error_message(&resp)
     );
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Running,
@@ -2041,7 +2041,7 @@ async fn wrap_up_pr_recalculates_epic_status() {
 
     // Epic should still not be Done (task is Review, not Done)
     // but the recalc ran without panicking and the task is now Review.
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Review);
 }
 
@@ -2093,10 +2093,10 @@ async fn dispatch_task_recalculates_epic_status() {
     );
 
     // Task should now be Running and epic recalculated (still not Done — task just started)
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     // Epic recalc ran — epic should still be in backlog/non-done (task is running, not done)
-    let epic_after = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic_after = db.get_epic(epic.id).await.unwrap();
     assert_ne!(
         epic_after.status,
         TaskStatus::Done,

@@ -22,7 +22,7 @@ async fn close_session_done_moves_task_to_done_and_clears_the_window() {
         Some(window),
         "the caller tears down the window this close cleared"
     );
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     assert_eq!(task.sub_status, SubStatus::default_for(TaskStatus::Done));
     assert!(task.tmux_window.is_none());
@@ -57,7 +57,7 @@ async fn close_session_pr_moves_task_to_review_and_records_the_url() {
         .unwrap();
 
     assert_eq!(closed.window, Some(window));
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Review);
     assert_eq!(task.sub_status, SubStatus::default_for(TaskStatus::Review));
     assert!(task.tmux_window.is_none());
@@ -106,7 +106,7 @@ async fn close_session_recalculates_the_parent_epic() {
         .await
         .unwrap();
 
-    let after = db.get_epic(epic.id).await.unwrap().unwrap();
+    let after = db.get_epic(epic.id).await.unwrap();
     assert_eq!(
         after.status,
         TaskStatus::Done,
@@ -164,7 +164,7 @@ async fn claim_next_backlog_task_marks_the_claimed_task_running() {
         "the claim seeds last_pre_tool_use_at so the tick classifier keeps the task Active"
     );
 
-    let persisted = db.get_task(ids[0]).await.unwrap().unwrap();
+    let persisted = db.get_task(ids[0]).await.unwrap();
     assert_eq!(persisted.status, TaskStatus::Running);
     assert!(persisted.worktree.is_none(), "the claim does not provision");
 }
@@ -236,7 +236,7 @@ async fn claim_next_backlog_task_clears_leftover_subagents_without_flipping() {
     let claimed = svc.claim_next_backlog_task(epic_id).await.unwrap().unwrap();
     assert_eq!(claimed.id, ids[0]);
 
-    let task = db.get_task(ids[0]).await.unwrap().unwrap();
+    let task = db.get_task(ids[0]).await.unwrap();
     assert_eq!(task.live_subagents, 0, "a fresh dispatch starts from zero");
     assert!(!task.stop_pending);
     assert_eq!(
@@ -269,7 +269,7 @@ async fn claim_backlog_task_moves_the_task_running_without_provisioning() {
 
     assert!(svc.claim_backlog_task(id).await.unwrap());
 
-    let claimed = db.get_task(id).await.unwrap().unwrap();
+    let claimed = db.get_task(id).await.unwrap();
     assert_eq!(claimed.status, TaskStatus::Running);
     assert_eq!(
         claimed.sub_status,
@@ -301,7 +301,7 @@ async fn dispatch_claim_clears_leftover_subagents_without_flipping() {
 
     assert!(svc.claim_backlog_task(id).await.unwrap());
 
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.live_subagents, 0, "a fresh dispatch starts from zero");
     assert!(!task.stop_pending);
     assert_eq!(
@@ -328,7 +328,7 @@ async fn claim_backlog_task_lost_claim_writes_nothing() {
 
     // The extras patch must be gated on the transition winning, or a lost
     // claim would stamp last_pre_tool_use_at on someone else's task.
-    let after = db.get_task(id).await.unwrap().unwrap();
+    let after = db.get_task(id).await.unwrap();
     assert_eq!(after.status, TaskStatus::Review);
     assert_eq!(after.sub_status, SubStatus::default_for(TaskStatus::Review));
     assert!(
@@ -376,7 +376,7 @@ async fn release_claim_undoes_a_by_id_claim() {
 
     assert!(svc.release_claim(id).await.unwrap());
 
-    let released = db.get_task(id).await.unwrap().unwrap();
+    let released = db.get_task(id).await.unwrap();
     assert_eq!(released.status, TaskStatus::Backlog);
     assert_eq!(
         released.sub_status,

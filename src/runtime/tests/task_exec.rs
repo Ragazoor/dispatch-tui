@@ -14,7 +14,7 @@ async fn exec_save_base_branch_records_and_updates_app_state() {
         &["develop".to_string()],
         "app.board.repo_base_branches should reflect the newly recorded branch"
     );
-    let all = rt.database.list_all_base_branches().await.unwrap();
+    let all = rt.database.list_all_base_branches().await;
     assert!(all.contains(&("/repo".to_string(), "develop".to_string())));
 }
 
@@ -88,7 +88,7 @@ async fn exec_quick_dispatch_does_not_record_base_branch_history() {
         .detecting_default_branch("main")
         .shared_runner();
     let rt = make_runtime(db.clone(), tx, mock).await;
-    let tasks = db.list_all().await.unwrap();
+    let tasks = db.list_all().await;
     let mut app = App::new(tasks);
 
     rt.exec_quick_dispatch(
@@ -112,12 +112,7 @@ async fn exec_quick_dispatch_does_not_record_base_branch_history() {
         app.base_branches_for(repo).is_empty(),
         "quick dispatch must not record base branch history"
     );
-    assert!(rt
-        .database
-        .list_all_base_branches()
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(rt.database.list_all_base_branches().await.is_empty());
 
     // Drain the async Dispatched message so the sender isn't left dangling.
     let _ = tokio::time::timeout(TEST_TIMEOUT, rx.recv()).await;
@@ -156,7 +151,7 @@ async fn exec_refresh_from_db_returns_commands_from_refresh() {
     let cmds = rt.exec_refresh_from_db(&mut app).await;
     assert!(cmds.is_empty()); // First load — no transition
 
-    let task = rt.database.list_all().await.unwrap()[0].clone();
+    let task = rt.database.list_all().await[0].clone();
     rt.db_write()
         .patch_task(
             task.id,
@@ -196,7 +191,7 @@ async fn exec_jump_to_tmux_calls_select_window() {
         .with_windows(&["my-window"]),
     );
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
-    let tasks = db.list_all().await.unwrap();
+    let tasks = db.list_all().await;
     let mut app = App::new(tasks);
 
     rt.exec_jump_to_tmux(&mut app, test_tmux_window("my-window"));
@@ -251,7 +246,7 @@ async fn exec_dispatch_sends_dispatched_message() {
     // nothing here runs that Persist, so the row can only have left Backlog via
     // the claim `exec_dispatch_agent` takes before provisioning
     // (`DispatchClaimExclusive` in docs/specs/dispatch.allium).
-    let claimed = db.get_task(id).await.unwrap().unwrap();
+    let claimed = db.get_task(id).await.unwrap();
     assert_eq!(claimed.status, models::TaskStatus::Running);
     assert!(
         claimed.last_pre_tool_use_at.is_some(),
@@ -366,7 +361,7 @@ async fn exec_dispatch_agent_lost_claim_provisions_nothing() {
     );
     // The winner's claim is untouched: still Running, still unprovisioned,
     // still theirs to finish.
-    let after = db.get_task(task.id).await.unwrap().unwrap();
+    let after = db.get_task(task.id).await.unwrap();
     assert_eq!(after.status, models::TaskStatus::Running);
     assert!(after.worktree.is_none());
 }
@@ -393,7 +388,7 @@ async fn exec_release_claim_returns_the_task_to_backlog() {
 
     rt.exec_release_claim(&mut app, task.id).await;
 
-    let released = db.get_task(task.id).await.unwrap().unwrap();
+    let released = db.get_task(task.id).await.unwrap();
     assert_eq!(released.status, models::TaskStatus::Backlog);
     assert!(
         released.last_pre_tool_use_at.is_none(),
@@ -601,7 +596,7 @@ async fn exec_jump_to_tmux_failure_shows_error() {
         MockProcessRunner::fail("no such window"), // simulate tmux failure
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
-    let tasks = db.list_all().await.unwrap();
+    let tasks = db.list_all().await;
     let mut app = App::new(tasks);
 
     rt.exec_jump_to_tmux(&mut app, test_tmux_window("nonexistent-window"));
@@ -695,7 +690,7 @@ async fn exec_cleanup_failure_keeps_the_worktree_pointer() {
     );
     handle.await.unwrap();
 
-    let row = rt.database.get_task(id).await.unwrap().unwrap();
+    let row = rt.database.get_task(id).await.unwrap();
     assert_eq!(
         row.worktree.as_deref(),
         Some(worktree),
@@ -780,7 +775,6 @@ async fn exec_cleanup_failure_does_not_delete_the_row() {
         .database
         .get_task(id)
         .await
-        .unwrap()
         .expect("the row must survive a failed removal");
     assert_eq!(row.status, models::TaskStatus::Done);
     assert_eq!(row.worktree.as_deref(), Some(worktree));
@@ -1140,7 +1134,7 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
         .detecting_default_branch("main")
         .shared_runner();
     let rt = make_runtime(db.clone(), tx, mock).await;
-    let tasks = db.list_all().await.unwrap();
+    let tasks = db.list_all().await;
     let mut app = App::new(tasks);
 
     rt.exec_quick_dispatch(
@@ -1158,7 +1152,7 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
     // Task was created in app and DB synchronously
     assert_eq!(app.tasks().len(), 1);
     assert_eq!(app.tasks()[0].title, "My Task");
-    assert_eq!(db.list_all().await.unwrap().len(), 1);
+    assert_eq!(db.list_all().await.len(), 1);
 
     // Repo path was saved
     assert!(app.repo_paths().contains(&repo.to_string()));
@@ -1192,7 +1186,7 @@ async fn exec_quick_dispatch_sets_base_branch_to_repo_default() {
         .detecting_default_branch("master")
         .shared_runner();
     let rt = make_runtime(db.clone(), tx, mock).await;
-    let tasks = db.list_all().await.unwrap();
+    let tasks = db.list_all().await;
     let mut app = App::new(tasks);
 
     rt.exec_quick_dispatch(
@@ -1209,7 +1203,7 @@ async fn exec_quick_dispatch_sets_base_branch_to_repo_default() {
     )
     .await;
 
-    let stored = db.list_all().await.unwrap();
+    let stored = db.list_all().await;
     assert_eq!(stored.len(), 1);
     assert_eq!(
         stored[0].base_branch, "master",
@@ -1230,7 +1224,7 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
         .detecting_default_branch("main")
         .shared_runner();
     let rt = make_runtime(db.clone(), tx, mock).await;
-    let tasks = db.list_all().await.unwrap();
+    let tasks = db.list_all().await;
     let mut app = App::new(tasks);
 
     rt.exec_quick_dispatch(
@@ -1270,7 +1264,7 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
         MockProcessRunner::fail("not a git repo"), // detect_default_branch
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;
-    let tasks = db.list_all().await.unwrap();
+    let tasks = db.list_all().await;
     let mut app = App::new(tasks);
 
     // /nonexistent won't have .worktrees dir, so provision_worktree fails
@@ -1308,7 +1302,7 @@ async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
         "not a git repo",
     )]));
     let rt = make_runtime(db.clone(), tx, mock).await;
-    let tasks = db.list_all().await.unwrap();
+    let tasks = db.list_all().await;
     let mut app = App::new(tasks);
 
     rt.exec_quick_dispatch(
@@ -1465,7 +1459,7 @@ async fn exec_patch_sub_status_updates_db() {
     rt.exec_patch_sub_status(&mut app, id, models::SubStatus::NeedsInput)
         .await;
 
-    let db_task = rt.database.get_task(id).await.unwrap().unwrap();
+    let db_task = rt.database.get_task(id).await.unwrap();
     assert_eq!(db_task.sub_status, models::SubStatus::NeedsInput);
     assert!(app.error_popup().is_none());
 }
@@ -1502,7 +1496,7 @@ async fn exec_move_task_to_epic_links_and_refreshes() {
     rt.exec_move_task_to_epic(&mut app, id, Some(epic.id)).await;
 
     assert_eq!(
-        rt.database.get_task(id).await.unwrap().unwrap().epic_id,
+        rt.database.get_task(id).await.unwrap().epic_id,
         Some(epic.id)
     );
     // Board reflects the new membership after refresh.
@@ -1536,10 +1530,7 @@ async fn exec_move_task_to_epic_detaches_to_none() {
 
     rt.exec_move_task_to_epic(&mut app, id, None).await;
 
-    assert_eq!(
-        rt.database.get_task(id).await.unwrap().unwrap().epic_id,
-        None
-    );
+    assert_eq!(rt.database.get_task(id).await.unwrap().epic_id, None);
     assert!(app.error_popup().is_none());
 }
 
@@ -1563,8 +1554,5 @@ async fn exec_move_task_to_epic_shows_error_for_missing_epic() {
         .await;
 
     assert!(app.error_popup().is_some());
-    assert_eq!(
-        rt.database.get_task(id).await.unwrap().unwrap().epic_id,
-        None
-    );
+    assert_eq!(rt.database.get_task(id).await.unwrap().epic_id, None);
 }

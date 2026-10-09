@@ -20,12 +20,12 @@ async fn the_store_reaches_every_shared_table() {
 
     // repo_paths
     shared.save_repo_path("/repo").await.unwrap();
-    assert_eq!(shared.list_repo_paths().await.unwrap(), vec!["/repo"]);
+    assert_eq!(shared.list_repo_paths().await, vec!["/repo"]);
 
     // repo_base_branches
     shared.record_base_branch("/repo", "main").await.unwrap();
     assert_eq!(
-        shared.list_all_base_branches().await.unwrap(),
+        shared.list_all_base_branches().await,
         vec![("/repo".to_string(), "main".to_string())]
     );
 
@@ -36,7 +36,7 @@ async fn the_store_reaches_every_shared_table() {
 
     // epics
     let epic = shared.create_epic("Epic", "", None).await.unwrap();
-    assert!(shared.get_epic(epic.id).await.unwrap().is_some());
+    assert!(shared.get_epic(epic.id).await.is_some());
 
     // tasks
     let task_id = shared
@@ -46,7 +46,7 @@ async fn the_store_reaches_every_shared_table() {
         })
         .await
         .unwrap();
-    assert!(shared.get_task(task_id).await.unwrap().is_some());
+    assert!(shared.get_task(task_id).await.is_some());
 
     // task_watchers
     let watcher = make_task(&db, "Watcher").await;

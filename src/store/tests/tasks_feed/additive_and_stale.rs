@@ -26,7 +26,7 @@ async fn upsert_feed_tasks_adds_new_items() {
     .await
     .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 2, "new item should be created on second call");
 }
 
@@ -47,7 +47,7 @@ async fn upsert_feed_tasks_removes_stale_items() {
     )
     .await
     .unwrap();
-    assert_eq!(db.list_tasks_for_epic(epic.id).await.unwrap().len(), 2);
+    assert_eq!(db.list_tasks_for_epic(epic.id).await.len(), 2);
 
     // Second fetch: only ext-1 remains in the feed
     db.upsert_feed_tasks(
@@ -59,7 +59,7 @@ async fn upsert_feed_tasks_removes_stale_items() {
     .await
     .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1, "stale feed task should be removed");
     assert_eq!(tasks[0].external_id.as_deref(), Some("ext-1"));
 }
@@ -91,7 +91,6 @@ async fn upsert_feed_tasks_additive_upserts_without_deleting_absent_tasks() {
     let live = db
         .list_tasks_for_epic(epic.id)
         .await
-        .unwrap()
         .into_iter()
         .find(|t| t.external_id.as_deref() == Some("live-1"))
         .unwrap();
@@ -121,7 +120,7 @@ async fn upsert_feed_tasks_additive_upserts_without_deleting_absent_tasks() {
          nothing, got {removed:?}"
     );
 
-    let left = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let left = db.list_tasks_for_epic(epic.id).await;
     let ext = |t: &crate::models::Task| t.external_id.clone().unwrap_or_default();
     let mut ids: Vec<String> = left.iter().map(ext).collect();
     ids.sort();
@@ -175,7 +174,7 @@ async fn upsert_feed_tasks_additive_with_no_items_deletes_nothing() {
         .unwrap();
 
     assert_eq!(
-        db.list_tasks_for_epic(epic.id).await.unwrap().len(),
+        db.list_tasks_for_epic(epic.id).await.len(),
         1,
         "an empty additive emission must not clear the epic"
     );
@@ -215,7 +214,7 @@ async fn delete_stale_subtree_feed_tasks_never_reports_manual_tasks() {
         removed.is_empty(),
         "manual tasks are neither deleted nor reported, got {removed:?}"
     );
-    assert_eq!(db.list_tasks_for_epic(sub.id).await.unwrap().len(), 1);
+    assert_eq!(db.list_tasks_for_epic(sub.id).await.len(), 1);
 }
 
 /// `delete_stale_subtree_feed_tasks` deletes feed tasks (external_id set) across
@@ -261,14 +260,14 @@ async fn delete_stale_subtree_feed_tasks_scopes_to_subtree_and_keeps_set() {
         .await
         .unwrap();
 
-    let a_tasks = db.list_tasks_for_epic(child_a.id).await.unwrap();
+    let a_tasks = db.list_tasks_for_epic(child_a.id).await;
     assert_eq!(a_tasks.len(), 2, "kept feed task + manual task survive");
     assert!(a_tasks
         .iter()
         .any(|t| t.external_id.as_deref() == Some("keep-1")));
     assert!(a_tasks.iter().any(|t| t.id == manual_id));
 
-    let b_tasks = db.list_tasks_for_epic(child_b.id).await.unwrap();
+    let b_tasks = db.list_tasks_for_epic(child_b.id).await;
     assert!(
         b_tasks.is_empty(),
         "stale feed task absent from keep-set is deleted, got {b_tasks:?}"

@@ -296,7 +296,7 @@ async fn update_tasks_updates_every_named_task_whatever_its_status() {
     let text = extract_response_text(&resp);
 
     for id in [backlog, running, done] {
-        let task = state.db.get_task(id).await.unwrap().unwrap();
+        let task = state.db.get_task(id).await.unwrap();
         assert_eq!(task.base_branch, "master", "task {id}");
         assert!(
             text.contains(&format!("Task {id} updated (base_branch)")),
@@ -332,10 +332,7 @@ async fn update_tasks_reports_a_failure_and_carries_on() {
     );
     assert_eq!(lines[3], "Updated 2 of 3 tasks.");
     for id in [first, last] {
-        assert_eq!(
-            state.db.get_task(id).await.unwrap().unwrap().base_branch,
-            "master"
-        );
+        assert_eq!(state.db.get_task(id).await.unwrap().base_branch, "master");
     }
 }
 
@@ -373,7 +370,7 @@ async fn update_tasks_applies_update_task_guards_per_task() {
     assert!(text.contains(&format!("Task {id} failed: ")), "{text}");
     assert!(text.contains("only field set"), "{text}");
     assert_eq!(
-        state.db.get_task(id).await.unwrap().unwrap().status,
+        state.db.get_task(id).await.unwrap().status,
         TaskStatus::Review
     );
 }
@@ -412,7 +409,7 @@ async fn update_tasks_rejects_task_id() {
     )
     .await;
     assert!(is_error(&resp), "{:?}", resp.result);
-    assert_eq!(state.db.get_task(id).await.unwrap().unwrap().title, "a");
+    assert_eq!(state.db.get_task(id).await.unwrap().title, "a");
 }
 
 /// update_tasks advertises exactly update_task's field set, with task_ids in

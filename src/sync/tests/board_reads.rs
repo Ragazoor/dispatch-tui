@@ -23,26 +23,18 @@ async fn nothing_is_read_through_to_the_local_store() {
         .await
         .unwrap();
     assert!(
-        !db.list_all().await.unwrap().is_empty(),
+        !db.list_all().await.is_empty(),
         "the handle's own store must be populated, or this proves nothing"
     );
 
     // A second handle over rows nothing has been delivered to.
     let nothing_delivered = Store::open_in_memory().unwrap();
 
-    assert!(nothing_delivered.list_all().await.unwrap().is_empty());
-    assert!(nothing_delivered.list_epics().await.unwrap().is_empty());
-    assert!(nothing_delivered
-        .list_repo_paths()
-        .await
-        .unwrap()
-        .is_empty());
-    assert!(nothing_delivered
-        .list_all_base_branches()
-        .await
-        .unwrap()
-        .is_empty());
-    assert_eq!(nothing_delivered.get_task(any_task).await.unwrap(), None);
+    assert!(nothing_delivered.list_all().await.is_empty());
+    assert!(nothing_delivered.list_epics().await.is_empty());
+    assert!(nothing_delivered.list_repo_paths().await.is_empty());
+    assert!(nothing_delivered.list_all_base_branches().await.is_empty());
+    assert_eq!(nothing_delivered.get_task(any_task).await, None);
 }
 
 // ---------------------------------------------------------------------------

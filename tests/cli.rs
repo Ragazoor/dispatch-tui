@@ -336,7 +336,7 @@ async fn plan_attaches_to_existing_task() {
 
     // The plan must actually be persisted (routing through the service path
     // writes it), not just echoed.
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert!(
         task.plan_path.is_some(),
         "Expected plan_path to be persisted, got None"

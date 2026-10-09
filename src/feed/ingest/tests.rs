@@ -110,7 +110,7 @@ async fn create_manual_task(db: &Store, title: &str, epic: EpicId) -> TaskId {
 
 /// Find the sub-epic of `parent` carrying `role`, asserting exactly one.
 async fn role_sub_epic(db: &Store, parent: EpicId, role: FeedRole) -> EpicId {
-    let subs = db.list_sub_epics(parent).await.unwrap();
+    let subs = db.list_sub_epics(parent).await;
     let matching: Vec<_> = subs.iter().filter(|e| e.feed_role == role).collect();
     assert_eq!(
         matching.len(),
@@ -149,11 +149,11 @@ async fn route_routed_inserts_into_role_sub_epic() {
     let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
     let bots = role_sub_epic(&db, parent.id, FeedRole::Bots).await;
 
-    let my_tasks = db.list_tasks_for_epic(my).await.unwrap();
+    let my_tasks = db.list_tasks_for_epic(my).await;
     assert_eq!(my_tasks.len(), 1, "direct-request PR lands in My Reviews");
     assert_eq!(my_tasks[0].external_id.as_deref(), Some("pr-1"));
-    assert!(db.list_tasks_for_epic(team).await.unwrap().is_empty());
-    assert!(db.list_tasks_for_epic(bots).await.unwrap().is_empty());
+    assert!(db.list_tasks_for_epic(team).await.is_empty());
+    assert!(db.list_tasks_for_epic(bots).await.is_empty());
 }
 
 /// Task 3 (B2): a PR whose role changes is MOVED, preserving its in-flight
@@ -174,7 +174,7 @@ async fn route_routed_moves_task_preserving_state() {
         .unwrap();
 
     let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
-    let task = db.list_tasks_for_epic(team).await.unwrap().remove(0);
+    let task = db.list_tasks_for_epic(team).await.remove(0);
 
     // Simulate in-flight dispatched work on the task.
     db.patch_task(
@@ -199,7 +199,7 @@ async fn route_routed_moves_task_preserving_state() {
         .unwrap();
 
     let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
-    let my_tasks = db.list_tasks_for_epic(my).await.unwrap();
+    let my_tasks = db.list_tasks_for_epic(my).await;
     assert_eq!(my_tasks.len(), 1, "exactly one task, moved into My Reviews");
     let moved = &my_tasks[0];
     assert_eq!(moved.id, task.id, "same task row, not a recreate");
@@ -217,7 +217,7 @@ async fn route_routed_moves_task_preserving_state() {
     );
 
     assert!(
-        db.list_tasks_for_epic(team).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(team).await.is_empty(),
         "old role sub-epic no longer holds the moved task"
     );
 }
@@ -250,11 +250,11 @@ async fn route_routed_move_not_deleted_same_cycle() {
     let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
     let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
     assert_eq!(
-        db.list_tasks_for_epic(my).await.unwrap().len(),
+        db.list_tasks_for_epic(my).await.len(),
         1,
         "moved PR survives in its new role"
     );
-    assert!(db.list_tasks_for_epic(team).await.unwrap().is_empty());
+    assert!(db.list_tasks_for_epic(team).await.is_empty());
 }
 
 /// A task MOVED between role sub-epics during a sync must NEVER appear in the
@@ -314,7 +314,6 @@ async fn moved_task_is_never_reported_as_removed() {
     let task = db
         .list_tasks_for_epic(team)
         .await
-        .unwrap()
         .into_iter()
         .find(|t| t.external_id.as_deref() == Some("pr-1"))
         .expect("pr-1 landed in Team Reviews");
@@ -358,7 +357,7 @@ async fn moved_task_is_never_reported_as_removed() {
     );
 
     let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
-    let moved = db.list_tasks_for_epic(my).await.unwrap().remove(0);
+    let moved = db.list_tasks_for_epic(my).await.remove(0);
     assert_eq!(moved.id, task.id, "same task row, not a recreate");
     assert_eq!(
         moved.worktree.as_deref(),
@@ -400,7 +399,7 @@ async fn absent_task_with_worktree_is_reported_as_removed() {
     .unwrap();
 
     let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
-    let task = db.list_tasks_for_epic(team).await.unwrap().remove(0);
+    let task = db.list_tasks_for_epic(team).await.remove(0);
     db.patch_task(
         task.id,
         &TaskPatch::new()
@@ -444,7 +443,7 @@ async fn flat_sync_reports_removed_task_with_worktree() {
         .await
         .unwrap();
 
-    let task = db.list_tasks_for_epic(epic.id).await.unwrap().remove(0);
+    let task = db.list_tasks_for_epic(epic.id).await.remove(0);
     db.patch_task(
         task.id,
         &TaskPatch::new()
@@ -469,7 +468,6 @@ async fn flat_sync_reports_removed_task_with_worktree() {
 async fn flat_feed_task_count(db: &Store, epic: EpicId) -> usize {
     db.list_tasks_for_epic(epic)
         .await
-        .unwrap()
         .into_iter()
         .filter(|t| t.external_id.is_some())
         .count()
@@ -507,7 +505,7 @@ async fn route_routed_rescues_flat_task_stranded_on_parent() {
     )
     .await
     .unwrap();
-    let stranded = db.list_tasks_for_epic(parent.id).await.unwrap().remove(0);
+    let stranded = db.list_tasks_for_epic(parent.id).await.remove(0);
 
     // Simulate in-flight dispatched work on the stranded task.
     db.patch_task(
@@ -533,7 +531,7 @@ async fn route_routed_rescues_flat_task_stranded_on_parent() {
     );
 
     let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
-    let my_tasks = db.list_tasks_for_epic(my).await.unwrap();
+    let my_tasks = db.list_tasks_for_epic(my).await;
     assert_eq!(my_tasks.len(), 1, "the rescued PR lands in My Reviews once");
     let moved = &my_tasks[0];
     assert_eq!(moved.id, stranded.id, "same task row, not delete+recreate");
@@ -601,7 +599,7 @@ async fn route_routed_preserves_manual_task_on_parent() {
         .await
         .unwrap();
 
-    let survivors = db.list_tasks_for_epic(parent.id).await.unwrap();
+    let survivors = db.list_tasks_for_epic(parent.id).await;
     assert_eq!(survivors.len(), 1, "manual task must survive");
     assert_eq!(survivors[0].id, manual_id);
     assert!(
@@ -640,7 +638,7 @@ async fn route_routed_clears_parent_duplicate_when_canonical_in_sub_epic() {
     .await
     .unwrap();
     let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
-    assert_eq!(db.list_tasks_for_epic(my).await.unwrap().len(), 1);
+    assert_eq!(db.list_tasks_for_epic(my).await.len(), 1);
 
     // Corrupt the state: plant a duplicate flat copy on the parent, as the
     // old manual-trigger flat upsert did (inserting onto a reviews_parent
@@ -674,7 +672,7 @@ async fn route_routed_clears_parent_duplicate_when_canonical_in_sub_epic() {
         "parent duplicate cleared"
     );
     assert_eq!(
-        db.list_tasks_for_epic(my).await.unwrap().len(),
+        db.list_tasks_for_epic(my).await.len(),
         1,
         "exactly one canonical copy remains in My Reviews"
     );
@@ -723,11 +721,11 @@ async fn route_routed_removes_merged_pr_keeps_manual() {
 
     let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
     assert!(
-        db.list_tasks_for_epic(team).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(team).await.is_empty(),
         "merged pr-2 removed from Team Reviews"
     );
 
-    let my_tasks = db.list_tasks_for_epic(my).await.unwrap();
+    let my_tasks = db.list_tasks_for_epic(my).await;
     assert!(
         my_tasks.iter().any(|t| t.id == manual_id),
         "manual task survives reconcile"
@@ -795,17 +793,17 @@ async fn route_routed_preserves_per_item_repo_path_and_base_branch() {
             .clone()
     };
 
-    let my_tasks = db.list_tasks_for_epic(my).await.unwrap();
+    let my_tasks = db.list_tasks_for_epic(my).await;
     let my_task = task_by_ext(&my_tasks, "pr-my");
     assert_eq!(my_task.repo_path, "/repo-my");
     assert_eq!(my_task.base_branch, "my-branch");
 
-    let team_tasks = db.list_tasks_for_epic(team).await.unwrap();
+    let team_tasks = db.list_tasks_for_epic(team).await;
     let team_task = task_by_ext(&team_tasks, "pr-team");
     assert_eq!(team_task.repo_path, "/repo-team");
     assert_eq!(team_task.base_branch, "team-branch");
 
-    let bots_tasks = db.list_tasks_for_epic(bots).await.unwrap();
+    let bots_tasks = db.list_tasks_for_epic(bots).await;
     let bots_task = task_by_ext(&bots_tasks, "pr-bots");
     assert_eq!(bots_task.repo_path, "/repo-bots");
     assert_eq!(bots_task.base_branch, "bots-branch");
@@ -847,20 +845,20 @@ async fn role_routed_group_by_repo_routes_into_repo_sub_epic() {
         .await
         .unwrap();
 
-    let team_direct = db.list_tasks_for_epic(team).await.unwrap();
+    let team_direct = db.list_tasks_for_epic(team).await;
     assert!(
         team_direct.is_empty(),
         "Team Reviews must have no direct tasks when group_by_repo is active"
     );
 
-    let repo_subs = db.list_sub_epics(team).await.unwrap();
+    let repo_subs = db.list_sub_epics(team).await;
     assert_eq!(
         repo_subs.len(),
         1,
         "one repo-group sub-epic under Team Reviews"
     );
     assert_eq!(repo_subs[0].title, "myrepo");
-    let repo_tasks = db.list_tasks_for_epic(repo_subs[0].id).await.unwrap();
+    let repo_tasks = db.list_tasks_for_epic(repo_subs[0].id).await;
     assert_eq!(repo_tasks.len(), 1, "PR landed in the repo-group sub-epic");
     assert_eq!(repo_tasks[0].external_id.as_deref(), Some("pr-1"));
 }
@@ -905,12 +903,12 @@ async fn role_routed_group_by_repo_no_duplicate_on_resync() {
         .await
         .unwrap();
 
-    let repo_subs = db.list_sub_epics(team).await.unwrap();
+    let repo_subs = db.list_sub_epics(team).await;
     assert_eq!(repo_subs.len(), 1);
-    let tasks = db.list_tasks_for_epic(repo_subs[0].id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(repo_subs[0].id).await;
     assert_eq!(tasks.len(), 1, "exactly one task after three cycles");
     assert!(
-        db.list_tasks_for_epic(team).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(team).await.is_empty(),
         "no duplicate in role sub-epic"
     );
 }
@@ -950,9 +948,9 @@ async fn role_routed_group_by_repo_stale_deletion_reaches_grandchildren() {
         .await
         .unwrap();
 
-    let repo_subs = db.list_sub_epics(team).await.unwrap();
+    let repo_subs = db.list_sub_epics(team).await;
     assert_eq!(
-        db.list_tasks_for_epic(repo_subs[0].id).await.unwrap().len(),
+        db.list_tasks_for_epic(repo_subs[0].id).await.len(),
         1,
         "task present before stale deletion cycle"
     );
@@ -962,7 +960,7 @@ async fn role_routed_group_by_repo_stale_deletion_reaches_grandchildren() {
         .await
         .unwrap();
 
-    let tasks_after = db.list_tasks_for_epic(repo_subs[0].id).await.unwrap();
+    let tasks_after = db.list_tasks_for_epic(repo_subs[0].id).await;
     assert!(
         tasks_after.is_empty(),
         "stale PR must be removed from repo-group sub-epic"
@@ -986,18 +984,18 @@ async fn items_grouped_by_repo_name() {
     )
     .await;
 
-    let subs = db.list_sub_epics(parent.id).await.unwrap();
+    let subs = db.list_sub_epics(parent.id).await;
     assert_eq!(subs.len(), 2);
     let names: Vec<&str> = subs.iter().map(|e| e.title.as_str()).collect();
     assert!(names.contains(&"repo-a"), "got {names:?}");
     assert!(names.contains(&"repo-b"), "got {names:?}");
 
     for sub in &subs {
-        let tasks = db.list_tasks_for_epic(sub.id).await.unwrap();
+        let tasks = db.list_tasks_for_epic(sub.id).await;
         assert_eq!(tasks.len(), 1, "sub-epic {} should have 1 task", sub.title);
     }
 
-    let parent_tasks = db.list_tasks_for_epic(parent.id).await.unwrap();
+    let parent_tasks = db.list_tasks_for_epic(parent.id).await;
     assert_eq!(parent_tasks.len(), 0, "parent should have no direct tasks");
 }
 
@@ -1022,7 +1020,7 @@ async fn no_url_groups_as_other() {
 
     sync_grouped_feed(&*db, parent.id, entries(&items, &[""], &["main"])).await;
 
-    let subs = db.list_sub_epics(parent.id).await.unwrap();
+    let subs = db.list_sub_epics(parent.id).await;
     assert_eq!(subs.len(), 1);
     assert_eq!(subs[0].title, "other");
 }
@@ -1051,7 +1049,7 @@ async fn existing_active_sub_epic_reused() {
         vec![pre_existing.id],
         "should reuse existing active sub-epic"
     );
-    let subs = db.list_sub_epics(parent.id).await.unwrap();
+    let subs = db.list_sub_epics(parent.id).await;
     assert_eq!(subs.len(), 1, "no duplicate sub-epic should be created");
 }
 
@@ -1078,7 +1076,7 @@ async fn run_feed_sync_flat_upserts_to_parent_epic() {
         .unwrap();
 
     assert_eq!(outcome.affected_epics, vec![epic.id]);
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].external_id.as_deref(), Some("1"));
 }
@@ -1108,13 +1106,13 @@ async fn run_feed_sync_grouped_puts_tasks_in_sub_epics() {
     assert!(outcome.affected_epics.contains(&epic.id));
     assert_eq!(outcome.affected_epics.len(), 2, "parent id + 1 sub-epic id");
 
-    let parent_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let parent_tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(parent_tasks.len(), 0, "parent should have no direct tasks");
 
-    let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
+    let sub_epics = db.list_sub_epics(epic.id).await;
     assert_eq!(sub_epics.len(), 1);
     assert_eq!(sub_epics[0].title, "repo-a");
-    let sub_tasks = db.list_tasks_for_epic(sub_epics[0].id).await.unwrap();
+    let sub_tasks = db.list_tasks_for_epic(sub_epics[0].id).await;
     assert_eq!(sub_tasks.len(), 1);
 }
 
@@ -1138,19 +1136,19 @@ async fn sync_grouped_feed_empty_emission_clears_all_sub_epics() {
     )
     .await;
 
-    assert_eq!(db.list_sub_epics(parent.id).await.unwrap().len(), 2);
+    assert_eq!(db.list_sub_epics(parent.id).await.len(), 2);
 
     // Second cycle: the feed now returns nothing.
     sync_grouped_feed(&*db, parent.id, vec![]).await;
 
-    let subs = db.list_sub_epics(parent.id).await.unwrap();
+    let subs = db.list_sub_epics(parent.id).await;
     assert_eq!(
         subs.len(),
         2,
         "sub-epic rows remain, only their tasks clear"
     );
     for sub in &subs {
-        let tasks = db.list_tasks_for_epic(sub.id).await.unwrap();
+        let tasks = db.list_tasks_for_epic(sub.id).await;
         assert_eq!(
             tasks.len(),
             0,
@@ -1182,16 +1180,16 @@ async fn sync_grouped_feed_partial_emission_clears_dropped_repo() {
     let items2 = vec![make_item("1", "https://github.com/org/repo-a/pull/1")];
     sync_grouped_feed(&*db, parent.id, entries(&items2, &[""], &["main"])).await;
 
-    let subs = db.list_sub_epics(parent.id).await.unwrap();
+    let subs = db.list_sub_epics(parent.id).await;
     let repo_a = subs.iter().find(|e| e.title == "repo-a").unwrap();
     let repo_b = subs.iter().find(|e| e.title == "repo-b").unwrap();
     assert_eq!(
-        db.list_tasks_for_epic(repo_a.id).await.unwrap().len(),
+        db.list_tasks_for_epic(repo_a.id).await.len(),
         1,
         "repo-a still in feed, task kept"
     );
     assert_eq!(
-        db.list_tasks_for_epic(repo_b.id).await.unwrap().len(),
+        db.list_tasks_for_epic(repo_b.id).await.len(),
         0,
         "repo-b dropped out, task cleared"
     );
@@ -1231,13 +1229,10 @@ async fn role_routed_group_by_repo_off_rehomes_repo_tasks_no_duplicate() {
         .await
         .unwrap();
 
-    let repo_subs = db.list_sub_epics(team).await.unwrap();
+    let repo_subs = db.list_sub_epics(team).await;
     assert_eq!(repo_subs.len(), 1);
-    assert_eq!(
-        db.list_tasks_for_epic(repo_subs[0].id).await.unwrap().len(),
-        1
-    );
-    assert!(db.list_tasks_for_epic(team).await.unwrap().is_empty());
+    assert_eq!(db.list_tasks_for_epic(repo_subs[0].id).await.len(), 1);
+    assert!(db.list_tasks_for_epic(team).await.is_empty());
 
     // Disable group_by_repo → cycle 3 must re-home task to role sub-epic, no duplicate.
     db.patch_epic(team, &EpicPatch::new().group_by_repo(false))
@@ -1247,7 +1242,7 @@ async fn role_routed_group_by_repo_off_rehomes_repo_tasks_no_duplicate() {
         .await
         .unwrap();
 
-    let team_tasks = db.list_tasks_for_epic(team).await.unwrap();
+    let team_tasks = db.list_tasks_for_epic(team).await;
     assert_eq!(
         team_tasks.len(),
         1,
@@ -1256,9 +1251,9 @@ async fn role_routed_group_by_repo_off_rehomes_repo_tasks_no_duplicate() {
     assert_eq!(team_tasks[0].external_id.as_deref(), Some("pr-1"));
 
     // No tasks remain in any repo-group sub-epic.
-    for sub in db.list_sub_epics(team).await.unwrap() {
+    for sub in db.list_sub_epics(team).await {
         assert!(
-            db.list_tasks_for_epic(sub.id).await.unwrap().is_empty(),
+            db.list_tasks_for_epic(sub.id).await.is_empty(),
             "repo-group sub-epic {} must be empty after group_by_repo turned off",
             sub.title
         );
@@ -1275,7 +1270,7 @@ async fn sync_grouped_feed_preserves_manual_task_in_dropped_sub_epic() {
     let items = vec![make_item("1", "https://github.com/org/repo-a/pull/1")];
     sync_grouped_feed(&*db, parent.id, entries(&items, &[""], &["main"])).await;
 
-    let subs = db.list_sub_epics(parent.id).await.unwrap();
+    let subs = db.list_sub_epics(parent.id).await;
     let repo_a = subs.iter().find(|e| e.title == "repo-a").unwrap();
 
     // A manual task the user added under the repo sub-epic (no external_id).
@@ -1284,7 +1279,7 @@ async fn sync_grouped_feed_preserves_manual_task_in_dropped_sub_epic() {
     // Empty emission clears the feed task but must spare the manual one.
     sync_grouped_feed(&*db, parent.id, vec![]).await;
 
-    let tasks = db.list_tasks_for_epic(repo_a.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(repo_a.id).await;
     assert_eq!(tasks.len(), 1, "only the manual task survives");
     assert_eq!(tasks[0].id, manual_id);
 }
@@ -1314,7 +1309,7 @@ async fn flat_sync_rehomes_tasks_from_existing_repo_group_subepic_and_deletes_it
     db.upsert_feed_tasks(sub, &seed, &["".into()], &["main".into()])
         .await
         .unwrap();
-    let pre_existing = db.list_tasks_for_epic(sub).await.unwrap().remove(0);
+    let pre_existing = db.list_tasks_for_epic(sub).await.remove(0);
 
     // Flat sync (group_by_repo=false) with the same item still emitted.
     let items = vec![make_item("cve-1", "https://github.com/org/myrepo/pull/1")];
@@ -1322,7 +1317,7 @@ async fn flat_sync_rehomes_tasks_from_existing_repo_group_subepic_and_deletes_it
         .await
         .unwrap();
 
-    let parent_tasks = db.list_tasks_for_epic(parent.id).await.unwrap();
+    let parent_tasks = db.list_tasks_for_epic(parent.id).await;
     assert_eq!(parent_tasks.len(), 1, "task re-homed onto the parent");
     assert_eq!(
         parent_tasks[0].id, pre_existing.id,
@@ -1331,7 +1326,7 @@ async fn flat_sync_rehomes_tasks_from_existing_repo_group_subepic_and_deletes_it
     assert_eq!(parent_tasks[0].external_id.as_deref(), Some("cve-1"));
 
     assert!(
-        db.get_epic(sub).await.unwrap().is_none(),
+        db.get_epic(sub).await.is_none(),
         "emptied RepoGroup sub-epic is deleted"
     );
 }
@@ -1349,11 +1344,11 @@ async fn flat_sync_with_no_repo_group_subepics_is_unaffected() {
         .await
         .unwrap();
 
-    let parent_tasks = db.list_tasks_for_epic(parent.id).await.unwrap();
+    let parent_tasks = db.list_tasks_for_epic(parent.id).await;
     assert_eq!(parent_tasks.len(), 1, "flat upsert still lands on parent");
     assert_eq!(parent_tasks[0].external_id.as_deref(), Some("cve-2"));
     assert!(
-        db.list_sub_epics(parent.id).await.unwrap().is_empty(),
+        db.list_sub_epics(parent.id).await.is_empty(),
         "no sub-epics created or left behind"
     );
 }
@@ -1374,10 +1369,10 @@ async fn flat_sync_preserves_manual_sub_epic() {
         .unwrap();
 
     assert!(
-        db.get_epic(manual.id).await.unwrap().is_some(),
+        db.get_epic(manual.id).await.is_some(),
         "manual sub-epic survives flat-path reconciliation"
     );
-    let manual_tasks = db.list_tasks_for_epic(manual.id).await.unwrap();
+    let manual_tasks = db.list_tasks_for_epic(manual.id).await;
     assert_eq!(manual_tasks.len(), 1, "manual task stays put");
     assert_eq!(manual_tasks[0].id, manual_task);
 }
@@ -1429,7 +1424,6 @@ async fn additive_role_routed_sync_keeps_a_task_absent_from_the_emission() {
     let live = db
         .list_tasks_for_epic(my)
         .await
-        .unwrap()
         .into_iter()
         .find(|t| t.external_id.as_deref() == Some("pr-1"))
         .unwrap();
@@ -1459,7 +1453,7 @@ async fn additive_role_routed_sync_keeps_a_task_absent_from_the_emission() {
     .await
     .unwrap();
 
-    let tasks = db.list_tasks_for_epic(my).await.unwrap();
+    let tasks = db.list_tasks_for_epic(my).await;
     let survivor = tasks
         .iter()
         .find(|t| t.external_id.as_deref() == Some("pr-1"))
@@ -1511,7 +1505,7 @@ async fn additive_role_routed_sync_keeps_parent_stranded_tasks() {
     .await
     .unwrap();
 
-    let on_parent = db.list_tasks_for_epic(parent.id).await.unwrap();
+    let on_parent = db.list_tasks_for_epic(parent.id).await;
     assert_eq!(
         on_parent.len(),
         1,
@@ -1563,7 +1557,6 @@ async fn additive_role_routed_sync_still_moves_and_inserts() {
     let my_ids: Vec<String> = db
         .list_tasks_for_epic(my)
         .await
-        .unwrap()
         .into_iter()
         .filter_map(|t| t.external_id)
         .collect();
@@ -1573,7 +1566,7 @@ async fn additive_role_routed_sync_still_moves_and_inserts() {
         "first-sight insert still applied"
     );
     assert!(
-        db.list_tasks_for_epic(team).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(team).await.is_empty(),
         "the moved task left its old role sub-epic, and nothing was deleted to \
          achieve that"
     );
@@ -1607,10 +1600,10 @@ async fn additive_grouped_sync_keeps_tasks_in_a_dropped_repo_sub_epic() {
     )
     .await;
 
-    let subs = db.list_sub_epics(parent.id).await.unwrap();
+    let subs = db.list_sub_epics(parent.id).await;
     let repo_b = subs.iter().find(|e| e.title == "repo-b").unwrap();
     assert_eq!(
-        db.list_tasks_for_epic(repo_b.id).await.unwrap().len(),
+        db.list_tasks_for_epic(repo_b.id).await.len(),
         1,
         "a repo absent from a degraded emission keeps its tasks"
     );
@@ -1648,7 +1641,6 @@ async fn additive_flat_sync_keeps_a_task_absent_from_the_emission() {
     let ids: Vec<String> = db
         .list_tasks_for_epic(epic.id)
         .await
-        .unwrap()
         .into_iter()
         .filter_map(|t| t.external_id)
         .collect();
@@ -1715,7 +1707,6 @@ async fn role_routed_drops_own_authored_pr_entirely() {
     let my_ids: Vec<String> = db
         .list_tasks_for_epic(my)
         .await
-        .unwrap()
         .into_iter()
         .filter_map(|t| t.external_id)
         .collect();
@@ -1724,13 +1715,13 @@ async fn role_routed_drops_own_authored_pr_entirely() {
         vec!["pr-theirs".to_string()],
         "an own-authored PR must not reach My Reviews"
     );
-    assert!(db.list_tasks_for_epic(team).await.unwrap().is_empty());
+    assert!(db.list_tasks_for_epic(team).await.is_empty());
     assert!(
-        db.list_tasks_for_epic(bots).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(bots).await.is_empty(),
         "an excluded PR is dropped, not rerouted to Bots"
     );
     assert!(
-        db.list_tasks_for_epic(parent.id).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(parent.id).await.is_empty(),
         "an excluded PR must not be stranded on the parent either"
     );
 }
@@ -1761,7 +1752,7 @@ async fn role_routed_drops_own_authored_pr_even_with_team_and_bot_signals() {
     for role in [FeedRole::MyReviews, FeedRole::TeamReviews, FeedRole::Bots] {
         let sub = role_sub_epic(&db, parent.id, role).await;
         assert!(
-            db.list_tasks_for_epic(sub).await.unwrap().is_empty(),
+            db.list_tasks_for_epic(sub).await.is_empty(),
             "{role:?} must be empty — the author_me exclusion is unconditional"
         );
     }
@@ -1817,7 +1808,6 @@ async fn role_routed_drops_settled_approved_pr_entirely() {
     let my_ids: Vec<String> = db
         .list_tasks_for_epic(my)
         .await
-        .unwrap()
         .into_iter()
         .filter_map(|t| t.external_id)
         .collect();
@@ -1826,13 +1816,13 @@ async fn role_routed_drops_settled_approved_pr_entirely() {
         vec!["pr-open".to_string()],
         "an approved PR must not reach My Reviews"
     );
-    assert!(db.list_tasks_for_epic(team).await.unwrap().is_empty());
+    assert!(db.list_tasks_for_epic(team).await.is_empty());
     assert!(
-        db.list_tasks_for_epic(bots).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(bots).await.is_empty(),
         "an approved bot PR is dropped, not rerouted to Bots"
     );
     assert!(
-        db.list_tasks_for_epic(parent.id).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(parent.id).await.is_empty(),
         "an excluded PR must not be stranded on the parent either"
     );
 }
@@ -1877,7 +1867,6 @@ async fn role_routed_keeps_approved_pr_with_a_pending_request() {
     let my_ids: Vec<String> = db
         .list_tasks_for_epic(my)
         .await
-        .unwrap()
         .into_iter()
         .filter_map(|t| t.external_id)
         .collect();
@@ -1886,7 +1875,6 @@ async fn role_routed_keeps_approved_pr_with_a_pending_request() {
     let team_ids: Vec<String> = db
         .list_tasks_for_epic(team)
         .await
-        .unwrap()
         .into_iter()
         .filter_map(|t| t.external_id)
         .collect();
@@ -1918,7 +1906,7 @@ async fn assert_newly_excluded_pr_loses_its_task(before: Vec<Signal>, after: Vec
 
     let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
     assert_eq!(
-        db.list_tasks_for_epic(my).await.unwrap().len(),
+        db.list_tasks_for_epic(my).await.len(),
         1,
         "precondition: the PR is in My Reviews before the exclusion applies"
     );
@@ -1930,7 +1918,7 @@ async fn assert_newly_excluded_pr_loses_its_task(before: Vec<Signal>, after: Vec
         .await
         .unwrap();
 
-    let remaining = db.list_tasks_for_epic(my).await.unwrap();
+    let remaining = db.list_tasks_for_epic(my).await;
     assert_eq!(
         remaining.iter().map(|t| t.id).collect::<Vec<_>>(),
         vec![manual_id],
@@ -1996,7 +1984,7 @@ async fn additive_role_routed_sync_does_not_insert_own_authored_pr() {
 
     let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
     assert!(
-        db.list_tasks_for_epic(my).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(my).await.is_empty(),
         "an excluded item is not inserted on the additive path either"
     );
 }
@@ -2021,9 +2009,9 @@ async fn make_feed_epic(db: &Store, epic: EpicId) {
 /// flat, grouped, role-routed, role-routed + group_by_repo) carrying `id`.
 async fn subtree_tasks_with_id(db: &Store, root: EpicId, id: &str) -> Vec<crate::models::Task> {
     let mut epics = vec![root];
-    for sub in db.list_sub_epics(root).await.unwrap() {
+    for sub in db.list_sub_epics(root).await {
         epics.push(sub.id);
-        for grand in db.list_sub_epics(sub.id).await.unwrap() {
+        for grand in db.list_sub_epics(sub.id).await {
             epics.push(grand.id);
         }
     }
@@ -2032,7 +2020,6 @@ async fn subtree_tasks_with_id(db: &Store, root: EpicId, id: &str) -> Vec<crate:
         out.extend(
             db.list_tasks_for_epic(e)
                 .await
-                .unwrap()
                 .into_iter()
                 .filter(|t| t.external_id.as_deref() == Some(id)),
         );
@@ -2229,11 +2216,10 @@ async fn grouped_sync_creates_no_sub_epic_for_a_retired_item_with_no_task() {
     let repo_a = db
         .list_sub_epics(root.id)
         .await
-        .unwrap()
         .into_iter()
         .find(|e| e.title == "repo-a")
         .unwrap();
-    for t in db.list_tasks_for_epic(repo_a.id).await.unwrap() {
+    for t in db.list_tasks_for_epic(repo_a.id).await {
         db.patch_task(t.id, &TaskPatch::new().status(TaskStatus::Done))
             .await
             .unwrap();
@@ -2245,7 +2231,6 @@ async fn grouped_sync_creates_no_sub_epic_for_a_retired_item_with_no_task() {
     let titles: Vec<String> = db
         .list_sub_epics(root.id)
         .await
-        .unwrap()
         .into_iter()
         .map(|e| e.title)
         .collect();
@@ -2416,7 +2401,7 @@ async fn role_routed_group_by_repo_creates_no_repo_sub_epic_for_a_retired_item()
         .unwrap();
 
     assert!(
-        db.list_sub_epics(team).await.unwrap().is_empty(),
+        db.list_sub_epics(team).await.is_empty(),
         "no repo-group sub-epic may be created for a retired item"
     );
     assert!(subtree_tasks_with_id(&db, parent.id, "pr-1")
@@ -2448,7 +2433,6 @@ async fn mirror_sync_purge_leaves_no_watch_rows_for_the_removed_task() {
     assert!(
         crate::store::TaskRead::get_task(&*db, target)
             .await
-            .unwrap()
             .is_none(),
         "fixture: purged"
     );

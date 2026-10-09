@@ -58,7 +58,6 @@ async fn dispatch_save_repo_path_persists_and_updates_app() {
         rt.database
             .list_repo_paths()
             .await
-            .unwrap()
             .contains(&"/some/repo".to_string()),
         "repo path should be persisted"
     );
@@ -82,7 +81,7 @@ async fn dispatch_save_base_branch_persists_and_updates_app() {
     )
     .await;
 
-    let pairs = rt.database.list_all_base_branches().await.unwrap();
+    let pairs = rt.database.list_all_base_branches().await;
     assert!(
         pairs
             .iter()
@@ -110,7 +109,7 @@ async fn dispatch_task_persist_writes_status_to_db() {
     )
     .await;
 
-    let stored = rt.database.get_task(task.id).await.unwrap().unwrap();
+    let stored = rt.database.get_task(task.id).await.unwrap();
     assert_eq!(stored.status, models::TaskStatus::Running);
     assert_eq!(stored.sub_status, models::SubStatus::Active);
     assert_eq!(stored.worktree.as_deref(), Some("/wt"));
@@ -136,7 +135,7 @@ async fn dispatch_task_persist_surfaces_service_rejection_and_writes_nothing() {
     )
     .await;
 
-    let stored = rt.database.get_task(task.id).await.unwrap().unwrap();
+    let stored = rt.database.get_task(task.id).await.unwrap();
     assert_eq!(stored.status, models::TaskStatus::Backlog);
     assert_eq!(stored.worktree, None);
     let err = app.error_popup().unwrap_or_default();
@@ -154,7 +153,7 @@ async fn dispatch_task_delete_removes_the_row() {
     dispatch_one(&rt, &mut app, Command::Task(TaskCommand::Delete(task.id))).await;
 
     assert!(
-        rt.database.get_task(task.id).await.unwrap().is_none(),
+        rt.database.get_task(task.id).await.is_none(),
         "the task row should be gone"
     );
 }
@@ -183,7 +182,7 @@ async fn dispatch_task_clear_worktree_pointer_clears_both_pointers() {
     )
     .await;
 
-    let stored = rt.database.get_task(task.id).await.unwrap().unwrap();
+    let stored = rt.database.get_task(task.id).await.unwrap();
     assert_eq!(stored.worktree, None);
     assert_eq!(stored.tmux_window, None);
     // Paired with `worktree` per core/Task's `HostTracksWorktree` invariant
@@ -213,7 +212,7 @@ async fn dispatch_task_move_to_epic_reparents_and_cascades_a_refresh() {
     )
     .await;
 
-    let stored = rt.database.get_task(task.id).await.unwrap().unwrap();
+    let stored = rt.database.get_task(task.id).await.unwrap();
     assert_eq!(
         stored.epic_id,
         Some(epic_id),
@@ -264,7 +263,7 @@ async fn dispatch_task_patch_sub_status_writes_to_db() {
     )
     .await;
 
-    let stored = rt.database.get_task(task.id).await.unwrap().unwrap();
+    let stored = rt.database.get_task(task.id).await.unwrap();
     assert_eq!(stored.sub_status, models::SubStatus::NeedsInput);
 }
 
@@ -283,7 +282,7 @@ async fn dispatch_epic_insert_then_persist_writes_to_db() {
     )
     .await;
 
-    let epics = rt.database.list_epics().await.unwrap();
+    let epics = rt.database.list_epics().await;
     assert_eq!(epics.len(), 1);
     assert_eq!(epics[0].title, "Epic via dispatch");
 }
@@ -378,7 +377,7 @@ async fn dispatch_editor_finalize_result_persists_the_edit() {
     )
     .await;
 
-    let stored = rt.database.get_task(task.id).await.unwrap().unwrap();
+    let stored = rt.database.get_task(task.id).await.unwrap();
     assert_eq!(stored.title, "New title");
     assert_eq!(stored.description, "New description");
 }
@@ -402,7 +401,7 @@ async fn dispatch_task_insert_writes_a_new_row() {
     )
     .await;
 
-    let tasks = rt.database.list_all().await.unwrap();
+    let tasks = rt.database.list_all().await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "Inserted via dispatch");
     assert_eq!(app.tasks().len(), 1);
@@ -421,7 +420,7 @@ async fn dispatch_task_seed_activity_stamps_the_hook_column() {
     )
     .await;
 
-    let stored = rt.database.get_task(task.id).await.unwrap().unwrap();
+    let stored = rt.database.get_task(task.id).await.unwrap();
     assert!(
         stored.last_pre_tool_use_at.is_some(),
         "the activity timestamp must be seeded so the task is not immediately Stale"
@@ -447,21 +446,11 @@ async fn dispatch_task_batch_patch_sub_status_updates_every_task() {
     .await;
 
     assert_eq!(
-        rt.database
-            .get_task(a.id)
-            .await
-            .unwrap()
-            .unwrap()
-            .sub_status,
+        rt.database.get_task(a.id).await.unwrap().sub_status,
         models::SubStatus::Stale
     );
     assert_eq!(
-        rt.database
-            .get_task(b.id)
-            .await
-            .unwrap()
-            .unwrap()
-            .sub_status,
+        rt.database.get_task(b.id).await.unwrap().sub_status,
         models::SubStatus::Crashed
     );
 }
@@ -506,7 +495,7 @@ async fn dispatch_epic_persist_delete_and_toggles_reach_the_db() {
     )
     .await;
 
-    let stored = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+    let stored = rt.database.get_epic(epic.id).await.unwrap();
     assert_eq!(stored.status, models::TaskStatus::Review);
     assert_eq!(stored.sort_order, Some(3));
     assert!(stored.auto_dispatch);
@@ -517,7 +506,7 @@ async fn dispatch_epic_persist_delete_and_toggles_reach_the_db() {
     assert!(app.epics().iter().any(|e| e.id == epic.id));
 
     dispatch_one(&rt, &mut app, Command::Epic(EpicCommand::Delete(epic.id))).await;
-    assert!(rt.database.get_epic(epic.id).await.unwrap().is_none());
+    assert!(rt.database.get_epic(epic.id).await.is_none());
 }
 
 #[tokio::test]
@@ -537,7 +526,7 @@ async fn dispatch_epic_reparent_moves_the_child() {
     )
     .await;
 
-    let stored = rt.database.get_epic(child.id).await.unwrap().unwrap();
+    let stored = rt.database.get_epic(child.id).await.unwrap();
     assert_eq!(stored.parent_epic_id, Some(parent.id));
 }
 
@@ -563,7 +552,6 @@ async fn dispatch_repo_filter_delete_repo_path_forgets_the_path() {
         !rt.database
             .list_repo_paths()
             .await
-            .unwrap()
             .contains(&"/doomed".to_string()),
         "the path should no longer be known"
     );
@@ -649,7 +637,7 @@ async fn harness(mock: MockProcessRunner) -> Harness {
         tx: call_tx,
     });
     let rt = make_runtime(db.clone(), tx, runner).await;
-    let app = App::new(db.list_all().await.unwrap());
+    let app = App::new(db.list_all().await);
     Harness {
         rt,
         app,
@@ -1135,7 +1123,7 @@ async fn dispatch_feed_trigger_epic_runs_the_epics_own_feed_command() {
         "expected one synced item, got: {msg:?}"
     );
     assert_eq!(
-        h.db.list_tasks_for_epic(epic.id).await.unwrap().len(),
+        h.db.list_tasks_for_epic(epic.id).await.len(),
         1,
         "the cycle must have upserted the emitted item"
     );
@@ -1306,7 +1294,7 @@ async fn dispatch_task_dispatch_agent_claims_then_provisions() {
     // Nothing here runs the Persist `handle_dispatched` emits, so the row can
     // only have left Backlog via the pre-provisioning claim
     // (`DispatchClaimExclusive` in docs/specs/dispatch.allium).
-    let claimed = h.rt.database.get_task(id).await.unwrap().unwrap();
+    let claimed = h.rt.database.get_task(id).await.unwrap();
     assert_eq!(claimed.status, models::TaskStatus::Running);
 }
 
@@ -1408,7 +1396,7 @@ async fn dispatch_task_quick_dispatch_stops_at_the_trust_prompt_for_an_untrusted
         "quick dispatch must gate on trust too, got: {status:?}"
     );
     assert!(
-        h.rt.database.list_all().await.unwrap().is_empty(),
+        h.rt.database.list_all().await.is_empty(),
         "no task row may be created before the operator confirms"
     );
 }
@@ -1644,7 +1632,7 @@ async fn dispatch_task_release_claim_returns_the_task_to_backlog() {
     h.dispatch(Command::Task(TaskCommand::ReleaseClaim(task.id)))
         .await;
 
-    let released = h.rt.database.get_task(task.id).await.unwrap().unwrap();
+    let released = h.rt.database.get_task(task.id).await.unwrap();
     assert_eq!(released.status, models::TaskStatus::Backlog);
     assert!(
         released.last_pre_tool_use_at.is_none(),
@@ -1680,7 +1668,6 @@ async fn dispatch_task_clear_subagents_drops_the_live_count() {
             .get_task(task.id)
             .await
             .unwrap()
-            .unwrap()
             .live_subagents,
         1,
         "precondition: one live subagent"
@@ -1696,7 +1683,6 @@ async fn dispatch_task_clear_subagents_drops_the_live_count() {
         h.rt.database
             .get_task(task.id)
             .await
-            .unwrap()
             .unwrap()
             .live_subagents,
         0
@@ -1983,7 +1969,7 @@ async fn a_guarded_cleanup_of_a_task_not_done_in_the_store_runs_no_teardown() {
         "no git or tmux command may run: {:?}",
         h.mock.recorded_calls()
     );
-    assert!(h.rt.database.get_task(task.id).await.unwrap().is_some());
+    assert!(h.rt.database.get_task(task.id).await.is_some());
 }
 
 #[tokio::test]
@@ -2071,7 +2057,7 @@ async fn deleting_a_task_that_is_not_done_in_the_store_changes_nothing() {
         .await;
 
     assert!(refused(&h.next_msg().await));
-    assert!(h.rt.database.get_task(task.id).await.unwrap().is_some());
+    assert!(h.rt.database.get_task(task.id).await.is_some());
 }
 
 #[tokio::test]
@@ -2087,6 +2073,6 @@ async fn batch_deleting_with_one_item_not_done_in_the_store_changes_nothing() {
     .await;
 
     assert!(refused(&h.next_msg().await));
-    assert!(h.rt.database.get_task(done.id).await.unwrap().is_some());
-    assert!(h.rt.database.get_task(live.id).await.unwrap().is_some());
+    assert!(h.rt.database.get_task(done.id).await.is_some());
+    assert!(h.rt.database.get_task(live.id).await.is_some());
 }

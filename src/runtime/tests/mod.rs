@@ -272,7 +272,7 @@ async fn test_runtime_over(db: Arc<Store>) -> (TuiRuntime, App) {
     let (tx, _rx) = mpsc::unbounded_channel();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let rt = make_runtime(db.clone(), tx, runner).await;
-    let tasks = db.list_all().await.unwrap();
+    let tasks = db.list_all().await;
     let app = App::new(tasks);
     (rt, app)
 }
@@ -295,7 +295,7 @@ async fn create_task_returning(
         })
         .await?;
     db.get_task(id)
-        .await?
+        .await
         .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
 }
 
@@ -330,7 +330,7 @@ async fn exec_insert_task_adds_to_db_and_app() {
     .await;
     assert_eq!(app.tasks().len(), 1);
     assert_eq!(app.tasks()[0].title, "Test");
-    assert_eq!(rt.database.list_all().await.unwrap().len(), 1);
+    assert_eq!(rt.database.list_all().await.len(), 1);
 }
 
 #[tokio::test]
@@ -356,7 +356,7 @@ async fn exec_delete_task_removes_from_db() {
         .await
         .unwrap();
     rt.exec_delete_task(id).await;
-    assert!(rt.database.list_all().await.unwrap().is_empty());
+    assert!(rt.database.list_all().await.is_empty());
 }
 
 #[tokio::test]
@@ -382,12 +382,7 @@ async fn exec_persist_task_saves_status_to_db() {
         crate::tui::commands::PersistFields::from_task(&task),
     )
     .await;
-    let db_task = rt
-        .database
-        .get_task(app.tasks()[0].id)
-        .await
-        .unwrap()
-        .unwrap();
+    let db_task = rt.database.get_task(app.tasks()[0].id).await.unwrap();
     assert_eq!(db_task.status, models::TaskStatus::Running);
     assert_eq!(db_task.worktree.as_deref(), Some("/repo/.worktrees/1-test"));
 }
@@ -431,7 +426,7 @@ async fn exec_persist_task_preserves_sub_status() {
     .await;
 
     // sub_status must survive the round-trip to DB
-    let db_task = rt.database.get_task(id).await.unwrap().unwrap();
+    let db_task = rt.database.get_task(id).await.unwrap();
     assert_eq!(db_task.sub_status, models::SubStatus::Approved);
 }
 
@@ -480,7 +475,7 @@ async fn exec_persist_task_does_not_overwrite_last_pre_tool_use_at() {
 
     // The hook's timestamp must survive — Persist owns status/sub_status,
     // not the activity stamp.
-    let db_task = rt.database.get_task(id).await.unwrap().unwrap();
+    let db_task = rt.database.get_task(id).await.unwrap();
     assert_eq!(
         db_task.last_pre_tool_use_at.map(|t| t.timestamp()),
         Some(hook_ts.timestamp()),
@@ -553,7 +548,7 @@ async fn exec_persist_task_writes_back_done_transition_completed_at_immediately(
         in_memory.completed_at
     );
 
-    let db_task = rt.database.get_task(id).await.unwrap().unwrap();
+    let db_task = rt.database.get_task(id).await.unwrap();
     assert_eq!(
         in_memory.completed_at, db_task.completed_at,
         "in-memory completed_at must match what was actually persisted"
@@ -630,7 +625,7 @@ async fn exec_persist_task_leaving_done_keeps_completed_at_and_sort_order() {
         "nor the manual ordering the task carried"
     );
 
-    let db_task = rt.database.get_task(id).await.unwrap().unwrap();
+    let db_task = rt.database.get_task(id).await.unwrap();
     assert_eq!(db_task.completed_at, Some(finished));
     assert_eq!(db_task.sort_order, Some(7));
 }
@@ -746,7 +741,7 @@ async fn exec_persist_task_write_back_does_not_resurrect_task_absent_from_board(
         "write-back re-inserted a task that is not on the board"
     );
     // The DB write itself still lands — only the in-memory splice is skipped.
-    let db_task = rt.database.get_task(task.id).await.unwrap().unwrap();
+    let db_task = rt.database.get_task(task.id).await.unwrap();
     assert_eq!(db_task.status, models::TaskStatus::Done);
     assert!(db_task.completed_at.is_some());
 }
@@ -781,7 +776,7 @@ async fn exec_seed_activity_writes_only_timestamp() {
     let seed_at = chrono::Utc::now();
     rt.exec_seed_activity(&mut app, id, seed_at).await;
 
-    let db_task = rt.database.get_task(id).await.unwrap().unwrap();
+    let db_task = rt.database.get_task(id).await.unwrap();
     assert_eq!(
         db_task.last_pre_tool_use_at.map(|t| t.timestamp()),
         Some(seed_at.timestamp())
@@ -811,7 +806,7 @@ async fn exec_save_repo_path_expands_tilde() {
         app.repo_paths()
     );
     // Verify the DB also has the expanded path, not the tilde version
-    let db_paths = rt.database.list_repo_paths().await.unwrap();
+    let db_paths = rt.database.list_repo_paths().await;
     assert!(db_paths.contains(&expected));
     assert!(!db_paths.iter().any(|p| p.starts_with("~/")));
 }

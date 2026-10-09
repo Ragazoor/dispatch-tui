@@ -76,7 +76,7 @@ async fn create_task_via_task_header_does_not_inherit_epic() {
         "refusal must name the argument and the caller's epic, got: {refusal}"
     );
     assert_eq!(
-        db.list_all().await.unwrap().len(),
+        db.list_all().await.len(),
         1,
         "a refused create must leave only the caller's own task"
     );
@@ -96,7 +96,7 @@ async fn create_task_via_task_header_does_not_inherit_epic() {
     .await;
 
     let new_id = parse_created_task_id(&resp);
-    let new_task = db.get_task(new_id).await.unwrap().unwrap();
+    let new_task = db.get_task(new_id).await.unwrap();
     assert_eq!(new_task.epic_id, None, "the argument is the effective epic");
 }
 
@@ -117,7 +117,7 @@ async fn create_task_via_session_succeeds() {
     )
     .await;
     let new_id = parse_created_task_id(&resp);
-    let new_task = db.get_task(new_id).await.unwrap().unwrap();
+    let new_task = db.get_task(new_id).await.unwrap();
     assert_eq!(new_task.title, "t");
 }
 

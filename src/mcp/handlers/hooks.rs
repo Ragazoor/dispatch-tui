@@ -49,12 +49,10 @@ pub async fn handle_pane_view(
     State(state): State<Arc<McpState>>,
     Json(request): Json<PaneViewRequest>,
 ) -> Result<Json<PaneView>, (StatusCode, String)> {
-    let failed = |e: anyhow::Error| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"));
     let task = state
         .db
         .get_task(request.task_id)
         .await
-        .map_err(failed)?
         .map(|task| PaneTask {
             worktree: task.worktree,
             base_branch: task.base_branch,
@@ -63,7 +61,6 @@ pub async fn handle_pane_view(
         .db
         .list_live_agent_tasks()
         .await
-        .map_err(failed)?
         .into_iter()
         .filter_map(|task| {
             Some(PaneAgent {

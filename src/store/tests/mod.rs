@@ -32,7 +32,7 @@ pub(super) async fn create_task_returning(
         })
         .await?;
     db.get_task(id)
-        .await?
+        .await
         .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
 }
 

@@ -192,23 +192,25 @@ patch_struct! {
 // Sub-traits — focused slices of the database API
 // ---------------------------------------------------------------------------
 
-/// Read-only task queries. Held (via [`TaskReadStore`]) by non-service consumers so
+/// Read-only task queries. Infallible by signature: the read traits answer
+/// from the subscription's in-memory rows, so there is no read error to handle
+/// or inject. Held (via [`TaskReadStore`]) by non-service consumers so
 /// a direct task *mutation* from a handler is a compile error — see the
 /// "Service layer is the mutation boundary" section of `docs/conventions.md`.
 #[async_trait::async_trait]
 pub trait TaskRead: Send + Sync {
-    async fn get_task(&self, id: TaskId) -> Result<Option<Task>>;
+    async fn get_task(&self, id: TaskId) -> Option<Task>;
     /// Whether a task row exists, without materialising it. For callers whose
     /// only question is existence — typically to honour a `NotFound` contract
     /// before a mutation — where [`get_task`](Self::get_task) would decode every
     /// column and discard the result.
-    async fn task_exists(&self, id: TaskId) -> Result<bool>;
-    async fn list_all(&self) -> Result<Vec<Task>>;
+    async fn task_exists(&self, id: TaskId) -> bool;
+    async fn list_all(&self) -> Vec<Task>;
     /// The tasks [`Task::is_live_agent`] accepts, ordered by id — the
     /// agent-tree pane's agents section, read once a second per pane, so it
     /// filters in SQL rather than decoding every task ever created.
-    async fn list_live_agent_tasks(&self) -> Result<Vec<Task>>;
-    async fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
+    async fn list_live_agent_tasks(&self) -> Vec<Task>;
+    async fn find_task_by_plan(&self, plan: &str) -> Option<Task>;
 }
 
 /// Task mutations, layered on top of the read surface. Reachable only by the
@@ -537,20 +539,20 @@ pub trait PollOwnershipStore: Send + Sync {
 /// Read-only epic queries. Held (via [`TaskReadStore`]) by non-service consumers.
 #[async_trait::async_trait]
 pub trait EpicRead: Send + Sync {
-    async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
-    async fn list_epics(&self) -> Result<Vec<Epic>>;
+    async fn get_epic(&self, id: EpicId) -> Option<Epic>;
+    async fn list_epics(&self) -> Vec<Epic>;
     /// List only root epics (no parent). Used for the main board view.
-    async fn list_root_epics(&self) -> Result<Vec<Epic>>;
+    async fn list_root_epics(&self) -> Vec<Epic>;
     /// List direct children of the given epic.
-    async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>>;
-    async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<Task>>;
+    async fn list_sub_epics(&self, parent_id: EpicId) -> Vec<Epic>;
+    async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Vec<Task>;
     /// Ids of the epic's tasks the bulk read skipped because the row did not
     /// decode, ascending. Such a task is still in the epic's subtree with an
     /// unknown status (epics.allium: `DeleteEpicRefused`).
-    async fn list_undecodable_task_ids_for_epic(&self, epic_id: EpicId) -> Result<Vec<TaskId>>;
+    async fn list_undecodable_task_ids_for_epic(&self, epic_id: EpicId) -> Vec<TaskId>;
     /// Fetch all tasks that have a non-null epic_id in a single query.
     /// Use instead of looping over epics and calling list_tasks_for_epic() per epic.
-    async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>>;
+    async fn list_all_tasks_with_epic_id(&self) -> Vec<Task>;
 }
 
 /// Epic mutations, layered on top of the read surface. The
@@ -634,13 +636,13 @@ pub trait SettingsStore: Send + Sync {
 /// holds a handle that cannot write it.
 #[async_trait::async_trait]
 pub trait RepoConfigRead: Send + Sync {
-    async fn list_repo_paths(&self) -> Result<Vec<String>>;
+    async fn list_repo_paths(&self) -> Vec<String>;
 
-    async fn get_verify_command(&self, path: &str) -> Result<Option<String>>;
+    async fn get_verify_command(&self, path: &str) -> Option<String>;
 
     /// All `(repo_path, branch)` pairs across every repo, ordered by
     /// `last_used DESC, id DESC`.
-    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>>;
+    async fn list_all_base_branches(&self) -> Vec<(String, String)>;
 }
 
 #[async_trait::async_trait]

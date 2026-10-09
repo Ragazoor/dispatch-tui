@@ -163,7 +163,7 @@ impl TaskService {
         body: &str,
         reason: WatchReason,
     ) {
-        let Ok(Some(watcher)) = self.db.get_task(watcher_id).await else {
+        let Some(watcher) = self.db.get_task(watcher_id).await else {
             tracing::warn!(
                 watcher_id = watcher_id.0,
                 target_id = target_id.0,

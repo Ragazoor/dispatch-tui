@@ -11,7 +11,7 @@ async fn create_and_get() {
         })
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().expect("task should exist");
+    let task = db.get_task(id).await.expect("task should exist");
     assert_eq!(task.id, id);
     assert_eq!(task.title, "My Task");
     assert_eq!(task.description, "A description");
@@ -42,7 +42,7 @@ async fn list_all() {
     })
     .await
     .unwrap();
-    let tasks = db.list_all().await.unwrap();
+    let tasks = db.list_all().await;
     assert_eq!(tasks.len(), 3);
     assert_eq!(tasks[0].title, "Task A");
     assert_eq!(tasks[1].title, "Task B");
@@ -52,7 +52,7 @@ async fn list_all() {
 #[tokio::test]
 async fn get_nonexistent() {
     let db = in_memory_db().await;
-    let result = db.get_task(TaskId(9999)).await.unwrap();
+    let result = db.get_task(TaskId(9999)).await;
     assert!(result.is_none());
 }
 
@@ -67,7 +67,7 @@ async fn create_task_with_plan() {
         })
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.plan_path.as_deref(), Some("docs/plan.md"));
 }
 
@@ -81,7 +81,7 @@ async fn create_task_without_plan() {
         })
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert!(task.plan_path.is_none());
 }
 
@@ -97,7 +97,7 @@ async fn find_task_by_plan_returns_match() {
         .await
         .unwrap();
 
-    let found = db.find_task_by_plan("/plans/my-plan.md").await.unwrap();
+    let found = db.find_task_by_plan("/plans/my-plan.md").await;
     assert!(found.is_some());
     assert_eq!(found.unwrap().id, id);
 }
@@ -113,7 +113,7 @@ async fn find_task_by_plan_returns_none_when_no_match() {
     .await
     .unwrap();
 
-    let found = db.find_task_by_plan("/plans/nonexistent.md").await.unwrap();
+    let found = db.find_task_by_plan("/plans/nonexistent.md").await;
     assert!(found.is_none());
 }
 
@@ -127,7 +127,7 @@ async fn find_task_by_plan_ignores_tasks_without_plan() {
     .await
     .unwrap();
 
-    let found = db.find_task_by_plan("/plans/any.md").await.unwrap();
+    let found = db.find_task_by_plan("/plans/any.md").await;
     assert!(found.is_none());
 }
 
@@ -183,13 +183,13 @@ async fn respawn_phoenix_successor_creates_task_with_labels_in_one_insert() {
         .await
         .unwrap();
 
-    let successor = db.get_task(successor_id).await.unwrap().unwrap();
+    let successor = db.get_task(successor_id).await.unwrap();
     assert_eq!(
         successor.labels, labels,
         "labels land as part of the single insert, not a follow-up patch"
     );
 
-    let predecessor_task = db.get_task(predecessor).await.unwrap().unwrap();
+    let predecessor_task = db.get_task(predecessor).await.unwrap();
     assert!(
         !predecessor_task.phoenix,
         "the flag clears in the same transaction as the successor's creation"
@@ -220,7 +220,7 @@ async fn respawn_phoenix_successor_rolls_back_if_predecessor_is_gone() {
         "a predecessor that vanished mid-flight must fail the whole call"
     );
 
-    let all = db.list_all().await.unwrap();
+    let all = db.list_all().await;
     assert!(
         all.is_empty(),
         "no orphaned successor left behind when the transaction rolls back"
@@ -242,7 +242,7 @@ async fn patch_task_applies_all_fields() {
         .plan_path(Some("plan.md"))
         .title("new title");
     db.patch_task(id, &patch).await.unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(task.plan_path.as_deref(), Some("plan.md"));
     assert_eq!(task.title, "new title");
@@ -263,7 +263,7 @@ async fn patch_task_none_fields_unchanged() {
         .unwrap();
     let patch = TaskPatch::new();
     db.patch_task(id, &patch).await.unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.title, "title");
     assert_eq!(task.plan_path.as_deref(), Some("plan.md"));
     assert_eq!(task.status, TaskStatus::Running);
@@ -276,7 +276,7 @@ async fn create_task_defaults_labels_to_empty() {
         .create_task(CreateTaskRequest::fixture("t", "/r"))
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.labels, Vec::<String>::new());
 }
 
@@ -291,7 +291,7 @@ async fn patch_task_sets_labels() {
     db.patch_task(id, &TaskPatch::new().labels(&labels))
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.labels, labels);
 }
 
@@ -303,7 +303,7 @@ async fn patch_task_round_trips_hook_event_timestamps() {
         .await
         .unwrap();
 
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert!(task.last_pre_tool_use_at.is_none());
     assert!(task.last_notification_at.is_none());
 
@@ -318,7 +318,7 @@ async fn patch_task_round_trips_hook_event_timestamps() {
     .await
     .unwrap();
 
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     let stored_pre = task.last_pre_tool_use_at.expect("pre_tool_use written");
     let stored_notif = task.last_notification_at.expect("notification written");
     assert!(
@@ -339,7 +339,7 @@ async fn patch_task_round_trips_peer_message_timestamps() {
         .await
         .unwrap();
 
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert!(task.last_peer_message_sent_at.is_none());
     assert!(task.last_peer_message_received_at.is_none());
 
@@ -354,7 +354,7 @@ async fn patch_task_round_trips_peer_message_timestamps() {
     .await
     .unwrap();
 
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     let stored_sent = task
         .last_peer_message_sent_at
         .expect("peer message sent timestamp written");
@@ -386,7 +386,7 @@ async fn patch_task_none_preserves_labels() {
     db.patch_task(id, &TaskPatch::new().title("new"))
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.labels, labels);
 }
 
@@ -403,7 +403,7 @@ async fn patch_task_sets_tag() {
     db.patch_task(id, &TaskPatch::new().tag(Some(TaskTag::Bug)))
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.tag, Some(TaskTag::Bug));
 }
 
@@ -423,7 +423,7 @@ async fn patch_task_clears_tag() {
     db.patch_task(id, &TaskPatch::new().tag(None))
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert!(task.tag.is_none());
 }
 
@@ -440,7 +440,7 @@ async fn patch_task_clears_plan() {
         .unwrap();
     let patch = TaskPatch::new().plan_path(None);
     db.patch_task(id, &patch).await.unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert!(task.plan_path.is_none());
 }
 
@@ -459,7 +459,7 @@ async fn patch_task_sets_dispatch_fields() {
         .worktree(Some("/repo/.worktrees/1-my-task"))
         .tmux_window(Some(&window));
     db.patch_task(id, &patch).await.unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/1-my-task"));
     assert_eq!(
         task.tmux_window.as_ref().map(|w| w.as_str()),
@@ -484,14 +484,14 @@ async fn patch_task_clears_dispatch_fields() {
         .worktree(Some("/repo/.worktrees/1-my-task"))
         .tmux_window(Some(&window));
     db.patch_task(id, &patch).await.unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert!(task.worktree.is_some());
     assert!(task.tmux_window.is_some());
 
     // Clear them
     let patch = TaskPatch::new().worktree(None).tmux_window(None);
     db.patch_task(id, &patch).await.unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert!(task.worktree.is_none());
     assert!(task.tmux_window.is_none());
 }
@@ -512,7 +512,7 @@ async fn patch_task_status_and_dispatch_together() {
         .worktree(Some("/repo/.worktrees/1-my-task"))
         .tmux_window(Some(&window));
     db.patch_task(id, &patch).await.unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/1-my-task"));
     assert_eq!(
@@ -563,7 +563,7 @@ async fn task_roundtrip_with_pr_fields() {
         .await
         .unwrap();
 
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.url, Some(url));
 }
 
@@ -577,7 +577,7 @@ async fn task_pr_fields_default_to_none() {
         })
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert!(task.url.is_none());
 }
 
@@ -598,7 +598,7 @@ async fn patch_sets_and_clears_typed_url_together() {
     db.patch_task(id, &TaskPatch::new().url(Some(&url)))
         .await
         .unwrap();
-    let t = db.get_task(id).await.unwrap().unwrap();
+    let t = db.get_task(id).await.unwrap();
     assert_eq!(
         t.url,
         Some(TaskUrl::new("https://github.com/o/r/pull/9", UrlType::Pr))
@@ -608,7 +608,7 @@ async fn patch_sets_and_clears_typed_url_together() {
     db.patch_task(id, &TaskPatch::new().url(None))
         .await
         .unwrap();
-    let t = db.get_task(id).await.unwrap().unwrap();
+    let t = db.get_task(id).await.unwrap();
     assert_eq!(t.url, None);
 }
 
@@ -625,7 +625,7 @@ async fn patch_task_sets_sort_order() {
     db.patch_task(id, &TaskPatch::new().sort_order(Some(500)))
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.sort_order, Some(500));
 }
 
@@ -645,7 +645,7 @@ async fn patch_task_clears_sort_order() {
     db.patch_task(id, &TaskPatch::new().sort_order(None))
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.sort_order, None);
 }
 
@@ -663,7 +663,7 @@ async fn task_sub_status_persists() {
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale))
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.sub_status, SubStatus::Stale);
 }
 
@@ -681,7 +681,7 @@ async fn task_sub_status_pr_closed_persists_for_review() {
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::PrClosed))
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.sub_status, SubStatus::PrClosed);
 }
 
@@ -695,7 +695,7 @@ async fn task_sub_status_defaults_to_none() {
         })
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.sub_status, SubStatus::None);
 }
 
@@ -711,7 +711,7 @@ async fn create_task_sets_default_sub_status_for_running() {
         })
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.sub_status, SubStatus::Active);
 }
 
@@ -725,7 +725,7 @@ async fn create_task_sets_default_sub_status_for_backlog() {
         })
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.sub_status, SubStatus::None);
 }
 
@@ -743,7 +743,7 @@ async fn create_task_with_epic_sort_tag_single_insert() {
         })
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.epic_id, Some(epic.id));
     assert_eq!(task.sort_order, Some(7));
     assert_eq!(task.tag, Some(TaskTag::Bug));
@@ -778,9 +778,9 @@ async fn batch_delete_removes_a_task_and_an_epic_subtree_together() {
 
     db.batch_delete(&[plain.id], &[epic.id]).await.unwrap();
 
-    assert!(db.get_task(plain.id).await.unwrap().is_none());
-    assert!(db.get_task(in_epic_id).await.unwrap().is_none());
-    assert!(db.get_epic(epic.id).await.unwrap().is_none());
+    assert!(db.get_task(plain.id).await.is_none());
+    assert!(db.get_task(in_epic_id).await.is_none());
+    assert!(db.get_epic(epic.id).await.is_none());
 }
 
 /// A selection holding an epic AND one of its own sub-epics is a legal batch:
@@ -805,8 +805,8 @@ async fn batch_delete_accepts_an_epic_and_its_own_sub_epic_in_either_order() {
             panic!("parent_first={parent_first}: nested selection must delete, got {e}")
         });
 
-        assert!(db.get_epic(parent.id).await.unwrap().is_none());
-        assert!(db.get_epic(child.id).await.unwrap().is_none());
+        assert!(db.get_epic(parent.id).await.is_none());
+        assert!(db.get_epic(child.id).await.is_none());
     }
 }
 

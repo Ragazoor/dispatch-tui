@@ -86,16 +86,16 @@ impl super::super::SettingsStore for Store {
 
 #[async_trait::async_trait]
 impl super::super::RepoConfigRead for Store {
-    async fn list_repo_paths(&self) -> Result<Vec<String>> {
-        Ok(self.rows.repo_paths())
+    async fn list_repo_paths(&self) -> Vec<String> {
+        self.rows.repo_paths()
     }
 
-    async fn get_verify_command(&self, path: &str) -> Result<Option<String>> {
-        Ok(self.rows.verify_command(path))
+    async fn get_verify_command(&self, path: &str) -> Option<String> {
+        self.rows.verify_command(path)
     }
 
-    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>> {
-        Ok(self.rows.base_branches())
+    async fn list_all_base_branches(&self) -> Vec<(String, String)> {
+        self.rows.base_branches()
     }
 }
 

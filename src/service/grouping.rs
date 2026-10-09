@@ -15,7 +15,7 @@ pub async fn route_target(
     root_id: EpicId,
     repo_path: &str,
 ) -> Result<EpicId, ServiceError> {
-    let Some(root) = db.get_epic(root_id).await? else {
+    let Some(root) = db.get_epic(root_id).await else {
         return Ok(root_id);
     };
     if !root.can_auto_group() {
@@ -40,7 +40,7 @@ pub async fn grouping_root_of(
     db: &dyn TaskAndEpicStore,
     epic_id: EpicId,
 ) -> Result<Option<EpicId>, ServiceError> {
-    let Some(epic) = db.get_epic(epic_id).await? else {
+    let Some(epic) = db.get_epic(epic_id).await else {
         return Ok(None);
     };
     if epic.can_auto_group() {
@@ -48,7 +48,7 @@ pub async fn grouping_root_of(
     }
     if epic.origin == EpicOrigin::RepoGroup {
         if let Some(parent_id) = epic.parent_epic_id {
-            if let Some(parent) = db.get_epic(parent_id).await? {
+            if let Some(parent) = db.get_epic(parent_id).await {
                 if parent.can_auto_group() {
                     return Ok(Some(parent.id));
                 }
@@ -60,7 +60,7 @@ pub async fn grouping_root_of(
 
 /// Migrate every direct task of `root_id` into its repo sub-epic.
 pub async fn regroup_epic(db: &dyn TaskAndEpicStore, root_id: EpicId) -> Result<(), ServiceError> {
-    let tasks = db.list_tasks_for_epic(root_id).await?;
+    let tasks = db.list_tasks_for_epic(root_id).await;
     for task in tasks {
         let target = route_target(db, root_id, &task.repo_path).await?;
         if target != root_id {
@@ -79,13 +79,13 @@ pub async fn flatten_epic(
     learnings: &dyn LearningStore,
     root_id: EpicId,
 ) -> Result<(), ServiceError> {
-    let subs = db.list_sub_epics(root_id).await?;
+    let subs = db.list_sub_epics(root_id).await;
     for sub in &subs {
         if sub.origin != EpicOrigin::RepoGroup {
             continue;
         }
         // Re-home FIRST (delete_epic cascades to tasks — order is load-bearing).
-        for task in db.list_tasks_for_epic(sub.id).await? {
+        for task in db.list_tasks_for_epic(sub.id).await {
             db.set_task_epic_id(task.id, Some(root_id)).await?;
         }
         delete_if_empty_repo_group(db, learnings, sub.id).await?;
@@ -103,7 +103,7 @@ pub async fn reroute_on_repo_change(
     task_id: TaskId,
     new_repo: &str,
 ) -> Result<(), ServiceError> {
-    let Some(task) = db.get_task(task_id).await? else {
+    let Some(task) = db.get_task(task_id).await else {
         return Ok(());
     };
     let Some(current_epic) = task.epic_id else {
@@ -135,14 +135,14 @@ async fn delete_if_empty_repo_group(
     learnings: &dyn LearningStore,
     epic_id: EpicId,
 ) -> Result<(), ServiceError> {
-    let Some(epic) = db.get_epic(epic_id).await? else {
+    let Some(epic) = db.get_epic(epic_id).await else {
         return Ok(());
     };
     if epic.origin != EpicOrigin::RepoGroup {
         return Ok(());
     }
-    let has_tasks = !db.list_tasks_for_epic(epic_id).await?.is_empty();
-    let has_children = !db.list_sub_epics(epic_id).await?.is_empty();
+    let has_tasks = !db.list_tasks_for_epic(epic_id).await.is_empty();
+    let has_children = !db.list_sub_epics(epic_id).await.is_empty();
     if has_tasks || has_children {
         db.recalculate_epic_status(epic_id).await?;
         return Ok(());
@@ -187,7 +187,7 @@ mod tests {
             .unwrap();
         let target = route_target(&db, root.id, "/x/dispatch").await.unwrap();
         assert_ne!(target, root.id);
-        let sub = db.get_epic(target).await.unwrap().unwrap();
+        let sub = db.get_epic(target).await.unwrap();
         assert_eq!(sub.title, "dispatch");
         assert_eq!(sub.origin, crate::models::EpicOrigin::RepoGroup);
     }
@@ -227,10 +227,10 @@ mod tests {
         add_task(&db, root.id, "/x/beta").await;
         regroup_epic(&db, root.id).await.unwrap();
         assert!(
-            db.list_tasks_for_epic(root.id).await.unwrap().is_empty(),
+            db.list_tasks_for_epic(root.id).await.is_empty(),
             "root has no direct tasks after regroup"
         );
-        let subs = db.list_sub_epics(root.id).await.unwrap();
+        let subs = db.list_sub_epics(root.id).await;
         assert_eq!(subs.len(), 2);
     }
 
@@ -246,12 +246,12 @@ mod tests {
 
         flatten_epic(&db, &db, root.id).await.unwrap();
         assert_eq!(
-            db.list_tasks_for_epic(root.id).await.unwrap().len(),
+            db.list_tasks_for_epic(root.id).await.len(),
             1,
             "task re-homed, not deleted"
         );
         assert!(
-            db.list_sub_epics(root.id).await.unwrap().is_empty(),
+            db.list_sub_epics(root.id).await.is_empty(),
             "emptied repo-group sub-epics deleted"
         );
     }
@@ -266,7 +266,7 @@ mod tests {
         let manual = db.create_epic("notes", "", Some(root.id)).await.unwrap(); // origin=Manual
         flatten_epic(&db, &db, root.id).await.unwrap();
         assert!(
-            db.get_epic(manual.id).await.unwrap().is_some(),
+            db.get_epic(manual.id).await.is_some(),
             "Manual sub-epic must survive flatten"
         );
     }
@@ -289,7 +289,7 @@ mod tests {
         reroute_on_repo_change(&db, &db, t, "/x/beta")
             .await
             .unwrap();
-        let subs = db.list_sub_epics(root.id).await.unwrap();
+        let subs = db.list_sub_epics(root.id).await;
         let titles: Vec<_> = subs.iter().map(|e| e.title.clone()).collect();
         assert!(titles.contains(&"beta".to_string()));
         assert!(
@@ -311,7 +311,7 @@ mod tests {
         regroup_epic(&db, root.id).await.unwrap();
 
         // Capture the sub-epic's id before deletion.
-        let subs = db.list_sub_epics(root.id).await.unwrap();
+        let subs = db.list_sub_epics(root.id).await;
         let sub = subs
             .iter()
             .find(|e| e.title == "alpha")
@@ -339,7 +339,7 @@ mod tests {
 
         // The sub-epic must be gone.
         assert!(
-            db.get_epic(sub_id).await.unwrap().is_none(),
+            db.get_epic(sub_id).await.is_none(),
             "sub-epic should be deleted after flatten"
         );
 
@@ -372,7 +372,7 @@ mod tests {
         let t = add_task(&db, root.id, "/x/alpha").await;
         regroup_epic(&db, root.id).await.unwrap();
 
-        let subs = db.list_sub_epics(root.id).await.unwrap();
+        let subs = db.list_sub_epics(root.id).await;
         let sub = subs
             .iter()
             .find(|e| e.title == "alpha")
@@ -405,7 +405,7 @@ mod tests {
 
         // Alpha sub-epic must be gone.
         assert!(
-            db.get_epic(sub_id).await.unwrap().is_none(),
+            db.get_epic(sub_id).await.is_none(),
             "alpha sub-epic should be deleted after reroute"
         );
 
@@ -428,7 +428,7 @@ mod tests {
         add_task(&db, root.id, "/x/alpha").await;
         regroup_epic(&db, root.id).await.unwrap();
 
-        let subs = db.list_sub_epics(root.id).await.unwrap();
+        let subs = db.list_sub_epics(root.id).await;
         let sub_id = subs.iter().find(|e| e.title == "alpha").unwrap().id;
         let sub_id_str = sub_id.0.to_string();
         let root_id_str = root.id.0.to_string();

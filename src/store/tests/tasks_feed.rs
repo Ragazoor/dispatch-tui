@@ -62,7 +62,6 @@ async fn upsert(db: &Store, epic: EpicId, items: &[crate::models::FeedItem]) {
 async fn tasks_with_external_id(db: &Store, epic: EpicId, external_id: &str) -> Vec<Task> {
     db.list_tasks_for_epic(epic)
         .await
-        .unwrap()
         .into_iter()
         .filter(|t| t.external_id.as_deref() == Some(external_id))
         .collect()

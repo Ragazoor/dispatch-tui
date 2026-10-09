@@ -11,7 +11,7 @@ mod epic_tests {
             .await;
         assert_eq!(app.epics().len(), 1);
         assert_eq!(app.epics()[0].title, "My Epic");
-        assert_eq!(rt.database.list_epics().await.unwrap().len(), 1);
+        assert_eq!(rt.database.list_epics().await.len(), 1);
     }
 
     #[tokio::test]
@@ -23,7 +23,7 @@ mod epic_tests {
             .await
             .unwrap();
         rt.exec_delete_epic(epic.id).await;
-        assert!(rt.database.list_epics().await.unwrap().is_empty());
+        assert!(rt.database.list_epics().await.is_empty());
         assert!(app.error_popup().is_none());
     }
 
@@ -43,7 +43,7 @@ mod epic_tests {
             None,
         )
         .await;
-        let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+        let updated = rt.database.get_epic(epic.id).await.unwrap();
         assert_eq!(updated.status, models::TaskStatus::Running);
     }
 
@@ -109,7 +109,7 @@ mod epic_tests {
             in_memory.completed_at
         );
 
-        let db_epic = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+        let db_epic = rt.database.get_epic(epic.id).await.unwrap();
         assert_eq!(
             in_memory.completed_at, db_epic.completed_at,
             "in-memory completed_at must match what was actually persisted"
@@ -164,7 +164,7 @@ mod epic_tests {
             "leaving Done must not clear the in-memory epic's completed_at"
         );
 
-        let db_epic = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+        let db_epic = rt.database.get_epic(epic.id).await.unwrap();
         assert_eq!(
             db_epic.completed_at,
             Some(finished),
@@ -280,7 +280,7 @@ mod feed_epic_trigger {
          failure, got: {msg:?}"
         );
         assert_eq!(
-            db.list_tasks_for_epic(epic.id).await.unwrap().len(),
+            db.list_tasks_for_epic(epic.id).await.len(),
             1,
             "a dropped refresh must run no sync, so the existing task survives"
         );
@@ -439,7 +439,7 @@ mod feed_epic_trigger {
         )
         .await
         .unwrap();
-        let task = db.list_tasks_for_epic(epic_id).await.unwrap().remove(0);
+        let task = db.list_tasks_for_epic(epic_id).await.remove(0);
         db.patch_task(
             task.id,
             &store::TaskPatch::new()
@@ -566,7 +566,7 @@ mod feed_epic_trigger {
         )
         .await
         .unwrap();
-        assert_eq!(db.list_tasks_for_epic(epic.id).await.unwrap().len(), 1);
+        assert_eq!(db.list_tasks_for_epic(epic.id).await.len(), 1);
         set_feed_command(&db, epic.id, "echo 'Invalid search query' >&2; echo '[]'").await;
 
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -588,7 +588,7 @@ mod feed_epic_trigger {
             "expected FeedMessage::Failed, got: {msg:?}"
         );
 
-        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await;
         assert_eq!(
             tasks.len(),
             1,
@@ -638,7 +638,6 @@ mod feed_epic_trigger {
         let live = db
             .list_tasks_for_epic(epic.id)
             .await
-            .unwrap()
             .into_iter()
             .find(|t| t.external_id.as_deref() == Some("pr-1"))
             .unwrap();
@@ -683,7 +682,6 @@ mod feed_epic_trigger {
         let ids: Vec<String> = db
             .list_tasks_for_epic(epic.id)
             .await
-            .unwrap()
             .into_iter()
             .filter_map(|t| t.external_id)
             .collect();
@@ -749,7 +747,7 @@ mod feed_epic_trigger {
         );
 
         assert!(
-            db.list_tasks_for_epic(epic.id).await.unwrap().is_empty(),
+            db.list_tasks_for_epic(epic.id).await.is_empty(),
             "the merged PR's row is gone"
         );
 
@@ -828,7 +826,7 @@ mod feed_epic_trigger {
             .expect("timed out")
             .expect("channel closed");
         assert_feed_failed_because(&msg, Some("parse"), "a missing tag");
-        let tasks = db.list_all().await.unwrap();
+        let tasks = db.list_all().await;
         assert!(
             tasks.is_empty(),
             "a rejected emission must upsert no task, got: {tasks:?}"
@@ -869,17 +867,17 @@ mod feed_epic_trigger {
             "expected FeedRefreshed with count=1, got: {msg:?}"
         );
 
-        let parent_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+        let parent_tasks = db.list_tasks_for_epic(epic.id).await;
         assert_eq!(
             parent_tasks.len(),
             0,
             "parent should have no direct tasks when group_by_repo=true"
         );
 
-        let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
+        let sub_epics = db.list_sub_epics(epic.id).await;
         assert_eq!(sub_epics.len(), 1);
         assert_eq!(sub_epics[0].title, "repo-a");
-        let sub_tasks = db.list_tasks_for_epic(sub_epics[0].id).await.unwrap();
+        let sub_tasks = db.list_tasks_for_epic(sub_epics[0].id).await;
         assert_eq!(sub_tasks.len(), 1);
     }
 
@@ -921,19 +919,19 @@ mod feed_epic_trigger {
         );
 
         // No feed task may be stranded flat on the reviews_parent epic.
-        let parent_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+        let parent_tasks = db.list_tasks_for_epic(epic.id).await;
         assert!(
             parent_tasks.iter().all(|t| t.external_id.is_none()),
             "manual reviews_parent refresh must route, not flat-upsert onto the parent"
         );
 
         // The PR must land in the My Reviews role sub-epic.
-        let subs = db.list_sub_epics(epic.id).await.unwrap();
+        let subs = db.list_sub_epics(epic.id).await;
         let my = subs
             .iter()
             .find(|e| e.feed_role == crate::models::FeedRole::MyReviews)
             .expect("My Reviews role sub-epic ensured by the role router");
-        let my_tasks = db.list_tasks_for_epic(my.id).await.unwrap();
+        let my_tasks = db.list_tasks_for_epic(my.id).await;
         assert_eq!(
             my_tasks.len(),
             1,
@@ -959,13 +957,13 @@ mod epic_auto_dispatch_and_group_by_repo {
             .patch_epic(epic.id, &store::EpicPatch::new().auto_dispatch(true))
             .await
             .unwrap();
-        let enabled = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+        let enabled = rt.database.get_epic(epic.id).await.unwrap();
         assert!(enabled.auto_dispatch);
 
         rt.exec_toggle_epic_auto_dispatch(&mut app, epic.id, false)
             .await;
 
-        let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+        let updated = rt.database.get_epic(epic.id).await.unwrap();
         assert!(!updated.auto_dispatch);
         assert!(app.error_popup().is_none());
     }
@@ -986,7 +984,7 @@ mod epic_auto_dispatch_and_group_by_repo {
         rt.exec_toggle_epic_auto_dispatch(&mut app, epic.id, true)
             .await;
 
-        let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+        let updated = rt.database.get_epic(epic.id).await.unwrap();
         assert!(updated.auto_dispatch);
         assert!(app.error_popup().is_none());
     }
@@ -1004,7 +1002,7 @@ mod epic_auto_dispatch_and_group_by_repo {
         rt.exec_toggle_epic_group_by_repo(&mut app, epic.id, true)
             .await;
 
-        let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+        let updated = rt.database.get_epic(epic.id).await.unwrap();
         assert!(updated.group_by_repo);
         assert!(app.error_popup().is_none());
     }
@@ -1025,7 +1023,7 @@ mod epic_auto_dispatch_and_group_by_repo {
         rt.exec_toggle_epic_group_by_repo(&mut app, epic.id, false)
             .await;
 
-        let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+        let updated = rt.database.get_epic(epic.id).await.unwrap();
         assert!(!updated.group_by_repo);
         assert!(app.error_popup().is_none());
     }
@@ -1049,7 +1047,7 @@ mod epic_auto_dispatch_and_group_by_repo {
             .unwrap();
 
         // Mirror what the keypress does: flip the in-memory copy first.
-        let mut optimistic = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+        let mut optimistic = rt.database.get_epic(epic.id).await.unwrap();
         optimistic.group_by_repo = true;
         app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
             vec![optimistic],
@@ -1062,7 +1060,7 @@ mod epic_auto_dispatch_and_group_by_repo {
             app.error_popup().is_some(),
             "an append-only epic must refuse grouping"
         );
-        let persisted = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+        let persisted = rt.database.get_epic(epic.id).await.unwrap();
         assert!(!persisted.group_by_repo, "the refusal must persist nothing");
         let in_memory = app
             .epics()
@@ -1098,15 +1096,11 @@ mod epic_group_by_repo_migration {
             .await;
 
         assert!(
-            rt.database
-                .list_tasks_for_epic(root.id)
-                .await
-                .unwrap()
-                .is_empty(),
+            rt.database.list_tasks_for_epic(root.id).await.is_empty(),
             "root tasks should have been migrated into sub-epics"
         );
         assert_eq!(
-            rt.database.list_sub_epics(root.id).await.unwrap().len(),
+            rt.database.list_sub_epics(root.id).await.len(),
             1,
             "one sub-epic should exist for the repo group"
         );

@@ -64,7 +64,7 @@ async fn tick_background_task_upserts_tasks() {
         .expect("timed out waiting for BoardEvent::Refresh")
         .expect("channel closed");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "BG");
 }
@@ -98,7 +98,7 @@ async fn tick_done_epic_moves_to_backlog_when_new_feed_tasks_added() {
         .expect("channel closed");
 
     // After the feed adds a new backlog task, the epic must regress to backlog.
-    let refreshed = db.get_epic(epic.id).await.unwrap().unwrap();
+    let refreshed = db.get_epic(epic.id).await.unwrap();
     assert_eq!(
         refreshed.status,
         TaskStatus::Backlog,
@@ -126,7 +126,7 @@ async fn tick_valid_json_upserts_tasks() {
         .expect("timed out waiting for BoardEvent::Refresh")
         .expect("channel closed");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "T");
     assert_eq!(tasks[0].external_id.as_deref(), Some("1"));
@@ -158,7 +158,7 @@ async fn tick_stderr_on_zero_exit_does_not_suppress_sync() {
         .expect("timed out waiting for BoardEvent::Refresh")
         .expect("channel closed");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(
         tasks.len(),
         1,
@@ -197,7 +197,7 @@ async fn tick_degraded_empty_emission_does_not_delete_existing_tasks() {
     )
     .await
     .unwrap();
-    assert_eq!(db.list_tasks_for_epic(epic.id).await.unwrap().len(), 1);
+    assert_eq!(db.list_tasks_for_epic(epic.id).await.len(), 1);
 
     db.patch_epic(
         epic.id,
@@ -210,7 +210,7 @@ async fn tick_degraded_empty_emission_does_not_delete_existing_tasks() {
     runner.tick().await;
     runner.join_spawned_jobs().await;
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(
         tasks.len(),
         1,
@@ -257,7 +257,7 @@ async fn tick_removed_task_tears_down_its_worktree() {
     )
     .await
     .unwrap();
-    let task = db.list_tasks_for_epic(epic.id).await.unwrap().remove(0);
+    let task = db.list_tasks_for_epic(epic.id).await.remove(0);
     db.patch_task(
         task.id,
         &TaskPatch::new()
@@ -285,7 +285,7 @@ async fn tick_removed_task_tears_down_its_worktree() {
     runner.join_spawned_jobs().await;
 
     assert!(
-        db.list_tasks_for_epic(epic.id).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(epic.id).await.is_empty(),
         "the merged PR's row is gone"
     );
 
@@ -347,7 +347,6 @@ async fn tick_partially_degraded_emission_does_not_delete_or_tear_down() {
     let live = db
         .list_tasks_for_epic(epic.id)
         .await
-        .unwrap()
         .into_iter()
         .find(|t| t.external_id.as_deref() == Some("pr-1"))
         .unwrap();
@@ -381,7 +380,6 @@ async fn tick_partially_degraded_emission_does_not_delete_or_tear_down() {
     let ids: Vec<String> = db
         .list_tasks_for_epic(epic.id)
         .await
-        .unwrap()
         .into_iter()
         .filter_map(|t| t.external_id)
         .collect();
@@ -425,7 +423,7 @@ async fn tick_persists_feed_tag() {
         .expect("timed out waiting for BoardEvent::Refresh")
         .expect("channel closed");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].tag, Some(TaskTag::PrReview));
 }
@@ -453,7 +451,7 @@ async fn tick_missing_tag_rejects_item() {
         "expected no notification when tag is missing"
     );
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert!(tasks.is_empty(), "no task should be inserted on parse fail");
 }
 
@@ -472,7 +470,7 @@ async fn tick_nonzero_exit_no_panic() {
     let result = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
     assert!(result.is_err(), "expected timeout but got a notification");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert!(tasks.is_empty());
 }
 
@@ -493,7 +491,7 @@ async fn tick_malformed_json_no_panic() {
     let result = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
     assert!(result.is_err(), "expected timeout but got a notification");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert!(tasks.is_empty());
 }
 
@@ -643,7 +641,7 @@ async fn tick_skips_an_epic_whose_stored_interval_is_below_the_floor() {
         runner.join_spawned_jobs().await;
 
         assert!(
-            db.list_tasks_for_epic(epic.id).await.unwrap().is_empty(),
+            db.list_tasks_for_epic(epic.id).await.is_empty(),
             "interval {bad} is below the floor, so the command must not have run"
         );
         assert!(
@@ -679,7 +677,7 @@ async fn tick_skips_an_epic_with_a_negative_interval_rather_than_wrapping() {
     runner.join_spawned_jobs().await;
 
     assert!(
-        db.list_tasks_for_epic(epic.id).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(epic.id).await.is_empty(),
         "a negative interval must skip, not wrap into a huge one"
     );
     assert!(
@@ -716,7 +714,7 @@ async fn tick_polls_an_epic_whose_interval_is_exactly_the_floor() {
     runner.join_spawned_jobs().await;
 
     assert_eq!(
-        db.list_tasks_for_epic(epic.id).await.unwrap().len(),
+        db.list_tasks_for_epic(epic.id).await.len(),
         1,
         "an interval at the floor is legal and must poll"
     );
@@ -738,7 +736,7 @@ async fn tick_null_feed_command_skipped() {
         "expected empty channel but got notification"
     );
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert!(tasks.is_empty());
 }
 
@@ -769,7 +767,7 @@ async fn tick_grouped_creates_sub_epics_per_repo() {
         .expect("timed out")
         .expect("channel closed");
 
-    let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
+    let sub_epics = db.list_sub_epics(epic.id).await;
     assert_eq!(sub_epics.len(), 2);
     let names: Vec<&str> = sub_epics.iter().map(|e| e.title.as_str()).collect();
     assert!(
@@ -782,11 +780,11 @@ async fn tick_grouped_creates_sub_epics_per_repo() {
     );
 
     for sub in &sub_epics {
-        let tasks = db.list_tasks_for_epic(sub.id).await.unwrap();
+        let tasks = db.list_tasks_for_epic(sub.id).await;
         assert_eq!(tasks.len(), 1, "sub-epic {} should have 1 task", sub.title);
     }
 
-    let parent_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let parent_tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(parent_tasks.len(), 0, "parent should have no direct tasks");
 }
 
@@ -820,7 +818,7 @@ async fn tick_done_epic_grouped_moves_to_backlog_when_new_feed_tasks_added() {
 
     // After the feed adds a new backlog task into a sub-epic, the parent
     // epic must regress to backlog.
-    let refreshed = db.get_epic(epic.id).await.unwrap().unwrap();
+    let refreshed = db.get_epic(epic.id).await.unwrap();
     assert_eq!(
         refreshed.status,
         TaskStatus::Backlog,
@@ -848,7 +846,7 @@ async fn tick_grouped_migrates_existing_flat_tasks() {
         .expect("timed out")
         .expect("closed");
 
-    let flat_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let flat_tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(
         flat_tasks.len(),
         1,
@@ -866,13 +864,13 @@ async fn tick_grouped_migrates_existing_flat_tasks() {
         .expect("timed out")
         .expect("closed");
 
-    let parent_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let parent_tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(parent_tasks.len(), 0, "flat task should have migrated");
 
-    let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
+    let sub_epics = db.list_sub_epics(epic.id).await;
     assert_eq!(sub_epics.len(), 1);
     assert_eq!(sub_epics[0].title, "repo-a");
-    let sub_tasks = db.list_tasks_for_epic(sub_epics[0].id).await.unwrap();
+    let sub_tasks = db.list_tasks_for_epic(sub_epics[0].id).await;
     assert_eq!(sub_tasks.len(), 1);
 }
 
@@ -898,7 +896,7 @@ async fn tick_grouped_uses_other_for_no_url() {
         .expect("timed out")
         .expect("closed");
 
-    let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
+    let sub_epics = db.list_sub_epics(epic.id).await;
     assert_eq!(sub_epics.len(), 1);
     assert_eq!(sub_epics[0].title, "other");
 }
@@ -943,16 +941,16 @@ async fn tick_routes_reviews_parent_into_role_sub_epics() {
     runner.tick().await;
     drain_events(&mut rx).await;
 
-    let subs = db.list_sub_epics(parent.id).await.unwrap();
+    let subs = db.list_sub_epics(parent.id).await;
     let my = role_sub(&subs, crate::models::FeedRole::MyReviews);
     let team = role_sub(&subs, crate::models::FeedRole::TeamReviews);
     let bots = role_sub(&subs, crate::models::FeedRole::Bots);
 
-    let my_tasks = db.list_tasks_for_epic(my.id).await.unwrap();
+    let my_tasks = db.list_tasks_for_epic(my.id).await;
     assert_eq!(my_tasks.len(), 1, "direct-request PR routes to My Reviews");
     assert_eq!(my_tasks[0].external_id.as_deref(), Some("pr-1"));
 
-    let team_tasks = db.list_tasks_for_epic(team.id).await.unwrap();
+    let team_tasks = db.list_tasks_for_epic(team.id).await;
     assert_eq!(
         team_tasks.len(),
         1,
@@ -960,9 +958,9 @@ async fn tick_routes_reviews_parent_into_role_sub_epics() {
     );
     assert_eq!(team_tasks[0].external_id.as_deref(), Some("pr-2"));
 
-    assert!(db.list_tasks_for_epic(bots.id).await.unwrap().is_empty());
+    assert!(db.list_tasks_for_epic(bots.id).await.is_empty());
     assert!(
-        db.list_tasks_for_epic(parent.id).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(parent.id).await.is_empty(),
         "parent holds no direct feed tasks"
     );
 }
@@ -1004,7 +1002,7 @@ async fn tick_skips_an_epic_whose_cycle_is_already_in_flight() {
         "a dropped tick must send no notification"
     );
     assert!(
-        db.list_tasks_for_epic(epic.id).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(epic.id).await.is_empty(),
         "a dropped tick must not run the feed command or write anything"
     );
 }
@@ -1035,7 +1033,7 @@ async fn tick_resumes_after_the_in_flight_cycle_releases() {
     runner.tick().await;
     runner.join_spawned_jobs().await;
     assert!(
-        db.list_tasks_for_epic(epic.id).await.unwrap().is_empty(),
+        db.list_tasks_for_epic(epic.id).await.is_empty(),
         "precondition: the first tick was dropped"
     );
 
@@ -1050,7 +1048,7 @@ async fn tick_resumes_after_the_in_flight_cycle_releases() {
         .expect("timed out waiting for the resumed poll")
         .expect("channel closed");
     assert_eq!(
-        db.list_tasks_for_epic(epic.id).await.unwrap().len(),
+        db.list_tasks_for_epic(epic.id).await.len(),
         1,
         "releasing the claim must let the epic poll again"
     );
@@ -1088,9 +1086,9 @@ async fn tick_two_ticks_lose_nothing() {
     runner.tick().await;
     drain_events(&mut rx).await;
 
-    let subs = db.list_sub_epics(parent.id).await.unwrap();
+    let subs = db.list_sub_epics(parent.id).await;
     let team = role_sub(&subs, crate::models::FeedRole::TeamReviews);
-    let team_tasks = db.list_tasks_for_epic(team.id).await.unwrap();
+    let team_tasks = db.list_tasks_for_epic(team.id).await;
     assert_eq!(
         team_tasks.len(),
         1,
@@ -1105,7 +1103,6 @@ async fn tick_two_ticks_lose_nothing() {
             n += db
                 .list_tasks_for_epic(s.id)
                 .await
-                .unwrap()
                 .iter()
                 .filter(|t| t.external_id.is_some())
                 .count();
@@ -1153,7 +1150,7 @@ async fn start_background_task_eventually_runs_feed_command() {
         .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(
         tasks.len(),
         1,
@@ -1185,7 +1182,7 @@ async fn tick_github_url_resolves_to_known_repo_path() {
         .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(
         tasks[0].repo_path, "/home/user/code/myrepo",
@@ -1214,7 +1211,7 @@ async fn tick_no_matching_repo_stores_empty_sentinel() {
         .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(
         tasks[0].repo_path, "",
@@ -1240,7 +1237,7 @@ async fn tick_empty_url_stores_empty_sentinel() {
         .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(
         tasks[0].repo_path, "",
@@ -1325,7 +1322,7 @@ async fn tick_resolves_default_branch_per_unique_repo() {
         .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 3);
 
     let by_ext = |ext: &str| {
@@ -1365,7 +1362,7 @@ async fn tick_falls_back_to_main_when_origin_head_missing() {
         .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].base_branch, "main");
 }
@@ -1391,7 +1388,7 @@ async fn tick_twice_is_idempotent() {
         .expect("first tick: timed out waiting for refresh")
         .expect("channel closed");
 
-    let first = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let first = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(first.len(), 1);
     let first_id = first[0].id;
 
@@ -1403,7 +1400,7 @@ async fn tick_twice_is_idempotent() {
         .expect("second tick: timed out waiting for refresh")
         .expect("channel closed");
 
-    let second = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let second = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(
         second.len(),
         1,
@@ -1429,7 +1426,7 @@ async fn tick_empty_array_creates_no_tasks() {
 
     let _ = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert!(tasks.is_empty(), "empty feed array must not create tasks");
 }
 
@@ -1494,7 +1491,7 @@ async fn tick_skips_db_queries_when_cache_is_false_and_no_invalidation() {
         result.is_err(),
         "tick should skip body when cache is Some(false)"
     );
-    let tasks = db.list_tasks_for_epic(epic2.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic2.id).await;
     assert!(
         tasks.is_empty(),
         "no task should be created while cache prevents DB query"
@@ -1527,7 +1524,7 @@ async fn tick_re_queries_after_epic_changed_invalidation() {
         .expect("timed out waiting for BoardEvent after cache invalidation")
         .expect("channel closed");
 
-    let tasks = db.list_tasks_for_epic(epic2.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic2.id).await;
     assert_eq!(
         tasks.len(),
         1,
@@ -1553,7 +1550,7 @@ async fn tick_non_github_url_stores_empty_sentinel() {
         .expect("timed out waiting for BoardEvent")
         .expect("channel closed");
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(
         tasks[0].repo_path, "",

@@ -33,7 +33,7 @@ async fn update_task_sets_sub_status() {
         "response should mention sub_status: {text}"
     );
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.sub_status, crate::models::SubStatus::NeedsInput);
 }
 
@@ -112,7 +112,7 @@ async fn update_task_sub_status_with_status_change() {
     .await;
     assert!(resp.error.is_none(), "expected success: {:?}", resp.error);
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Review);
     assert_eq!(task.sub_status, crate::models::SubStatus::Approved);
 }
@@ -143,7 +143,7 @@ async fn update_task_status_running_with_needs_input() {
     .await;
     assert!(resp.error.is_none(), "expected success: {:?}", resp.error);
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(task.sub_status, crate::models::SubStatus::NeedsInput);
 }
@@ -304,7 +304,7 @@ async fn update_task_valid_tag() {
     }
 
     // Verify last tag persisted
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.tag, Some(crate::models::TaskTag::Chore));
 }
 
@@ -354,7 +354,7 @@ async fn update_task_sets_epic_id() {
         "response should list epic_id: {text}"
     );
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.epic_id, Some(epic.id));
 }
 
@@ -374,7 +374,7 @@ async fn update_task_sort_order() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.sort_order, Some(42));
 }
 
@@ -411,7 +411,7 @@ async fn create_task_valid_tag() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let tasks = state.db.list_all().await.unwrap();
+    let tasks = state.db.list_all().await;
     assert_eq!(tasks[0].tag, Some(crate::models::TaskTag::Bug));
 }
 
@@ -429,7 +429,7 @@ async fn create_task_with_sort_order() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let tasks = state.db.list_all().await.unwrap();
+    let tasks = state.db.list_all().await;
     assert_eq!(tasks[0].sort_order, Some(99));
 }
 
@@ -465,7 +465,7 @@ async fn create_task_with_nonexistent_epic() {
         "the refusal must not surface as an insert failure, got: {msg}"
     );
     assert!(
-        state.db.list_all().await.unwrap().is_empty(),
+        state.db.list_all().await.is_empty(),
         "a refused call creates nothing"
     );
 }
@@ -675,7 +675,7 @@ async fn wrap_up_rebase_does_not_change_status() {
     let text = extract_response_text(&resp);
     assert!(text.contains("wrap_up complete"));
 
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Review,
@@ -709,7 +709,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
     .await
     .unwrap();
     db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic_status_before = db.get_epic(epic.id).await.unwrap().unwrap().status;
+    let epic_status_before = db.get_epic(epic.id).await.unwrap().status;
 
     let resp = call(
         &state,
@@ -722,7 +722,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let epic_after = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic_after = db.get_epic(epic.id).await.unwrap();
     assert_eq!(
         epic_after.status, epic_status_before,
         "wrap_up must not recalculate epic status — that runs at exit_session"

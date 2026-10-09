@@ -233,7 +233,7 @@ async fn set_provisions_managed_epics() {
     )
     .await;
 
-    let epics = state.db.list_epics().await.unwrap();
+    let epics = state.db.list_epics().await;
     let role_count = |role: FeedRole| epics.iter().filter(|e| e.feed_role == role).count();
     assert_eq!(role_count(FeedRole::ReviewsParent), 1, "epics: {epics:?}");
     assert_eq!(role_count(FeedRole::MyReviews), 1);

@@ -17,11 +17,11 @@ async fn create_repo_group_sub_epic_is_idempotent() {
         .unwrap();
     assert_eq!(a1, a2, "same (parent,title) must return the same sub-epic");
 
-    let sub = db.get_epic(a1).await.unwrap().unwrap();
+    let sub = db.get_epic(a1).await.unwrap();
     assert_eq!(sub.origin, crate::models::EpicOrigin::RepoGroup);
     assert_eq!(sub.parent_epic_id, Some(root.id));
 
-    let subs = db.list_sub_epics(root.id).await.unwrap();
+    let subs = db.list_sub_epics(root.id).await;
     assert_eq!(subs.len(), 1, "no duplicate sub-epics created");
 }
 
@@ -54,7 +54,7 @@ async fn create_managed_role_epic_is_idempotent() {
         "a lost race on (parent, feed_role) must be a no-op, not a duplicate"
     );
 
-    let epic = db.get_epic(a1).await.unwrap().unwrap();
+    let epic = db.get_epic(a1).await.unwrap();
     assert_eq!(epic.feed_role, crate::models::FeedRole::ReviewsParent);
     assert_eq!(
         epic.feed_command.as_deref(),
@@ -62,7 +62,7 @@ async fn create_managed_role_epic_is_idempotent() {
     );
     assert_eq!(epic.feed_interval_secs, Some(300));
 
-    let all = db.list_epics().await.unwrap();
+    let all = db.list_epics().await;
     assert_eq!(
         all.iter()
             .filter(|e| e.feed_role == crate::models::FeedRole::ReviewsParent)
@@ -87,7 +87,7 @@ async fn create_epic_defaults_origin_manual_and_patch_sets_repo_group() {
 
     let patch = crate::store::EpicPatch::new().origin(crate::models::EpicOrigin::RepoGroup);
     db.patch_epic(root.id, &patch).await.unwrap();
-    let reloaded = db.get_epic(root.id).await.unwrap().unwrap();
+    let reloaded = db.get_epic(root.id).await.unwrap();
     assert_eq!(reloaded.origin, crate::models::EpicOrigin::RepoGroup);
 }
 
@@ -102,7 +102,7 @@ async fn create_and_get_epic() {
     assert_eq!(epic.description, "Rewrite auth");
     assert_eq!(epic.status, TaskStatus::Backlog);
 
-    let fetched = db.get_epic(epic.id).await.unwrap().unwrap();
+    let fetched = db.get_epic(epic.id).await.unwrap();
     assert_eq!(fetched.id, epic.id);
     assert_eq!(fetched.title, "Auth Rewrite");
 }
@@ -112,14 +112,14 @@ async fn list_epics() {
     let db = in_memory_db().await;
     db.create_epic("Epic A", "desc", None).await.unwrap();
     db.create_epic("Epic B", "desc", None).await.unwrap();
-    let epics = db.list_epics().await.unwrap();
+    let epics = db.list_epics().await;
     assert_eq!(epics.len(), 2);
 }
 
 #[tokio::test]
 async fn get_epic_nonexistent() {
     let db = in_memory_db().await;
-    assert!(db.get_epic(EpicId(999)).await.unwrap().is_none());
+    assert!(db.get_epic(EpicId(999)).await.is_none());
 }
 
 #[tokio::test]
@@ -136,10 +136,10 @@ async fn delete_epic_multi_level_sub_epics() {
         .await
         .expect("deep delete should succeed");
 
-    assert!(db.get_epic(root.id).await.unwrap().is_none());
-    assert!(db.get_epic(child.id).await.unwrap().is_none());
-    assert!(db.get_epic(grandchild.id).await.unwrap().is_none());
-    assert_eq!(db.list_epics().await.unwrap().len(), 0);
+    assert!(db.get_epic(root.id).await.is_none());
+    assert!(db.get_epic(child.id).await.is_none());
+    assert!(db.get_epic(grandchild.id).await.is_none());
+    assert_eq!(db.list_epics().await.len(), 0);
 }
 
 #[tokio::test]
@@ -156,7 +156,7 @@ async fn patch_epic_status() {
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Running))
         .await
         .unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Running);
 }
 
@@ -170,7 +170,7 @@ async fn patch_epic_feed_role_persists() {
     )
     .await
     .unwrap();
-    let got = db.get_epic(e.id).await.unwrap().unwrap();
+    let got = db.get_epic(e.id).await.unwrap();
     assert_eq!(got.feed_role, crate::models::FeedRole::ReviewsParent);
 }
 
@@ -182,7 +182,7 @@ async fn patch_epic_title() {
     db.patch_epic(epic.id, &EpicPatch::new().title("New Title"))
         .await
         .unwrap();
-    let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.title, "New Title");
     assert_eq!(updated.description, "desc"); // unchanged
 }
@@ -200,11 +200,11 @@ async fn task_epic_id_roundtrip() {
         .unwrap();
 
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(task.epic_id, Some(epic.id));
 
     db.set_task_epic_id(task_id, None).await.unwrap();
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert!(task.epic_id.is_none());
 }
 
@@ -229,7 +229,7 @@ async fn list_tasks_for_epic() {
 
     db.set_task_epic_id(id1, Some(epic.id)).await.unwrap();
 
-    let subtasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let subtasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(subtasks.len(), 1);
     assert_eq!(subtasks[0].title, "Sub A");
 }
@@ -243,7 +243,7 @@ async fn patch_epic_plan() {
     db.patch_epic(epic.id, &EpicPatch::new().plan_path(Some("docs/plan.md")))
         .await
         .unwrap();
-    let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.plan_path.as_deref(), Some("docs/plan.md"));
 }
 
@@ -258,7 +258,7 @@ async fn patch_epic_clear_plan() {
     db.patch_epic(epic.id, &EpicPatch::new().plan_path(None))
         .await
         .unwrap();
-    let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = db.get_epic(epic.id).await.unwrap();
     assert!(updated.plan_path.is_none());
 }
 
@@ -277,7 +277,7 @@ async fn recalculate_epic_status_running_task_leaves_epic_in_backlog() {
         .unwrap();
 
     db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
@@ -298,7 +298,7 @@ async fn recalculate_epic_status_running_task_leaves_review_epic_unchanged() {
         .unwrap();
 
     db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Review); // manual placement preserved
 }
 
@@ -316,7 +316,7 @@ async fn recalculate_epic_status_backlog_task_leaves_review_epic_unchanged() {
     db.set_task_epic_id(task.id, Some(epic.id)).await.unwrap();
 
     db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Review); // manual placement preserved
 }
 
@@ -346,7 +346,7 @@ async fn recalculate_epic_status_review_epic_stays_when_one_task_done_one_runnin
         .unwrap();
 
     db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     // t1 still running, t2 done — not all done, not done-regression → no change
     assert_eq!(epic.status, TaskStatus::Review);
 }
@@ -372,7 +372,7 @@ async fn recalculate_epic_status_all_done() {
         .unwrap();
 
     db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Done);
 }
 
@@ -394,7 +394,7 @@ async fn recalculate_epic_status_all_done_stamps_completed_at() {
     db.recalculate_epic_status(epic.id).await.unwrap();
     let after = chrono::Utc::now() + chrono::Duration::seconds(1);
 
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Done);
     let completed_at = epic
         .completed_at
@@ -433,7 +433,7 @@ async fn recalculate_epic_status_done_regression_keeps_completed_at() {
 
     db.recalculate_epic_status(epic.id).await.unwrap();
 
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
     assert_eq!(
         epic.completed_at,
@@ -464,7 +464,7 @@ async fn recalculate_epic_status_already_done_noop_leaves_completed_at_untouched
 
     db.recalculate_epic_status(epic.id).await.unwrap();
 
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Done);
     assert_eq!(
         epic.completed_at,
@@ -494,7 +494,7 @@ async fn recalculate_epic_status_mixed_review_done_leaves_epic_in_backlog() {
         .unwrap();
 
     db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog); // not all done → no auto-advance
 }
 
@@ -526,7 +526,7 @@ async fn recalculate_epic_status_mixed_review_running_leaves_epic_in_backlog() {
         .unwrap();
 
     db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
@@ -546,7 +546,7 @@ async fn update_task_to_review_leaves_epic_in_backlog() {
         .await
         .unwrap();
 
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
@@ -566,7 +566,7 @@ async fn update_task_to_running_leaves_epic_in_backlog() {
         .await
         .unwrap();
 
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
@@ -587,7 +587,7 @@ async fn epic_stays_backlog_when_review_task_completes() {
     db.set_task_epic_id(t2.id, Some(epic.id)).await.unwrap();
     db.recalculate_epic_status(epic.id).await.unwrap();
     assert_eq!(
-        db.get_epic(epic.id).await.unwrap().unwrap().status,
+        db.get_epic(epic.id).await.unwrap().status,
         TaskStatus::Backlog // running+review tasks → no auto-advance
     );
 
@@ -596,7 +596,7 @@ async fn epic_stays_backlog_when_review_task_completes() {
         .await
         .unwrap();
 
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog); // t1 still running → not all done
 }
 
@@ -621,10 +621,10 @@ async fn update_task_with_substatus_keeps_task_running_and_epic_in_backlog() {
     .await
     .unwrap();
 
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog); // running task → epic stays in backlog
 
-    let task = db.get_task(task.id).await.unwrap().unwrap();
+    let task = db.get_task(task.id).await.unwrap();
     assert_eq!(task.sub_status, SubStatus::NeedsInput);
 }
 
@@ -638,7 +638,7 @@ async fn patch_epic_no_changes_is_noop() {
     let epic = db.create_epic("Title", "desc", None).await.unwrap();
     // Empty patch — has_changes() is false, so this should succeed without touching DB
     db.patch_epic(epic.id, &EpicPatch::new()).await.unwrap();
-    let fetched = db.get_epic(epic.id).await.unwrap().unwrap();
+    let fetched = db.get_epic(epic.id).await.unwrap();
     assert_eq!(fetched.title, "Title");
 }
 
@@ -651,14 +651,14 @@ async fn patch_epic_sort_order() {
     db.patch_epic(epic.id, &EpicPatch::new().sort_order(Some(42)))
         .await
         .unwrap();
-    let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.sort_order, Some(42));
 
     // Clear sort_order
     db.patch_epic(epic.id, &EpicPatch::new().sort_order(None))
         .await
         .unwrap();
-    let cleared = db.get_epic(epic.id).await.unwrap().unwrap();
+    let cleared = db.get_epic(epic.id).await.unwrap();
     assert!(cleared.sort_order.is_none());
 }
 
@@ -679,7 +679,7 @@ async fn recalculate_epic_status_done_regresses_to_backlog_when_running_task_add
         .unwrap();
 
     db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
@@ -693,7 +693,7 @@ async fn recalculate_epic_status_no_active_children_leaves_status_unchanged() {
         .unwrap();
 
     db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Running);
 }
 
@@ -710,7 +710,7 @@ async fn recalculate_epic_status_all_done_stays_done_when_already_done() {
         .unwrap();
 
     db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Done);
 }
 
@@ -730,13 +730,13 @@ async fn patch_epic_auto_dispatch_persists() {
     db.patch_epic(epic.id, &EpicPatch::new().auto_dispatch(false))
         .await
         .unwrap();
-    let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = db.get_epic(epic.id).await.unwrap();
     assert!(!updated.auto_dispatch);
 
     db.patch_epic(epic.id, &EpicPatch::new().auto_dispatch(true))
         .await
         .unwrap();
-    let re_enabled = db.get_epic(epic.id).await.unwrap().unwrap();
+    let re_enabled = db.get_epic(epic.id).await.unwrap();
     assert!(re_enabled.auto_dispatch);
 }
 
@@ -757,12 +757,12 @@ async fn patch_epic_feed_append_only_persists() {
     db.patch_epic(epic.id, &EpicPatch::new().feed_append_only(true))
         .await
         .unwrap();
-    let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = db.get_epic(epic.id).await.unwrap();
     assert!(updated.feed_append_only);
     db.patch_epic(epic.id, &EpicPatch::new().feed_append_only(false))
         .await
         .unwrap();
-    let re_disabled = db.get_epic(epic.id).await.unwrap().unwrap();
+    let re_disabled = db.get_epic(epic.id).await.unwrap();
     assert!(!re_disabled.feed_append_only);
 }
 
@@ -780,12 +780,12 @@ async fn patch_epic_group_by_repo_persists() {
     db.patch_epic(epic.id, &EpicPatch::new().group_by_repo(true))
         .await
         .unwrap();
-    let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = db.get_epic(epic.id).await.unwrap();
     assert!(updated.group_by_repo);
     db.patch_epic(epic.id, &EpicPatch::new().group_by_repo(false))
         .await
         .unwrap();
-    let re_disabled = db.get_epic(epic.id).await.unwrap().unwrap();
+    let re_disabled = db.get_epic(epic.id).await.unwrap();
     assert!(!re_disabled.group_by_repo);
 }
 
@@ -811,7 +811,7 @@ async fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
     db.set_task_epic_id(t1, Some(epic1_id)).await.unwrap();
     db.set_task_epic_id(t2, Some(epic2_id)).await.unwrap();
 
-    let tasks = db.list_all_tasks_with_epic_id().await.unwrap();
+    let tasks = db.list_all_tasks_with_epic_id().await;
     assert_eq!(tasks.len(), 2);
     assert!(tasks.iter().any(|t| t.id == t1));
     assert!(tasks.iter().any(|t| t.id == t2));
@@ -831,7 +831,7 @@ async fn sub_epic_has_parent_id() {
         .unwrap();
     assert_eq!(child.parent_epic_id, Some(parent.id));
 
-    let fetched = db.get_epic(child.id).await.unwrap().unwrap();
+    let fetched = db.get_epic(child.id).await.unwrap();
     assert_eq!(fetched.parent_epic_id, Some(parent.id));
 }
 
@@ -850,7 +850,7 @@ async fn list_root_epics_excludes_sub_epics() {
         .await
         .unwrap();
 
-    let roots = db.list_root_epics().await.unwrap();
+    let roots = db.list_root_epics().await;
     assert_eq!(roots.len(), 1);
     assert_eq!(roots[0].id, parent.id);
 }
@@ -870,7 +870,7 @@ async fn list_sub_epics_returns_children() {
     // unrelated root epic — must not appear
     db.create_epic("Other", "desc", None).await.unwrap();
 
-    let children = db.list_sub_epics(parent.id).await.unwrap();
+    let children = db.list_sub_epics(parent.id).await;
     assert_eq!(children.len(), 2);
     let ids: Vec<_> = children.iter().map(|e| e.id).collect();
     assert!(ids.contains(&child1.id));
@@ -908,10 +908,10 @@ async fn recalculate_parent_status_from_sub_epic() {
     // Running tasks do not auto-advance epics — both stay in backlog.
     db.recalculate_epic_status(child.id).await.unwrap();
 
-    let updated_child = db.get_epic(child.id).await.unwrap().unwrap();
+    let updated_child = db.get_epic(child.id).await.unwrap();
     assert_eq!(updated_child.status, TaskStatus::Backlog);
 
-    let updated_parent = db.get_epic(parent.id).await.unwrap().unwrap();
+    let updated_parent = db.get_epic(parent.id).await.unwrap();
     assert_eq!(updated_parent.status, TaskStatus::Backlog);
 }
 
@@ -992,7 +992,7 @@ async fn root_feed_epic(db: &Store, title: &str) -> Epic {
 }
 
 async fn mark_all_done(db: &Store, epic: EpicId) {
-    for t in db.list_tasks_for_epic(epic).await.unwrap() {
+    for t in db.list_tasks_for_epic(epic).await {
         db.patch_task(t.id, &TaskPatch::new().status(TaskStatus::Done))
             .await
             .unwrap();
@@ -1003,7 +1003,6 @@ async fn external_ids_under(db: &Store, epic: EpicId) -> Vec<String> {
     let mut ids: Vec<String> = db
         .list_tasks_for_epic(epic)
         .await
-        .unwrap()
         .into_iter()
         .filter_map(|t| t.external_id)
         .collect();
@@ -1023,7 +1022,7 @@ async fn delete_epic_retires_its_feed_tasks_under_the_surviving_feed_epic() {
     mark_all_done(&db, sub.id).await;
 
     db.delete_epic(sub.id).await.unwrap();
-    assert!(db.get_epic(sub.id).await.unwrap().is_none());
+    assert!(db.get_epic(sub.id).await.is_none());
 
     let again = db.create_epic("repo-a", "", Some(root.id)).await.unwrap();
     upsert_ids(&db, again.id, &["pr-1", "pr-2", "pr-3"]).await;
@@ -1045,13 +1044,13 @@ async fn delete_epic_of_the_feed_epic_itself_takes_its_retired_records_with_it()
     let root = root_feed_epic(&db, "Feed").await;
     upsert_ids(&db, root.id, &["ext-1"]).await;
     mark_all_done(&db, root.id).await;
-    let task = db.list_tasks_for_epic(root.id).await.unwrap()[0].id;
+    let task = db.list_tasks_for_epic(root.id).await[0].id;
     db.delete_task(task).await.unwrap();
 
     db.delete_epic(root.id)
         .await
         .expect("deleting a feed epic that holds retired records must succeed");
-    assert!(db.get_epic(root.id).await.unwrap().is_none());
+    assert!(db.get_epic(root.id).await.is_none());
 
     let fresh = root_feed_epic(&db, "Fresh feed").await;
     upsert_ids(&db, fresh.id, &["ext-1"]).await;

@@ -54,7 +54,7 @@ async fn feed_sync_creates_then_updates_tasks_via_external_id() {
     runner.tick().await;
     wait_for_refresh(&mut rx).await;
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 3, "expected 3 tasks after first feed sync");
     let mut external_ids: Vec<&str> = tasks
         .iter()
@@ -88,7 +88,7 @@ async fn feed_sync_creates_then_updates_tasks_via_external_id() {
     runner2.tick().await;
     wait_for_refresh(&mut rx2).await;
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     let titles_by_ext: std::collections::HashMap<String, String> = tasks
         .iter()
         .map(|t| (t.external_id.clone().unwrap_or_default(), t.title.clone()))

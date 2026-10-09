@@ -318,7 +318,7 @@ async fn update_task_done_does_not_chain_the_next_subtask() {
     let resp = fx.close_via_update_task(closing).await;
     assert!(resp.error.is_none(), "close must succeed: {:?}", resp.error);
 
-    let next = fx.db.get_task(first).await.unwrap().unwrap();
+    let next = fx.db.get_task(first).await.unwrap();
     assert_eq!(
         next.status,
         TaskStatus::Backlog,
@@ -329,7 +329,7 @@ async fn update_task_done_does_not_chain_the_next_subtask() {
 
     // The closing task itself still closed.
     assert_eq!(
-        fx.db.get_task(closing).await.unwrap().unwrap().status,
+        fx.db.get_task(closing).await.unwrap().status,
         TaskStatus::Done
     );
 }
@@ -369,14 +369,7 @@ async fn update_task_done_kills_the_tmux_window() {
         !fx.kill_window_calls().is_empty(),
         "expected a tmux kill-window call"
     );
-    assert!(fx
-        .db
-        .get_task(closing)
-        .await
-        .unwrap()
-        .unwrap()
-        .tmux_window
-        .is_none());
+    assert!(fx.db.get_task(closing).await.unwrap().tmux_window.is_none());
 }
 
 /// A terminal write that does not persist must leave the task exactly as it
@@ -387,7 +380,7 @@ async fn update_task_done_kills_the_tmux_window() {
 async fn update_task_done_failed_close_leaves_the_task_unchanged() {
     let fx = ChainFixture::with_failing_close().await;
     let closing = fx.closing_subtask(None).await;
-    let before = fx.db.get_task(closing).await.unwrap().unwrap();
+    let before = fx.db.get_task(closing).await.unwrap();
 
     let resp = fx.close_via_update_task(closing).await;
     assert!(resp.error.is_none(), "still a successful response");
@@ -397,7 +390,7 @@ async fn update_task_done_failed_close_leaves_the_task_unchanged() {
         extract_response_text(&resp)
     );
 
-    let after = fx.db.get_task(closing).await.unwrap().unwrap();
+    let after = fx.db.get_task(closing).await.unwrap();
     assert_eq!(
         after.status, before.status,
         "a close that did not persist must not move the task"
@@ -432,7 +425,7 @@ async fn exit_session_dispatches_first_backlog_subtask() {
 
     wait_for_task_changed(&mut fx.notify_rx, first).await;
 
-    let dispatched = fx.db.get_task(first).await.unwrap().unwrap();
+    let dispatched = fx.db.get_task(first).await.unwrap();
     assert_eq!(dispatched.status, TaskStatus::Running);
     assert!(dispatched.worktree.is_some());
     assert!(dispatched.tmux_window.is_some());
@@ -441,7 +434,7 @@ async fn exit_session_dispatches_first_backlog_subtask() {
         "last_pre_tool_use_at should be seeded so the tick classifier does not flicker the task to Stale"
     );
 
-    let untouched = fx.db.get_task(second).await.unwrap().unwrap();
+    let untouched = fx.db.get_task(second).await.unwrap();
     assert_eq!(
         untouched.status,
         TaskStatus::Backlog,
@@ -499,7 +492,7 @@ async fn exit_session_chain_respects_sort_order() {
 
     wait_for_task_changed(&mut fx.notify_rx, earlier).await;
     assert_eq!(
-        fx.db.get_task(later).await.unwrap().unwrap().status,
+        fx.db.get_task(later).await.unwrap().status,
         TaskStatus::Backlog
     );
 }
@@ -526,7 +519,7 @@ async fn exit_session_chain_respects_tag_routing() {
         )
         .await
         .unwrap();
-    let task = fx.db.get_task(next).await.unwrap().unwrap();
+    let task = fx.db.get_task(next).await.unwrap();
     assert_eq!(
         crate::models::DispatchMode::for_task(&task),
         crate::models::DispatchMode::Research,
@@ -538,7 +531,7 @@ async fn exit_session_chain_respects_tag_routing() {
 
     wait_for_task_changed(&mut fx.notify_rx, next).await;
     assert_eq!(
-        fx.db.get_task(next).await.unwrap().unwrap().status,
+        fx.db.get_task(next).await.unwrap().status,
         TaskStatus::Running
     );
 }
@@ -555,7 +548,7 @@ async fn exit_session_with_no_backlog_subtask_closes_without_chaining() {
     let resp = fx.close(closing, WrapUpAction::Done).await;
     assert_eq!(extract_response_text(&resp), "Session closed.");
     assert_eq!(
-        fx.db.get_task(closing).await.unwrap().unwrap().status,
+        fx.db.get_task(closing).await.unwrap().status,
         TaskStatus::Done
     );
 }
@@ -586,7 +579,7 @@ async fn exit_session_does_not_chain_when_auto_dispatch_off() {
 
     // The claim is synchronous and completes before exit_session returns, so a
     // subtask still in Backlog here was never claimed and can never transition.
-    let untouched = fx.db.get_task(next).await.unwrap().unwrap();
+    let untouched = fx.db.get_task(next).await.unwrap();
     assert_eq!(untouched.status, TaskStatus::Backlog);
     assert!(untouched.worktree.is_none());
 }
@@ -600,7 +593,7 @@ async fn exit_session_without_epic_closes_without_chaining() {
     let resp = fx.close(closing, WrapUpAction::Done).await;
     assert_eq!(extract_response_text(&resp), "Session closed.");
     assert_eq!(
-        fx.db.get_task(closing).await.unwrap().unwrap().status,
+        fx.db.get_task(closing).await.unwrap().status,
         TaskStatus::Done
     );
 }
@@ -620,14 +613,14 @@ async fn exit_session_chain_starts_only_after_the_closing_task_is_terminal() {
     fx.close(closing, WrapUpAction::Done).await;
     wait_for_task_changed(&mut fx.notify_rx, next).await;
 
-    let successor = fx.db.get_task(next).await.unwrap().unwrap();
+    let successor = fx.db.get_task(next).await.unwrap();
     assert_eq!(successor.status, TaskStatus::Running);
     assert!(
         successor.worktree.is_some(),
         "successor should be provisioned by the time TaskChanged fires"
     );
 
-    let predecessor = fx.db.get_task(closing).await.unwrap().unwrap();
+    let predecessor = fx.db.get_task(closing).await.unwrap();
     assert_eq!(
         predecessor.status,
         TaskStatus::Done,
@@ -674,7 +667,7 @@ async fn assert_action_chains(action: WrapUpAction) {
 
     wait_for_task_changed(&mut fx.notify_rx, next).await;
     assert_eq!(
-        fx.db.get_task(next).await.unwrap().unwrap().status,
+        fx.db.get_task(next).await.unwrap().status,
         TaskStatus::Running
     );
 }
@@ -706,7 +699,7 @@ async fn exit_session_chain_reverts_claim_when_dispatch_fails() {
 
     wait_for_task_changed(&mut fx.notify_rx, next).await;
 
-    let reverted = fx.db.get_task(next).await.unwrap().unwrap();
+    let reverted = fx.db.get_task(next).await.unwrap();
     assert_eq!(
         reverted.status,
         TaskStatus::Backlog,
@@ -828,12 +821,9 @@ impl crate::service::TaskServiceApiStub for FailingCloseTaskService {
         task_id: crate::models::TaskId,
     ) -> Result<crate::models::Task, crate::service::ServiceError> {
         let db = self.db.get().expect("db is bound by the fixture");
-        db.get_task(task_id)
-            .await
-            .map_err(crate::service::ServiceError::Internal)?
-            .ok_or_else(|| {
-                crate::service::ServiceError::NotFound(format!("task {task_id} not found"))
-            })
+        db.get_task(task_id).await.ok_or_else(|| {
+            crate::service::ServiceError::NotFound(format!("task {task_id} not found"))
+        })
     }
 
     async fn close_session(
@@ -876,12 +866,9 @@ impl crate::service::TaskServiceApiStub for LostClaimTaskService {
         task_id: crate::models::TaskId,
     ) -> Result<crate::models::Task, crate::service::ServiceError> {
         let db = self.db.get().expect("db is bound by the fixture");
-        db.get_task(task_id)
-            .await
-            .map_err(crate::service::ServiceError::Internal)?
-            .ok_or_else(|| {
-                crate::service::ServiceError::NotFound(format!("task {task_id} not found"))
-            })
+        db.get_task(task_id).await.ok_or_else(|| {
+            crate::service::ServiceError::NotFound(format!("task {task_id} not found"))
+        })
     }
 
     async fn dispatch(
@@ -901,11 +888,11 @@ crate::task_service_api!(service_api_stub_bridge, LostClaimTaskService);
 async fn exit_session_failed_close_leaves_the_task_unchanged() {
     let fx = ChainFixture::with_failing_close().await;
     let closing = fx.closing_subtask(None).await;
-    let before = fx.db.get_task(closing).await.unwrap().unwrap();
+    let before = fx.db.get_task(closing).await.unwrap();
 
     fx.close(closing, WrapUpAction::Done).await;
 
-    let after = fx.db.get_task(closing).await.unwrap().unwrap();
+    let after = fx.db.get_task(closing).await.unwrap();
     assert_eq!(
         after.status, before.status,
         "a close that did not persist must not move the task"
@@ -965,7 +952,6 @@ async fn exit_session_successful_close_kills_the_tmux_window() {
         .get_task(closing)
         .await
         .unwrap()
-        .unwrap()
         .tmux_window
         .expect("closing_subtask must have a tmux window");
 
@@ -978,7 +964,7 @@ async fn exit_session_successful_close_kills_the_tmux_window() {
     fx.wait_for_kill_window_done().await;
 
     assert_eq!(
-        fx.db.get_task(closing).await.unwrap().unwrap().status,
+        fx.db.get_task(closing).await.unwrap().status,
         TaskStatus::Done,
         "the kill-window signal must not fire before the terminal write lands"
     );
@@ -1009,7 +995,7 @@ async fn exit_session_failed_close_records_no_pr_url() {
 
     fx.close(closing, WrapUpAction::Pr).await;
 
-    let after = fx.db.get_task(closing).await.unwrap().unwrap();
+    let after = fx.db.get_task(closing).await.unwrap();
     assert_eq!(after.status, TaskStatus::Running);
     assert!(
         after.url.is_none(),
@@ -1087,7 +1073,7 @@ async fn exit_session_failed_close_does_not_chain() {
 
     // The claim is synchronous and completes before exit_session returns, so a
     // subtask still in Backlog here was never claimed and can never transition.
-    let untouched = fx.db.get_task(next).await.unwrap().unwrap();
+    let untouched = fx.db.get_task(next).await.unwrap();
     assert_eq!(untouched.status, TaskStatus::Backlog);
     assert!(untouched.worktree.is_none());
 }
@@ -1175,7 +1161,7 @@ async fn wrap_up_then_exit_session_chains_without_an_agent_tool_call() {
 
     wait_for_task_changed(&mut fx.notify_rx, next).await;
     assert_eq!(
-        fx.db.get_task(next).await.unwrap().unwrap().status,
+        fx.db.get_task(next).await.unwrap().status,
         TaskStatus::Running
     );
 }
@@ -1238,7 +1224,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
         "response should instruct agent to call exit_session; got: {text}"
     );
 
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Review,
@@ -1288,7 +1274,7 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
     .await;
 
     assert_error(&resp, "conflict");
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Review,
@@ -1338,7 +1324,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
     .unwrap();
 
     // Verify conflict is set before wrap_up
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_eq!(task.sub_status, SubStatus::Conflict);
 
     let _resp = call(
@@ -1351,7 +1337,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
     )
     .await;
 
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
     assert_ne!(
         task.sub_status,
         SubStatus::Conflict,
@@ -1402,7 +1388,7 @@ async fn dispatch_task_dispatches_backlog_task() {
     );
 
     // dispatch_task is synchronous — no sleep needed
-    let task = fx.db.get_task(task_id).await.unwrap().unwrap();
+    let task = fx.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert!(
         task.worktree.is_some(),
@@ -1556,7 +1542,7 @@ async fn the_auto_dispatch_chain_notifies_that_the_repo_needs_remeasuring() {
         "a chained dispatch must ask the runtime to remeasure {repo_path}"
     );
     assert_eq!(
-        fx.db.get_task(next).await.unwrap().unwrap().status,
+        fx.db.get_task(next).await.unwrap().status,
         TaskStatus::Running,
         "the chain really did launch an agent"
     );
@@ -1598,7 +1584,7 @@ async fn dispatch_task_reports_the_status_a_lost_claim_left_behind() {
 
     assert_error(&resp, "not in backlog");
     assert_error(&resp, "running");
-    let task = fx.db.get_task(task_id).await.unwrap().unwrap();
+    let task = fx.db.get_task(task_id).await.unwrap();
     assert!(
         task.worktree.is_none(),
         "a lost claim must provision nothing"
@@ -1626,7 +1612,7 @@ async fn dispatch_task_lost_claim_provisions_nothing() {
         "a lost claim must run no provisioning commands at all, got: {:?}",
         fx.runner.recorded_calls()
     );
-    let task = fx.db.get_task(task_id).await.unwrap().unwrap();
+    let task = fx.db.get_task(task_id).await.unwrap();
     assert!(task.worktree.is_none());
     assert!(task.tmux_window.is_none());
 }
@@ -1651,7 +1637,7 @@ async fn dispatch_task_releases_the_claim_when_provisioning_fails() {
     let resp = call_dispatch_task(&fx.state, task_id).await;
 
     assert_error(&resp, "dispatch failed");
-    let task = fx.db.get_task(task_id).await.unwrap().unwrap();
+    let task = fx.db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Backlog,
@@ -1712,7 +1698,7 @@ async fn dispatch_task_respects_tag_routing() {
         text.contains("dispatched"),
         "Expected dispatch confirmation, got: {text}"
     );
-    let task = fx.db.get_task(task_id).await.unwrap().unwrap();
+    let task = fx.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running);
 }
 
@@ -1802,7 +1788,7 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
     assert!(is_error(&resp), "expected error when dispatch fails");
 
     // Task status must remain Backlog — dispatch failure must not leave it as Running
-    let task = fx.db.get_task(task_id).await.unwrap().unwrap();
+    let task = fx.db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Backlog,

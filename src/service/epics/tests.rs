@@ -235,7 +235,7 @@ async fn update_epic_rejecting_the_interval_writes_no_other_field() {
         .await;
     assert!(matches!(err, Err(ServiceError::Validation(_))), "{err:?}");
 
-    let after = db.get_epic(epic.id).await.unwrap().unwrap();
+    let after = db.get_epic(epic.id).await.unwrap();
     assert_eq!(
         after.title, "Original",
         "the title must not survive a rejected update"
@@ -254,7 +254,7 @@ async fn update_epic_accepts_the_floor_itself_and_clearing_the_interval() {
     })
     .await
     .unwrap();
-    let after = db.get_epic(epic.id).await.unwrap().unwrap();
+    let after = db.get_epic(epic.id).await.unwrap();
     assert_eq!(after.feed_interval_secs, Some(MIN_FEED_INTERVAL_SECS));
 
     // Explicit null clears to "inherit the default", never below the floor.
@@ -264,7 +264,7 @@ async fn update_epic_accepts_the_floor_itself_and_clearing_the_interval() {
     })
     .await
     .unwrap();
-    let cleared = db.get_epic(epic.id).await.unwrap().unwrap();
+    let cleared = db.get_epic(epic.id).await.unwrap();
     assert_eq!(cleared.feed_interval_secs, None);
 }
 
@@ -297,7 +297,7 @@ async fn update_epic_refuses_append_only_together_with_group_by_repo() {
         matches!(err, Err(ServiceError::Validation(_))),
         "append-only + group_by_repo must be refused, got {err:?}"
     );
-    let unchanged = db.get_epic(epic.id).await.unwrap().unwrap();
+    let unchanged = db.get_epic(epic.id).await.unwrap();
     assert!(
         !unchanged.group_by_repo,
         "a refused update must write nothing"
@@ -375,7 +375,7 @@ async fn update_epic_sets_group_by_repo() {
     })
     .await
     .unwrap();
-    let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = db.get_epic(epic.id).await.unwrap();
     assert!(updated.group_by_repo);
 }
 
@@ -398,7 +398,7 @@ async fn update_epic_entering_done_stamps_completed_at() {
     .await
     .unwrap();
 
-    let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.completed_at, Some(now));
     assert_eq!(
         updated.sort_order, None,
@@ -420,7 +420,7 @@ async fn update_epic_leaving_done_keeps_completed_at() {
     })
     .await
     .unwrap();
-    let finished = db.get_epic(epic.id).await.unwrap().unwrap().completed_at;
+    let finished = db.get_epic(epic.id).await.unwrap().completed_at;
     assert!(finished.is_some());
 
     svc.update_epic(UpdateEpicParams {
@@ -430,7 +430,7 @@ async fn update_epic_leaving_done_keeps_completed_at() {
     .await
     .unwrap();
 
-    let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.completed_at, finished);
 }
 
@@ -450,7 +450,7 @@ async fn update_epic_entering_done_keeps_an_explicit_sort_order() {
     .await
     .unwrap();
 
-    let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.sort_order, Some(7));
     assert!(updated.completed_at.is_some());
 }
@@ -467,7 +467,7 @@ async fn update_epic_unrelated_field_edit_while_done_leaves_completed_at_untouch
     })
     .await
     .unwrap();
-    let after_entry = db.get_epic(epic.id).await.unwrap().unwrap().completed_at;
+    let after_entry = db.get_epic(epic.id).await.unwrap().completed_at;
 
     svc.update_epic(UpdateEpicParams {
         title: Some("Renamed".to_string()),
@@ -476,7 +476,7 @@ async fn update_epic_unrelated_field_edit_while_done_leaves_completed_at_untouch
     .await
     .unwrap();
 
-    let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.completed_at, after_entry);
 }
 
@@ -514,7 +514,7 @@ async fn create_sub_epic_recalculates_done_parent() {
     .await
     .unwrap();
 
-    let parent = db.get_epic(parent.id).await.unwrap().unwrap();
+    let parent = db.get_epic(parent.id).await.unwrap();
     assert_eq!(parent.status, TaskStatus::Backlog);
 }
 
@@ -547,7 +547,7 @@ async fn update_epic_sets_parent() {
     })
     .await
     .unwrap();
-    let updated = db.get_epic(child.id).await.unwrap().unwrap();
+    let updated = db.get_epic(child.id).await.unwrap();
     assert_eq!(updated.parent_epic_id, Some(parent.id));
 }
 
@@ -564,7 +564,7 @@ async fn update_epic_clears_parent() {
     })
     .await
     .unwrap();
-    let updated = db.get_epic(child.id).await.unwrap().unwrap();
+    let updated = db.get_epic(child.id).await.unwrap();
     assert!(updated.parent_epic_id.is_none());
 }
 
@@ -580,7 +580,7 @@ async fn update_epic_parent_id_absent_is_noop() {
     })
     .await
     .unwrap();
-    let updated = db.get_epic(child.id).await.unwrap().unwrap();
+    let updated = db.get_epic(child.id).await.unwrap();
     assert_eq!(updated.parent_epic_id, Some(parent.id), "parent unchanged");
 }
 
@@ -621,8 +621,8 @@ async fn update_epic_reparent_recalculates_old_and_new_parent() {
     .await
     .unwrap();
 
-    let old_parent = db.get_epic(old_parent.id).await.unwrap().unwrap();
-    let new_parent = db.get_epic(new_parent.id).await.unwrap().unwrap();
+    let old_parent = db.get_epic(old_parent.id).await.unwrap();
+    let new_parent = db.get_epic(new_parent.id).await.unwrap();
     assert_eq!(
         old_parent.status,
         TaskStatus::Backlog,
@@ -650,7 +650,7 @@ async fn update_epic_status_change_recalculates_parent() {
     })
     .await
     .unwrap();
-    let parent_after_child_done = db.get_epic(parent.id).await.unwrap().unwrap();
+    let parent_after_child_done = db.get_epic(parent.id).await.unwrap();
     assert_eq!(parent_after_child_done.status, TaskStatus::Done);
 
     // Regress the child back to Running — parent must be recalculated
@@ -662,7 +662,7 @@ async fn update_epic_status_change_recalculates_parent() {
     .await
     .unwrap();
 
-    let parent = db.get_epic(parent.id).await.unwrap().unwrap();
+    let parent = db.get_epic(parent.id).await.unwrap();
     assert_eq!(parent.status, TaskStatus::Backlog);
 }
 
@@ -685,7 +685,7 @@ async fn update_epic_cycle_detection() {
         result
     );
     // DB must be unchanged
-    let a_after = db.get_epic(a.id).await.unwrap().unwrap();
+    let a_after = db.get_epic(a.id).await.unwrap();
     assert!(a_after.parent_epic_id.is_none());
 }
 
@@ -772,7 +772,7 @@ async fn detach_manual_sub_epic_is_allowed() {
     .await
     .unwrap();
 
-    let updated = db.get_epic(child.id).await.unwrap().unwrap();
+    let updated = db.get_epic(child.id).await.unwrap();
     assert!(
         updated.parent_epic_id.is_none(),
         "Manual sub-epic can be detached"

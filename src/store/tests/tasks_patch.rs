@@ -178,7 +178,7 @@ mod property_tests {
                     })
                     .await
                     .unwrap();
-                let baseline = db.get_task(id).await.unwrap().unwrap();
+                let baseline = db.get_task(id).await.unwrap();
 
                 // Generated as strings, then lifted to the typed window field:
                 // `[a-z]{1,16}` is always a valid window name (non-empty, not a
@@ -204,7 +204,7 @@ mod property_tests {
                 if let Some(ref e)  = external_id { p = p.external_id(e.as_deref()); }
 
                 db.patch_task(id, &p).await.unwrap();
-                let after = db.get_task(id).await.unwrap().unwrap();
+                let after = db.get_task(id).await.unwrap();
 
                 prop_assert_eq!(&after.title,       &title.unwrap_or(baseline.title));
                 prop_assert_eq!(&after.description, &description.unwrap_or(baseline.description));
@@ -237,11 +237,11 @@ mod property_tests {
                     })
                     .await
                     .unwrap();
-                let baseline = db.get_task(id).await.unwrap().unwrap();
+                let baseline = db.get_task(id).await.unwrap();
                 let mut p = TaskPatch::new();
                 if let Some(so) = sort_order { p = p.sort_order(so); }
                 db.patch_task(id, &p).await.unwrap();
-                let after = db.get_task(id).await.unwrap().unwrap();
+                let after = db.get_task(id).await.unwrap();
                 prop_assert_eq!(after.sort_order, sort_order.unwrap_or(baseline.sort_order));
                 Ok::<(), proptest::test_runner::TestCaseError>(())
             })?;
@@ -265,7 +265,7 @@ mod property_tests {
                 let epic = db
                     .create_epic("Baseline epic", "baseline", None).await
                     .unwrap();
-                let baseline = db.get_epic(epic.id).await.unwrap().unwrap();
+                let baseline = db.get_epic(epic.id).await.unwrap();
 
                 let mut p = EpicPatch::new();
                 if let Some(t)  = title.as_deref()       { p = p.title(t); }
@@ -277,7 +277,7 @@ mod property_tests {
                 if let Some(fi) = feed_interval     { p = p.feed_interval_secs(fi); }
 
                 db.patch_epic(epic.id, &p).await.unwrap();
-                let after = db.get_epic(epic.id).await.unwrap().unwrap();
+                let after = db.get_epic(epic.id).await.unwrap();
 
                 prop_assert_eq!(&after.title,         &title.unwrap_or(baseline.title));
                 prop_assert_eq!(&after.description,   &description.unwrap_or(baseline.description));
@@ -299,7 +299,7 @@ async fn create_task_wrap_up_mode_defaults_to_none() {
         .create_task(CreateTaskRequest::fixture("T", "/repo"))
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.wrap_up_mode, None);
 }
 
@@ -313,7 +313,7 @@ async fn create_task_with_wrap_up_mode_rebase() {
         })
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.wrap_up_mode, Some(WrapUpMode::Rebase));
 }
 
@@ -332,14 +332,14 @@ async fn patch_task_wrap_up_mode() {
     )
     .await
     .unwrap();
-    let task = db.get_task(task.id).await.unwrap().unwrap();
+    let task = db.get_task(task.id).await.unwrap();
     assert_eq!(task.wrap_up_mode, Some(WrapUpMode::Pr));
 
     // Clear it
     db.patch_task(task.id, &TaskPatch::new().wrap_up_mode(None))
         .await
         .unwrap();
-    let task = db.get_task(task.id).await.unwrap().unwrap();
+    let task = db.get_task(task.id).await.unwrap();
     assert_eq!(task.wrap_up_mode, None);
 }
 
@@ -356,7 +356,7 @@ async fn patch_auto_run_plan_true() {
     db.patch_task(id, &TaskPatch::new().auto_run_plan(true))
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().expect("task should exist");
+    let task = db.get_task(id).await.expect("task should exist");
     assert!(task.auto_run_plan);
 }
 
@@ -370,7 +370,7 @@ async fn row_to_task_sub_status_none_string_maps_to_none_variant() {
         })
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.sub_status, SubStatus::None);
 }
 
@@ -384,7 +384,7 @@ async fn row_to_task_base_branch_defaults_to_main() {
         })
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.base_branch, "main");
 }
 
@@ -439,7 +439,7 @@ async fn patch_task_all_fields_round_trip() {
     .await
     .unwrap();
 
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running, "status");
     assert_eq!(task.sub_status, SubStatus::Active, "sub_status");
     assert_eq!(
@@ -494,7 +494,7 @@ async fn create_task_persists_wrap_up_mode() {
         })
         .await
         .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.wrap_up_mode, Some(WrapUpMode::Rebase));
 }
 
@@ -557,7 +557,7 @@ async fn try_claim_next_backlog_task_claims_the_lowest_sort_order_subtask() {
     assert_eq!(claimed, Some(first));
     for untouched in [second, third] {
         assert_eq!(
-            db.get_task(untouched).await.unwrap().unwrap().status,
+            db.get_task(untouched).await.unwrap().status,
             TaskStatus::Backlog,
             "only the selected row may be claimed"
         );
@@ -625,7 +625,7 @@ async fn try_claim_next_backlog_task_skips_phoenix_subtasks() {
         "the phoenix subtask sorts first but is not a candidate"
     );
     assert_eq!(
-        db.get_task(recurring).await.unwrap().unwrap().status,
+        db.get_task(recurring).await.unwrap().status,
         TaskStatus::Backlog,
         "and it is left in backlog, unclaimed"
     );
@@ -690,7 +690,7 @@ async fn try_claim_next_backlog_task_ignores_other_epics_subtasks() {
         .unwrap()
         .is_none());
     assert_eq!(
-        db.get_task(theirs).await.unwrap().unwrap().status,
+        db.get_task(theirs).await.unwrap().status,
         TaskStatus::Backlog
     );
 }
@@ -700,12 +700,12 @@ async fn try_claim_next_backlog_task_applies_running_and_the_activity_stamp() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = subtask(&db, epic.id, "t", TaskStatus::Backlog, Some(1)).await;
-    let before = db.get_task(id).await.unwrap().unwrap().updated_at;
+    let before = db.get_task(id).await.unwrap().updated_at;
 
     let claimed = db.try_claim_next_backlog_task(epic.id).await.unwrap();
 
     assert_eq!(claimed, Some(id));
-    let task = db.get_task(id).await.unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(task.sub_status, SubStatus::default_for(TaskStatus::Running));
     assert!(
@@ -756,12 +756,9 @@ async fn try_claim_backlog_task_claims_a_phoenix_task_the_chain_would_skip() {
     let id = phoenix_subtask(&db, epic.id, "recurring", Some(1)).await;
 
     assert!(db.try_claim_backlog_task(id).await.unwrap());
-    assert_eq!(
-        db.get_task(id).await.unwrap().unwrap().status,
-        TaskStatus::Running
-    );
+    assert_eq!(db.get_task(id).await.unwrap().status, TaskStatus::Running);
     assert!(
-        db.get_task(id).await.unwrap().unwrap().phoenix,
+        db.get_task(id).await.unwrap().phoenix,
         "dispatching does not consume the flag; only entering Done does"
     );
 }
@@ -775,7 +772,7 @@ async fn try_claim_backlog_task_applies_the_full_claim() {
     assert!(db.try_claim_backlog_task(id).await.unwrap());
 
     // Same SET list as the by-epic claim — asserted here so the two cannot drift.
-    let claimed = db.get_task(id).await.unwrap().unwrap();
+    let claimed = db.get_task(id).await.unwrap();
     assert_eq!(claimed.status, TaskStatus::Running);
     assert_eq!(
         claimed.sub_status,
@@ -798,7 +795,6 @@ async fn try_claim_backlog_task_is_false_for_a_task_out_of_backlog() {
     assert!(
         db.get_task(id)
             .await
-            .unwrap()
             .unwrap()
             .last_pre_tool_use_at
             .is_none(),
@@ -859,7 +855,7 @@ async fn try_claim_backlog_task_refuses_a_foreign_owned_task() {
         "another machine holds this task's worktree; claiming it here would \
          re-dispatch onto a directory that is not on this disk"
     );
-    let untouched = db.get_task(id).await.unwrap().unwrap();
+    let untouched = db.get_task(id).await.unwrap();
     assert_eq!(
         untouched.status,
         TaskStatus::Backlog,
@@ -887,7 +883,7 @@ async fn try_claim_next_backlog_task_skips_a_foreign_owned_subtask_and_claims_th
          over it and claims the next ordinary backlog subtask behind it"
     );
     assert_eq!(
-        db.get_task(foreign).await.unwrap().unwrap().status,
+        db.get_task(foreign).await.unwrap().status,
         TaskStatus::Backlog,
         "the foreign-owned subtask is left untouched, not claimed"
     );
@@ -912,7 +908,7 @@ async fn try_release_backlog_claim_undoes_an_unprovisioned_claim() {
     let id = claimed_task(&db).await;
 
     assert!(db.try_release_backlog_claim(id).await.unwrap());
-    let released = db.get_task(id).await.unwrap().unwrap();
+    let released = db.get_task(id).await.unwrap();
     assert_eq!(released.status, TaskStatus::Backlog);
     assert_eq!(
         released.sub_status,
@@ -934,7 +930,7 @@ async fn try_release_backlog_claim_spares_a_provisioned_task() {
 
     // The release must not stomp a task that is genuinely running.
     assert!(!db.try_release_backlog_claim(id).await.unwrap());
-    let kept = db.get_task(id).await.unwrap().unwrap();
+    let kept = db.get_task(id).await.unwrap();
     assert_eq!(kept.status, TaskStatus::Running);
     assert_eq!(kept.worktree.as_deref(), Some("/tmp/wt"));
 }
@@ -949,10 +945,7 @@ async fn try_release_backlog_claim_spares_a_task_moved_out_of_running() {
         .unwrap();
 
     assert!(!db.try_release_backlog_claim(id).await.unwrap());
-    assert_eq!(
-        db.get_task(id).await.unwrap().unwrap().status,
-        TaskStatus::Review
-    );
+    assert_eq!(db.get_task(id).await.unwrap().status, TaskStatus::Review);
 }
 
 #[tokio::test]
@@ -983,12 +976,9 @@ async fn batch_patch_sub_status_updates_all_tasks() {
         .await
         .unwrap();
 
+    assert_eq!(db.get_task(t1).await.unwrap().sub_status, SubStatus::Stale);
     assert_eq!(
-        db.get_task(t1).await.unwrap().unwrap().sub_status,
-        SubStatus::Stale
-    );
-    assert_eq!(
-        db.get_task(t2).await.unwrap().unwrap().sub_status,
+        db.get_task(t2).await.unwrap().sub_status,
         SubStatus::NeedsInput
     );
 }

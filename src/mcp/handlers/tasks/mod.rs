@@ -312,7 +312,6 @@ pub(super) async fn build_epic_titles(state: &McpState) -> HashMap<EpicId, Strin
         .db
         .list_epics()
         .await
-        .unwrap_or_default()
         .into_iter()
         .map(|e| (e.id, e.title))
         .collect()

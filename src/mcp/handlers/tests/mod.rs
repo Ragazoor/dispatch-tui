@@ -1279,7 +1279,7 @@ async fn create_task_from_session_succeeds() {
         "unexpected isError: {:?}",
         resp.result
     );
-    let tasks = db.list_all().await.unwrap();
+    let tasks = db.list_all().await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "T");
 }

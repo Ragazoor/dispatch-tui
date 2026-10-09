@@ -1437,12 +1437,12 @@ async fn listing_and_reading_leave_tasks_epics_and_learnings_untouched() {
         .unwrap();
 
     let snapshot = |s: Arc<McpState>| async move {
-        let tasks = s.db.list_all().await.unwrap();
+        let tasks = s.db.list_all().await;
         let learnings =
             s.db.list_learnings(crate::store::LearningFilter::default())
                 .await
                 .unwrap();
-        let epics = s.db.list_epics().await.unwrap();
+        let epics = s.db.list_epics().await;
         format!("{tasks:?}\n{learnings:?}\n{epics:?}")
     };
     let before = snapshot(state.clone()).await;

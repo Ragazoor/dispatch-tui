@@ -137,7 +137,7 @@ async fn apply_loop_event_tick_triggers_window_sweep() {
     let (tx, _rx) = mpsc::unbounded_channel();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let rt = make_runtime(db.clone(), tx, runner).await;
-    let mut app = App::new(db.list_all().await.unwrap());
+    let mut app = App::new(db.list_all().await);
 
     let cmds = apply_loop_event(&mut app, LoopEvent::Tick, &rt);
 
@@ -442,7 +442,7 @@ mod execute_commands {
         )
         .await;
 
-        let stored = rt.database.get_task(task.id).await.unwrap().unwrap();
+        let stored = rt.database.get_task(task.id).await.unwrap();
         assert_eq!(
             stored.title, "New title",
             "the cascaded follow-on command must reach the DB, not just the \
@@ -490,7 +490,7 @@ mod execute_commands {
             "the first queued command must run"
         );
         assert!(
-            rt.database.get_task(id).await.unwrap().is_none(),
+            rt.database.get_task(id).await.is_none(),
             "the second queued command must also run, not just the first"
         );
     }

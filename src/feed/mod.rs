@@ -342,15 +342,7 @@ impl FeedRunner {
         };
 
         // Fetch once per tick so N concurrent spawned tasks don't each hit the DB.
-        let known_paths = Arc::new(match self.db.list_repo_paths().await {
-            Ok(p) => p,
-            Err(err) => {
-                tracing::warn!(
-                    "FeedRunner: failed to list repo_paths, using empty sentinel: {err:#}"
-                );
-                vec![]
-            }
-        });
+        let known_paths = Arc::new(self.db.list_repo_paths().await);
 
         let now = Instant::now();
         for epic in epics {
@@ -397,13 +389,7 @@ impl FeedRunner {
             return None;
         }
 
-        let epics = match self.db.list_epics().await {
-            Ok(e) => e,
-            Err(err) => {
-                tracing::warn!("FeedRunner: failed to list epics: {err:#}");
-                return None;
-            }
-        };
+        let epics = self.db.list_epics().await;
 
         let active_ids: std::collections::HashSet<EpicId> = epics.iter().map(|e| e.id).collect();
         self.last_run.retain(|id, _| active_ids.contains(id));
@@ -421,20 +407,10 @@ impl FeedRunner {
     /// `core/PollOwner`. Claims ownership (without waiting for the answer) when
     /// no host has it yet.
     async fn this_host_polls(&mut self, epic_id: EpicId) -> bool {
-        let owner = match self
+        let owner = self
             .board_reads
             .poll_owner(crate::models::PollScopeId::Epic(epic_id))
-            .await
-        {
-            Ok(owner) => owner,
-            Err(err) => {
-                tracing::debug!(
-                    epic_id = epic_id.0,
-                    "FeedRunner: failed to read poll ownership, skipping this tick: {err:#}"
-                );
-                return false;
-            }
-        };
+            .await;
         match decide_poll_action(owner.as_deref(), &self.host_id) {
             PollAction::Skip => return false,
             // Fired without awaiting it: `tick` must not block on a

@@ -646,17 +646,13 @@ pub async fn prepare_inputs_with_epic_ctx(
 /// `/wrap-up` skill reads its "Verify command" line before ever calling
 /// `wrap_up`) and the `wrap_up` handler itself, which echoes it back as a
 /// secondary "Verify before exiting" reminder. No prompt builder reads it, so
-/// this has no caller on a dispatch path despite living here. Logs a warning
-/// and returns `None` if the DB lookup fails so either caller proceeds
-/// without the line rather than failing.
+/// this has no caller on a dispatch path despite living here. Returns `None`
+/// when no verify command is configured.
 pub async fn fetch_verify_command(
     db: &dyn crate::store::TaskReadStore,
     repo_path: &str,
 ) -> Option<String> {
-    db.get_verify_command(repo_path).await.unwrap_or_else(|e| {
-        tracing::warn!(error = %e, "failed to load verify_command; proceeding without it");
-        None
-    })
+    db.get_verify_command(repo_path).await
 }
 
 /// Re-open a tmux window for an existing worktree and resume the most recent

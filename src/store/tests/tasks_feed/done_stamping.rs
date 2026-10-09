@@ -11,7 +11,7 @@ async fn upsert_feed_tasks_preserves_status() {
         .unwrap();
 
     // Simulate user moving task to Running
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     db.patch_task(tasks[0].id, &TaskPatch::new().status(TaskStatus::Running))
         .await
         .unwrap();
@@ -34,7 +34,7 @@ async fn upsert_feed_tasks_preserves_status() {
         .await
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "Updated Title", "title should be updated");
     assert_eq!(
@@ -65,7 +65,7 @@ async fn upsert_feed_tasks_updates_a_done_tasks_sort_order_and_keeps_its_complet
         .unwrap();
 
     let finished = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     db.patch_task(
         tasks[0].id,
         &TaskPatch::new()
@@ -86,7 +86,7 @@ async fn upsert_feed_tasks_updates_a_done_tasks_sort_order_and_keeps_its_complet
     .await
     .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(
         tasks[0].sort_order,
@@ -117,7 +117,7 @@ async fn upsert_feed_tasks_stamps_a_task_inserted_straight_into_done() {
         .unwrap();
     let after = chrono::Utc::now() + chrono::Duration::seconds(1);
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     let completed_at = tasks[0]
         .completed_at
         .expect("a card born in Done carries a completion time");
@@ -150,7 +150,6 @@ async fn create_task_stamps_a_task_created_straight_into_done() {
         .get_task(id)
         .await
         .unwrap()
-        .unwrap()
         .completed_at
         .expect("a task created in Done carries a completion time");
     assert!(
@@ -171,7 +170,7 @@ async fn create_task_does_not_stamp_a_task_created_outside_done() {
         .await
         .unwrap();
 
-    assert_eq!(db.get_task(id).await.unwrap().unwrap().completed_at, None);
+    assert_eq!(db.get_task(id).await.unwrap().completed_at, None);
 }
 
 #[tokio::test]
@@ -188,7 +187,7 @@ async fn upsert_feed_tasks_does_not_stamp_a_task_inserted_outside_done() {
     .await
     .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks[0].completed_at, None);
 }
 
@@ -213,6 +212,6 @@ async fn upsert_feed_tasks_still_updates_sort_order_when_task_is_not_done() {
     .await
     .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks[0].sort_order, Some(7));
 }

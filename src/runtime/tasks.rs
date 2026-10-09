@@ -261,7 +261,7 @@ impl TuiRuntime {
             crate::tui::messages::TaskMessage::MarkDispatching(task.id),
         ));
         let _ = self.database.save_repo_path(&expanded).await;
-        let paths = self.board_reads.list_repo_paths().await.unwrap_or_default();
+        let paths = self.board_reads.list_repo_paths().await;
         app.update(Message::RepoPathsUpdated(paths));
         // Claim before provisioning, exactly as exec_dispatch_agent does. This
         // task was created moments ago, so the claim is effectively uncontended
@@ -749,18 +749,10 @@ impl TuiRuntime {
                 Self::db_error("saving base branch", e),
             )));
         }
-        match self.board_reads.list_all_base_branches().await {
-            Ok(pairs) => {
-                app.update(Message::BaseBranchesUpdated(
-                    super::group_base_branches_by_repo(pairs),
-                ));
-            }
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    Self::db_error("listing base branches", e),
-                )));
-            }
-        }
+        let pairs = self.board_reads.list_all_base_branches().await;
+        app.update(Message::BaseBranchesUpdated(
+            super::group_base_branches_by_repo(pairs),
+        ));
     }
 
     pub(super) async fn exec_save_repo_path(&self, app: &mut App, path: String) {
@@ -770,16 +762,8 @@ impl TuiRuntime {
                 Self::db_error("saving repo path", e),
             )));
         }
-        match self.board_reads.list_repo_paths().await {
-            Ok(paths) => {
-                app.update(Message::RepoPathsUpdated(paths));
-            }
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    Self::db_error("listing repo paths", e),
-                )));
-            }
-        }
+        let paths = self.board_reads.list_repo_paths().await;
+        app.update(Message::RepoPathsUpdated(paths));
     }
 
     /// Reload the whole board on a tokio task, sending the results back as
@@ -938,47 +922,23 @@ impl TuiRuntime {
         db: Arc<dyn crate::store::BoardReads>,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
     ) {
-        match db.list_all().await {
-            Ok(tasks) => {
-                let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Refresh(
-                    tasks,
-                )));
-            }
-            Err(e) => {
-                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                    TuiRuntime::db_error("refreshing tasks", e),
-                )));
-            }
-        }
+        let tasks = db.list_all().await;
+        let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+            tasks,
+        )));
 
-        match db.list_epics().await {
-            Ok(epics) => {
-                let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
-                    epics,
-                )));
-            }
-            Err(e) => {
-                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                    TuiRuntime::db_error("refreshing epics", e),
-                )));
-            }
-        }
+        let epics = db.list_epics().await;
+        let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
+            epics,
+        )));
 
-        match db.list_repo_paths().await {
-            Ok(paths) => {
-                let _ = tx.send(Message::RepoPathsUpdated(paths));
-            }
-            Err(e) => tracing::warn!("failed to reload repo paths from the shared store: {e}"),
-        }
+        let paths = db.list_repo_paths().await;
+        let _ = tx.send(Message::RepoPathsUpdated(paths));
 
-        match db.list_all_base_branches().await {
-            Ok(pairs) => {
-                let _ = tx.send(Message::BaseBranchesUpdated(
-                    super::group_base_branches_by_repo(pairs),
-                ));
-            }
-            Err(e) => tracing::warn!("failed to reload base branches from the shared store: {e}"),
-        }
+        let pairs = db.list_all_base_branches().await;
+        let _ = tx.send(Message::BaseBranchesUpdated(
+            super::group_base_branches_by_repo(pairs),
+        ));
     }
 
     /// Spawn a single-task reload. Sends `TaskMessage::Updated` on success.
@@ -991,18 +951,13 @@ impl TuiRuntime {
         let tx = self.msg_tx.clone();
         tokio::spawn(async move {
             match db.get_task(task_id).await {
-                Ok(Some(task)) => {
+                Some(task) => {
                     let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Updated(
                         Box::new(task),
                     )));
                 }
-                Ok(None) => {
+                None => {
                     TuiRuntime::reload_board(db, tx).await;
-                }
-                Err(e) => {
-                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                        TuiRuntime::db_error("refreshing task", e),
-                    )));
                 }
             }
         })
@@ -1015,29 +970,14 @@ impl TuiRuntime {
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
         epic_id: crate::models::EpicId,
     ) {
-        let epic = match db.get_epic(epic_id).await {
-            Ok(Some(epic)) => epic,
-            Ok(None) => return TuiRuntime::reload_board(db, tx).await,
-            Err(e) => {
-                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                    TuiRuntime::db_error("refreshing epic", e),
-                )));
-                return;
-            }
+        let Some(epic) = db.get_epic(epic_id).await else {
+            return TuiRuntime::reload_board(db, tx).await;
         };
         let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Updated(
             epic,
         )));
 
-        let tasks = match db.list_tasks_for_epic(epic_id).await {
-            Ok(tasks) => tasks,
-            Err(e) => {
-                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                    TuiRuntime::db_error("listing epic tasks", e),
-                )));
-                return;
-            }
-        };
+        let tasks = db.list_tasks_for_epic(epic_id).await;
         for task in tasks {
             let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Updated(
                 Box::new(task),
@@ -1070,19 +1010,10 @@ impl TuiRuntime {
             return vec![];
         }
 
-        let mut cmds = Vec::new();
-        match self.board_reads.list_all().await {
-            Ok(tasks) => {
-                cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
-                    tasks,
-                )));
-            }
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    Self::db_error("refreshing tasks", e),
-                )));
-            }
-        }
+        let tasks = self.board_reads.list_all().await;
+        let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+            tasks,
+        )));
         self.exec_refresh_epics_from_db(app).await;
         // Snapshot *after* the refresh so the next tick only re-reads when a
         // write has occurred since this point.
@@ -1116,16 +1047,8 @@ impl TuiRuntime {
             )));
             return;
         }
-        match self.board_reads.list_repo_paths().await {
-            Ok(paths) => {
-                app.update(Message::RepoPathsUpdated(paths));
-            }
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    Self::db_error("listing repo paths", e),
-                )));
-            }
-        }
+        let paths = self.board_reads.list_repo_paths().await;
+        app.update(Message::RepoPathsUpdated(paths));
     }
 
     /// Clear a task's `worktree`, `tmux_window` and `host` columns: the DB

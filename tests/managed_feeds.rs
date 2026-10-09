@@ -52,7 +52,7 @@ async fn provisioned_reviews_tick_routes_into_role_sub_epics() {
     provision_managed_feeds_from_settings(&*db).await.unwrap();
 
     // The tree exists with the expected shape.
-    let epics = db.list_epics().await.unwrap();
+    let epics = db.list_epics().await;
     assert_eq!(epics.len(), 5, "managed tree provisioned");
     let parent = role_epic(&epics, FeedRole::ReviewsParent);
     let my = role_epic(&epics, FeedRole::MyReviews);
@@ -81,9 +81,9 @@ async fn provisioned_reviews_tick_routes_into_role_sub_epics() {
 
     // Wait until both syncs have landed (background tasks emit BoardEvents).
     loop {
-        let my_tasks = db.list_tasks_for_epic(my.id).await.unwrap();
-        let team_tasks = db.list_tasks_for_epic(team.id).await.unwrap();
-        let cve_tasks = db.list_tasks_for_epic(cve.id).await.unwrap();
+        let my_tasks = db.list_tasks_for_epic(my.id).await;
+        let team_tasks = db.list_tasks_for_epic(team.id).await;
+        let cve_tasks = db.list_tasks_for_epic(cve.id).await;
         if !my_tasks.is_empty() && !team_tasks.is_empty() && !cve_tasks.is_empty() {
             break;
         }
@@ -93,11 +93,11 @@ async fn provisioned_reviews_tick_routes_into_role_sub_epics() {
         }
     }
 
-    let my_tasks = db.list_tasks_for_epic(my.id).await.unwrap();
+    let my_tasks = db.list_tasks_for_epic(my.id).await;
     assert_eq!(my_tasks.len(), 1, "direct-request PR routes to My Reviews");
     assert_eq!(my_tasks[0].external_id.as_deref(), Some("pr-1"));
 
-    let team_tasks = db.list_tasks_for_epic(team.id).await.unwrap();
+    let team_tasks = db.list_tasks_for_epic(team.id).await;
     assert_eq!(
         team_tasks.len(),
         1,
@@ -105,7 +105,7 @@ async fn provisioned_reviews_tick_routes_into_role_sub_epics() {
     );
     assert_eq!(team_tasks[0].external_id.as_deref(), Some("pr-2"));
 
-    let cve_tasks = db.list_tasks_for_epic(cve.id).await.unwrap();
+    let cve_tasks = db.list_tasks_for_epic(cve.id).await;
     assert_eq!(cve_tasks.len(), 1, "CVE feed populates its own epic");
     assert_eq!(cve_tasks[0].external_id.as_deref(), Some("cve-1"));
 }

@@ -372,7 +372,7 @@ async fn seed_task(db: &dyn crate::store::TaskStore) -> models::Task {
         })
         .await
         .unwrap();
-    db.get_task(id).await.unwrap().unwrap()
+    db.get_task(id).await.unwrap()
 }
 
 #[tokio::test]
@@ -401,7 +401,7 @@ async fn finalize_task_edit_persists_changes() {
     .await;
 
     // The DB row should reflect the edits.
-    let updated = db.get_task(task.id).await.unwrap().unwrap();
+    let updated = db.get_task(task.id).await.unwrap();
     assert_eq!(updated.title, "New title");
     assert_eq!(updated.description, "New description");
     assert_eq!(updated.repo_path, "/new/repo");
@@ -434,7 +434,7 @@ async fn finalize_task_edit_persists_url() {
     )
     .await;
 
-    let updated = db.get_task(task.id).await.unwrap().unwrap();
+    let updated = db.get_task(task.id).await.unwrap();
     assert_eq!(
         updated.url,
         Some(TaskUrl::new("https://github.com/o/r/pull/9", UrlType::Pr))
@@ -463,7 +463,7 @@ async fn finalize_task_edit_clears_url_when_section_emptied() {
         )
         .await
         .unwrap();
-    let task = db.get_task(task.id).await.unwrap().unwrap();
+    let task = db.get_task(task.id).await.unwrap();
     assert!(task.url.is_some());
     let mut app = App::new(vec![task.clone()]);
 
@@ -476,7 +476,7 @@ async fn finalize_task_edit_clears_url_when_section_emptied() {
     )
     .await;
 
-    let updated = db.get_task(task.id).await.unwrap().unwrap();
+    let updated = db.get_task(task.id).await.unwrap();
     assert_eq!(updated.url, None);
     assert_eq!(app.tasks()[0].url, None);
 }
@@ -504,7 +504,7 @@ async fn finalize_task_edit_clears_plan_when_section_emptied() {
     )
     .await;
 
-    let updated = db.get_task(task.id).await.unwrap().unwrap();
+    let updated = db.get_task(task.id).await.unwrap();
     assert_eq!(updated.plan_path, None, "DB plan_path should be cleared");
     assert_eq!(app.tasks()[0].plan_path, None);
 }
@@ -525,7 +525,7 @@ async fn finalize_task_edit_clears_tag_when_section_emptied() {
         .update_task(UpdateTaskParams::for_task(task.id).tag(Some(Some(TaskTag::Bug))))
         .await
         .unwrap();
-    let task = db.get_task(task.id).await.unwrap().unwrap();
+    let task = db.get_task(task.id).await.unwrap();
     assert_eq!(task.tag, Some(TaskTag::Bug), "precondition: task has a tag");
     let mut app = App::new(vec![task.clone()]);
 
@@ -538,7 +538,7 @@ async fn finalize_task_edit_clears_tag_when_section_emptied() {
     )
     .await;
 
-    let updated = db.get_task(task.id).await.unwrap().unwrap();
+    let updated = db.get_task(task.id).await.unwrap();
     assert_eq!(updated.tag, None, "DB tag should be cleared");
     assert_eq!(app.tasks()[0].tag, None);
 }
@@ -553,11 +553,7 @@ async fn finalize_task_edit_persists_new_repo_path_to_known_list() {
     let task = seed_task(&*db).await;
     // Precondition: known repo_paths does not contain the new path.
     assert!(
-        !db.list_repo_paths()
-            .await
-            .unwrap()
-            .iter()
-            .any(|p| p == "/new/repo"),
+        !db.list_repo_paths().await.iter().any(|p| p == "/new/repo"),
         "precondition: /new/repo should not be in known list yet"
     );
 
@@ -580,7 +576,7 @@ async fn finalize_task_edit_persists_new_repo_path_to_known_list() {
     )
     .await;
 
-    let paths = db.list_repo_paths().await.unwrap();
+    let paths = db.list_repo_paths().await;
     assert!(
         paths.iter().any(|p| p == "/new/repo"),
         "expected /new/repo in known repo_paths, got {paths:?}"
@@ -619,7 +615,7 @@ async fn finalize_task_edit_unchanged_repo_path_does_not_save() {
 
     // /orig/repo was never in the known list, and a no-op edit must
     // not add it.
-    let paths = db.list_repo_paths().await.unwrap();
+    let paths = db.list_repo_paths().await;
     assert!(
         !paths.iter().any(|p| p == "/orig/repo"),
         "unchanged repo_path must not be added to known list, got {paths:?}"
@@ -643,7 +639,7 @@ async fn finalize_task_edit_cancelled_does_not_change_db() {
     )
     .await;
 
-    let still = db.get_task(task.id).await.unwrap().unwrap();
+    let still = db.get_task(task.id).await.unwrap();
     assert_eq!(still.title, task.title);
     assert_eq!(still.description, task.description);
 }

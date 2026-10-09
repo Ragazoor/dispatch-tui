@@ -150,7 +150,7 @@ impl Board {
     pub async fn task(&self, id: dispatch_tui::models::TaskId) -> dispatch_tui::models::Task {
         use dispatch_tui::store::TaskRead;
 
-        self.db.get_task(id).await.unwrap().unwrap()
+        self.db.get_task(id).await.unwrap()
     }
 
     /// Await one detached background write of `want`. See [`await_bg_write`].

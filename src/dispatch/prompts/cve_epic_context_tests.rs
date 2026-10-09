@@ -12,7 +12,7 @@ async fn task_in_epic(db: &Store, epic_id: EpicId) -> crate::models::Task {
         })
         .await
         .unwrap();
-    db.get_task(id).await.unwrap().unwrap()
+    db.get_task(id).await.unwrap()
 }
 
 #[tokio::test]
@@ -40,7 +40,7 @@ async fn a_task_on_a_repo_group_sub_epic_of_the_cve_root_is_under_the_cve_feed()
         .await
         .unwrap();
     assert_eq!(
-        db.get_epic(group).await.unwrap().unwrap().feed_role,
+        db.get_epic(group).await.unwrap().feed_role,
         FeedRole::None,
         "the grouping sub-epic carries no role of its own — that is the \
 whole reason the answer is an ancestry walk"

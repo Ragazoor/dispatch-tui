@@ -86,10 +86,10 @@ async fn set_setting_string_upserts() {
 #[tokio::test]
 async fn save_and_list_repo_paths() {
     let db = in_memory_db().await;
-    assert!(db.list_repo_paths().await.unwrap().is_empty());
+    assert!(db.list_repo_paths().await.is_empty());
     db.save_repo_path("/home/user/project").await.unwrap();
     db.save_repo_path("/home/user/other").await.unwrap();
-    let paths = db.list_repo_paths().await.unwrap();
+    let paths = db.list_repo_paths().await;
     assert_eq!(paths.len(), 2);
     assert!(paths.contains(&"/home/user/project".to_string()));
     assert!(paths.contains(&"/home/user/other".to_string()));
@@ -100,13 +100,13 @@ async fn save_repo_path_deduplicates() {
     let db = in_memory_db().await;
     db.save_repo_path("/home/user/project").await.unwrap();
     db.save_repo_path("/home/user/project").await.unwrap();
-    assert_eq!(db.list_repo_paths().await.unwrap().len(), 1);
+    assert_eq!(db.list_repo_paths().await.len(), 1);
 }
 
 #[tokio::test]
 async fn list_repo_paths_empty_by_default() {
     let db = in_memory_db().await;
-    assert!(db.list_repo_paths().await.unwrap().is_empty());
+    assert!(db.list_repo_paths().await.is_empty());
 }
 
 #[tokio::test]
@@ -117,7 +117,7 @@ async fn list_repo_paths_returns_all_beyond_nine() {
             .await
             .unwrap();
     }
-    let paths = db.list_repo_paths().await.unwrap();
+    let paths = db.list_repo_paths().await;
     assert_eq!(
         paths.len(),
         15,
@@ -130,9 +130,9 @@ async fn delete_repo_path_removes_entry() {
     let db = in_memory_db().await;
     db.save_repo_path("/home/user/project").await.unwrap();
     db.save_repo_path("/home/user/other").await.unwrap();
-    assert_eq!(db.list_repo_paths().await.unwrap().len(), 2);
+    assert_eq!(db.list_repo_paths().await.len(), 2);
     db.delete_repo_path("/home/user/project").await.unwrap();
-    let paths = db.list_repo_paths().await.unwrap();
+    let paths = db.list_repo_paths().await;
     assert_eq!(paths.len(), 1);
     assert_eq!(paths[0], "/home/user/other");
 }
@@ -147,7 +147,7 @@ async fn delete_repo_path_nonexistent_is_ok() {
 async fn verify_command_default_is_none() {
     let db = in_memory_db().await;
     db.save_repo_path("/home/me/repo").await.unwrap();
-    assert_eq!(db.get_verify_command("/home/me/repo").await.unwrap(), None);
+    assert_eq!(db.get_verify_command("/home/me/repo").await, None);
 }
 
 #[tokio::test]
@@ -158,7 +158,7 @@ async fn verify_command_round_trip() {
         .await
         .unwrap();
     assert_eq!(
-        db.get_verify_command("/home/me/repo").await.unwrap(),
+        db.get_verify_command("/home/me/repo").await,
         Some("cargo test".to_string())
     );
 }
@@ -166,10 +166,7 @@ async fn verify_command_round_trip() {
 #[tokio::test]
 async fn verify_command_get_unknown_path_is_none() {
     let db = in_memory_db().await;
-    assert_eq!(
-        db.get_verify_command("/does/not/exist").await.unwrap(),
-        None
-    );
+    assert_eq!(db.get_verify_command("/does/not/exist").await, None);
 }
 
 // --- managed-feed config keys (WP5) ---
@@ -236,14 +233,14 @@ async fn cve_feed_interval_secs_round_trips_and_clears() {
 #[tokio::test]
 async fn list_all_base_branches_empty_by_default() {
     let db = in_memory_db().await;
-    assert!(db.list_all_base_branches().await.unwrap().is_empty());
+    assert!(db.list_all_base_branches().await.is_empty());
 }
 
 #[tokio::test]
 async fn record_base_branch_inserts_new_row() {
     let db = in_memory_db().await;
     db.record_base_branch("/repo/a", "main").await.unwrap();
-    let all = db.list_all_base_branches().await.unwrap();
+    let all = db.list_all_base_branches().await;
     assert_eq!(all, vec![("/repo/a".to_string(), "main".to_string())]);
 }
 

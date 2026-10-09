@@ -44,7 +44,7 @@ mod spawn_refresh_task {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let rt = make_runtime(db.clone(), tx, runner).await;
-        let tasks = db.list_all().await.unwrap();
+        let tasks = db.list_all().await;
         let mut app = App::new(tasks);
         rt.exec_insert_task(
             &mut app,
@@ -90,7 +90,7 @@ mod spawn_refresh_task {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let rt = make_runtime(db.clone(), tx, runner).await;
-        let tasks = db.list_all().await.unwrap();
+        let tasks = db.list_all().await;
         let mut app = App::new(tasks);
         rt.exec_insert_task(
             &mut app,

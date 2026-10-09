@@ -68,7 +68,7 @@ impl EpicContext {
     /// Build epic context from the database for a task that belongs to an epic.
     pub async fn from_db(task: &Task, db: &dyn store::TaskReadStore) -> Option<Self> {
         let epic_id = task.epic_id?;
-        let epic = db.get_epic(epic_id).await.ok()??;
+        let epic = db.get_epic(epic_id).await?;
         Some(Self::from_epic(epic, db).await)
     }
 
@@ -113,7 +113,7 @@ impl EpicContext {
                 return true;
             }
             let Some(id) = parent else { return false };
-            let Ok(Some(row)) = db.get_epic(id).await else {
+            let Some(row) = db.get_epic(id).await else {
                 return false;
             };
             cursor = row.id;

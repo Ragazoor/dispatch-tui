@@ -444,16 +444,11 @@ pub(super) async fn fetch_caller_task(
     caller_id: crate::models::TaskId,
 ) -> Result<crate::models::Task, JsonRpcResponse> {
     match db.get_task(caller_id).await {
-        Ok(Some(task)) => Ok(task),
-        Ok(None) => Err(JsonRpcResponse::err(
+        Some(task) => Ok(task),
+        None => Err(JsonRpcResponse::err(
             id.clone(),
             NOT_FOUND_CODE,
             format!("Unknown caller task {}", caller_id.0),
-        )),
-        Err(e) => Err(JsonRpcResponse::err(
-            id.clone(),
-            INTERNAL_ERROR,
-            format!("Store error: {e}"),
         )),
     }
 }

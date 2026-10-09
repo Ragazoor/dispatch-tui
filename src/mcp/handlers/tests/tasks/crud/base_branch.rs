@@ -24,7 +24,7 @@ async fn create_task_with_base_branch_stores_it() {
     .await;
 
     assert!(resp.error.is_none(), "{:?}", resp.error);
-    let tasks = state.db.list_all().await.unwrap();
+    let tasks = state.db.list_all().await;
     let task = tasks.iter().find(|t| t.title == "My Feature").unwrap();
     assert_eq!(task.base_branch, "develop");
 }
@@ -58,7 +58,6 @@ async fn base_branch_created_with(probe: anyhow::Result<std::process::Output>) -
         .db
         .list_all()
         .await
-        .unwrap()
         .iter()
         .find(|t| t.title == "Default Branch Task")
         .unwrap()
@@ -120,7 +119,7 @@ async fn update_task_with_base_branch_updates_it() {
     .await;
 
     assert!(resp.error.is_none(), "{:?}", resp.error);
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.base_branch, "release/2.0");
 }
 
@@ -621,7 +620,7 @@ async fn create_task_task_identity_does_not_inherit_epic() {
     .await;
 
     assert!(is_error(&resp), "omitted epic_id must be refused");
-    let tasks = state.db.list_all().await.unwrap();
+    let tasks = state.db.list_all().await;
     assert_eq!(
         tasks.len(),
         1,
@@ -648,7 +647,7 @@ async fn create_task_session_identity_requires_epic_id() {
 
     assert!(is_error(&resp), "omitted epic_id must be refused");
     assert!(
-        state.db.list_all().await.unwrap().is_empty(),
+        state.db.list_all().await.is_empty(),
         "nothing may be created by a refused call"
     );
 }
@@ -770,7 +769,7 @@ async fn create_task_explicit_null_epic_creates_a_standalone_task() {
     )
     .await;
     let new_id = extract_created_task_id(&resp);
-    let t = state.db.get_task(new_id).await.unwrap().unwrap();
+    let t = state.db.get_task(new_id).await.unwrap();
     assert_eq!(t.epic_id, None);
 }
 
@@ -884,7 +883,7 @@ async fn create_task_accepts_phoenix() {
     .await;
 
     let id = extract_created_task_id(&resp);
-    let task = state.db.get_task(id).await.unwrap().unwrap();
+    let task = state.db.get_task(id).await.unwrap();
     assert!(task.phoenix);
 }
 
@@ -892,7 +891,7 @@ async fn create_task_accepts_phoenix() {
 async fn create_task_defaults_phoenix_to_false() {
     let state = test_state().await;
     let task_id = create_task_fixture(&state).await;
-    assert!(!state.db.get_task(task_id).await.unwrap().unwrap().phoenix);
+    assert!(!state.db.get_task(task_id).await.unwrap().phoenix);
 }
 
 #[tokio::test]
@@ -909,7 +908,7 @@ async fn update_task_sets_and_clears_phoenix() {
         })),
     )
     .await;
-    assert!(state.db.get_task(task_id).await.unwrap().unwrap().phoenix);
+    assert!(state.db.get_task(task_id).await.unwrap().phoenix);
 
     call(
         &state,
@@ -920,7 +919,7 @@ async fn update_task_sets_and_clears_phoenix() {
         })),
     )
     .await;
-    assert!(!state.db.get_task(task_id).await.unwrap().unwrap().phoenix);
+    assert!(!state.db.get_task(task_id).await.unwrap().phoenix);
 }
 
 /// Omitting the field is a no-op, not a clear — the same nullable-boolean
@@ -949,7 +948,7 @@ async fn update_task_omitting_phoenix_leaves_it_alone() {
     )
     .await;
 
-    assert!(state.db.get_task(task_id).await.unwrap().unwrap().phoenix);
+    assert!(state.db.get_task(task_id).await.unwrap().phoenix);
 }
 
 /// So a dispatched agent wrapping up knows it is finishing THIS run of a

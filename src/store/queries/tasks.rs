@@ -11,24 +11,24 @@ use super::won;
 
 #[async_trait::async_trait]
 impl super::super::TaskRead for Store {
-    async fn get_task(&self, id: TaskId) -> Result<Option<Task>> {
-        Ok(self.rows.task(id))
+    async fn get_task(&self, id: TaskId) -> Option<Task> {
+        self.rows.task(id)
     }
 
-    async fn task_exists(&self, id: TaskId) -> Result<bool> {
-        Ok(self.rows.has_task(id))
+    async fn task_exists(&self, id: TaskId) -> bool {
+        self.rows.has_task(id)
     }
 
-    async fn list_live_agent_tasks(&self) -> Result<Vec<Task>> {
-        Ok(self.rows.live_agent_tasks())
+    async fn list_live_agent_tasks(&self) -> Vec<Task> {
+        self.rows.live_agent_tasks()
     }
 
-    async fn list_all(&self) -> Result<Vec<Task>> {
-        Ok(self.rows.tasks())
+    async fn list_all(&self) -> Vec<Task> {
+        self.rows.tasks()
     }
 
-    async fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>> {
-        Ok(self.rows.task_by_plan(plan))
+    async fn find_task_by_plan(&self, plan: &str) -> Option<Task> {
+        self.rows.task_by_plan(plan)
     }
 }
 

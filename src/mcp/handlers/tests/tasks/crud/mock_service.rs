@@ -127,7 +127,7 @@ async fn update_task_with_plan() {
     .await;
     assert!(resp.error.is_none());
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, crate::models::TaskStatus::Backlog);
     assert_eq!(task.plan_path.as_deref(), Some("/path/to/plan.md"));
 }
@@ -159,7 +159,7 @@ async fn update_task_title_only() {
         resp.error
     );
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.title, "New Title");
     assert_eq!(task.status, crate::models::TaskStatus::Backlog); // unchanged
 }
@@ -187,7 +187,7 @@ async fn update_task_status_optional() {
     .await;
     assert!(resp.error.is_none());
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.title, "Renamed");
     assert_eq!(task.status, crate::models::TaskStatus::Backlog);
 }
@@ -215,7 +215,7 @@ async fn update_task_title_and_description() {
     .await;
     assert!(resp.error.is_none());
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.title, "New");
     assert_eq!(task.description, "new desc");
 }
@@ -247,7 +247,7 @@ async fn update_task_repo_path() {
         resp.error
     );
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.repo_path, "/new/repo");
     assert_eq!(task.status, crate::models::TaskStatus::Backlog); // unchanged
 }
@@ -303,7 +303,7 @@ async fn patch_task_sets_multiple_fields() {
     .await;
     assert!(resp.error.is_none());
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Backlog);
     assert_eq!(task.title, "Updated Title");
 }
@@ -332,7 +332,7 @@ async fn update_task_without_plan_preserves_existing() {
     .await;
     assert!(resp.error.is_none());
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(
         task.plan_path.as_deref(),
         Some("/existing.md"),
@@ -371,7 +371,7 @@ async fn update_task_sets_pr_fields() {
         resp.error
     );
 
-    let updated = state.db.get_task(task_id).await.unwrap().unwrap();
+    let updated = state.db.get_task(task_id).await.unwrap();
     assert_eq!(
         updated.url.as_ref().map(|u| u.url.as_str()),
         Some("https://github.com/org/repo/pull/99")
@@ -464,7 +464,7 @@ async fn update_task_sets_wrap_up_mode() {
     .await;
     assert!(resp.error.is_none(), "got error: {:?}", resp.error);
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.wrap_up_mode, Some(crate::models::WrapUpMode::Rebase));
 }
 
@@ -493,7 +493,7 @@ async fn update_task_wrap_up_mode_all_variants() {
             "wrap_up_mode={input} should succeed, got: {:?}",
             resp.error
         );
-        let task = state.db.get_task(task_id).await.unwrap().unwrap();
+        let task = state.db.get_task(task_id).await.unwrap();
         assert_eq!(
             task.wrap_up_mode,
             Some(expected),
@@ -535,7 +535,7 @@ async fn update_task_clears_wrap_up_mode_with_null() {
         resp.error
     );
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert!(
         task.wrap_up_mode.is_none(),
         "wrap_up_mode should be cleared after null"
@@ -580,7 +580,7 @@ async fn create_task_with_wrap_up_mode() {
     assert!(resp.error.is_none(), "got error: {:?}", resp.error);
 
     let task_id = extract_created_task_id(&resp);
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.wrap_up_mode, Some(crate::models::WrapUpMode::Pr));
 }
 
@@ -603,7 +603,7 @@ async fn create_task_with_auto_run_plan_true() {
     .await;
     assert!(!is_error(&resp));
 
-    let tasks = state.db.list_all().await.unwrap();
+    let tasks = state.db.list_all().await;
     let task = tasks
         .iter()
         .find(|t| t.title == "T")
@@ -627,7 +627,7 @@ async fn update_task_sets_auto_run_plan() {
     .await;
     assert!(!is_error(&resp));
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert!(task.auto_run_plan);
 }
 
@@ -858,7 +858,7 @@ async fn create_task_with_epic_id() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let subtasks = state.db.list_tasks_for_epic(epic.id).await.unwrap();
+    let subtasks = state.db.list_tasks_for_epic(epic.id).await;
     assert_eq!(subtasks.len(), 1);
     assert_eq!(subtasks[0].title, "Epic Child");
 }
@@ -891,6 +891,6 @@ async fn create_task_with_string_epic_id() {
         resp.error
     );
 
-    let subtasks = state.db.list_tasks_for_epic(epic.id).await.unwrap();
+    let subtasks = state.db.list_tasks_for_epic(epic.id).await;
     assert_eq!(subtasks.len(), 1);
 }

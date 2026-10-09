@@ -357,7 +357,7 @@ impl LearningService {
         params: QueryLearningsParams,
     ) -> Result<Vec<Learning>, ServiceError> {
         let task =
-            self.db.get_task(params.task_id).await?.ok_or_else(|| {
+            self.db.get_task(params.task_id).await.ok_or_else(|| {
                 ServiceError::NotFound(format!("task {} not found", params.task_id))
             })?;
 

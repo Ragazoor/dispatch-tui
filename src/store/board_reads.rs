@@ -24,7 +24,6 @@
 //! re-reading, which is what keeps a speculative refresh free. Nothing
 //! persists one, so a fresh connection simply costs one extra refresh.
 
-use anyhow::Result;
 use async_trait::async_trait;
 
 use super::{EpicRead, RepoConfigRead, TaskRead};
@@ -41,7 +40,7 @@ pub trait BoardReads: TaskRead + EpicRead + RepoConfigRead {
     /// `target`, or `None` if unclaimed (`core.allium: PollOwner`). See
     /// `pr-workflow.allium: PollPrStatus` and `feeds.allium: FeedTick`, the two
     /// callers.
-    async fn poll_owner(&self, target: PollScopeId) -> Result<Option<String>>;
+    async fn poll_owner(&self, target: PollScopeId) -> Option<String>;
 
     /// A number that changes when the rows do.
     ///

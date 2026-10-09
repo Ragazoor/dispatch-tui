@@ -15,8 +15,8 @@ async fn the_board_reads_and_the_store_answer_from_the_same_rows() {
         .await
         .unwrap();
 
-    assert_eq!(board.get_task(id).await.unwrap().unwrap().title, "drawn");
-    assert_eq!(board.list_all().await.unwrap().len(), 1);
+    assert_eq!(board.get_task(id).await.unwrap().title, "drawn");
+    assert_eq!(board.list_all().await.len(), 1);
     assert_ne!(
         board.revision().await,
         before,
@@ -42,7 +42,7 @@ async fn attached_handle_round_trips_a_task_through_the_store() {
         .create_task(CreateTaskRequest::fixture("via store", "/repo"))
         .await
         .unwrap();
-    assert_eq!(db.get_task(id).await.unwrap().unwrap().title, "via store");
+    assert_eq!(db.get_task(id).await.unwrap().title, "via store");
     let other = Store::open_in_memory().unwrap();
-    assert!(other.list_all().await.unwrap().is_empty());
+    assert!(other.list_all().await.is_empty());
 }

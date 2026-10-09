@@ -145,7 +145,7 @@ proptest! {
                 .await
                 .unwrap();
             db.recalculate_epic_status(epic.id).await.unwrap();
-            db.get_epic(epic.id).await.unwrap().unwrap().status
+            db.get_epic(epic.id).await.unwrap().status
         });
 
         prop_assert_eq!(

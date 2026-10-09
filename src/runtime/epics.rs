@@ -202,23 +202,18 @@ impl TuiRuntime {
                 // below is different and correctly stays: it decides whether to
                 // regroup, and regrouping is a write.
                 match self.board_reads.get_epic(id).await {
-                    Ok(Some(persisted)) => {
+                    Some(persisted) => {
                         app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(
                             persisted,
                         )));
                     }
                     // Nothing better to do than leave the flip standing: the
-                    // next timed refresh corrects it, and a second error
-                    // popup over the first would only bury the real one. An
-                    // epic that is simply not there is the same situation — it
-                    // is not on this board to restore.
-                    Ok(None) => {
+                    // next timed refresh corrects it. An epic that is simply
+                    // not there is not on this board to restore.
+                    None => {
                         tracing::warn!(
                             "epic {id:?} is not on the board to restore after a refused toggle"
                         );
-                    }
-                    Err(e) => {
-                        tracing::warn!("failed to restore epic {id:?} after refused toggle: {e}");
                     }
                 }
                 return;
@@ -274,18 +269,10 @@ impl TuiRuntime {
     }
 
     pub(super) async fn exec_refresh_epics_from_db(&self, app: &mut App) {
-        match self.board_reads.list_epics().await {
-            Ok(epics) => {
-                app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
-                    epics,
-                )));
-            }
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    Self::db_error("refreshing epics", e),
-                )));
-            }
-        }
+        let epics = self.board_reads.list_epics().await;
+        app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
+            epics,
+        )));
     }
 
     /// Run one feed cycle for `epic_id` and present its outcome in the status

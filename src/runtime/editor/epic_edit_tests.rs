@@ -45,7 +45,7 @@ async fn a_refused_epic_edit_emits_no_edited_message_and_writes_nothing() {
         app.error_popup()
     );
 
-    let after = db.get_epic(epic.id).await.unwrap().unwrap();
+    let after = db.get_epic(epic.id).await.unwrap();
     assert_eq!(
         after.title, "Original",
         "the title must not survive a refused edit"
@@ -63,7 +63,7 @@ async fn an_epic_edit_at_the_floor_is_applied() {
     rt.finalize_epic_edit(&mut app, epic.clone(), saved("Renamed", "60"))
         .await;
 
-    let after = db.get_epic(epic.id).await.unwrap().unwrap();
+    let after = db.get_epic(epic.id).await.unwrap();
     assert_eq!(after.title, "Renamed");
     assert_eq!(
         after.feed_interval_secs,
@@ -91,7 +91,7 @@ async fn changing_feed_command_against_a_foreign_owner_offers_a_takeover() {
         .await;
 
     assert_eq!(
-        db.get_epic(epic.id).await.unwrap().unwrap().title,
+        db.get_epic(epic.id).await.unwrap().title,
         "Renamed",
         "the edit itself must apply regardless of the prompt"
     );
@@ -139,7 +139,7 @@ async fn resubmitting_the_same_feed_command_offers_no_takeover() {
     )
     .await
     .unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, _rx) = mpsc::unbounded_channel();
     db.claim_poll_owner(crate::models::PollScopeId::Epic(epic.id))
@@ -169,7 +169,7 @@ async fn clearing_feed_command_offers_no_takeover() {
     )
     .await
     .unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, _rx) = mpsc::unbounded_channel();
     db.claim_poll_owner(crate::models::PollScopeId::Epic(epic.id))
@@ -186,7 +186,7 @@ async fn clearing_feed_command_offers_no_takeover() {
     rt.finalize_epic_edit(&mut app, epic.clone(), outcome).await;
 
     assert_eq!(
-        db.get_epic(epic.id).await.unwrap().unwrap().feed_command,
+        db.get_epic(epic.id).await.unwrap().feed_command,
         None,
         "an empty FEED_COMMAND section must clear the value"
     );

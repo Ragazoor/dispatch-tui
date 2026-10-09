@@ -99,7 +99,7 @@ impl RoleSubEpics {
 /// Ensure the three role sub-epics exist (idempotent, matched by feed_role).
 async fn ensure_role_sub_epics(db: &dyn TaskStore, parent_id: EpicId) -> Result<RoleSubEpics> {
     use crate::models::FeedRole;
-    let existing_subs = db.list_sub_epics(parent_id).await?;
+    let existing_subs = db.list_sub_epics(parent_id).await;
     let my = ensure_role_sub_epic(db, parent_id, &existing_subs, FeedRole::MyReviews).await?;
     let team = ensure_role_sub_epic(db, parent_id, &existing_subs, FeedRole::TeamReviews).await?;
     let bots = ensure_role_sub_epic(db, parent_id, &existing_subs, FeedRole::Bots).await?;
@@ -136,15 +136,15 @@ async fn build_existing_task_index(
     let mut existing: HashMap<String, Task> = HashMap::new();
     let mut pre_existing_repo_group_ids: Vec<EpicId> = Vec::new();
 
-    for task in db.list_tasks_for_epic(parent_id).await? {
+    for task in db.list_tasks_for_epic(parent_id).await {
         if let Some(ext) = task.external_id.clone() {
             existing.insert(ext, task);
         }
     }
     for sub in roles.ids() {
-        let children = db.list_sub_epics(sub).await?;
+        let children = db.list_sub_epics(sub).await;
         for child in &children {
-            for task in db.list_tasks_for_epic(child.id).await? {
+            for task in db.list_tasks_for_epic(child.id).await {
                 if let Some(ext) = task.external_id.clone() {
                     existing.insert(ext, task);
                 }
@@ -154,7 +154,7 @@ async fn build_existing_task_index(
     }
     // Role sub-epics scanned last — their copies overwrite repo-group copies.
     for sub in roles.ids() {
-        for task in db.list_tasks_for_epic(sub).await? {
+        for task in db.list_tasks_for_epic(sub).await {
             if let Some(ext) = task.external_id.clone() {
                 existing.insert(ext, task);
             }

@@ -27,7 +27,7 @@ async fn make_task(db: &Arc<Store>) -> crate::models::Task {
         })
         .await
         .unwrap();
-    db.get_task(id).await.unwrap().unwrap()
+    db.get_task(id).await.unwrap()
 }
 
 #[tokio::test]

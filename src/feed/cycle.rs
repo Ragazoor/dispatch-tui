@@ -97,10 +97,8 @@ impl FeedCycle {
             return FeedCycleOutcome::Busy;
         };
 
-        let mut epic = match self.db.get_epic(self.epic_id).await {
-            Ok(Some(epic)) => epic,
-            Ok(None) => return self.fail("epic no longer exists"),
-            Err(err) => return self.fail(format!("failed to read epic: {err:#}")),
+        let Some(mut epic) = self.db.get_epic(self.epic_id).await else {
+            return self.fail("epic no longer exists");
         };
         let Some(feed_command) = epic.feed_command.take() else {
             return self.fail("epic has no feed command");
@@ -210,7 +208,7 @@ impl FeedCycle {
     ) -> anyhow::Result<super::ingest::FeedSyncOutcome> {
         let known_paths = match &self.known_paths {
             Some(paths) => Arc::clone(paths),
-            None => Arc::new(self.db.list_repo_paths().await.unwrap_or_default()),
+            None => Arc::new(self.db.list_repo_paths().await),
         };
         let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
         let base_branches = super::resolve_base_branches(&repo_paths, &*self.runner);
@@ -440,7 +438,6 @@ mod tests {
         let mut ids: Vec<String> = db
             .list_tasks_for_epic(epic_id)
             .await
-            .unwrap()
             .into_iter()
             .filter_map(|t| t.external_id)
             .collect();

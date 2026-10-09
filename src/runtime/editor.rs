@@ -451,7 +451,7 @@ impl TuiRuntime {
                 .poll_owner(crate::models::PollScopeId::Epic(epic_id))
                 .await
             {
-                Ok(Some(other_host)) if other_host != self.host_id => {
+                Some(other_host) if other_host != self.host_id => {
                     cmds.extend(app.update(Message::Epic(
                         crate::tui::messages::EpicMessage::FeedOwnerTakeoverOffered {
                             epic_id,
@@ -459,13 +459,7 @@ impl TuiRuntime {
                         },
                     )));
                 }
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::debug!(
-                        epic_id = epic_id.0,
-                        "failed to read feed poll ownership, skipping the take-over prompt: {e:#}"
-                    );
-                }
+                _ => {}
             }
         }
         cmds

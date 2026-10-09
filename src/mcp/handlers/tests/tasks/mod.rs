@@ -26,7 +26,7 @@ async fn create_epic_minimal() {
     assert!(text.contains("Epic"));
     assert!(text.contains("created"));
 
-    let epics = state.db.list_epics().await.unwrap();
+    let epics = state.db.list_epics().await;
     assert_eq!(epics.len(), 1);
     assert_eq!(epics[0].title, "My Epic");
 }
@@ -48,7 +48,7 @@ async fn create_epic_with_all_fields() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let epics = state.db.list_epics().await.unwrap();
+    let epics = state.db.list_epics().await;
     assert_eq!(epics[0].description, "Epic desc");
 }
 
@@ -285,7 +285,7 @@ async fn update_epic_title() {
     assert!(text.contains("updated"));
     assert!(text.contains("title"));
 
-    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.title, "New Title");
 }
 
@@ -313,7 +313,7 @@ async fn update_epic_mark_done() {
         "response should mention status field: {text}"
     );
 
-    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.status, crate::models::TaskStatus::Done);
 }
 
@@ -341,7 +341,7 @@ async fn update_epic_multiple_fields() {
     .await;
     assert!(resp.error.is_none());
 
-    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.title, "New");
     assert_eq!(updated.description, "new desc");
 }
@@ -395,7 +395,7 @@ async fn update_epic_plan() {
         "response should mention plan: {text}"
     );
 
-    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap();
     assert_eq!(
         updated.plan_path.as_deref(),
         Some("docs/plans/epic-plan.md")
@@ -442,7 +442,7 @@ async fn update_epic_feed_command_set() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.feed_command.as_deref(), Some("echo []"));
 }
 
@@ -474,7 +474,7 @@ async fn update_epic_feed_command_clear() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap();
     assert!(
         updated.feed_command.is_none(),
         "feed_command should be cleared"
@@ -509,7 +509,7 @@ async fn update_epic_feed_command_absent_preserves_existing() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.feed_command.as_deref(), Some("keep me"));
 }
 
@@ -533,7 +533,7 @@ async fn update_epic_feed_interval_secs_set() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.feed_interval_secs, Some(60));
 }
 
@@ -565,7 +565,7 @@ async fn update_epic_feed_interval_secs_clear() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap();
     assert!(
         updated.feed_interval_secs.is_none(),
         "feed_interval_secs should be cleared"
@@ -648,7 +648,7 @@ async fn mcp_create_sub_epic() {
     );
 
     // Verify the sub-epic has the correct parent
-    let epics = state.db.list_epics().await.unwrap();
+    let epics = state.db.list_epics().await;
     let sub = epics
         .iter()
         .find(|e| e.title == "Sub Epic")

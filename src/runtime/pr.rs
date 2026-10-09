@@ -42,21 +42,9 @@ impl TuiRuntime {
         let runner = self.runner.clone();
 
         tokio::spawn(async move {
-            let owner = match board_reads
+            let owner = board_reads
                 .poll_owner(crate::models::PollScopeId::Task(id))
-                .await
-            {
-                Ok(owner) => owner,
-                // A failed read is "cannot tell", and skipping is the side to
-                // err on: it costs a delayed poll, never a duplicated one.
-                Err(e) => {
-                    tracing::debug!(
-                        task_id = id.0,
-                        "failed to read PR-poll ownership, skipping this tick: {e:#}"
-                    );
-                    return;
-                }
-            };
+                .await;
             match decide_poll_action(owner.as_deref(), &host_id) {
                 PollAction::Skip => return,
                 // A failed claim call does not block the poll below — the

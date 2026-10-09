@@ -27,7 +27,7 @@ async fn verify_command_lookup_matches_task_repo_path() {
         .unwrap();
 
     // Load the task back from the DB — this is the same call chain as dispatch.
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap();
 
     // Use task.repo_path as the key, exactly as exec_dispatch_agent does.
     let fetched = fetch_verify_command(&db, &task.repo_path).await;

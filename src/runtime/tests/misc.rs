@@ -223,7 +223,7 @@ mod prepare_inputs {
             })
             .await
             .unwrap();
-        let task = db.get_task(task_id).await.unwrap().unwrap();
+        let task = db.get_task(task_id).await.unwrap();
         let learning_id = db
             .create_learning(CreateLearningRow {
                 kind: LearningKind::Convention,
@@ -1100,13 +1100,7 @@ mod bootstrap {
             "a fresh database has no tasks to hydrate"
         );
         assert!(
-            bootstrap
-                .runtime
-                .database
-                .list_all()
-                .await
-                .unwrap()
-                .is_empty(),
+            bootstrap.runtime.database.list_all().await.is_empty(),
             "the returned runtime must be backed by the same freshly-opened database"
         );
         assert!(
@@ -1183,9 +1177,7 @@ mod bootstrap {
                 .await
                 .expect("bootstrap must succeed against a fresh, writable db path");
 
-        let epics = crate::store::EpicRead::list_epics(&*bootstrap.runtime.database)
-            .await
-            .unwrap();
+        let epics = crate::store::EpicRead::list_epics(&*bootstrap.runtime.database).await;
         assert!(
             !epics.iter().any(|e| e.title == "Dependabot"),
             "startup must not create a Dependabot epic: {epics:?}"

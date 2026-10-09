@@ -191,7 +191,7 @@ async fn update_task_valid() {
     assert!(resp.result.is_some());
     assert!(resp.error.is_none());
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, crate::models::TaskStatus::Running);
 }
 
@@ -219,7 +219,7 @@ async fn update_task_invalid_status() {
 async fn update_task_rejects_archived_as_an_unknown_status() {
     let state = test_state().await;
     let task_id = create_task_fixture(&state).await;
-    let before = state.db.get_task(task_id).await.unwrap().unwrap().status;
+    let before = state.db.get_task(task_id).await.unwrap().status;
 
     let resp = call(
         &state,
@@ -232,7 +232,7 @@ async fn update_task_rejects_archived_as_an_unknown_status() {
     .await;
     assert_error(&resp, "unknown variant `archived`");
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, before);
 }
 
@@ -269,7 +269,7 @@ async fn update_task_done_marks_task_done_for_session_caller() {
         format!("Task #{} marked done.", task_id.0)
     );
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, crate::models::TaskStatus::Done);
     assert_eq!(
         task.sub_status,
@@ -299,13 +299,7 @@ async fn update_task_done_reclose_keeps_existing_completed_at() {
         })),
     )
     .await;
-    let first_completed_at = state
-        .db
-        .get_task(task_id)
-        .await
-        .unwrap()
-        .unwrap()
-        .completed_at;
+    let first_completed_at = state.db.get_task(task_id).await.unwrap().completed_at;
 
     let resp = call(
         &state,
@@ -321,13 +315,7 @@ async fn update_task_done_reclose_keeps_existing_completed_at() {
         "re-closing an already-done task must succeed"
     );
 
-    let second_completed_at = state
-        .db
-        .get_task(task_id)
-        .await
-        .unwrap()
-        .unwrap()
-        .completed_at;
+    let second_completed_at = state.db.get_task(task_id).await.unwrap().completed_at;
     assert_eq!(
         first_completed_at, second_completed_at,
         "re-closing an already-done task must not re-date it"
@@ -351,7 +339,7 @@ async fn update_task_done_rejects_when_combined_with_other_fields() {
     assert_error(&resp, "must be the only field set");
     assert_error(&resp, "title");
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_ne!(task.status, crate::models::TaskStatus::Done);
     assert_eq!(
         task.title, "Test Task",
@@ -381,7 +369,7 @@ async fn update_task_done_rejects_when_combined_with_bare_url_type() {
     assert_error(&resp, "must be the only field set");
     assert_error(&resp, "url_type");
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_ne!(task.status, crate::models::TaskStatus::Done);
 }
 
@@ -411,7 +399,7 @@ async fn update_task_done_combined_with_url_reports_the_close_only_error_first()
     assert_error(&resp, "must be the only field set");
     assert_error(&resp, "url");
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_ne!(task.status, crate::models::TaskStatus::Done);
 }
 
@@ -432,7 +420,7 @@ async fn update_task_done_rejects_dispatched_agent_closing_its_own_task() {
     .await;
     assert_error(&resp, "Cannot mark your own task done");
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_ne!(task.status, crate::models::TaskStatus::Done);
 }
 
@@ -458,7 +446,7 @@ async fn update_task_done_allows_dispatched_agent_closing_a_different_task() {
         resp.error
     );
 
-    let task = state.db.get_task(other_task).await.unwrap().unwrap();
+    let task = state.db.get_task(other_task).await.unwrap();
     assert_eq!(task.status, crate::models::TaskStatus::Done);
 }
 
@@ -484,7 +472,7 @@ async fn update_task_done_reachable_from_backlog_with_no_window_or_epic() {
     // create_task_fixture leaves the task in Backlog with no worktree/epic —
     // the dedicated close path has no precondition on either.
     let task_id = create_task_fixture(&state).await;
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, crate::models::TaskStatus::Backlog);
     assert!(task.tmux_window.is_none());
     assert!(task.epic_id.is_none());
@@ -504,7 +492,7 @@ async fn update_task_done_reachable_from_backlog_with_no_window_or_epic() {
         resp.error
     );
     assert_eq!(
-        state.db.get_task(task_id).await.unwrap().unwrap().status,
+        state.db.get_task(task_id).await.unwrap().status,
         crate::models::TaskStatus::Done
     );
 }
@@ -571,7 +559,7 @@ async fn update_task_done_rejection_does_not_block_leaving_done() {
         .await;
         assert!(!is_error(&resp), "status={status}: {:?}", resp);
 
-        let task = state.db.get_task(task_id).await.unwrap().unwrap();
+        let task = state.db.get_task(task_id).await.unwrap();
         assert_eq!(
             task.completed_at,
             Some(finished),
@@ -661,7 +649,7 @@ async fn create_task_minimal() {
     assert!(text.contains("created"));
 
     // Verify task was created in DB
-    let tasks = state.db.list_all().await.unwrap();
+    let tasks = state.db.list_all().await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "New Task");
     assert_eq!(tasks[0].status, TaskStatus::Backlog);
@@ -691,7 +679,7 @@ async fn create_task_with_plan_stays_backlog() {
     .await;
     assert!(resp.error.is_none());
 
-    let tasks = state.db.list_all().await.unwrap();
+    let tasks = state.db.list_all().await;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].status, TaskStatus::Backlog);
     let stored = tasks[0].plan_path.as_deref().unwrap();
@@ -724,7 +712,7 @@ async fn create_task_with_description() {
     .await;
     assert!(resp.error.is_none());
 
-    let tasks = state.db.list_all().await.unwrap();
+    let tasks = state.db.list_all().await;
     assert_eq!(tasks[0].description, "Some details");
 }
 
@@ -789,7 +777,7 @@ async fn update_task_accepts_string_task_id() {
         resp.error
     );
 
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap();
     assert_eq!(task.status, crate::models::TaskStatus::Running);
 }
 

@@ -42,7 +42,7 @@ async fn record_notification_is_a_no_op_on_a_task_that_left_running() {
         .await
         .unwrap();
 
-    let reread = db.get_task(task.id).await.unwrap().unwrap();
+    let reread = db.get_task(task.id).await.unwrap();
     assert_eq!(reread.status, TaskStatus::Backlog);
     assert_eq!(reread.sub_status, SubStatus::None);
     assert!(reread.last_notification_at.is_none());
@@ -60,7 +60,7 @@ async fn record_pre_tool_use_is_a_no_op_on_a_task_that_left_running() {
         .await
         .unwrap();
 
-    let reread = db.get_task(task.id).await.unwrap().unwrap();
+    let reread = db.get_task(task.id).await.unwrap();
     assert_eq!(reread.status, TaskStatus::Backlog);
     assert_eq!(reread.sub_status, SubStatus::None);
     assert!(reread.last_pre_tool_use_at.is_none());
@@ -75,7 +75,7 @@ async fn record_pre_tool_use_stamps_and_sets_sub_status_on_a_running_task() {
         .await
         .unwrap();
 
-    let reread = db.get_task(task.id).await.unwrap().unwrap();
+    let reread = db.get_task(task.id).await.unwrap();
     assert_eq!(reread.sub_status, SubStatus::Stale);
     assert!(reread.last_pre_tool_use_at.is_some());
 }

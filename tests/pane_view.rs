@@ -121,13 +121,13 @@ async fn live_agents_are_exactly_the_boards_live_agents_by_id() {
 async fn asking_changes_no_row() {
     let board = spawn_board().await;
     let id = seed_with(&board.db, "asked about", TaskStatus::Running, true).await;
-    let before = board.db.list_all().await.unwrap();
+    let before = board.db.list_all().await;
 
     for _ in 0..3 {
         fetch_pane_view(board.port, id).await.expect("answered");
     }
 
-    let after = board.db.list_all().await.unwrap();
+    let after = board.db.list_all().await;
     assert_eq!(before, after, "answering a pane must write nothing");
 }
 

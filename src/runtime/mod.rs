@@ -883,7 +883,7 @@ impl TuiRuntime {
             data_dir: data_dir.clone(),
         };
 
-        let tasks = database.list_all().await?;
+        let tasks = database.list_all().await;
 
         start_services_after_connect(
             &database,
@@ -1150,9 +1150,9 @@ async fn hydrate_app(
         database.list_repo_paths(),
         database.list_all_base_branches()
     );
-    app.update(Message::RepoPathsUpdated(repo_paths.unwrap_or_default()));
+    app.update(Message::RepoPathsUpdated(repo_paths));
     app.update(Message::BaseBranchesUpdated(group_base_branches_by_repo(
-        base_branch_pairs.unwrap_or_default(),
+        base_branch_pairs,
     )));
     load_notifications_pref(database, &mut app).await;
     load_repo_filter(database, &mut app).await;

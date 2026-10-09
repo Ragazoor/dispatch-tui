@@ -36,7 +36,7 @@ async fn update_task_worktree_set_persists() {
     )
     .await
     .unwrap();
-    let task = db.get_task(TaskId(id.0)).await.unwrap().unwrap();
+    let task = db.get_task(TaskId(id.0)).await.unwrap();
     assert_eq!(task.worktree.as_deref(), Some("/wt"));
     assert_eq!(task.tmux_window.as_ref().map(|w| w.as_str()), Some("win"));
 }
@@ -71,7 +71,7 @@ async fn update_task_worktree_clear_sets_null() {
     )
     .await
     .unwrap();
-    let task = db.get_task(TaskId(id.0)).await.unwrap().unwrap();
+    let task = db.get_task(TaskId(id.0)).await.unwrap();
     assert_eq!(task.worktree, None);
     assert_eq!(task.tmux_window, None);
 }
@@ -98,7 +98,7 @@ async fn update_task_pr_url_set_and_clear() {
     )
     .await
     .unwrap();
-    let task = db.get_task(TaskId(id.0)).await.unwrap().unwrap();
+    let task = db.get_task(TaskId(id.0)).await.unwrap();
     assert_eq!(
         task.url.as_ref().map(|u| u.url.as_str()),
         Some("https://github.com/org/repo/pull/1")
@@ -107,6 +107,6 @@ async fn update_task_pr_url_set_and_clear() {
     svc.update_task(UpdateTaskParams::for_task(id).url(crate::service::UrlUpdate::Clear))
         .await
         .unwrap();
-    let task = db.get_task(TaskId(id.0)).await.unwrap().unwrap();
+    let task = db.get_task(TaskId(id.0)).await.unwrap();
     assert_eq!(task.url, None);
 }

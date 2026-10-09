@@ -8,32 +8,32 @@ use super::super::{EpicPatch, Store};
 
 #[async_trait::async_trait]
 impl super::super::EpicRead for Store {
-    async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
-        Ok(self.rows.epic(id))
+    async fn get_epic(&self, id: EpicId) -> Option<Epic> {
+        self.rows.epic(id)
     }
 
-    async fn list_epics(&self) -> Result<Vec<Epic>> {
-        Ok(self.rows.epics())
+    async fn list_epics(&self) -> Vec<Epic> {
+        self.rows.epics()
     }
 
-    async fn list_root_epics(&self) -> Result<Vec<Epic>> {
-        Ok(self.rows.epics_with_parent(None))
+    async fn list_root_epics(&self) -> Vec<Epic> {
+        self.rows.epics_with_parent(None)
     }
 
-    async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>> {
-        Ok(self.rows.epics_with_parent(Some(parent_id)))
+    async fn list_sub_epics(&self, parent_id: EpicId) -> Vec<Epic> {
+        self.rows.epics_with_parent(Some(parent_id))
     }
 
-    async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<Task>> {
-        Ok(self.rows.tasks_for_epic(epic_id))
+    async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Vec<Task> {
+        self.rows.tasks_for_epic(epic_id)
     }
 
-    async fn list_undecodable_task_ids_for_epic(&self, epic_id: EpicId) -> Result<Vec<TaskId>> {
-        Ok(self.rows.undecodable_task_ids_for_epic(epic_id))
+    async fn list_undecodable_task_ids_for_epic(&self, epic_id: EpicId) -> Vec<TaskId> {
+        self.rows.undecodable_task_ids_for_epic(epic_id)
     }
 
-    async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>> {
-        Ok(self.rows.tasks_with_epic())
+    async fn list_all_tasks_with_epic_id(&self) -> Vec<Task> {
+        self.rows.tasks_with_epic()
     }
 }
 

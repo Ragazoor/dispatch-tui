@@ -200,7 +200,7 @@ async fn update_epic_auto_dispatch_persists() {
         .unwrap();
 
     // Default is false.
-    assert!(!db.get_epic(epic.id).await.unwrap().unwrap().auto_dispatch);
+    assert!(!db.get_epic(epic.id).await.unwrap().auto_dispatch);
 
     svc.update_epic(UpdateEpicParams {
         auto_dispatch: Some(true),
@@ -209,7 +209,7 @@ async fn update_epic_auto_dispatch_persists() {
     .await
     .unwrap();
 
-    assert!(db.get_epic(epic.id).await.unwrap().unwrap().auto_dispatch);
+    assert!(db.get_epic(epic.id).await.unwrap().auto_dispatch);
 }
 
 #[tokio::test]
