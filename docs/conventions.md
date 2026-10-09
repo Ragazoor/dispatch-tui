@@ -256,6 +256,7 @@ Parallel to DB trait narrowing, the service layer exposes these traits in `src/s
 | `TaskServiceApi` | `TaskService` | `TuiRuntime::task_svc`, `McpState::task_svc` |
 | `EpicServiceApi` | `EpicService` | `TuiRuntime::epic_svc`, `McpState::epic_svc` |
 | `LearningServiceApi` | `LearningService` | `TuiRuntime::learning_svc`, `McpState::learning_svc` |
+| `WorkPackageServiceApi` | `WorkPackageService` | `McpState::work_package_svc` (and `Services::work_packages`) |
 
 Consumers that call task or epic operations should hold `Arc<dyn TaskServiceApi>` / `Arc<dyn EpicServiceApi>` rather than the concrete struct. This lets unit tests inject a mock service without a real database — construct `McpState` directly (all fields are `pub` or `pub(crate)`) and pass a custom `Arc<dyn TaskServiceApi>`.
 

@@ -13,6 +13,7 @@ mod managed_feeds;
 mod poll_ownership;
 mod tasks;
 mod types;
+mod work_packages;
 
 #[cfg(test)]
 mod tests;

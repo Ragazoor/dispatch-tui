@@ -53,7 +53,7 @@ Checked every tool in `mcp_tools!` against the guidance above.
 | Practice | State | Action |
 |---|---|---|
 | Detailed descriptions (3+ sentences) | Met. Enforced by test. `get_task` and `record_learning` are one sentence on purpose (spec). | None |
-| Every argument described | Met for all 25 tools. | Added a test so it stays met |
+| Every argument described | Met for all 25 tools at the audit; the four work-package tools added since meet it too. | Added a test so it stays met |
 | Closed sets as `enum` | Met (`status`, `tag`, `wrap_up_mode`, `url_type`). | None |
 | Consolidation | **Met.** Three pairs overlapped, and all are merged. `subscribe_to_task`/`unsubscribe_from_task` became `watch_task`. `get_managed_feed_config`/`set_managed_feed_config` became `managed_feed_config` (task 45073): no arguments reads, any argument writes, and it is annotated as a write because annotations cannot say both. `update_task`/`update_tasks` became `update_tasks` (task 45071): a call with one id is the single update. `create_task` and `update_tasks` stay apart: their required fields differ, and an upsert turns a wrong id into a new task. | Task 45072 |
 | Search over list-everything | **Gap.** `list_tasks` and `list_epics` have filters but no text query. One search tool across tasks and epics was rejected: they return different shapes. | Task 45074 |

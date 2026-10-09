@@ -23,6 +23,7 @@ use super::tasks;
 use super::types::{
     tool_error, JsonRpcRequest, JsonRpcResponse, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND,
 };
+use super::work_packages;
 
 /// MCP protocol version this server speaks natively.
 const SERVER_PROTOCOL_VERSION: &str = "2025-06-18";
@@ -347,6 +348,69 @@ loop.",
                 "parent_epic_id": { "type": ["integer", "null"], "description": "Re-parent this epic under another epic by ID. Pass null to make it a root epic. Cycle detection prevents hierarchical loops." }
             },
             "required": ["epic_id"]
+        };
+
+    async write "create_work_package" => work_packages::handle_create_work_package,
+        "Create a work package: a named group that links to tasks and epics which already exist, \
+wherever they sit in the epic tree, so work spread across several epics can be followed as one \
+board. Nothing is created inside a package and one item can belong to many packages. Pass \
+link_task_ids and link_epic_ids to link items at once; every id is checked first, and an unknown \
+one creates nothing. Returns the new package's id. To group new work under a parent, use \
+create_epic instead.",
+        {
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "Package title, for example the maintenance window it covers. Must not be blank." },
+                "description": { "type": "string", "description": "Free-text notes, for example the plan for the window." },
+                "link_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing tasks to link." },
+                "link_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing epics to link. A linked epic shows as one card; its subtasks are not linked one by one." }
+            },
+            "required": ["title"]
+        };
+
+    async read_only "list_work_packages" => work_packages::handle_list_work_packages,
+        "List work packages with their linked items. Read-only. With no arguments it lists every \
+package; pass work_package_id for one. Each package shows its title, description and every linked \
+task or epic with its id, status and title. A package has no status of its own: read progress from \
+the items.",
+        {
+            "type": "object",
+            "properties": {
+                "work_package_id": { "type": "integer", "description": "List only this package." }
+            }
+        };
+
+    async idempotent "update_work_package" => work_packages::handle_update_work_package,
+        "Update a work package in place: rename it with title, rewrite description, and change \
+its links with link_task_ids, unlink_task_ids, link_epic_ids and unlink_epic_ids. Unlinks apply \
+before links, linking an item already linked and unlinking one not linked are both silent, and \
+the tasks and epics themselves are never changed. Every id is checked before anything is written, \
+and an id named in both a link and an unlink list is refused. Every field left out is untouched, \
+and at least one must be given.",
+        {
+            "type": "object",
+            "properties": {
+                "work_package_id": { "type": "integer", "description": "The work package ID" },
+                "title": { "type": "string", "description": "New title. Must not be blank." },
+                "description": { "type": "string", "description": "New description." },
+                "link_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing tasks to link." },
+                "unlink_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of tasks to unlink." },
+                "link_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing epics to link." },
+                "unlink_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of epics to unlink." }
+            },
+            "required": ["work_package_id"]
+        };
+
+    async destructive "delete_work_package" => work_packages::handle_delete_work_package,
+        "Delete a work package and its links. The linked tasks and epics are not touched: they \
+stay where they are in the epic tree, with their status unchanged. Use it when the package has \
+served its purpose; to drop single items, unlink them with update_work_package instead.",
+        {
+            "type": "object",
+            "properties": {
+                "work_package_id": { "type": "integer", "description": "The work package ID" }
+            },
+            "required": ["work_package_id"]
         };
 
     async write "wrap_up" => tasks::handle_wrap_up,

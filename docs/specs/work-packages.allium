@@ -368,18 +368,25 @@ rule DeletePackageFromBoard {
 --   create_work_package(title, description?, link_task_ids?, link_epic_ids?)
 --       write. Creates the package (CreateWorkPackage) and links the given
 --       items. Returns the new package id.
---   list_work_packages(id?)
---       read_only. Every package (or the one with `id`): id, title,
+--   list_work_packages(work_package_id?)
+--       read_only. Every package (or the one named): id, title,
 --       description, created_at, updated_at, and its linked items, each with
---       kind, id, title and status.
---   update_work_package(id, title?, description?, link_task_ids?,
---                       unlink_task_ids?, link_epic_ids?, unlink_epic_ids?)
+--       kind, id, title and status. A link whose item this board does not
+--       hold is left out.
+--   update_work_package(work_package_id, title?, description?,
+--                       link_task_ids?, unlink_task_ids?, link_epic_ids?,
+--                       unlink_epic_ids?)
 --       idempotent. Applies UpdateWorkPackage, then every unlink, then every
 --       link. An id appearing in both a link and an unlink list is refused
---       before anything is written.
---   delete_work_package(id)
+--       before anything is written, and so is a call that names no field.
+--   delete_work_package(work_package_id)
 --       destructive. DeleteWorkPackage.
 --
--- A missing package id is not-found. A link to a task or epic id that does
--- not exist is not-found, and nothing in that call is written: the call
--- validates every id before the first write.
+-- The package argument is `work_package_id`, not a bare `id`: every other
+-- tool names its selector after the entity (task_id, epic_id), and
+-- docs/mcp-tool-design.md asks for unambiguous argument names.
+--
+-- A missing package id is not-found, on update, list and delete alike. A
+-- link to a task or epic id that does not exist is not-found, and nothing in
+-- that call is written: the call validates every id before the first write.
+-- A repeated id in one list is one write.

@@ -87,6 +87,7 @@ pub struct McpState {
     pub task_svc: Arc<dyn TaskServiceApi>,
     pub epic_svc: Arc<dyn EpicServiceApi>,
     pub learning_svc: Arc<dyn LearningServiceApi>,
+    pub work_package_svc: Arc<dyn crate::service::WorkPackageServiceApi>,
     /// When set, MCP sends events after mutations to trigger TUI updates.
     pub notify_tx: Option<mpsc::UnboundedSender<BoardEvent>>,
     // Deliberately no `runner`: no handler shells out. Every subprocess a
@@ -149,6 +150,7 @@ impl McpState {
             tasks: task_svc,
             epics: epic_svc,
             learnings: learning_svc,
+            work_packages: work_package_svc,
         } = services;
         // Narrow the write-capable dependency handle to the read-only surface
         // consumers are allowed to touch. Mutations go through the services above.
@@ -158,6 +160,7 @@ impl McpState {
             task_svc,
             epic_svc,
             learning_svc,
+            work_package_svc,
             notify_tx,
             embedding_service: deps.embedding_service,
             exit_tokens: Arc::new(RwLock::new(HashMap::new())),

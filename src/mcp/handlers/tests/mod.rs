@@ -7,6 +7,7 @@ mod managed_feeds;
 mod poll_ownership;
 mod tasks;
 mod usage;
+mod work_packages;
 
 use std::sync::Arc;
 
@@ -1179,6 +1180,10 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("list_keybindings", json!({})),
         ("read_context", json!({"uri": "dispatch://task/self"})),
         ("override_poll_owner", json!({"task_id": 1})),
+        ("create_work_package", json!({"title": "t"})),
+        ("list_work_packages", json!({})),
+        ("update_work_package", json!({"work_package_id": 1})),
+        ("delete_work_package", json!({"work_package_id": 1})),
     ];
 
     let covered: std::collections::BTreeSet<&str> = payloads.iter().map(|(n, _)| *n).collect();
@@ -1358,8 +1363,9 @@ fn tool_definitions_carry_annotations() {
         "query_usage",
         "read_context",
         "list_keybindings",
+        "list_work_packages",
     ];
-    const DESTRUCTIVE: &[&str] = &["delete_learning", "exit_session"];
+    const DESTRUCTIVE: &[&str] = &["delete_learning", "exit_session", "delete_work_package"];
     let defs = tool_definitions();
     for tool in defs["tools"].as_array().unwrap() {
         let name = tool["name"].as_str().unwrap();

@@ -2,7 +2,8 @@
 //!
 //! Each seam is declared **once**, as a `macro_rules!` "spec" macro holding the
 //! doc comments and the signature list ([`crate::task_service_api!`],
-//! [`crate::epic_service_api!`], [`crate::learning_service_api!`]). A spec macro takes the name of an
+//! [`crate::epic_service_api!`], [`crate::learning_service_api!`],
+//! [`crate::work_package_service_api!`]). A spec macro takes the name of an
 //! *emitter* macro and replays its signature list into it, so every artefact
 //! derived from the surface is generated from the same tokens and cannot drift:
 //!
@@ -24,7 +25,7 @@
 // The signature lists below name their types through `$crate::…` paths, so the
 // only imports this module needs are the concrete services the production impls
 // delegate to.
-use super::{learnings::LearningService, EpicService, TaskService};
+use super::{learnings::LearningService, EpicService, TaskService, WorkPackageService};
 
 // ---------------------------------------------------------------------------
 // Emitters — consume a spec macro's signature list, emit one artefact each
@@ -473,6 +474,46 @@ macro_rules! epic_service_api {
     };
 }
 
+/// The `WorkPackageServiceApi` surface. Pass an emitter macro name; see the
+/// module docs for the available emitters.
+#[macro_export]
+macro_rules! work_package_service_api {
+    ($emit:ident $(, $extra:tt)*) => {
+        $crate::$emit! {
+            [$($extra)*]
+
+            /// Consumer-facing seam for work-package operations
+            /// (`docs/specs/work-packages.allium`).
+            ///
+            /// Mirrors the public async surface of [`WorkPackageService`].
+            trait WorkPackageServiceApi for WorkPackageService, stub WorkPackageServiceApiStub;
+
+            async fn create_work_package(
+                &self,
+                params: $crate::service::CreateWorkPackageParams
+            ) -> Result<$crate::models::WorkPackageId, $crate::service::ServiceError>;
+
+            /// Every package, or only `id`, each with its resolved links.
+            async fn list_work_packages(
+                &self,
+                id: Option<$crate::models::WorkPackageId>
+            ) -> Result<Vec<$crate::service::WorkPackageView>, $crate::service::ServiceError>;
+
+            /// Title/description, then unlinks, then links — all validated
+            /// before the first write.
+            async fn update_work_package(
+                &self,
+                params: $crate::service::UpdateWorkPackageParams
+            ) -> Result<(), $crate::service::ServiceError>;
+
+            async fn delete_work_package(
+                &self,
+                id: $crate::models::WorkPackageId
+            ) -> Result<(), $crate::service::ServiceError>;
+        }
+    };
+}
+
 /// The `LearningServiceApi` surface. Pass an emitter macro name; see the module
 /// docs for the available emitters.
 #[macro_export]
@@ -541,6 +582,7 @@ macro_rules! learning_service_api {
 task_service_api!(service_api_trait);
 epic_service_api!(service_api_trait);
 learning_service_api!(service_api_trait);
+work_package_service_api!(service_api_trait);
 
 // ---------------------------------------------------------------------------
 // Production impls — delegate to the concrete structs
@@ -549,6 +591,7 @@ learning_service_api!(service_api_trait);
 task_service_api!(service_api_delegate);
 epic_service_api!(service_api_delegate);
 learning_service_api!(service_api_delegate);
+work_package_service_api!(service_api_delegate);
 
 // ---------------------------------------------------------------------------
 // Test-only stub traits — mocks override only what they exercise
@@ -558,6 +601,8 @@ learning_service_api!(service_api_delegate);
 task_service_api!(service_api_stub_trait);
 #[cfg(test)]
 learning_service_api!(service_api_stub_trait);
+#[cfg(test)]
+work_package_service_api!(service_api_stub_trait);
 
 /// No-op [`LearningServiceApi`] for tests that construct a [`TuiRuntime`] or
 /// [`McpState`] but never exercise learning operations. Overrides nothing, so
@@ -629,6 +674,23 @@ mod tests {
 
         assert_eq!(svc.get_epic(epic.id).await.unwrap().title, "delegated epic");
         assert_eq!(svc.list_epics().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn work_package_service_api_delegates_to_work_package_service() {
+        let store = store().await;
+        let svc: Arc<dyn WorkPackageServiceApi> = Arc::new(WorkPackageService::new(store));
+
+        let id = svc
+            .create_work_package(crate::service::CreateWorkPackageParams {
+                title: "delegated package".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let views = svc.list_work_packages(Some(id)).await.unwrap();
+        assert_eq!(views[0].package.title, "delegated package");
     }
 
     #[tokio::test]

@@ -858,6 +858,16 @@ pub trait TaskAndEpicStore: TaskCrud + EpicCrud {}
 impl<T: TaskCrud + EpicCrud> TaskAndEpicStore for T {}
 
 // ---------------------------------------------------------------------------
+// WorkPackageStore — composite for the work-package service
+// ---------------------------------------------------------------------------
+
+/// What `WorkPackageService` holds: the package writes, plus the task and epic
+/// reads it checks a link's item against before writing.
+pub trait WorkPackageStore: WorkPackageCrud + TaskRead + EpicRead {}
+
+impl<T: WorkPackageCrud + TaskRead + EpicRead> WorkPackageStore for T {}
+
+// ---------------------------------------------------------------------------
 // LearningPatch — builder for partial learning updates
 // ---------------------------------------------------------------------------
 
@@ -1094,7 +1104,7 @@ pub trait UsageStore: Send + Sync {
 /// built.
 pub trait TaskStore:
     TaskAndEpicStore
-    + WorkPackageCrud
+    + WorkPackageStore
     + RepoConfigStore
     + HostStore
     + SubscriptionStore
@@ -1109,7 +1119,7 @@ pub trait TaskStore:
 
 impl<
         T: TaskAndEpicStore
-            + WorkPackageCrud
+            + WorkPackageStore
             + RepoConfigStore
             + HostStore
             + SubscriptionStore

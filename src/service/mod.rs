@@ -8,8 +8,9 @@ pub mod managed_feeds;
 mod services;
 pub mod tasks;
 pub mod usage;
+pub mod work_packages;
 
-pub use api::{EpicServiceApi, LearningServiceApi, TaskServiceApi};
+pub use api::{EpicServiceApi, LearningServiceApi, TaskServiceApi, WorkPackageServiceApi};
 #[cfg(test)]
 pub use api::{LearningServiceApiStub, MockLearningService, TaskServiceApiStub};
 pub use epics::{
@@ -29,6 +30,10 @@ pub use tasks::{
     UpdateTaskResult, WrapUpRebaseOutcome,
 };
 pub use usage::record_usage_event_logged;
+pub use work_packages::{
+    CreateWorkPackageParams, LinkedItem, UpdateWorkPackageParams, WorkPackageService,
+    WorkPackageView,
+};
 
 // ---------------------------------------------------------------------------
 // Service error
