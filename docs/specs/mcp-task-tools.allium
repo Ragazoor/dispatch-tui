@@ -98,6 +98,40 @@ config {
 -- both carry the text in plugin/skills, and a branch that names a references/
 -- file can be followed over MCP too.
 
+-- == Tool definitions follow the authoring standard ==
+--
+-- Anthropic's guidance on tool definitions (platform.claude.com "Define
+-- tools"; anthropic.com/engineering "Writing tools for agents") is the
+-- reference for every tool. docs/mcp-tool-design.md is how this repo applies it
+-- and holds the audit of the current tool list. The parts a test can hold:
+--   - a description of at least three sentences (the detail floor, asserted by
+--     every_tool_description_meets_the_detail_floor);
+--   - a description on every argument, so no caller guesses what one means;
+--   - behaviour annotations on every tool, so a client can tell a read from a
+--     write from a destructive call without parsing prose.
+
+rule ToolsAdvertiseAnnotations {
+    when: McpToolsList()
+
+    -- Every tool in the list carries `annotations` with a `title` and the four
+    -- MCP behaviour hints. readOnlyHint is true exactly for a tool that changes
+    -- nothing (get_task, list_tasks, get_epic, list_epics, query_learnings,
+    -- get_managed_feed_config, query_usage, read_context, list_keybindings).
+    -- destructiveHint is true only where a call removes or closes something
+    -- that cannot be restored by another call (delete_learning, exit_session);
+    -- it is false on a read-only tool. idempotentHint is true where repeating
+    -- the identical call leaves the same state. openWorldHint is false on every
+    -- tool: dispatch reaches no system outside itself through them.
+    ensures: ToolsAnnotated()
+
+    @guidance
+        -- The access class is declared in the mcp_tools! entry beside the tool's
+        -- name (read_only, write, idempotent or destructive), so a new tool
+        -- cannot be registered without choosing one.
+        -- Asserted by tool_definitions_carry_annotations and
+        -- every_argument_carries_a_description in src/mcp/handlers/tests/mod.rs.
+}
+
 -- == MCP Task Tools ==
 
 rule UpdateTaskViaMcp {

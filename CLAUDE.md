@@ -102,7 +102,7 @@ The Allium specs in `docs/specs/` are the **source of truth** for domain and int
 
 ## MCP Tools for Agents
 
-The `dispatch` MCP server's tool descriptions say what each tool does; call `tools/list`, or see `docs/specs/mcp-task-tools.allium`. `create_task`/`create_epic` matter mainly to orchestrating agents, not to one executing a single task.
+The `dispatch` MCP server's tool descriptions say what each tool does; call `tools/list`, or see `docs/specs/mcp-task-tools.allium`. Writing or changing a tool: read [docs/mcp-tool-design.md](docs/mcp-tool-design.md) first. `create_task`/`create_epic` matter mainly to orchestrating agents, not to one executing a single task.
 
 ## Agent-Facing Skill Copy
 
@@ -133,6 +133,7 @@ Read these on demand:
 - [docs/architecture.md](docs/architecture.md) — Message→Command, ProcessRunner, command queue draining, editor session invariant, layout-cache coherence, render dirty flag, error handling, quick dispatch
 - [docs/conventions.md](docs/conventions.md) — the full convention set: `FieldUpdate`/`TaskPatch` double-Option, DB/service trait narrowing, the `run_bounded` primitive, keybinding telemetry, Clippy/visibility rules, tag system, and more
 - [docs/module-map.md](docs/module-map.md) — module and subsystem responsibilities
+- [docs/mcp-tool-design.md](docs/mcp-tool-design.md) — tool design checklist and the audit of the current tools
 - [docs/how-to.md](docs/how-to.md) — adding an MCP tool, TUI view, entity; knowledge base MCP tools
 - [docs/mcp.md](docs/mcp.md) — MCP notification flow, error codes, debugging handlers, feed epics, knowledge base flow
 - [docs/reference.md](docs/reference.md) — key bindings, CLI subcommands, configuration, environment variables, troubleshooting, learning store

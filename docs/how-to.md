@@ -2,7 +2,7 @@
 
 ## Adding a New MCP Tool
 
-The registry is **generated**. `tool_definitions()`, the `tools/call` dispatch arm, and `TOOL_NAMES` all expand from the `mcp_tools!` macro's single declarative list (`src/mcp/handlers/dispatch.rs::mcp_tools`) — do not hand-edit any of the three, and read the macro's doc comment before adding an entry.
+The registry is **generated**. `tool_definitions()`, the `tools/call` dispatch arm, and `TOOL_NAMES` all expand from the `mcp_tools!` macro's single declarative list (`src/mcp/handlers/dispatch.rs::mcp_tools`) — do not hand-edit any of the three, and read the macro's doc comment before adding an entry. How to word the description and arguments, and which access class to pick, is in [mcp-tool-design.md](mcp-tool-design.md).
 
 1. **Add the argument struct** next to its siblings — task tools in `src/mcp/handlers/tasks/mod.rs`, other domains in their own handler module. Derive `Deserialize`, and annotate every integer field with a flexible deserializer from `src/mcp/handlers/types.rs`, since Claude Code may send integers as strings: `deserialize_flexible_id` / `deserialize_optional_flexible_id` / `deserialize_nullable_flexible_id` for entity ids (the field's type is the newtype itself — `TaskId`, `EpicId`, `LearningId` — never a bare `i64`), and the `*_flexible_i64` trio for genuine integers like `sort_order` or `limit`. Parse enum-valued fields into their model type at the boundary too (`status`, `tag`, `sub_status`, `url_type`) rather than carrying a `String` inward.
 
@@ -24,10 +24,10 @@ The registry is **generated**. `tool_definitions()`, the `tools/call` dispatch a
 
    Reads may go through `state.db`. **Mutations must not** — task and epic writes go through `state.task_svc` / `state.epic_svc` (`TaskServiceApi` / `EpicServiceApi`), because the service layer owns invariants like epic-status recalculation. `McpState.db` is typed `Arc<dyn store::TaskReadStore>` (`src/mcp/mod.rs::McpState`), so `state.db.patch_task(…)` is a **compile error**, locked in by a `compile_fail` doctest on `src/store/mod.rs::TaskReadStore`. <!-- allow-phantom-symbol: compile_fail is a rustdoc attribute, not our symbol --> Map service errors with `service_err_to_response`, and call `state.notify()` after a successful mutation so the TUI refreshes. See the [service mutation boundary](conventions.md#service-layer-is-the-mutation-boundary).
 
-3. **Register the tool** by adding one entry to the `mcp_tools!` list in `src/mcp/handlers/dispatch.rs`: the `sync`/`async` kind, the tool name, the handler path, the description string, and the JSON input schema.
+3. **Register the tool** by adding one entry to the `mcp_tools!` list in `src/mcp/handlers/dispatch.rs`: the `sync`/`async` kind, the access class (`read_only`, `write`, `idempotent` or `destructive`), the tool name, the handler path, the description string, and the JSON input schema.
 
    ```rust
-   async "my_tool" => tasks::handle_my_tool,
+   async write "my_tool" => tasks::handle_my_tool,
        "What the tool does, written for the agent that will read it.",
        {
            "type": "object",

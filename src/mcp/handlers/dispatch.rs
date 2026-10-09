@@ -36,6 +36,43 @@ const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2024-11-05"];
 // Tool registry macro
 // ---------------------------------------------------------------------------
 
+/// How a tool touches state, declared beside its name in `mcp_tools!` so a new
+/// tool cannot be registered without choosing one. Drives the MCP `annotations`
+/// behaviour hints that `tools/list` advertises.
+#[derive(Clone, Copy)]
+enum Access {
+    /// Changes nothing.
+    ReadOnly,
+    /// Changes state; repeating the call may change it again.
+    Write,
+    /// Changes state; repeating the identical call leaves the same state.
+    Idempotent,
+    /// Removes or closes something no other call restores.
+    Destructive,
+}
+
+/// The MCP `annotations` object for a tool: a title and the four behaviour
+/// hints. `openWorldHint` is false everywhere — no tool reaches outside dispatch.
+fn annotations(name: &str, access: Access) -> Value {
+    let title = name
+        .split('_')
+        .map(|w| {
+            let mut c = w.chars();
+            c.next()
+                .map(|f| f.to_uppercase().chain(c).collect::<String>())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    json!({
+        "title": title,
+        "readOnlyHint": matches!(access, Access::ReadOnly),
+        "destructiveHint": matches!(access, Access::Destructive),
+        "idempotentHint": matches!(access, Access::ReadOnly | Access::Idempotent),
+        "openWorldHint": false
+    })
+}
+
 /// Register all MCP tools in one place. Expands to:
 /// - `fn tool_definitions() -> Value` — the JSON tool list
 /// - `async fn dispatch_tool(...)` — the match dispatch
@@ -43,7 +80,7 @@ const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2024-11-05"];
 macro_rules! mcp_tools {
     (
         $(
-            $kind:ident $name:literal => $handler:path,
+            $kind:ident $access:ident $name:literal => $handler:path,
                 $desc:literal,
                 $schema:tt
         );+ $(;)?
@@ -55,7 +92,8 @@ macro_rules! mcp_tools {
                         {
                             "name": $name,
                             "description": $desc,
-                            "inputSchema": $schema
+                            "inputSchema": $schema,
+                            "annotations": annotations($name, mcp_tools!(@access $access))
                         }
                     ),+
                 ]
@@ -79,6 +117,11 @@ macro_rules! mcp_tools {
 
         pub const TOOL_NAMES: &[&str] = &[$($name),+];
     };
+
+    (@access read_only) => { Access::ReadOnly };
+    (@access write) => { Access::Write };
+    (@access idempotent) => { Access::Idempotent };
+    (@access destructive) => { Access::Destructive };
 
     (@call sync, $handler:path, $state:expr, $id:expr, $identity:expr, $args:expr) => {
         $handler($state, $id, $identity, $args)
@@ -126,14 +169,14 @@ fn task_status_enum_values() -> Vec<&'static str> {
 // ---------------------------------------------------------------------------
 
 mcp_tools! {
-    async "update_task" => tasks::handle_update_task,
+    async idempotent "update_task" => tasks::handle_update_task,
         "Update a task in place. Accepts status, sub_status, title, description, repo_path, \
 plan_path, sort_order, url, url_type, tag, epic_id, base_branch, wrap_up_mode, auto_run_plan and \
 phoenix. At least one field besides task_id must be provided; every field left out is untouched.",
         // Generated from the `mcp_args!` field list in `tasks::mod`.
         (tasks::update_task_schema());
 
-    async "update_tasks" => tasks::handle_update_tasks,
+    async idempotent "update_tasks" => tasks::handle_update_tasks,
         "Update many tasks with one call. Takes task_ids plus update_task's fields: status, \
 sub_status, title, description, repo_path, plan_path, sort_order, url, url_type, tag, epic_id, \
 base_branch, wrap_up_mode, auto_run_plan and phoenix. Applies them to each task exactly as \
@@ -142,7 +185,7 @@ updated whatever its status; pick the ids with list_tasks (epic_id, recursive, s
 Not atomic: the reply has one line per task, success or failure, then a count.",
         (tasks::update_tasks_schema());
 
-    async "get_task" => tasks::handle_get_task,
+    async read_only "get_task" => tasks::handle_get_task,
         "Get the details of a task by ID.",
         {
             "type": "object",
@@ -155,7 +198,7 @@ Not atomic: the reply has one line per task, success or failure, then a count.",
             "required": ["task_id"]
         };
 
-    async "create_task" => tasks::handle_create_task,
+    async write "create_task" => tasks::handle_create_task,
         "Create a new task on the kanban board. Tasks always start in 'backlog' status. Your \
 identity as caller is established by the transport, not by an argument — there is no \
 caller_task_id to pass. epic_id is required: name the epic this task belongs to, or pass null \
@@ -214,7 +257,7 @@ usually the right answer.",
             "required": ["title", "repo_path", "epic_id"]
         };
 
-    async "list_tasks" => tasks::handle_list_tasks,
+    async read_only "list_tasks" => tasks::handle_list_tasks,
         "List tasks on the kanban board. Filters are ANDed. When called by a dispatched agent, results auto-scope to the agent's epic and exclude the agent's own task; passing explicit epic_id/repo_paths disables auto-scoping. When called from a non-dispatched session, no auto-scoping. Output includes each task's base branch, its url under its own type label — 'PR', 'Issue', 'Security Alert' or 'Link', with the number appended where there is one — and the plan goal, when available.",
         {
             "type": "object",
@@ -246,7 +289,7 @@ usually the right answer.",
             }
         };
 
-    async "create_epic" => epics::handle_create_epic,
+    async write "create_epic" => epics::handle_create_epic,
         "Create a new epic on the kanban board. An epic groups related tasks and derives its \
 status from theirs, so you do not set an epic's status directly. Pass parent_epic_id to create it \
 as a sub-epic of an existing one. Epics carry no repo_path — that lives on each subtask, and \
@@ -262,7 +305,7 @@ passing it here is rejected.",
             "required": ["title"]
         };
 
-    async "get_epic" => epics::handle_get_epic,
+    async read_only "get_epic" => epics::handle_get_epic,
         "Get one epic by ID: its title, description, status, plan and a summary of its subtasks \
 by status. Read-only. Use it to check an epic's progress before adding work to it or closing it \
 out. It does not return the subtasks themselves — call list_tasks with epic_id for those.",
@@ -274,7 +317,7 @@ out. It does not return the subtasks themselves — call list_tasks with epic_id
             "required": ["epic_id"]
         };
 
-    async "list_epics" => epics::handle_list_epics,
+    async read_only "list_epics" => epics::handle_list_epics,
         "List epics on the kanban board, one row each, with each sub-epic's parent id. With no \
 arguments it lists every epic. Pass parent_epic_id for that epic's direct children, plus \
 recursive=true for its whole subtree. Use it to find an epic's ID when you only know its title. \
@@ -287,7 +330,7 @@ For one epic's detail or its subtask counts, call get_epic instead.",
             }
         };
 
-    async "update_epic" => epics::handle_update_epic,
+    async idempotent "update_epic" => epics::handle_update_epic,
         "Update an epic in place. Accepts title, description, status, plan_path, sort_order, \
 parent_epic_id, and the feed settings feed_command, feed_interval_secs, group_by_repo and \
 feed_append_only. Every field left out is untouched; the nullable ones take an explicit null to \
@@ -312,7 +355,7 @@ loop.",
             "required": ["epic_id"]
         };
 
-    async "wrap_up" => tasks::handle_wrap_up,
+    async write "wrap_up" => tasks::handle_wrap_up,
         "Wrap up a running or review task with one of three actions (rebase, done, pr) and return an \
 exit token for exit_session; the task stays running until then. \
 'rebase' rebases onto base_branch and fast-forwards it (blocks until complete). \
@@ -335,7 +378,7 @@ A task tagged pr-review or dependabot is refused.",
             "required": ["task_id", "action"]
         };
 
-    async "dispatch_task" => tasks::handle_dispatch_task,
+    async write "dispatch_task" => tasks::handle_dispatch_task,
         "Dispatch a backlog task by ID, then launch an agent in a tmux session. If the task has \
 no worktree directory yet, one is CREATED — from the task's base branch, or from the PR's head \
 branch for a review task carrying a PR url. If it already exists it is \
@@ -356,7 +399,7 @@ it along with the tmux window. Errors if the task is not in backlog status or th
             "required": ["task_id"]
         };
 
-    async "subscribe_to_task" => tasks::handle_subscribe_to_task,
+    async write "subscribe_to_task" => tasks::handle_subscribe_to_task,
         "Subscribe to be notified when another task finishes (reaches Done) or is deleted first. If the target has already finished, you're told immediately instead of being subscribed. Delivery is a one-shot nudge into your tmux session — it fires once and the subscription is then spent.",
         {
             "type": "object",
@@ -367,7 +410,7 @@ it along with the tmux window. Errors if the task is not in backlog status or th
             "required": ["watcher_task_id", "target_task_id"]
         };
 
-    async "unsubscribe_from_task" => tasks::handle_unsubscribe_from_task,
+    async idempotent "unsubscribe_from_task" => tasks::handle_unsubscribe_from_task,
         "Cancel a watch previously registered with subscribe_to_task. Idempotent: it succeeds \
 whether or not such a subscription exists, so it is safe to call speculatively. You do not need it \
 after a notification has fired — delivery is one-shot and spends the subscription. Use it when you \
@@ -381,7 +424,7 @@ stop caring about the target before it finishes.",
             "required": ["watcher_task_id", "target_task_id"]
         };
 
-    async "override_poll_owner" => poll_ownership::handle_override_poll_owner,
+    async idempotent "override_poll_owner" => poll_ownership::handle_override_poll_owner,
         "Reassign which host polls a review task's PR status, or runs a feed epic's poll, to THIS \
 host — unconditionally, even when a different host already owns it. Provide exactly one of task_id \
 (a review task whose PR has no worktree — a feed-upserted 'open PRs' style task) or epic_id (a feed \
@@ -396,7 +439,7 @@ failover, so this is the only way ownership ever moves.",
             }
         };
 
-    async "record_learning" => learnings::handle_record_learning,
+    async write "record_learning" => learnings::handle_record_learning,
         "Record a non-obvious, durable finding in the shared knowledge base, following the /learnings skill's authoring rules.",
         {
             "type": "object",
@@ -436,7 +479,7 @@ failover, so this is the only way ownership ever moves.",
             "required": ["task_id", "kind", "summary", "scope"]
         };
 
-    async "query_learnings" => learnings::handle_query_learnings,
+    async read_only "query_learnings" => learnings::handle_query_learnings,
         "Query the knowledge base by semantic similarity to your task's context. Results are \
 ranked by embedding similarity plus a scope and upvote boost, and entries below the similarity \
 threshold are dropped — so an empty result means nothing relevant was found, not that the store is \
@@ -466,7 +509,7 @@ expect overlap with those. Call it when something is unclear, before guessing or
             "required": ["task_id"]
         };
 
-    async "rate_learning" => learnings::handle_rate_learning,
+    async write "rate_learning" => learnings::handle_rate_learning,
         "Give feedback on a knowledge base entry that was surfaced to you this task. \
 Call any time you act on a retrieved learning. 'helped' upvotes it (a usefulness signal that \
 boosts ranking); 'wrong' downvotes it (may go negative) — neither changes its status, and \
@@ -492,7 +535,7 @@ into your prompt or returned by query_learnings).",
             "required": ["learning_id", "task_id", "verdict"]
         };
 
-    async "delete_learning" => learnings::handle_delete_learning,
+    async destructive "delete_learning" => learnings::handle_delete_learning,
         "Delete a learning entry from the knowledge base by ID. Permanent and immediate — there \
 is no archive, no soft delete and no human review step, so the entry stops reaching other agents \
 at once. Use it for an entry that is wrong or has gone stale, rather than only downvoting it with \
@@ -509,14 +552,14 @@ exist.",
             "required": ["learning_id"]
         };
 
-    async "get_managed_feed_config" => managed_feeds::handle_get_managed_feed_config,
+    async read_only "get_managed_feed_config" => managed_feeds::handle_get_managed_feed_config,
         "Return the current managed-feed configuration: the PR-reviews and CVE feed commands and \
 their poll intervals (in seconds). Read-only and argument-free. Unset values are reported as \
 unset, which is how you tell a disabled feed from one running on the default interval. Read it \
 before calling set_managed_feed_config, since that tool leaves any field you omit unchanged.",
         { "type": "object", "properties": {} };
 
-    async "set_managed_feed_config" => managed_feeds::handle_set_managed_feed_config,
+    async idempotent "set_managed_feed_config" => managed_feeds::handle_set_managed_feed_config,
         "Set or clear the managed-feed configuration (PR-reviews and CVE feed commands + poll \
 intervals). Each field is triple-state: omit to leave unchanged, pass null to clear, or pass a \
 value to set. Saving re-provisions the managed epic tree, so enabling a feed creates its epics \
@@ -531,7 +574,7 @@ immediately. Intervals are in seconds; omit an interval to fall back to the defa
             }
         };
 
-    async "set_verify_command" => tasks::handle_set_verify_command,
+    async idempotent "set_verify_command" => tasks::handle_set_verify_command,
         "Set or clear the verify command for a repository path — the check an agent working in \
 that repo must run green before declaring work complete. It never appears in a dispatch prompt. \
 It reaches the agent through two surfaces instead: the 'Verify command' line in get_task's \
@@ -552,7 +595,7 @@ Pass command=null to clear it.",
             "required": ["repo_path"]
         };
 
-    async "exit_session" => tasks::handle_exit_session,
+    async destructive "exit_session" => tasks::handle_exit_session,
         "Close your agent session with the token wrap_up returned. Applies the terminal mutation \
 atomically with clearing the tmux window: 'rebase'/'done' move the task to Done; 'pr' moves it to \
 Review and sets the PR url. The action must match the one passed to wrap_up. If the task belongs \
@@ -581,7 +624,7 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
             "required": ["task_id", "token", "action"]
         };
 
-    async "query_usage" => tasks::handle_query_usage,
+    async read_only "query_usage" => tasks::handle_query_usage,
         "Query aggregated feature usage counts. Returns events grouped by category/action/actor, ordered by count ascending (least-used first). Useful for identifying unused keybindings or MCP tools.",
         {
             "type": "object",
@@ -608,7 +651,7 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
         }
 ;
 
-    async "read_context" => context::handle_read_context,
+    async read_only "read_context" => context::handle_read_context,
         "Return the text of one dispatch context resource, the same text the resources/read method gives for that URI. Pass skill://<name>/SKILL.md for an agent-facing skill or skill://<name>/references/<file>.md for a reference file beside it, dispatch://learnings/<id> for a validated learning from the knowledge base, dispatch://task/self for your own task, or dispatch://task/<id> for any task by id, exactly as get_task renders it. Use it to pull a skill, a reference or a learning into your context when you only have its URI; it does not search, and it does not list what exists. An unknown URI is refused with an error naming it.",
         {
             "type": "object",
@@ -622,7 +665,7 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
         }
 ;
 
-    async "list_keybindings" => keybindings::handle_list_keybindings,
+    async read_only "list_keybindings" => keybindings::handle_list_keybindings,
         "List every key the dispatch board, the agent-tree and diff panes, and tmux answer to, grouped by input mode (namespace), straight from the table the key handlers read. Each row has its keys, the context it applies under (when it has one), the action id, a description and a note where a key is easy to misread. Read-only.",
         {
             "type": "object",

@@ -1354,3 +1354,77 @@ fn no_task_or_epic_status_schema_advertises_archived() {
         }
     }
 }
+
+/// mcp-task-tools.allium: ToolsAdvertiseAnnotations. Every tool carries a
+/// title and the four MCP behaviour hints, and the hints agree with each other
+/// and with the tools we know to be reads or destructive.
+#[test]
+fn tool_definitions_carry_annotations() {
+    const READ_ONLY: &[&str] = &[
+        "get_task",
+        "list_tasks",
+        "get_epic",
+        "list_epics",
+        "query_learnings",
+        "get_managed_feed_config",
+        "query_usage",
+        "read_context",
+        "list_keybindings",
+    ];
+    const DESTRUCTIVE: &[&str] = &["delete_learning", "exit_session"];
+    let defs = tool_definitions();
+    for tool in defs["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        let ann = tool["annotations"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{name}: missing annotations"));
+        assert!(
+            ann.get("title")
+                .and_then(Value::as_str)
+                .is_some_and(|t| !t.is_empty()),
+            "{name}: annotations.title must be a non-empty string"
+        );
+        let hint = |k: &str| {
+            ann.get(k)
+                .and_then(Value::as_bool)
+                .unwrap_or_else(|| panic!("{name}: annotations.{k} must be a boolean"))
+        };
+        let (ro, destructive, idem, open) = (
+            hint("readOnlyHint"),
+            hint("destructiveHint"),
+            hint("idempotentHint"),
+            hint("openWorldHint"),
+        );
+        assert!(!open, "{name}: openWorldHint must be false");
+        assert_eq!(ro, READ_ONLY.contains(&name), "{name}: readOnlyHint");
+        assert_eq!(
+            destructive,
+            DESTRUCTIVE.contains(&name),
+            "{name}: destructiveHint"
+        );
+        if ro {
+            assert!(idem, "{name}: a read-only tool is idempotent");
+            assert!(!destructive, "{name}: a read-only tool is not destructive");
+        }
+    }
+}
+
+/// mcp-task-tools.allium: ToolsAdvertiseAnnotations. Every argument of every
+/// tool has a description; a bare `{"type": "integer"}` leaves the caller to
+/// guess its meaning.
+#[test]
+fn every_argument_carries_a_description() {
+    let defs = tool_definitions();
+    for tool in defs["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        let Some(props) = tool["inputSchema"]["properties"].as_object() else {
+            continue;
+        };
+        for (arg, schema) in props {
+            let ok = schema["description"]
+                .as_str()
+                .is_some_and(|d| !d.trim().is_empty());
+            assert!(ok, "{name}.{arg}: missing description");
+        }
+    }
+}
