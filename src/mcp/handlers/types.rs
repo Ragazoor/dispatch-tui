@@ -361,6 +361,33 @@ where
 // boundary and parses each into a TaskStatus.
 // ---------------------------------------------------------------------------
 
+/// Reject a `limit` of zero (-32602); `None` means no cap.
+pub(super) fn check_limit(id: &Option<Value>, limit: Option<usize>) -> Result<(), JsonRpcResponse> {
+    if limit == Some(0) {
+        return Err(JsonRpcResponse::err(
+            id.clone(),
+            INVALID_PARAMS,
+            "limit must be at least 1".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Keep the first `limit` rows. Returns the hint line to append when rows were
+/// cut. See `limit` in `ListTasksViaMcp` (`docs/specs/mcp-task-tools.allium`).
+pub(super) fn apply_limit<T>(rows: &mut Vec<T>, limit: Option<usize>) -> Option<String> {
+    let total = rows.len();
+    match limit {
+        Some(n) if total > n => {
+            rows.truncate(n);
+            Some(format!(
+                "Showing {n} of {total}. Narrow your query or filters."
+            ))
+        }
+        _ => None,
+    }
+}
+
 /// Filter for `list_tasks.status`. Deserialises from either a JSON string
 /// (`"backlog"`) or a JSON array of strings (`["backlog", "ready"]`).
 #[derive(Debug, Clone, PartialEq, Eq)]

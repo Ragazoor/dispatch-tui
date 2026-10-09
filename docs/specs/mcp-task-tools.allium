@@ -885,7 +885,11 @@ rule GetTaskViaMcp {
 rule ListTasksViaMcp {
     when: McpListTasks(caller_identity,
                        epic_id?, repo_paths?, status?, recursive?, base_branch?,
-                       query?)
+                       query?, limit?)
+
+    -- A limit of zero is meaningless: rejected as invalid params (-32602).
+    requires:
+        if limit != null: limit >= 1
 
     -- caller_identity comes from the HTTP transport (see CreateTaskViaMcp).
 
@@ -896,7 +900,8 @@ rule ListTasksViaMcp {
         status: status,
         recursive: recursive,
         base_branch: base_branch,
-        query: query
+        query: query,
+        limit: limit
     )
 
     @guidance
@@ -914,9 +919,16 @@ rule ListTasksViaMcp {
         -- epics.allium). Substring, not whole-word: "dispatch" matches
         -- "redispatch". No ranking: matches come back in the usual list order.
         -- When nothing matches the reply is the usual "No tasks found".
-        -- No limit argument: the query is the narrowing tool, and a default
-        -- limit would silently truncate the unqueried list that callers
-        -- already rely on being complete.
+        -- == limit caps the rows, with no default ==
+        -- limit is optional and has NO default: without it the list is
+        -- complete, as before. A default would silently truncate the plain
+        -- list that callers rely on being complete (a bulk change would miss
+        -- tasks without knowing). With limit set, the first `limit` rows in
+        -- the usual order are returned after every filter has been applied.
+        -- When rows were cut, a final line says so:
+        --   "Showing <limit> of <total>. Narrow your query or filters."
+        -- When nothing is cut there is no such line. The same rule serves
+        -- list_epics (ListEpicsViaMcp in epics.allium).
         --
         -- == recursive widens the epic scope to the whole subtree ==
         -- recursive (default false) applies to the epic scope in effect,

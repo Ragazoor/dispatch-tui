@@ -84,3 +84,52 @@ async fn query_with_no_match_says_no_tasks_found() {
         "No tasks found"
     );
 }
+
+#[tokio::test]
+async fn limit_caps_rows_and_says_how_many_were_cut() {
+    let state = test_state().await;
+    seed(&state).await;
+    let text = list(&state, json!({ "limit": 2 })).await;
+    assert_eq!(text.lines().count(), 3, "{text}");
+    assert_eq!(
+        text.lines().last().unwrap(),
+        "Showing 2 of 3. Narrow your query or filters."
+    );
+}
+
+#[tokio::test]
+async fn limit_not_exceeded_adds_no_hint() {
+    let state = test_state().await;
+    seed(&state).await;
+    let text = list(&state, json!({ "limit": 3 })).await;
+    assert_eq!(text.lines().count(), 3, "{text}");
+    assert!(!text.contains("Showing"), "{text}");
+}
+
+#[tokio::test]
+async fn limit_applies_after_the_query() {
+    let state = test_state().await;
+    seed(&state).await;
+    let text = list(&state, json!({ "query": "login", "limit": 1 })).await;
+    assert!(
+        text.ends_with("Showing 1 of 2. Narrow your query or filters."),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn zero_limit_is_invalid_params() {
+    let state = test_state().await;
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_tasks", "arguments": { "limit": 0 } })),
+    )
+    .await;
+    let rejected = resp.error.is_some()
+        || resp
+            .result
+            .as_ref()
+            .is_some_and(|r| r["isError"] == json!(true));
+    assert!(rejected, "limit 0 must be rejected: {resp:?}");
+}

@@ -467,6 +467,9 @@ pub(crate) async fn handle_list_tasks(
         Err(resp) => return resp,
     };
     tracing::info!(status = ?parsed.status, identity = ?identity, "MCP list_tasks");
+    if let Err(resp) = super::super::types::check_limit(&id, parsed.limit) {
+        return resp;
+    }
 
     let (derived_epic_id, exclude_task_id) =
         match resolve_list_scope(state, &id, identity, &parsed).await {
@@ -484,7 +487,7 @@ pub(crate) async fn handle_list_tasks(
         );
     }
 
-    let filtered = match state
+    let mut filtered = match state
         .task_svc
         .list_tasks(ListTasksFilter {
             statuses: status_filter,
@@ -507,11 +510,12 @@ pub(crate) async fn handle_list_tasks(
             json!({"content": [{"type": "text", "text": "No tasks found"}]}),
         );
     }
+    let cut_hint = super::super::types::apply_limit(&mut filtered, parsed.limit);
     let (epic_titles, plan_goals) = tokio::join!(
         super::build_epic_titles(state),
         build_plan_goal_cache(&filtered)
     );
-    let lines: Vec<String> = filtered
+    let mut lines: Vec<String> = filtered
         .iter()
         .map(|t| {
             let goal = match t.plan_path.as_deref().and_then(|p| plan_goals.get(p)) {
@@ -521,6 +525,7 @@ pub(crate) async fn handle_list_tasks(
             super::format_task_line(t, &epic_titles, &goal)
         })
         .collect();
+    lines.extend(cut_hint);
     JsonRpcResponse::ok(
         id,
         json!({"content": [{"type": "text", "text": lines.join("\n")}]}),

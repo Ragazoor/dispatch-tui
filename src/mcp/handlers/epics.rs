@@ -44,6 +44,8 @@ pub(super) struct ListEpicsArgs {
     pub(super) recursive: bool,
     #[serde(default)]
     pub(super) query: Option<String>,
+    #[serde(default)]
+    pub(super) limit: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -178,6 +180,9 @@ pub(super) async fn handle_list_epics(
     };
     tracing::info!(parent_epic_id = ?parsed.parent_epic_id, recursive = parsed.recursive, "MCP list_epics");
 
+    if let Err(resp) = super::types::check_limit(&id, parsed.limit) {
+        return resp;
+    }
     let epics = match state
         .epic_svc
         .list_epics_with_progress_under(parsed.parent_epic_id, parsed.recursive)
@@ -186,7 +191,7 @@ pub(super) async fn handle_list_epics(
         Ok(epics) => epics,
         Err(e) => return service_err_to_response(id, e),
     };
-    let epics: Vec<_> = match parsed.query.as_deref() {
+    let mut epics: Vec<_> = match parsed.query.as_deref() {
         Some(q) => epics
             .into_iter()
             .filter(|(e, _, _)| crate::models::text_query_matches(q, &e.title, &e.description))
@@ -199,10 +204,12 @@ pub(super) async fn handle_list_epics(
             json!({"content": [{"type": "text", "text": "No epics found"}]}),
         );
     }
-    let lines: Vec<String> = epics
+    let cut_hint = super::types::apply_limit(&mut epics, parsed.limit);
+    let mut lines: Vec<String> = epics
         .iter()
         .map(|(e, done, total)| format_epic_list_line(e, *done, *total))
         .collect();
+    lines.extend(cut_hint);
     JsonRpcResponse::ok(
         id,
         json!({"content": [{"type": "text", "text": lines.join("\n")}]}),

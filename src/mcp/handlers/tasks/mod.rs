@@ -198,6 +198,8 @@ pub(super) struct ListTasksArgs {
     pub(super) base_branch: Option<String>,
     #[serde(default)]
     pub(super) query: Option<String>,
+    #[serde(default)]
+    pub(super) limit: Option<usize>,
 }
 
 #[derive(Deserialize)]

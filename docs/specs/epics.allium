@@ -548,7 +548,7 @@ rule GetEpicViaMcp {
 }
 
 rule ListEpicsViaMcp {
-    when: McpListEpics(parent_epic_id?, recursive?, query?)
+    when: McpListEpics(parent_epic_id?, recursive?, query?, limit?)
 
     requires:
         if parent_epic_id != null: core/Epic.exists(parent_epic_id)
@@ -561,10 +561,14 @@ rule ListEpicsViaMcp {
     -- (done_count, total_count): every epic when parent_epic_id is null; the
     -- epics whose parent is parent_epic_id when recursive is false; every
     -- descendant of parent_epic_id (not parent_epic_id itself) when it is true.
+    -- A limit of zero is rejected as invalid params (-32602).
+    requires:
+        if limit != null: limit >= 1
+
     -- When query is set, only epics matching it are kept, after the scope
     -- above is applied (the two are ANDed).
     ensures: EpicsListed(parent_epic_id: parent_epic_id, recursive: recursive,
-                         query: query)
+                         query: query, limit: limit)
 
     @guidance
         -- query is split on whitespace into words; an epic matches when
@@ -573,6 +577,10 @@ rule ListEpicsViaMcp {
         -- rule as list_tasks (ListTasksViaMcp in mcp-task-tools.allium). The
         -- progress counts of a matching epic are unchanged. Nothing matching
         -- gives the usual "No epics found".
+        -- limit (optional, no default) keeps the first `limit` rows after the
+        -- scope and query are applied; when rows were cut the reply ends with
+        -- "Showing <limit> of <total>. Narrow your query or filters." The
+        -- same rule as list_tasks.
         --
         -- All arguments are optional. With neither it returns every epic in
         -- the database along with done/total subtask counts for each. An

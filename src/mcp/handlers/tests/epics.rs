@@ -1158,3 +1158,33 @@ async fn list_epics_query_is_anded_with_parent_scope() {
         "{text}"
     );
 }
+
+#[tokio::test]
+async fn list_epics_limit_caps_rows_and_hints() {
+    let state = test_state().await;
+    let w = state.db_write();
+    for t in ["A", "B", "C"] {
+        w.create_epic(t, "", None).await.unwrap();
+    }
+    let text = list_epics_text(&state, json!({ "limit": 2 })).await;
+    assert_eq!(text.lines().count(), 3, "{text}");
+    assert_eq!(
+        text.lines().last().unwrap(),
+        "Showing 2 of 3. Narrow your query or filters."
+    );
+    let text = list_epics_text(&state, json!({ "limit": 3 })).await;
+    assert!(!text.contains("Showing"), "{text}");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_epics", "arguments": { "limit": 0 } })),
+    )
+    .await;
+    let rejected = resp.error.is_some()
+        || resp
+            .result
+            .as_ref()
+            .is_some_and(|r| r["isError"] == json!(true));
+    assert!(rejected, "limit 0 must be rejected: {resp:?}");
+}

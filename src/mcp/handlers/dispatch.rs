@@ -284,6 +284,11 @@ usually the right answer.",
                 "query": {
                     "type": "string",
                     "description": "Text search over title and description. Split on spaces; every word must appear (any case, as part of a word) in the title or description. Combines with the other filters."
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Return at most this many rows. No default: without it every match is returned. When rows are cut, the last line says how many were shown of how many."
                 }
             }
         };
@@ -329,6 +334,11 @@ For one epic's detail or its subtask counts, call get_epic instead.",
                 "query": {
                     "type": "string",
                     "description": "Text search over title and description. Split on spaces; every word must appear (any case, as part of a word) in the title or description. Combines with the other filters."
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Return at most this many rows. No default: without it every match is returned. When rows are cut, the last line says how many were shown of how many."
                 }
             }
         };
