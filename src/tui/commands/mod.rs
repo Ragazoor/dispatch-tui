@@ -19,6 +19,7 @@ pub mod split;
 pub mod system;
 pub mod task;
 pub mod usage;
+pub mod work_package;
 
 pub use budget::BudgetCommand;
 pub use editor::EditorCommand;
@@ -33,3 +34,4 @@ pub use split::SplitCommand;
 pub use system::SystemCommand;
 pub use task::{CleanupFollowUp, DeleteGuard, PersistFields, TaskCommand};
 pub use usage::UsageCommand;
+pub use work_package::WorkPackageCommand;

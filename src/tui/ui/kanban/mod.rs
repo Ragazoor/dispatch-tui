@@ -45,6 +45,7 @@ use columns::{compute_columns_data, render_columns};
 use popups::{
     render_error_popup, render_help_overlay, render_move_task_overlay,
     render_reparent_epic_overlay, render_repo_filter_overlay, render_task_detail_overlay,
+    render_work_package_picker_overlay, render_work_package_rename_overlay,
 };
 use status_bar::render_status_bar;
 
@@ -292,6 +293,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_task_detail_overlay(frame, app, area);
     render_reparent_epic_overlay(frame, app, area);
     render_move_task_overlay(frame, app, area);
+    render_work_package_picker_overlay(frame, app, area);
+    render_work_package_rename_overlay(frame, app, area);
 }
 
 /// Layout constraints for the kanban board: content columns interleaved with
@@ -403,7 +406,9 @@ fn task_column_segment(
             ColumnItem::Task(_) | ColumnItem::Epic(_) => 1,
             ColumnItem::FoldedSection(h) => h.hidden,
             ColumnItem::FoldedEpic(h) => h.hidden,
-            ColumnItem::SubstatusLabel(_)
+            // A package card is a view onto work counted elsewhere, not work.
+            ColumnItem::WorkPackage(_)
+            | ColumnItem::SubstatusLabel(_)
             | ColumnItem::EpicHeader(_)
             | ColumnItem::OrphanSeparator => 0,
         })
@@ -421,7 +426,8 @@ fn task_column_segment(
             let selected = match item {
                 ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
                 ColumnItem::Epic(e) => app.selected_epics().contains(&e.id),
-                ColumnItem::FoldedSection(_)
+                ColumnItem::WorkPackage(_)
+                | ColumnItem::FoldedSection(_)
                 | ColumnItem::FoldedEpic(_)
                 | ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
@@ -666,6 +672,24 @@ pub(in crate::tui) fn action_hints(
 }
 
 /// Build context-sensitive keybinding hints for a selected epic.
+/// Status bar hints for a work package card (`work-packages.allium`). A
+/// package has no status, so there is nothing to move.
+pub(in crate::tui) fn package_action_hints(key_color: Color) -> Vec<Span<'static>> {
+    let label_style = Style::default().fg(MUTED);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut push_hint = |key: &'static str, label: &'static str| {
+        push_hint_spans(&mut spans, key, label, key_color, label_style);
+    };
+    push_hint("Space", "open");
+    push_hint("e", "rename");
+    push_hint("x", "delete");
+    push_hint("n", "new");
+    push_hint("E", "epic");
+    push_hint("/", "search");
+    push_hint("?", "help");
+    spans
+}
+
 pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Span<'static>> {
     let label_style = Style::default().fg(MUTED);
 

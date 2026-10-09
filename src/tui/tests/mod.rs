@@ -31,6 +31,7 @@ mod targeted_refresh;
 mod task_detail;
 mod tick_performance;
 mod usage;
+mod work_packages;
 mod wrap_up;
 
 // Re-exports: child test modules access these via `super::<item>`.

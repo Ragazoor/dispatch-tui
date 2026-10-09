@@ -1673,3 +1673,30 @@ surface EpicCard {
         -- token: sourcing it from the column encodes the very conflation the
         -- tests disprove. See "Where these rules are enforced".
 }
+
+-- A work package card (work-packages.allium: PackageCardPlacement) is a
+-- second kind of container: shaped like an epic card, coloured apart from it.
+surface WorkPackageCard {
+    facing user: User
+
+    context package: WorkPackage
+    context card: RenderedCard
+
+    exposes:
+        package.title
+        card.frame_colour
+        card.is_cursor
+
+    @guarantee CyanInEveryColumn
+        -- The stripe, the square glyph (U+25A3) and the bold title are CYAN
+        -- wherever the card sits, so a package card is never read as an
+        -- epic card (PURPLE) or as a member of its column.
+
+    @guarantee PackageFramesAreOnlyWhiteOrNeutral
+        -- Like an epic card, a package card claims no state colour: its
+        -- frame is cursor_white when selected and resting_neutral otherwise.
+
+    @guidance
+        -- Line 2 is a muted "N items · M done" summary, or "no items". The
+        -- surface, inset and chrome are an epic card's.
+}

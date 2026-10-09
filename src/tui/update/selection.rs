@@ -115,7 +115,8 @@ impl App {
         match item {
             ColumnItem::Task(t) => crate::models::ColumnSection::for_task(t),
             ColumnItem::Epic(e) => self.view().epic_column_section(e, status, placements),
-            ColumnItem::FoldedSection(_)
+            ColumnItem::WorkPackage(_)
+            | ColumnItem::FoldedSection(_)
             | ColumnItem::FoldedEpic(_)
             | ColumnItem::SubstatusLabel(_)
             | ColumnItem::EpicHeader(_)
@@ -222,7 +223,10 @@ impl App {
             match item {
                 ColumnItem::Task(t) => task_ids.push(t.id),
                 ColumnItem::Epic(e) => epic_ids.push(e.id),
-                ColumnItem::FoldedSection(_)
+                // Not selectable for batch actions: a package is not a card
+                // any batch action applies to.
+                ColumnItem::WorkPackage(_)
+                | ColumnItem::FoldedSection(_)
                 | ColumnItem::FoldedEpic(_)
                 | ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)

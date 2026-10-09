@@ -150,7 +150,9 @@ impl App {
         self.status.clear();
         let epic_id = match self.view().effective_view_mode() {
             BoardViewMode::Epic { epic_id, .. } => Some(epic_id),
-            BoardViewMode::Board(_) => None,
+            // Nothing is created inside a package: a new task in a package
+            // view is a plain main-board task (`work-packages.allium`).
+            BoardViewMode::Board(_) | BoardViewMode::Package { .. } => None,
         };
         vec![
             Command::Task(crate::tui::commands::TaskCommand::Insert { draft, epic_id }),

@@ -38,7 +38,11 @@ impl App {
             InputMode::InputTitle
             | InputMode::InputDescription
             | InputMode::InputEpicTitle
-            | InputMode::InputEpicDescription => N::BoardText,
+            | InputMode::InputEpicDescription
+            | InputMode::InputWorkPackageTitle(_)
+            | InputMode::RenameWorkPackage(_) => N::BoardText,
+            InputMode::LinkWorkPackage { .. } => N::BoardPickerWorkPackage,
+            InputMode::ConfirmDeleteWorkPackage(_) => N::BoardConfirmDeleteWorkPackage,
             InputMode::InputRepoPath => N::BoardPickerRepoPath,
             InputMode::InputBaseBranch => N::BoardPickerBaseBranch,
             InputMode::InputTag => N::BoardPickerTag,
@@ -132,7 +136,12 @@ impl App {
         rung: &std::cell::OnceCell<Option<KeyContext>>,
     ) -> bool {
         use KeyContext as C;
-        let in_epic = matches!(self.board.view_mode, ViewMode::Epic { .. });
+        // An epic view or a package view: one level below the main board,
+        // left by the same keys (`work-packages.allium: ExitPackage`).
+        let in_epic = matches!(
+            self.board.view_mode,
+            ViewMode::Epic { .. } | ViewMode::Package { .. }
+        );
         match context {
             C::SearchActive => self.view().search_active(),
             C::InsideEpicView => in_epic,
@@ -147,6 +156,7 @@ impl App {
             C::OnFoldedSection => self.cursor_is_on_folded_header(),
             C::OnFoldedEpicGroup => self.cursor_is_on_folded_epic_header(),
             C::OnEpicCard => self.selected_epic_id().is_some(),
+            C::OnWorkPackageCard => self.selected_work_package_id().is_some(),
             C::OnTaskCard => matches!(self.selected_column_item(), Some(ColumnItem::Task(_))),
             C::OnFlattenedTaskCard | C::OnUnflattenedTaskCard => {
                 self.cursor_in_flattened_column() == (context == C::OnFlattenedTaskCard)
@@ -328,6 +338,13 @@ impl App {
             N::BoardPickerQuickDispatch => self.run_quick_dispatch_picker(action, key, label),
             N::BoardPickerMoveToEpic => self.run_move_to_epic_picker(action, key, label),
             N::BoardPickerReparentEpic => self.run_reparent_picker(action, key, label),
+            N::BoardPickerWorkPackage => self.run_work_package_picker(action, key, label),
+            N::BoardConfirmDeleteWorkPackage => match self.input.mode {
+                InputMode::ConfirmDeleteWorkPackage(id) => {
+                    self.handle_key_confirm_delete_work_package(label, action.ends_with("_yes"), id)
+                }
+                _ => vec![],
+            },
             N::BoardConfirmMoveToEpic => {
                 use crate::tui::messages::TaskMessage::*;
                 let msg = match action {
@@ -517,6 +534,26 @@ impl App {
             _ => return vec![],
         };
         self.dispatch_keyed(Message::Task(msg), action, label)
+    }
+
+    /// The work-package link picker (`WorkPackageLinkPicker`).
+    fn run_work_package_picker(
+        &mut self,
+        action: &'static str,
+        key: KeyEvent,
+        label: &str,
+    ) -> Vec<Command> {
+        use crate::tui::messages::WorkPackageMessage::*;
+        let msg = match action {
+            "work_package_picker_navigate" => {
+                let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
+                PickerMove(if down { 1 } else { -1 })
+            }
+            "work_package_picker_toggle" => PickerActivate,
+            "work_package_picker_close" => PickerClose,
+            _ => return vec![],
+        };
+        self.dispatch_keyed(Message::WorkPackage(msg), action, label)
     }
 
     /// The "reparent epic" tree picker.

@@ -99,7 +99,9 @@ impl App {
         self.invalidate_layout_cache();
 
         let anchor = match self.view().effective_view_mode() {
-            BoardViewMode::Board(sel) | BoardViewMode::Epic { selection: sel, .. } => sel.anchor,
+            BoardViewMode::Board(sel)
+            | BoardViewMode::Epic { selection: sel, .. }
+            | BoardViewMode::Package { selection: sel, .. } => sel.anchor,
         };
 
         let Some(anchor) = anchor else {

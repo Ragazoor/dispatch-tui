@@ -47,6 +47,11 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_cancel_input(&mut self) -> Vec<Command> {
+        // The new-package title belongs to the link picker: Esc returns there
+        // (`work-packages.allium: WorkPackageLinkPicker`).
+        if let InputMode::InputWorkPackageTitle(item) = self.input.mode {
+            return self.cancel_new_package_title(item);
+        }
         self.input.mode = InputMode::Normal;
         self.input.clear_buffer();
         self.input.task_draft = None;

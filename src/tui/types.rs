@@ -169,6 +169,9 @@ pub enum Message {
     Feed(crate::tui::messages::FeedMessage),
     /// Budget-indicator messages — see [`crate::tui::messages::BudgetMessage`].
     Budget(crate::tui::messages::BudgetMessage),
+    /// Work-package messages — see
+    /// [`crate::tui::messages::WorkPackageMessage`].
+    WorkPackage(crate::tui::messages::WorkPackageMessage),
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +226,9 @@ pub enum Command {
     /// Budget-indicator side-effect commands — see
     /// [`crate::tui::commands::BudgetCommand`].
     Budget(crate::tui::commands::BudgetCommand),
+    /// Work-package side-effect commands — see
+    /// [`crate::tui::commands::WorkPackageCommand`].
+    WorkPackage(crate::tui::commands::WorkPackageCommand),
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +318,20 @@ pub enum InputMode {
     ConfirmRepoSync {
         repo_path: String,
     },
+    /// The work-package link picker (`w` on a task or epic card —
+    /// `work-packages.allium: WorkPackageLinkPicker`). `cursor` indexes the
+    /// board's packages in order, then the final "new package" row.
+    LinkWorkPackage {
+        item: crate::models::WorkPackageItem,
+        cursor: usize,
+    },
+    /// The picker's "new package" title input. Carries the item the new
+    /// package will be linked to, and returns to the picker either way.
+    InputWorkPackageTitle(crate::models::WorkPackageItem),
+    /// `e` on a package card: the one-line rename input.
+    RenameWorkPackage(crate::models::WorkPackageId),
+    /// `x` on a package card: delete the package (its links only).
+    ConfirmDeleteWorkPackage(crate::models::WorkPackageId),
 }
 
 impl InputMode {

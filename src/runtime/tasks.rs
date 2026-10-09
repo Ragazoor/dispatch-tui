@@ -932,6 +932,12 @@ impl TuiRuntime {
             epics,
         )));
 
+        let packages = db.list_work_packages().await;
+        let links = db.list_work_package_links().await;
+        let _ = tx.send(Message::WorkPackage(
+            crate::tui::messages::WorkPackageMessage::Refresh { packages, links },
+        ));
+
         let paths = db.list_repo_paths().await;
         let _ = tx.send(Message::RepoPathsUpdated(paths));
 

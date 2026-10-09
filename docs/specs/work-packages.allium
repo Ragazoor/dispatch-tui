@@ -190,8 +190,12 @@ rule DeletingAnItemRemovesItsLinks {
 --   - every task in the subtree of every linked epic.
 -- Visible means the same as for epic cards: admitted by the repo filter, the
 -- only-active filter and the search query. A package with no such task in
--- any column — no links yet, or everything filtered away — is drawn in
--- Backlog, so it stays reachable and the user can link items to it.
+-- any column — no links yet, or everything hidden by the repo or
+-- only-active filter — is drawn in Backlog, so it stays reachable and the
+-- user can link items to it. Unlike an epic card, a package card is never
+-- hidden by the repo or only-active filter: a package is the user's own
+-- grouping, not work in a repo. Only a search query can take a package's
+-- card off the board (see the guidance below).
 --
 -- When every linked item is done, the only column with work is Done, so the
 -- card shows there alone. That is the whole of "finished": there is no
@@ -219,7 +223,22 @@ rule PackageCardPlacement {
         -- whose title matches the query keeps its card even when no linked
         -- work matches, mirroring board_search_filter's own-match clause for
         -- epics. A package whose title does not match keeps its card only
-        -- through visible linked work.
+        -- through visible linked work. The title match is a case-insensitive
+        -- substring match on the title alone; a package id is not searched,
+        -- because package ids are a sequence of their own and "#7" would
+        -- match a package and a task at once.
+        -- The card shows a square glyph and the title in CYAN (an epic card's
+        -- identity is PURPLE — board-visuals.allium: WorkPackageCard), and a
+        -- second line "N items · M done" counting the linked items the board
+        -- holds and how many of them are done; "no items" when it holds none.
+        -- A package card is a view onto work counted elsewhere, so the
+        -- column header's card count does not include it, select-all and
+        -- multi-select skip it, and H/L and J/K reordering do nothing on it.
+        -- The status bar on a package card offers Space open, e rename and
+        -- x delete.
+        -- Computed on every render rather than cached: the placement reads
+        -- links, the epic tree and the filters, and a board holds few
+        -- packages.
 }
 
 -- Package cards are a main-board-only surface.
@@ -240,6 +259,11 @@ rule EnterPackage {
     @guidance
         -- Space on a package card. The view keeps its own cursor, as an epic
         -- view does, and the main board's cursor is restored on exit.
+        -- The view is framed like an epic view, its border titled with a
+        -- square glyph and the package title.
+        -- A refresh in which the open package no longer exists (deleted on
+        -- another machine, or by an agent) returns to the main board, from
+        -- the package view and from any epic view entered from it.
 }
 
 rule ExitPackage {
@@ -291,6 +315,10 @@ rule EnterEpicFromPackage {
         -- the deepest epic (epics.allium: JumpToDeepestEpic) with the trail
         -- starting at the package view. q from that epic view returns to the
         -- package view, not the main board. Q returns to the main board.
+        -- The trail starts at the linked epic that was pressed, not at the
+        -- root of the epic tree: a linked sub-epic's ancestors are not on
+        -- the trail, because the user never stepped through them.
+        -- The epic view's border names the package first, then the trail.
 }
 
 ------------------------------------------------------------
@@ -318,9 +346,17 @@ surface WorkPackageLinkPicker {
         -- Toggling a row calls LinkItem or UnlinkItem at once and keeps the
         -- picker open, so several packages can be toggled in one visit.
         -- Creating a package from here also links the item to it, then
-        -- returns to the picker with the new row checked.
-        -- j/k move the cursor. `w` does nothing on any row that is not a
-        -- task or epic card (headers, folded rows, package cards).
+        -- returns to the picker with the cursor on the row the new package
+        -- fills (packages are oldest first, so it lands last); the row shows
+        -- checked once the write's refresh arrives.
+        -- A toggle flips the check mark at once, before the store answers;
+        -- the board re-reads its packages after every write, so a refused
+        -- write puts the mark back and shows the error.
+        -- j/k (and Down/Up) move the cursor, stopping at the first and last
+        -- rows. Esc in the new-package title returns to the picker. A linked
+        -- row shows "[x]", an unlinked one "[ ]". `w` does nothing on any row
+        -- that is not a task or epic card (headers, folded rows, package
+        -- cards).
 }
 
 rule CreatePackageFromPicker {
@@ -333,7 +369,7 @@ rule CreatePackageFromPicker {
         LinkItem(package, item)
 
     @guidance
-        -- An empty title closes the input without creating anything.
+        -- An empty title creates nothing and returns to the picker.
 }
 
 rule RenamePackageFromBoard {
@@ -354,8 +390,9 @@ rule DeletePackageFromBoard {
     ensures: DeleteWorkPackage(package)
 
     @guidance
-        -- `x` on a package card asks "Delete work package <title>? [y/n]"
-        -- (links only; items are kept). y deletes; anything else cancels.
+        -- `x` on a package card asks
+        -- `Delete work package "<title>"? Its tasks and epics are kept [y/n]`.
+        -- y (or Y) deletes; any other key cancels.
 }
 
 ------------------------------------------------------------

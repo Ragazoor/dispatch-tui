@@ -193,6 +193,7 @@ fn app_for(binding: &KeyBinding) -> App {
             app
         }
         Some(C::OnEpicCard) => make_app_with_epic_selected(),
+        Some(C::OnWorkPackageCard) => app_with_package_selected(),
         Some(C::OnFlattenedTaskCard) => {
             let mut app = app_with_running_task(|t| t.epic_id = Some(EpicId(10)));
             app.board.epics = vec![make_epic(10)];
@@ -292,6 +293,23 @@ fn app_for(binding: &KeyBinding) -> App {
 // The other board namespaces: put the board into the namespace's input mode
 // ---------------------------------------------------------------------------
 
+/// A board whose only card is work package #1's, under the cursor.
+fn app_with_package_selected() -> App {
+    let mut app = App::new(vec![]);
+    let at = chrono::DateTime::from_timestamp(1_700_000_000, 0).expect("valid timestamp");
+    app.board.work_packages = vec![crate::models::WorkPackage {
+        id: crate::models::WorkPackageId(1),
+        title: "Window".to_string(),
+        description: String::new(),
+        created_by: None,
+        created_at: at,
+        updated_at: at,
+    }];
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+    app
+}
+
 fn draft_app(mode: InputMode) -> App {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
@@ -387,6 +405,8 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
             InputMode::InputDescription,
             InputMode::InputEpicTitle,
             InputMode::InputEpicDescription,
+            InputMode::InputWorkPackageTitle(crate::models::WorkPackageItem::Task(TaskId(1))),
+            InputMode::RenameWorkPackage(crate::models::WorkPackageId(1)),
         ]
         .into_iter()
         .map(draft_app)
@@ -415,6 +435,14 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
         N::BoardPickerQuickDispatch => one(draft_app(InputMode::QuickDispatch)),
         N::BoardPickerMoveToEpic => one(with_move_task_picker()),
         N::BoardPickerReparentEpic => one(with_reparent_picker()),
+        N::BoardPickerWorkPackage => {
+            let mut app = app_with_package_selected();
+            app.input.mode = InputMode::LinkWorkPackage {
+                item: crate::models::WorkPackageItem::Task(TaskId(1)),
+                cursor: 0,
+            };
+            one(app)
+        }
         N::BoardConfirmQuit => one(draft_app(InputMode::ConfirmQuit)),
         N::BoardConfirmDeleteTask => one(draft_app(InputMode::ConfirmDeleteTask(TaskId(4)))),
         N::BoardConfirmBatchDelete => one(draft_app(InputMode::ConfirmBatchDelete)),
@@ -471,6 +499,9 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
         N::BoardConfirmRepoSync => one(draft_app(InputMode::ConfirmRepoSync {
             repo_path: "/repo/a".to_string(),
         })),
+        N::BoardConfirmDeleteWorkPackage => one(draft_app(InputMode::ConfirmDeleteWorkPackage(
+            crate::models::WorkPackageId(1),
+        ))),
         N::AgentTreeTree
         | N::AgentTreeCommits
         | N::AgentTreeAgents

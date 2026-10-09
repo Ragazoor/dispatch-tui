@@ -57,7 +57,9 @@ use "./observability.allium" as observability
 --   board_error                  board.error                  the error popup
 --   board_text                   board.text                   a free-text field: task title,
 --                                                             task description, epic title,
---                                                             epic description
+--                                                             epic description, a new
+--                                                             work package's title, a
+--                                                             work package rename
 --   board_repo_filter            board.repo_filter            the repo-filter picker (`f`)
 --   board_picker_repo_path       board.picker.repo_path       repo-path field with candidate list
 --   board_picker_base_branch     board.picker.base_branch     base-branch field with candidate list
@@ -66,6 +68,7 @@ use "./observability.allium" as observability
 --   board_picker_quick_dispatch  board.picker.quick_dispatch  quick-dispatch repo picker (`D`)
 --   board_picker_move_to_epic    board.picker.move_to_epic    epic tree picker for moving a task (`m`)
 --   board_picker_reparent_epic   board.picker.reparent_epic   epic tree picker for reparenting an epic (`m`)
+--   board_picker_work_package    board.picker.work_package    work-package link picker (`w`; work-packages.allium)
 --   board_confirm_quit                    board.confirm.quit
 --   board_confirm_delete_task             board.confirm.delete_task
 --   board_confirm_batch_delete            board.confirm.batch_delete
@@ -80,6 +83,7 @@ use "./observability.allium" as observability
 --   board_confirm_trust_repo              board.confirm.trust_repo
 --   board_confirm_trust_repo_quick_dispatch  board.confirm.trust_repo_quick_dispatch
 --   board_confirm_repo_sync               board.confirm.repo_sync
+--   board_confirm_delete_work_package     board.confirm.delete_work_package
 --   agent_tree_tree              agent_tree.tree              companion pane, file-tree section
 --   agent_tree_commits           agent_tree.commits           companion pane, Commits section
 --   agent_tree_agents            agent_tree.agents            companion pane, Agents section
@@ -182,12 +186,14 @@ enum KeyNamespace {
     board_picker_repo_path | board_picker_base_branch | board_picker_tag |
     board_picker_wrap_up_mode | board_picker_quick_dispatch |
     board_picker_move_to_epic | board_picker_reparent_epic |
+    board_picker_work_package |
     board_confirm_quit | board_confirm_delete_task | board_confirm_batch_delete |
     board_confirm_delete_epic | board_confirm_done | board_confirm_retry |
     board_confirm_detach_tmux | board_confirm_override_feed_owner |
     board_confirm_move_to_epic | board_confirm_reparent_epic |
     board_confirm_delete_repo_path | board_confirm_trust_repo |
     board_confirm_trust_repo_quick_dispatch | board_confirm_repo_sync |
+    board_confirm_delete_work_package |
     agent_tree_tree | agent_tree_commits | agent_tree_agents | agent_diff |
     tmux_global
 }
@@ -216,13 +222,16 @@ enum KeyReceiver { dispatch | tmux }
 --
 -- board.normal, view-level (q, Esc, U, R). Esc's handler tests, in order:
 -- a search active, an epic view open, cards selected. q and U/R test only
--- whether an epic view is open and ignore search:
+-- whether an epic view is open and ignore search. A work package view
+-- (work-packages.allium: ExitPackage) counts as an epic view here: it is one
+-- level below the main board and q / Esc / Q leave it the same way. U and R
+-- inside a package view have no epic to act on and do nothing:
 --   search_active             "with a search active"            Esc: clear_search
 --                              (any view)
---   inside_epic_view          "inside an epic view"             q: exit_epic; Q: exit_all_epics; U, R
---                              (search active or not)
---   epic_view_no_search       "inside an epic view, no search   Esc: exit_epic
---                              active"
+--   inside_epic_view          "inside an epic or work package   q: exit_epic; Q: exit_all_epics; U, R
+--                              view" (search active or not)
+--   epic_view_no_search       "inside an epic or work package   Esc: exit_epic
+--                              view, no search active"
 --   top_level                 "on the top-level board"          q: quit
 --                              (not in an epic view, search
 --                              active or not)
@@ -245,9 +254,12 @@ enum KeyReceiver { dispatch | tmux }
 --                                                                toggle_epic_fold
 --   on_epic_card              "on an epic card"                 Space: enter_epic;
 --                                                                Enter: jump_to_deepest_epic;
---                                                                m: reparent_epic; H/L
+--                                                                m: reparent_epic; H/L;
+--                                                                w: link_work_package
+--   on_work_package_card      "on a work package card"          Space: enter_work_package
 --   on_task_card              "on a task card"                  i: open_task_detail;
---                                                                m: move_task_to_epic
+--                                                                m: move_task_to_epic;
+--                                                                w: link_work_package
 --   on_flattened_task_card    "on a task card in a flattened    Enter: jump_to_task_epic
 --                              column" (FlattenedView.flattens;  (does nothing when the task
 --                              a subset of on_task_card)         has no epic)
@@ -255,9 +267,10 @@ enum KeyReceiver { dispatch | tmux }
 --                              that is not flattened"
 --                              (the other part of on_task_card)
 --   off_epic_card             "anywhere but an epic card"       H/L: move_task_forward /
---                              (a task card, or no card at all:   move_task_backward
---                              an empty column, a folded
---                              header, a select-all row)
+--                              (a task card, a work package       move_task_backward
+--                              card, or no card at all: an
+--                              empty column, a folded header,
+--                              a select-all row)
 --   H/L on an epic card move that epic's status even with cards selected.
 --   Anywhere else (off_epic_card) they move the selection if there is one,
 --   else the card under the cursor, and record move_task_forward /
@@ -265,6 +278,8 @@ enum KeyReceiver { dispatch | tmux }
 --   the press changes nothing and records nothing. off_epic_card and
 --   on_epic_card are mutually exclusive by definition. off_epic_card overlaps
 --   the other cursor-level literals, but no key uses it together with them.
+--   H/L on a work package card move nothing: a package has no status, and
+--   the press records nothing.
 -- board.normal, Space on a task card (the activation ladder, highest first;
 -- each literal holds only when none above it does). "Window" means the task
 -- has an agent tmux window; "stuck" is the third rung of the windowless
@@ -317,7 +332,7 @@ enum KeyContext {
     search_active | inside_epic_view | epic_view_no_search | top_level |
     with_selection |
     on_column_select_all | on_folded_section | on_folded_epic_group |
-    on_epic_card | on_task_card | on_flattened_task_card |
+    on_epic_card | on_work_package_card | on_task_card | on_flattened_task_card |
     on_unflattened_task_card | off_epic_card |
     on_directory | on_file |
     task_on_other_machine | task_pinned_in_split | task_window_split_open |
@@ -581,7 +596,7 @@ rule ListKeybindingsViaMcp {
         -- when absent; context shown as its plain words). With a namespace
         -- name supplied, exactly that one group is returned; with a family
         -- name, every group in that family (board.confirm returns all
-        -- fourteen board.confirm.* groups), in KeyNamespace order.
+        -- fifteen board.confirm.* groups), in KeyNamespace order.
         -- tmux_global rows are included and marked as handled by tmux, so an
         -- agent learns the prefix bindings exist without mistaking them for
         -- keys the board answers.

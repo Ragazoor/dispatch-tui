@@ -38,8 +38,14 @@ impl<'a> BoardView<'a> {
     /// Whether flattened mode applies to `status`. The exempt columns live on
     /// [`TaskStatus::UNFLATTENED`], so this is only the mode half of the
     /// question; nothing here restates which columns those are.
+    ///
+    /// Never in a package view: its cards are a hand-picked set, and
+    /// flattening would replace the linked epic cards with their contents
+    /// (`work-packages.allium: PackageViewCards`).
     pub(in crate::tui) fn is_flattened_for_status(self, status: TaskStatus) -> bool {
-        self.board.flattened && !status.is_unflattened()
+        self.board.flattened
+            && !status.is_unflattened()
+            && !matches!(self.effective_view_mode(), BoardViewMode::Package { .. })
     }
 
     /// Whether the main board shows `task` as a card of its own, rather than
@@ -127,6 +133,17 @@ impl<'a> BoardView<'a> {
                             t.epic_id == Some(current)
                         }
                     })
+                    .filter(|t| filters.admits(t))
+                    .collect()
+            }
+            BoardViewMode::Package { package_id, .. } => {
+                // The linked tasks, wherever they live in the epic tree
+                // (`work-packages.allium: PackageViewCards`).
+                let linked = self.package_task_ids(package_id);
+                self.board
+                    .tasks
+                    .iter()
+                    .filter(|t| linked.contains(&t.id))
                     .filter(|t| filters.admits(t))
                     .collect()
             }
@@ -378,10 +395,22 @@ impl<'a> BoardView<'a> {
             .copied()
             .collect();
 
-        if self.is_flattened_for_status(status) {
-            return self.flattened_column_items(status, tasks);
+        let items = if self.is_flattened_for_status(status) {
+            self.flattened_column_items(status, tasks)
+        } else {
+            self.hierarchical_column_items(status, tasks, placements, pass)
+        };
+        // Package cards lead the column, ahead of any section header
+        // (`work-packages.allium: PackageCardPlacement`).
+        let packages = self.package_cards_for_status(status);
+        if packages.is_empty() {
+            return items;
         }
-        self.hierarchical_column_items(status, tasks, placements, pass)
+        packages
+            .into_iter()
+            .map(ColumnItem::WorkPackage)
+            .chain(items)
+            .collect()
     }
 
     /// Flattened column: cards sorted by section, then epic group, then card
@@ -553,7 +582,8 @@ impl<'a> BoardView<'a> {
             let tie_break = match item {
                 ColumnItem::Task(t) => t.id.0,
                 ColumnItem::Epic(e) => e.id.0,
-                ColumnItem::FoldedSection(_)
+                ColumnItem::WorkPackage(_)
+                | ColumnItem::FoldedSection(_)
                 | ColumnItem::FoldedEpic(_)
                 | ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
@@ -708,7 +738,8 @@ impl<'a> BoardView<'a> {
                 .filter(|i| i.is_selectable())
                 .count();
         }
-        let task_count = view_tasks.iter().filter(|t| t.status == status).count();
+        let task_count = view_tasks.iter().filter(|t| t.status == status).count()
+            + self.package_cards_for_status(status).len();
         if self.is_flattened_for_status(status) {
             return task_count;
         }
@@ -750,6 +781,16 @@ impl<'a> BoardView<'a> {
                 } => {
                     return BoardViewMode::Epic {
                         epic_id: *epic_id,
+                        selection,
+                    }
+                }
+                ViewMode::Package {
+                    package_id,
+                    selection,
+                    ..
+                } => {
+                    return BoardViewMode::Package {
+                        package_id: *package_id,
                         selection,
                     }
                 }
@@ -899,14 +940,26 @@ impl<'a> BoardView<'a> {
         self,
         pass: &'p EpicSearchPass<'a>,
     ) -> impl Iterator<Item = &'a Epic> + 'p {
-        let parent = match self.effective_view_mode() {
-            BoardViewMode::Board(_) => None,
-            BoardViewMode::Epic { epic_id, .. } => Some(epic_id),
+        // Root epics on the main board, direct children in an epic view, and
+        // the linked epics, at any depth, in a package view.
+        enum Scope {
+            Children(Option<EpicId>),
+            Linked(HashSet<EpicId>),
+        }
+        let scope = match self.effective_view_mode() {
+            BoardViewMode::Board(_) => Scope::Children(None),
+            BoardViewMode::Epic { epic_id, .. } => Scope::Children(Some(epic_id)),
+            BoardViewMode::Package { package_id, .. } => {
+                Scope::Linked(self.package_epic_ids(package_id))
+            }
         };
         self.board
             .epics
             .iter()
-            .filter(move |e| e.parent_epic_id == parent)
+            .filter(move |e| match &scope {
+                Scope::Children(parent) => e.parent_epic_id == *parent,
+                Scope::Linked(ids) => ids.contains(&e.id),
+            })
             .filter(move |e| {
                 self.epic_matches(e.id) && self.epic_repo_matches(e.id) && pass.admits(self, e.id)
             })

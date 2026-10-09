@@ -15,6 +15,9 @@ use crate::models::{ColumnSection, Epic, EpicId, EpicSubstatus, Task, TaskId, Ta
 // cloning there would be pure waste.
 #[derive(Debug, Clone, Copy)]
 pub enum ColumnItem<'a> {
+    /// A work package's card. Main board only (`work-packages.allium:
+    /// PackageCardsOnlyOnMainBoard`).
+    WorkPackage(&'a crate::models::WorkPackage),
     Task(&'a Task),
     Epic(&'a Epic),
     /// Non-selectable group header in flat view. Carries the epic so the renderer
@@ -103,6 +106,7 @@ impl ColumnItem<'_> {
             self,
             ColumnItem::Task(_)
                 | ColumnItem::Epic(_)
+                | ColumnItem::WorkPackage(_)
                 | ColumnItem::FoldedSection(_)
                 | ColumnItem::FoldedEpic(_)
         )
@@ -118,6 +122,7 @@ impl ColumnItem<'_> {
         match self {
             ColumnItem::Task(t) => Some(ColumnAnchor::Task(t.id)),
             ColumnItem::Epic(e) => Some(ColumnAnchor::Epic(e.id)),
+            ColumnItem::WorkPackage(p) => Some(ColumnAnchor::WorkPackage(p.id)),
             ColumnItem::FoldedSection(h) => Some(ColumnAnchor::Section(h.at)),
             ColumnItem::FoldedEpic(h) => Some(ColumnAnchor::EpicFold(h.at)),
             ColumnItem::SubstatusLabel(_)
@@ -138,6 +143,7 @@ impl ColumnItem<'_> {
 pub enum ColumnAnchor {
     Task(crate::models::TaskId),
     Epic(crate::models::EpicId),
+    WorkPackage(crate::models::WorkPackageId),
     /// A folded section's header.
     ///
     /// Unlike the other two this names no database row. It is still an

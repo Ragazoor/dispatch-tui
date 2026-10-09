@@ -157,12 +157,12 @@ fn namespace_names_are_unique_and_round_trip() {
 #[test]
 fn family_names_select_every_namespace_of_the_family() {
     let confirm = namespaces_matching("board.confirm").unwrap();
-    assert_eq!(confirm.len(), 14);
+    assert_eq!(confirm.len(), 15);
     assert!(confirm
         .iter()
         .all(|n| n.name().starts_with("board.confirm.")));
     let picker = namespaces_matching("board.picker").unwrap();
-    assert_eq!(picker.len(), 7);
+    assert_eq!(picker.len(), 8);
     assert_eq!(namespaces_matching("board.normal").unwrap().len(), 1);
     assert!(namespaces_matching("board").is_none());
     assert!(namespaces_matching("nonsense").is_none());
@@ -353,9 +353,12 @@ fn lookup_over_the_real_table_reads_g_as_the_last_row_not_enter_epic() {
 fn view_level_context_words_are_the_specs() {
     assert_eq!(
         C::EpicViewNoSearch.words(),
-        "inside an epic view, no search active"
+        "inside an epic or work package view, no search active"
     );
-    assert_eq!(C::InsideEpicView.words(), "inside an epic view");
+    assert_eq!(
+        C::InsideEpicView.words(),
+        "inside an epic or work package view"
+    );
     assert_eq!(
         C::WithSelection.words(),
         "on the top-level board, no search active, with cards selected or the cursor on a select-all row"
@@ -450,7 +453,7 @@ fn confirm_dialogs_with_a_yes_row_catch_every_other_key_as_no() {
         assert!(yes.keys.contains(&"Y"), "{}: y and Y are one row", n.name());
         assert!(yes.action.ends_with("_yes"), "{}: {}", n.name(), yes.action);
     }
-    assert_eq!(checked, 11, "eleven confirm dialogs answer y/Y");
+    assert_eq!(checked, 12, "twelve confirm dialogs answer y/Y");
 }
 
 #[test]

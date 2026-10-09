@@ -65,6 +65,10 @@ pub(super) async fn dispatch(
             drop(rt.exec_refresh_budget());
             vec![]
         }
+        WorkPackage(cmd) => {
+            rt.exec_work_package_command(app, cmd).await;
+            vec![]
+        }
     }
 }
 

@@ -17,7 +17,7 @@ use super::super::shared::{
 };
 use super::cards::{
     build_task_list_item, render_epic_header_item, render_epic_item, render_folded_epic_header,
-    ColRenderCtx,
+    render_package_item, ColRenderCtx,
 };
 use super::{board_column_constraints, column_bg_color, column_color, render_column_separator};
 use crate::palette::{MUTED, PURPLE};
@@ -144,6 +144,12 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
 
         let first = list_items.is_empty();
         push_item!(match item {
+            ColumnItem::WorkPackage(package) => render_package_item(
+                package,
+                is_cursor,
+                app.view().package_progress(package.id),
+                &ctx,
+            ),
             ColumnItem::Task(task) => {
                 build_task_list_item(task, status, app, now, is_cursor, &ctx)
             }
@@ -212,40 +218,7 @@ pub(super) fn compute_columns_data<'a>(
     now: DateTime<Utc>,
 ) -> ColumnsData {
     // Determine the board area and, if in epic view, capture the title for the border.
-    let (epic_border, board_area) = if let ViewMode::Epic {
-        epic_id, parent, ..
-    } = app.view_mode()
-    {
-        // Walk the parent chain to collect all ancestor IDs (innermost first),
-        // then reverse for display order (root → … → current).
-        let mut ids: Vec<EpicId> = vec![*epic_id];
-        let mut cursor: &ViewMode = parent.as_ref();
-        while let ViewMode::Epic {
-            epic_id: pid,
-            parent: grandparent,
-            ..
-        } = cursor
-        {
-            ids.push(*pid);
-            cursor = grandparent.as_ref();
-        }
-        ids.reverse();
-        let segments: Vec<String> = ids
-            .iter()
-            .map(|id| {
-                app.epics()
-                    .iter()
-                    .find(|e| e.id == *id)
-                    .map(|e| truncate(&e.title, 30))
-                    .unwrap_or_default()
-            })
-            .collect();
-        let title = format!(
-            " #{} {} ",
-            epic_id,
-            segments.join(crate::tui::ui::shared::BREADCRUMB_SEPARATOR)
-        );
-
+    let (epic_border, board_area) = if let Some(title) = view_border_title(app) {
         // Inner area: Borders::ALL removes 1 from each side.
         let inner = Rect {
             x: area.x + 1,
@@ -298,6 +271,62 @@ pub(super) fn compute_columns_data<'a>(
         epic_border,
         sep_areas,
         task_cols,
+    }
+}
+
+/// The border title of a nested view, or `None` on the main board.
+///
+/// An epic view names its trail (root → … → current); a package view names
+/// the package; an epic view entered from a package names the package first,
+/// then the trail below it (`work-packages.allium: EnterEpicFromPackage`).
+fn view_border_title(app: &App) -> Option<String> {
+    let package_title = |id: crate::models::WorkPackageId| {
+        app.board
+            .find_work_package(id)
+            .map(|p| truncate(&p.title, 30))
+            .unwrap_or_default()
+    };
+    match app.view_mode() {
+        ViewMode::Package { package_id, .. } => {
+            Some(format!(" \u{25a3} {} ", package_title(*package_id)))
+        }
+        ViewMode::Epic {
+            epic_id, parent, ..
+        } => {
+            // Walk the parent chain to collect all ancestor IDs (innermost
+            // first), then reverse for display order (root → … → current).
+            let mut ids: Vec<EpicId> = vec![*epic_id];
+            let mut cursor: &ViewMode = parent.as_ref();
+            while let ViewMode::Epic {
+                epic_id: pid,
+                parent: grandparent,
+                ..
+            } = cursor
+            {
+                ids.push(*pid);
+                cursor = grandparent.as_ref();
+            }
+            ids.reverse();
+            let mut segments: Vec<String> = ids
+                .iter()
+                .map(|id| {
+                    app.epics()
+                        .iter()
+                        .find(|e| e.id == *id)
+                        .map(|e| truncate(&e.title, 30))
+                        .unwrap_or_default()
+                })
+                .collect();
+            if let ViewMode::Package { package_id, .. } = cursor {
+                segments.insert(0, format!("\u{25a3} {}", package_title(*package_id)));
+            }
+            Some(format!(
+                " #{} {} ",
+                epic_id,
+                segments.join(crate::tui::ui::shared::BREADCRUMB_SEPARATOR)
+            ))
+        }
+        ViewMode::Board(_) | ViewMode::TaskDetail { .. } => None,
     }
 }
 

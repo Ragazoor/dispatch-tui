@@ -274,6 +274,12 @@ impl App {
             InputMode::InputBaseBranch => self.update(Message::Input(
                 crate::tui::messages::InputMessage::SubmitBaseBranch(value),
             )),
+            InputMode::InputWorkPackageTitle(_) => self.update(Message::WorkPackage(
+                crate::tui::messages::WorkPackageMessage::SubmitNewTitle(value),
+            )),
+            InputMode::RenameWorkPackage(_) => self.update(Message::WorkPackage(
+                crate::tui::messages::WorkPackageMessage::SubmitRename(value),
+            )),
             _ => vec![],
         }
     }
@@ -297,7 +303,8 @@ impl App {
                 on_epic(self, id)
             }
             Some(
-                ColumnItem::EpicHeader(_)
+                ColumnItem::WorkPackage(_)
+                | ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
                 | ColumnItem::FoldedSection(_)
                 | ColumnItem::FoldedEpic(_)
@@ -322,6 +329,14 @@ impl App {
     /// same terms as [`Self::cursor_is_on_folded_header`].
     pub(in crate::tui) fn cursor_is_on_folded_epic_header(&self) -> bool {
         matches!(self.selected_column_item(), Some(ColumnItem::FoldedEpic(_)))
+    }
+
+    /// The package whose card the cursor is on, or `None`.
+    pub(in crate::tui) fn selected_work_package_id(&self) -> Option<crate::models::WorkPackageId> {
+        match self.selected_column_item() {
+            Some(ColumnItem::WorkPackage(p)) => Some(p.id),
+            _ => None,
+        }
     }
 
     pub(in crate::tui) fn selected_epic_id(&self) -> Option<EpicId> {

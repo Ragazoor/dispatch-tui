@@ -299,7 +299,10 @@ fn reorder_target(
             };
             Some((None, Some(e.id), key))
         }
-        ColumnItem::EpicHeader(_)
+        // A package card has no order of its own to swap: package cards sort
+        // by id (`work-packages.allium: PackageCardPlacement`).
+        ColumnItem::WorkPackage(_)
+        | ColumnItem::EpicHeader(_)
         | ColumnItem::SubstatusLabel(_)
         | ColumnItem::FoldedSection(_)
         | ColumnItem::FoldedEpic(_)

@@ -82,6 +82,7 @@ pub enum KeyNamespace {
     BoardPickerQuickDispatch,
     BoardPickerMoveToEpic,
     BoardPickerReparentEpic,
+    BoardPickerWorkPackage,
     BoardConfirmQuit,
     BoardConfirmDeleteTask,
     BoardConfirmBatchDelete,
@@ -96,6 +97,7 @@ pub enum KeyNamespace {
     BoardConfirmTrustRepo,
     BoardConfirmTrustRepoQuickDispatch,
     BoardConfirmRepoSync,
+    BoardConfirmDeleteWorkPackage,
     AgentTreeTree,
     AgentTreeCommits,
     AgentTreeAgents,
@@ -106,7 +108,7 @@ pub enum KeyNamespace {
 impl KeyNamespace {
     /// Every namespace, in the order the spec's enum lists them. This is the
     /// order `list_keybindings` and the help overlay group by.
-    pub const ALL: [KeyNamespace; 33] = [
+    pub const ALL: [KeyNamespace; 35] = [
         Self::BoardNormal,
         Self::BoardDetail,
         Self::BoardSearch,
@@ -121,6 +123,7 @@ impl KeyNamespace {
         Self::BoardPickerQuickDispatch,
         Self::BoardPickerMoveToEpic,
         Self::BoardPickerReparentEpic,
+        Self::BoardPickerWorkPackage,
         Self::BoardConfirmQuit,
         Self::BoardConfirmDeleteTask,
         Self::BoardConfirmBatchDelete,
@@ -135,6 +138,7 @@ impl KeyNamespace {
         Self::BoardConfirmTrustRepo,
         Self::BoardConfirmTrustRepoQuickDispatch,
         Self::BoardConfirmRepoSync,
+        Self::BoardConfirmDeleteWorkPackage,
         Self::AgentTreeTree,
         Self::AgentTreeCommits,
         Self::AgentTreeAgents,
@@ -159,6 +163,7 @@ impl KeyNamespace {
             Self::BoardPickerQuickDispatch => "board.picker.quick_dispatch",
             Self::BoardPickerMoveToEpic => "board.picker.move_to_epic",
             Self::BoardPickerReparentEpic => "board.picker.reparent_epic",
+            Self::BoardPickerWorkPackage => "board.picker.work_package",
             Self::BoardConfirmQuit => "board.confirm.quit",
             Self::BoardConfirmDeleteTask => "board.confirm.delete_task",
             Self::BoardConfirmBatchDelete => "board.confirm.batch_delete",
@@ -173,6 +178,7 @@ impl KeyNamespace {
             Self::BoardConfirmTrustRepo => "board.confirm.trust_repo",
             Self::BoardConfirmTrustRepoQuickDispatch => "board.confirm.trust_repo_quick_dispatch",
             Self::BoardConfirmRepoSync => "board.confirm.repo_sync",
+            Self::BoardConfirmDeleteWorkPackage => "board.confirm.delete_work_package",
             Self::AgentTreeTree => "agent_tree.tree",
             Self::AgentTreeCommits => "agent_tree.commits",
             Self::AgentTreeAgents => "agent_tree.agents",
@@ -247,6 +253,7 @@ pub enum KeyContext {
     OnFoldedSection,
     OnFoldedEpicGroup,
     OnEpicCard,
+    OnWorkPackageCard,
     OnTaskCard,
     OnFlattenedTaskCard,
     OnUnflattenedTaskCard,
@@ -270,8 +277,8 @@ impl KeyContext {
     pub fn words(self) -> &'static str {
         match self {
             Self::SearchActive => "with a search active",
-            Self::InsideEpicView => "inside an epic view",
-            Self::EpicViewNoSearch => "inside an epic view, no search active",
+            Self::InsideEpicView => "inside an epic or work package view",
+            Self::EpicViewNoSearch => "inside an epic or work package view, no search active",
             Self::TopLevel => "on the top-level board",
             Self::WithSelection => {
                 "on the top-level board, no search active, with cards selected or the cursor on a select-all row"
@@ -280,6 +287,7 @@ impl KeyContext {
             Self::OnFoldedSection => "on a folded section header",
             Self::OnFoldedEpicGroup => "on a folded epic group",
             Self::OnEpicCard => "on an epic card",
+            Self::OnWorkPackageCard => "on a work package card",
             Self::OnTaskCard => "on a task card",
             Self::OnFlattenedTaskCard => "on a task card in a flattened column",
             Self::OnUnflattenedTaskCard => "on a task card in a column that is not flattened",
@@ -327,6 +335,7 @@ impl KeyContext {
             | OnFoldedSection
             | OnFoldedEpicGroup
             | OnEpicCard
+            | OnWorkPackageCard
             | OnTaskCard
             | OnFlattenedTaskCard
             | OnUnflattenedTaskCard
@@ -387,6 +396,7 @@ pub fn contexts_overlap(a: KeyContext, b: KeyContext) -> bool {
                 OnTaskCard,
                 OnFlattenedTaskCard,
                 OnUnflattenedTaskCard,
+                OnWorkPackageCard,
             ]
             .iter()
             .any(|c| pair(OffEpicCard, *c))

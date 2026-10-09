@@ -7,7 +7,9 @@ use std::time::Instant;
 use ratatui::widgets::ListState;
 
 use super::{ColumnAnchor, EpicDraft, InputMode, RepoFilterMode, TaskDraft};
-use crate::models::{Epic, EpicId, Task, TaskId, TaskStatus};
+use crate::models::{
+    Epic, EpicId, Task, TaskId, TaskStatus, WorkPackage, WorkPackageId, WorkPackageLink,
+};
 
 // BoardState — tasks, epics, view mode, and related board data
 // ---------------------------------------------------------------------------
@@ -26,6 +28,11 @@ pub struct BoardState {
     /// descendant task of the current view surfaces directly in its status
     /// column. Preserved across navigation, session-scoped.
     pub(in crate::tui) flattened: bool,
+    /// This person's work packages, oldest first
+    /// (`docs/specs/work-packages.allium`).
+    pub(in crate::tui) work_packages: Vec<WorkPackage>,
+    /// Every package link the board holds.
+    pub(in crate::tui) work_package_links: Vec<WorkPackageLink>,
 }
 
 impl BoardState {
@@ -46,6 +53,10 @@ impl BoardState {
             .iter()
             .filter(|t| t.epic_id.is_some_and(|eid| subtree.contains(&eid)))
             .all(|t| t.status == TaskStatus::Done)
+    }
+
+    pub(in crate::tui) fn find_work_package(&self, id: WorkPackageId) -> Option<&WorkPackage> {
+        self.work_packages.iter().find(|p| p.id == id)
     }
 
     /// Look up the title of an epic by ID.
@@ -643,6 +654,15 @@ pub enum ViewMode {
         /// For a nested sub-epic, this is `ViewMode::Epic { ... }` of the parent.
         parent: Box<ViewMode>,
     },
+    /// A work package's view (`work-packages.allium: EnterPackage`): the
+    /// board's columns holding the package's linked tasks and epics.
+    Package {
+        package_id: WorkPackageId,
+        selection: BoardSelection,
+        /// The view to restore on exit — always the main board, since package
+        /// cards are drawn there only.
+        parent: Box<ViewMode>,
+    },
     TaskDetail {
         task_id: TaskId,
         scroll: u16,
@@ -658,7 +678,7 @@ impl ViewMode {
     pub(in crate::tui) fn selection(&self) -> &BoardSelection {
         match self {
             ViewMode::Board(sel) => sel,
-            ViewMode::Epic { selection, .. } => selection,
+            ViewMode::Epic { selection, .. } | ViewMode::Package { selection, .. } => selection,
             ViewMode::TaskDetail { previous, .. } => previous.selection(),
         }
     }
@@ -666,7 +686,7 @@ impl ViewMode {
     pub(in crate::tui) fn selection_mut(&mut self) -> &mut BoardSelection {
         match self {
             ViewMode::Board(sel) => sel,
-            ViewMode::Epic { selection, .. } => selection,
+            ViewMode::Epic { selection, .. } | ViewMode::Package { selection, .. } => selection,
             ViewMode::TaskDetail { previous, .. } => previous.selection_mut(),
         }
     }
@@ -690,6 +710,10 @@ pub(in crate::tui) enum BoardViewMode<'a> {
     Board(&'a BoardSelection),
     Epic {
         epic_id: EpicId,
+        selection: &'a BoardSelection,
+    },
+    Package {
+        package_id: WorkPackageId,
         selection: &'a BoardSelection,
     },
 }

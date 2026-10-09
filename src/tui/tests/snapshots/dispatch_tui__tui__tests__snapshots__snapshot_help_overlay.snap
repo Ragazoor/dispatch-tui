@@ -23,14 +23,14 @@ expression: rendered
                         ║    Clear the active search query                                     ║
                         ║    (with a search active)                                            ║
                         ║  q                                                                   ║
-                        ║    Leave the epic view and return to the board                       ║
-                        ║    (inside an epic view)                                             ║
+                        ║    Leave the epic or work package view, one level                    ║
+                        ║    (inside an epic or work package view)                             ║
                         ║  Esc                                                                 ║
-                        ║    Leave the epic view and return to the board                       ║
-                        ║    (inside an epic view, no search active)                           ║
+                        ║    Leave the epic or work package view, one level                    ║
+                        ║    (inside an epic or work package view, no search active)           ║
                         ║  Q                                                                   ║
-                        ║    Leave every epic view and return to the board                     ║
-                        ║    (inside an epic view)                                             ║
+                        ║    Leave every epic and work package view and return to the board    ║
+                        ║    (inside an epic or work package view)                             ║
                         ║  q                                                                   ║
                         ║    Quit dispatch                                                     ║
                         ║    (on the top-level board)                                          ║

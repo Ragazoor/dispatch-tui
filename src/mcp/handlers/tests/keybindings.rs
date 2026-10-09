@@ -59,7 +59,7 @@ async fn a_family_name_returns_every_group_of_the_family() {
     let state = test_state().await;
     let resp = list(&state, json!({"namespace": "board.confirm"})).await;
     let gs = groups(&resp);
-    assert_eq!(gs.len(), 14);
+    assert_eq!(gs.len(), 15);
     assert!(gs.iter().all(|g| g["namespace"]
         .as_str()
         .unwrap()
@@ -83,7 +83,7 @@ async fn the_last_row_row_carries_its_note_and_context_is_shown_as_words() {
     assert!(g["keys"].as_array().unwrap().iter().any(|k| k == "G"));
 
     let q = rows.iter().find(|r| r["action"] == "exit_epic").unwrap();
-    assert_eq!(q["context"], "inside an epic view");
+    assert_eq!(q["context"], "inside an epic or work package view");
     // Absent context and note are omitted, not null.
     let n = rows.iter().find(|r| r["action"] == "create_task").unwrap();
     assert!(n.get("context").is_none());
@@ -114,13 +114,13 @@ async fn an_unknown_namespace_is_rejected_listing_the_valid_names() {
 }
 
 /// Non-vacuity of the family filter: every board.confirm.* dialog has rows,
-/// so the family returns fourteen groups none of which is empty.
+/// so the family returns fifteen groups none of which is empty.
 #[tokio::test]
-async fn the_confirm_family_returns_fourteen_non_empty_groups() {
+async fn the_confirm_family_returns_fifteen_non_empty_groups() {
     let state = test_state().await;
     let resp = list(&state, json!({"namespace": "board.confirm"})).await;
     let gs = groups(&resp);
-    assert_eq!(gs.len(), 14);
+    assert_eq!(gs.len(), 15);
     for g in &gs {
         assert!(
             !g["bindings"].as_array().unwrap().is_empty(),
@@ -131,11 +131,11 @@ async fn the_confirm_family_returns_fourteen_non_empty_groups() {
     }
 }
 
-/// The picker family is every board.picker.* namespace — seven of them
+/// The picker family is every board.picker.* namespace — eight of them
 /// (repo_path, base_branch, tag, wrap_up_mode, quick_dispatch, move_to_epic,
-/// reparent_epic) — and each has rows.
+/// reparent_epic, work_package) — and each has rows.
 #[tokio::test]
-async fn the_picker_family_returns_seven_non_empty_groups() {
+async fn the_picker_family_returns_eight_non_empty_groups() {
     let state = test_state().await;
     let resp = list(&state, json!({"namespace": "board.picker"})).await;
     let gs = groups(&resp);
@@ -153,6 +153,7 @@ async fn the_picker_family_returns_seven_non_empty_groups() {
             "board.picker.quick_dispatch",
             "board.picker.move_to_epic",
             "board.picker.reparent_epic",
+            "board.picker.work_package",
         ]
     );
     for g in &gs {
@@ -189,5 +190,8 @@ async fn the_esc_exit_epic_row_shows_its_context_words() {
         .iter()
         .find(|r| r["action"] == "exit_epic" && r["keys"] == json!(["Esc"]))
         .unwrap();
-    assert_eq!(esc["context"], "inside an epic view, no search active");
+    assert_eq!(
+        esc["context"],
+        "inside an epic or work package view, no search active"
+    );
 }

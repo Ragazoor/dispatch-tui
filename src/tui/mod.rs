@@ -9,6 +9,7 @@ pub mod text_caret;
 pub mod types;
 pub mod ui;
 pub mod update;
+mod work_packages;
 
 pub(in crate::tui) use search::*;
 pub use types::*;
@@ -316,6 +317,8 @@ impl App {
                 repo_base_branches: HashMap::new(),
                 split: SplitState::default(),
                 flattened: false,
+                work_packages: Vec::new(),
+                work_package_links: Vec::new(),
             },
             status: StatusState::default(),
             should_quit: false,
@@ -427,6 +430,12 @@ impl App {
     }
     pub fn epics(&self) -> &[Epic] {
         &self.board.epics
+    }
+    pub fn work_packages(&self) -> &[crate::models::WorkPackage] {
+        &self.board.work_packages
+    }
+    pub fn work_package_links(&self) -> &[crate::models::WorkPackageLink] {
+        &self.board.work_package_links
     }
     pub fn mode(&self) -> &InputMode {
         &self.input.mode

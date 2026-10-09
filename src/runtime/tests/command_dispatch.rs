@@ -287,6 +287,81 @@ async fn dispatch_epic_insert_then_persist_writes_to_db() {
     assert_eq!(epics[0].title, "Epic via dispatch");
 }
 
+/// `work-packages.allium`: the board's package writes reach the store through
+/// the service, and the board re-reads its packages after each one.
+#[tokio::test]
+async fn dispatch_work_package_commands_write_and_refresh_the_board() {
+    use crate::tui::commands::WorkPackageCommand as W;
+    let (rt, mut app) = test_runtime().await;
+    let task = seed(&rt, "linked", models::TaskStatus::Backlog).await;
+    let item = models::WorkPackageItem::Task(task.id);
+
+    dispatch_one(
+        &rt,
+        &mut app,
+        Command::WorkPackage(W::Create {
+            title: "Window 1".into(),
+            item,
+        }),
+    )
+    .await;
+    let packages = rt.database.list_work_packages().await;
+    assert_eq!(packages.len(), 1);
+    let id = packages[0].id;
+    assert_eq!(
+        app.work_packages(),
+        packages.as_slice(),
+        "the board re-read its packages"
+    );
+    assert_eq!(
+        app.work_package_links(),
+        [models::WorkPackageLink {
+            work_package_id: id,
+            item
+        }]
+    );
+
+    dispatch_one(&rt, &mut app, Command::WorkPackage(W::Unlink { id, item })).await;
+    assert!(rt.database.list_work_package_links().await.is_empty());
+    dispatch_one(&rt, &mut app, Command::WorkPackage(W::Link { id, item })).await;
+    assert_eq!(rt.database.list_work_package_links().await.len(), 1);
+
+    dispatch_one(
+        &rt,
+        &mut app,
+        Command::WorkPackage(W::Rename {
+            id,
+            title: "Window 2".into(),
+        }),
+    )
+    .await;
+    assert_eq!(rt.database.list_work_packages().await[0].title, "Window 2");
+
+    dispatch_one(&rt, &mut app, Command::WorkPackage(W::Delete(id))).await;
+    assert!(rt.database.list_work_packages().await.is_empty());
+    assert!(app.work_packages().is_empty());
+    assert!(
+        rt.database.get_task(task.id).await.is_some(),
+        "deleting a package keeps its tasks"
+    );
+}
+
+#[tokio::test]
+async fn a_refused_work_package_write_surfaces_an_error() {
+    use crate::tui::commands::WorkPackageCommand as W;
+    let (rt, mut app) = test_runtime().await;
+    dispatch_one(
+        &rt,
+        &mut app,
+        Command::WorkPackage(W::Rename {
+            id: models::WorkPackageId(404),
+            title: "nope".into(),
+        }),
+    )
+    .await;
+    assert!(app.error_popup().is_some());
+}
+
 #[tokio::test]
 async fn dispatch_persist_setting_writes_both_kinds() {
     let (rt, mut app) = test_runtime().await;
@@ -1883,6 +1958,7 @@ fn every_command_sub_enum_is_named_by_this_module() {
             Command::Learning(_) => "Learning",
             Command::Usage(_) => "Usage",
             Command::Budget(_) => "Budget",
+            Command::WorkPackage(_) => "WorkPackage",
         }
     }
 
@@ -1922,6 +1998,9 @@ fn every_command_sub_enum_is_named_by_this_module() {
             },
         )),
         Command::Budget(crate::tui::commands::BudgetCommand::Refresh),
+        Command::WorkPackage(crate::tui::commands::WorkPackageCommand::Delete(
+            models::WorkPackageId(1),
+        )),
     ];
 
     let mut names: Vec<&str> = covered.iter().map(sub_enum_name).collect();

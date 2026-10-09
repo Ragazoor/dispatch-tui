@@ -795,6 +795,49 @@ pub(super) fn render_epic_item(
         .style(Style::default().bg(card_surface_color()).fg(FG))
 }
 
+/// A work package's card (`work-packages.allium: PackageCardPlacement`).
+///
+/// Shaped like an epic card so it reads as a container, but in CYAN rather
+/// than an epic's PURPLE and marked with a square glyph, so the two kinds of
+/// grouping are never mistaken for each other. Line 2 counts the linked items
+/// the board holds and how many of them are done; a package has no status of
+/// its own to show.
+pub(super) fn render_package_item(
+    package: &crate::models::WorkPackage,
+    is_cursor: bool,
+    progress: (usize, usize),
+    ctx: &ColRenderCtx,
+) -> ListItem<'static> {
+    let col_width = ctx.width;
+    // Prefix: select(2) + stripe(1) + " ▣ "(3)
+    let prefix_width = 2 + 1 + 3 + CARD_CHROME_WIDTH;
+    let max_title = (col_width as usize).saturating_sub(prefix_width);
+    let title_text = truncate(&package.title, max_title);
+
+    let line1 = Line::from(vec![
+        Span::raw("  "),
+        Span::styled("\u{258e}", Style::default().fg(CYAN)),
+        Span::styled(" \u{25a3} ", Style::default().fg(CYAN)),
+        Span::styled(
+            title_text,
+            Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
+        ),
+    ]);
+    let (done, total) = progress;
+    let summary = match total {
+        0 => "no items".to_string(),
+        1 => format!("1 item \u{b7} {done} done"),
+        n => format!("{n} items \u{b7} {done} done"),
+    };
+    let line2 = Line::from(vec![
+        Span::raw("    "),
+        Span::styled(summary, Style::default().fg(MUTED)),
+    ]);
+    let frame_color = resolve_frame_color(is_cursor, None);
+    ListItem::new(frame_card(line1, line2, col_width, frame_color, ctx.ground))
+        .style(Style::default().bg(card_surface_color()).fg(FG))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

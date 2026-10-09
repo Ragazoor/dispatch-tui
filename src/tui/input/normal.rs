@@ -132,6 +132,26 @@ impl App {
                 Some(id) => keyed(self, Message::Epic(EpicMessage::Enter(id))),
                 None => vec![],
             },
+            "enter_work_package" => match self.selected_work_package_id() {
+                Some(id) => keyed(
+                    self,
+                    Message::WorkPackage(crate::tui::messages::WorkPackageMessage::Enter(id)),
+                ),
+                None => vec![],
+            },
+            "link_work_package" => {
+                let item = match self.selected_column_item() {
+                    Some(ColumnItem::Task(t)) => crate::models::WorkPackageItem::Task(t.id),
+                    Some(ColumnItem::Epic(e)) => crate::models::WorkPackageItem::Epic(e.id),
+                    _ => return Some(vec![]),
+                };
+                keyed(
+                    self,
+                    Message::WorkPackage(crate::tui::messages::WorkPackageMessage::OpenLinkPicker(
+                        item,
+                    )),
+                )
+            }
             "toggle_auto_dispatch" | "toggle_group_by_repo" => match self.current_epic_id() {
                 Some(id) => {
                     let msg = if action == "toggle_auto_dispatch" {
@@ -189,7 +209,11 @@ impl App {
             | "dispatch_task"
             | "open_retry_dialog"
             | "resume_task" => self.run_activation(b, label),
-            "edit_task" => self.dispatch_handler_keyed(Self::handle_key_edit, action, label),
+            // Prompting: on a package card `e` opens the rename input, which
+            // changes the mode and issues no command.
+            "edit_task" => {
+                self.dispatch_prompting_handler_keyed(Self::handle_key_edit, action, label)
+            }
             "delete_task" => {
                 self.dispatch_prompting_handler_keyed(Self::handle_key_delete_item, action, label)
             }
@@ -232,6 +256,12 @@ impl App {
             Some(ColumnItem::Epic(epic)) => {
                 let id = epic.id;
                 self.update(Message::Epic(crate::tui::messages::EpicMessage::Edit(id)))
+            }
+            Some(ColumnItem::WorkPackage(package)) => {
+                let id = package.id;
+                self.update(Message::WorkPackage(
+                    crate::tui::messages::WorkPackageMessage::StartRename(id),
+                ))
             }
             Some(
                 ColumnItem::EpicHeader(_)
@@ -295,6 +325,11 @@ impl App {
         if let Some(ColumnItem::Epic(_)) = self.selected_column_item() {
             return self.update(Message::Epic(
                 crate::tui::messages::EpicMessage::ConfirmDelete,
+            ));
+        }
+        if let Some(id) = self.selected_work_package_id() {
+            return self.update(Message::WorkPackage(
+                crate::tui::messages::WorkPackageMessage::ConfirmDelete(id),
             ));
         }
         let Some(task) = self.selected_task() else {

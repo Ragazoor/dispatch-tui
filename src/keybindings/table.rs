@@ -100,19 +100,19 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &["q"],
         Some(C::InsideEpicView),
         "exit_epic",
-        "Leave the epic view and return to the board",
+        "Leave the epic or work package view, one level",
     ),
     normal(
         &["Esc"],
         Some(C::EpicViewNoSearch),
         "exit_epic",
-        "Leave the epic view and return to the board",
+        "Leave the epic or work package view, one level",
     ),
     normal(
         &["Q"],
         Some(C::InsideEpicView),
         "exit_all_epics",
-        "Leave every epic view and return to the board",
+        "Leave every epic and work package view and return to the board",
     ),
     normal(&["q"], Some(C::TopLevel), "quit", "Quit dispatch"),
     normal(
@@ -187,6 +187,24 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         Some(C::OnEpicCard),
         "enter_epic",
         "Enter the epic and show its subtasks",
+    ),
+    normal(
+        &["Space"],
+        Some(C::OnWorkPackageCard),
+        "enter_work_package",
+        "Open the work package's view: its linked tasks and epics as cards",
+    ),
+    normal(
+        &["w"],
+        Some(C::OnTaskCard),
+        "link_work_package",
+        "Link the task to work packages, or unlink it: opens the package picker",
+    ),
+    normal(
+        &["w"],
+        Some(C::OnEpicCard),
+        "link_work_package",
+        "Link the epic to work packages, or unlink it: opens the package picker",
     ),
     // ---- board.normal: Space on a task card (activation ladder) ----
     normal(
@@ -300,13 +318,13 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &["e"],
         None,
         "edit_task",
-        "Edit the selected task or epic in the editor (opens in a separate tmux window)",
+        "Edit the selected task or epic in the editor (opens in a separate tmux window); on a work package card, rename it",
     ),
     normal(
         &["x"],
         None,
         "delete_task",
-        "Move the task to Done (with confirmation); on a task already in Done, delete it instead. On an epic, delete it and its whole subtask subtree, guarded on every task in it being Done. In a multi-selection of tasks: all Done means delete, otherwise the not-yet-Done tasks move to Done",
+        "Move the task to Done (with confirmation); on a task already in Done, delete it instead. On an epic, delete it and its whole subtask subtree, guarded on every task in it being Done. On a work package card, delete the package (its links only, with confirmation). In a multi-selection of tasks: all Done means delete, otherwise the not-yet-Done tasks move to Done",
     ),
     normal(&["v"], None, "toggle_select", "Toggle selection of the card"),
     normal(
@@ -818,6 +836,25 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "reparent_picker_cancel",
         "Close the picker without reparenting the epic",
     ),
+    // ---- board.picker.work_package ----
+    r(
+        N::BoardPickerWorkPackage,
+        &["j", "Down", "k", "Up"],
+        "work_package_picker_navigate",
+        "Move through the packages: down (j, Down), up (k, Up)",
+    ),
+    r(
+        N::BoardPickerWorkPackage,
+        &["Space", "Enter"],
+        "work_package_picker_toggle",
+        "Link or unlink the highlighted package; on the last row, create a new package linked to the card",
+    ),
+    r(
+        N::BoardPickerWorkPackage,
+        &["Esc", "q"],
+        "work_package_picker_close",
+        "Close the picker",
+    ),
     // ---- BoardConfirmQuit ----
     r(
         N::BoardConfirmQuit,
@@ -1017,6 +1054,19 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &[ANY_OTHER_KEY],
         "confirm_repo_sync_no",
         "Leave the repository untouched",
+    ),
+    // ---- BoardConfirmDeleteWorkPackage ----
+    r(
+        N::BoardConfirmDeleteWorkPackage,
+        &["y", "Y"],
+        "confirm_delete_work_package_yes",
+        "Delete the work package; its linked tasks and epics are kept",
+    ),
+    r(
+        N::BoardConfirmDeleteWorkPackage,
+        &[ANY_OTHER_KEY],
+        "confirm_delete_work_package_no",
+        "Keep the work package",
     ),
     row(
         N::AgentTreeTree,

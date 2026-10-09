@@ -651,6 +651,7 @@ struct TuiRuntime {
     feed_db: Arc<dyn store::TaskStore>,
     task_svc: Arc<dyn crate::service::TaskServiceApi>,
     epic_svc: Arc<dyn crate::service::EpicServiceApi>,
+    work_package_svc: Arc<dyn crate::service::WorkPackageServiceApi>,
     learning_svc: Arc<dyn crate::service::LearningServiceApi>,
     msg_tx: mpsc::UnboundedSender<Message>,
     runner: Arc<dyn ProcessRunner>,
@@ -726,6 +727,7 @@ mod store_target;
 mod tasks;
 #[cfg(test)]
 mod tests;
+mod work_packages;
 
 #[cfg(test)]
 use event_loop::{
@@ -981,6 +983,7 @@ impl TuiRuntime {
         let runtime = TuiRuntime {
             task_svc: services.tasks,
             epic_svc: services.epics,
+            work_package_svc: services.work_packages,
             learning_svc: services.learnings,
             feed_runner: Some(feed_runner),
             feed_invalidate_tx,

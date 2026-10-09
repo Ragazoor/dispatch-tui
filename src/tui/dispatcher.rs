@@ -53,5 +53,8 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
 
         // ── Budget indicator ──
         Message::Budget(bm) => bm.route(app),
+
+        // ── Work packages ──
+        Message::WorkPackage(wm) => wm.route(app),
     }
 }

@@ -208,6 +208,20 @@ fn status_line(app: &App) -> (Line<'static>, Style) {
         InputMode::ConfirmTrustRepo { .. } | InputMode::ConfirmTrustRepoQuickDispatch { .. } => {
             hint_text(app, "Repo not trusted — trust it? [y/N]", YELLOW)
         }
+        InputMode::LinkWorkPackage { .. } => hint(
+            "Link to work package: [j/k] move  [Space/Enter] toggle  [Esc] close",
+            CYAN,
+        ),
+        InputMode::InputWorkPackageTitle(_) => hint(
+            "New work package: type a title  [Enter] create  [Esc] back",
+            CYAN,
+        ),
+        InputMode::RenameWorkPackage(_) => {
+            hint("Rename work package: [Enter] save  [Esc] cancel", CYAN)
+        }
+        InputMode::ConfirmDeleteWorkPackage(_) => {
+            hint_text(app, "Delete work package? Its items are kept [y/n]", RED)
+        }
         InputMode::ConfirmRepoSync { repo_path } => {
             // The status message carrying the full prompt auto-clears after
             // STATUS_MESSAGE_TTL while the mode lives on, so the fallback rebuilds
@@ -241,6 +255,8 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
         batch_action_hints(count, key_color, has_tasks)
     } else if let Some(ColumnItem::Epic(epic)) = app.selected_column_item() {
         epic_action_hints(epic, key_color)
+    } else if let Some(ColumnItem::WorkPackage(_)) = app.selected_column_item() {
+        super::package_action_hints(key_color)
     } else {
         let task = app.selected_task();
         let now = chrono::Utc::now();

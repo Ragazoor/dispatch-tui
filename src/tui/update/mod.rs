@@ -20,3 +20,4 @@ mod retry;
 mod selection;
 mod split_pane;
 mod system;
+mod work_packages;

@@ -24,17 +24,26 @@ impl App {
         vec![]
     }
 
+    /// Leave one level: an epic view, or a package view
+    /// (`work-packages.allium: ExitPackage`). Anything else is left as it is.
     pub(in crate::tui) fn handle_exit_epic(&mut self) -> Vec<Command> {
-        if let ViewMode::Epic { parent, .. } = std::mem::take(&mut self.board.view_mode) {
-            self.board.view_mode = *parent;
-            self.invalidate_layout_cache();
-            self.dirty = true;
+        match std::mem::take(&mut self.board.view_mode) {
+            ViewMode::Epic { parent, .. } | ViewMode::Package { parent, .. } => {
+                self.board.view_mode = *parent;
+                self.invalidate_layout_cache();
+                self.dirty = true;
+            }
+            other => self.board.view_mode = other,
         }
         vec![]
     }
 
+    /// Back to the main board from any depth of epic and package views.
     pub(in crate::tui) fn handle_exit_all_epics(&mut self) -> Vec<Command> {
-        while matches!(self.board.view_mode, ViewMode::Epic { .. }) {
+        while matches!(
+            self.board.view_mode,
+            ViewMode::Epic { .. } | ViewMode::Package { .. }
+        ) {
             self.handle_exit_epic();
         }
         vec![]
@@ -43,11 +52,22 @@ impl App {
     /// Open `target`'s epic view, entering each epic between the current view
     /// and `target` so that `q` climbs back one level at a time.
     pub(in crate::tui) fn handle_jump_to_epic(&mut self, target: EpicId) -> Vec<Command> {
+        self.jump_to_epic_from(target, None)
+    }
+
+    /// [`Self::handle_jump_to_epic`], with the trail's first level named when
+    /// the current view is not an epic view. A package view holds linked epics
+    /// from anywhere in the tree, so a jump from one starts its trail at the
+    /// linked epic pressed rather than at the tree's root
+    /// (`work-packages.allium: EnterEpicFromPackage`).
+    fn jump_to_epic_from(&mut self, target: EpicId, first: Option<EpicId>) -> Vec<Command> {
         let path = crate::models::epic_path(target, &self.board.epics);
-        let start = self
-            .current_epic_id()
-            .and_then(|cur| path.iter().position(|&e| e == cur))
-            .map_or(0, |i| i + 1);
+        let start = match self.current_epic_id() {
+            Some(cur) => path.iter().position(|&e| e == cur).map_or(0, |i| i + 1),
+            None => first
+                .and_then(|f| path.iter().position(|&e| e == f))
+                .unwrap_or(0),
+        };
         let below = &path[start..];
         for &id in below {
             self.handle_enter_epic(id);
@@ -62,7 +82,8 @@ impl App {
     ) -> Vec<Command> {
         let target =
             crate::models::deepest_epic_with(epic, status, &self.board.epics, &self.board.tasks);
-        self.handle_jump_to_epic(target)
+        let in_package = matches!(self.board.view_mode, ViewMode::Package { .. });
+        self.jump_to_epic_from(target, in_package.then_some(epic))
     }
 
     pub(in crate::tui) fn handle_refresh_epics(&mut self, epics: Vec<Epic>) -> Vec<Command> {
