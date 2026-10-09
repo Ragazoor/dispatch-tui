@@ -119,12 +119,40 @@ fn enter_package(app: &mut App, id: i64) {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn package_card_appears_in_every_column_its_linked_work_has() {
+fn package_card_stays_in_backlog_while_its_work_is_under_way() {
     let app = board_with_package();
-    assert_eq!(
-        package_columns(&app, 7),
-        vec![TaskStatus::Backlog, TaskStatus::Running, TaskStatus::Review]
-    );
+    assert_eq!(package_columns(&app, 7), vec![TaskStatus::Backlog]);
+}
+
+#[test]
+fn package_card_stays_in_backlog_when_only_some_work_is_done() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Done),
+        make_task(2, TaskStatus::Running),
+    ]);
+    app.board.work_packages = vec![make_package(7, "W")];
+    app.board.work_package_links = vec![link(7, task_item(1)), link(7, task_item(2))];
+    assert_eq!(package_columns(&app, 7), vec![TaskStatus::Backlog]);
+}
+
+#[test]
+fn package_card_moves_to_done_when_all_its_work_is_done() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Done),
+        make_task(2, TaskStatus::Done),
+    ]);
+    app.board.work_packages = vec![make_package(7, "W")];
+    app.board.work_package_links = vec![link(7, task_item(1)), link(7, task_item(2))];
+    assert_eq!(package_columns(&app, 7), vec![TaskStatus::Done]);
+}
+
+#[test]
+fn package_card_never_enters_running_or_review() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Running)]);
+    app.board.work_packages = vec![make_package(7, "W")];
+    app.board.work_package_links = vec![link(7, task_item(1))];
+    assert!(!package_columns(&app, 7).contains(&TaskStatus::Running));
+    assert!(!package_columns(&app, 7).contains(&TaskStatus::Review));
 }
 
 #[test]
@@ -180,12 +208,11 @@ fn package_cards_sort_above_every_other_card_in_package_id_order() {
 #[test]
 fn package_cards_come_before_the_first_section_header() {
     let app = board_with_package();
-    let items = app.view().column_items_for_status(TaskStatus::Running);
+    let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
         matches!(items[0], ColumnItem::WorkPackage(_)),
-        "package card leads the Running column: {items:?}"
+        "package card leads the Backlog column: {items:?}"
     );
-    assert!(matches!(items[1], ColumnItem::SubstatusLabel(_)));
 }
 
 #[test]

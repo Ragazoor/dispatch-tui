@@ -339,6 +339,14 @@ impl EpicPlacement {
         }
     }
 
+    /// A placement naming exactly one column. A package card sits in one
+    /// column only (`work-packages.allium: PackageCardPlacement`).
+    pub(in crate::tui) fn only_in(status: TaskStatus) -> Self {
+        let mut placement = Self::default();
+        placement.columns[status.column_index()] = true;
+        placement
+    }
+
     /// Whether the epic's card is drawn in `status`.
     pub fn appears_in(&self, status: TaskStatus) -> bool {
         self.columns

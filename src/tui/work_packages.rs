@@ -56,9 +56,9 @@ impl<'a> BoardView<'a> {
     /// Where each package card sits on the main board (`PackageCardPlacement`).
     /// Empty outside the main board (`PackageCardsOnlyOnMainBoard`).
     ///
-    /// A column shows the card when a visible placement task — a linked task,
-    /// or any task in the subtree of a linked epic, each counted once — holds
-    /// its status; a package with none is drawn in Backlog. Under a search
+    /// The card sits in one column: Done when there is a visible placement
+    /// task — a linked task, or any task in the subtree of a linked epic,
+    /// each counted once — and all of them are done; Backlog otherwise. Under a search
     /// query a package keeps its card only when its title matches or some
     /// placement task is visible — the twin of board_search_filter's own-match
     /// clause for epics.
@@ -82,22 +82,26 @@ impl<'a> BoardView<'a> {
                 .into_iter()
                 .flat_map(|e| crate::models::descendant_epic_ids_with_map(e, &children))
                 .collect();
-            let mut placement = EpicPlacement::default();
             let mut any_visible = false;
+            let mut all_done = true;
             for task in &self.board.tasks {
                 let placed = task_ids.contains(&task.id)
                     || task.epic_id.is_some_and(|e| subtree.contains(&e));
                 if placed && filters.admits(task) {
-                    placement.record(task);
                     any_visible = true;
+                    all_done &= task.status == TaskStatus::Done;
                 }
             }
             let title_matches = package.title.to_lowercase().contains(&filters.query_lower);
             if searching && !title_matches && !any_visible {
                 continue;
             }
-            placement.apply_empty_fallback();
-            map.insert(package.id, placement);
+            let column = if any_visible && all_done {
+                TaskStatus::Done
+            } else {
+                TaskStatus::Backlog
+            };
+            map.insert(package.id, EpicPlacement::only_in(column));
         }
         map
     }

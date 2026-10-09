@@ -35,8 +35,8 @@
 --   - Package cards sit on the main board only. A package cannot hold a
 --     package, and no package card appears inside an epic view or another
 --     package view.
---   - When the work is finished the card ends up in Done by the placement
---     rule; the user deletes the package when they no longer want it. There
+--   - The card stays in Backlog until the work is finished, then it ends up
+--     in Done by the placement rule; the user deletes the package when they no longer want it. There
 --     is no archive.
 
 use "./core.allium" as core
@@ -182,34 +182,35 @@ rule DeletingAnItemRemovesItsLinks {
 -- Package card on the main board
 ------------------------------------------------------------
 
--- A package's card is placed by the same rule as an epic card
--- (board-layout.allium, "Epic Card Placement"), over the package's linked
--- items instead of an epic's subtree. A column shows the package card when
--- at least one VISIBLE task holds that column's status among:
+-- A package's card is in ONE column, never several (task #49156). It stays in
+-- Backlog while its work is under way, and moves to Done only when the work
+-- is finished. It never enters Running or Review: a package is a view, not
+-- work an agent runs.
+--
+-- Placement looks at the package's VISIBLE placement tasks:
 --   - the linked tasks themselves, and
 --   - every task in the subtree of every linked epic.
 -- Visible means the same as for epic cards: admitted by the repo filter, the
--- only-active filter and the search query. A package with no such task in
--- any column — no links yet, or everything hidden by the repo or
--- only-active filter — is drawn in Backlog, so it stays reachable and the
--- user can link items to it. Unlike an epic card, a package card is never
+-- only-active filter and the search query. The card is in Done when there is
+-- at least one visible placement task and every one of them is done. In every
+-- other case it is in Backlog: no links yet, everything hidden by a filter,
+-- or any visible task not done. Unlike an epic card, a package card is never
 -- hidden by the repo or only-active filter: a package is the user's own
 -- grouping, not work in a repo. Only a search query can take a package's
 -- card off the board (see the guidance below).
 --
--- When every linked item is done, the only column with work is Done, so the
--- card shows there alone. That is the whole of "finished": there is no
--- package status.
+-- That is the whole of "finished": there is no package status.
 
 rule PackageCardPlacement {
     when: MainBoardRendered()
 
     ensures:
         for package in WorkPackages:
-            for status in core/TaskStatus:
-                if package.placement_tasks(visible).any(t => t.status = status)
-                    or (status = backlog and package.placement_tasks(visible) = {}):
-                    CardShown(package, column: status)
+            let tasks = package.placement_tasks(visible)
+            if tasks != {} and tasks.all(t => t.status = done):
+                CardShown(package, column: done)
+            else:
+                CardShown(package, column: backlog)
 
     @guidance
         -- placement_tasks = linked_tasks + linked_epics.flat_map(e => e.subtree_tasks),
@@ -217,8 +218,7 @@ rule PackageCardPlacement {
         -- counts once.
         -- Within a column, package cards sort above every epic and task card,
         -- in package id order (oldest first). They do not sit in a column
-        -- section; in Running and Review they come before the first section
-        -- header.
+        -- section.
         -- A search query also narrows packages by their own title: a package
         -- whose title matches the query keeps its card even when no linked
         -- work matches, mirroring board_search_filter's own-match clause for
