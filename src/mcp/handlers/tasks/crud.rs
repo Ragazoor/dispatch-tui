@@ -493,6 +493,7 @@ pub(crate) async fn handle_list_tasks(
             repo_paths: parsed.repo_paths,
             base_branch: parsed.base_branch,
             exclude_task_id,
+            query: parsed.query,
         })
         .await
     {

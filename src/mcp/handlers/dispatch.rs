@@ -280,6 +280,10 @@ usually the right answer.",
                 "base_branch": {
                     "type": "string",
                     "description": "The base branch for rebase and PR operations (e.g. 'main', 'develop'). Lists only tasks whose base_branch is exactly this."
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Text search over title and description. Split on spaces; every word must appear (any case, as part of a word) in the title or description. Combines with the other filters."
                 }
             }
         };
@@ -315,13 +319,17 @@ out. It does not return the subtasks themselves — call list_tasks with epic_id
     async read_only "list_epics" => epics::handle_list_epics,
         "List epics on the kanban board, one row each, with each sub-epic's parent id. With no \
 arguments it lists every epic. Pass parent_epic_id for that epic's direct children, plus \
-recursive=true for its whole subtree. Use it to find an epic's ID when you only know its title. \
+recursive=true for its whole subtree. Pass query to search titles and descriptions. Use it to find an epic's ID when you only know its title. \
 For one epic's detail or its subtask counts, call get_epic instead.",
         {
             "type": "object",
             "properties": {
                 "parent_epic_id": { "type": "integer", "description": "List only the sub-epics of this epic." },
-                "recursive": { "type": "boolean", "description": "With parent_epic_id, list every descendant rather than only direct children." }
+                "recursive": { "type": "boolean", "description": "With parent_epic_id, list every descendant rather than only direct children." },
+                "query": {
+                    "type": "string",
+                    "description": "Text search over title and description. Split on spaces; every word must appear (any case, as part of a word) in the title or description. Combines with the other filters."
+                }
             }
         };
 

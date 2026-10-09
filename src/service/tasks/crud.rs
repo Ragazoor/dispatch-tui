@@ -995,6 +995,10 @@ impl TaskService {
                 Some(branch) => &t.base_branch == branch,
                 None => true,
             })
+            .filter(|t| match &filter.query {
+                Some(q) => crate::models::text_query_matches(q, &t.title, &t.description),
+                None => true,
+            })
             .filter(|t| match filter.exclude_task_id {
                 Some(excluded) => t.id != excluded,
                 None => true,

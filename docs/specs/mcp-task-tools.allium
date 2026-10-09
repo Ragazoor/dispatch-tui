@@ -884,7 +884,8 @@ rule GetTaskViaMcp {
 
 rule ListTasksViaMcp {
     when: McpListTasks(caller_identity,
-                       epic_id?, repo_paths?, status?, recursive?, base_branch?)
+                       epic_id?, repo_paths?, status?, recursive?, base_branch?,
+                       query?)
 
     -- caller_identity comes from the HTTP transport (see CreateTaskViaMcp).
 
@@ -894,10 +895,29 @@ rule ListTasksViaMcp {
         repo_paths: repo_paths,
         status: status,
         recursive: recursive,
-        base_branch: base_branch
+        base_branch: base_branch,
+        query: query
     )
 
     @guidance
+        -- == query is a text search over title and description ==
+        -- query, when set, keeps only tasks that match it. It is split on
+        -- whitespace into words; a task matches when EVERY word is a
+        -- case-insensitive substring of its title or its description (a word
+        -- may match in either field, different words in different fields).
+        -- Word order does not matter. A blank query (empty or only
+        -- whitespace) has no words and is the same as omitting it. It is ANDed
+        -- with every other filter and it is not a scope filter: it does not
+        -- disable auto-scoping, so an agent searching with a query still
+        -- searches only its own epic unless it passes epic_id/repo_paths.
+        -- The same matching rule serves list_epics (ListEpicsViaMcp in
+        -- epics.allium). Substring, not whole-word: "dispatch" matches
+        -- "redispatch". No ranking: matches come back in the usual list order.
+        -- When nothing matches the reply is the usual "No tasks found".
+        -- No limit argument: the query is the narrowing tool, and a default
+        -- limit would silently truncate the unqueried list that callers
+        -- already rely on being complete.
+        --
         -- == recursive widens the epic scope to the whole subtree ==
         -- recursive (default false) applies to the epic scope in effect,
         -- explicit or auto-derived (below): with it, a task matches when its

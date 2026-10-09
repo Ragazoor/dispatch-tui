@@ -1084,3 +1084,77 @@ async fn update_epic_schema_excludes_repo_path() {
         "update_epic schema should not declare repo_path — UpdateEpicArgs has no such field"
     );
 }
+
+// =======================================================================
+// list_epics `query` (ListEpicsViaMcp, docs/specs/epics.allium)
+// =======================================================================
+
+async fn list_epics_text(state: &Arc<McpState>, args: Value) -> String {
+    let resp = call(
+        state,
+        "tools/call",
+        Some(json!({ "name": "list_epics", "arguments": args })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+    extract_response_text(&resp)
+}
+
+#[tokio::test]
+async fn list_epics_query_matches_title_and_description_words() {
+    let state = test_state().await;
+    let w = state.db_write();
+    w.create_epic("Billing Revamp", "new invoice flow", None)
+        .await
+        .unwrap();
+    w.create_epic("Search", "billing lookup", None)
+        .await
+        .unwrap();
+    w.create_epic("Other", "nothing", None).await.unwrap();
+
+    let text = list_epics_text(&state, json!({ "query": "BILLING" })).await;
+    assert!(
+        text.contains("Billing Revamp") && text.contains("Search"),
+        "{text}"
+    );
+    assert!(!text.contains("Other"), "{text}");
+
+    let text = list_epics_text(&state, json!({ "query": "lookup billing" })).await;
+    assert!(
+        text.contains("Search") && !text.contains("Billing Revamp"),
+        "{text}"
+    );
+
+    let text = list_epics_text(&state, json!({ "query": "  " })).await;
+    assert_eq!(text.lines().count(), 3, "{text}");
+
+    assert_eq!(
+        list_epics_text(&state, json!({ "query": "zzzz" })).await,
+        "No epics found"
+    );
+}
+
+#[tokio::test]
+async fn list_epics_query_is_anded_with_parent_scope() {
+    let state = test_state().await;
+    let w = state.db_write();
+    let parent = w.create_epic("Parent", "", None).await.unwrap();
+    w.create_epic("Child alpha", "", Some(parent.id))
+        .await
+        .unwrap();
+    w.create_epic("Child beta", "", Some(parent.id))
+        .await
+        .unwrap();
+    w.create_epic("Top alpha", "", None).await.unwrap();
+
+    let text = list_epics_text(
+        &state,
+        json!({ "parent_epic_id": parent.id.0, "query": "alpha" }),
+    )
+    .await;
+    assert!(text.contains("Child alpha"), "{text}");
+    assert!(
+        !text.contains("Top alpha") && !text.contains("Child beta"),
+        "{text}"
+    );
+}

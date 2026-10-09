@@ -270,6 +270,9 @@ pub struct ListTasksFilter {
     /// Exact match on `base_branch`.
     pub base_branch: Option<String>,
     pub exclude_task_id: Option<TaskId>,
+    /// Text search over title and description; see
+    /// [`crate::models::text_query_matches`].
+    pub query: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

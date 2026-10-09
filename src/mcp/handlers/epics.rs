@@ -42,6 +42,8 @@ pub(super) struct ListEpicsArgs {
     pub(super) parent_epic_id: Option<EpicId>,
     #[serde(default)]
     pub(super) recursive: bool,
+    #[serde(default)]
+    pub(super) query: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -183,6 +185,13 @@ pub(super) async fn handle_list_epics(
     {
         Ok(epics) => epics,
         Err(e) => return service_err_to_response(id, e),
+    };
+    let epics: Vec<_> = match parsed.query.as_deref() {
+        Some(q) => epics
+            .into_iter()
+            .filter(|(e, _, _)| crate::models::text_query_matches(q, &e.title, &e.description))
+            .collect(),
+        None => epics,
     };
     if epics.is_empty() {
         return JsonRpcResponse::ok(

@@ -196,6 +196,8 @@ pub(super) struct ListTasksArgs {
     pub(super) recursive: bool,
     #[serde(default)]
     pub(super) base_branch: Option<String>,
+    #[serde(default)]
+    pub(super) query: Option<String>,
 }
 
 #[derive(Deserialize)]

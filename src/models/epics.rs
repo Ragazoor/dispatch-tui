@@ -303,6 +303,21 @@ pub fn descendant_epic_ids_with_map(
 /// When computing descendants for multiple roots over the same epic list,
 /// prefer [`build_children_map`] + [`descendant_epic_ids_with_map`] to avoid
 /// rebuilding the adjacency map on every call.
+/// Whether `query` matches an item with this `title` and `description`.
+///
+/// The query splits on whitespace into words; every word must be a
+/// case-insensitive substring of the title or the description. A blank query
+/// has no words and matches everything. See `ListTasksViaMcp` in
+/// `docs/specs/mcp-task-tools.allium`.
+pub fn text_query_matches(query: &str, title: &str, description: &str) -> bool {
+    let title = title.to_lowercase();
+    let description = description.to_lowercase();
+    query
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .all(|w| title.contains(&w) || description.contains(&w))
+}
+
 pub fn descendant_epic_ids(root: EpicId, epics: &[Epic]) -> HashSet<EpicId> {
     let children = build_children_map(epics);
     descendant_epic_ids_with_map(root, &children)
