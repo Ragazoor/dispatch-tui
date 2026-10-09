@@ -841,7 +841,7 @@ fn remove_worktree_and_branch(
                     "git worktree remove failed; deleting the directory directly"
                 );
             }
-            delete_leftover_worktree_dir(&repo, worktree_path).with_context(|| {
+            delete_leftover_worktree_dir(&repo, worktree_path, true).with_context(|| {
                 format!("git worktree remove failed for path {worktree_path}: {stderr}")
             })?;
 
@@ -855,7 +855,7 @@ fn remove_worktree_and_branch(
             prune_worktrees(runner, &repo, SUBPROCESS_TIMEOUT);
         }
         // Git removed its own record here, so there is nothing to prune.
-        None => delete_leftover_worktree_dir(&repo, worktree_path)?,
+        None => delete_leftover_worktree_dir(&repo, worktree_path, false)?,
     }
 
     if let Some(branch) = branch_from_worktree(worktree_path) {
@@ -907,7 +907,11 @@ fn remove_worktree_and_branch(
 /// `remove_dir_all` on a symlink has not behaved the same way across Rust
 /// versions — it has both errored with `ENOTDIR` and silently unlinked the
 /// link, and neither is a behaviour to inherit for a recursive delete.
-fn delete_leftover_worktree_dir(repo: &str, worktree_path: &str) -> Result<()> {
+///
+/// `git_reported` says git already failed and that was logged by the caller.
+/// The leftover is then the expected follow-up and logs at INFO. It warns only
+/// when git claimed success yet left the directory, which nothing else reports.
+fn delete_leftover_worktree_dir(repo: &str, worktree_path: &str, git_reported: bool) -> Result<()> {
     let target = lexical_path(&expand_tilde(worktree_path));
 
     // The shared existence question — `symlink_metadata`, not `exists`, so a
@@ -942,10 +946,17 @@ fn delete_leftover_worktree_dir(repo: &str, worktree_path: &str) -> Result<()> {
         );
     }
 
-    tracing::warn!(
-        worktree_path,
-        "git left the worktree directory on disk; deleting it"
-    );
+    if git_reported {
+        tracing::info!(
+            worktree_path,
+            "git left the worktree directory on disk; deleting it"
+        );
+    } else {
+        tracing::warn!(
+            worktree_path,
+            "git left the worktree directory on disk; deleting it"
+        );
+    }
 
     if metadata.file_type().is_symlink() {
         fs::remove_file(&target)
