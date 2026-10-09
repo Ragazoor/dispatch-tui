@@ -164,6 +164,7 @@ impl MemoryReducerCaller {
             self.delete_task_side_effects(tables, task_id);
         }
         self.delete_epic_row(tables, id);
+        self.delete_work_package_links_to(tables, module::WORK_PACKAGE_ITEM_EPIC, id);
     }
 
     pub(super) fn apply_create_task(&self, row: bindings::Task) -> Result<TaskId> {

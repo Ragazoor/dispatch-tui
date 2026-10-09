@@ -200,7 +200,10 @@ pub async fn import_old_store(
 fn differs_in_creation(table: SharedTable, existing: &Row, incoming: &Row) -> bool {
     if !matches!(
         table,
-        SharedTable::Tasks | SharedTable::Epics | SharedTable::Learnings
+        SharedTable::Tasks
+            | SharedTable::Epics
+            | SharedTable::Learnings
+            | SharedTable::WorkPackages
     ) {
         return false;
     }
@@ -244,6 +247,16 @@ impl DroppedIds {
             SharedTable::PollOwners => {
                 row.get("scope").and_then(Value::as_str) == Some("epic")
                     && id_of(row, "scope_id").is_some_and(|e| self.epics.contains(&e))
+            }
+            // A link naming a dropped item names nothing
+            // (`work-packages.allium: DeletingAnItemRemovesItsLinks`).
+            SharedTable::WorkPackageLinks => {
+                let item = id_of(row, "item_id");
+                match row.get("kind").and_then(Value::as_str) {
+                    Some("task") => item.is_some_and(|t| self.tasks.contains(&t)),
+                    Some("epic") => item.is_some_and(|e| self.epics.contains(&e)),
+                    _ => false,
+                }
             }
             _ => false,
         }

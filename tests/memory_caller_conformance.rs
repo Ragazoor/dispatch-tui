@@ -35,7 +35,8 @@
 //!
 //! **Every `ReducerDomain` now covered**: tasks_and_epics/repo_config/
 //! subscriptions (task #4975), usage/agent_state (task #5004), learnings
-//! (task #5003), and settings (task #5002, which lands last). Extend this
+//! (task #5003), settings (task #5002), and work packages (task #45061).
+//! Extend this
 //! same file's scenario, rather than starting a new one, for any future
 //! `ReducerDomain` — `spacetime-memory-store.allium`'s `ConformanceIsCiGated`
 //! guarantee.
@@ -1295,6 +1296,102 @@ fn memory_caller_matches_the_real_reducers() {
         mem.delete_watches_by_watcher(task_id_mem).await.unwrap();
         assert!(rows_mem.watchers_of(watcher_target_mem).is_empty());
 
+        // -- work packages (`work-packages.allium`) -----------------------------
+        // `updated_at` is the store's own clock on a patch, so it is left out
+        // of the comparison, on `SameEndState`'s reasoning.
+        let package_shapes = |rows: &SharedRows| -> Vec<(i64, String, String, Option<String>)> {
+            rows.work_packages()
+                .into_iter()
+                .map(|p| (p.id.0, p.title, p.description, p.created_by))
+                .collect()
+        };
+        let package_row = || bindings::WorkPackage {
+            id: 0,
+            title: "  Window 1 ".into(),
+            description: "the plan".into(),
+            created_by: accepted.identity.clone(),
+            created_at: "2026-01-01 00:00:00.000".into(),
+            updated_at: "2026-01-01 00:00:00.000".into(),
+        };
+        let package_real = real.create_work_package(package_row()).await.unwrap();
+        wait_for!(!rows_real.work_packages().is_empty());
+        let package_mem = mem.create_work_package(package_row()).await.unwrap();
+        assert_eq!(package_real, package_mem, "generated work package id");
+        assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
+
+        let blank = bindings::WorkPackage {
+            title: "  ".into(),
+            ..package_row()
+        };
+        assert!(real.create_work_package(blank.clone()).await.is_err());
+        assert!(mem.create_work_package(blank).await.is_err());
+
+        let task_item = dispatch_tui::models::WorkPackageItem::Task(task_id_real);
+        let epic_item = dispatch_tui::models::WorkPackageItem::Epic(EpicId(epic_id_real));
+        for item in [task_item, epic_item, task_item] {
+            let r = real
+                .link_work_package_item(package_real, item)
+                .await
+                .unwrap();
+            let m = mem.link_work_package_item(package_mem, item).await.unwrap();
+            assert_eq!(r.won(), m.won(), "link {item:?}");
+        }
+        wait_for!(rows_real.work_package_links().len() == 2);
+        assert_eq!(
+            rows_real.work_package_links(),
+            rows_mem.work_package_links(),
+            "links after linking"
+        );
+
+        let unknown = dispatch_tui::models::WorkPackageItem::Task(TaskId(987_654));
+        let r = real
+            .link_work_package_item(package_real, unknown)
+            .await
+            .unwrap();
+        let m = mem
+            .link_work_package_item(package_mem, unknown)
+            .await
+            .unwrap();
+        assert!(!r.won(), "a link to an unknown task is refused");
+        assert_eq!(r.won(), m.won(), "link to an unknown task");
+
+        for _ in 0..2 {
+            let r = real
+                .unlink_work_package_item(package_real, epic_item)
+                .await
+                .unwrap();
+            let m = mem
+                .unlink_work_package_item(package_mem, epic_item)
+                .await
+                .unwrap();
+            assert_eq!(r.won(), m.won(), "unlink");
+        }
+        wait_for!(rows_real.work_package_links().len() == 1);
+        assert_eq!(
+            rows_real.work_package_links(),
+            rows_mem.work_package_links()
+        );
+
+        let rename = || bindings::WorkPackagePatch {
+            title: Some(" Window 2".into()),
+            description: None,
+        };
+        real.patch_work_package(package_real, rename())
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .work_packages()
+            .first()
+            .is_some_and(|p| p.title == "Window 2"));
+        mem.patch_work_package(package_mem, rename()).await.unwrap();
+        assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
+
+        let missing = dispatch_tui::models::WorkPackageId(987_654);
+        let r = real.patch_work_package(missing, rename()).await.unwrap();
+        let m = mem.patch_work_package(missing, rename()).await.unwrap();
+        assert!(!r.won(), "patching a missing package is refused");
+        assert_eq!(r.won(), m.won(), "patch of a missing package");
+
         // -- poll ownership (agent_state) ----------------------------------------
         real.claim_poll_owner(PollScopeId::Task(task_id_real), "host-a".into())
             .await
@@ -1740,6 +1837,15 @@ fn memory_caller_matches_the_real_reducers() {
         mem.delete_task(task_id_mem).await.unwrap();
         assert!(rows_mem.task(task_id_mem).is_none());
         compare_epic(epic_id_real);
+
+        // `work-packages.allium: DeletingAnItemRemovesItsLinks` — the task was
+        // the package's last link.
+        wait_for!(rows_real.work_package_links().is_empty());
+        assert!(rows_mem.work_package_links().is_empty());
+        real.delete_work_package(package_real).await.unwrap();
+        wait_for!(rows_real.work_packages().is_empty());
+        mem.delete_work_package(package_mem).await.unwrap();
+        assert!(rows_mem.work_packages().is_empty());
 
         wait_for!(rows_real
             .learning(sourced_real)

@@ -33,8 +33,9 @@ pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 /// the eleventh and still needed this done by hand; `learnings` and
 /// `learning_retrievals`, the thirteenth and fourteenth, needed it again;
 /// `usage_events`, the fifteenth, needed it once more; `retired_feed_items`,
-/// the sixteenth, needed it yet again).
-pub const SHARED_TABLE_COUNT: usize = 17;
+/// the sixteenth, needed it yet again; `work_packages` and
+/// `work_package_links`, the eighteenth and nineteenth, once more).
+pub const SHARED_TABLE_COUNT: usize = 19;
 
 /// One row, carried whole. Deliberately untyped: this module does not describe
 /// the shape of a task row — `core.allium` does — and a second description here
@@ -67,6 +68,8 @@ pub enum SharedTable {
     LearningRetrievals,
     UsageEvents,
     RetiredFeedItems,
+    WorkPackages,
+    WorkPackageLinks,
 }
 
 impl SharedTable {
@@ -90,6 +93,8 @@ impl SharedTable {
         SharedTable::LearningRetrievals,
         SharedTable::UsageEvents,
         SharedTable::RetiredFeedItems,
+        SharedTable::WorkPackages,
+        SharedTable::WorkPackageLinks,
     ];
 
     pub fn name(self) -> &'static str {
@@ -111,6 +116,8 @@ impl SharedTable {
             SharedTable::LearningRetrievals => "learning_retrievals",
             SharedTable::UsageEvents => "usage_events",
             SharedTable::RetiredFeedItems => "retired_feed_items",
+            SharedTable::WorkPackages => "work_packages",
+            SharedTable::WorkPackageLinks => "work_package_links",
         }
     }
 
@@ -138,8 +145,12 @@ impl SharedTable {
             | SharedTable::Learnings
             | SharedTable::LearningRetrievals
             | SharedTable::UsageEvents
-            | SharedTable::RetiredFeedItems => Some("id"),
-            SharedTable::TaskShells
+            | SharedTable::RetiredFeedItems
+            | SharedTable::WorkPackages => Some("id"),
+            // A link's id is derived (`"<package>/<kind>/<item>"`), like a
+            // subscription's: nothing generated, nothing to burn.
+            SharedTable::WorkPackageLinks
+            | SharedTable::TaskShells
             | SharedTable::TaskSubagents
             | SharedTable::Hosts
             | SharedTable::Subscriptions
@@ -180,7 +191,9 @@ impl SharedTable {
             | SharedTable::Learnings
             | SharedTable::LearningRetrievals
             | SharedTable::UsageEvents
-            | SharedTable::RetiredFeedItems => &[],
+            | SharedTable::RetiredFeedItems
+            | SharedTable::WorkPackages
+            | SharedTable::WorkPackageLinks => &[],
         }
     }
 
@@ -313,7 +326,11 @@ impl SharedTable {
             | SharedTable::UsageEvents
             // `retired_feed_items.feed_epic_id` is already required on both
             // sides — nothing here to sentinel.
-            | SharedTable::RetiredFeedItems => &[],
+            | SharedTable::RetiredFeedItems
+            | SharedTable::WorkPackageLinks => &[],
+            // The package twin of `Epic.created_by` above: the board
+            // subscribes by it, so it cannot be optional.
+            SharedTable::WorkPackages => &[("created_by", S)],
         }
     }
 
@@ -406,7 +423,9 @@ impl SharedTable {
             | SharedTable::Learnings
             | SharedTable::LearningRetrievals
             | SharedTable::UsageEvents
-            | SharedTable::RetiredFeedItems => &[],
+            | SharedTable::RetiredFeedItems
+            | SharedTable::WorkPackages
+            | SharedTable::WorkPackageLinks => &[],
         }
     }
 
@@ -463,7 +482,9 @@ impl SharedTable {
             | SharedTable::Learnings
             | SharedTable::LearningRetrievals
             | SharedTable::UsageEvents
-            | SharedTable::RetiredFeedItems => &[],
+            | SharedTable::RetiredFeedItems
+            | SharedTable::WorkPackages
+            | SharedTable::WorkPackageLinks => &[],
         }
     }
 

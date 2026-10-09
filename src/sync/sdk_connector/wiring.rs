@@ -12,7 +12,8 @@ use crate::spacetime::bindings::{
     LearningsTableAccess as _, PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _,
     RepoPathsTableAccess as _, RetiredFeedItemsTableAccess as _, SettingsTableAccess as _,
     SubscriptionHandle, SubscriptionsTableAccess as _, TaskWatchersTableAccess as _,
-    TasksTableAccess as _, UsageEventsTableAccess as _,
+    TasksTableAccess as _, UsageEventsTableAccess as _, WorkPackageLinksTableAccess as _,
+    WorkPackagesTableAccess as _,
 };
 use crate::sync::subtree::SubtreeCover;
 
@@ -134,6 +135,18 @@ impl SpacetimeSdkConnector {
             upsert_setting,
             remove_setting,
             |row: &bindings::Setting| { row.id.clone() }
+        );
+        wire!(
+            work_packages,
+            upsert_work_package,
+            remove_work_package,
+            |row: &bindings::WorkPackage| crate::models::WorkPackageId(row.id)
+        );
+        wire!(
+            work_package_links,
+            upsert_work_package_link,
+            remove_work_package_link,
+            |row: &bindings::WorkPackageLink| row.id.clone()
         );
     }
 

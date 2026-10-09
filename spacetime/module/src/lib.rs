@@ -73,6 +73,7 @@ mod sequence;
 mod support;
 mod tables;
 mod tasks_epics;
+mod packages;
 
 pub use agent_state::*;
 pub use blanks::*;
@@ -84,6 +85,7 @@ pub use sequence::*;
 pub use support::*;
 pub use tables::*;
 pub use tasks_epics::*;
+pub use packages::*;
 
 #[cfg(test)]
 mod tests;

@@ -303,3 +303,31 @@ mirror!(
         retrieved_at,
     }
 );
+
+mirror!(
+    module::WorkPackage,
+    bindings::WorkPackage {
+        id,
+        title,
+        description,
+        created_by,
+        created_at,
+        updated_at
+    }
+);
+
+mirror!(
+    module::WorkPackageLink,
+    bindings::WorkPackageLink {
+        id,
+        work_package_id,
+        kind,
+        item_id,
+        created_at
+    }
+);
+
+mirror!(
+    module::WorkPackagePatch,
+    bindings::WorkPackagePatch { title, description }
+);

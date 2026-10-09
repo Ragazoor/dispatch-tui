@@ -324,6 +324,24 @@ pub fn epic_patch(patch: &crate::store::EpicPatch<'_>) -> bindings::EpicPatch {
     }
 }
 
+/// The row `create_work_package` inserts, on the terms [`create_epic_row`]
+/// states: every field is chosen here, and the store adds only the id.
+pub fn create_work_package_row(
+    title: &str,
+    description: &str,
+    created_by: &str,
+    now: &str,
+) -> bindings::WorkPackage {
+    bindings::WorkPackage {
+        id: 0,
+        title: title.trim().to_string(),
+        description: description.to_string(),
+        created_by: created_by.to_string(),
+        created_at: now.to_string(),
+        updated_at: now.to_string(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Feed ingestion (Phase 6c)
 // ---------------------------------------------------------------------------

@@ -74,10 +74,10 @@ The registry is **generated**. `tool_definitions()`, the `tools/call` dispatch a
 
 ## Removing an MCP Tool
 
-Reverse the steps above, but note that one test does **not** self-heal from the `mcp_tools!` macro like `tools_list_returns_tools` does: `every_tool_with_args_rejects_unknown_field` (`src/mcp/handlers/tests/mod.rs`) hand-lists every tool name in its `payloads`/`no_arg_tools` arrays. Deleting a tool's macro entry without also deleting its line there fails that test's `covered == all_tools` assertion at run time, not at compile time — `cargo build`/`cargo clippy` stay green.
+Reverse the steps above, but note that one test does **not** self-heal from the `mcp_tools!` macro like `tools_list_returns_tools` does: `every_tool_with_args_rejects_unknown_field` (`src/mcp/handlers/tests/mod.rs`) hand-lists every tool name in its `payloads` array. Deleting a tool's macro entry without also deleting its line there fails that test's `covered == all_tools` assertion at run time, not at compile time — `cargo build`/`cargo clippy` stay green.
 
 1. Delete the `mcp_tools!` entry in `src/mcp/handlers/dispatch.rs` and the handler function/module.
-2. Delete the tool's entry from `every_tool_with_args_rejects_unknown_field`'s `payloads` (or `no_arg_tools`) list.
+2. Delete the tool's entry from `every_tool_with_args_rejects_unknown_field`'s `payloads` list.
 3. Delete the tool's dedicated test file/module, and any doc references (`docs/module-map.md`, `CLAUDE.md`, relevant `docs/specs/*.allium`).
 4. Run the full `cargo test` suite — grepping for the tool name is not enough to catch every reference; this hardcoded list is the proof.
 

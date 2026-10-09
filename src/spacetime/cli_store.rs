@@ -408,6 +408,8 @@ fn seed_reducer(table: SharedTable) -> &'static str {
         SharedTable::LearningRetrievals => "seed_learning_retrievals",
         SharedTable::UsageEvents => "seed_usage_events",
         SharedTable::RetiredFeedItems => "seed_retired_feed_items",
+        SharedTable::WorkPackages => "seed_work_packages",
+        SharedTable::WorkPackageLinks => "seed_work_package_links",
     }
 }
 

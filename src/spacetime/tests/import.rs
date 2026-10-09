@@ -137,6 +137,27 @@ async fn rows_that_only_describe_a_dropped_task_are_dropped_with_it() {
     assert_eq!(report.dropped(SharedTable::TaskSubagents), 1);
 }
 
+/// `DependentsOfDroppedRowsAreDropped`, for work package links: a link to a
+/// dropped task or epic names nothing, and the package itself stays.
+#[tokio::test]
+async fn a_work_package_link_to_a_dropped_item_is_dropped_with_it() {
+    let mut source = snapshot_of_a_populated_board().await;
+    archive(&mut source, SharedTable::Tasks, 3); // linked to package 1
+    archive(&mut source, SharedTable::Epics, 9); // linked to package 1
+    let target = store_for(&source);
+
+    let report = import_old_store(&target, &source, OPERATOR).await.unwrap();
+
+    assert!(rows(&target, SharedTable::WorkPackageLinks)
+        .await
+        .is_empty());
+    assert_eq!(report.dropped(SharedTable::WorkPackageLinks), 2);
+    assert_eq!(
+        ids(&rows(&target, SharedTable::WorkPackages).await),
+        vec![1]
+    );
+}
+
 /// `OrphansLeaveTheirDroppedEpic`: a live task is not lost with its epic.
 #[tokio::test]
 async fn a_live_task_in_a_dropped_epic_arrives_with_no_epic_and_the_importer_as_owner() {

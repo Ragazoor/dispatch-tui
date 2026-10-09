@@ -20,6 +20,7 @@ pub mod create_managed_role_epic_reducer;
 pub mod create_repo_group_sub_epic_reducer;
 pub mod create_task_reducer;
 pub mod create_task_watcher_reducer;
+pub mod create_work_package_reducer;
 pub mod delete_epic_reducer;
 pub mod delete_learning_reducer;
 pub mod delete_repo_path_reducer;
@@ -28,6 +29,7 @@ pub mod delete_task_reducer;
 pub mod delete_task_watcher_reducer;
 pub mod delete_watches_by_watcher_reducer;
 pub mod delete_watches_of_target_reducer;
+pub mod delete_work_package_reducer;
 pub mod drop_closed_retired_feed_items_reducer;
 pub mod epic_patch_type;
 pub mod epic_type;
@@ -43,11 +45,13 @@ pub mod learning_retrievals_table;
 pub mod learning_type;
 pub mod learning_verdict_input_type;
 pub mod learnings_table;
+pub mod link_work_package_item_reducer;
 pub mod mark_pr_learnings_gate_shown_reducer;
 pub mod override_poll_owner_reducer;
 pub mod patch_epic_reducer;
 pub mod patch_learning_reducer;
 pub mod patch_task_reducer;
+pub mod patch_work_package_reducer;
 pub mod poll_owner_type;
 pub mod poll_owners_table;
 pub mod probe_generated_task_id_reducer;
@@ -89,6 +93,8 @@ pub mod seed_task_watchers_reducer;
 pub mod seed_tasks_reducer;
 pub mod seed_todos_reducer;
 pub mod seed_usage_events_reducer;
+pub mod seed_work_package_links_reducer;
+pub mod seed_work_packages_reducer;
 pub mod set_schema_version_reducer;
 pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
@@ -114,11 +120,17 @@ pub mod tasks_table;
 pub mod todo_type;
 pub mod todos_table;
 pub mod try_record_stop_reducer;
+pub mod unlink_work_package_item_reducer;
 pub mod unsubscribe_from_epic_reducer;
 pub mod upsert_feed_tasks_additive_reducer;
 pub mod upsert_feed_tasks_reducer;
 pub mod usage_event_type;
 pub mod usage_events_table;
+pub mod work_package_link_type;
+pub mod work_package_links_table;
+pub mod work_package_patch_type;
+pub mod work_package_type;
+pub mod work_packages_table;
 
 pub use apply_learning_verdicts_reducer::apply_learning_verdicts;
 pub use archive_stale_learnings_reducer::archive_stale_learnings;
@@ -134,6 +146,7 @@ pub use create_managed_role_epic_reducer::create_managed_role_epic;
 pub use create_repo_group_sub_epic_reducer::create_repo_group_sub_epic;
 pub use create_task_reducer::create_task;
 pub use create_task_watcher_reducer::create_task_watcher;
+pub use create_work_package_reducer::create_work_package;
 pub use delete_epic_reducer::delete_epic;
 pub use delete_learning_reducer::delete_learning;
 pub use delete_repo_path_reducer::delete_repo_path;
@@ -142,6 +155,7 @@ pub use delete_task_reducer::delete_task;
 pub use delete_task_watcher_reducer::delete_task_watcher;
 pub use delete_watches_by_watcher_reducer::delete_watches_by_watcher;
 pub use delete_watches_of_target_reducer::delete_watches_of_target;
+pub use delete_work_package_reducer::delete_work_package;
 pub use drop_closed_retired_feed_items_reducer::drop_closed_retired_feed_items;
 pub use epic_patch_type::EpicPatch;
 pub use epic_type::Epic;
@@ -157,11 +171,13 @@ pub use learning_retrievals_table::*;
 pub use learning_type::Learning;
 pub use learning_verdict_input_type::LearningVerdictInput;
 pub use learnings_table::*;
+pub use link_work_package_item_reducer::link_work_package_item;
 pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
 pub use override_poll_owner_reducer::override_poll_owner;
 pub use patch_epic_reducer::patch_epic;
 pub use patch_learning_reducer::patch_learning;
 pub use patch_task_reducer::patch_task;
+pub use patch_work_package_reducer::patch_work_package;
 pub use poll_owner_type::PollOwner;
 pub use poll_owners_table::*;
 pub use probe_generated_task_id_reducer::probe_generated_task_id;
@@ -203,6 +219,8 @@ pub use seed_task_watchers_reducer::seed_task_watchers;
 pub use seed_tasks_reducer::seed_tasks;
 pub use seed_todos_reducer::seed_todos;
 pub use seed_usage_events_reducer::seed_usage_events;
+pub use seed_work_package_links_reducer::seed_work_package_links;
+pub use seed_work_packages_reducer::seed_work_packages;
 pub use set_schema_version_reducer::set_schema_version;
 pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
@@ -228,11 +246,17 @@ pub use tasks_table::*;
 pub use todo_type::Todo;
 pub use todos_table::*;
 pub use try_record_stop_reducer::try_record_stop;
+pub use unlink_work_package_item_reducer::unlink_work_package_item;
 pub use unsubscribe_from_epic_reducer::unsubscribe_from_epic;
 pub use upsert_feed_tasks_additive_reducer::upsert_feed_tasks_additive;
 pub use upsert_feed_tasks_reducer::upsert_feed_tasks;
 pub use usage_event_type::UsageEvent;
 pub use usage_events_table::*;
+pub use work_package_link_type::WorkPackageLink;
+pub use work_package_links_table::*;
+pub use work_package_patch_type::WorkPackagePatch;
+pub use work_package_type::WorkPackage;
+pub use work_packages_table::*;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -298,6 +322,9 @@ pub enum Reducer {
         watcher_task_id: i64,
         target_task_id: i64,
     },
+    CreateWorkPackage {
+        row: WorkPackage,
+    },
     DeleteEpic {
         id: i64,
     },
@@ -324,9 +351,17 @@ pub enum Reducer {
     DeleteWatchesOfTarget {
         target_task_id: i64,
     },
+    DeleteWorkPackage {
+        id: i64,
+    },
     DropClosedRetiredFeedItems {
         feed_epic_id: i64,
         keep_external_ids: Vec<String>,
+    },
+    LinkWorkPackageItem {
+        work_package_id: i64,
+        kind: String,
+        item_id: i64,
     },
     MarkPrLearningsGateShown {
         id: i64,
@@ -348,6 +383,10 @@ pub enum Reducer {
     PatchTask {
         id: i64,
         patch: TaskPatch,
+    },
+    PatchWorkPackage {
+        id: i64,
+        patch: WorkPackagePatch,
     },
     ProbeGeneratedTaskId,
     RecalculateEpicStatus {
@@ -458,6 +497,12 @@ pub enum Reducer {
     SeedUsageEvents {
         rows: Vec<UsageEvent>,
     },
+    SeedWorkPackageLinks {
+        rows: Vec<WorkPackageLink>,
+    },
+    SeedWorkPackages {
+        rows: Vec<WorkPackage>,
+    },
     SetSchemaVersion {
         version: i64,
     },
@@ -494,6 +539,11 @@ pub enum Reducer {
     TryRecordStop {
         id: i64,
         stop_pending_at: String,
+    },
+    UnlinkWorkPackageItem {
+        work_package_id: i64,
+        kind: String,
+        item_id: i64,
     },
     UnsubscribeFromEpic {
         subscriber: String,
@@ -532,6 +582,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::CreateRepoGroupSubEpic { .. } => "create_repo_group_sub_epic",
             Reducer::CreateTask { .. } => "create_task",
             Reducer::CreateTaskWatcher { .. } => "create_task_watcher",
+            Reducer::CreateWorkPackage { .. } => "create_work_package",
             Reducer::DeleteEpic { .. } => "delete_epic",
             Reducer::DeleteLearning { .. } => "delete_learning",
             Reducer::DeleteRepoPath { .. } => "delete_repo_path",
@@ -540,12 +591,15 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteTaskWatcher { .. } => "delete_task_watcher",
             Reducer::DeleteWatchesByWatcher { .. } => "delete_watches_by_watcher",
             Reducer::DeleteWatchesOfTarget { .. } => "delete_watches_of_target",
+            Reducer::DeleteWorkPackage { .. } => "delete_work_package",
             Reducer::DropClosedRetiredFeedItems { .. } => "drop_closed_retired_feed_items",
+            Reducer::LinkWorkPackageItem { .. } => "link_work_package_item",
             Reducer::MarkPrLearningsGateShown { .. } => "mark_pr_learnings_gate_shown",
             Reducer::OverridePollOwner { .. } => "override_poll_owner",
             Reducer::PatchEpic { .. } => "patch_epic",
             Reducer::PatchLearning { .. } => "patch_learning",
             Reducer::PatchTask { .. } => "patch_task",
+            Reducer::PatchWorkPackage { .. } => "patch_work_package",
             Reducer::ProbeGeneratedTaskId => "probe_generated_task_id",
             Reducer::RecalculateEpicStatus { .. } => "recalculate_epic_status",
             Reducer::RecordBaseBranch { .. } => "record_base_branch",
@@ -577,6 +631,8 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedTasks { .. } => "seed_tasks",
             Reducer::SeedTodos { .. } => "seed_todos",
             Reducer::SeedUsageEvents { .. } => "seed_usage_events",
+            Reducer::SeedWorkPackageLinks { .. } => "seed_work_package_links",
+            Reducer::SeedWorkPackages { .. } => "seed_work_packages",
             Reducer::SetSchemaVersion { .. } => "set_schema_version",
             Reducer::SetTaskEpic { .. } => "set_task_epic",
             Reducer::SetVerifyCommand { .. } => "set_verify_command",
@@ -588,6 +644,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SubagentStop { .. } => "subagent_stop",
             Reducer::SubscribeToEpic { .. } => "subscribe_to_epic",
             Reducer::TryRecordStop { .. } => "try_record_stop",
+            Reducer::UnlinkWorkPackageItem { .. } => "unlink_work_package_item",
             Reducer::UnsubscribeFromEpic { .. } => "unsubscribe_from_epic",
             Reducer::UpsertFeedTasks { .. } => "upsert_feed_tasks",
             Reducer::UpsertFeedTasksAdditive { .. } => "upsert_feed_tasks_additive",
@@ -695,6 +752,11 @@ impl __sdk::Reducer for Reducer {
                 watcher_task_id: watcher_task_id.clone(),
                 target_task_id: target_task_id.clone(),
 }),
+            Reducer::CreateWorkPackage{
+                row,
+}             => __sats::bsatn::to_vec(&create_work_package_reducer::CreateWorkPackageArgs {
+                row: row.clone(),
+}),
             Reducer::DeleteEpic{
                 id,
 }             => __sats::bsatn::to_vec(&delete_epic_reducer::DeleteEpicArgs {
@@ -739,12 +801,26 @@ impl __sdk::Reducer for Reducer {
 }             => __sats::bsatn::to_vec(&delete_watches_of_target_reducer::DeleteWatchesOfTargetArgs {
                 target_task_id: target_task_id.clone(),
 }),
+            Reducer::DeleteWorkPackage{
+                id,
+}             => __sats::bsatn::to_vec(&delete_work_package_reducer::DeleteWorkPackageArgs {
+                id: id.clone(),
+}),
             Reducer::DropClosedRetiredFeedItems{
                 feed_epic_id,
                 keep_external_ids,
 }             => __sats::bsatn::to_vec(&drop_closed_retired_feed_items_reducer::DropClosedRetiredFeedItemsArgs {
                 feed_epic_id: feed_epic_id.clone(),
                 keep_external_ids: keep_external_ids.clone(),
+}),
+            Reducer::LinkWorkPackageItem{
+                work_package_id,
+                kind,
+                item_id,
+}             => __sats::bsatn::to_vec(&link_work_package_item_reducer::LinkWorkPackageItemArgs {
+                work_package_id: work_package_id.clone(),
+                kind: kind.clone(),
+                item_id: item_id.clone(),
 }),
             Reducer::MarkPrLearningsGateShown{
                 id,
@@ -780,6 +856,13 @@ impl __sdk::Reducer for Reducer {
                 id,
                 patch,
 }             => __sats::bsatn::to_vec(&patch_task_reducer::PatchTaskArgs {
+                id: id.clone(),
+                patch: patch.clone(),
+}),
+            Reducer::PatchWorkPackage{
+                id,
+                patch,
+}             => __sats::bsatn::to_vec(&patch_work_package_reducer::PatchWorkPackageArgs {
                 id: id.clone(),
                 patch: patch.clone(),
 }),
@@ -971,6 +1054,16 @@ Reducer::RecalculateEpicStatus{
 }             => __sats::bsatn::to_vec(&seed_usage_events_reducer::SeedUsageEventsArgs {
                 rows: rows.clone(),
 }),
+            Reducer::SeedWorkPackageLinks{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_work_package_links_reducer::SeedWorkPackageLinksArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedWorkPackages{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_work_packages_reducer::SeedWorkPackagesArgs {
+                rows: rows.clone(),
+}),
             Reducer::SetSchemaVersion{
                 version,
 }             => __sats::bsatn::to_vec(&set_schema_version_reducer::SetSchemaVersionArgs {
@@ -1036,6 +1129,15 @@ Reducer::RecalculateEpicStatus{
                 id: id.clone(),
                 stop_pending_at: stop_pending_at.clone(),
 }),
+            Reducer::UnlinkWorkPackageItem{
+                work_package_id,
+                kind,
+                item_id,
+}             => __sats::bsatn::to_vec(&unlink_work_package_item_reducer::UnlinkWorkPackageItemArgs {
+                work_package_id: work_package_id.clone(),
+                kind: kind.clone(),
+                item_id: item_id.clone(),
+}),
             Reducer::UnsubscribeFromEpic{
                 subscriber,
                 epic_id,
@@ -1088,6 +1190,8 @@ pub struct DbUpdate {
     tasks: __sdk::TableUpdate<Task>,
     todos: __sdk::TableUpdate<Todo>,
     usage_events: __sdk::TableUpdate<UsageEvent>,
+    work_package_links: __sdk::TableUpdate<WorkPackageLink>,
+    work_packages: __sdk::TableUpdate<WorkPackage>,
 }
 
 impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
@@ -1150,6 +1254,12 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "usage_events" => db_update
                     .usage_events
                     .append(usage_events_table::parse_table_update(table_update)?),
+                "work_package_links" => db_update
+                    .work_package_links
+                    .append(work_package_links_table::parse_table_update(table_update)?),
+                "work_packages" => db_update
+                    .work_packages
+                    .append(work_packages_table::parse_table_update(table_update)?),
 
                 unknown => {
                     return Err(__sdk::InternalError::unknown_name(
@@ -1230,6 +1340,12 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.usage_events = cache
             .apply_diff_to_table::<UsageEvent>("usage_events", &self.usage_events)
             .with_updates_by_pk(|row| &row.id);
+        diff.work_package_links = cache
+            .apply_diff_to_table::<WorkPackageLink>("work_package_links", &self.work_package_links)
+            .with_updates_by_pk(|row| &row.id);
+        diff.work_packages = cache
+            .apply_diff_to_table::<WorkPackage>("work_packages", &self.work_packages)
+            .with_updates_by_pk(|row| &row.id);
 
         diff
     }
@@ -1290,6 +1406,12 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "usage_events" => db_update
                     .usage_events
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "work_package_links" => db_update
+                    .work_package_links
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "work_packages" => db_update
+                    .work_packages
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -1358,6 +1480,12 @@ impl __sdk::DbUpdate for DbUpdate {
                 "usage_events" => db_update
                     .usage_events
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "work_package_links" => db_update
+                    .work_package_links
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "work_packages" => db_update
+                    .work_packages
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 unknown => {
                     return Err(
                         __sdk::InternalError::unknown_name("table", unknown, "QueryRows").into(),
@@ -1391,6 +1519,8 @@ pub struct AppliedDiff<'r> {
     tasks: __sdk::TableAppliedDiff<'r, Task>,
     todos: __sdk::TableAppliedDiff<'r, Todo>,
     usage_events: __sdk::TableAppliedDiff<'r, UsageEvent>,
+    work_package_links: __sdk::TableAppliedDiff<'r, WorkPackageLink>,
+    work_packages: __sdk::TableAppliedDiff<'r, WorkPackage>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
 
@@ -1456,6 +1586,16 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<UsageEvent>(
             "usage_events",
             &self.usage_events,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<WorkPackageLink>(
+            "work_package_links",
+            &self.work_package_links,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<WorkPackage>(
+            "work_packages",
+            &self.work_packages,
             event,
         );
     }
@@ -2136,6 +2276,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         tasks_table::register_table(client_cache);
         todos_table::register_table(client_cache);
         usage_events_table::register_table(client_cache);
+        work_package_links_table::register_table(client_cache);
+        work_packages_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "epics",
@@ -2156,5 +2298,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "tasks",
         "todos",
         "usage_events",
+        "work_package_links",
+        "work_packages",
     ];
 }

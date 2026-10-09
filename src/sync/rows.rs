@@ -42,6 +42,7 @@ use tokio::sync::watch;
 
 use crate::models::{
     Epic, EpicId, Learning, LearningId, LearningRetrieval, PollScopeId, Task, TaskId, UsageSummary,
+    WorkPackage, WorkPackageId, WorkPackageLink,
 };
 use crate::spacetime::bindings;
 use crate::store::{LearningFilter, UsageQuery};
@@ -153,6 +154,11 @@ struct Rows {
     /// Task #4971. Unconditionally subscribed, like `learnings`/`usage_events`
     /// above — a retirement record is not scoped by owner or host either.
     retired_feed_items: BTreeMap<i64, RetiredFeedItemRow>,
+    /// `work-packages.allium`. Packages arrive scoped to their creator by the
+    /// subscription's `WHERE created_by = …`; links arrive unfiltered.
+    work_packages: BTreeMap<i64, WorkPackage>,
+    /// Keyed by the store's derived link id.
+    work_package_links: BTreeMap<String, WorkPackageLink>,
 }
 
 impl Rows {
@@ -170,6 +176,8 @@ impl Rows {
             && self.subscriptions.is_empty()
             && self.settings.is_empty()
             && self.retired_feed_items.is_empty()
+            && self.work_packages.is_empty()
+            && self.work_package_links.is_empty()
     }
 }
 
@@ -457,6 +465,38 @@ impl SharedRows {
         self.write(|rows| rows.retired_feed_items.remove(&id).is_some());
     }
 
+    pub fn upsert_work_package(&self, row: &bindings::WorkPackage) {
+        match decode::work_package(row) {
+            Ok(package) => self.write(|rows| {
+                rows.work_packages.insert(package.id.0, package);
+                true
+            }),
+            Err(e) => {
+                crate::store::drop_undecodable("work package", &e);
+            }
+        }
+    }
+
+    pub fn remove_work_package(&self, id: WorkPackageId) {
+        self.write(|rows| rows.work_packages.remove(&id.0).is_some());
+    }
+
+    pub fn upsert_work_package_link(&self, row: &bindings::WorkPackageLink) {
+        match decode::work_package_link(row) {
+            Ok(link) => self.write(|rows| {
+                rows.work_package_links.insert(row.id.clone(), link);
+                true
+            }),
+            Err(e) => {
+                crate::store::drop_undecodable("work package link", &e);
+            }
+        }
+    }
+
+    pub fn remove_work_package_link(&self, id: String) {
+        self.write(|rows| rows.work_package_links.remove(&id).is_some());
+    }
+
     /// Drop everything.
     ///
     /// Called when a connection goes down. The rows belonged to that
@@ -569,6 +609,22 @@ impl SharedRows {
 
     pub fn epic(&self, id: EpicId) -> Option<Epic> {
         self.read(|rows| rows.epics.get(&id.0).cloned())
+    }
+
+    /// Every work package, oldest first (by id).
+    pub fn work_packages(&self) -> Vec<WorkPackage> {
+        self.read(|rows| rows.work_packages.values().cloned().collect())
+    }
+
+    /// Every work package link, ordered by package id, then the item's kind
+    /// and id — the order the derived key would sort in if its ids were
+    /// numbers rather than text.
+    pub fn work_package_links(&self) -> Vec<WorkPackageLink> {
+        self.read(|rows| {
+            let mut out: Vec<WorkPackageLink> = rows.work_package_links.values().copied().collect();
+            out.sort_by_key(|l| (l.work_package_id, l.item));
+            out
+        })
     }
 
     // `hosts` is DELIVERED and stored but has no accessor, and that is the

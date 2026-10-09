@@ -28,7 +28,7 @@ use crate::models::{
     Epic, EpicId, FeedItem, FeedRole, Learning, LearningId, LearningKind, LearningRetrieval,
     LearningScope, LearningStatus, LearningVerdict, NotificationWrite, PollScopeId,
     RetrievalSource, StopOutcome, SubStatus, SubagentDrain, Task, TaskId, TaskStatus, TaskTag,
-    UserPromptOutcome, WrapUpMode,
+    UserPromptOutcome, WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink, WrapUpMode,
 };
 
 // ---------------------------------------------------------------------------
@@ -596,6 +596,41 @@ pub trait EpicCrud: EpicRead {
     async fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()>;
 }
 
+/// Read-only work-package queries (`work-packages.allium`). Held (via
+/// [`TaskReadStore`] and [`BoardReads`]) by non-service consumers.
+#[async_trait::async_trait]
+pub trait WorkPackageRead: Send + Sync {
+    /// Every work package this board holds, oldest first.
+    async fn list_work_packages(&self) -> Vec<WorkPackage>;
+    /// Every link this board holds, ordered by package, then item.
+    async fn list_work_package_links(&self) -> Vec<WorkPackageLink>;
+}
+
+/// Work-package mutations. Off [`TaskReadStore`], like [`EpicCrud`]: writes go
+/// through the service layer.
+#[async_trait::async_trait]
+pub trait WorkPackageCrud: WorkPackageRead {
+    /// Create a package stamped with this board's identity; answers its id.
+    async fn create_work_package(&self, title: &str, description: &str) -> Result<WorkPackageId>;
+    /// Change the title and/or description; `None` leaves a field alone.
+    async fn patch_work_package(
+        &self,
+        id: WorkPackageId,
+        title: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<()>;
+    /// Delete the package and its links; the linked items stay.
+    async fn delete_work_package(&self, id: WorkPackageId) -> Result<()>;
+    /// Link an item. Idempotent.
+    async fn link_work_package_item(&self, id: WorkPackageId, item: WorkPackageItem) -> Result<()>;
+    /// Unlink an item. Idempotent.
+    async fn unlink_work_package_item(
+        &self,
+        id: WorkPackageId,
+        item: WorkPackageItem,
+    ) -> Result<()>;
+}
+
 /// Per-host preferences: key/value settings and the managed-feed config.
 /// **Shared, not local** — a mutation is a reducer call scoped to this
 /// install's own host id, and a read answers from the store's rows, so a board
@@ -1017,6 +1052,7 @@ pub trait UsageStore: Send + Sync {
 /// | `learning_retrievals` | [`LearningRetrievalStore`] |
 /// | `usage_events` | [`UsageStore`] |
 /// | `retired_feed_items` | [`TaskCrud`] (task #4971) |
+/// | `work_packages`, `work_package_links` | [`WorkPackageCrud`] / [`WorkPackageRead`] |
 /// | the user identity's credential | [`IdentityCredentialStore`] |
 ///
 /// Every table is reachable through one handle:
@@ -1058,6 +1094,7 @@ pub trait UsageStore: Send + Sync {
 /// built.
 pub trait TaskStore:
     TaskAndEpicStore
+    + WorkPackageCrud
     + RepoConfigStore
     + HostStore
     + SubscriptionStore
@@ -1072,6 +1109,7 @@ pub trait TaskStore:
 
 impl<
         T: TaskAndEpicStore
+            + WorkPackageCrud
             + RepoConfigStore
             + HostStore
             + SubscriptionStore
@@ -1129,6 +1167,7 @@ impl<
 pub trait TaskReadStore:
     TaskRead
     + EpicRead
+    + WorkPackageRead
     + RepoConfigStore
     + HostStore
     + SettingsStore
@@ -1143,6 +1182,7 @@ pub trait TaskReadStore:
 impl<
         T: TaskRead
             + EpicRead
+            + WorkPackageRead
             + RepoConfigStore
             + HostStore
             + SettingsStore

@@ -13,6 +13,18 @@ mod tests {
     /// `spacetime-seed.allium: StoreRefusesUnknownStatus`. The module is the
     /// one layer no client can bypass, so it names the four statuses it
     /// holds and refuses the rest, `archived` included.
+    /// `work-packages.allium: OneLinkPerPackageAndItem` rests on this key: a
+    /// task and an epic sharing an id are different items, so the kind is
+    /// part of it.
+    #[test]
+    fn a_work_package_link_key_names_package_kind_and_item() {
+        assert_eq!(work_package_link_id(1, WORK_PACKAGE_ITEM_TASK, 3), "1/task/3");
+        assert_ne!(
+            work_package_link_id(1, WORK_PACKAGE_ITEM_TASK, 3),
+            work_package_link_id(1, WORK_PACKAGE_ITEM_EPIC, 3)
+        );
+    }
+
     #[test]
     fn the_four_known_statuses_are_accepted() {
         for status in ["backlog", "running", "review", "done"] {

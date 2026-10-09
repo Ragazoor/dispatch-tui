@@ -58,6 +58,7 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
         "epics" => burn_table!(epics, blank_epic()),
         "todos" => burn_table!(todos, blank_todo()),
         "task_watchers" => burn_table!(task_watchers, blank_watcher()),
+        "work_packages" => burn_table!(work_packages, blank_work_package()),
         "repo_paths" => burn_table!(repo_paths, blank_repo_path()),
         "repo_base_branches" => burn_table!(repo_base_branches, blank_repo_base_branch()),
         // Found in passing while adding the two arms below: `poll_owners` DOES
@@ -77,12 +78,13 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
         // caught by `seeding_a_board_puts_its_rows_on_that_persons_store_backed_board`
         // once task #4916's seed path started burning every generating table.
         "retired_feed_items" => burn_table!(retired_feed_items, blank_retired_feed_item()),
-        // `task_shells`, `task_subagents`, `hosts`, `subscriptions`, `settings`
-        // and `filter_presets` generate no ids, so there is nothing to burn.
+        // `task_shells`, `task_subagents`, `hosts`, `subscriptions`, `settings`,
+        // `filter_presets` and `work_package_links` generate no ids, so there
+        // is nothing to burn.
         // Accepted rather than rejected so a caller can loop over every shared
         // table without a special case.
         "task_shells" | "task_subagents" | "hosts" | "subscriptions" | "settings"
-        | "filter_presets" => {}
+        | "filter_presets" | "work_package_links" => {}
         other => return Err(format!("unknown table {other}")),
     }
     Ok(())

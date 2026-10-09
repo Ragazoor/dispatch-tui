@@ -8,6 +8,7 @@ mod learnings;
 mod settings;
 mod tasks;
 mod usage;
+mod work_packages;
 
 pub(crate) use settings::{HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY};
 

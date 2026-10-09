@@ -7,7 +7,7 @@
 //! [`BoardReads`] is the handle the board draws its cards from — the reads
 //! the row-change pump and the tick's revision guard refresh. Its card reads
 //! are the store's own read traits ([`TaskRead`], [`EpicRead`],
-//! [`RepoConfigRead`]), so there is one `get_task`, not a second copy on a
+//! [`WorkPackageRead`], [`RepoConfigRead`]), so there is one `get_task`, not a second copy on a
 //! second trait; this trait adds only what drawing needs beyond them: the
 //! poll owner and the revision.
 //!
@@ -26,16 +26,16 @@
 
 use async_trait::async_trait;
 
-use super::{EpicRead, RepoConfigRead, TaskRead};
+use super::{EpicRead, RepoConfigRead, TaskRead, WorkPackageRead};
 use crate::models::PollScopeId;
 
 /// The reads a board performs to draw itself.
 ///
 /// Read-only by construction: the supertraits are the read halves of the
-/// task, epic and repo-config domains, so a `dyn BoardReads` reaches no
+/// task, epic, work-package and repo-config domains, so a `dyn BoardReads` reaches no
 /// mutation.
 #[async_trait]
-pub trait BoardReads: TaskRead + EpicRead + RepoConfigRead {
+pub trait BoardReads: TaskRead + EpicRead + WorkPackageRead + RepoConfigRead {
     /// The `Host.id` allowed to run recurring background polling for
     /// `target`, or `None` if unclaimed (`core.allium: PollOwner`). See
     /// `pr-workflow.allium: PollPrStatus` and `feeds.allium: FeedTick`, the two

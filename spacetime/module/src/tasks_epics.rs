@@ -377,6 +377,7 @@ pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
         ctx.db.task_watchers().id().delete(watch);
     }
     detach_learnings_from_task(ctx, task_id);
+    delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, task_id);
 }
 
 /// Move a task into an epic, out of one, or between two.
@@ -744,6 +745,7 @@ pub(crate) fn delete_epic_subtree(ctx: &ReducerContext, id: i64, depth: usize) {
         delete_task_side_effects(ctx, task.id);
     }
     ctx.db.epics().id().delete(id);
+    delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_EPIC, id);
 }
 
 /// Recalculate an epic's status and every ancestor's, from the WHOLE child set.

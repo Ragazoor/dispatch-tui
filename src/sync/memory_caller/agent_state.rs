@@ -32,6 +32,7 @@ impl MemoryReducerCaller {
             .collect();
         self.delete_watcher_rows(tables, watches);
         self.detach_learnings_from_task(tables, task_id);
+        self.delete_work_package_links_to(tables, module::WORK_PACKAGE_ITEM_TASK, task_id);
     }
 
     pub(super) fn delete_watcher_rows(&self, tables: &mut Tables, ids: Vec<i64>) {

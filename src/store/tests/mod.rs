@@ -10,6 +10,7 @@ mod tasks;
 mod tasks_feed;
 mod tasks_patch;
 mod usage;
+mod work_packages;
 
 pub(super) async fn in_memory_db() -> Store {
     Store::open_in_memory().unwrap()

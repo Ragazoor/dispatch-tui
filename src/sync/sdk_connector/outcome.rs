@@ -150,6 +150,18 @@ pub(super) fn matches_created_epic(candidate: &bindings::Epic, sent: &bindings::
         && candidate.created_by == sent.created_by
 }
 
+/// Whether `candidate` is a row this board's work package create could have
+/// produced: the twin of [`matches_created_epic`]. The title is compared
+/// trimmed, because the store trims it on the way in.
+pub(super) fn matches_created_work_package(
+    candidate: &bindings::WorkPackage,
+    sent: &bindings::WorkPackage,
+) -> bool {
+    candidate.title == sent.title.trim()
+        && candidate.created_at == sent.created_at
+        && candidate.created_by == sent.created_by
+}
+
 /// Whether `candidate` is a row this board's create could have produced.
 ///
 /// Every field here is one the CLIENT chose, so a match cannot be a coincidence

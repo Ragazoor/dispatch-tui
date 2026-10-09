@@ -64,6 +64,9 @@ pub use agent_events::*;
 pub mod epics;
 pub use epics::*;
 
+pub mod work_packages;
+pub use work_packages::*;
+
 pub mod usage;
 pub use usage::*;
 

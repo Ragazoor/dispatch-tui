@@ -68,6 +68,39 @@ pub fn seed_task_watchers(ctx: &ReducerContext, rows: Vec<TaskWatcher>) -> Resul
 }
 
 #[spacetimedb::reducer]
+pub fn seed_work_packages(ctx: &ReducerContext, rows: Vec<WorkPackage>) -> Result<(), String> {
+    for row in rows {
+        if row.id == 0 {
+            return Err("seed_work_packages needs each package's real id".into());
+        }
+        if ctx.db.work_packages().id().find(row.id).is_some() {
+            ctx.db.work_packages().id().update(row);
+        } else {
+            ctx.db.work_packages().insert(row);
+        }
+    }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn seed_work_package_links(
+    ctx: &ReducerContext,
+    rows: Vec<WorkPackageLink>,
+) -> Result<(), String> {
+    for row in rows {
+        if row.id.is_empty() {
+            return Err("a work package link needs its derived id".into());
+        }
+        if ctx.db.work_package_links().id().find(row.id.clone()).is_some() {
+            ctx.db.work_package_links().id().update(row);
+        } else {
+            ctx.db.work_package_links().insert(row);
+        }
+    }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
 pub fn seed_repo_paths(ctx: &ReducerContext, rows: Vec<RepoPath>) -> Result<(), String> {
     for row in rows {
         if row.id == 0 {

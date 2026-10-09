@@ -27,8 +27,8 @@
 --           of their own and are untouched by this file.
 -- Dependencies: ReducerDomain's members correspond to the shared tables and
 --               mutation groups core.allium, epics.allium, host.allium,
---               settings.allium, learnings.allium and task-watchers.allium
---               already define.
+--               settings.allium, learnings.allium, task-watchers.allium and
+--               work-packages.allium already define.
 
 ------------------------------------------------------------
 -- External Entities
@@ -94,6 +94,7 @@ enum ReducerDomain {
     learnings
     usage
     agent_state
+    work_packages   -- work-packages.allium (task #45061)
 }
 
 ------------------------------------------------------------
@@ -145,7 +146,7 @@ config {
     -- The number of ReducerDomain members. Kept as an explicit count rather
     -- than an expression over the enum so MemoryReducerCaller.is_complete
     -- reads as a comparison against a known target, not a tautology.
-    total_domains: Integer = 7
+    total_domains: Integer = 8
 }
 
 ------------------------------------------------------------
@@ -200,7 +201,7 @@ config {
 -- domain (a behavioural cutover for roughly 342 call sites). #8277 wired
 -- Store::open_in_memory() to check is_complete() and attach the store.
 default MemoryReducerCaller the_store = {
-    covered_domains: { tasks_and_epics, repo_config, subscriptions, settings, learnings, usage, agent_state }
+    covered_domains: { tasks_and_epics, repo_config, subscriptions, settings, learnings, usage, agent_state, work_packages }
 }
 
 ------------------------------------------------------------

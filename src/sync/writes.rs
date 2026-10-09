@@ -31,7 +31,7 @@ use chrono::{DateTime, Utc};
 
 use crate::models::{
     EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource,
-    SubStatus, TaskId,
+    SubStatus, TaskId, WorkPackageId, WorkPackageItem,
 };
 use crate::spacetime::bindings;
 
@@ -346,6 +346,26 @@ pub trait ReducerCaller: Send + Sync {
     ) -> Result<ReducerOutcome>;
     async fn delete_watches_of_target(&self, target_task_id: TaskId) -> Result<ReducerOutcome>;
     async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<ReducerOutcome>;
+
+    // -- Work packages (`work-packages.allium`) ----------------------------------
+    /// Insert a work package and answer with the id the store generated.
+    async fn create_work_package(&self, row: bindings::WorkPackage) -> Result<WorkPackageId>;
+    async fn patch_work_package(
+        &self,
+        id: WorkPackageId,
+        patch: bindings::WorkPackagePatch,
+    ) -> Result<ReducerOutcome>;
+    async fn delete_work_package(&self, id: WorkPackageId) -> Result<ReducerOutcome>;
+    async fn link_work_package_item(
+        &self,
+        id: WorkPackageId,
+        item: WorkPackageItem,
+    ) -> Result<ReducerOutcome>;
+    async fn unlink_work_package_item(
+        &self,
+        id: WorkPackageId,
+        item: WorkPackageItem,
+    ) -> Result<ReducerOutcome>;
 
     // -- Poll ownership (Phase 7) -----------------------------------------------
     async fn claim_poll_owner(&self, target: PollScopeId, host: String) -> Result<ReducerOutcome>;

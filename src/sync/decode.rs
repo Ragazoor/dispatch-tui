@@ -32,7 +32,8 @@ use chrono::{DateTime, Utc};
 use crate::models::{
     Epic, EpicId, EpicOrigin, FeedRole, Learning, LearningId, LearningKind, LearningRetrieval,
     LearningScope, LearningStatus, RetrievalSource, SubStatus, Task, TaskId, TaskStatus, TaskTag,
-    TaskUrl, TmuxWindow, UrlType, WrapUpMode,
+    TaskUrl, TmuxWindow, UrlType, WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink,
+    WrapUpMode,
 };
 use crate::spacetime::bindings;
 
@@ -277,6 +278,36 @@ pub fn epic(row: &bindings::Epic) -> Decoded<Epic> {
         created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
         updated_at: required_timestamp(T, row.id, "updated_at", &row.updated_at)?,
         completed_at: timestamp(T, row.id, "completed_at", &row.completed_at)?,
+    })
+}
+
+/// A `work_packages` row (`work-packages.allium: WorkPackage`).
+pub fn work_package(row: &bindings::WorkPackage) -> Decoded<WorkPackage> {
+    const T: &str = "work_packages";
+    Ok(WorkPackage {
+        id: WorkPackageId(row.id),
+        title: row.title.clone(),
+        description: row.description.clone(),
+        created_by: text(&row.created_by).map(str::to_owned),
+        created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
+        updated_at: required_timestamp(T, row.id, "updated_at", &row.updated_at)?,
+    })
+}
+
+/// A `work_package_links` row. A kind this binary does not know is refused
+/// rather than guessed: a link is two ids and a kind, and without the kind
+/// the id names nothing.
+pub fn work_package_link(row: &bindings::WorkPackageLink) -> Decoded<WorkPackageLink> {
+    let item = WorkPackageItem::from_parts(&row.kind, row.item_id).ok_or_else(|| {
+        DecodeError::new(
+            "work_package_links",
+            row.work_package_id,
+            format!("unknown item kind {:?} in link {:?}", row.kind, row.id),
+        )
+    })?;
+    Ok(WorkPackageLink {
+        work_package_id: WorkPackageId(row.work_package_id),
+        item,
     })
 }
 

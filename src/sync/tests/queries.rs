@@ -101,8 +101,8 @@ fn nothing_asked_for_can_reach_another_persons_user_board() {
         .filter(|q| q.contains("created_by ="))
         .count();
     assert_eq!(
-        creator_filters, 2,
-        "two queries select by created_by — own_creations for tasks and for epics — and both select by this one"
+        creator_filters, 3,
+        "three queries select by created_by — own_creations for tasks and for epics, and this person's work packages — and all select by this one"
     );
     for query in queries.iter().filter(|q| q.contains("created_by =")) {
         assert!(query.contains(&format!("created_by = '{ID}'")), "{query}");

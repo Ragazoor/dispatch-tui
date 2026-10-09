@@ -168,6 +168,27 @@ pub(super) fn snapshot_of_a_populated_board_sync() -> Snapshot {
                 ("key", json!("repo_filter_mode")),
                 ("value", json!("include")),
             ]],
+            "work_packages" => vec![vec![
+                ("id", json!(1)),
+                ("title", json!("Window 1")),
+                ("created_by", json!("c0ffee")),
+                ("created_at", json!("2026-09-17T10:00:00Z")),
+                ("updated_at", json!("2026-09-17T10:00:00Z")),
+            ]],
+            "work_package_links" => vec![
+                vec![
+                    ("id", json!("1/task/3")),
+                    ("work_package_id", json!(1)),
+                    ("kind", json!("task")),
+                    ("item_id", json!(3)),
+                ],
+                vec![
+                    ("id", json!("1/epic/9")),
+                    ("work_package_id", json!(1)),
+                    ("kind", json!("epic")),
+                    ("item_id", json!(9)),
+                ],
+            ],
             _ => vec![],
         }
     };

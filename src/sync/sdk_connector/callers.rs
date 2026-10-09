@@ -9,33 +9,35 @@ use std::sync::Arc;
 use super::answer::{awaiting_answer, fire};
 use super::outcome::{
     flag_or_refused, generated_id, is_review, matches_create, matches_created_epic,
-    matches_created_learning, outcome_of, outcome_with_ids, subagent_drain_read_back,
-    value_or_bail,
+    matches_created_learning, matches_created_work_package, outcome_of, outcome_with_ids,
+    subagent_drain_read_back, value_or_bail,
 };
 use super::SpacetimeSdkConnector;
 use crate::models::{
     EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource,
-    SubStatus, TaskId,
+    SubStatus, TaskId, WorkPackageId, WorkPackageItem,
 };
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
     apply_learning_verdicts as _, archive_stale_learnings as _, batch_delete as _,
     batch_patch_sub_status as _, claim_backlog_task as _, claim_poll_owner as _,
     clear_setting as _, create_epic as _, create_learning as _, create_managed_role_epic as _,
-    create_repo_group_sub_epic as _, create_task as _, create_task_watcher as _, delete_epic as _,
-    delete_learning as _, delete_repo_path as _, delete_stale_subtree_feed_tasks as _,
-    delete_task as _, delete_task_watcher as _, delete_watches_by_watcher as _,
-    delete_watches_of_target as _, drop_closed_retired_feed_items as _,
+    create_repo_group_sub_epic as _, create_task as _, create_task_watcher as _,
+    create_work_package as _, delete_epic as _, delete_learning as _, delete_repo_path as _,
+    delete_stale_subtree_feed_tasks as _, delete_task as _, delete_task_watcher as _,
+    delete_watches_by_watcher as _, delete_watches_of_target as _, delete_work_package as _,
+    drop_closed_retired_feed_items as _, link_work_package_item as _,
     mark_pr_learnings_gate_shown as _, override_poll_owner as _, patch_epic as _,
-    patch_learning as _, patch_task as _, recalculate_epic_status as _, record_base_branch as _,
-    record_learning_retrieval as _, record_notification as _, record_pre_tool_use as _,
-    record_usage_event as _, record_user_prompt_submit as _, register_host as _,
-    release_backlog_claim as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
-    save_repo_path as _, save_setting as _, set_task_epic as _, set_verify_command as _,
-    subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
-    subagent_stop as _, subscribe_to_epic as _, try_record_stop as _, unsubscribe_from_epic as _,
-    upsert_feed_tasks as _, upsert_feed_tasks_additive as _, DbConnection, EpicsTableAccess as _,
-    LearningsTableAccess as _, TasksTableAccess as _,
+    patch_learning as _, patch_task as _, patch_work_package as _, recalculate_epic_status as _,
+    record_base_branch as _, record_learning_retrieval as _, record_notification as _,
+    record_pre_tool_use as _, record_usage_event as _, record_user_prompt_submit as _,
+    register_host as _, release_backlog_claim as _, rescope_epic_learnings as _,
+    respawn_phoenix_successor as _, save_repo_path as _, save_setting as _, set_task_epic as _,
+    set_verify_command as _, subagent_clear as _, subagent_clear_and_void_pending_stop as _,
+    subagent_start as _, subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
+    unlink_work_package_item as _, unsubscribe_from_epic as _, upsert_feed_tasks as _,
+    upsert_feed_tasks_additive as _, DbConnection, EpicsTableAccess as _,
+    LearningsTableAccess as _, TasksTableAccess as _, WorkPackagesTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -791,6 +793,70 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "the watcher's watches",
             delete_watches_by_watcher_then(watcher_task_id.0)
+        )
+    }
+
+    // -- Work packages -----------------------------------------------------------
+
+    /// The work-package twin of [`Self::create_epic`], matched on the fields
+    /// this board chose, its creator and creation instant included.
+    async fn create_work_package(
+        &self,
+        row: bindings::WorkPackage,
+    ) -> anyhow::Result<WorkPackageId> {
+        let wanted = row.clone();
+        created_call!(
+            self,
+            "the new work package",
+            "work package",
+            create_work_package_then(row),
+            work_packages,
+            |p| matches_created_work_package(p, &wanted)
+        )
+        .map(WorkPackageId)
+    }
+
+    async fn patch_work_package(
+        &self,
+        id: WorkPackageId,
+        patch: bindings::WorkPackagePatch,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the work package change",
+            patch_work_package_then(id.0, patch)
+        )
+    }
+
+    async fn delete_work_package(&self, id: WorkPackageId) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the work package deletion",
+            delete_work_package_then(id.0)
+        )
+    }
+
+    async fn link_work_package_item(
+        &self,
+        id: WorkPackageId,
+        item: WorkPackageItem,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the work package link",
+            link_work_package_item_then(id.0, item.kind().to_string(), item.raw_id())
+        )
+    }
+
+    async fn unlink_work_package_item(
+        &self,
+        id: WorkPackageId,
+        item: WorkPackageItem,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the work package unlink",
+            unlink_work_package_item_then(id.0, item.kind().to_string(), item.raw_id())
         )
     }
 

@@ -521,3 +521,53 @@ pub struct Subscription {
     #[default("")]
     pub subscriber: String,
 }
+
+/// A work package (`work-packages.allium: WorkPackage`): a named grouping that
+/// links to existing tasks and epics across the epic tree.
+///
+/// Holds no status of its own — the spec's decision is that a package is a
+/// view on the board, so an item's done-ness is read from the item itself.
+#[spacetimedb::table(accessor = work_packages, public)]
+#[derive(Clone, Debug)]
+pub struct WorkPackage {
+    #[primary_key]
+    #[auto_inc]
+    pub id: i64,
+    pub title: String,
+    pub description: String,
+    /// Who created this package; stamped once and never rewritten. The board
+    /// subscribes to its own creator's packages by this column, the way
+    /// `own_creations` finds epics by [`Epic::created_by`].
+    #[index(btree)]
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// One link from a work package to one task or one epic
+/// (`work-packages.allium: WorkPackageLink`).
+#[spacetimedb::table(accessor = work_package_links, public)]
+#[derive(Clone, Debug)]
+pub struct WorkPackageLink {
+    /// `"<work_package_id>/<kind>/<item_id>"` — see [`work_package_link_id`].
+    ///
+    /// Derived for the reason [`Subscription::id`] is: the uniqueness that
+    /// matters is over the triple, SpacetimeDB indexes single columns, and a
+    /// derived key keeps the table out of the sequence burn
+    /// (`work-packages.allium: OneLinkPerPackageAndItem`).
+    #[primary_key]
+    pub id: String,
+    /// Indexed: deleting a package removes its links by this column.
+    #[index(btree)]
+    pub work_package_id: i64,
+    /// [`WORK_PACKAGE_ITEM_TASK`] or [`WORK_PACKAGE_ITEM_EPIC`].
+    pub kind: String,
+    /// Indexed: deleting a task or epic removes the links naming it.
+    #[index(btree)]
+    pub item_id: i64,
+    pub created_at: String,
+}
+
+pub const WORK_PACKAGE_ITEM_TASK: &str = "task";
+
+pub const WORK_PACKAGE_ITEM_EPIC: &str = "epic";

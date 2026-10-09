@@ -101,6 +101,17 @@ pub(crate) fn blank_watcher() -> TaskWatcher {
     }
 }
 
+pub(crate) fn blank_work_package() -> WorkPackage {
+    WorkPackage {
+        id: 0,
+        title: String::new(),
+        description: String::new(),
+        created_by: String::new(),
+        created_at: String::new(),
+        updated_at: String::new(),
+    }
+}
+
 pub(crate) fn blank_repo_path() -> RepoPath {
     RepoPath {
         id: 0,

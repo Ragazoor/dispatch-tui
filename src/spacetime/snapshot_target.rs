@@ -138,7 +138,9 @@ pub(super) fn key_columns(table: SharedTable) -> &'static [&'static str] {
         | SharedTable::Learnings
         | SharedTable::LearningRetrievals
         | SharedTable::UsageEvents
-        | SharedTable::RetiredFeedItems => &["id"],
+        | SharedTable::RetiredFeedItems
+        | SharedTable::WorkPackages
+        | SharedTable::WorkPackageLinks => &["id"],
         SharedTable::TaskShells => &["task_id", "shell_id"],
         SharedTable::TaskSubagents => &["task_id", "agent_id"],
     }

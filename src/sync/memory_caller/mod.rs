@@ -43,7 +43,7 @@ use dispatch_spacetime_module as module;
 use crate::clock::Clock;
 use crate::models::{
     EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource,
-    SubStatus, TaskId,
+    SubStatus, TaskId, WorkPackageId, WorkPackageItem,
 };
 use crate::spacetime::bindings;
 
@@ -56,6 +56,7 @@ mod convert;
 mod feed;
 mod learnings;
 mod tasks_epics;
+mod work_packages;
 
 #[cfg(test)]
 mod tests;
@@ -119,6 +120,9 @@ struct Tables {
     /// comment), so its cascade is always a no-op and there is nothing to
     /// gain by storing an empty table natively.
     task_subagents: Vec<module::TaskSubagent>,
+    work_packages: BTreeMap<i64, module::WorkPackage>,
+    /// Keyed by the module's derived link id (`module::work_package_link_id`).
+    work_package_links: BTreeMap<String, module::WorkPackageLink>,
     next_task_id: i64,
     next_epic_id: i64,
     next_repo_path_id: i64,
@@ -129,6 +133,7 @@ struct Tables {
     next_retired_feed_item_id: i64,
     next_learning_id: i64,
     next_learning_retrieval_id: i64,
+    next_work_package_id: i64,
 }
 
 impl Tables {
@@ -144,6 +149,7 @@ impl Tables {
             next_retired_feed_item_id: 1,
             next_learning_id: 1,
             next_learning_retrieval_id: 1,
+            next_work_package_id: 1,
             ..Self::default()
         }
     }
@@ -514,6 +520,38 @@ impl ReducerCaller for MemoryReducerCaller {
 
     async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<ReducerOutcome> {
         self.apply_delete_watches_by_watcher(watcher_task_id)
+    }
+
+    async fn create_work_package(&self, row: bindings::WorkPackage) -> Result<WorkPackageId> {
+        self.apply_create_work_package(row)
+    }
+
+    async fn patch_work_package(
+        &self,
+        id: WorkPackageId,
+        patch: bindings::WorkPackagePatch,
+    ) -> Result<ReducerOutcome> {
+        self.apply_patch_work_package(id, patch)
+    }
+
+    async fn delete_work_package(&self, id: WorkPackageId) -> Result<ReducerOutcome> {
+        self.apply_delete_work_package(id)
+    }
+
+    async fn link_work_package_item(
+        &self,
+        id: WorkPackageId,
+        item: WorkPackageItem,
+    ) -> Result<ReducerOutcome> {
+        self.apply_link_work_package_item(id, item)
+    }
+
+    async fn unlink_work_package_item(
+        &self,
+        id: WorkPackageId,
+        item: WorkPackageItem,
+    ) -> Result<ReducerOutcome> {
+        self.apply_unlink_work_package_item(id, item)
     }
 
     async fn claim_poll_owner(&self, target: PollScopeId, host: String) -> Result<ReducerOutcome> {

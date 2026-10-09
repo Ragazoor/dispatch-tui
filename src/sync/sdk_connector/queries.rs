@@ -98,6 +98,15 @@ pub(in crate::sync) fn subscription_queries(
         // second host's feed cycle would re-insert what the first one's human
         // deleted — see the module's own doc comment on `RetiredFeedItem`.
         "SELECT * FROM retired_feed_items".to_string(),
+        // Work packages (`docs/specs/work-packages.allium`). A package is one
+        // person's grouping of their own work, so it is scoped to its creator,
+        // the way `own_creations` scopes epics above.
+        format!("SELECT * FROM work_packages WHERE created_by = '{owner}'"),
+        // Their links, unfiltered, like `task_watchers`: a row is two ids and
+        // a kind, and the store's SQL cannot join it to the packages above to
+        // narrow it. A link whose package or item this board does not hold
+        // draws nothing (`work-packages.allium: PackageViewCards`).
+        "SELECT * FROM work_package_links".to_string(),
     ];
 
     // The epic ids are integers by type, so they need no validation beyond

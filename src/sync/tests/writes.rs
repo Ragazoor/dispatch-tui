@@ -13,12 +13,13 @@ use std::sync::{Arc, Mutex};
 use crate::clock::{Clock, FixedClock};
 use crate::models::{
     EpicId, LearningId, NotificationWrite, PollScopeId, RetrievalSource, StopOutcome, SubStatus,
-    SubagentDrain, TaskId, TaskStatus, UserPromptOutcome,
+    SubagentDrain, TaskId, TaskStatus, UserPromptOutcome, WorkPackageId, WorkPackageItem,
 };
 use crate::spacetime::bindings;
 use crate::store::{
     CreateTaskRequest, EpicCrud, LearningRetrievalStore, LearningStore, PollOwnershipStore,
     RepoConfigStore, SettingsStore, Store, SubscriptionStore, TaskCrud, TaskPatch, UsageStore,
+    WorkPackageCrud,
 };
 use crate::sync::encode;
 use crate::sync::writes::{
@@ -94,6 +95,11 @@ enum Sent {
     ApplyLearningVerdicts(usize),
     ArchiveStaleLearnings(String),
     RecordUsageEvent(Box<bindings::UsageEvent>, i64),
+    CreateWorkPackage(Box<bindings::WorkPackage>),
+    PatchWorkPackage(i64, Box<bindings::WorkPackagePatch>),
+    DeleteWorkPackage(i64),
+    LinkWorkPackageItem(i64, String, i64),
+    UnlinkWorkPackageItem(i64, String, i64),
 }
 
 #[derive(Default)]
@@ -664,6 +670,50 @@ impl ReducerCaller for RecordingCaller {
         self.answer(Sent::DeleteWatchesByWatcher(watcher_task_id))
     }
 
+    async fn create_work_package(
+        &self,
+        row: bindings::WorkPackage,
+    ) -> anyhow::Result<WorkPackageId> {
+        self.record(Sent::CreateWorkPackage(Box::new(row)))?;
+        Ok(WorkPackageId(9))
+    }
+
+    async fn patch_work_package(
+        &self,
+        id: WorkPackageId,
+        patch: bindings::WorkPackagePatch,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::PatchWorkPackage(id.0, Box::new(patch)))
+    }
+
+    async fn delete_work_package(&self, id: WorkPackageId) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::DeleteWorkPackage(id.0))
+    }
+
+    async fn link_work_package_item(
+        &self,
+        id: WorkPackageId,
+        item: WorkPackageItem,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::LinkWorkPackageItem(
+            id.0,
+            item.kind().to_string(),
+            item.raw_id(),
+        ))
+    }
+
+    async fn unlink_work_package_item(
+        &self,
+        id: WorkPackageId,
+        item: WorkPackageItem,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::UnlinkWorkPackageItem(
+            id.0,
+            item.kind().to_string(),
+            item.raw_id(),
+        ))
+    }
+
     async fn claim_poll_owner(
         &self,
         target: PollScopeId,
@@ -1163,6 +1213,52 @@ async fn a_board_with_no_identity_cannot_create_an_epic() {
     let refused = writer.create_epic("New", "why", None).await;
 
     assert!(refused.is_err(), "an epic create needs a name to stamp");
+    assert!(caller.sent().is_empty());
+}
+
+/// A work package create carries the creator, a trimmed title and this
+/// board's clock — `work-packages.allium: CreateWorkPackage`. The board
+/// subscribes to packages by `created_by`, so the name is what makes the new
+/// package visible at all.
+#[tokio::test]
+async fn a_work_package_create_carries_the_creator_and_a_trimmed_title() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    let id = writer
+        .create_work_package("  Window 1 ", "the plan")
+        .await
+        .unwrap();
+
+    let Some(Sent::CreateWorkPackage(row)) = caller.sent().into_iter().next() else {
+        panic!("expected a create");
+    };
+    assert_eq!(id, WorkPackageId(9));
+    assert_eq!(row.title, "Window 1");
+    assert_eq!(row.description, "the plan");
+    assert_eq!(row.created_by, "user-me");
+    assert!(!row.created_at.is_empty());
+    assert_eq!(row.created_at, row.updated_at);
+}
+
+/// `sync.allium: CreatesRequireASettledIdentity`, for packages.
+#[tokio::test]
+async fn a_board_with_no_identity_cannot_create_a_work_package() {
+    let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
+
+    assert!(writer.create_work_package("W", "").await.is_err());
+    assert!(caller.sent().is_empty());
+}
+
+/// A patch naming nothing never reaches the transport.
+#[tokio::test]
+async fn an_empty_work_package_patch_sends_nothing() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    writer
+        .patch_work_package(WorkPackageId(1), None, None)
+        .await
+        .unwrap();
+
     assert!(caller.sent().is_empty());
 }
 
@@ -2288,6 +2384,18 @@ async fn every_store_mutation_reaches_the_transport() {
     .await
     .unwrap();
 
+    db.create_work_package("W", "").await.unwrap();
+    db.patch_work_package(WorkPackageId(1), Some("W2"), None)
+        .await
+        .unwrap();
+    db.link_work_package_item(WorkPackageId(1), WorkPackageItem::Task(TaskId(1)))
+        .await
+        .unwrap();
+    db.unlink_work_package_item(WorkPackageId(1), WorkPackageItem::Epic(EpicId(1)))
+        .await
+        .unwrap();
+    db.delete_work_package(WorkPackageId(1)).await.unwrap();
+
     let names: Vec<String> = caller
         .sent()
         .iter()
@@ -2354,6 +2462,11 @@ async fn every_store_mutation_reaches_the_transport() {
             "RecordLearningRetrieval",
             "ApplyLearningVerdicts",
             "RecordUsageEvent",
+            "CreateWorkPackage",
+            "PatchWorkPackage",
+            "LinkWorkPackageItem",
+            "UnlinkWorkPackageItem",
+            "DeleteWorkPackage",
         ]
     );
 }
