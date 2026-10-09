@@ -18,9 +18,29 @@ pub struct WorkPackagePatch {
     pub description: Option<String>,
 }
 
-fn validate_work_package_title(title: &str) -> Result<(), String> {
+/// `pub` so `MemoryReducerCaller` refuses a blank title with this very
+/// wording rather than a hand-kept copy of it.
+pub fn validate_work_package_title(title: &str) -> Result<(), String> {
     if title.trim().is_empty() {
         return Err("a work package needs a non-empty title".into());
+    }
+    Ok(())
+}
+
+/// Apply `patch` to `row`: a title is validated and trimmed, a description
+/// taken as given. Leaves `updated_at` to the caller, which owns the clock.
+/// Nothing is written when the title is refused. `pub` for the same reuse as
+/// [`validate_work_package_title`], on the terms `apply_task_patch` sets.
+pub fn apply_work_package_patch(
+    row: &mut WorkPackage,
+    patch: WorkPackagePatch,
+) -> Result<(), String> {
+    if let Some(title) = patch.title {
+        validate_work_package_title(&title)?;
+        row.title = title.trim().to_string();
+    }
+    if let Some(description) = patch.description {
+        row.description = description;
     }
     Ok(())
 }
@@ -53,13 +73,7 @@ pub fn patch_work_package(
     let Some(mut row) = ctx.db.work_packages().id().find(id) else {
         return Err(format!("no work package {id}"));
     };
-    if let Some(title) = patch.title {
-        validate_work_package_title(&title)?;
-        row.title = title.trim().to_string();
-    }
-    if let Some(description) = patch.description {
-        row.description = description;
-    }
+    apply_work_package_patch(&mut row, patch)?;
     row.updated_at = now(ctx);
     ctx.db.work_packages().id().update(row);
     Ok(())

@@ -220,30 +220,34 @@ enum KeyReceiver { dispatch | tmux }
 -- for one key and another thing for a second key. Where two keys rank the
 -- same condition differently, they use two literals.
 --
--- board.normal, view-level (q, Esc, U, R). Esc's handler tests, in order:
--- a search active, an epic view open, cards selected. q and U/R test only
--- whether an epic view is open and ignore search. A work package view
--- (work-packages.allium: ExitPackage) counts as an epic view here: it is one
--- level below the main board and q / Esc / Q leave it the same way. U and R
--- inside a package view have no epic to act on and do nothing:
+-- board.normal, view-level (q, Q, Esc, U, R). Esc's handler tests, in order:
+-- a search active, a nested view open, cards selected. q and Q test only
+-- whether a nested view is open and ignore search. A nested view is an epic
+-- view or a work package view (work-packages.allium: ExitPackage): both sit
+-- below the main board and q / Esc / Q leave them the same way. U and R act
+-- on the epic the user is inside, so they test for an epic view alone — a
+-- package view is not an epic, and they claim nothing there:
 --   search_active             "with a search active"            Esc: clear_search
 --                              (any view)
---   inside_epic_view          "inside an epic or work package   q: exit_epic; Q: exit_all_epics; U, R
+--   inside_nested_view        "inside an epic or work package   q: exit_epic; Q: exit_all_epics
 --                              view" (search active or not)
---   epic_view_no_search       "inside an epic or work package   Esc: exit_epic
+--   inside_epic_view          "inside an epic view"             U, R
+--                              (search active or not; a subset
+--                              of inside_nested_view)
+--   nested_view_no_search     "inside an epic or work package   Esc: exit_epic
 --                              view, no search active"
 --   top_level                 "on the top-level board"          q: quit
---                              (not in an epic view, search
+--                              (not in a nested view, search
 --                              active or not)
 --   with_selection            "on the top-level board, no       Esc: clear_selection
 --                              search active, with cards
 --                              selected or the cursor on a
 --                              select-all row"
---   Per key: q's rows (inside_epic_view, top_level) and Esc's rows
---   (search_active, epic_view_no_search, with_selection) are each mutually
+--   Per key: q's rows (inside_nested_view, top_level) and Esc's rows
+--   (search_active, nested_view_no_search, with_selection) are each mutually
 --   exclusive by these definitions. Esc on the top-level board with no
 --   search, no selection and the cursor off a select-all row has no row and
---   does nothing; so do U and R on the top-level board.
+--   does nothing; so do U and R outside an epic view.
 -- board.normal, cursor-level (Enter, Space, m, H, L). The cursor is on at
 -- most one of the first five (a select-all row is not a card or header);
 -- off_epic_card is the complement of on_epic_card:
@@ -329,7 +333,7 @@ enum KeyReceiver { dispatch | tmux }
 --
 -- A new condition is a new literal here; a row cannot invent one inline.
 enum KeyContext {
-    search_active | inside_epic_view | epic_view_no_search | top_level |
+    search_active | inside_nested_view | inside_epic_view | nested_view_no_search | top_level |
     with_selection |
     on_column_select_all | on_folded_section | on_folded_epic_group |
     on_epic_card | on_work_package_card | on_task_card | on_flattened_task_card |

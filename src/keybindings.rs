@@ -246,7 +246,8 @@ impl KeyReceiver {
 pub enum KeyContext {
     SearchActive,
     InsideEpicView,
-    EpicViewNoSearch,
+    InsideNestedView,
+    NestedViewNoSearch,
     TopLevel,
     WithSelection,
     OnColumnSelectAll,
@@ -277,8 +278,9 @@ impl KeyContext {
     pub fn words(self) -> &'static str {
         match self {
             Self::SearchActive => "with a search active",
-            Self::InsideEpicView => "inside an epic or work package view",
-            Self::EpicViewNoSearch => "inside an epic or work package view, no search active",
+            Self::InsideEpicView => "inside an epic view",
+            Self::InsideNestedView => "inside an epic or work package view",
+            Self::NestedViewNoSearch => "inside an epic or work package view, no search active",
             Self::TopLevel => "on the top-level board",
             Self::WithSelection => {
                 "on the top-level board, no search active, with cards selected or the cursor on a select-all row"
@@ -328,9 +330,8 @@ impl KeyContext {
     fn axis(self) -> ContextAxis {
         use KeyContext::*;
         match self {
-            SearchActive | InsideEpicView | EpicViewNoSearch | TopLevel | WithSelection => {
-                ContextAxis::View
-            }
+            SearchActive | InsideEpicView | InsideNestedView | NestedViewNoSearch | TopLevel
+            | WithSelection => ContextAxis::View,
             OnColumnSelectAll
             | OnFoldedSection
             | OnFoldedEpicGroup
@@ -381,9 +382,14 @@ pub fn contexts_overlap(a: KeyContext, b: KeyContext) -> bool {
     let pair = |x: KeyContext, y: KeyContext| (a == x && b == y) || (a == y && b == x);
     match xa {
         ContextAxis::View => {
+            // An epic view is one kind of nested view: InsideEpicView holds
+            // only where InsideNestedView does.
             pair(SearchActive, InsideEpicView)
+                || pair(SearchActive, InsideNestedView)
                 || pair(SearchActive, TopLevel)
-                || pair(InsideEpicView, EpicViewNoSearch)
+                || pair(InsideEpicView, InsideNestedView)
+                || pair(InsideEpicView, NestedViewNoSearch)
+                || pair(InsideNestedView, NestedViewNoSearch)
                 || pair(TopLevel, WithSelection)
         }
         // OffEpicCard is every cursor position except an epic card; a task

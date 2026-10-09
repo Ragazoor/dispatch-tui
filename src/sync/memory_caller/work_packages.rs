@@ -11,21 +11,12 @@ use crate::spacetime::bindings;
 use super::super::writes::ReducerOutcome;
 use super::{MemoryReducerCaller, Tables};
 
-/// Mirrors the module's private `validate_work_package_title`, wording
-/// included, so a caller cannot tell the backends apart from the refusal.
-fn validate_title(title: &str) -> Result<(), String> {
-    if title.trim().is_empty() {
-        return Err("a work package needs a non-empty title".into());
-    }
-    Ok(())
-}
-
 impl MemoryReducerCaller {
     pub(super) fn apply_create_work_package(
         &self,
         row: bindings::WorkPackage,
     ) -> Result<WorkPackageId> {
-        validate_title(&row.title)
+        module::validate_work_package_title(&row.title)
             .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
         let mut tables = self.lock();
         let id = Self::assign_id(0, &mut tables.next_work_package_id);
@@ -49,14 +40,8 @@ impl MemoryReducerCaller {
         let Some(mut row) = tables.work_packages.get(&id.0).cloned() else {
             return Ok(ReducerOutcome::Refused(format!("no work package {id}")));
         };
-        if let Some(title) = patch.title {
-            if let Err(why) = validate_title(&title) {
-                return Ok(ReducerOutcome::Refused(why));
-            }
-            row.title = title.trim().to_string();
-        }
-        if let Some(description) = patch.description {
-            row.description = description;
+        if let Err(why) = module::apply_work_package_patch(&mut row, patch) {
+            return Ok(ReducerOutcome::Refused(why));
         }
         row.updated_at = self.now();
         tables.work_packages.insert(id.0, row.clone());

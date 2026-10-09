@@ -13,12 +13,22 @@ impl App {
     // -----------------------------------------------------------------------
 
     pub(in crate::tui) fn handle_enter_epic(&mut self, epic_id: EpicId) -> Vec<Command> {
-        let parent = Box::new(self.board.view_mode.clone());
-        self.board.view_mode = ViewMode::Epic {
+        self.push_view(|selection, parent| ViewMode::Epic {
             epic_id,
-            selection: BoardSelection::new_for_epic(),
+            selection,
             parent,
-        };
+        })
+    }
+
+    /// Open a nested view (an epic or a work package) over the current one,
+    /// with a fresh cursor and the current view kept as its parent, so q
+    /// restores it.
+    pub(in crate::tui) fn push_view(
+        &mut self,
+        view: impl FnOnce(BoardSelection, Box<ViewMode>) -> ViewMode,
+    ) -> Vec<Command> {
+        let parent = Box::new(self.board.view_mode.clone());
+        self.board.view_mode = view(BoardSelection::new_for_epic(), parent);
         self.invalidate_layout_cache();
         self.dirty = true;
         vec![]

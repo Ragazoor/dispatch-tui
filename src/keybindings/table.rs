@@ -98,19 +98,19 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     normal(
         &["q"],
-        Some(C::InsideEpicView),
+        Some(C::InsideNestedView),
         "exit_epic",
         "Leave the epic or work package view, one level",
     ),
     normal(
         &["Esc"],
-        Some(C::EpicViewNoSearch),
+        Some(C::NestedViewNoSearch),
         "exit_epic",
         "Leave the epic or work package view, one level",
     ),
     normal(
         &["Q"],
-        Some(C::InsideEpicView),
+        Some(C::InsideNestedView),
         "exit_all_epics",
         "Leave every epic and work package view and return to the board",
     ),

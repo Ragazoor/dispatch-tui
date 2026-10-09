@@ -156,7 +156,9 @@ fn app_for(binding: &KeyBinding) -> App {
             app.search.query = "task".to_string();
             app
         }
-        Some(C::InsideEpicView) | Some(C::EpicViewNoSearch) => inside_epic_view(),
+        Some(C::InsideEpicView) | Some(C::InsideNestedView) | Some(C::NestedViewNoSearch) => {
+            inside_epic_view()
+        }
         Some(C::TopLevel) => make_app(),
         Some(C::WithSelection) => {
             let mut app = make_app();
@@ -905,7 +907,7 @@ fn q_and_esc_contexts_are_mutually_exclusive() {
             "epic view",
             inside_epic_view(),
             C::InsideEpicView,
-            Some(C::EpicViewNoSearch),
+            Some(C::NestedViewNoSearch),
         ),
         (
             "epic view, search",
@@ -933,7 +935,7 @@ fn q_and_esc_contexts_are_mutually_exclusive() {
         ),
     ];
     let q = [C::InsideEpicView, C::TopLevel];
-    let esc = [C::SearchActive, C::EpicViewNoSearch, C::WithSelection];
+    let esc = [C::SearchActive, C::NestedViewNoSearch, C::WithSelection];
     for (name, app, want_q, want_esc) in boards {
         assert_eq!(holding(&app, &q), vec![want_q], "q on {name}");
         assert_eq!(

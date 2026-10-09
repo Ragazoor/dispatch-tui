@@ -118,7 +118,7 @@ pub(crate) async fn handle_update_tasks(
     }
     let task_ids = match fields
         .remove("task_ids")
-        .map(serde_json::from_value::<Vec<BulkTaskId>>)
+        .map(serde_json::from_value::<Vec<super::FlexibleId<TaskId>>>)
     {
         Some(Ok(ids)) if !ids.is_empty() => ids,
         Some(Ok(_)) => {
@@ -146,7 +146,7 @@ pub(crate) async fn handle_update_tasks(
     let mut seen = std::collections::HashSet::new();
     let task_ids: Vec<TaskId> = task_ids
         .into_iter()
-        .map(|BulkTaskId(t)| t)
+        .map(|super::FlexibleId(t)| t)
         .filter(|t| seen.insert(*t))
         .collect();
 
@@ -186,11 +186,6 @@ pub(crate) async fn handle_update_tasks(
         json!({"content": [{"type": "text", "text": lines.join("\n")}]}),
     )
 }
-
-/// One element of `update_tasks`' `task_ids`, accepting an id as a number or
-/// a numeric string like every other id argument.
-#[derive(serde::Deserialize)]
-struct BulkTaskId(#[serde(deserialize_with = "super::deserialize_flexible_id")] TaskId);
 
 /// Every `UpdateTaskArgs` field other than `task_id`/`status` that the caller
 /// actually set. Used by [`handle_mark_task_done`] to enforce

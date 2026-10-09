@@ -139,7 +139,7 @@ impl<'a> BoardView<'a> {
             BoardViewMode::Package { package_id, .. } => {
                 // The linked tasks, wherever they live in the epic tree
                 // (`work-packages.allium: PackageViewCards`).
-                let linked = self.package_task_ids(package_id);
+                let (linked, _) = self.package_item_ids(package_id);
                 self.board
                     .tasks
                     .iter()
@@ -402,12 +402,11 @@ impl<'a> BoardView<'a> {
         };
         // Package cards lead the column, ahead of any section header
         // (`work-packages.allium: PackageCardPlacement`).
-        let packages = self.package_cards_for_status(status);
-        if packages.is_empty() {
+        let placements = pass.package_placements(self);
+        if placements.is_empty() {
             return items;
         }
-        packages
-            .into_iter()
+        self.package_cards_for_status(status, placements)
             .map(ColumnItem::WorkPackage)
             .chain(items)
             .collect()
@@ -739,7 +738,11 @@ impl<'a> BoardView<'a> {
                 .count();
         }
         let task_count = view_tasks.iter().filter(|t| t.status == status).count()
-            + self.package_cards_for_status(status).len();
+            + pass
+                .package_placements(self)
+                .values()
+                .filter(|p| p.appears_in(status))
+                .count();
         if self.is_flattened_for_status(status) {
             return task_count;
         }
@@ -950,7 +953,7 @@ impl<'a> BoardView<'a> {
             BoardViewMode::Board(_) => Scope::Children(None),
             BoardViewMode::Epic { epic_id, .. } => Scope::Children(Some(epic_id)),
             BoardViewMode::Package { package_id, .. } => {
-                Scope::Linked(self.package_epic_ids(package_id))
+                Scope::Linked(self.package_item_ids(package_id).1)
             }
         };
         self.board

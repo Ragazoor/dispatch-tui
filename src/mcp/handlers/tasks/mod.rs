@@ -11,7 +11,7 @@ pub(super) use super::types::{
     deserialize_flexible_id, deserialize_nullable_flexible_id, deserialize_nullable_wrap_up_mode,
     deserialize_optional_flexible_i64, deserialize_optional_flexible_id,
     deserialize_optional_url_type, fetch_caller_task, parse_args, service_err_to_response,
-    JsonRpcResponse, StatusFilter, INTERNAL_ERROR, INVALID_PARAMS,
+    FlexibleId, JsonRpcResponse, StatusFilter, INTERNAL_ERROR, INVALID_PARAMS,
 };
 
 mod crud;

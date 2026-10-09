@@ -19,13 +19,24 @@ pub(in crate::tui) fn delete_work_package_prompt(package: &WorkPackage) -> Strin
 impl App {
     pub(in crate::tui) fn handle_refresh_work_packages(
         &mut self,
-        packages: Vec<WorkPackage>,
+        mut packages: Vec<WorkPackage>,
         links: Vec<WorkPackageLink>,
     ) -> Vec<Command> {
+        // Held in id order, so the picker and the column builds can list them
+        // oldest first without sorting per frame. The store already reads them
+        // that way; this makes it the board's own guarantee.
+        packages.sort_by_key(|p| p.id);
+        // Every row-change wake-up re-reads the board, task edits included, so
+        // most refreshes carry exactly what the board already holds: skip the
+        // selection sync (a full column count) when nothing moved.
+        if self.board.work_packages == packages && self.board.work_package_links == links {
+            return vec![];
+        }
         self.board.work_packages = packages;
         self.board.work_package_links = links;
-        // An open picker's cursor stays on a row that exists.
-        let last = self.link_picker_len() - 1;
+        // An open picker's cursor stays on a row that exists: the last one is
+        // the "new package" row, at index `work_packages.len()`.
+        let last = self.board.work_packages.len();
         if let InputMode::LinkWorkPackage { cursor, .. } = &mut self.input.mode {
             *cursor = (*cursor).min(last);
         }
@@ -56,26 +67,21 @@ impl App {
 
     /// Pop every epic and package view, back to the main board.
     fn leave_package_views(&mut self) {
+        // Guarded: handle_close_task_detail takes the view mode, so outside the
+        // overlay it would drop the board's own selection.
         if matches!(self.board.view_mode, ViewMode::TaskDetail { .. }) {
-            if let ViewMode::TaskDetail { previous, .. } = std::mem::take(&mut self.board.view_mode)
-            {
-                self.board.view_mode = *previous;
-            }
+            self.handle_close_task_detail();
         }
         self.handle_exit_all_epics();
     }
 
     /// `work-packages.allium: EnterPackage`.
     pub(in crate::tui) fn handle_enter_work_package(&mut self, id: WorkPackageId) -> Vec<Command> {
-        let parent = Box::new(self.board.view_mode.clone());
-        self.board.view_mode = ViewMode::Package {
+        self.push_view(|selection, parent| ViewMode::Package {
             package_id: id,
-            selection: BoardSelection::new_for_epic(),
+            selection,
             parent,
-        };
-        self.invalidate_layout_cache();
-        self.dirty = true;
-        vec![]
+        })
     }
 
     /// `w` on a task or epic card (`WorkPackageLinkPicker`).
@@ -88,13 +94,9 @@ impl App {
         vec![]
     }
 
-    /// The picker's row count: every package, then the "new package" row.
-    fn link_picker_len(&self) -> usize {
-        self.board.work_packages.len() + 1
-    }
-
     pub(in crate::tui) fn handle_link_picker_move(&mut self, delta: isize) -> Vec<Command> {
-        let last = self.link_picker_len() - 1;
+        // Every package, then the "new package" row at `work_packages.len()`.
+        let last = self.board.work_packages.len();
         if let InputMode::LinkWorkPackage { cursor, .. } = &mut self.input.mode {
             *cursor = cursor.saturating_add_signed(delta).min(last);
         }
@@ -154,9 +156,7 @@ impl App {
         let InputMode::InputWorkPackageTitle(item) = self.input.mode else {
             return vec![];
         };
-        self.input.clear_buffer();
-        let cursor = self.board.work_packages.len();
-        self.input.mode = InputMode::LinkWorkPackage { item, cursor };
+        self.cancel_new_package_title(item);
         let title = title.trim().to_string();
         if title.is_empty() {
             return vec![];

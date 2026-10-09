@@ -12,18 +12,33 @@ use ratatui::{
 
 use crate::models::WorkPackageItem;
 use crate::palette::{CYAN, FG, MUTED};
-use crate::tui::ui::shared::{centered_rect, open_overlay, scroll_offset, titled_block, truncate};
+use crate::tui::ui::shared::{
+    caret_line, centered_rect, open_overlay, scroll_offset, titled_block, truncate,
+};
 use crate::tui::{App, InputMode};
 
 /// Rows the block's borders take.
 const BORDER_ROWS: u16 = 2;
 
-/// The text field line: the typed text and a trailing caret mark.
-fn field_line(label: &str, text: &str) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(label.to_string(), Style::default().fg(MUTED)),
-        Span::styled(format!("{text}_"), Style::default().fg(FG)),
-    ])
+/// Both overlays' width: 60% of the board, kept between 30 and 70 columns.
+fn overlay_width(area: Rect) -> u16 {
+    (area.width * 60 / 100).clamp(30, 70)
+}
+
+/// The title field line, the caret drawn where `app.input.caret` puts it and
+/// a long title scrolled to keep it visible (`shared::caret_line`).
+fn title_field_line(app: &App, overlay_width: u16) -> Line<'static> {
+    const LABEL: &str = "Title: ";
+    let value_width = usize::from(overlay_width.saturating_sub(BORDER_ROWS))
+        .saturating_sub(LABEL.len())
+        .max(1);
+    caret_line(
+        LABEL.to_string(),
+        &app.input.buffer,
+        app.input.caret,
+        value_width,
+        Style::default().fg(FG),
+    )
 }
 
 /// Draw the link picker while it, or its new-package title input, is open.
@@ -43,7 +58,7 @@ pub(in crate::tui::ui::kanban) fn render_work_package_picker_overlay(
     }
     .unwrap_or_default();
 
-    let width = (area.width * 60 / 100).clamp(30, 70);
+    let width = overlay_width(area);
     let text_width = usize::from(width.saturating_sub(BORDER_ROWS + 6));
     let mut rows: Vec<Line<'static>> = app
         .board
@@ -70,7 +85,7 @@ pub(in crate::tui::ui::kanban) fn render_work_package_picker_overlay(
     // Rows below the list: the title field while typing, then the hint.
     let footer: Vec<Line<'static>> = if typing {
         vec![
-            field_line("Title: ", &app.input.buffer),
+            title_field_line(app, width),
             Line::from(Span::styled(
                 "[Enter] create  [Esc] back",
                 Style::default().fg(MUTED),
@@ -127,7 +142,7 @@ pub(in crate::tui::ui::kanban) fn render_work_package_rename_overlay(
     if !matches!(app.input.mode, InputMode::RenameWorkPackage(_)) {
         return;
     }
-    let width = (area.width * 60 / 100).clamp(30, 70);
+    let width = overlay_width(area);
     let block = titled_block(
         CYAN,
         BorderType::Rounded,
@@ -135,7 +150,7 @@ pub(in crate::tui::ui::kanban) fn render_work_package_rename_overlay(
     );
     let inner = open_overlay(frame, centered_rect(area, width, 3 + BORDER_ROWS), block);
     let lines = vec![
-        field_line("Title: ", &app.input.buffer),
+        title_field_line(app, width),
         Line::raw(""),
         Line::from(Span::styled(
             "[Enter] save  [Esc] cancel",

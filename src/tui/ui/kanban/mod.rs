@@ -671,7 +671,6 @@ pub(in crate::tui) fn action_hints(
     spans
 }
 
-/// Build context-sensitive keybinding hints for a selected epic.
 /// Status bar hints for a work package card (`work-packages.allium`). A
 /// package has no status, so there is nothing to move.
 pub(in crate::tui) fn package_action_hints(key_color: Color) -> Vec<Span<'static>> {
@@ -690,6 +689,7 @@ pub(in crate::tui) fn package_action_hints(key_color: Color) -> Vec<Span<'static
     spans
 }
 
+/// Build context-sensitive keybinding hints for a selected epic.
 pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Span<'static>> {
     let label_style = Style::default().fg(MUTED);
 

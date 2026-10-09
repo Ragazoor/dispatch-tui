@@ -273,6 +273,12 @@ where
 // `i64`, and the same flexible int-or-string acceptance applies.
 // ---------------------------------------------------------------------------
 
+/// One element of an id list argument (`task_ids`, `link_epic_ids`, ...),
+/// accepting a number or a numeric string like every single id argument.
+#[derive(Deserialize)]
+#[serde(bound = "T: From<i64>")]
+pub(super) struct FlexibleId<T>(#[serde(deserialize_with = "deserialize_flexible_id")] pub T);
+
 pub(super) fn deserialize_flexible_id<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,

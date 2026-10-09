@@ -161,7 +161,11 @@ fn a_package_whose_work_is_all_filtered_away_falls_back_to_backlog() {
 fn package_cards_sort_above_every_other_card_in_package_id_order() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.epics.push(make_epic(2));
-    app.board.work_packages = vec![make_package(9, "B"), make_package(8, "A")];
+    // Delivered out of order: the board keeps its packages in id order.
+    app.update(Message::WorkPackage(WorkPackageMessage::Refresh {
+        packages: vec![make_package(9, "B"), make_package(8, "A")],
+        links: vec![],
+    }));
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -808,4 +812,18 @@ fn a_refresh_keeps_an_open_pickers_cursor_on_a_real_row() {
         links: vec![],
     }));
     assert_eq!(picker_cursor(&app), 1, "one package + the new-package row");
+}
+
+// `U` and `R` act on the epic the user is inside, under InsideEpicView. A
+// package view is not an epic, so that context must not hold there (the keys
+// would claim the press and silently do nothing while help listed them as
+// live). Leaving the view is a separate context that does hold.
+#[test]
+fn the_epic_only_context_does_not_hold_in_a_package_view() {
+    use crate::keybindings::KeyContext as C;
+    let mut app = board_with_package();
+    enter_package(&mut app, 7);
+    assert!(!app.context_holds(C::InsideEpicView));
+    assert!(app.context_holds(C::InsideNestedView));
+    assert!(app.context_holds(C::NestedViewNoSearch));
 }

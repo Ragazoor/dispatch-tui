@@ -260,15 +260,22 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
         let count = app.selected_tasks().len() + app.selected_epics().len();
         let has_tasks = !app.selected_tasks().is_empty();
         batch_action_hints(count, key_color, has_tasks)
-    } else if let Some(ColumnItem::Epic(epic)) = app.selected_column_item() {
-        epic_action_hints(epic, key_color)
-    } else if let Some(ColumnItem::WorkPackage(_)) = app.selected_column_item() {
-        super::package_action_hints(key_color)
     } else {
-        let task = app.selected_task();
-        let now = chrono::Utc::now();
-        let in_flight = task.is_some_and(|t| app.dispatch_may_be_in_flight(t, now));
-        action_hints(task, in_flight, key_color)
+        // One column build for the cursor's item, not one per question asked
+        // of it.
+        match app.selected_column_item() {
+            Some(ColumnItem::Epic(epic)) => epic_action_hints(epic, key_color),
+            Some(ColumnItem::WorkPackage(_)) => super::package_action_hints(key_color),
+            item => {
+                let task = match item {
+                    Some(ColumnItem::Task(task)) => Some(task),
+                    _ => None,
+                };
+                let now = chrono::Utc::now();
+                let in_flight = task.is_some_and(|t| app.dispatch_may_be_in_flight(t, now));
+                action_hints(task, in_flight, key_color)
+            }
+        }
     };
     if app.split_active() {
         prepend(

@@ -4,6 +4,7 @@ use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 
 use super::columns::BoardView;
+use super::work_packages::PackagePlacementMap;
 use super::*;
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -243,19 +244,34 @@ impl EpicSearchIndex<'_> {
 /// once-per-pass property structural rather than a discipline the callers have
 /// to keep.
 ///
+/// It also carries the pass's package placement map
+/// ([`Self::package_placements`]), on the same once-per-pass terms: package
+/// cards are placed from the same board, filters and query the epic index
+/// reads, and every column build already holds the pass.
+///
 /// **Intra-pass only**, for the reasons on [`EpicSearchIndex`]: it is a local
 /// value, never stored on `App` or in `App.layout`.
 #[derive(Default)]
-pub(in crate::tui) struct EpicSearchPass<'a>(OnceCell<Option<EpicSearchIndex<'a>>>);
+pub(in crate::tui) struct EpicSearchPass<'a> {
+    index: OnceCell<Option<EpicSearchIndex<'a>>>,
+    packages: OnceCell<PackagePlacementMap>,
+}
 
 impl<'a> EpicSearchPass<'a> {
     /// Whether the epic survives this pass's search filter, building the index
     /// on the first call. With no query live, every epic is admitted.
     pub(in crate::tui) fn admits(&self, view: BoardView<'a>, epic_id: EpicId) -> bool {
-        self.0
+        self.index
             .get_or_init(|| view.search_active().then(|| view.epic_search_index()))
             .as_ref()
             .is_none_or(|idx| view.epic_search_matches_indexed(idx, epic_id))
+    }
+
+    /// Where each package card sits in this pass, built on the first call
+    /// (`BoardView::compute_package_placements`). Empty outside the main board.
+    pub(in crate::tui) fn package_placements(&self, view: BoardView<'a>) -> &PackagePlacementMap {
+        self.packages
+            .get_or_init(|| view.compute_package_placements())
     }
 }
 

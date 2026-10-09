@@ -137,18 +137,18 @@ impl App {
     ) -> bool {
         use KeyContext as C;
         // An epic view or a package view: one level below the main board,
-        // left by the same keys (`work-packages.allium: ExitPackage`).
-        let in_epic = matches!(
-            self.board.view_mode,
-            ViewMode::Epic { .. } | ViewMode::Package { .. }
-        );
+        // left by the same keys (`work-packages.allium: ExitPackage`). Only
+        // an epic view is an epic, which the epic settings keys need.
+        let in_epic = matches!(self.board.view_mode, ViewMode::Epic { .. });
+        let nested = in_epic || matches!(self.board.view_mode, ViewMode::Package { .. });
         match context {
             C::SearchActive => self.view().search_active(),
             C::InsideEpicView => in_epic,
-            C::EpicViewNoSearch => in_epic && !self.view().search_active(),
-            C::TopLevel => !in_epic,
+            C::InsideNestedView => nested,
+            C::NestedViewNoSearch => nested && !self.view().search_active(),
+            C::TopLevel => !nested,
             C::WithSelection => {
-                !in_epic
+                !nested
                     && !self.view().search_active()
                     && (self.has_selection() || self.selection().on_select_all)
             }
@@ -339,12 +339,6 @@ impl App {
             N::BoardPickerMoveToEpic => self.run_move_to_epic_picker(action, key, label),
             N::BoardPickerReparentEpic => self.run_reparent_picker(action, key, label),
             N::BoardPickerWorkPackage => self.run_work_package_picker(action, key, label),
-            N::BoardConfirmDeleteWorkPackage => match self.input.mode {
-                InputMode::ConfirmDeleteWorkPackage(id) => {
-                    self.handle_key_confirm_delete_work_package(label, action.ends_with("_yes"), id)
-                }
-                _ => vec![],
-            },
             N::BoardConfirmMoveToEpic => {
                 use crate::tui::messages::TaskMessage::*;
                 let msg = match action {
@@ -377,7 +371,8 @@ impl App {
             | N::BoardConfirmDeleteRepoPath
             | N::BoardConfirmTrustRepo
             | N::BoardConfirmTrustRepoQuickDispatch
-            | N::BoardConfirmRepoSync => self.run_confirm(action.ends_with("_yes"), label),
+            | N::BoardConfirmRepoSync
+            | N::BoardConfirmDeleteWorkPackage => self.run_confirm(action.ends_with("_yes"), label),
             N::AgentTreeTree
             | N::AgentTreeCommits
             | N::AgentTreeAgents
@@ -600,6 +595,9 @@ impl App {
             }
             InputMode::ConfirmRepoSync { repo_path } => {
                 self.handle_key_confirm_repo_sync(label, yes, repo_path)
+            }
+            InputMode::ConfirmDeleteWorkPackage(id) => {
+                self.handle_key_confirm_delete_work_package(label, yes, id)
             }
             _ => vec![],
         }

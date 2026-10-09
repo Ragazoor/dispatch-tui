@@ -196,7 +196,7 @@ impl WorkPackageService {
             if self.resolve(item).await.is_none() {
                 return Err(ServiceError::NotFound(format!(
                     "{} {} not found",
-                    capitalised_kind(item),
+                    capitalised(item.kind()),
                     item.raw_id()
                 )));
             }
@@ -237,11 +237,14 @@ fn not_found(id: WorkPackageId) -> ServiceError {
     ServiceError::NotFound(format!("Work package {} not found", id.0))
 }
 
-fn capitalised_kind(item: WorkPackageItem) -> &'static str {
-    match item {
-        WorkPackageItem::Task(_) => "Task",
-        WorkPackageItem::Epic(_) => "Epic",
-    }
+/// `kind` with its first letter upper-cased ("task" -> "Task"), so an error
+/// names the item kind from `WorkPackageItem::kind`'s one table.
+fn capitalised(kind: &str) -> String {
+    let mut chars = kind.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
 }
 
 /// `items` in first-seen order with repeats dropped: a repeated id is one

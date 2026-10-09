@@ -322,25 +322,29 @@ impl App {
 
     /// The single-item half of [`Self::handle_key_delete_item`].
     fn delete_cursor_item(&mut self) -> Vec<Command> {
-        if let Some(ColumnItem::Epic(_)) = self.selected_column_item() {
-            return self.update(Message::Epic(
-                crate::tui::messages::EpicMessage::ConfirmDelete,
-            ));
-        }
-        if let Some(id) = self.selected_work_package_id() {
-            return self.update(Message::WorkPackage(
-                crate::tui::messages::WorkPackageMessage::ConfirmDelete(id),
-            ));
-        }
-        let Some(task) = self.selected_task() else {
-            return vec![];
+        let (id, done, title) = match self.selected_column_item() {
+            Some(ColumnItem::Epic(_)) => {
+                return self.update(Message::Epic(
+                    crate::tui::messages::EpicMessage::ConfirmDelete,
+                ));
+            }
+            Some(ColumnItem::WorkPackage(package)) => {
+                let id = package.id;
+                return self.update(Message::WorkPackage(
+                    crate::tui::messages::WorkPackageMessage::ConfirmDelete(id),
+                ));
+            }
+            Some(ColumnItem::Task(task)) => (
+                task.id,
+                task.status == crate::models::TaskStatus::Done,
+                super::super::truncate_title(&task.title, super::super::TITLE_DISPLAY_LENGTH),
+            ),
+            _ => return vec![],
         };
-        let id = task.id;
-        if task.status != crate::models::TaskStatus::Done {
+        if !done {
             self.prompt_move_to_done(vec![id]);
             return vec![];
         }
-        let title = super::super::truncate_title(&task.title, super::super::TITLE_DISPLAY_LENGTH);
         self.input.mode = InputMode::ConfirmDeleteTask(id);
         self.status.set(format!("Delete {title}? [y/n]"));
         vec![]

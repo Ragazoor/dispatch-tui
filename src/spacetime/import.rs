@@ -251,11 +251,16 @@ impl DroppedIds {
             // A link naming a dropped item names nothing
             // (`work-packages.allium: DeletingAnItemRemovesItsLinks`).
             SharedTable::WorkPackageLinks => {
-                let item = id_of(row, "item_id");
-                match row.get("kind").and_then(Value::as_str) {
-                    Some("task") => item.is_some_and(|t| self.tasks.contains(&t)),
-                    Some("epic") => item.is_some_and(|e| self.epics.contains(&e)),
-                    _ => false,
+                use crate::models::WorkPackageItem;
+                let item = row
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .zip(id_of(row, "item_id"))
+                    .and_then(|(kind, id)| WorkPackageItem::from_parts(kind, id));
+                match item {
+                    Some(WorkPackageItem::Task(t)) => self.tasks.contains(&t.0),
+                    Some(WorkPackageItem::Epic(e)) => self.epics.contains(&e.0),
+                    None => false,
                 }
             }
             _ => false,

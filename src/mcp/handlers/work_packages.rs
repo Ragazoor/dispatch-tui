@@ -11,21 +11,12 @@ use crate::service::{CreateWorkPackageParams, UpdateWorkPackageParams, WorkPacka
 
 use super::types::{
     deserialize_flexible_id, deserialize_optional_flexible_id, parse_args, service_err_to_response,
-    JsonRpcResponse,
+    FlexibleId, JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------
 // Typed argument structs (JSON-RPC layer)
 // ---------------------------------------------------------------------------
-
-/// One element of a task id list, accepting a number or a numeric string like
-/// every other id argument.
-#[derive(Deserialize)]
-struct ListedTaskId(#[serde(deserialize_with = "deserialize_flexible_id")] TaskId);
-
-/// The epic twin of [`ListedTaskId`].
-#[derive(Deserialize)]
-struct ListedEpicId(#[serde(deserialize_with = "deserialize_flexible_id")] EpicId);
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -34,9 +25,9 @@ struct CreateWorkPackageArgs {
     #[serde(default)]
     description: String,
     #[serde(default)]
-    link_task_ids: Vec<ListedTaskId>,
+    link_task_ids: Vec<FlexibleId<TaskId>>,
     #[serde(default)]
-    link_epic_ids: Vec<ListedEpicId>,
+    link_epic_ids: Vec<FlexibleId<EpicId>>,
 }
 
 #[derive(Deserialize)]
@@ -56,13 +47,13 @@ struct UpdateWorkPackageArgs {
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
-    link_task_ids: Vec<ListedTaskId>,
+    link_task_ids: Vec<FlexibleId<TaskId>>,
     #[serde(default)]
-    unlink_task_ids: Vec<ListedTaskId>,
+    unlink_task_ids: Vec<FlexibleId<TaskId>>,
     #[serde(default)]
-    link_epic_ids: Vec<ListedEpicId>,
+    link_epic_ids: Vec<FlexibleId<EpicId>>,
     #[serde(default)]
-    unlink_epic_ids: Vec<ListedEpicId>,
+    unlink_epic_ids: Vec<FlexibleId<EpicId>>,
 }
 
 #[derive(Deserialize)]
@@ -72,14 +63,14 @@ struct DeleteWorkPackageArgs {
     work_package_id: WorkPackageId,
 }
 
-fn items(tasks: Vec<ListedTaskId>, epics: Vec<ListedEpicId>) -> Vec<WorkPackageItem> {
+fn items(tasks: Vec<FlexibleId<TaskId>>, epics: Vec<FlexibleId<EpicId>>) -> Vec<WorkPackageItem> {
     tasks
         .into_iter()
-        .map(|ListedTaskId(t)| WorkPackageItem::Task(t))
+        .map(|FlexibleId(t)| WorkPackageItem::Task(t))
         .chain(
             epics
                 .into_iter()
-                .map(|ListedEpicId(e)| WorkPackageItem::Epic(e)),
+                .map(|FlexibleId(e)| WorkPackageItem::Epic(e)),
         )
         .collect()
 }

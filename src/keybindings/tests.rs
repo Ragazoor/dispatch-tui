@@ -352,11 +352,12 @@ fn lookup_over_the_real_table_reads_g_as_the_last_row_not_enter_epic() {
 #[test]
 fn view_level_context_words_are_the_specs() {
     assert_eq!(
-        C::EpicViewNoSearch.words(),
+        C::NestedViewNoSearch.words(),
         "inside an epic or work package view, no search active"
     );
+    assert_eq!(C::InsideEpicView.words(), "inside an epic view");
     assert_eq!(
-        C::InsideEpicView.words(),
+        C::InsideNestedView.words(),
         "inside an epic or work package view"
     );
     assert_eq!(
@@ -365,8 +366,8 @@ fn view_level_context_words_are_the_specs() {
     );
 }
 
-/// The `Esc` exit_epic row is guarded by epic_view_no_search, and `q`'s
-/// exit_epic is its own row under inside_epic_view: Esc ranks a search above
+/// The `Esc` exit_epic row is guarded by nested_view_no_search, and `q`'s
+/// exit_epic is its own row under inside_nested_view: Esc ranks a search above
 /// the epic view, q ignores search, so the two keys need two literals.
 #[test]
 fn q_and_esc_exit_the_epic_under_different_contexts() {
@@ -376,10 +377,10 @@ fn q_and_esc_exit_the_epic_under_different_contexts() {
     assert_eq!(exit.len(), 2, "{exit:?}");
     let q = exit.iter().find(|b| b.keys.contains(&"q")).unwrap();
     assert_eq!(q.keys, &["q"]);
-    assert_eq!(q.context, Some(C::InsideEpicView));
+    assert_eq!(q.context, Some(C::InsideNestedView));
     let esc = exit.iter().find(|b| b.keys.contains(&"Esc")).unwrap();
     assert_eq!(esc.keys, &["Esc"]);
-    assert_eq!(esc.context, Some(C::EpicViewNoSearch));
+    assert_eq!(esc.context, Some(C::NestedViewNoSearch));
 }
 
 // ---- Rows for every board namespace ---------------------------------------
@@ -753,7 +754,9 @@ fn contexts_overlap_reports_real_co_occurrence() {
     use KeyContext::*;
     for (a, b) in [
         (SearchActive, InsideEpicView),
-        (InsideEpicView, EpicViewNoSearch),
+        (InsideEpicView, NestedViewNoSearch),
+        (InsideEpicView, InsideNestedView),
+        (InsideNestedView, NestedViewNoSearch),
         (OffEpicCard, OnTaskCard),
         (OnTaskCard, BacklogTask),
         (TopLevel, OnEpicCard),
@@ -762,7 +765,9 @@ fn contexts_overlap_reports_real_co_occurrence() {
         assert!(contexts_overlap(b, a), "{b:?} and {a:?} must be symmetric");
     }
     for (a, b) in [
-        (EpicViewNoSearch, SearchActive),
+        (NestedViewNoSearch, SearchActive),
+        (InsideNestedView, TopLevel),
+        (InsideEpicView, TopLevel),
         (OnEpicCard, OnTaskCard),
         (OnFoldedSection, BacklogTask),
         (BacklogTask, StuckTask),
