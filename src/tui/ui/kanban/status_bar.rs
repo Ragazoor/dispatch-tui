@@ -219,8 +219,15 @@ fn status_line(app: &App) -> (Line<'static>, Style) {
         InputMode::RenameWorkPackage(_) => {
             hint("Rename work package: [Enter] save  [Esc] cancel", CYAN)
         }
-        InputMode::ConfirmDeleteWorkPackage(_) => {
-            hint_text(app, "Delete work package? Its items are kept [y/n]", RED)
+        InputMode::ConfirmDeleteWorkPackage(id) => {
+            // The status message auto-clears after STATUS_MESSAGE_TTL while
+            // the mode lives on, so rebuild the titled prompt, as
+            // ConfirmRepoSync does below.
+            let fallback = app.board.find_work_package(*id).map_or_else(
+                || "Delete work package? Its tasks and epics are kept [y/n]".to_string(),
+                crate::tui::update::delete_work_package_prompt,
+            );
+            hint_text(app, &fallback, RED)
         }
         InputMode::ConfirmRepoSync { repo_path } => {
             // The status message carrying the full prompt auto-clears after

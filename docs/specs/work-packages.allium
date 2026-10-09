@@ -48,7 +48,7 @@ use "./core.allium" as core
 entity WorkPackage {
     title: String               -- non-empty after trimming
     description: String         -- free text, may be empty; holds the plan for the window
-    created_by: core/UserIdentity?   -- stamped once, never rewritten; the board subscribes to its own creator's packages
+    created_by: core/UserIdentity    -- stamped once, never rewritten; required (a create with no settled identity is refused); the board subscribes to its own creator's packages only
     created_at: Timestamp
     updated_at: Timestamp
 
@@ -326,7 +326,8 @@ rule EnterEpicFromPackage {
 ------------------------------------------------------------
 
 -- `w` on a task card or an epic card, in any view, opens the link picker for
--- that item. The picker lists every package, oldest first, each marked
+-- that item. The picker lists every package the board holds (the user's
+-- own, see WorkPackage.created_by), oldest first, each marked
 -- linked or not linked for this item, plus a final "new package" row.
 surface WorkPackageLinkPicker {
     facing user: core/UserIdentity
@@ -406,8 +407,9 @@ rule DeletePackageFromBoard {
 --       write. Creates the package (CreateWorkPackage) and links the given
 --       items. Returns the new package id.
 --   list_work_packages(work_package_id?)
---       read_only. Every package (or the one named): id, title,
---       description, created_at, updated_at, and its linked items, each with
+--       read_only. Every package the board holds, i.e. the caller's own
+--       (or the one named): id, title, description (omitted when empty),
+--       created_at, updated_at, and its linked items, each with
 --       kind, id, title and status. A link whose item this board does not
 --       hold is left out.
 --   update_work_package(work_package_id, title?, description?,
@@ -423,7 +425,8 @@ rule DeletePackageFromBoard {
 -- tool names its selector after the entity (task_id, epic_id), and
 -- docs/mcp-tool-design.md asks for unambiguous argument names.
 --
--- A missing package id is not-found, on update, list and delete alike. A
+-- A missing package id is not-found, on update, list and delete alike; so is
+-- the id of a package another user created, which this board does not hold. A
 -- link to a task or epic id that does not exist is not-found, and nothing in
 -- that call is written: the call validates every id before the first write.
 -- A repeated id in one list is one write.

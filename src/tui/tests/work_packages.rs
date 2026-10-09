@@ -675,6 +675,21 @@ fn an_empty_rename_cancels() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
+// The status message carrying the prompt auto-clears after STATUS_MESSAGE_TTL
+// while the confirm mode lives on, so the prompt must still name the package.
+#[test]
+fn the_delete_prompt_still_names_the_package_after_the_status_message_expires() {
+    let mut app = board_with_package();
+    cursor_on_package(&mut app, TaskStatus::Backlog);
+    app.handle_key(make_key(KeyCode::Char('x')));
+    app.status.message = None;
+    let buf = render_to_buffer(&mut app, 160, 40);
+    assert!(
+        buffer_contains(&buf, "Delete work package \"Window 1\"?"),
+        "the expired prompt must still name the package"
+    );
+}
+
 #[test]
 fn x_on_a_package_card_asks_before_deleting() {
     let mut app = board_with_package();

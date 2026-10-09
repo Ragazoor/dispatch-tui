@@ -21,3 +21,4 @@ mod selection;
 mod split_pane;
 mod system;
 mod work_packages;
+pub(in crate::tui) use work_packages::delete_work_package_prompt;
