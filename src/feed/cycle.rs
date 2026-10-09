@@ -98,7 +98,7 @@ impl FeedCycle {
         };
 
         let Some(mut epic) = self.db.get_epic(self.epic_id).await else {
-            return self.fail("epic no longer exists");
+            return self.epic_gone();
         };
         let Some(feed_command) = epic.feed_command.take() else {
             return self.fail("epic has no feed command");
@@ -135,7 +135,7 @@ impl FeedCycle {
             .await
         {
             Ok(outcome) => outcome,
-            Err(err) => return self.fail(format!("{err:#}")),
+            Err(err) => return self.fail_sync(err).await,
         };
 
         super::recalculate_epic_status_after_feed(&*self.db, self.epic_id, "FeedCycle::run").await;
@@ -223,6 +223,27 @@ impl FeedCycle {
             mode,
         )
         .await
+    }
+
+    /// The sync failed. If the epic was deleted while the command ran (it can
+    /// run for minutes), the store's refusal is that race, not a fault.
+    async fn fail_sync(&self, err: anyhow::Error) -> FeedCycleOutcome {
+        if self.db.get_epic(self.epic_id).await.is_none() {
+            return self.epic_gone();
+        }
+        self.fail(format!("{err:#}"))
+    }
+
+    /// The epic was deleted under the cycle. Expected, so debug not warn; the
+    /// next tick no longer lists the epic. feeds.allium `FeedCommandFailure`
+    /// bucket 5.
+    fn epic_gone(&self) -> FeedCycleOutcome {
+        tracing::debug!(
+            epic_id = self.epic_id.0,
+            epic_title = %self.epic_title,
+            "feed cycle dropped: epic no longer exists"
+        );
+        FeedCycleOutcome::Failed("epic no longer exists".to_string())
     }
 
     /// Log a failure against this cycle's epic and return it for the caller to
@@ -317,6 +338,33 @@ mod tests {
             !sentinel.exists(),
             "the failure precedes the exec, so the feed command must never run"
         );
+    }
+
+    /// Bucket 5, mid-cycle: the epic is deleted while the command runs, so the
+    /// store refuses the sync. That is a race, logged below warn; a refusal
+    /// for an epic that still exists stays a warning.
+    #[tokio::test]
+    async fn a_sync_refused_because_the_epic_was_deleted_mid_cycle_is_not_a_warning() {
+        let db = Arc::new(Store::open_in_memory().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let sentinel = dir.path().join("command-ran");
+        let epic_id = reviews_parent_with_sentinel_command(&db, &sentinel).await;
+        let refusal = || anyhow::anyhow!("the shared store refused: epic not found");
+
+        let gone_log = crate::test_log::logged_during(|| async {
+            db.delete_epic(epic_id).await.unwrap();
+            let out = cycle(Arc::clone(&db), epic_id).fail_sync(refusal()).await;
+            assert!(failure(out).contains("epic no longer exists"));
+        })
+        .await;
+        assert!(!gone_log.contains("WARN"), "got: {gone_log}");
+
+        let live = reviews_parent_with_sentinel_command(&db, &sentinel).await;
+        let live_log = crate::test_log::logged_during(|| async {
+            failure(cycle(Arc::clone(&db), live).fail_sync(refusal()).await);
+        })
+        .await;
+        assert!(live_log.contains("WARN"), "got: {live_log}");
     }
 
     /// #4150: exec_feed_command has a deadline. A command that never exits

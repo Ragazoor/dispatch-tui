@@ -2200,6 +2200,13 @@ rule FeedCommandFailure {
     --      same way buckets 1-2 are — before any parse. See
     --      SerialisedFeedCycle's bounded-cost note below.
     --
+    -- Bucket 5 also covers the epic being deleted WHILE the command runs
+    -- (it can run for minutes): the store then refuses the sync with
+    -- "epic N not found". The cycle re-reads the epic after a refused sync
+    -- and, if it is gone, drops the cycle logging at debug, not warn: the
+    -- next tick no longer lists the epic, so there is nothing to recover.
+    -- A refusal for an epic that still exists stays a warning.
+    --
     -- Buckets 5 and 6 are unreachable in a correctly-provisioned, unraced
     -- system; they are specified because the cycle must do something
     -- definite when they happen, and "sync anyway" would be the wrong
