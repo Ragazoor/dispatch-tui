@@ -306,6 +306,16 @@ pub fn delete_stale_subtree_feed_tasks(
 ) -> Result<(), String> {
     let keep: std::collections::HashSet<&str> =
         keep_external_ids.iter().map(String::as_str).collect();
+    delete_stale_in_children(ctx, parent_id, &keep);
+    Ok(())
+}
+
+/// [`delete_stale_subtree_feed_tasks`]'s body, shared with `ingest_feed`.
+pub(crate) fn delete_stale_in_children(
+    ctx: &ReducerContext,
+    parent_id: i64,
+    keep: &std::collections::HashSet<&str>,
+) {
     let child_epics: Vec<i64> = ctx
         .db
         .epics()
@@ -314,9 +324,8 @@ pub fn delete_stale_subtree_feed_tasks(
         .map(|e| e.id)
         .collect();
     for epic_id in child_epics {
-        delete_stale_feed_tasks_in_epic(ctx, epic_id, &keep);
+        delete_stale_feed_tasks_in_epic(ctx, epic_id, keep);
     }
-    Ok(())
 }
 
 /// feeds.allium: `DropClosedRetiredFeedItems`. Drop every `retired_feed_items`
@@ -332,6 +341,16 @@ pub fn drop_closed_retired_feed_items(
 ) -> Result<(), String> {
     let keep: std::collections::HashSet<&str> =
         keep_external_ids.iter().map(String::as_str).collect();
+    drop_closed_retired(ctx, feed_epic_id, &keep);
+    Ok(())
+}
+
+/// [`drop_closed_retired_feed_items`]'s body, shared with `ingest_feed`.
+pub(crate) fn drop_closed_retired(
+    ctx: &ReducerContext,
+    feed_epic_id: i64,
+    keep: &std::collections::HashSet<&str>,
+) {
     let stale: Vec<i64> = ctx
         .db
         .retired_feed_items()
@@ -343,7 +362,6 @@ pub fn drop_closed_retired_feed_items(
     for id in stale {
         ctx.db.retired_feed_items().id().delete(id);
     }
-    Ok(())
 }
 
 /// epics.allium: `DeleteEpic`'s retirement clause. For every feed task

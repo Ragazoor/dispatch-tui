@@ -74,6 +74,7 @@ enum Sent {
     MarkPrLearningsGateShown(i64, String),
     UpsertFeedTasks(i64, usize, String),
     UpsertFeedTasksAdditive(i64, usize, String),
+    IngestFeed(i64, usize, bool, String),
     ClaimPollOwner(String, i64, String),
     OverridePollOwner(String, i64, String),
     DeleteStaleSubtreeFeedTasks(i64, Vec<String>),
@@ -556,6 +557,25 @@ impl ReducerCaller for RecordingCaller {
     ) -> anyhow::Result<ReducerOutcome> {
         let epic_id = epic_id.0;
         let outcome = self.answer(Sent::UpsertFeedTasks(epic_id, items.len(), created_by))?;
+        if matches!(outcome, ReducerOutcome::Applied(_)) {
+            self.simulate_feed_removal();
+        }
+        Ok(outcome)
+    }
+
+    async fn ingest_feed(
+        &self,
+        epic_id: EpicId,
+        items: Vec<bindings::FeedIngestItem>,
+        additive: bool,
+        created_by: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        let outcome = self.answer(Sent::IngestFeed(
+            epic_id.0,
+            items.len(),
+            additive,
+            created_by,
+        ))?;
         if matches!(outcome, ReducerOutcome::Applied(_)) {
             self.simulate_feed_removal();
         }
@@ -1842,6 +1862,29 @@ async fn additive_upsert_never_reports_a_removal() {
     );
 }
 
+/// `ingest_feed` is one reducer call carrying the additive flag and the
+/// caller's identity; a reconciling call reports the rows the module removed
+/// that this board predicted, an additive one reports none.
+#[tokio::test]
+async fn ingest_feed_is_one_call_and_reports_only_confirmed_removals() {
+    let rows = Arc::new(crate::sync::SharedRows::new());
+    rows.upsert_task(&feed_task_row(1, 1, "absent-from-emission"));
+    let caller = RecordingCaller::removing_on_feed_write(rows.clone(), &[1]);
+    let (writer, sent) = writer_over(rows, caller);
+
+    let outcome = writer
+        .ingest_feed(EpicId(1), &[], &[], &[], false)
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.removed.len(), 1);
+    assert_eq!(outcome.affected_epics, vec![EpicId(1)]);
+    assert_eq!(
+        sent.sent(),
+        vec![Sent::IngestFeed(1, 0, false, "user-me".to_string())]
+    );
+}
+
 /// A feed sync must not fail just because this install has never connected to
 /// a shared store before — best-effort, unlike every `create_*` call that
 /// uses `require_identity`. `created_by` is honestly empty rather than the
@@ -2258,6 +2301,9 @@ async fn every_store_mutation_reaches_the_transport() {
     db.drop_closed_retired_feed_items(EpicId(1), &["ext-1".to_string()])
         .await
         .unwrap();
+    db.ingest_feed(EpicId(1), &[], &[], &[], false)
+        .await
+        .unwrap();
     db.create_repo_group_sub_epic(EpicId(1), "repo")
         .await
         .unwrap();
@@ -2386,6 +2432,7 @@ async fn every_store_mutation_reaches_the_transport() {
             "UpsertFeedTasksAdditive",
             "DeleteStaleSubtreeFeedTasks",
             "DropClosedRetiredFeedItems",
+            "IngestFeed",
             "CreateRepoGroupSubEpic",
             "CreateManagedRoleEpic",
             "BatchPatchSubStatus",

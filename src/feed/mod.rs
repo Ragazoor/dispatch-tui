@@ -3,7 +3,6 @@ mod exec;
 mod guard;
 mod ingest;
 mod parse;
-mod routing;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,62 +22,11 @@ pub(crate) use exec::{
     degraded_empty_emission, exec_feed_command, resolve_base_branches, FEED_COMMAND_TIMEOUT,
 };
 pub(crate) use guard::FeedSyncGuard;
-pub(crate) use ingest::{run_feed_sync_by_role, FeedItemWithTarget, SyncMode};
+pub(crate) use ingest::{ingest_emission, FeedItemWithTarget, SyncMode};
 // `pub`, unlike the `pub(crate)` re-exports above: the `verify-feed` CLI in
 // src/main.rs is a separate bin crate and is one of this function's three
 // callers. See feeds.allium's FeedItemParse block.
 pub use parse::parse_feed_items;
-pub use routing::{excluded_from_reviews, route};
-
-/// Log-and-discard on `Err` for the feed writes that report what they deleted,
-/// keeping the `Ok` payload so the removed rows reach
-/// [`cleanup_removed_feed_tasks`]. An `Err` yields an empty vec — nothing was
-/// reported, so there is nothing to tear down; the reconciliation pass
-/// continues either way.
-///
-/// `context` labels the call site in the log line (e.g.
-/// `"sync_grouped_feed: upsert_feed_tasks failed"`).
-pub(crate) fn removed_or_warn(
-    result: anyhow::Result<Vec<RemovedFeedTask>>,
-    epic_id: EpicId,
-    sub_epic_id: Option<EpicId>,
-    context: &str,
-) -> Vec<RemovedFeedTask> {
-    match result {
-        Ok(removed) => removed,
-        Err(err) => {
-            // `sub_epic_id` is attached when the write is scoped to a sub-epic
-            // beneath `epic_id`, so a warning names the epic it actually wrote.
-            match sub_epic_id {
-                Some(sub_epic_id) => tracing::warn!(
-                    epic_id = epic_id.0,
-                    sub_epic_id = sub_epic_id.0,
-                    "{context}: {err:#}"
-                ),
-                None => tracing::warn!(epic_id = epic_id.0, "{context}: {err:#}"),
-            }
-            Vec::new()
-        }
-    }
-}
-
-/// Recalculate an epic's status after feed tasks have been upserted, logging a
-/// warning on failure. New non-done tasks can cause a done epic to regress to
-/// backlog; the recalculation propagates upward to any parent epic.
-///
-/// `context` labels the call site in the log line (e.g. `"FeedRunner"`).
-pub(crate) async fn recalculate_epic_status_after_feed(
-    db: &dyn TaskStore,
-    epic_id: EpicId,
-    context: &str,
-) {
-    if let Err(err) = db.recalculate_epic_status(epic_id).await {
-        tracing::warn!(
-            epic_id = epic_id.0,
-            "{context}: recalculate_epic_status failed: {err:#}"
-        );
-    }
-}
 
 /// Tear down the worktree and tmux window of every feed task a sync removed.
 ///
@@ -117,7 +65,7 @@ pub(crate) async fn recalculate_epic_status_after_feed(
 /// never surfaced, because feed reconciliation is background work, and one
 /// task's failure must not abort the rest of its repo's queue.
 /// Called once, from [`cycle::FeedCycle::run`], with the `removed` half of the
-/// [`ingest::FeedSyncOutcome`] the sync returned — so both feed paths get the
+/// [`crate::store::FeedIngestOutcome`] the sync returned — so both feed paths get the
 /// teardown by sharing that cycle rather than by each remembering to call this.
 pub(crate) async fn cleanup_removed_feed_tasks(
     runner: Arc<dyn ProcessRunner>,

@@ -47,18 +47,58 @@ fn entries(
         .collect()
 }
 
-// Default-mode shims. Every test written before SyncMode existed means
-// `SyncMode::Reconcile` — the ordinary trusted-emission sync — so these
-// same-named wrappers supply it and shadow the glob-imported originals from
-// `use super::*`. A test that exercises `SyncMode::Additive`
-// (DegradedNonEmptyEmission) calls the real function by its `super::` path, so
-// the mode under test is always visible at the call site.
+// Test shims. Every test written before the strategies moved into the module
+// names the strategy it means (`run_role_routed_feed_sync`, `run_feed_sync`,
+// `sync_grouped_feed`) and the ordinary trusted mode. The module now picks the
+// strategy from the epic's own row, so each shim first makes the row say what
+// the test means, then posts through `ingest_emission`. A test of
+// `SyncMode::Additive` calls the `*_with_mode` form, so the mode under test is
+// visible at the call site.
+type FeedSyncOutcome = crate::store::FeedIngestOutcome;
+
+async fn set_strategy(
+    db: &dyn crate::store::TaskStore,
+    epic_id: EpicId,
+    feed_role: Option<FeedRole>,
+    group_by_repo: Option<bool>,
+) {
+    let mut patch = EpicPatch::new();
+    if let Some(role) = feed_role {
+        patch = patch.feed_role(role);
+    }
+    if let Some(flag) = group_by_repo {
+        patch = patch.group_by_repo(flag);
+    }
+    db.patch_epic(epic_id, &patch).await.unwrap();
+}
+
+async fn run_role_routed_feed_sync_with_mode(
+    db: &dyn crate::store::TaskStore,
+    parent_id: EpicId,
+    entries: Vec<FeedItemWithTarget>,
+    mode: SyncMode,
+) -> anyhow::Result<FeedSyncOutcome> {
+    set_strategy(db, parent_id, Some(FeedRole::ReviewsParent), None).await;
+    ingest_emission(db, parent_id, entries, mode).await
+}
+
 async fn run_role_routed_feed_sync(
     db: &dyn crate::store::TaskStore,
     parent_id: EpicId,
     entries: Vec<FeedItemWithTarget>,
 ) -> anyhow::Result<FeedSyncOutcome> {
-    super::role_routed::run_role_routed_feed_sync(db, parent_id, entries, SyncMode::Reconcile).await
+    run_role_routed_feed_sync_with_mode(db, parent_id, entries, SyncMode::Reconcile).await
+}
+
+async fn run_feed_sync_with_mode(
+    db: &dyn crate::store::TaskStore,
+    epic_id: EpicId,
+    group_by_repo: bool,
+    entries: Vec<FeedItemWithTarget>,
+    mode: SyncMode,
+) -> anyhow::Result<FeedSyncOutcome> {
+    set_strategy(db, epic_id, None, Some(group_by_repo)).await;
+    ingest_emission(db, epic_id, entries, mode).await
 }
 
 async fn run_feed_sync(
@@ -67,7 +107,7 @@ async fn run_feed_sync(
     group_by_repo: bool,
     entries: Vec<FeedItemWithTarget>,
 ) -> anyhow::Result<FeedSyncOutcome> {
-    super::run_feed_sync(db, epic_id, group_by_repo, entries, SyncMode::Reconcile).await
+    run_feed_sync_with_mode(db, epic_id, group_by_repo, entries, SyncMode::Reconcile).await
 }
 
 async fn run_feed_sync_by_role(
@@ -77,15 +117,19 @@ async fn run_feed_sync_by_role(
     group_by_repo: bool,
     entries: Vec<FeedItemWithTarget>,
 ) -> anyhow::Result<FeedSyncOutcome> {
-    super::run_feed_sync_by_role(
-        db,
-        epic_id,
-        feed_role,
-        group_by_repo,
-        entries,
-        SyncMode::Reconcile,
-    )
-    .await
+    set_strategy(db, epic_id, Some(feed_role), Some(group_by_repo)).await;
+    ingest_emission(db, epic_id, entries, SyncMode::Reconcile).await
+}
+
+async fn sync_grouped_feed_with_mode(
+    db: &dyn crate::store::TaskStore,
+    parent_id: EpicId,
+    entries: Vec<FeedItemWithTarget>,
+    mode: SyncMode,
+) -> FeedSyncOutcome {
+    run_feed_sync_with_mode(db, parent_id, true, entries, mode)
+        .await
+        .unwrap()
 }
 
 async fn sync_grouped_feed(
@@ -93,7 +137,7 @@ async fn sync_grouped_feed(
     parent_id: EpicId,
     entries: Vec<FeedItemWithTarget>,
 ) -> FeedSyncOutcome {
-    super::grouped::sync_grouped_feed(db, parent_id, entries, SyncMode::Reconcile).await
+    sync_grouped_feed_with_mode(db, parent_id, entries, SyncMode::Reconcile).await
 }
 
 /// Create a manual (non-feed) task under `epic` — no `external_id`, so the
@@ -259,14 +303,14 @@ async fn route_routed_move_not_deleted_same_cycle() {
 
 /// A task MOVED between role sub-epics during a sync must NEVER appear in the
 /// removed set. The ordering that makes this true is not compiler-enforced:
-/// `apply_move`'s `set_task_epic_id` lands before `upsert_role_groups`,
-/// `delete_stale_subtree` and `clear_parent_stranded_tasks`, each of whose SQL
-/// filters on the task's CURRENT `epic_id`. Before feed-task teardown existed a
+/// the module's `ingest_role_routed` lands the move before its per-group
+/// upsert, subtree delete and parent sweep, each of which filters on the
+/// task's CURRENT `epic_id`. Before feed-task teardown existed a
 /// mis-ordering merely deleted a row; now it would force-remove a live review
 /// agent's worktree and kill its tmux window. Pin it.
 ///
 /// `pr-2` stays in Team Reviews on purpose: it keeps a non-empty group on the
-/// LOSING role sub-epic, so `upsert_role_groups`' per-epic stale-delete would
+/// LOSING role sub-epic, so the per-epic stale-delete would
 /// actually sweep `pr-1` out of Team if the move had not already landed. Drop
 /// `pr-2` and the test stops detecting the mis-ordering.
 #[tokio::test]
@@ -1444,7 +1488,7 @@ async fn additive_role_routed_sync_keeps_a_task_absent_from_the_emission() {
         "https://github.com/org/repo/pull/2",
         vec![Signal::DirectRequest],
     )];
-    let outcome = super::role_routed::run_role_routed_feed_sync(
+    let outcome = run_role_routed_feed_sync_with_mode(
         &*db,
         parent.id,
         entries(&cycle2, &[""], &["main"]),
@@ -1496,7 +1540,7 @@ async fn additive_role_routed_sync_keeps_parent_stranded_tasks() {
         "https://github.com/org/repo/pull/2",
         vec![Signal::DirectRequest],
     )];
-    super::role_routed::run_role_routed_feed_sync(
+    run_role_routed_feed_sync_with_mode(
         &*db,
         parent.id,
         entries(&items, &[""], &["main"]),
@@ -1543,7 +1587,7 @@ async fn additive_role_routed_sync_still_moves_and_inserts() {
             vec![Signal::DirectRequest],
         ),
     ];
-    super::role_routed::run_role_routed_feed_sync(
+    run_role_routed_feed_sync_with_mode(
         &*db,
         parent.id,
         entries(&cycle2, &["", ""], &["main", "main"]),
@@ -1592,7 +1636,7 @@ async fn additive_grouped_sync_keeps_tasks_in_a_dropped_repo_sub_epic() {
 
     // Degraded cycle: repo-b's query soft-failed, so only repo-a is emitted.
     let degraded = vec![make_item("1", "https://github.com/org/repo-a/pull/1")];
-    let outcome = super::grouped::sync_grouped_feed(
+    let outcome = sync_grouped_feed_with_mode(
         &*db,
         parent.id,
         entries(&degraded, &[""], &["main"]),
@@ -1628,7 +1672,7 @@ async fn additive_flat_sync_keeps_a_task_absent_from_the_emission() {
     .unwrap();
 
     let degraded = vec![make_item("cve-2", "")];
-    let outcome = super::run_feed_sync(
+    let outcome = run_feed_sync_with_mode(
         &*db,
         epic.id,
         false,
@@ -1973,7 +2017,7 @@ async fn additive_role_routed_sync_does_not_insert_own_authored_pr() {
         vec![Signal::DirectRequest, Signal::AuthorMe],
     )];
 
-    super::role_routed::run_role_routed_feed_sync(
+    run_role_routed_feed_sync_with_mode(
         &*db,
         parent.id,
         entries(&items, &[""], &["main"]),
@@ -2078,7 +2122,7 @@ async fn flat_additive_sync_inserts_no_task_for_a_retired_id() {
     let epic = flat_feed_with_retired(&db, "Log", "warn-1").await;
 
     let items = vec![make_item("warn-1", "")];
-    super::run_feed_sync(
+    run_feed_sync_with_mode(
         &*db,
         epic,
         false,
@@ -2150,7 +2194,7 @@ async fn additive_sync_never_drops_a_retired_record() {
     let epic = flat_feed_with_retired(&db, "Log", "warn-1").await;
 
     let other = vec![make_item("warn-2", "")];
-    super::run_feed_sync(
+    run_feed_sync_with_mode(
         &*db,
         epic,
         false,
@@ -2350,7 +2394,7 @@ async fn role_routed_additive_sync_never_drops_a_retired_record() {
     let db = Arc::new(Store::open_in_memory().unwrap());
     let parent = reviews_feed_with_retired_pr(&db).await;
 
-    super::role_routed::run_role_routed_feed_sync(&*db, parent, vec![], SyncMode::Additive)
+    run_role_routed_feed_sync_with_mode(&*db, parent, vec![], SyncMode::Additive)
         .await
         .unwrap();
 

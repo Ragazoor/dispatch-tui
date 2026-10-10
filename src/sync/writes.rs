@@ -323,6 +323,18 @@ pub trait ReducerCaller: Send + Sync {
         keep_external_ids: Vec<String>,
     ) -> Result<ReducerOutcome>;
 
+    /// Apply one parsed feed emission to a feed epic (store-split M3,
+    /// `feeds.allium: IngestFeedEmission`). The module picks the strategy,
+    /// routes, groups, upserts, deletes the stale and recalculates; which rows
+    /// it removed is decoded in the `Store`, as for the calls above.
+    async fn ingest_feed(
+        &self,
+        epic_id: EpicId,
+        items: Vec<bindings::FeedIngestItem>,
+        additive: bool,
+        created_by: String,
+    ) -> Result<ReducerOutcome>;
+
     // -- Retired feed items (task #4971) --------------------------------------
     //
     // A plain applied-or-refused call, like the three feed-ingestion ones

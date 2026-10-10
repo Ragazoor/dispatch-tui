@@ -30,12 +30,14 @@ pub mod drop_closed_retired_feed_items_reducer;
 pub mod epic_patch_type;
 pub mod epic_type;
 pub mod epics_table;
+pub mod feed_ingest_item_type;
 pub mod feed_task_upsert_item_type;
 pub mod filter_preset_type;
 pub mod filter_presets_table;
 pub mod flatten_epic_reducer;
 pub mod host_type;
 pub mod hosts_table;
+pub mod ingest_feed_reducer;
 pub mod learning_patch_type;
 pub mod learning_retrieval_type;
 pub mod learning_retrievals_table;
@@ -156,12 +158,14 @@ pub use drop_closed_retired_feed_items_reducer::drop_closed_retired_feed_items;
 pub use epic_patch_type::EpicPatch;
 pub use epic_type::Epic;
 pub use epics_table::*;
+pub use feed_ingest_item_type::FeedIngestItem;
 pub use feed_task_upsert_item_type::FeedTaskUpsertItem;
 pub use filter_preset_type::FilterPreset;
 pub use filter_presets_table::*;
 pub use flatten_epic_reducer::flatten_epic;
 pub use host_type::Host;
 pub use hosts_table::*;
+pub use ingest_feed_reducer::ingest_feed;
 pub use learning_patch_type::LearningPatch;
 pub use learning_retrieval_type::LearningRetrieval;
 pub use learning_retrievals_table::*;
@@ -346,6 +350,12 @@ pub enum Reducer {
     },
     FlattenEpic {
         root_id: i64,
+    },
+    IngestFeed {
+        epic_id: i64,
+        items: Vec<FeedIngestItem>,
+        additive: bool,
+        created_by: String,
     },
     LinkWorkPackageItem {
         work_package_id: i64,
@@ -582,6 +592,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteWorkPackage { .. } => "delete_work_package",
             Reducer::DropClosedRetiredFeedItems { .. } => "drop_closed_retired_feed_items",
             Reducer::FlattenEpic { .. } => "flatten_epic",
+            Reducer::IngestFeed { .. } => "ingest_feed",
             Reducer::LinkWorkPackageItem { .. } => "link_work_package_item",
             Reducer::MarkPrLearningsGateShown { .. } => "mark_pr_learnings_gate_shown",
             Reducer::OverridePollOwner { .. } => "override_poll_owner",
@@ -783,6 +794,17 @@ impl __sdk::Reducer for Reducer {
                 root_id,
 }             => __sats::bsatn::to_vec(&flatten_epic_reducer::FlattenEpicArgs {
                 root_id: root_id.clone(),
+}),
+            Reducer::IngestFeed{
+                epic_id,
+                items,
+                additive,
+                created_by,
+}             => __sats::bsatn::to_vec(&ingest_feed_reducer::IngestFeedArgs {
+                epic_id: epic_id.clone(),
+                items: items.clone(),
+                additive: additive.clone(),
+                created_by: created_by.clone(),
 }),
             Reducer::LinkWorkPackageItem{
                 work_package_id,

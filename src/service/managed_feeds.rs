@@ -32,7 +32,7 @@ use crate::store::{EpicCrud, EpicPatch};
 
 /// Default display title for a freshly-created managed epic. Consulted only on
 /// creation — once an epic exists its title is owned by the user. The sub-epic
-/// titles mirror `feed::ingest::role_sub_epic_title` so lazy (reconcile-time)
+/// titles mirror `ensure_role_sub_epic`'s titles in the module's `feed_ingest.rs` so lazy (reconcile-time)
 /// and eager (provisioning-time) creation agree.
 fn managed_role_title(role: FeedRole) -> &'static str {
     match role {

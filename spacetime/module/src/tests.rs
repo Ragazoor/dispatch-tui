@@ -543,6 +543,92 @@ mod rules {
         assert_eq!(repo_name_from_path("/"), "other");
     }
 
+    fn sig(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// `feeds.allium: RouteSignals`. Total, first match wins.
+    #[test]
+    fn signals_route_by_first_match() {
+        let cases: &[(&[&str], &str)] = &[
+            (&["direct-request"], ROLE_MY_REVIEWS),
+            (&["team-request"], ROLE_TEAM_REVIEWS),
+            (&["reviewed"], ROLE_MY_REVIEWS),
+            (&["commented"], ROLE_MY_REVIEWS),
+            (&["author-bot"], ROLE_BOTS),
+            // engagement beats the bot rule
+            (&["reviewed", "author-bot"], ROLE_MY_REVIEWS),
+            // but the user's own comment on their own PR is not engagement
+            (&["commented", "author-me", "author-bot"], ROLE_BOTS),
+            (&["team-request", "reviewed"], ROLE_MY_REVIEWS),
+            (&[], ROLE_MY_REVIEWS),
+            (&["org-review"], ROLE_MY_REVIEWS),
+            (&["org-review", "author-bot"], ROLE_BOTS),
+            (&["org-review", "author-bot", "reviewed"], ROLE_MY_REVIEWS),
+        ];
+        for (signals, role) in cases {
+            assert_eq!(route_signals(&sig(signals)), *role, "{signals:?}");
+        }
+    }
+
+    /// `feeds.allium: ExcludeFromReviews`.
+    #[test]
+    fn own_authored_and_settled_approved_prs_are_excluded() {
+        let others = [
+            "direct-request",
+            "team-request",
+            "reviewed",
+            "commented",
+            "author-bot",
+            "org-review",
+        ];
+        assert!(!excluded_from_reviews(&[]));
+        assert!(excluded_from_reviews(&sig(&["author-me"])));
+        for s in others.iter().chain(["approved"].iter()) {
+            assert!(
+                !excluded_from_reviews(&sig(&[s])) || *s == "approved",
+                "{s}"
+            );
+            assert!(
+                excluded_from_reviews(&sig(&["author-me", s])),
+                "author-me + {s}"
+            );
+        }
+        // approved is excluded unless a request rescues it
+        assert!(excluded_from_reviews(&sig(&["approved"])));
+        for s in ["reviewed", "commented", "author-bot", "org-review"] {
+            assert!(excluded_from_reviews(&sig(&["approved", s])), "{s}");
+        }
+        for s in ["direct-request", "team-request"] {
+            assert!(!excluded_from_reviews(&sig(&["approved", s])), "{s}");
+            assert!(
+                !excluded_from_reviews(&sig(&["approved", "reviewed", s])),
+                "{s}"
+            );
+        }
+        // an own-authored PR is never rescued
+        assert!(excluded_from_reviews(&sig(&[
+            "author-me",
+            "approved",
+            "direct-request"
+        ])));
+    }
+
+    #[test]
+    fn a_feed_item_url_names_its_repo_group() {
+        assert_eq!(
+            repo_name_from_url("https://github.com/org/my-repo/pull/42"),
+            "my-repo"
+        );
+        assert_eq!(
+            repo_name_from_url("https://github.com/org/my-repo"),
+            "my-repo"
+        );
+        assert_eq!(repo_name_from_url(""), "other");
+        assert_eq!(repo_name_from_url("https://gitlab.com/org/repo"), "other");
+        assert_eq!(extract_github_repo("https://github.com/org"), None);
+    }
+
     #[test]
     fn the_rules_version_is_positive() {
         // 0 is what a module that predates the gate reads as.

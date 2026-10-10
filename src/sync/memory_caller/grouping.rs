@@ -179,8 +179,15 @@ impl MemoryReducerCaller {
 
     /// Mirrors `flatten_epic`.
     pub(super) fn apply_flatten_epic(&self, root: EpicId) -> Result<ReducerOutcome> {
-        let root = root.0;
         let mut tables = self.lock();
+        Ok(match self.flatten_epic_rows(&mut tables, root.0) {
+            Ok(()) => ReducerOutcome::Applied(vec![]),
+            Err(why) => ReducerOutcome::Refused(why),
+        })
+    }
+
+    /// The body of `flatten_epic`, shared with `ingest_feed`'s flat path.
+    pub(super) fn flatten_epic_rows(&self, tables: &mut Tables, root: i64) -> Result<(), String> {
         let subs: Vec<i64> = tables
             .epics
             .values()
@@ -195,13 +202,11 @@ impl MemoryReducerCaller {
                 .cloned()
                 .collect();
             for task in tasks {
-                if let Err(why) = self.relink_task(&mut tables, task, root) {
-                    return Ok(ReducerOutcome::Refused(why));
-                }
+                self.relink_task(tables, task, root)?;
             }
-            self.delete_if_empty_repo_group(&mut tables, sub);
+            self.delete_if_empty_repo_group(tables, sub);
         }
-        self.recalculate_epic_chain(&mut tables, root);
-        Ok(ReducerOutcome::Applied(vec![]))
+        self.recalculate_epic_chain(tables, root);
+        Ok(())
     }
 }

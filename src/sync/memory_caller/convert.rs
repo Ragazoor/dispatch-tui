@@ -246,6 +246,24 @@ mirror!(
     }
 );
 
+impl From<bindings::FeedIngestItem> for module::FeedIngestItem {
+    fn from(v: bindings::FeedIngestItem) -> Self {
+        Self {
+            item: v.item.into(),
+            signals: v.signals,
+        }
+    }
+}
+
+impl From<module::FeedIngestItem> for bindings::FeedIngestItem {
+    fn from(v: module::FeedIngestItem) -> Self {
+        Self {
+            item: v.item.into(),
+            signals: v.signals,
+        }
+    }
+}
+
 mirror!(
     module::SubStatusUpdate,
     bindings::SubStatusUpdate {

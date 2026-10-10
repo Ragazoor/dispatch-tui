@@ -4,8 +4,8 @@
 -- Scope: The TARGET split of responsibility between the dispatch TUI process
 --        and the SpacetimeDB module (spacetime/module/), and the order the
 --        code is migrated in. It says which side owns which kind of
---        behaviour. Migration steps land one at a time: M2 (below) has
---        landed, M3-M7 have not. Until a step lands, the rules in the specs
+--        behaviour. Migration steps land one at a time: M2 and M3 (below) have
+--        landed, M4-M7 have not. Until a step lands, the rules in the specs
 --        listed under Excludes stay authoritative for what the system does
 --        today, and nothing here overrides them. Each step runs its own
 --        spec -> tests -> code cycle on the spec that owns the behaviour it
@@ -84,6 +84,21 @@
 --           service and MCP boundary. The version gate landed with it.
 --       M3  Feed routing and reconcile move into the module; the TUI's feed
 --           runner posts raw items only.
+--           LANDED (task #53256): the ingest_feed reducer takes the parsed
+--           items, an additive flag and the caller's identity, and does what
+--           src/feed/ingest/ did: pick the strategy from the epic's own
+--           feed_role and group_by_repo, filter and route by signals, ensure
+--           the role and repo-group sub-epics, group, upsert, delete the stale
+--           subtree, clear tasks stranded on the reviews parent, drop closed
+--           retired items and recalculate. The board runs the script, resolves
+--           repo paths from local clones, and reports the removed worktrees
+--           and tmux windows by comparing its view before and after. The board
+--           no longer calls the per-step reducers it used to orchestrate
+--           (upsert_feed_tasks_additive, delete_stale_subtree_feed_tasks,
+--           drop_closed_retired_feed_items); they remain as primitives
+--           ingest_feed shares code with, and are for removal in M7. The
+--           rules version is 2.
+--           See feeds.allium: IngestFeedEmission.
 --       M4  Dispatch becomes request rows plus the scheduled timeout.
 --       M5  Wrap-up and exit-session become request rows.
 --       M6  Watchers get module-written "notice due" rows; PR state is

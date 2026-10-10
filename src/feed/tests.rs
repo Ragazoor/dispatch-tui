@@ -224,7 +224,7 @@ async fn tick_degraded_empty_emission_does_not_delete_existing_tasks() {
 /// for it.
 ///
 /// This crosses the seam the rest of the suite leaves untested. The ingest
-/// tests prove `FeedSyncOutcome::removed` is populated; the `cleanup_*` tests
+/// tests prove `FeedIngestOutcome::removed` is populated; the `cleanup_*` tests
 /// call `cleanup_removed_feed_tasks` directly with a hand-built `Vec`.
 /// Neither notices if the cycle stops passing one to the other — before
 /// this test, deleting the fan-out call left the whole suite green. Removing

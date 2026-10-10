@@ -27,9 +27,10 @@ use super::*;
 ///
 /// 1: store-split M2 — sub-status legality, the reparent cycle, repo-group
 ///    reparent and append-only checks, and repo grouping.
+/// 2: store-split M3 — feed routing and reconcile (`ingest_feed`).
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 1;
+pub const RULES_VERSION: i64 = 2;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///
@@ -199,4 +200,79 @@ pub fn check_epic_patch(
         )?;
     }
     Ok(())
+}
+
+/// The `feed_role` of the epic a PR-review feed is attached to.
+pub const ROLE_REVIEWS_PARENT: &str = "reviews-parent";
+/// The `feed_role` of the sub-epic for reviews requested of the user.
+pub const ROLE_MY_REVIEWS: &str = "my-reviews";
+/// The `feed_role` of the sub-epic for reviews requested of the user's team.
+pub const ROLE_TEAM_REVIEWS: &str = "team-reviews";
+/// The `feed_role` of the sub-epic for bot-authored PRs.
+pub const ROLE_BOTS: &str = "bots";
+
+/// Whether a PR item is kept out of the review subtree altogether.
+///
+/// `feeds.allium: ExcludeFromReviews`. Evaluated before [`route_signals`], so
+/// an excluded item is never routed, inserted or kept. Signals are in the
+/// store's spelling (kebab-case, as `Signal` serialises).
+///
+/// 1. `author-me` excludes unconditionally.
+/// 2. `approved` excludes unless `direct-request` or `team-request` rescues it.
+pub fn excluded_from_reviews(signals: &[String]) -> bool {
+    let has = |s: &str| signals.iter().any(|x| x == s);
+    if has("author-me") {
+        return true;
+    }
+    has("approved") && !has("direct-request") && !has("team-request")
+}
+
+/// The role a PR's signals route it to: one of [`ROLE_MY_REVIEWS`],
+/// [`ROLE_TEAM_REVIEWS`], [`ROLE_BOTS`]. Total, first match wins.
+///
+/// `feeds.allium: RouteSignals`. Engagement (a review or comment that is not
+/// on the user's own PR) beats the bot rule; `org-review` counts as a direct
+/// request; `approved` is not read here.
+pub fn route_signals(signals: &[String]) -> &'static str {
+    let has = |s: &str| signals.iter().any(|x| x == s);
+    let engaged = (has("reviewed") || has("commented")) && !has("author-me");
+    if engaged {
+        ROLE_MY_REVIEWS
+    } else if has("author-bot") {
+        ROLE_BOTS
+    } else if has("direct-request") || has("org-review") {
+        ROLE_MY_REVIEWS
+    } else if has("team-request") {
+        ROLE_TEAM_REVIEWS
+    } else {
+        ROLE_MY_REVIEWS
+    }
+}
+
+/// `"org/repo"` from a GitHub URL, or `None` for anything else.
+///
+/// The twin of `models::extract_github_repo`; a test in the board's crate
+/// compares the two.
+pub fn extract_github_repo(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("https://github.com/")?;
+    let rest = rest.trim_end_matches('/');
+    let slash = rest.find('/')?;
+    let after_org = &rest[slash + 1..];
+    if after_org.is_empty() {
+        return None;
+    }
+    let end = after_org.find('/').unwrap_or(after_org.len());
+    if after_org[..end].is_empty() {
+        return None;
+    }
+    Some(&rest[..slash + 1 + end])
+}
+
+/// The grouping key for a feed item's URL: the repo name, else
+/// [`UNKNOWN_REPO_GROUP`]. The twin of `models::repo_name_from_url`.
+pub fn repo_name_from_url(url: &str) -> String {
+    extract_github_repo(url)
+        .and_then(|s| s.split('/').next_back())
+        .unwrap_or(UNKNOWN_REPO_GROUP)
+        .to_string()
 }

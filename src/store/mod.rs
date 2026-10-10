@@ -164,6 +164,18 @@ pub struct RemovedFeedTask {
     pub tmux_window: Option<crate::models::TmuxWindow>,
 }
 
+/// What [`TaskCrud::ingest_feed`] did, as this board sees it afterwards.
+///
+/// `affected_epics` is the feed epic first, then every epic below it: the
+/// module decides which of them it wrote to, and does not say, so the board
+/// notifies them all. `removed` is the rows the module deleted that were in
+/// this board's view of the subtree, for teardown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeedIngestOutcome {
+    pub affected_epics: Vec<EpicId>,
+    pub removed: Vec<RemovedFeedTask>,
+}
+
 // ---------------------------------------------------------------------------
 // EpicPatch — builder for selective epic field updates
 // ---------------------------------------------------------------------------
@@ -436,8 +448,7 @@ pub trait TaskCrud: TaskRead {
     /// nothing — there is, by construction, nothing for the caller to tear
     /// down. The return type matches [`TaskCrud::upsert_feed_tasks`] on purpose:
     /// callers pick between the two by mode and then share one success/failure
-    /// tail (the `removed_or_warn` + recalculate shape), rather than forking
-    /// into two arms that each restate it.
+    /// tail, rather than forking into two arms that each restate it.
     async fn upsert_feed_tasks_additive(
         &self,
         epic_id: EpicId,
@@ -445,6 +456,23 @@ pub trait TaskCrud: TaskRead {
         repo_paths: &[String],
         base_branches: &[String],
     ) -> Result<Vec<RemovedFeedTask>>;
+    /// Post one parsed feed emission to the store (store-split M3,
+    /// `feeds.allium: IngestFeedEmission`). The three slices are co-indexed.
+    /// The module alone decides what the items do: the strategy from the epic's
+    /// own `feed_role` and `group_by_repo`, routing, sub-epics, grouping,
+    /// upsert, the stale delete and the status recalculation.
+    ///
+    /// `additive` says the emission may not remove anything (degraded, or an
+    /// append-only epic). The returned outcome is read from this board's own
+    /// view before and after the call — see [`FeedIngestOutcome`].
+    async fn ingest_feed(
+        &self,
+        epic_id: EpicId,
+        items: &[FeedItem],
+        repo_paths: &[String],
+        base_branches: &[String],
+        additive: bool,
+    ) -> Result<FeedIngestOutcome>;
     /// Delete stale feed tasks across the WHOLE subtree of `parent_id` (all its
     /// direct child epics), keeping only those whose `external_id` is in
     /// `keep_external_ids`. Unlike [`TaskCrud::upsert_feed_tasks`]'s per-epic

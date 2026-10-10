@@ -374,7 +374,7 @@ config {
     -- rebuild, and a build version would need a stored minimum that somebody
     -- also has to bump. The rules version is the one number that changes
     -- exactly when the answer to "who enforces this?" changes.
-    rules_version: Integer = 1
+    rules_version: Integer = 2
 }
 
 ------------------------------------------------------------

@@ -55,10 +55,10 @@ pub(crate) enum FeedCycleOutcome {
 
 /// One feed cycle for one epic.
 ///
-/// `feed_command`, `feed_role`, `group_by_repo` and `feed_append_only` are
-/// deliberately NOT fields: they are read from the epic inside
-/// [`run`](Self::run), after the claim, so neither caller can act on a stale
-/// snapshot of them. Anything else the cycle ACTS on belongs on that list, not
+/// `feed_command` and `feed_append_only` are deliberately NOT fields: they are
+/// read from the epic inside [`run`](Self::run), after the claim, so neither
+/// caller can act on a stale snapshot of them. `feed_role` and `group_by_repo`
+/// are not read here at all: the module reads them from the epic's own row. Anything else the cycle ACTS on belongs on that list, not
 /// in this struct.
 pub(crate) struct FeedCycle {
     pub(crate) db: Arc<dyn TaskStore>,
@@ -130,15 +130,10 @@ impl FeedCycle {
                 Err(outcome) => return outcome,
             };
 
-        let outcome = match self
-            .sync_emission(items, epic.feed_role, epic.group_by_repo, mode)
-            .await
-        {
+        let outcome = match self.sync_emission(items, mode).await {
             Ok(outcome) => outcome,
             Err(err) => return self.fail_sync(err).await,
         };
-
-        super::recalculate_epic_status_after_feed(&*self.db, self.epic_id, "FeedCycle::run").await;
 
         // Teardown before the caller notifies, on BOTH surfaces: a notification
         // means reconciled AND cleaned up, so the board never shows a row gone
@@ -197,15 +192,13 @@ impl FeedCycle {
         Ok((mode, degraded))
     }
 
-    /// Resolve each item's repo and base branch, then sync the lot by the
-    /// epic's feed role.
+    /// Resolve each item's repo and base branch from local clones, then post
+    /// the lot to the store, which decides what it does.
     async fn sync_emission(
         &self,
         items: Vec<crate::models::FeedItem>,
-        feed_role: crate::models::FeedRole,
-        group_by_repo: bool,
         mode: super::SyncMode,
-    ) -> anyhow::Result<super::ingest::FeedSyncOutcome> {
+    ) -> anyhow::Result<crate::store::FeedIngestOutcome> {
         let known_paths = match &self.known_paths {
             Some(paths) => Arc::clone(paths),
             None => Arc::new(self.db.list_repo_paths().await),
@@ -214,15 +207,7 @@ impl FeedCycle {
         let base_branches = super::resolve_base_branches(&repo_paths, &*self.runner);
         let entries = super::FeedItemWithTarget::zip(items, repo_paths, base_branches);
 
-        super::run_feed_sync_by_role(
-            &*self.db,
-            self.epic_id,
-            feed_role,
-            group_by_repo,
-            entries,
-            mode,
-        )
-        .await
+        super::ingest_emission(&*self.db, self.epic_id, entries, mode).await
     }
 
     /// The sync failed. If the epic was deleted while the command ran (it can

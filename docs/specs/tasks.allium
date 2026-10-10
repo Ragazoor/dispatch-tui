@@ -1273,10 +1273,11 @@ rule MoveTaskToEpic {
 -- Implementation of the feed path: src/feed/mod.rs::cleanup_removed_feed_tasks,
 -- which performs the same unconditional teardown. It is fed by the feed
 -- stale-deletes, which report what they removed rather than tearing down
--- inline: the DELETE statements in src/store/queries/tasks.rs carry a RETURNING
--- clause and yield src/store/mod.rs::RemovedFeedTask rows (only those still owning
--- a worktree or a tmux window — the delete is unconditional either way), which
--- reach both feed entry points on src/feed/ingest/mod.rs::FeedSyncOutcome.
+-- inline: the board predicts the removed feed tasks from its own view before
+-- the ingest_feed call and confirms them gone afterwards
+-- (src/store/queries/mod.rs::ingest_feed_inner), yielding
+-- src/store/mod.rs::RemovedFeedTask rows, which reach the feed cycle on
+-- src/store/mod.rs::FeedIngestOutcome.
 -- cleanup_removed_feed_tasks groups them by repo_path and runs a repo's
 -- removals sequentially — teardown_task shells git against the shared checkout,
 -- so concurrent removals in one repo would contend on its index lock — while

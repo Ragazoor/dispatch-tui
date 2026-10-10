@@ -183,6 +183,79 @@ impl Store {
         Ok(self.confirm_removed(candidates))
     }
 
+    /// `TaskCrud::ingest_feed`: one reducer call, then the board's own
+    /// before-and-after read for the outcome.
+    ///
+    /// Predict-then-verify as [`Self::upsert_feed_tasks_inner`] documents, over
+    /// the whole subtree because the module may delete in any of it. A task the
+    /// module MOVED between sub-epics is still in the view afterwards, so it is
+    /// never reported as removed. An additive call removes nothing and
+    /// predicts nothing.
+    async fn ingest_feed_inner(
+        &self,
+        epic_id: EpicId,
+        items: &[crate::models::FeedItem],
+        repo_paths: &[String],
+        base_branches: &[String],
+        additive: bool,
+    ) -> Result<crate::store::FeedIngestOutcome> {
+        if items.len() != repo_paths.len() || items.len() != base_branches.len() {
+            anyhow::bail!(
+                "ingest_feed slice length mismatch: items={}, repo_paths={}, base_branches={}",
+                items.len(),
+                repo_paths.len(),
+                base_branches.len()
+            );
+        }
+        let wire_items: Vec<bindings::FeedIngestItem> = items
+            .iter()
+            .zip(repo_paths)
+            .zip(base_branches)
+            .map(|((item, repo_path), base_branch)| {
+                encode::feed_ingest_item(item, repo_path, base_branch)
+            })
+            .collect();
+        let candidates = if additive {
+            Vec::new()
+        } else {
+            self.subtree_feed_tasks(epic_id)
+        };
+        let created_by = self
+            .identity
+            .user()
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        self.caller
+            .ingest_feed(epic_id, wire_items, additive, created_by)
+            .await?
+            .applied()?;
+        let mut below: Vec<EpicId> =
+            crate::models::descendant_epic_ids(epic_id, &self.rows.epics())
+                .into_iter()
+                .filter(|id| *id != epic_id)
+                .collect();
+        below.sort_by_key(|id| id.0);
+        let mut affected_epics = vec![epic_id];
+        affected_epics.extend(below);
+        Ok(crate::store::FeedIngestOutcome {
+            affected_epics,
+            removed: self.confirm_removed(candidates),
+        })
+    }
+
+    /// Every feed-managed task (`external_id` set) this board can see in
+    /// `epic_id`'s subtree, the epic itself included.
+    fn subtree_feed_tasks(&self, epic_id: EpicId) -> Vec<crate::models::Task> {
+        let subtree = crate::models::descendant_epic_ids(epic_id, &self.rows.epics());
+        subtree
+            .into_iter()
+            .flat_map(|e| self.rows.tasks_for_epic(e))
+            .filter(|t| t.external_id.is_some())
+            .collect()
+    }
+
     /// Tasks in `epic_id` this board can currently see whose `external_id` is
     /// set and not in `keep` — the same predicate the reducer's stale-delete
     /// pass applies, read from this connection's own subscription rather

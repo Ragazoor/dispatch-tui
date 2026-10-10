@@ -471,6 +471,16 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_upsert_feed_tasks_additive(epic_id, items, created_by)
     }
 
+    async fn ingest_feed(
+        &self,
+        epic_id: EpicId,
+        items: Vec<bindings::FeedIngestItem>,
+        additive: bool,
+        created_by: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_ingest_feed(epic_id, items, additive, created_by)
+    }
+
     async fn delete_stale_subtree_feed_tasks(
         &self,
         parent_id: EpicId,

@@ -37,7 +37,9 @@ fi
 
 # A path-ish token under src/ or docs/, ending in a known extension or a
 # trailing slash, optionally followed by a `:NN` / `:NN-MM` line citation.
-PATH_RE='(src|docs)/[A-Za-z0-9_{},./-]*(\.rs|\.md|\.allium|\.sh|/)(:[0-9]+(-[0-9]+)?)?'
+# `spacetime/module/` is optional: the module is its own crate, so its files
+# are cited as spacetime/module/src/..., which must not be read as src/....
+PATH_RE='(spacetime/module/)?(src|docs)/[A-Za-z0-9_{},./-]*(\.rs|\.md|\.allium|\.sh|/)(:[0-9]+(-[0-9]+)?)?'
 
 # Expand a single `{a,b,c}` brace group into one line per member. Tokens
 # without a brace group pass through unchanged. Deliberately hand-rolled

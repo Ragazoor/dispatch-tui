@@ -4,6 +4,10 @@
 -- Scope: Programmable feed epics — generic mechanism for surfacing external
 --        items (PRs, security alerts, anything emitting JSON) as tasks under
 --        an Epic.
+--        WHERE it runs: the TUI process runs the feed script and posts the
+--        raw parsed items (IngestFeedEmission); the SpacetimeDB module
+--        applies every rule below that decides what the items do to the
+--        store (store-split.allium, M3).
 -- Includes: FeedItem schema, upsert semantics, status preservation, polling
 --           cadence, error handling, the verify-feed
 --           validator CLI, the role-routed reconcile path that splits a
@@ -88,9 +92,9 @@ contract RouteSignals {
         -- routes to my_reviews rather than bots.
 
     @guidance
-        -- Implementation: src/feed/routing.rs::route, re-exported as
-        -- crate::feed::route. Coverage: src/feed/routing.rs tests
-        -- (feed::routing::tests::*).
+        -- Implementation: spacetime/module/src/rules.rs::route_signals, run by
+        -- the module's ingest_feed (store-split M3). Coverage: the module's
+        -- own tests (spacetime/module/src/tests.rs).
 }
 
 -- ExcludeFromReviews is the pure predicate that decides whether a PR item
@@ -139,7 +143,7 @@ contract RouteSignals {
 --
 -- NEW COMMITS DO NOT BRING IT BACK. An author pushing after the approval
 -- leaves the approval standing, so the item stays excluded. Only an explicit
--- re-request does — which is exactly what rule 2's three rescuing signals
+-- re-request does — which is exactly what rule 2's two rescuing signals
 -- carry. This is the decided behaviour, not an accident of the mechanism: the
 -- alternative (comparing commit timestamps against review timestamps) was
 -- considered and rejected as more machinery for a case the user does not
@@ -228,12 +232,11 @@ contract ExcludeFromReviews {
         -- passed to route, so no routing outcome can contradict it.
 
     @guidance
-        -- Implementation: src/feed/routing.rs::excluded_from_reviews,
-        -- re-exported as crate::feed::excluded_from_reviews, applied in
-        -- src/feed/ingest/role_routed.rs::run_role_routed_feed_sync before
-        -- src/feed/ingest/routing.rs::route_and_group_entries. Coverage:
-        -- src/feed/routing.rs tests (feed::routing::tests::*) for the
-        -- predicate, src/feed/ingest/tests.rs for the reconcile behaviour.
+        -- Implementation: spacetime/module/src/rules.rs::excluded_from_reviews,
+        -- applied in spacetime/module/src/feed_ingest.rs::ingest_role_routed
+        -- before it routes. Coverage: the module's own tests
+        -- (spacetime/module/src/tests.rs) for the predicate,
+        -- src/feed/ingest/tests.rs for the reconcile behaviour.
 }
 
 ------------------------------------------------------------
@@ -1142,14 +1145,16 @@ rule SerialisedFeedCycle {
     --
     -- == Why the whole cycle, and why dropped ==
     --
-    -- The steps of RoleRoutedFeedSync are separate non-transactional writes,
-    -- each filtering on a task's CURRENT epic, and its stale-delete keep-set is
-    -- computed from ONE emission. Two cycles interleaving there can have one
-    -- pass see a task the other has moved as absent from its own (older)
-    -- emission, delete it, and — since the delete feeds TaskTeardown — force
-    -- remove a live review agent's worktree. Serialising ONLY the sync would
-    -- still leave a cycle reconciling against an emission fetched before the
-    -- other cycle's writes landed, so the claim spans the exec too. It also
+    -- RoleRoutedFeedSync's stale-delete keep-set is computed from ONE
+    -- emission, and each delete filters on a task's CURRENT epic. Before
+    -- store-split M3 its steps were separate non-transactional writes, so two
+    -- cycles could interleave inside the sync; since M3 the sync is one
+    -- module transaction (IngestFeedEmission) and cannot. The claim still
+    -- matters: a cycle reconciling against an emission fetched before the
+    -- other cycle's writes landed can see a task the other has moved or
+    -- inserted as absent from its own (older) emission, delete it, and —
+    -- since the delete feeds TaskTeardown — force remove a live review
+    -- agent's worktree. So the claim spans the exec too. It also
     -- halves the upstream API spend of a double refresh.
     --
     -- Dropping rather than queueing: even with the exec bounded at
@@ -1258,6 +1263,81 @@ rule SerialisedFeedCycle {
 }
 
 -- == Upsert semantics ==
+
+-- == Where ingestion runs (store-split M3) ==
+
+rule IngestFeedEmission {
+    when: FeedEmissionPosted(epic, items, additive)
+
+    requires: epic.feed_command != null
+
+    -- THE SPLIT (store-split.allium S1, S2). The TUI process keeps what needs
+    -- the operator's machine: it claims the poll-owner row (FeedTick), runs
+    -- the feed script (it needs the operator's gh credentials), parses the
+    -- output, classifies the emission as trusted or degraded
+    -- (DegradedEmptyEmission, DegradedNonEmptyEmission), resolves each item's
+    -- repo_path and base_branch from local clones, and posts the parsed items
+    -- with ONE reducer call (ingest_feed). Nothing else about the store is
+    -- decided there.
+    --
+    -- The module decides everything else, in one transaction, from the epic's
+    -- own row: which of the three strategies applies (the dispatch precedence
+    -- under FeedSync), the ExcludeFromReviews filter, RouteSignals, ensuring
+    -- the role and repo-group sub-epics, grouping, per-item upsert
+    -- (UpsertFeedTasks), the stale-subtree delete, clearing tasks stranded on
+    -- the reviews parent, DropClosedRetiredFeedItems, and the epic status
+    -- recalculation that follows (EpicStatusRecalculation). The board no
+    -- longer passes group_by_repo or feed_role: a board that read a stale
+    -- copy of either cannot ingest by the wrong strategy.
+    --
+    -- `additive` is the board's classification of the emission (degraded, or
+    -- the epic is append-only). The module does not re-derive it from the
+    -- items: the stderr and exit status that degrade an emission exist only
+    -- on the host. An additive call inserts and refreshes and moves, and
+    -- removes nothing.
+    --
+    -- An unknown epic is refused. A feed_role of my_reviews, team_reviews or
+    -- bots is refused, whether or not the epic carries a feed_command: those
+    -- epics are reconciled only through their reviews_parent. Refusal rolls
+    -- the whole call back. The module does not itself check feed_command;
+    -- the requires clause holds because the board's cycle refuses to run for
+    -- an epic without one (FeedCommandFailure bucket 5).
+    --
+    -- THE TEARDOWN REPORT. A reducer cannot return the rows it deleted. On a
+    -- non-additive call the board reads every feed task (external_id set) in
+    -- the epic's subtree, the epic included, before the call, and reports to
+    -- TaskTeardown those confirmed gone from its own view afterward (see the
+    -- shared-store paragraph under UpsertFeedTasks). A task MOVED between
+    -- role sub-epics survives and is never reported. An additive call reports
+    -- nothing. The outcome names the feed epic and every epic below it as
+    -- affected, since the module does not say which of them it wrote to (see
+    -- Notifications).
+    ensures:
+        FeedIngested(epic: epic, items: items, additive: additive)
+
+    @guidance
+        -- RULES VERSION. Moving these rules into the module bumped the rules
+        -- version to 2 (sync.allium: AStoreWithOtherRulesFailsTheAttempt). A
+        -- board on version 1 would route in the board and write with the old
+        -- reducers, and refuses to run against a version 2 module.
+        --
+        -- WHAT THE EARLIER RULES BELOW MEAN NOW. UpsertFeedTasks,
+        -- GroupedFeedUpsert, FlatFeedReconcile and RoleRoutedFeedSync still
+        -- say WHAT happens to the store; where they say "the runner" or "the
+        -- runtime" decides it, the module does. Their coverage notes name the
+        -- board-side tests that existed before M3; the same obligations are
+        -- now covered through the store handle (src/feed/ingest/tests.rs),
+        -- by the module's own tests (spacetime/module/src/tests.rs) and by
+        -- tests/memory_caller_conformance.rs::memory_caller_ingests_a_feed_like_the_real_module,
+        -- which runs one emission sequence against the live module and the
+        -- in-memory double (src/sync/memory_caller/feed.rs).
+        --
+        -- Implementation: spacetime/module/src/feed_ingest.rs::ingest_feed (the
+        -- reducer); src/feed/ingest/mod.rs::ingest_emission and
+        -- src/store/queries/mod.rs::ingest_feed_inner (the board's one call and
+        -- its before-and-after read); src/feed/cycle.rs::FeedCycle::run (the
+        -- host work and the additive decision).
+}
 
 rule UpsertFeedTasks {
     when: FeedCommandCompleted(epic, items)
@@ -1474,42 +1554,42 @@ rule UpsertFeedTasks {
         -- alone.
         -- The ON CONFLICT clause is conditional on external_id NOT NULL —
         -- non-feed tasks (external_id = null) never collide.
-        -- Implementation: src/store/queries/tasks.rs::upsert_feed_tasks (takes a
-        -- repo_paths slice, one entry per item, parallel to items, plus a
-        -- parallel base_branches slice). The parallel-slice contract is
-        -- enforced up front: if items, repo_paths, and base_branches do not all
-        -- share the same length the call errors and writes nothing, rather than
-        -- letting the index-zip silently truncate and drop items. This is the
-        -- ONE place in the feed pipeline the three collections are still
-        -- parallel slices — every caller above it (sync_grouped_feed,
-        -- run_feed_sync, run_role_routed_feed_sync) instead threads a single
+        -- Implementation: the per-item upsert and the per-epic stale delete are
+        -- spacetime/module/src/feed.rs::upsert_feed_tasks_inner, which every
+        -- strategy of ingest_feed calls (IngestFeedEmission). The board's
+        -- src/store/queries/mod.rs::ingest_feed_inner takes a repo_paths slice,
+        -- one entry per item, parallel to items, plus a parallel base_branches
+        -- slice, and enforces the parallel-slice contract up front: if items,
+        -- repo_paths, and base_branches do not all share the same length the
+        -- call errors and writes nothing, rather than letting the index-zip
+        -- silently truncate and drop items. This is the ONE place in the feed
+        -- pipeline the three collections are still parallel slices — the cycle
+        -- above it instead threads a single
         -- Vec<src/feed/ingest/mod.rs::FeedItemWithTarget> of paired
         -- {item, repo_path, base_branch} entries, assembled once via
-        -- FeedItemWithTarget::zip at the FeedCommandCompleted boundary
-        -- (FeedRunner::tick, exec_trigger_epic_feed), so per-index alignment
-        -- is structural end-to-end and needs no separate length check.
+        -- FeedItemWithTarget::zip in src/feed/cycle.rs::FeedCycle::run (shared
+        -- by FeedRunner::tick and exec_trigger_epic_feed), so per-index
+        -- alignment is structural up to that call and needs no separate
+        -- length check.
         -- Resolution helpers: src/dispatch/mod.rs::extract_github_repo,
         -- src/dispatch/mod.rs::resolve_repo_path. Callers:
-        -- src/feed/ingest/mod.rs::run_feed_sync (via FeedRunner.tick and exec_trigger_epic_feed).
+        -- src/feed/ingest/mod.rs::ingest_emission (via FeedRunner.tick and exec_trigger_epic_feed).
         -- The TaskTeardown obligation on the stale-delete is met by reporting,
-        -- not by tearing down inline: upsert_feed_tasks' delete carries
-        -- RETURNING id, repo_path, worktree, tmux_window and yields the removed
-        -- rows that still owned a worktree or a tmux window as
-        -- src/store/mod.rs::RemovedFeedTask values (rows owning neither need no
-        -- teardown and are not reported; the delete itself is unconditional).
-        -- They ride out on src/feed/ingest/mod.rs::FeedSyncOutcome and the two
-        -- feed entry points pass them to
-        -- src/feed/mod.rs::cleanup_removed_feed_tasks — see the TaskTeardown
+        -- not by tearing down inline: the removed rows reach the board as
+        -- src/store/mod.rs::RemovedFeedTask values on
+        -- src/store/mod.rs::FeedIngestOutcome, and the feed cycle passes them
+        -- to src/feed/mod.rs::cleanup_removed_feed_tasks — see the TaskTeardown
         -- fan-out paragraph under RoleRoutedFeedSync for the whole path.
         --
-        -- ON A SHARED STORE, THE REPORTING MECHANISM DIFFERS FROM THE
-        -- SQLite ONE ABOVE, but the obligation it discharges does not: the
-        -- delete itself is still unconditional (every stale row is removed
-        -- whether or not it is reported). A reducer cannot RETURN the rows it
-        -- deleted, so the Store (src/store/queries/tasks.rs) predicts candidates
+        -- HOW THE REPORT IS BUILT. The delete itself is unconditional (every
+        -- stale row is removed whether or not it is reported). A reducer
+        -- cannot RETURN the rows it deleted, so the Store
+        -- (src/store/queries/mod.rs::ingest_feed_inner) predicts candidates
         -- from its own already-subscribed view before calling the reducer,
         -- then reports only the ones CONFIRMED absent from that view
-        -- afterward. A candidate that survives the call (raced by a
+        -- afterward. The candidates are every feed task in the epic's subtree,
+        -- so a removed row that owned neither a worktree nor a tmux window is
+        -- reported too; its teardown runs no command. A candidate that survives the call (raced by a
         -- concurrent write on another host, since feed polling is not yet
         -- host-scoped — see the migration plan's Phase 7) is silently
         -- dropped rather than reported, which can under-report a removal —
@@ -1545,10 +1625,10 @@ rule GroupedFeedUpsert {
     -- the row, reports it, and then performs tasks.allium's TaskTeardown on the
     -- reported row: tmux window killed, git worktree removed, best-effort
     -- branch deletion.
-    -- Delete-then-teardown, not teardown-then-delete: the delete and the report
-    -- are one DELETE ... RETURNING statement, so what gets torn down is exactly
-    -- what was deleted, with no SELECT-then-DELETE window in which the two can
-    -- disagree. The cost is that a crash between the commit and the teardown
+    -- Delete-then-teardown, not teardown-then-delete: the board reports only
+    -- rows confirmed gone after the module's transaction committed, so nothing
+    -- is torn down that was not deleted (see how the report is built, under
+    -- UpsertFeedTasks). The cost is that a crash between the commit and the teardown
     -- orphans the worktree with no DB row left to retry from (see the sequencing
     -- note under RoleRoutedFeedSync). Grouping migration in
     -- particular deletes and recreates tasks wholesale, so a feed task carrying
@@ -1602,12 +1682,13 @@ rule GroupedFeedUpsert {
         -- the filter had emptied it outright — a distinction with no
         -- behavioral consequence, since the reconcile pass below clears an
         -- absent sub-epic's tasks either way. See
-        -- src/feed/ingest/grouped.rs::upsert_present_groups's own comment.
+        -- spacetime/module/src/feed_ingest.rs::ingest_grouped's own comment.
         --
         -- repo_name(url) = last path segment of extract_github_repo(url),
         -- or "other" when the URL yields no GitHub repo (empty URL, non-GitHub,
-        -- malformed). Implementation: src/feed/ingest/grouped.rs::sync_grouped_feed,
-        -- src/models/paths.rs::repo_name_from_url.
+        -- malformed). Implementation: spacetime/module/src/feed_ingest.rs::ingest_grouped,
+        -- spacetime/module/src/rules.rs::repo_name_from_url (the module's twin
+        -- of src/models/paths.rs::repo_name_from_url).
         -- Sub-epics are not auto-deleted when their tasks disappear; empty
         -- sub-epics remain for the user to clean up manually. The
         -- reconciliation only clears their feed tasks — it never removes the
@@ -1617,13 +1698,13 @@ rule GroupedFeedUpsert {
         -- parent epic; the same call on an absent sub-epic clears that
         -- sub-epic's feed tasks while preserving any manual (external_id =
         -- null) tasks the user added there.
-        -- Implementation: src/feed/ingest/grouped.rs::sync_grouped_feed — the present
-        -- groups and the absent-sub-epic reconciliation share the same
-        -- upsert_feed_tasks path, and therefore the same removed-row report:
-        -- sync_grouped_feed returns the affected sub-epic ids alongside the
-        -- concatenated src/store/mod.rs::RemovedFeedTask rows from every one of
-        -- those calls, which reach src/feed/mod.rs::cleanup_removed_feed_tasks
-        -- via src/feed/ingest/mod.rs::FeedSyncOutcome. Grouping migration
+        -- Implementation: spacetime/module/src/feed_ingest.rs::ingest_grouped — the
+        -- present groups and the absent-sub-epic reconciliation share the same
+        -- upsert path, and the whole pass is one transaction. The board reads
+        -- the removed src/store/mod.rs::RemovedFeedTask rows from its own view
+        -- before and after the call (src/store/queries/mod.rs::ingest_feed_inner)
+        -- and hands them to src/feed/mod.rs::cleanup_removed_feed_tasks via
+        -- src/store/mod.rs::FeedIngestOutcome. Grouping migration
         -- deletes and recreates wholesale, so this is the path where an
         -- unreported removal would orphan the most worktrees.
 }
@@ -1690,23 +1771,19 @@ rule FlatFeedReconcile {
         UpsertFeedTasks(epic, items)
 
     @guidance
-        -- Implementation: src/feed/ingest/mod.rs::run_feed_sync flat branch
+        -- Implementation: spacetime/module/src/feed_ingest.rs::ingest_flat
         -- (group_by_repo = false, feed_role != reviews_parent). The re-home +
         -- delete-if-empty step calls the store's flatten_epic reducer
         -- (spacetime/module, grouping.rs), shared with the manual FlattenEpic
         -- path. The reducer does not check feed_command, so it serves a feed
         -- epic as readily as a manual one. Symmetric
         -- with GroupedFeedUpsert's ON-side "doubles as migration" behaviour.
-        -- The flat branch's upsert_feed_tasks call reports its removed rows in
+        -- The flat branch reports its removed rows in
         -- the same SHAPE as every other path (see UpsertFeedTasks' guidance),
         -- so a re-homed task deleted as stale is torn down rather than
-        -- orphaned. Its FAILURE handling differs, though: the flat branch
-        -- propagates with `?` and aborts the whole sync, where the grouped and
-        -- role-routed paths funnel every write through
-        -- src/feed/mod.rs::removed_or_warn and continue past a failed write
-        -- with an empty report. One epic, one statement — there is no rest of
-        -- the pass to salvage here, which is why the flat path can afford to
-        -- be stricter.
+        -- orphaned. Since store-split M3 every path is one transaction: a
+        -- refusal anywhere rolls the whole ingest back, so there is no
+        -- partial pass to salvage and no per-write log-and-continue.
         -- Coverage: src/feed/ingest/tests.rs (re-home + delete empty RepoGroup
         -- sub-epic on flat sync; no-op when no sub-epics exist; manual sub-epics
         -- preserved; reviews_parent epic unaffected — routed to
@@ -1799,10 +1876,11 @@ rule RoleRoutedFeedSync {
     --
     -- The routing above places a PR in its role sub-epic (my/team/bots). When
     -- that ROLE SUB-EPIC itself has group_by_repo enabled (can_auto_group on
-    -- the sub-epic — src/models/epics.rs), the PR is routed ONE LEVEL DEEPER:
+    -- the sub-epic — spacetime/module/src/rules.rs::can_auto_group), the PR
+    -- is routed ONE LEVEL DEEPER:
     -- into a per-repo REPO-GROUP sub-epic nested UNDER the role sub-epic,
     -- found-or-created and keyed by repo name
-    -- (src/models/paths.rs::repo_name_from_url of item.url).
+    -- (spacetime/module/src/rules.rs::repo_name_from_url of item.url).
     -- Tasks then live at this third level, not
     -- directly on the role sub-epic. When the role sub-epic does NOT have
     -- grouping enabled the target is the role sub-epic directly — today's
@@ -1814,9 +1892,10 @@ rule RoleRoutedFeedSync {
     -- (parent -> role sub-epic -> repo-group sub-epic -> tasks) rather than a
     -- second. A per-sync cache keyed by (role_sub_epic_id, repo_name) memoises
     -- the found-or-created repo-group id for the duration of ONE reconcile, so
-    -- multiple items sharing a repo do not create duplicate sub-epics. If the
-    -- repo-group sub-epic cannot be created, the item falls back to the role
-    -- sub-epic directly (logged, not fatal).
+    -- multiple items sharing a repo do not create duplicate sub-epics. The
+    -- find-or-create runs inside the module's ingest transaction and has no
+    -- failure arm of its own (before store-split M3 a failed create fell back
+    -- to the role sub-epic; that fallback is gone with the separate write).
     --
     -- The third level widens every subtree operation below (identity lookup,
     -- stale delete, recalculation) — see each section for the specifics.
@@ -1976,57 +2055,39 @@ rule RoleRoutedFeedSync {
         RecalculateEpicStatus(epic)
 
     @guidance
-        -- Implementation: src/feed/ingest/role_routed.rs::run_role_routed_feed_sync,
-        -- selected by the shared dispatcher
-        -- src/feed/ingest/mod.rs::run_feed_sync_by_role when epic.feed_role =
-        -- ReviewsParent (a MyReviews/TeamReviews/Bots epic with a feed_command is
-        -- a provisioning bug, rejected by the provisioning guard in
-        -- src/feed/cycle.rs::FeedCycle::run (the debug_assert! block), which
-        -- debug_asserts and fails the cycle; that guard does NOT itself do the
-        -- role->path selection. Because it sits in the shared cycle it now
-        -- covers the manual "r" refresh too, which previously had no such
-        -- guard and would have flat-upserted into the role sub-epic).
-        -- Third-level (repo-group) routing lives in
-        -- src/feed/ingest/routing.rs::route_and_group_entries: per item, after
-        -- roles.target_for(route(signals)) gives the role sub-epic
-        -- (role_target), if roles.can_auto_group(role_target) is true the
-        -- actual target is a repo-group sub-epic found-or-created via
-        -- db.create_repo_group_sub_epic (src/store/mod.rs), keyed by
-        -- src/models/paths.rs::repo_name_from_url and memoised in an
-        -- in-memory (role_sub_epic_id, repo_name) -> repo_group_epic_id cache
-        -- for the duration of one sync; a create failure falls back to
-        -- role_target. can_auto_group is src/models/epics.rs::can_auto_group (group_by_repo
-        -- && feed_command.is_none()).
-        -- The subtree delete is
-        -- src/store/queries/tasks.rs::delete_stale_subtree_feed_tasks, ONE level
-        -- deep (DELETE ... WHERE epic_id IN (SELECT id FROM epics WHERE
-        -- parent_epic_id = ?1) ... RETURNING id, repo_path, worktree,
-        -- tmux_window). src/feed/ingest/stale.rs::delete_stale_subtree
-        -- therefore calls it once with the parent as root (reaches role
-        -- sub-epics) AND once per role sub-epic as root (reaches repo-group
-        -- grandchildren) — always, regardless of that role's grouping flag. The
-        -- parent itself is cleared separately by the parent sweep
-        -- (src/feed/ingest/stale.rs::clear_parent_stranded_tasks, an empty
-        -- upsert_feed_tasks — whose per-epic stale-delete carries the same
-        -- RETURNING clause).
+        -- Implementation: spacetime/module/src/feed_ingest.rs::ingest_role_routed,
+        -- selected by spacetime/module/src/feed_ingest.rs::ingest_feed from the
+        -- epic's own feed_role when it is ReviewsParent. A MyReviews/
+        -- TeamReviews/Bots epic carrying a feed_command is a provisioning bug,
+        -- and the reducer refuses it (ROLE_SUB_EPIC_FEED_REFUSED); because that
+        -- check sits in the one reducer, the auto-poll and the manual "r"
+        -- refresh cannot differ on it.
+        -- Third-level (repo-group) routing lives in ingest_role_routed too: per
+        -- item, after spacetime/module/src/rules.rs::route_signals gives the
+        -- role sub-epic, if that sub-epic groups (group_by_repo and no
+        -- feed_command, spacetime/module/src/rules.rs::can_auto_group) the
+        -- actual target is a repo-group sub-epic found-or-created by
+        -- spacetime/module/src/grouping.rs::find_or_create_repo_group, keyed by
+        -- spacetime/module/src/rules.rs::repo_name_from_url and memoised for
+        -- the duration of one ingest.
+        -- The subtree delete is one level deep, so ingest_role_routed deletes
+        -- once with the parent as root (reaches role sub-epics) AND once per
+        -- role sub-epic as root (reaches repo-group grandchildren), always,
+        -- regardless of that role's grouping flag. The parent itself is cleared
+        -- separately by the parent sweep (a delete over the parent's own feed
+        -- tasks, keeping nothing).
         --
-        -- TaskTeardown fan-out. Both deletes report what they removed, so the
-        -- row does not vanish silently and orphan an in-flight agent's
-        -- worktree. The shared row type is src/store/mod.rs::RemovedFeedTask
-        -- {id, repo_path, worktree, tmux_window}; only rows that still own a
-        -- worktree or a tmux window are reported (the RETURNING statement
-        -- deletes every stale row either way — reporting only narrows what the
-        -- caller has to clean up). src/feed/mod.rs::removed_or_warn is the
-        -- log-and-discard wrapper that keeps the Ok payload, so a failed write
-        -- contributes an empty vec rather than aborting the pass.
-        -- src/feed/ingest/role_routed.rs::run_role_routed_feed_sync
-        -- concatenates the reports from src/feed/ingest/upsert.rs::upsert_role_groups,
-        -- delete_stale_subtree and clear_parent_stranded_tasks — IN THAT ORDER,
-        -- which is load-bearing: each statement filters on the task's CURRENT
-        -- epic_id, so the move must land before the deletes or a MOVED task is
-        -- reported as removed and has its live worktree destroyed. The
-        -- concatenation rides out on the `removed` half of
-        -- src/feed/ingest/mod.rs::FeedSyncOutcome, which
+        -- TaskTeardown fan-out. A reducer cannot return what it deleted, so the
+        -- board predicts the removed rows from its own view of the subtree
+        -- before the call and reports those confirmed gone afterwards
+        -- (src/store/queries/mod.rs::ingest_feed_inner). The shared row type is
+        -- src/store/mod.rs::RemovedFeedTask {id, repo_path, worktree,
+        -- tmux_window}. The module runs the move before the deletes, which is
+        -- load-bearing: each delete filters on the task's CURRENT epic_id, so
+        -- the move must land first or a MOVED task would be deleted and have its
+        -- live worktree destroyed. A moved task is still in the board's view
+        -- afterwards, so it is never reported. The report rides out on
+        -- src/store/mod.rs::FeedIngestOutcome, which
         -- src/feed/cycle.rs::FeedCycle::run hands to
         -- src/feed/mod.rs::cleanup_removed_feed_tasks -- once, in the shared
         -- cycle, rather than once per feed path as when teardown was first
@@ -2047,12 +2108,12 @@ rule RoleRoutedFeedSync {
         -- Sequencing note — the ensures clauses of this rule and of
         -- UpsertFeedTasks / GroupedFeedUpsert write `not exists task` BEFORE
         -- TaskTeardown(task), which is the order the implementation runs in:
-        -- the DELETE ... RETURNING commits first and the teardown runs
-        -- afterwards in the caller, off FeedSyncOutcome.removed. The delete
-        -- and the report are the SAME statement on purpose — a
-        -- SELECT-then-DELETE pair would leave a window in which the set torn
-        -- down and the set deleted disagree (a row could be modified, moved,
-        -- or deleted between the two), and RETURNING closes it.
+        -- the module's ingest transaction commits first and the teardown runs
+        -- afterwards in the caller, off FeedIngestOutcome.removed. The report
+        -- is the board's prediction narrowed to rows CONFIRMED gone after the
+        -- commit, so the set torn down never exceeds the set deleted; a row
+        -- raced back in by another writer is under-reported, never torn down
+        -- (see how the report is built, under UpsertFeedTasks).
         -- The cost, stated honestly: if the process dies between the commit
         -- and the teardown, the worktree is orphaned on disk with no row left
         -- to retry from. That is accepted — the alternative is holding a write
@@ -2086,19 +2147,19 @@ rule RoleRoutedFeedSync {
         -- The existing-task lookup
         -- that decides
         -- move-vs-insert is
-        -- src/feed/ingest/role_routed.rs::build_existing_task_index: it
-        -- scans the parent FIRST (lowest priority), then each role sub-epic's
+        -- spacetime/module/src/feed_ingest.rs::ingest_role_routed (its
+        -- `existing` index): it scans the parent FIRST (lowest priority), then each role sub-epic's
         -- children (repo-group grandchildren), then the role sub-epics
         -- themselves LAST — so external_id identity is global across all three
         -- levels and a role-sub-epic-direct copy wins ties over a repo-group
         -- copy. A present parent-stranded task is thus moved (single-row
         -- relocation, no uniqueness-trigger collision, in-flight state
-        -- preserved) before the sweep runs. The move is
-        -- db.set_task_epic_id (epic_id +
-        -- updated_at only) THEN db.patch_task(fields). role_sub_epic is
-        -- ensure_role_sub_epic (idempotent, matched by feed_role). Recalculation
-        -- is src/feed/ingest/role_routed.rs::recalculate_subtree: repo-group
-        -- sub-epics first (bottom-up), then role sub-epics, then the parent.
+        -- preserved) before the sweep runs. The move rewrites epic_id and
+        -- updated_at only, and the per-group upsert then refreshes the
+        -- feed-owned fields. role_sub_epic is ensure_role_sub_epic (idempotent,
+        -- matched by feed_role). Recalculation runs in the same transaction:
+        -- repo-group sub-epics first (bottom-up), then role sub-epics, then the
+        -- parent.
         -- Coverage:
         -- src/feed/ingest/tests.rs (move preserves in-flight worktree/status;
         -- moved task not deleted same cycle; insert on first sight; delete on
@@ -2178,14 +2239,16 @@ rule FeedCommandFailure {
     --   5. The epic's own configuration cannot be read, or the epic no
     --      longer exists / no longer carries a feed_command by the time the
     --      cycle claims it. These come BEFORE the exec: nothing is spawned.
-    --      They exist because the cycle reads feed_command / feed_role /
-    --      group_by_repo from the epic itself rather than accepting them
-    --      from its caller (SerialisedFeedCycle), so an epic deleted or
-    --      reconfigured between the request and the claim is a failure here
-    --      rather than a sync against stale configuration.
+    --      They exist because the cycle reads feed_command (and
+    --      feed_append_only) from the epic itself rather than accepting them
+    --      from its caller (SerialisedFeedCycle), and the module reads
+    --      feed_role and group_by_repo from the epic's own row
+    --      (IngestFeedEmission), so an epic deleted or reconfigured between
+    --      the request and the claim is a failure here rather than a sync
+    --      against stale configuration.
     --   6. The epic is a role sub-epic carrying a feed_command at all — a
-    --      provisioning bug (see RoleRoutedFeedSync). Reached after the
-    --      parse, before the sync.
+    --      provisioning bug (see RoleRoutedFeedSync). Reached at the sync:
+    --      the module's ingest_feed refuses it and writes nothing.
     --   7. The command exceeded feed_command_timeout (core.allium config)
     --      without exiting. It is killed and reaped rather than left to
     --      finish or orphaned; the exec never produces output for the
@@ -2408,8 +2471,8 @@ rule DegradedEmptyEmission {
         -- Implementation: ONE shared predicate,
         -- src/feed/exec.rs::degraded_empty_emission, next to FeedOutput in
         -- src/feed/exec.rs, so the two feed paths cannot drift — the same
-        -- rationale that put the role dispatch in the single shared
-        -- src/feed/ingest/mod.rs::run_feed_sync_by_role. It is applied once,
+        -- rationale that put the role dispatch in the single reducer
+        -- spacetime/module/src/feed_ingest.rs::ingest_feed. It is applied once,
         -- after parse and before sync, in src/feed/cycle.rs::FeedCycle::run,
         -- which logs it and returns a failed outcome. The two surfaces then
         -- present that outcome:
@@ -2526,34 +2589,17 @@ rule DegradedNonEmptyEmission {
         -- the empty one first because it can return early.
         --
         -- The mode is src/feed/ingest/mod.rs::SyncMode {Reconcile, Additive},
-        -- threaded from FeedCycle::run through run_feed_sync_by_role into
-        -- every sync path. It is an enum rather than a bool so a call site
-        -- cannot silently mean the opposite of what it reads.
-        -- The mode is decided once, but its CONSEQUENCE is applied at five
-        -- sites, in two shapes. Counting them honestly matters: a sixth removal
-        -- path added later inherits neither shape automatically.
+        -- decided in FeedCycle::run and posted to the module as the `additive`
+        -- flag of ingest_feed. It is an enum on the board so a call site cannot
+        -- silently mean the opposite of what it reads.
+        -- The module applies the flag in every strategy
+        -- (spacetime/module/src/feed_ingest.rs): the per-epic stale delete is
+        -- chosen through upsert_feed_tasks_inner's `delete_absent`, and the
+        -- phases that exist only to remove (the subtree delete, the parent
+        -- sweep, clearing absent sub-epics, dropping closed retired items) are
+        -- skipped. A new removal path's obligation is to honour `additive`.
         --
-        -- Shape 1 — pick the DB variant. The removal is inside the upsert, so
-        -- there is no step to skip: src/store/queries/tasks.rs::upsert_feed_tasks_additive
-        -- is the insert/update half of upsert_feed_tasks WITHOUT its per-epic
-        -- stale delete, sharing one private helper with it so the two cannot
-        -- drift in what they WRITE. It returns the same (empty) removed-row type
-        -- as its sibling precisely so the three call sites that choose between
-        -- them — src/feed/ingest/mod.rs::run_feed_sync (flat),
-        -- src/feed/ingest/upsert.rs::upsert_role_groups and
-        -- src/feed/ingest/grouped.rs::upsert_sub_epic_and_recalc — share one
-        -- success/failure tail instead of restating it per mode.
-        --
-        -- Shape 2 — skip the call. The removal is its own phase, so the caller
-        -- omits it: src/feed/ingest/role_routed.rs skips
-        -- src/feed/ingest/stale.rs::delete_stale_subtree and
-        -- clear_parent_stranded_tasks; src/feed/ingest/grouped.rs skips
-        -- clear_absent_sub_epics and clear_parent_flat_tasks. A clearing pass
-        -- takes no mode — clearing is a reconcile act by definition, so
-        -- src/feed/ingest/grouped.rs::clear_sub_epic_and_recalc is mode-free
-        -- and the decision to clear at all lives in its caller.
-        --
-        -- FeedSyncOutcome.removed is therefore empty on every additive path,
+        -- FeedIngestOutcome.removed is therefore empty on every additive path,
         -- so src/feed/mod.rs::cleanup_removed_feed_tasks is a no-op by
         -- construction rather than by a second guard.
         --
@@ -2564,8 +2610,8 @@ rule DegradedNonEmptyEmission {
         -- rule's whole subject. Empty-by-construction was preferred anyway
         -- because a second guard there would make the invariant ambiguous
         -- (which layer owns it?) while covering only the paths someone
-        -- remembered to route through it. A new removal path's obligation is to
-        -- take one of the two shapes above.
+        -- remembered to route through it. A new removal path's obligation is,
+        -- again, to honour `additive` inside the module.
         --
         -- SURFACING. An additive cycle is not silent: a run that declines to
         -- remove anything must say so, or the user reads an unchanged board as
@@ -2752,10 +2798,10 @@ rule AppendOnlyFeed {
         -- predicates in src/feed/cycle.rs::FeedCycle::run, which selects
         -- src/feed/ingest/mod.rs::SyncMode::Additive when EITHER a degraded
         -- predicate fires OR the epic is append-only. Everything below that
-        -- point — run_feed_sync, sync_grouped_feed,
-        -- run_role_routed_feed_sync, upsert_feed_tasks_additive — is
-        -- unchanged and untouched by this rule: it already implements "no
-        -- removals" and does not care why it was asked for.
+        -- point — the `additive` flag of the module's ingest_feed
+        -- (IngestFeedEmission) and every strategy it runs — is untouched by
+        -- this rule: it already implements "no removals" and does not care
+        -- why it was asked for.
         --
         -- SURFACING. An append-only cycle is a normal, healthy cycle, so it
         -- is NOT reported the way a degraded one is. DegradedNonEmptyEmission
@@ -2772,7 +2818,7 @@ rule AppendOnlyFeed {
         -- and is covered where that rule's own guidance says it is.
         -- src/feed/ingest/tests.rs covers the reconcile behaviour, reusing the
         -- existing additive_* assertions rather than duplicating them, and
-        -- src/store/tests/tasks.rs covers the retirement claim above
+        -- src/store/tests/tasks_feed/insert_and_retired.rs covers the retirement claim above
         -- (upsert_feed_tasks_inserts_no_task_for_a_retired_external_id).
 }
 
@@ -2844,7 +2890,7 @@ rule AppendOnlyFeed {
 -- all three entry points, the exec (exec_feed_command) by only the two runtime
 -- ones -- verify-feed deliberately spawns its own `sh -c`, having no
 -- epic_id/epic_title and wanting terminal output rather than app.log (see
--- FeedCommandStderrOnSuccess). run_feed_sync_by_role is the single role
+-- FeedCommandStderrOnSuccess). The module's ingest_feed is the single role
 -- dispatcher (see the FeedSync block below).
 --
 -- Implementation: src/feed/parse.rs::parse_feed_items, re-exported from
@@ -2888,11 +2934,11 @@ rule AppendOnlyFeed {
 -- or an item can be re-routed to a different role, without the record going
 -- stale.
 --
--- OVER A SHARED STORE, retired_without_task's subtree walk runs over
--- whatever the reading board's subscriptions have delivered, not over every
--- row the store holds — see sync.allium: BoardConnection.covered_epics for
--- the assumption this places on a feed's poll owner and what an incomplete
--- subscription costs.
+-- SINCE store-split M3, retired_without_task's subtree walk runs inside the
+-- module's ingest_feed, over every row the store holds, not over the poll
+-- owner's subscribed view (IngestFeedEmission). Before M3 it ran on the board,
+-- which is the assumption sync.allium: BoardConnection.covered_epics still
+-- describes.
 
 rule DropClosedRetiredFeedItems {
     when: FeedSync(epic, items, additive)
@@ -2937,7 +2983,8 @@ rule DropClosedRetiredFeedItems {
 -- carries the cycle's MODE alongside the emission: reconcile (the default —
 -- write what the emission contains, remove what it omits) or additive (write
 -- what it contains, remove nothing). The mode is decided once per cycle by
--- DegradedNonEmptyEmission and is orthogonal to the routing below: all three
+-- DegradedNonEmptyEmission and AppendOnlyFeed, on the board, and is
+-- orthogonal to the routing below, which the module does: all three
 -- paths honour it, and none of them re-decides it.
 -- Routing precedence by core/Epic.feed_role:
 --   1. feed_role = reviews_parent -> RoleRoutedFeedSync (subtree reconcile).
@@ -2950,12 +2997,12 @@ rule DropClosedRetiredFeedItems {
 --      (epics.allium ToggleGroupByRepo), which flips the flag but moves no task
 --      synchronously. When the epic has no RepoGroup sub-epics this reduces to
 --      a plain UpsertFeedTasks, exactly as before.
--- The reviews_parent path lives in its own entry point (run_role_routed_feed_sync),
--- separate from run_feed_sync, because it orchestrates a whole subtree rather
--- than an epic's own emission. The WHOLE feed_role dispatch — including the
--- reviews_parent -> run_role_routed_feed_sync branch, not just the
+-- The reviews_parent path lives in its own function (ingest_role_routed),
+-- separate from ingest_flat and ingest_grouped, because it orchestrates a
+-- whole subtree rather than an epic's own emission. The WHOLE feed_role
+-- dispatch — including the reviews_parent -> ingest_role_routed branch, not just the
 -- flat/group_by_repo branches — lives in ONE shared dispatcher function,
--- src/feed/ingest/mod.rs::run_feed_sync_by_role, which BOTH FeedRunner.tick
+-- spacetime/module/src/feed_ingest.rs::ingest_feed, which BOTH FeedRunner.tick
 -- (auto-poll) and exec_trigger_epic_feed (manual "r") delegate to. Because the
 -- switch is centralised in that single function rather than duplicated per
 -- caller, the two paths are structurally identical — not merely behaviourally
@@ -2964,13 +3011,14 @@ rule DropClosedRetiredFeedItems {
 -- different path; doing so would strand feed tasks in the wrong epic (the
 -- reviews_parent parent-flat bug).
 --
--- Implementation: src/feed/ingest/mod.rs::run_feed_sync_by_role is the shared
--- role->path dispatcher; it delegates to src/feed/ingest/mod.rs::run_feed_sync (flat/grouped) or
--- src/feed/ingest/role_routed.rs::run_role_routed_feed_sync (reviews_parent).
--- Both runtime paths reach run_feed_sync_by_role through the single shared
--- src/feed/cycle.rs::FeedCycle::run, which reads feed_role from the epic
--- itself; neither surface performs its own feed_role switch, and neither can
--- pass a stale one down.
+-- Implementation: spacetime/module/src/feed_ingest.rs::ingest_feed is the
+-- shared role->path dispatcher; it reads feed_role and group_by_repo from the
+-- epic's own row and runs ingest_flat, ingest_grouped or ingest_role_routed.
+-- Both runtime paths reach it through src/feed/ingest/mod.rs::ingest_emission
+-- and the single shared
+-- src/feed/cycle.rs::FeedCycle::run, which passes neither feed_role nor
+-- group_by_repo; neither surface performs its own feed_role switch, and
+-- neither can pass a stale one down.
 
 -- == Manual trigger ==
 
@@ -3050,25 +3098,25 @@ rule ManualFeedTrigger {
         -- from the TUI's loaded board in
         -- src/tui/update/feeds.rs::App::handle_trigger_epic_feed — that is this
         -- rule's requires clause and cached data is fine for it. But the values
-        -- the cycle ACTS on (feed_command, feed_role, group_by_repo) are read
-        -- fresh from the epic inside FeedCycle::run, never passed down from that
-        -- snapshot, so a manual refresh cannot run a command or a grouping mode
-        -- the user has since changed.
+        -- the cycle ACTS on are never passed down from that snapshot:
+        -- feed_command and feed_append_only are read fresh from the epic inside
+        -- FeedCycle::run, and feed_role and group_by_repo are read by the
+        -- module's ingest_feed from the epic's own row, so a manual refresh
+        -- cannot run a command or a grouping mode the user has since changed.
         -- FeedSync dispatches by epic.feed_role IDENTICALLY to the auto-poll
         -- path (see the FeedSync dispatch block above): feed_role =
-        -- reviews_parent -> run_role_routed_feed_sync; otherwise
-        -- group_by_repo=true -> sync_grouped_feed / false -> upsert_feed_tasks,
-        -- both via run_feed_sync. exec_trigger_epic_feed must therefore read the
-        -- epic's feed_role (not just group_by_repo) and branch on it; a manual
-        -- "r" refresh on a reviews_parent epic MUST route into the My/Team/Bots
-        -- subtree, never flat-upsert into the parent. Coverage:
+        -- reviews_parent -> ingest_role_routed; otherwise
+        -- group_by_repo=true -> ingest_grouped / false -> ingest_flat, all
+        -- inside the one reducer. A manual "r" refresh on a reviews_parent
+        -- epic therefore routes into the My/Team/Bots subtree and never
+        -- flat-upserts into the parent. Coverage:
         -- src/runtime/tests/feeds.rs (manual trigger on a reviews_parent epic routes
         -- like auto-poll and strands no feed task on the parent);
         -- src/runtime/tests/feeds.rs::exec_trigger_epic_feed_fails_on_degraded_empty_emission
         -- and exec_trigger_epic_feed_degraded_empty_emission_does_not_delete_existing_tasks
         -- (the failure line, and that no sync ran behind it);
         -- src/runtime/tests/feeds.rs::exec_trigger_epic_feed_removed_task_tears_down_its_worktree
-        -- (the manual path also hands its FeedSyncOutcome.removed to
+        -- (the manual path also hands its FeedIngestOutcome.removed to
         -- src/feed/mod.rs::cleanup_removed_feed_tasks).
         -- FeedCommandFailure (auto-poll failures) remains silent — only
         -- manual trigger failures surface in the status bar.
@@ -3083,11 +3131,12 @@ rule ManualFeedTrigger {
 -- rather than as an expression-bearing invariant because a cycle is an
 -- in-process activity, not entity state — there is nothing to quantify over.
 --
--- This is what makes RoleRoutedFeedSync's phase ordering sound. Its steps are
--- separate non-transactional writes, each filtering on a task's CURRENT epic,
--- and the argument that "the move lands before the deletes, so a moved task is
--- never reported as removed" holds WITHIN one cycle only. Two cycles for the
--- same epic interleaving across those writes breaks it, and because the
+-- This is what makes RoleRoutedFeedSync's keep-set sound. Since store-split M3
+-- its steps run in one module transaction, so two cycles can no longer
+-- interleave INSIDE the sync; but each cycle's keep-set comes from the
+-- emission it fetched, and the argument that "a task in the subtree but
+-- absent from this emission is stale" holds only if no other cycle for the
+-- same epic wrote between this cycle's exec and its sync. Because the
 -- stale-delete feeds TaskTeardown, breaking it destroys a live agent's worktree
 -- rather than merely losing a row.
 --
@@ -3159,10 +3208,13 @@ invariant DefaultFeedIntervalClearsTheFloor {
 -- Notifications
 ------------------------------------------------------------
 
--- After a successful upsert (regardless of whether any tasks actually
--- changed), the runner sends one BoardEvent::EpicChanged(epic_id) on the
--- notification channel so the TUI reloads only the affected epic and
--- its tasks — not the whole board. Failed runs do NOT send a refresh.
+-- After a successful sync (regardless of whether any tasks actually
+-- changed), the runner sends one BoardEvent::EpicChanged per affected epic on
+-- the notification channel so the TUI reloads only those epics and their
+-- tasks — not the whole board. Since store-split M3 the affected epics are the
+-- feed epic and every epic below it, because the module does not say which of
+-- them it wrote to (src/store/mod.rs::FeedIngestOutcome). Failed runs do NOT
+-- send a refresh.
 
 -- FlatFeedReconcile re-homing and subtree uniqueness (resolved): the
 -- feed-task subtree-uniqueness triggers (enforce_feed_task_subtree_unique_

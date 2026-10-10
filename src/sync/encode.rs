@@ -383,6 +383,24 @@ pub fn feed_task_upsert_item(
     }
 }
 
+/// The wire form of one parsed feed item for `ingest_feed`: the task fields
+/// of [`feed_task_upsert_item`] plus the signals the module routes by.
+pub fn feed_ingest_item(
+    item: &crate::models::FeedItem,
+    repo_path: &str,
+    base_branch: &str,
+) -> bindings::FeedIngestItem {
+    bindings::FeedIngestItem {
+        item: feed_task_upsert_item(item, repo_path, base_branch),
+        signals: item
+            .signals
+            .iter()
+            .filter_map(|s| serde_json::to_value(s).ok())
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Learnings and retrievals (Phase 10, task #4914)
 // ---------------------------------------------------------------------------

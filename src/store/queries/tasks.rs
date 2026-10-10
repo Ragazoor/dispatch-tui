@@ -6,7 +6,9 @@ use crate::models::{
 };
 use crate::sync::{encode, ReducerOutcome};
 
-use super::super::{CreateTaskRequest, RemovedFeedTask, Store, TaskCrud, TaskPatch};
+use super::super::{
+    CreateTaskRequest, FeedIngestOutcome, RemovedFeedTask, Store, TaskCrud, TaskPatch,
+};
 use super::won;
 
 #[async_trait::async_trait]
@@ -127,6 +129,18 @@ impl TaskCrud for Store {
         base_branches: &[String],
     ) -> Result<Vec<RemovedFeedTask>> {
         self.upsert_feed_tasks_inner(epic_id, items, repo_paths, base_branches, true)
+            .await
+    }
+
+    async fn ingest_feed(
+        &self,
+        epic_id: EpicId,
+        items: &[FeedItem],
+        repo_paths: &[String],
+        base_branches: &[String],
+        additive: bool,
+    ) -> Result<FeedIngestOutcome> {
+        self.ingest_feed_inner(epic_id, items, repo_paths, base_branches, additive)
             .await
     }
 

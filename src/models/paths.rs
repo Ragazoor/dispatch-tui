@@ -121,6 +121,83 @@ mod tests {
         assert_eq!(repo_name_from_url("https://gitlab.com/org/repo"), "other");
     }
 
+    /// The store decides feed routing now (store-split M3); these are the
+    /// module's twins of the two URL helpers, and must not drift.
+    #[test]
+    fn url_helpers_agree_with_the_modules_twins() {
+        for url in [
+            "https://github.com/org/my-repo/pull/42",
+            "https://github.com/org/my-repo",
+            "https://github.com/org/my-repo/",
+            "https://github.com/org",
+            "https://github.com/",
+            "https://github.com//x",
+            "https://gitlab.com/org/repo",
+            "http://github.com/org/repo",
+            "",
+            "not a url",
+        ] {
+            assert_eq!(
+                extract_github_repo(url),
+                dispatch_spacetime_module::extract_github_repo(url),
+                "{url:?}"
+            );
+            assert_eq!(
+                repo_name_from_url(url),
+                dispatch_spacetime_module::repo_name_from_url(url),
+                "{url:?}"
+            );
+        }
+    }
+
+    /// The route and exclusion rules moved into the module (feeds.allium:
+    /// RouteSignals, ExcludeFromReviews); the board's `Signal` names are what
+    /// the feed script emits and the module reads, so each must serialise to
+    /// the spelling the module matches on.
+    #[test]
+    fn signal_names_are_the_ones_the_module_reads() {
+        use crate::models::Signal::*;
+        let names: Vec<String> = [
+            DirectRequest,
+            TeamRequest,
+            Reviewed,
+            Commented,
+            AuthorBot,
+            AuthorMe,
+            OrgReview,
+            Approved,
+        ]
+        .iter()
+        .map(|s| {
+            serde_json::to_value(s)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+        assert_eq!(
+            names,
+            [
+                "direct-request",
+                "team-request",
+                "reviewed",
+                "commented",
+                "author-bot",
+                "author-me",
+                "org-review",
+                "approved"
+            ]
+        );
+        assert!(dispatch_spacetime_module::excluded_from_reviews(&[names
+            [5]
+        .clone()]));
+        assert_eq!(
+            dispatch_spacetime_module::route_signals(&[names[1].clone()]),
+            "team-reviews"
+        );
+    }
+
     // --- extract_github_repo tests ---
 
     #[test]

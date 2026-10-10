@@ -88,13 +88,8 @@ to look.
 | `src/feed/mod.rs` | `FeedRunner` struct, poll loop, `tick()` orchestration — composes exec/parse/ingest; re-exports `resolve_base_branches` |
 | `src/feed/exec.rs` | `resolve_base_branches()` (cached per-path git lookup), `exec_feed_command()` (async shell spawn + stdout capture) |
 | `src/feed/parse.rs` | `parse_feed_items()` — JSON → `Vec<FeedItem>` deserialization |
-| `src/feed/routing.rs` | `route()` — pure signal→`FeedRole` mapping for the PR-review feed. Not to be confused with `src/feed/ingest/routing.rs`, which groups already-routed entries |
-| `src/feed/ingest/mod.rs` | `FeedItemWithTarget` (shared entry type), `run_feed_sync_by_role()` / `run_feed_sync()` — dispatch an emission to the right sync strategy |
-| `src/feed/ingest/grouped.rs` | `sync_grouped_feed()` — `group_by_repo` path: groups items by repo, creates/reuses sub-epics, upserts tasks |
-| `src/feed/ingest/role_routed.rs` | `run_role_routed_feed_sync()` — `reviews_parent` path: role sub-epic scaffolding + subtree reconcile orchestration |
-| `src/feed/ingest/routing.rs` | `route_and_group_entries()` — role-routed phase 1: route each entry to its target sub-epic and group |
-| `src/feed/ingest/upsert.rs` | `upsert_role_groups()` — role-routed phase 2: insert/update present role groups |
-| `src/feed/ingest/stale.rs` | `delete_stale_subtree()` / `clear_parent_stranded_tasks()` — role-routed phase 3: delete absent tasks + clear the parent |
+| `src/feed/ingest/mod.rs` | `FeedItemWithTarget` (an item with its local repo path and base branch), `ingest_emission()` — posts an emission to the module's `ingest_feed` reducer, which routes, groups, upserts and reconciles |
+| `spacetime/module`'s `feed_ingest.rs` | What an emission does to the store (store-split M3): `ingest_feed` picks flat, grouped or role-routed from the epic's own row, filters and routes by signals (`rules.rs`), makes the role and repo sub-epics, upserts, deletes the stale subtree and recalculates, in one transaction. `src/sync/memory_caller/feed.rs` mirrors it |
 | `src/process.rs` | `ProcessRunner` trait + `RealProcessRunner` / `MockProcessRunner` for testable shell execution |
 | `src/tmux.rs` | Tmux API: create windows, send keys, capture pane output, kill windows |
 | `src/store/board_reads.rs` | The board's card-read handle: `BoardReads` (`TaskRead + EpicRead + RepoConfigRead`, plus `poll_owner` and `revision`), implemented by `Store`. `TuiRuntime::board_reads` holds it |

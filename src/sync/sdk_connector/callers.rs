@@ -25,15 +25,15 @@ use crate::spacetime::bindings::{
     create_repo_group_sub_epic as _, create_task as _, create_work_package as _, delete_epic as _,
     delete_learning as _, delete_repo_path as _, delete_stale_subtree_feed_tasks as _,
     delete_task as _, delete_work_package as _, drop_closed_retired_feed_items as _,
-    flatten_epic as _, link_work_package_item as _, mark_pr_learnings_gate_shown as _,
-    override_poll_owner as _, patch_epic as _, patch_learning as _, patch_task as _,
-    patch_work_package as _, recalculate_epic_status as _, record_base_branch as _,
-    record_learning_retrieval as _, record_notification as _, record_pre_tool_use as _,
-    record_usage_event as _, record_user_prompt_submit as _, register_host as _, regroup_epic as _,
-    release_backlog_claim as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
-    save_repo_path as _, save_setting as _, set_task_epic as _, set_verify_command as _,
-    subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
-    subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
+    flatten_epic as _, ingest_feed as _, link_work_package_item as _,
+    mark_pr_learnings_gate_shown as _, override_poll_owner as _, patch_epic as _,
+    patch_learning as _, patch_task as _, patch_work_package as _, recalculate_epic_status as _,
+    record_base_branch as _, record_learning_retrieval as _, record_notification as _,
+    record_pre_tool_use as _, record_usage_event as _, record_user_prompt_submit as _,
+    register_host as _, regroup_epic as _, release_backlog_claim as _, rescope_epic_learnings as _,
+    respawn_phoenix_successor as _, save_repo_path as _, save_setting as _, set_task_epic as _,
+    set_verify_command as _, subagent_clear as _, subagent_clear_and_void_pending_stop as _,
+    subagent_start as _, subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
     unlink_work_package_item as _, unsubscribe_from_epic as _, upsert_feed_tasks as _,
     upsert_feed_tasks_additive as _, DbConnection, EpicsTableAccess as _,
     LearningsTableAccess as _, TasksTableAccess as _, WorkPackagesTableAccess as _,
@@ -670,6 +670,20 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "the additive feed upsert",
             upsert_feed_tasks_additive_then(epic_id.0, items, created_by)
+        )
+    }
+
+    async fn ingest_feed(
+        &self,
+        epic_id: EpicId,
+        items: Vec<bindings::FeedIngestItem>,
+        additive: bool,
+        created_by: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the feed ingest",
+            ingest_feed_then(epic_id.0, items, additive, created_by)
         )
     }
 
