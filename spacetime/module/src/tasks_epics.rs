@@ -317,10 +317,6 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
 
 /// Delete a task and everything that only referred to it.
 ///
-/// The watcher rows go with it in the same transaction. A watch pointing at a
-/// task that no longer exists is not a row anybody can act on, and leaving it
-/// would make "who is watching me?" answerable with a ghost.
-///
 /// Also detaches this task's learnings (`source_task_id` set to `None`, a
 /// learning outlives its source as orphaned provenance) and cascades its
 /// `learning_retrievals` rows — reproducing, as explicit reducer logic, the
@@ -352,8 +348,7 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 }
 
 /// Every non-row side effect a task removal owes, beyond deleting the `tasks`
-/// row itself: live-session state, the watch rows naming it in either
-/// direction, and learning detachment/retrieval-cascade. SQLite gets most of
+/// row itself: live-session state and learning detachment/retrieval-cascade. SQLite gets most of
 /// this for free from `ON DELETE CASCADE`/`SET NULL`; the module has no such
 /// mechanism, so every path that deletes a task row explicitly reproduces it
 /// by calling here — `delete_task` itself, `batch_delete`'s plain-task pass,
@@ -362,20 +357,6 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 /// without it (task #4971's design doc flagged the gap).
 pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
     delete_agent_state_for(ctx, task_id);
-    // Two indexed lookups rather than one scan of every watch in the store.
-    // Collected first because deleting while walking an index is not something
-    // the table API promises.
-    let watches: Vec<i64> = ctx
-        .db
-        .task_watchers()
-        .watcher_task_id()
-        .filter(&task_id)
-        .chain(ctx.db.task_watchers().target_task_id().filter(&task_id))
-        .map(|w| w.id)
-        .collect();
-    for watch in watches {
-        ctx.db.task_watchers().id().delete(watch);
-    }
     detach_learnings_from_task(ctx, task_id);
     delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, task_id);
 }

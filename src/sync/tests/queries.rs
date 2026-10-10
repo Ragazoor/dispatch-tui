@@ -159,11 +159,11 @@ fn the_ask_is_never_empty() {
 /// rows. So this is asserted per table rather than left to whoever notices the
 /// gap on screen.
 ///
-/// `task_watchers` and `task_subagents` are deliberately absent. Nothing on the
-/// read surface reaches them — they are written and consumed by the mutation
-/// path, which is Phase 6 — and asking for rows nothing renders is the "asking
-/// for too much" this file's header warns about. `task_shells`, `todos` and
-/// `filter_presets` are dead schema (spacetime-seed.allium's SharedTable), so
+/// `task_subagents` is deliberately absent. Nothing on the read surface reaches
+/// it — it is written and consumed by the mutation path, which is Phase 6 — and
+/// asking for rows nothing renders is the "asking for too much" this file's
+/// header warns about. `task_shells`, `todos`, `filter_presets` and
+/// `task_watchers` are dead schema (spacetime-seed.allium's SharedTable), so
 /// nothing reads them — see `no_dead_table_is_asked_for` below.
 #[test]
 fn every_table_the_board_reads_is_asked_for() {
@@ -243,7 +243,7 @@ fn the_repo_lists_are_shared_by_design() {
 #[test]
 fn no_dead_table_is_asked_for() {
     let queries = queries(vec![7]);
-    for table in ["task_shells", "todos", "filter_presets"] {
+    for table in ["task_shells", "todos", "filter_presets", "task_watchers"] {
         assert!(
             !queries.iter().any(|q| q.contains(&format!("FROM {table}"))),
             "`{table}` is dead schema; nothing should ask for it: {queries:?}"

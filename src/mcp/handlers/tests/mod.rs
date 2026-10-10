@@ -4,7 +4,6 @@ mod hooks;
 mod keybindings;
 mod learnings;
 mod managed_feeds;
-mod poll_ownership;
 mod tasks;
 mod usage;
 mod work_packages;
@@ -1157,10 +1156,6 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("wrap_up", json!({"task_id": 1, "action": "rebase"})),
         ("dispatch_task", json!({"task_id": 1})),
         (
-            "watch_task",
-            json!({"watcher_task_id": 1, "target_task_id": 2, "watch": true}),
-        ),
-        (
             "record_learning",
             json!({"task_id": 1, "kind": "pitfall", "summary": "s", "scope": "user"}),
         ),
@@ -1179,7 +1174,6 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("query_usage", json!({})),
         ("list_keybindings", json!({})),
         ("read_context", json!({"uri": "dispatch://task/self"})),
-        ("override_poll_owner", json!({"task_id": 1})),
         ("create_work_package", json!({"title": "t"})),
         ("list_work_packages", json!({})),
         ("update_work_package", json!({"work_package_id": 1})),

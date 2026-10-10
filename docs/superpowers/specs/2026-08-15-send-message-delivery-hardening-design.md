@@ -1,5 +1,7 @@
 # Design: harden watcher-notice delivery against non-prompt panes
 
+> Removed in task 53250: the `watch_task` tool, task-watcher notices and `src/notify.rs` (with `notify_tmux`) described here no longer exist.
+
 Task: #4098 (follow-up from #3983, `docs/plans/3983-cross-session-messaging-investigation.md`)
 Date: 2026-08-15
 

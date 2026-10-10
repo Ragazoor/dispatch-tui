@@ -27,7 +27,7 @@
 --           of their own and are untouched by this file.
 -- Dependencies: ReducerDomain's members correspond to the shared tables and
 --               mutation groups core.allium, epics.allium, host.allium,
---               settings.allium, learnings.allium, task-watchers.allium and
+--               settings.allium, learnings.allium and
 --               work-packages.allium already define.
 
 ------------------------------------------------------------
@@ -175,12 +175,12 @@ config {
 --                   prune; the subagent lifecycle and the other agent-hook
 --                   writes (stop recording, pre-tool-use, notification,
 --                   user-prompt-submit, the PR-learnings gate stamp,
---                   batched sub-status); watchers; feed upsert, stale
+--                   batched sub-status); feed upsert, stale
 --                   feed-task deletion and the two feed-managed epic
 --                   creates (repo-group sub-epic, managed role epic);
 --                   phoenix respawn; poll ownership; host registration;
---                   plus reproducing the task-delete cascade onto watchers
---                   and agent-session state (both delete_task and the
+--                   plus reproducing the task-delete cascade onto
+--                   agent-session state (both delete_task and the
 --                   epic-subtree delete), and the feed-retirement cascade
 --                   (retire_task_if_feed_backed / retired_feed_items) that
 --                   delete_task/delete_epic/batch_delete owe now that this

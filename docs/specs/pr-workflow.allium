@@ -131,9 +131,9 @@ rule PollPrStatus {
         --
         -- A host-less task with no PollOwner row is claimed here, by
         -- whichever host's tick reaches this point first for it — the
-        -- claim is permanent (core/PollOwner) until a human or agent
-        -- explicitly reassigns it via OverridePrPollOwner below; there is no
-        -- expiry and no automatic failover. A host that is NOT the owner
+        -- claim is permanent (core/PollOwner): there is no expiry, no
+        -- automatic failover and, since the override_poll_owner MCP tool was
+        -- removed, no way to reassign a task-scope claim to another host. A host that is NOT the owner
         -- (`owns = false`) does nothing at all this tick: no GitHub call, no
         -- PrPollState write, no claim attempt — it is simply not this
         -- host's task to act on.
@@ -307,46 +307,6 @@ rule PrPollGaveUp {
         -- Not terminal: the task stays in review. See core/PrPollState for why
         -- an app restart retries, and PollPrStatus's succeeded branch for the
         -- clearing path.
-}
-
-rule OverridePrPollOwner {
-    when: OverridePrPollOwner(task)
-
-    -- Reassigns (or creates, if none existed) the host-less task's
-    -- core/PollOwner row to whoever calls this — unconditionally, even when
-    -- a different host already holds it. This is the only way a
-    -- host-less task's poll ownership ever moves, since PollPrStatus's own
-    -- claim (above) only ever fills an ABSENT row.
-    ensures:
-        let existing = core/PollOwner{scope: task, scope_id: task.id}
-        if exists existing:
-            existing.host = local_host()
-            existing.claimed_at = now
-        else:
-            core/PollOwner.created(
-                scope: task,
-                scope_id: task.id,
-                host: local_host(),
-                claimed_at: now
-            )
-
-    @guidance
-        -- Triggered only via override_poll_owner over MCP
-        -- (mcp-task-tools.allium: OverridePollOwnerViaMcp) — there is no TUI
-        -- surface for the task scope, unlike the epic scope's EditEpic-hosted
-        -- prompt (epics.allium: EditEpic, feeds.allium: OverrideFeedOwner).
-        -- A host-less review task has no "editing" moment a human is already
-        -- in the middle of the way an epic's feed_command edit gives one, so
-        -- an explicit MCP call is the only trigger; agents are first-class
-        -- users of this platform (see knowledge-base learning #817), not a
-        -- fallback for what the TUI does not cover.
-        --
-        -- No `requires: task.status = review` guard: unlike PrPollGaveUp,
-        -- reassigning polling ownership is meaningful (if inert) even for a
-        -- task that has since left review — the row would simply never be
-        -- read again, since PollPrStatus's own `where` clause already
-        -- excludes non-review tasks. Refusing the call over that would only
-        -- turn a harmless no-op into an error a caller has to handle.
 }
 
 rule PrMerged {

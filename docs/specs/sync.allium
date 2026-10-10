@@ -860,7 +860,7 @@ rule BoardReadsFromTheSubscription {
         --
         -- EVERY SHARED READ, NOT ONLY THE DRAWING. "Rows" here is every read
         -- of a shared row the board's own process makes — an MCP tool looking
-        -- up a task, the watcher fan-out finding who to notify, a setting read
+        -- up a task, a setting read
         -- back after it was saved, the subscribed-epic list — and not only the
         -- reads that put cards on screen. Until task #4916 only the drawing
         -- (`store::BoardReads`), the knowledge base and usage had a store path,

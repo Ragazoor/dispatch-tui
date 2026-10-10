@@ -18,7 +18,6 @@ use super::epics;
 use super::keybindings;
 use super::learnings;
 use super::managed_feeds;
-use super::poll_ownership;
 use super::tasks;
 use super::types::{
     tool_error, JsonRpcRequest, JsonRpcResponse, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND,
@@ -473,38 +472,6 @@ it along with the tmux window. Errors if the task is not in backlog status or th
                 }
             },
             "required": ["task_id"]
-        };
-
-    async idempotent "watch_task" => tasks::handle_watch_task,
-        "Start or cancel a watch on another task. With watch=true, you are notified when the target \
-finishes (reaches Done) or is deleted first; if it has already finished, you are told immediately \
-instead of being subscribed. Delivery is a one-shot nudge into your tmux session — it fires once \
-and the watch is then spent. With watch=false, the watch is cancelled: idempotent, it succeeds \
-whether or not such a watch exists, so it is safe to call speculatively. You do not need to cancel \
-after a notification has fired; cancel when you stop caring about the target before it finishes.",
-        {
-            "type": "object",
-            "properties": {
-                "watcher_task_id": { "type": "integer", "description": "Your own task ID (the one to notify)" },
-                "target_task_id": { "type": "integer", "description": "ID of the task to watch for completion" },
-                "watch": { "type": "boolean", "description": "true to start watching, false to cancel the watch" }
-            },
-            "required": ["watcher_task_id", "target_task_id", "watch"]
-        };
-
-    async idempotent "override_poll_owner" => poll_ownership::handle_override_poll_owner,
-        "Reassign which host polls a review task's PR status, or runs a feed epic's poll, to THIS \
-host — unconditionally, even when a different host already owns it. Provide exactly one of task_id \
-(a review task whose PR has no worktree — a feed-upserted 'open PRs' style task) or epic_id (a feed \
-epic). Use this when the machine that currently owns polling has gone quiet for good (offline for \
-good, retired, its person left) and nothing is picking the work back up — there is no automatic \
-failover, so this is the only way ownership ever moves.",
-        {
-            "type": "object",
-            "properties": {
-                "task_id": { "type": "integer", "description": "A host-less review task's ID (mutually exclusive with epic_id)" },
-                "epic_id": { "type": "integer", "description": "A feed epic's ID (mutually exclusive with task_id)" }
-            }
         };
 
     async write "record_learning" => learnings::handle_record_learning,

@@ -1,5 +1,7 @@
 # Design: `PollOwner` — a claim-based ownership model for recurring background polling
 
+> Removed in task 53250: the `override_poll_owner` MCP tool and the task-scope override; only the epic-scope override (`OverrideFeedOwner`, TUI) remains.
+
 **Task:** #4865, epic #325
 **Date:** 2026-09-21
 **Supersedes:** the host-registry-election sketch in the migration plan's

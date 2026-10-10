@@ -171,7 +171,7 @@ rule TrajectoryAppend {
         -- dir behaviour.
         -- Implementation lives behind the MCP handler dispatch boundary so
         -- that every tool call (create_task, update_tasks, query_learnings,
-        -- record_learning, query_usage, watch_task, dispatch_task,
+        -- record_learning, query_usage, dispatch_task,
         -- list_tasks, list_epics, …) is captured uniformly. A native
         -- SendMessage call between agents never reaches this boundary at
         -- all — see HookPeerMessageSent in agent-health.allium for how that

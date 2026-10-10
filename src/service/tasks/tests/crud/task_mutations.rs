@@ -306,48 +306,6 @@ async fn delete_epic_admits_a_subtree_whose_tasks_are_all_done() {
         ));
     }
 }
-
-/// NotifyWatchersOnDelete now fires on TaskRowRemoved, which an epic delete
-/// produces for every task in its subtree. A finished target's leftover rows
-/// and a deleted watcher's own rows must not be left dangling (task-watchers
-/// .allium; the design doc's "pre-existing gap fixed in passing").
-#[tokio::test]
-async fn delete_epic_leaves_no_watch_rows_for_the_tasks_it_removes() {
-    let db = test_db().await;
-    let epics = epic_svc(&db);
-    let tasks = task_svc(&db);
-    let root = epic_under(&epics, "Root", None).await;
-    let doomed_target = task_in(&tasks, root, TaskStatus::Done).await;
-    let doomed_watcher = task_in(&tasks, root, TaskStatus::Done).await;
-    let outside = tasks
-        .create_task(make_task_params_on_branch("/repo", "main"))
-        .await
-        .unwrap();
-    let outside_target = tasks
-        .create_task(make_task_params_on_branch("/repo", "main"))
-        .await
-        .unwrap();
-
-    // A row left on a finished target (the feed-completed case that bypasses
-    // NotifyWatchersOnFinish), and a row whose watcher is being deleted.
-    db.create_task_watcher(outside, doomed_target)
-        .await
-        .unwrap();
-    db.create_task_watcher(doomed_watcher, outside_target)
-        .await
-        .unwrap();
-
-    epics.delete_epic(root).await.unwrap();
-
-    assert!(db.list_watchers_of(doomed_target).await.unwrap().is_empty());
-    assert!(
-        db.list_watchers_of(outside_target)
-            .await
-            .unwrap()
-            .is_empty(),
-        "the deleted watcher's own subscription goes with it"
-    );
-}
 #[tokio::test]
 async fn list_tasks_filters_by_epic_id() {
     let db = test_db().await;

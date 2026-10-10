@@ -1008,7 +1008,7 @@ rule FeedTick {
                         FeedCycleRequested(epic: epic)
                     -- else: another host owns this epic's feed. This tick
                     -- does no exec and emits no FeedCycleRequested for it —
-                    -- until a human or agent reassigns ownership
+                    -- until a human reassigns ownership
                     -- (OverrideFeedOwner below) — but last_run IS bumped
                     -- regardless of which arm above ran, same as it already
                     -- is for a dropped SerialisedFeedCycle request. Without
@@ -1108,20 +1108,13 @@ rule OverrideFeedOwner {
             )
 
     @guidance
-        -- Two triggers:
-        --   1. epics.allium: EditEpic, when a human sets or changes
-        --      feed_command and an existing PollOwner names a different
-        --      host — see EditEpic's own guidance for the y/n prompt this
-        --      sits behind ("this feed is currently owned by <host label>
-        --      — take over?"). Declining leaves feed_command changed but
-        --      ownership untouched; this rule fires only on accept.
-        --   2. mcp-task-tools.allium: OverridePollOwnerViaMcp, the scope-
-        --      generic MCP tool — available for both scopes since agents
-        --      are first-class users of this platform (knowledge-base
-        --      learning #817), and the ONLY trigger at all for
-        --      PollPrStatus's task scope (pr-workflow.allium:
-        --      OverridePrPollOwner), which has no analogous "editing"
-        --      moment to hook a confirmation into.
+        -- One trigger: epics.allium: EditEpic, when a human sets or changes
+        -- feed_command and an existing PollOwner names a different host —
+        -- see EditEpic's own guidance for the y/n prompt this sits behind
+        -- ("this feed is currently owned by <host label> — take over?").
+        -- Declining leaves feed_command changed but ownership untouched;
+        -- this rule fires only on accept. There is no MCP trigger: the
+        -- override_poll_owner tool that also reached this rule was removed.
         --
         -- No `requires` on epic.status: every feed epic runs cycles whatever
         -- its status, so there is no status in which ownership is moot.
@@ -1457,7 +1450,6 @@ rule UpsertFeedTasks {
             for task in Tasks where epic = epic and external_id != null:
                 if not items.any(i => i.external_id = task.external_id):
                     not exists task
-                    TaskRowRemoved(task)
                     TaskTeardown(task)
 
     @guidance
@@ -1953,7 +1945,6 @@ rule RoleRoutedFeedSync {
                                 and task.external_id != null:
                 if not kept.any(i => i.external_id = task.external_id):
                     not exists task
-                    TaskRowRemoved(task)
                     TaskTeardown(task)
 
         -- Parent sweep: the reviews_parent epic must hold NO feed task directly
@@ -1969,7 +1960,6 @@ rule RoleRoutedFeedSync {
         if not additive:
             for task in Tasks where task.epic = epic and task.external_id != null:
                 not exists task
-                TaskRowRemoved(task)
                 TaskTeardown(task)
 
         -- Recalculate bottom-up through all three levels: repo-group sub-epics

@@ -19,16 +19,12 @@ pub mod create_learning_reducer;
 pub mod create_managed_role_epic_reducer;
 pub mod create_repo_group_sub_epic_reducer;
 pub mod create_task_reducer;
-pub mod create_task_watcher_reducer;
 pub mod create_work_package_reducer;
 pub mod delete_epic_reducer;
 pub mod delete_learning_reducer;
 pub mod delete_repo_path_reducer;
 pub mod delete_stale_subtree_feed_tasks_reducer;
 pub mod delete_task_reducer;
-pub mod delete_task_watcher_reducer;
-pub mod delete_watches_by_watcher_reducer;
-pub mod delete_watches_of_target_reducer;
 pub mod delete_work_package_reducer;
 pub mod drop_closed_retired_feed_items_reducer;
 pub mod epic_patch_type;
@@ -145,16 +141,12 @@ pub use create_learning_reducer::create_learning;
 pub use create_managed_role_epic_reducer::create_managed_role_epic;
 pub use create_repo_group_sub_epic_reducer::create_repo_group_sub_epic;
 pub use create_task_reducer::create_task;
-pub use create_task_watcher_reducer::create_task_watcher;
 pub use create_work_package_reducer::create_work_package;
 pub use delete_epic_reducer::delete_epic;
 pub use delete_learning_reducer::delete_learning;
 pub use delete_repo_path_reducer::delete_repo_path;
 pub use delete_stale_subtree_feed_tasks_reducer::delete_stale_subtree_feed_tasks;
 pub use delete_task_reducer::delete_task;
-pub use delete_task_watcher_reducer::delete_task_watcher;
-pub use delete_watches_by_watcher_reducer::delete_watches_by_watcher;
-pub use delete_watches_of_target_reducer::delete_watches_of_target;
 pub use delete_work_package_reducer::delete_work_package;
 pub use drop_closed_retired_feed_items_reducer::drop_closed_retired_feed_items;
 pub use epic_patch_type::EpicPatch;
@@ -318,10 +310,6 @@ pub enum Reducer {
     CreateTask {
         row: Task,
     },
-    CreateTaskWatcher {
-        watcher_task_id: i64,
-        target_task_id: i64,
-    },
     CreateWorkPackage {
         row: WorkPackage,
     },
@@ -340,16 +328,6 @@ pub enum Reducer {
     },
     DeleteTask {
         id: i64,
-    },
-    DeleteTaskWatcher {
-        watcher_task_id: i64,
-        target_task_id: i64,
-    },
-    DeleteWatchesByWatcher {
-        watcher_task_id: i64,
-    },
-    DeleteWatchesOfTarget {
-        target_task_id: i64,
     },
     DeleteWorkPackage {
         id: i64,
@@ -581,16 +559,12 @@ impl __sdk::Reducer for Reducer {
             Reducer::CreateManagedRoleEpic { .. } => "create_managed_role_epic",
             Reducer::CreateRepoGroupSubEpic { .. } => "create_repo_group_sub_epic",
             Reducer::CreateTask { .. } => "create_task",
-            Reducer::CreateTaskWatcher { .. } => "create_task_watcher",
             Reducer::CreateWorkPackage { .. } => "create_work_package",
             Reducer::DeleteEpic { .. } => "delete_epic",
             Reducer::DeleteLearning { .. } => "delete_learning",
             Reducer::DeleteRepoPath { .. } => "delete_repo_path",
             Reducer::DeleteStaleSubtreeFeedTasks { .. } => "delete_stale_subtree_feed_tasks",
             Reducer::DeleteTask { .. } => "delete_task",
-            Reducer::DeleteTaskWatcher { .. } => "delete_task_watcher",
-            Reducer::DeleteWatchesByWatcher { .. } => "delete_watches_by_watcher",
-            Reducer::DeleteWatchesOfTarget { .. } => "delete_watches_of_target",
             Reducer::DeleteWorkPackage { .. } => "delete_work_package",
             Reducer::DropClosedRetiredFeedItems { .. } => "drop_closed_retired_feed_items",
             Reducer::LinkWorkPackageItem { .. } => "link_work_package_item",
@@ -745,13 +719,6 @@ impl __sdk::Reducer for Reducer {
 }             => __sats::bsatn::to_vec(&create_task_reducer::CreateTaskArgs {
                 row: row.clone(),
 }),
-            Reducer::CreateTaskWatcher{
-                watcher_task_id,
-                target_task_id,
-}             => __sats::bsatn::to_vec(&create_task_watcher_reducer::CreateTaskWatcherArgs {
-                watcher_task_id: watcher_task_id.clone(),
-                target_task_id: target_task_id.clone(),
-}),
             Reducer::CreateWorkPackage{
                 row,
 }             => __sats::bsatn::to_vec(&create_work_package_reducer::CreateWorkPackageArgs {
@@ -783,23 +750,6 @@ impl __sdk::Reducer for Reducer {
                 id,
 }             => __sats::bsatn::to_vec(&delete_task_reducer::DeleteTaskArgs {
                 id: id.clone(),
-}),
-            Reducer::DeleteTaskWatcher{
-                watcher_task_id,
-                target_task_id,
-}             => __sats::bsatn::to_vec(&delete_task_watcher_reducer::DeleteTaskWatcherArgs {
-                watcher_task_id: watcher_task_id.clone(),
-                target_task_id: target_task_id.clone(),
-}),
-            Reducer::DeleteWatchesByWatcher{
-                watcher_task_id,
-}             => __sats::bsatn::to_vec(&delete_watches_by_watcher_reducer::DeleteWatchesByWatcherArgs {
-                watcher_task_id: watcher_task_id.clone(),
-}),
-            Reducer::DeleteWatchesOfTarget{
-                target_task_id,
-}             => __sats::bsatn::to_vec(&delete_watches_of_target_reducer::DeleteWatchesOfTargetArgs {
-                target_task_id: target_task_id.clone(),
 }),
             Reducer::DeleteWorkPackage{
                 id,

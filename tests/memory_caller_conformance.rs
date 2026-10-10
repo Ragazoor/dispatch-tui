@@ -1223,79 +1223,6 @@ fn memory_caller_matches_the_real_reducers() {
             .unwrap();
         compare_task(task_id_real.0);
 
-        // -- task watchers (agent_state) ----------------------------------------
-        // `title` must differ from `task_id_real`'s: `create_task`'s id
-        // read-back matches on `(title, repo_path, owner, epic_id, created_at,
-        // created_by)` (`matches_create`), and this task shares `epic_id_real`
-        // with `task_id_real`'s otherwise-identical `blank_task_in_epic`
-        // defaults.
-        let watcher_target_real = real
-            .create_task(bindings::Task {
-                title: "watcher target".into(),
-                ..blank_task_in_epic(epic_id_real)
-            })
-            .await
-            .unwrap();
-        wait_for!(rows_real.task(watcher_target_real).is_some());
-        let watcher_target_mem = mem
-            .create_task(bindings::Task {
-                title: "watcher target".into(),
-                ..blank_task_in_epic(epic_id_mem)
-            })
-            .await
-            .unwrap();
-        assert_eq!(watcher_target_real, watcher_target_mem, "watcher target id");
-
-        real.create_task_watcher(task_id_real, watcher_target_real)
-            .await
-            .unwrap();
-        wait_for!(rows_real.watchers_of(watcher_target_real) == vec![task_id_real]);
-        mem.create_task_watcher(task_id_mem, watcher_target_mem)
-            .await
-            .unwrap();
-        assert_eq!(
-            rows_real.watchers_of(watcher_target_real),
-            rows_mem.watchers_of(watcher_target_mem),
-            "watchers_of after create"
-        );
-
-        real.delete_task_watcher(task_id_real, watcher_target_real)
-            .await
-            .unwrap();
-        wait_for!(rows_real.watchers_of(watcher_target_real).is_empty());
-        mem.delete_task_watcher(task_id_mem, watcher_target_mem)
-            .await
-            .unwrap();
-        assert!(rows_mem.watchers_of(watcher_target_mem).is_empty());
-
-        real.create_task_watcher(task_id_real, watcher_target_real)
-            .await
-            .unwrap();
-        wait_for!(!rows_real.watchers_of(watcher_target_real).is_empty());
-        mem.create_task_watcher(task_id_mem, watcher_target_mem)
-            .await
-            .unwrap();
-        real.delete_watches_of_target(watcher_target_real)
-            .await
-            .unwrap();
-        wait_for!(rows_real.watchers_of(watcher_target_real).is_empty());
-        mem.delete_watches_of_target(watcher_target_mem)
-            .await
-            .unwrap();
-        assert!(rows_mem.watchers_of(watcher_target_mem).is_empty());
-
-        real.create_task_watcher(task_id_real, watcher_target_real)
-            .await
-            .unwrap();
-        wait_for!(!rows_real.watchers_of(watcher_target_real).is_empty());
-        mem.create_task_watcher(task_id_mem, watcher_target_mem)
-            .await
-            .unwrap();
-        real.delete_watches_by_watcher(task_id_real).await.unwrap();
-        wait_for!(rows_real.watchers_of(watcher_target_real).is_empty());
-        mem.delete_watches_by_watcher(task_id_mem).await.unwrap();
-        assert!(rows_mem.watchers_of(watcher_target_mem).is_empty());
-
         // -- work packages (`work-packages.allium`) -----------------------------
         // `updated_at` is the store's own clock on a patch, so it is left out
         // of the comparison, on `SameEndState`'s reasoning.
@@ -1770,7 +1697,6 @@ fn memory_caller_matches_the_real_reducers() {
         for (real_id, mem_id) in [
             (real_predecessor, mem_predecessor),
             (real_successor, mem_successor),
-            (watcher_target_real, watcher_target_mem),
         ] {
             real.patch_task(real_id, mark_done()).await.unwrap();
             wait_for!(rows_real

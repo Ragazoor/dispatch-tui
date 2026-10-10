@@ -1157,50 +1157,6 @@ fn a_claim_with_a_worktree_cannot_be_released() {
     );
 }
 
-/// Deleting a task takes its watchers with it, in the same transaction. A watch
-/// pointing at a task that no longer exists is not a row anybody can act on.
-#[test]
-fn deleting_a_task_takes_its_watchers_with_it() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    instance.call(
-        "seed_epics",
-        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
-    );
-    // Task 1 is `done`: this test is about watcher cleanup, not the delete
-    // guard, and task #4971's reducer guard refuses to delete an undone task
-    // (see `deleting_an_undone_task_is_refused_at_the_reducer`).
-    instance.call(
-        "seed_tasks",
-        &[&serde_json::json!([
-            task_json(1, "watched", "done", 1, ""),
-            task_json(2, "watcher", "backlog", 1, ""),
-        ])
-        .to_string()],
-    );
-    let seeded = instance.call(
-        "seed_task_watchers",
-        &[&serde_json::json!([{
-            "id": 1,
-            "watcher_task_id": 2,
-            "target_task_id": 1,
-            "created_at": "2026-09-19 10:00:00",
-        }])
-        .to_string()],
-    );
-    assert!(seeded.status.success(), "{}", describe(&seeded));
-
-    let deleted = instance.call("delete_task", &["1"]);
-    assert!(deleted.status.success(), "{}", describe(&deleted));
-
-    assert!(
-        no_rows(&instance, "SELECT id FROM task_watchers"),
-        "the watch must go with the task it pointed at"
-    );
-}
-
 /// **Test 3 of Phase 10 (task #4914).** A task's delete detaches its
 /// learnings (`source_task_id` set null, the learning survives as orphaned
 /// provenance) and cascades their retrievals — reproduced as explicit
@@ -1768,7 +1724,7 @@ fn mark_pr_learnings_gate_shown_wins_exactly_once() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 6c: feed ingestion, task watchers, and the stragglers
+// Phase 6c: feed ingestion and the stragglers
 // ---------------------------------------------------------------------------
 
 /// A feed item, already resolved the way the client resolves one before
@@ -2109,61 +2065,9 @@ fn delete_stale_subtree_feed_tasks_scopes_to_children_and_keeps_manual_tasks() {
     );
 }
 
-/// The same watch-row cleanup `deleting_a_task_takes_its_watchers_with_it`
-/// covers for `delete_task`, owed here too: `delete_stale_feed_tasks_in_epic`
-/// removes task rows directly rather than through `delete_task`, and was
-/// missing this cleanup — a pre-existing gap task #4971's design doc flagged.
-#[test]
-fn delete_stale_subtree_feed_tasks_takes_the_removed_tasks_watchers_with_it() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    instance.call(
-        "seed_epics",
-        &[&serde_json::json!([
-            epic_json(1, "parent", "backlog", 0),
-            epic_json(2, "child", "backlog", 1),
-        ])
-        .to_string()],
-    );
-    let mut stale = task_json(1, "stale", "backlog", 2, "");
-    stale["external_id"] = serde_json::json!("stale");
-    instance.call(
-        "seed_tasks",
-        &[&serde_json::json!([stale, task_json(2, "watcher", "backlog", 2, "")]).to_string()],
-    );
-    let seeded = instance.call(
-        "seed_task_watchers",
-        &[&serde_json::json!([{
-            "id": 1,
-            "watcher_task_id": 2,
-            "target_task_id": 1,
-            "created_at": "2026-09-19 10:00:00",
-        }])
-        .to_string()],
-    );
-    assert!(seeded.status.success(), "{}", describe(&seeded));
-
-    let deleted = instance.call(
-        "delete_stale_subtree_feed_tasks",
-        &["1", &serde_json::json!([]).to_string()],
-    );
-    assert!(deleted.status.success(), "{}", describe(&deleted));
-
-    assert!(
-        no_rows(&instance, "SELECT id FROM tasks WHERE id = 1"),
-        "the stale task must be removed"
-    );
-    assert!(
-        no_rows(&instance, "SELECT id FROM task_watchers"),
-        "a watch naming the removed stale task must go with it"
-    );
-}
-
 /// The same learning-detachment `deleting_a_task_detaches_its_learnings_and_cascades_their_retrievals`
-/// covers for `delete_task`, missing for the same reason as the watcher
-/// cleanup above.
+/// covers for `delete_task`, missing for the same reason `delete_task_side_effects`
+/// exists: each path that removes task rows must reproduce it.
 #[test]
 fn delete_stale_subtree_feed_tasks_detaches_the_removed_tasks_learnings() {
     if !spacetime_available_or_skip() {
@@ -2759,58 +2663,10 @@ fn batch_delete_deletes_a_task_and_an_epic_subtree_together() {
     );
 }
 
-/// The same watch-row cleanup `deleting_a_task_takes_its_watchers_with_it`
-/// covers for `delete_task`, owed here too: `delete_epic_subtree` removes
-/// task rows directly rather than through `delete_task`, and a second copy of
-/// the cleanup is how one of them drifts — a pre-existing gap task #4971's
-/// design doc flagged.
-#[test]
-fn deleting_an_epic_takes_its_subtasks_watchers_with_it() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    instance.call(
-        "seed_epics",
-        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
-    );
-    // `done`, not `backlog`: this test is about watcher cleanup, not the
-    // delete guard, and task #4971's server-side guard now refuses to delete
-    // a subtree holding an undone task (see
-    // `deleting_an_epic_with_an_undone_subtree_task_is_refused_at_the_reducer`).
-    instance.call(
-        "seed_tasks",
-        &[&serde_json::json!([
-            task_json(1, "watched", "done", 1, ""),
-            task_json(2, "watcher", "done", 1, ""),
-        ])
-        .to_string()],
-    );
-    let seeded = instance.call(
-        "seed_task_watchers",
-        &[&serde_json::json!([{
-            "id": 1,
-            "watcher_task_id": 2,
-            "target_task_id": 1,
-            "created_at": "2026-09-19 10:00:00",
-        }])
-        .to_string()],
-    );
-    assert!(seeded.status.success(), "{}", describe(&seeded));
-
-    let deleted = instance.call("delete_epic", &["1"]);
-    assert!(deleted.status.success(), "{}", describe(&deleted));
-
-    assert!(
-        no_rows(&instance, "SELECT id FROM task_watchers"),
-        "a watch pointing at (or from) a task inside the deleted epic must go with it"
-    );
-}
-
 /// The same learning-detachment
 /// `deleting_a_task_detaches_its_learnings_and_cascades_their_retrievals`
-/// covers for `delete_task`, missing for the same reason as the watcher
-/// cleanup above.
+/// covers for `delete_task`, missing for the same reason `delete_task_side_effects`
+/// exists: each path that removes task rows must reproduce it.
 #[test]
 fn deleting_an_epic_detaches_its_subtasks_learnings_and_cascades_their_retrievals() {
     if !spacetime_available_or_skip() {
@@ -3136,65 +2992,6 @@ fn create_managed_role_epic_is_idempotent_and_leaves_origin_manual() {
             "SELECT origin FROM epics WHERE feed_role = 'reviews'"
         ),
         "manual"
-    );
-}
-
-/// A watch is created once, is idempotent, and each delete method removes
-/// exactly the rows on its own side.
-#[test]
-fn task_watchers_are_idempotent_and_each_delete_targets_its_own_side() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    instance.call(
-        "seed_epics",
-        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
-    );
-    instance.call(
-        "seed_tasks",
-        &[&serde_json::json!([
-            task_json(1, "target", "backlog", 1, ""),
-            task_json(2, "watcher-a", "backlog", 1, ""),
-            task_json(3, "watcher-b", "backlog", 1, ""),
-        ])
-        .to_string()],
-    );
-
-    for _ in 0..2 {
-        let made = instance.call("create_task_watcher", &["2", "1"]);
-        assert!(made.status.success(), "{}", describe(&made));
-    }
-    instance.call("create_task_watcher", &["3", "1"]);
-    assert_eq!(
-        column(&instance, "SELECT count(*) AS c FROM task_watchers"),
-        "2",
-        "a repeated create must not duplicate the watch"
-    );
-
-    let removed = instance.call("delete_task_watcher", &["2", "1"]);
-    assert!(removed.status.success(), "{}", describe(&removed));
-    assert_eq!(
-        column(&instance, "SELECT count(*) AS c FROM task_watchers"),
-        "1",
-        "delete_task_watcher must remove only the named pair"
-    );
-
-    instance.call("create_task_watcher", &["2", "1"]);
-    let by_target = instance.call("delete_watches_of_target", &["1"]);
-    assert!(by_target.status.success(), "{}", describe(&by_target));
-    assert!(
-        no_rows(&instance, "SELECT id FROM task_watchers"),
-        "delete_watches_of_target must remove every watch pointed at it"
-    );
-
-    instance.call("create_task_watcher", &["2", "1"]);
-    instance.call("create_task_watcher", &["2", "3"]);
-    let by_watcher = instance.call("delete_watches_by_watcher", &["2"]);
-    assert!(by_watcher.status.success(), "{}", describe(&by_watcher));
-    assert!(
-        no_rows(&instance, "SELECT id FROM task_watchers"),
-        "delete_watches_by_watcher must remove every watch this task holds"
     );
 }
 

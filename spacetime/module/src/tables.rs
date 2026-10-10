@@ -184,14 +184,16 @@ pub struct Todo {
     pub owner: String,
 }
 
+/// Dead since the `watch_task` MCP tool was removed (task #53250): nothing reads
+/// or writes it. The table stays because the store refuses a publish that drops
+/// a table holding rows (`docs/specs/spacetime-seed.allium`); the `seed_task_watchers`
+/// reducer stays so a dump/import still carries the old rows across.
 #[spacetimedb::table(accessor = task_watchers, public)]
 #[derive(Clone, Debug)]
 pub struct TaskWatcher {
     #[primary_key]
     #[auto_inc]
     pub id: i64,
-    /// Both sides indexed: deleting a task removes the watches pointing at it
-    /// AND the ones it holds, which is two lookups rather than one scan.
     #[index(btree)]
     pub watcher_task_id: i64,
     #[index(btree)]
@@ -477,7 +479,7 @@ pub struct PollOwner {
     /// rule ever looks for.
     pub scope: String,
     /// The Task or Epic id this row names, per `scope`. No foreign key,
-    /// matching how `TaskWatcher`'s watcher/target ids are stored.
+    /// stored as a bare id.
     #[index(btree)]
     pub scope_id: i64,
     /// The owning `Host.id`.

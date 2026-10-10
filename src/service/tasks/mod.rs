@@ -6,7 +6,6 @@ mod crud;
 mod dispatch;
 mod params;
 mod validators;
-mod watchers;
 mod wrap_up;
 
 pub use crud::{
@@ -14,7 +13,6 @@ pub use crud::{
 };
 pub use dispatch::{DispatchClaim, DispatchOutcome, DispatchRequest};
 pub use params::{CreateTaskParams, ListTasksFilter, UpdateTaskParams};
-pub use watchers::SubscribeOutcome;
 pub use wrap_up::WrapUpRebaseOutcome;
 
 #[cfg(test)]

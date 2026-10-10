@@ -170,7 +170,7 @@ impl TaskService {
     /// Construct a `TaskService` with an explicitly chosen process runner.
     ///
     /// Required, not defaulted: `TaskService` really does shell out (see
-    /// `watchers.rs`), so a default would let a test silently touch the host.
+    /// `wrap_up.rs`), so a default would let a test silently touch the host.
     /// Tests pass `MockProcessRunner::unused`;
     /// production says so by name via
     /// [`new_with_real_runner`](Self::new_with_real_runner).
@@ -311,9 +311,6 @@ impl TaskService {
         };
         self.close_pr_on_done(task_id, prior.as_ref(), params.status, final_url);
 
-        self.notify_watchers_after_status_write(prior.as_ref(), params.status)
-            .await;
-
         self.apply_epic_follow_ups(
             task_id,
             &params,
@@ -426,10 +423,7 @@ impl TaskService {
         self.close_pr_on_done(task_id, Some(&prior), Some(status), prior.url.as_ref());
 
         // Everything past the write is infallible on purpose — see the doc
-        // comment. The one-shot watcher notice fires on the Done transition
-        // exactly as it does through `update_task`.
-        self.notify_watchers_after_status_write(Some(&prior), Some(status))
-            .await;
+        // comment.
         self.recalculate_epic_for_task(task_id).await;
         // PhoenixRespawn (tasks.allium), on the same terms: the rebase/done
         // branch lands in Done and respawns, the pr branch lands in Review and
@@ -444,8 +438,7 @@ impl TaskService {
     }
 
     /// `ClosePrOnDone` (`docs/specs/pr-workflow.allium`): one call site per
-    /// status-writing method, mirroring `notify_watchers_after_status_write`
-    /// right below it — derive from (prior, next), then act — rather than each
+    /// status-writing method — derive from (prior, next), then act — rather than each
     /// caller separately computing `pr_url_to_close` and separately guarding
     /// the close.
     ///
@@ -671,29 +664,6 @@ impl TaskService {
         }
     }
 
-    /// After a status-affecting write, notify watchers if `new_status` is the
-    /// finishing status (`Done`) the write actually transitioned into. Shared
-    /// by `update_task` and `close_session` so both callers funnel
-    /// through one call with one ordering relative to epic recalculation,
-    /// instead of each re-deriving this check. `prior` is the
-    /// task as fetched before the write — pass `None` when the caller didn't
-    /// need to fetch it (this no-ops immediately in that case, since a
-    /// finishing transition always requires `prior` to have been fetched).
-    async fn notify_watchers_after_status_write(
-        &self,
-        prior: Option<&Task>,
-        new_status: Option<TaskStatus>,
-    ) {
-        let Some(new_status) = new_status else {
-            return;
-        };
-        if new_status != TaskStatus::Done {
-            return;
-        }
-        let Some(prior) = prior else { return };
-        self.notify_watchers_if_finished(prior, new_status).await;
-    }
-
     /// Attach a plan file (by absolute path) to a task. Used by the `plan`
     /// CLI subcommand so plan attachment routes through the service like its
     /// siblings, rather than writing to the DB directly. Plan attachment
@@ -893,7 +863,7 @@ impl TaskService {
     }
 
     /// The delete pre-check (`DeleteTask`, tasks.allium): the store's TRUE row
-    /// must be done. Run before any teardown or watcher purge.
+    /// must be done. Run before any teardown.
     pub async fn ensure_deletable(&self, task_id: TaskId) -> Result<(), ServiceError> {
         let task = self.get_task(task_id).await?;
         if task.status != TaskStatus::Done {
@@ -907,35 +877,24 @@ impl TaskService {
     }
 
     pub async fn delete_task(&self, task_id: TaskId) -> Result<(), ServiceError> {
-        let task = self.get_task(task_id).await?;
-        self.notify_watchers_of_deletion(&task).await;
-
+        self.get_task(task_id).await?;
         self.db
             .delete_task(task_id)
             .await
             .map_err(ServiceError::from)
     }
 
-    /// `tasks.allium: BatchDelete`'s service-layer entry point. Notifies
-    /// watchers for every plain task exactly as [`Self::delete_task`] does per
-    /// item — an epic subtree's own subtasks are not walked here, same as
-    /// `delete_epic`'s own shape: the subtree is all done (the guard), so
-    /// task-watchers.allium: NotifyWatchersOnDelete owes them no notification,
-    /// and their watch rows are purged inside the store's own delete — then
-    /// performs every task and epic delete together in ONE atomic call. No status check here: the board's own `all_pass` check
-    /// (src/tui/update/selection.rs) is the responsive, explain-why pass, the
-    /// runtime's `pass_delete_guard` re-reads the store before any teardown or
-    /// purge, and the reducer is the final authority.
+    /// `tasks.allium: BatchDelete`'s service-layer entry point: performs every
+    /// task and epic delete together in ONE atomic call. No status check here:
+    /// the board's own `all_pass` check (src/tui/update/selection.rs) is the
+    /// responsive, explain-why pass, the runtime's `pass_delete_guard` re-reads
+    /// the store before any teardown or purge, and the reducer is the final
+    /// authority.
     pub async fn batch_delete(
         &self,
         task_ids: &[TaskId],
         epic_ids: &[EpicId],
     ) -> Result<(), ServiceError> {
-        for &task_id in task_ids {
-            if let Ok(task) = self.get_task(task_id).await {
-                self.notify_watchers_of_deletion(&task).await;
-            }
-        }
         self.db
             .batch_delete(task_ids, epic_ids)
             .await

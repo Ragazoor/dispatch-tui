@@ -404,7 +404,7 @@ rule DeletePackageFromBoard {
 ------------------------------------------------------------
 
 -- Agents are first-class users of packages: everything the board can do has
--- a tool. Four tools, in the merged style of update_tasks/watch_task:
+-- a tool. Four tools, in the merged style of update_tasks:
 --
 --   create_work_package(title, description?, link_task_ids?, link_epic_ids?)
 --       write. Creates the package (CreateWorkPackage) and links the given

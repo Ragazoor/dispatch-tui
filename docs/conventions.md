@@ -203,7 +203,7 @@ there is no routing layer or port trait between them (task #40967):
 
 | Part (a `Store` field) | Type (`src/sync/`) | Serves |
 |---|---|---|
-| `rows` | `SharedRows` | every read: tasks, epics, watchers, repo config, subscriptions, settings, learnings, usage, retired feed items |
+| `rows` | `SharedRows` | every read: tasks, epics, repo config, subscriptions, settings, learnings, usage, retired feed items |
 | `caller` | `ReducerCaller` (`SdkReducerCaller` in production) | every write, encoded by `sync::encode` |
 | `host_file_dir` | — (`src/host_file/mod.rs`) | the identity: `HostStore`, `IdentityCredentialStore` |
 

@@ -31,8 +31,8 @@ fn epic_svc(db: &Arc<dyn store::TaskStore>) -> EpicService {
 }
 
 /// Construct a `TaskService` with a caller-supplied `ProcessRunner` (e.g. a
-/// `MockProcessRunner`). Used by watch/finish notification tests to assert
-/// on tmux/file-system side effects deterministically.
+/// `MockProcessRunner`). Used by tests that assert on tmux/file-system
+/// side effects deterministically.
 fn task_svc_with_runner(
     db: &Arc<dyn store::TaskStore>,
     runner: Arc<dyn crate::process::ProcessRunner>,
@@ -76,5 +76,4 @@ mod crud;
 mod dispatch;
 mod property_tests;
 mod validators;
-mod watchers;
 mod wrap_up;

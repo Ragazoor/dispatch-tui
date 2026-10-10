@@ -86,6 +86,11 @@ use "./core.allium" as core
 -- module, never written, and a dump of any of them is always empty. They stay
 -- in this list because the store still holds them and
 -- "complete" means every table it holds.
+--
+-- A fourth, `task_watchers`, went dead with the watch_task MCP tool (task
+-- #53250). It stays for the same reason, but unlike the other three it may
+-- still hold rows written before the tool was removed: nothing reads or writes
+-- them any more, and a dump or import carries them across like any other row.
 enum SharedTable {
     tasks
     epics

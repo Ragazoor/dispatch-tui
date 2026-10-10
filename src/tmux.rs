@@ -160,12 +160,6 @@ fn is_resolved_target(target: &str) -> bool {
 /// uniformly is what [`set_window_dispatch_dir`]'s stderr sniff for
 /// "ambiguous" used to approximate for that one call.
 ///
-/// `pub(crate)` rather than private: [`crate::notify::notify_tmux`] resolves
-/// a window once and reuses the resolved pane id for both its `capture-pane`
-/// and `send-keys` calls, rather than letting each of those helpers
-/// independently re-run this lookup's `list-panes` subprocess for the exact
-/// same window on every notification.
-///
 /// # Why this one still takes `&str`
 ///
 /// It accepts *either* a window name *or* an already-resolved target
@@ -316,25 +310,14 @@ pub fn new_window_running(
 /// payload is typed into whatever Claude session receives it.
 pub fn send_keys(window: &TmuxWindow, keys: &str, runner: &dyn ProcessRunner) -> Result<()> {
     let target = window_target(window.as_str(), runner)?;
-    send_keys_at(&target, keys, runner)
-}
-
-/// [`send_keys`] against a target [`window_target`] has already resolved.
-///
-/// `pub(crate)` for [`crate::notify::notify_tmux`] alone, which resolves one
-/// window and drives both this and [`capture_pane`] from that single pane
-/// id rather than paying for the `list-panes` lookup twice per notification.
-/// Everything else goes through the [`TmuxWindow`]-typed wrappers, so the
-/// resolution step cannot be skipped by accident.
-pub(crate) fn send_keys_at(target: &str, keys: &str, runner: &dyn ProcessRunner) -> Result<()> {
     run_checked(
         runner,
-        &["send-keys", "-t", target, "-l", keys],
+        &["send-keys", "-t", &target, "-l", keys],
         "send-keys -l",
     )?;
     run_checked(
         runner,
-        &["send-keys", "-t", target, "Enter"],
+        &["send-keys", "-t", &target, "Enter"],
         "send-keys Enter",
     )?;
     Ok(())
@@ -1481,27 +1464,6 @@ pub fn pane_exists(pane_id: &str, runner: &dyn ProcessRunner) -> bool {
     list_all_pane_ids(runner)
         .map(|ids| ids.iter().any(|id| id == pane_id))
         .unwrap_or(false)
-}
-
-/// Capture the current on-screen content of `target`'s pane — exactly what a
-/// human attached to it would see right now, not scrollback history.
-///
-/// Takes a target [`window_target`] has already resolved, not a window name:
-/// its one caller, [`crate::notify::notify_tmux`], resolves the window once and
-/// drives both this and [`send_keys_at`] from that single pane id. A
-/// name-taking wrapper would have no callers — see [`send_keys`] for the shape
-/// used where both kinds of caller exist.
-///
-/// Used by [`crate::notify`] to decide whether a pane is showing its normal
-/// input surface before injecting keystrokes into it — see
-/// `docs/superpowers/specs/2026-08-15-send-message-delivery-hardening-design.md`
-/// for the reproduction this exists to guard against.
-pub(crate) fn capture_pane(target: &str, runner: &dyn ProcessRunner) -> Result<String> {
-    run_checked_stdout(
-        runner,
-        &["capture-pane", "-p", "-t", target],
-        "capture-pane",
-    )
 }
 
 // ---------------------------------------------------------------------------

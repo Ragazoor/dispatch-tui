@@ -1,4 +1,4 @@
-//! Agent session state: subagents, hooks, task watchers, poll ownership and the host registry.
+//! Agent session state: subagents, hooks, poll ownership and the host registry.
 
 use super::*;
 
@@ -26,95 +26,6 @@ pub(crate) fn delete_agent_state_for(ctx: &ReducerContext, task_id: i64) {
     {
         ctx.db.task_subagents().delete(row);
     }
-}
-
-// -- Task watchers ------------------------------------------------------------
-
-/// Insert a watch: `watcher_task_id` wants to be notified when
-/// `target_task_id` finishes or is deleted first. Idempotent — inserting an
-/// existing (watcher, target) pair is a no-op, checked by hand since the
-/// module's `task_watchers` carries no uniqueness index over the pair (unlike
-/// SQLite's `INSERT OR IGNORE`). Race-free for the same reason
-/// [`create_repo_group_sub_epic`] below needs no index either: reducers run
-/// one at a time.
-#[spacetimedb::reducer]
-pub fn create_task_watcher(
-    ctx: &ReducerContext,
-    watcher_task_id: i64,
-    target_task_id: i64,
-) -> Result<(), String> {
-    let exists = ctx
-        .db
-        .task_watchers()
-        .watcher_task_id()
-        .filter(&watcher_task_id)
-        .any(|w| w.target_task_id == target_task_id);
-    if !exists {
-        ctx.db.task_watchers().insert(TaskWatcher {
-            id: 0,
-            watcher_task_id,
-            target_task_id,
-            created_at: now(ctx),
-        });
-    }
-    Ok(())
-}
-
-/// Delete every `task_watchers` row in `ids`. Shared tail of the three
-/// deletes below, which differ only in which index picks `ids`.
-pub(crate) fn delete_watcher_rows(ctx: &ReducerContext, ids: Vec<i64>) {
-    for id in ids {
-        ctx.db.task_watchers().id().delete(id);
-    }
-}
-
-/// Remove a specific watch. Idempotent — no-op if it doesn't exist.
-#[spacetimedb::reducer]
-pub fn delete_task_watcher(
-    ctx: &ReducerContext,
-    watcher_task_id: i64,
-    target_task_id: i64,
-) -> Result<(), String> {
-    let ids: Vec<i64> = ctx
-        .db
-        .task_watchers()
-        .watcher_task_id()
-        .filter(&watcher_task_id)
-        .filter(|w| w.target_task_id == target_task_id)
-        .map(|w| w.id)
-        .collect();
-    delete_watcher_rows(ctx, ids);
-    Ok(())
-}
-
-/// Remove every watch where `target_task_id` is the target. Called after
-/// firing finish/delete notifications for that target.
-#[spacetimedb::reducer]
-pub fn delete_watches_of_target(ctx: &ReducerContext, target_task_id: i64) -> Result<(), String> {
-    let ids: Vec<i64> = ctx
-        .db
-        .task_watchers()
-        .target_task_id()
-        .filter(&target_task_id)
-        .map(|w| w.id)
-        .collect();
-    delete_watcher_rows(ctx, ids);
-    Ok(())
-}
-
-/// Remove every watch where `watcher_task_id` is the watcher. Called when the
-/// watcher itself is deleted.
-#[spacetimedb::reducer]
-pub fn delete_watches_by_watcher(ctx: &ReducerContext, watcher_task_id: i64) -> Result<(), String> {
-    let ids: Vec<i64> = ctx
-        .db
-        .task_watchers()
-        .watcher_task_id()
-        .filter(&watcher_task_id)
-        .map(|w| w.id)
-        .collect();
-    delete_watcher_rows(ctx, ids);
-    Ok(())
 }
 
 // -- Hosts and subscriptions ------------------------------------------------

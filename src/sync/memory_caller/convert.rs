@@ -205,16 +205,6 @@ mirror!(
 );
 
 mirror!(
-    module::TaskWatcher,
-    bindings::TaskWatcher {
-        id,
-        watcher_task_id,
-        target_task_id,
-        created_at
-    }
-);
-
-mirror!(
     module::PollOwner,
     bindings::PollOwner {
         id,

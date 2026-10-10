@@ -479,7 +479,7 @@ impl TuiRuntime {
     }
 
     pub(super) async fn exec_delete_task(&self, id: TaskId) {
-        // Before the service purges watcher rows: a refusal touches nothing.
+        // A refusal touches nothing: the guard runs before the service deletes.
         if !self
             .pass_delete_guard(&crate::tui::commands::DeleteGuard::Task(id))
             .await
@@ -493,7 +493,7 @@ impl TuiRuntime {
 
     /// The delete pre-check (`DeleteTask`/`DeleteEpic`/`BatchDelete` in
     /// tasks.allium and epics.allium): re-read the store's TRUE rows, not the
-    /// board's view, before any teardown or watcher purge. Returns `false`
+    /// board's view, before any teardown or purge. Returns `false`
     /// after reporting a `DeleteRefused` — the caller must then do nothing.
     /// A row already gone passes: there is nothing left to protect, and any
     /// teardown it still owes is the cleanup's to do.

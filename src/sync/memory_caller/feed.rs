@@ -12,7 +12,7 @@ use super::super::writes::ReducerOutcome;
 use super::{MemoryReducerCaller, Tables, MAX_EPIC_DEPTH};
 
 impl MemoryReducerCaller {
-    /// `delete_watcher_rows`'s `retired_feed_items` twin — shared by
+    /// The `retired_feed_items` delete helper — shared by
     /// `drop_retired_feed_items_for_epics` and `drop_closed_retired_feed_items`,
     /// which otherwise repeated this identical remove-and-notify loop.
     pub(super) fn remove_retired_feed_item_rows(&self, tables: &mut Tables, ids: Vec<i64>) {

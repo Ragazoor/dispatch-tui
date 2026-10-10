@@ -1275,18 +1275,18 @@ entity PrPollState {
 -- renews. This is not an oversight — a TTL/lease design was proposed and
 -- rejected: the people sharing a board are collaborators, not unreliable
 -- infrastructure a watchdog needs to route around, so a claim stays valid
--- for as long as it is useful and is only ever moved by an explicit human
--- (or agent) action — see pr-workflow.allium: OverridePrPollOwner and
--- feeds.allium: OverrideFeedOwner. A task WITH a worktree never gets a row
+-- for as long as it is useful. Only an epic-scope row can be moved, and only
+-- by an explicit human action — see feeds.allium: OverrideFeedOwner. A
+-- task-scope row has no override (the override_poll_owner MCP tool that
+-- carried one was removed). A task WITH a worktree never gets a row
 -- here: `task.host` already answers "who owns this?" unambiguously and for
 -- free, and duplicating that answer in a second table is a second place for
 -- it to disagree.
 entity PollOwner {
     scope: task | epic     -- which kind of scope_id this row names
     scope_id: Integer      -- the Task or Epic id, per `scope`. No foreign
-                            -- key, matching how TaskWatcher's watcher/target
-                            -- ids are stored (task-watchers.allium) rather
-                            -- than referencing Task or Epic directly.
+                            -- key: the id is stored rather than referencing
+                            -- Task or Epic directly.
     host: Host
     claimed_at: Timestamp  -- audit only; no rule reads this to decide
                            -- anything, unlike PrPollState's next_poll_at
@@ -1301,10 +1301,10 @@ entity PollOwner {
 
     @guidance
         -- Claiming (first host to see an eligible scope with no row) and
-        -- overriding (a human/agent reassigning an existing row) are both
-        -- specified where they are consumed, not here: PollPrStatus and
-        -- OverridePrPollOwner in pr-workflow.allium for the task scope,
-        -- FeedTick and OverrideFeedOwner in feeds.allium for the epic scope.
+        -- overriding (a human reassigning an existing epic-scope row) are
+        -- specified where they are consumed, not here: PollPrStatus in
+        -- pr-workflow.allium for the task scope, FeedTick and
+        -- OverrideFeedOwner in feeds.allium for the epic scope.
         -- This file owns the shape of the row, not the write rules, matching
         -- this file's own excluded scope ("Excludes: Rules").
 }

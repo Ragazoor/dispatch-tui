@@ -142,13 +142,12 @@ struct Rows {
     /// Telemetry (Phase 11, task #4915). Unconditionally subscribed, like
     /// `learnings` above — nothing here is scoped by owner or host.
     usage_events: BTreeMap<i64, UsageEventRow>,
-    /// The three tables the store's task, subscription and settings reads need
+    /// The tables the store's task, subscription and settings reads need
     /// beyond the ones above (task #4916). None carries a sentinel, an enum or a timestamp a reader
     /// interprets, so they are held as the store sends them.
     ///
     /// `settings` arrives already scoped to this host by the subscription's
     /// `WHERE host = …`, so nothing here filters by host.
-    task_watchers: BTreeMap<i64, bindings::TaskWatcher>,
     subscriptions: BTreeMap<String, bindings::Subscription>,
     settings: BTreeMap<String, bindings::Setting>,
     /// Task #4971. Unconditionally subscribed, like `learnings`/`usage_events`
@@ -172,7 +171,6 @@ impl Rows {
             && self.learnings.is_empty()
             && self.learning_retrievals.is_empty()
             && self.usage_events.is_empty()
-            && self.task_watchers.is_empty()
             && self.subscriptions.is_empty()
             && self.settings.is_empty()
             && self.retired_feed_items.is_empty()
@@ -418,17 +416,6 @@ impl SharedRows {
         self.write(|rows| rows.usage_events.remove(&id).is_some());
     }
 
-    pub fn upsert_task_watcher(&self, row: &bindings::TaskWatcher) {
-        self.write(|rows| {
-            rows.task_watchers.insert(row.id, row.clone());
-            true
-        });
-    }
-
-    pub fn remove_task_watcher(&self, id: i64) {
-        self.write(|rows| rows.task_watchers.remove(&id).is_some());
-    }
-
     pub fn upsert_subscription(&self, row: &bindings::Subscription) {
         self.write(|rows| {
             rows.subscriptions.insert(row.id.clone(), row.clone());
@@ -671,17 +658,6 @@ impl SharedRows {
             out.sort_by(|a, b| b.last_used.cmp(&a.last_used).then(b.id.cmp(&a.id)));
             out.into_iter()
                 .map(|row| (row.repo_path.clone(), row.branch.clone()))
-                .collect()
-        })
-    }
-
-    /// The watchers of `target`, ordered by watch id.
-    pub fn watchers_of(&self, target: TaskId) -> Vec<TaskId> {
-        self.read(|rows| {
-            rows.task_watchers
-                .values()
-                .filter(|w| w.target_task_id == target.0)
-                .map(|w| TaskId(w.watcher_task_id))
                 .collect()
         })
     }

@@ -540,8 +540,7 @@ rule PhoenixRespawn {
         -- EditTask, ExitSession's rebase and done branches, and PrMerged (both
         -- in pr-workflow.allium). transitions_to fires only on an actual change
         -- of value, so a no-op patch that rewrites done over done never
-        -- re-fires — the same property DetectTaskDone relies on
-        -- (task-watchers.allium).
+        -- re-fires.
         --
         -- Where it hooks. core/Task.status has exactly two writing paths in the
         -- service layer, TaskService::update_task and TaskService::close_session
@@ -564,8 +563,7 @@ rule PhoenixRespawn {
         -- this rule even without the precondition. The precondition is what
         -- makes the exemption a decision instead of an accident, and it also
         -- covers a feed row completed by hand from the TUI, which DOES reach
-        -- here. Same bypass, same reasoning, as the known limitation recorded
-        -- under "Feed-Synced Auto-Completion" in task-watchers.allium.
+        -- here.
         --
         -- WhatTheSuccessorInherits. Everything the operator configured, and
         -- nothing the previous run produced. Carried across: title (verbatim,
@@ -1350,7 +1348,6 @@ rule DeleteTask {
     ensures:
         if released:
             not exists task
-            TaskRowRemoved(task)
             if retires and not core/RetiredFeedItems.any(r => r.feed_epic = feed_epic and r.external_id = task.external_id):
                 core/RetiredFeedItem.created(
                     feed_epic:   feed_epic,
@@ -1397,15 +1394,13 @@ rule DeleteTask {
         -- PRE-CHECK BEFORE ANY SIDE EFFECT (task #8198). The reducer guard
         -- alone refuses too late: the delete flow has client-side side
         -- effects that run before the row delete is issued — TaskTeardown
-        -- (tmux window killed, worktree removed, branch deleted) and the
-        -- purge of this task's `task_watchers` rows (task-watchers.allium:
-        -- NotifyWatchersOnDelete), each its own already-committed effect.
-        -- So before ANY of them starts, the delete flow re-reads this task's
+        -- (tmux window killed, worktree removed, branch deleted), each its
+        -- own already-committed effect. So before ANY of them starts, the delete flow re-reads this task's
         -- TRUE status from the store — not the board's subscription view,
         -- which is the very reading that may be stale — and proceeds only if
         -- it is done. A failed pre-check refuses the delete with an error
         -- (DeleteTaskRefused below) and touches NOTHING: no teardown, no
-        -- watch-row purge, no row removal, no retirement. Because the board
+        -- row removal, no retirement. Because the board
         -- dropped the card optimistically when the delete was issued, a
         -- refusal also refreshes the board from the store, so the card the
         -- operator is told was not deleted is back on screen. A passing
@@ -1416,8 +1411,7 @@ rule DeleteTask {
         -- covers is stated precisely: the pre-check read and the reducer
         -- call are two separate trips to the store, so a task reopened on
         -- another board BETWEEN them passes the pre-check and is then
-        -- refused by the reducer — after its teardown and watch-row purge
-        -- have already run. That narrow race is the one case left in which a
+        -- refused by the reducer — after its teardown has already run. That narrow race is the one case left in which a
         -- refusal can follow side effects; there the reducer still
         -- guarantees the row and its RetiredFeedItem survive. Outside it,
         -- "no side effects on refusal" holds in full. DeleteEpic
@@ -1487,7 +1481,7 @@ rule DeleteTaskRefused {
     when: DeleteTask(task)
 
     -- Evaluated over the store's TRUE row (DeleteTask's pre-check), before
-    -- any teardown or watch-row purge begins.
+    -- any teardown begins.
     requires: task.status != done
 
     ensures:
@@ -1498,8 +1492,7 @@ rule DeleteTaskRefused {
 
     @guidance
         -- The refusal arm of DeleteTask's pre-check: the row, its worktree,
-        -- tmux window, branch and `task_watchers` rows are all left as they
-        -- are, and the board is refreshed from the store to restore the card
+        -- tmux window and branch are all left as they are, and the board is refreshed from the store to restore the card
         -- it dropped optimistically. See DeleteTask's guidance for the one
         -- narrow race (a reopen between the pre-check and the reducer call)
         -- in which a refusal can still follow a teardown.
@@ -1540,7 +1533,6 @@ rule BatchDelete {
             -- A task inside a selected epic's subtree went with that epic.
             for task in tasks where not epics.any(e => e.subtree_tasks.contains(task)):
                 not exists task
-                TaskRowRemoved(task)
                 if task.external_id != null
                    and task.epic != null
                    and task.epic.nearest_feed_epic != null
@@ -1596,20 +1588,18 @@ rule BatchDelete {
         --
         -- Pre-check before any teardown, all-or-nothing (task #8198). The
         -- atomic reducer validates too late on its own: every item's
-        -- teardown and every plain task's watch-row purge would already have
-        -- run by the time it refuses. So, as for DeleteTask and DeleteEpic,
+        -- teardown would already have run by the time it refuses. So, as for DeleteTask and DeleteEpic,
         -- `all_pass` is first evaluated over the TRUE state re-read from the
         -- store — every selected task, and every task in every selected
-        -- epic's subtree — before ANY item's teardown or purge starts. One
+        -- epic's subtree — before ANY item's teardown starts. One
         -- failing item refuses the whole batch with an error and touches
-        -- nothing for ANY item: no teardown, no watch-row purge, no row
-        -- removal, no retirement; the board is refreshed from the store to
+        -- nothing for ANY item: no teardown, no row removal, no retirement; the board is refreshed from the store to
         -- restore the cards it dropped optimistically. Only when every item
         -- passes do the teardowns fire and the one atomic call follow. The
         -- `batch_delete` reducer stays the final authority, and the same
         -- narrow race DeleteTask's guidance states applies batch-wide: an
         -- item reopened between the pre-check and the reducer call gets the
-        -- whole batch refused after the teardowns and purges have run.
+        -- whole batch refused after the teardowns have run.
         --
         -- The count prompt comes first and the per-item check runs when the
         -- user answers y: a refused batch is reported after confirmation, not
@@ -1901,7 +1891,7 @@ rule EditTask {
 -- Resolved 2026-09-28 (task #4971, final iteration): "reducer guard refuses
 -- too late" — first accepted as a known limitation, then decided in task
 -- #8198: "pre-check first". DeleteTask, DeleteEpic and BatchDelete re-read
--- the true status from the store before any teardown or watch-row purge, and
+-- the true status from the store before any teardown, and
 -- a failed pre-check touches nothing (DeleteTaskRefused). The only residual is
 -- the race between the pre-check read and the reducer call, stated in
 -- DeleteTask's guidance.

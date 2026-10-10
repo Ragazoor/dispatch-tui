@@ -8,7 +8,7 @@ The registry is **generated**. `tool_definitions()`, the `tools/call` dispatch a
 
    Build errors, not JSON-RPC errors, are the goal here: an args struct's field types are the only thing standing between a mistyped handler and a `-32602` the caller only sees at run time.
 
-2. **Define the handler** in the module matching the tool's domain (`src/mcp/handlers/tasks/crud.rs`, `tasks/dispatch.rs`, `tasks/wrap_up.rs`, `tasks/watch.rs`, `epics.rs`, `learnings.rs`, `managed_feeds.rs`). The signature is fixed by the macro:
+2. **Define the handler** in the module matching the tool's domain (`src/mcp/handlers/tasks/crud.rs`, `tasks/dispatch.rs`, `tasks/wrap_up.rs`, `epics.rs`, `learnings.rs`, `managed_feeds.rs`). The signature is fixed by the macro:
 
    ```rust
    pub(crate) async fn handle_my_tool(

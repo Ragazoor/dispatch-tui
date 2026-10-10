@@ -76,7 +76,7 @@ pub enum CleanupFollowUp {
 }
 
 /// What a delete must still hold of the store's TRUE rows before any
-/// client-side side effect (teardown, watcher purge) runs. Carried by the
+/// client-side side effect (teardown) runs. Carried by the
 /// teardown commands a delete emits so the runtime can refuse, touching
 /// nothing, when a stale board view let a not-done delete through. See the
 /// pre-check paragraph of `DeleteTask` in docs/specs/tasks.allium.

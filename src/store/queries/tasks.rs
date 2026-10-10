@@ -410,46 +410,6 @@ impl TaskCrud for Store {
             .applied()
     }
 
-    async fn create_task_watcher(
-        &self,
-        watcher_task_id: TaskId,
-        target_task_id: TaskId,
-    ) -> Result<()> {
-        self.caller
-            .create_task_watcher(watcher_task_id, target_task_id)
-            .await?
-            .applied()
-    }
-
-    async fn delete_task_watcher(
-        &self,
-        watcher_task_id: TaskId,
-        target_task_id: TaskId,
-    ) -> Result<()> {
-        self.caller
-            .delete_task_watcher(watcher_task_id, target_task_id)
-            .await?
-            .applied()
-    }
-
-    async fn list_watchers_of(&self, target_task_id: TaskId) -> Result<Vec<TaskId>> {
-        Ok(self.rows.watchers_of(target_task_id))
-    }
-
-    async fn delete_watches_of_target(&self, target_task_id: TaskId) -> Result<()> {
-        self.caller
-            .delete_watches_of_target(target_task_id)
-            .await?
-            .applied()
-    }
-
-    async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<()> {
-        self.caller
-            .delete_watches_by_watcher(watcher_task_id)
-            .await?
-            .applied()
-    }
-
     // Retired feed items.
     async fn retired_without_task(
         &self,

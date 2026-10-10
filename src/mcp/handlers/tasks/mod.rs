@@ -20,7 +20,6 @@ mod crud;
 // (a task whose epic_id does not resolve — blocked by a foreign key).
 pub(super) mod dispatch;
 mod verify;
-mod watch;
 mod wrap_up;
 
 pub(super) use crud::{
@@ -28,7 +27,6 @@ pub(super) use crud::{
 };
 pub(super) use dispatch::handle_dispatch_task;
 pub(super) use verify::handle_set_verify_command;
-pub(super) use watch::handle_watch_task;
 pub(super) use wrap_up::{handle_exit_session, handle_wrap_up};
 
 // ---------------------------------------------------------------------------
@@ -266,16 +264,6 @@ pub(super) struct ExitSessionArgs {
 pub(super) struct SetVerifyCommandArgs {
     pub(super) repo_path: String,
     pub(super) command: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct WatchTaskArgs {
-    #[serde(deserialize_with = "deserialize_flexible_id")]
-    pub(super) watcher_task_id: TaskId,
-    #[serde(deserialize_with = "deserialize_flexible_id")]
-    pub(super) target_task_id: TaskId,
-    pub(super) watch: bool,
 }
 
 #[derive(Deserialize)]

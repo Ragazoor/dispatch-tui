@@ -333,20 +333,6 @@ pub trait ReducerCaller: Send + Sync {
         created_by: String,
     ) -> Result<EpicId>;
 
-    // -- Task watchers ---------------------------------------------------------
-    async fn create_task_watcher(
-        &self,
-        watcher_task_id: TaskId,
-        target_task_id: TaskId,
-    ) -> Result<ReducerOutcome>;
-    async fn delete_task_watcher(
-        &self,
-        watcher_task_id: TaskId,
-        target_task_id: TaskId,
-    ) -> Result<ReducerOutcome>;
-    async fn delete_watches_of_target(&self, target_task_id: TaskId) -> Result<ReducerOutcome>;
-    async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<ReducerOutcome>;
-
     // -- Work packages (`work-packages.allium`) ----------------------------------
     /// Insert a work package and answer with the id the store generated.
     async fn create_work_package(&self, row: bindings::WorkPackage) -> Result<WorkPackageId>;

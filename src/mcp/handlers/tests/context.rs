@@ -1551,3 +1551,24 @@ async fn every_listed_entry_is_readable() {
         read_content(&resp, &uri);
     }
 }
+
+/// Task 53250: `watch_task` and `override_poll_owner` were removed from the
+/// MCP surface; the neighbouring tools stay.
+#[tokio::test]
+async fn tools_list_omits_removed_watch_and_poll_owner_tools() {
+    let state = test_state().await;
+    let resp = call(&state, "tools/list", None).await;
+    let result = resp.result.expect("tools/list must succeed");
+    let names: Vec<&str> = result["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t["name"].as_str())
+        .collect();
+    for removed in ["watch_task", "override_poll_owner"] {
+        assert!(!names.contains(&removed), "{removed} must not be listed");
+    }
+    for kept in ["read_context", "create_work_package"] {
+        assert!(names.contains(&kept), "{kept} must still be listed");
+    }
+}

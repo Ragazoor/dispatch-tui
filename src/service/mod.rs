@@ -26,8 +26,8 @@ pub use services::Services;
 pub use tasks::wrap_up_block_message;
 pub use tasks::{
     CloseSessionOutcome, ClosedSession, CreateTaskParams, DispatchClaim, DispatchOutcome,
-    DispatchRequest, ListTasksFilter, SubscribeOutcome, TaskService, UpdateTaskParams,
-    UpdateTaskResult, WrapUpRebaseOutcome,
+    DispatchRequest, ListTasksFilter, TaskService, UpdateTaskParams, UpdateTaskResult,
+    WrapUpRebaseOutcome,
 };
 pub use usage::record_usage_event_logged;
 pub use work_packages::{

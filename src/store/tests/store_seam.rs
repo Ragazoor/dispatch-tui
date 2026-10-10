@@ -48,17 +48,6 @@ async fn the_store_reaches_every_shared_table() {
         .unwrap();
     assert!(shared.get_task(task_id).await.is_some());
 
-    // task_watchers
-    let watcher = make_task(&db, "Watcher").await;
-    shared
-        .create_task_watcher(watcher.id, task_id)
-        .await
-        .unwrap();
-    assert_eq!(
-        shared.list_watchers_of(task_id).await.unwrap(),
-        [watcher.id]
-    );
-
     // task_subagents
     let now = chrono::Utc::now();
     assert_eq!(

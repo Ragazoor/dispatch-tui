@@ -72,12 +72,6 @@ pub(in crate::sync) fn subscription_queries(
         // travels in them, so the containment claim above is untouched.
         "SELECT * FROM repo_paths".to_string(),
         "SELECT * FROM repo_base_branches".to_string(),
-        // Who is watching which task (`task-watchers.allium`). Unfiltered,
-        // like the repo lists: a row is two task ids and a timestamp, and a
-        // watch on a task this board holds may have been placed by a watcher
-        // task it does not, so there is nothing narrower to ask for that
-        // would still deliver every watch the fan-out needs.
-        "SELECT * FROM task_watchers".to_string(),
         // Settings (`docs/specs/settings.allium`). Scoped by HOST, not by
         // owner: a setting is this machine's own, and
         // host is known even before an identity settles, unlike everything
@@ -102,7 +96,7 @@ pub(in crate::sync) fn subscription_queries(
         // person's grouping of their own work, so it is scoped to its creator,
         // the way `own_creations` scopes epics above.
         format!("SELECT * FROM work_packages WHERE created_by = '{owner}'"),
-        // Their links, unfiltered, like `task_watchers`: a row is two ids and
+        // Their links, unfiltered, like the repo lists: a row is two ids and
         // a kind, and the store's SQL cannot join it to the packages above to
         // narrow it. A link whose package or item this board does not hold
         // draws nothing (`work-packages.allium: PackageViewCards`).

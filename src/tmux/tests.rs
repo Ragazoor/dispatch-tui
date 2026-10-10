@@ -1731,22 +1731,6 @@ fn pane_exists_returns_false_on_runner_error() {
     assert!(!pane_exists("%42", &mock));
 }
 
-// --- capture_pane ---
-
-#[test]
-fn capture_pane_issues_correct_args_against_the_resolved_target() {
-    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"hello\n")])
-        .with_windows(&["task-42"]);
-    let result = capture_pane(&mock.pane_id_of("task-42"), &mock).unwrap();
-    assert_eq!(result, "hello");
-    let calls = mock.recorded_calls();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(
-        calls[0].1,
-        vec!["capture-pane", "-p", "-t", &mock.pane_id_of("task-42")]
-    );
-}
-
 // --- set_focus_events failure ---
 
 #[test]

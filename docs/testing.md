@@ -28,8 +28,7 @@ cargo test --test tmux_diff_pane          # real tmux: agent-tree diff pane geom
 That is a **selection**, not the full inventory — `tests/` also holds
 `active_health.rs`, `caller_identity.rs`, `ci_gates.rs`,
 `dispatch_status_lifecycle.rs`, `feed_sync.rs`, `githooks.rs`,
-`managed_feeds.rs`, `task_watchers.rs`,
-`tmux_send_message_pane_state.rs`, `trajectory.rs`, and `verify_command.rs`.
+`managed_feeds.rs`, `trajectory.rs`, and `verify_command.rs`.
 `ls tests/` is the authority; this list is a shortcut for the targets you reach
 for most.
 

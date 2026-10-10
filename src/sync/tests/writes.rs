@@ -78,10 +78,6 @@ enum Sent {
     DropClosedRetiredFeedItems(i64, Vec<String>),
     CreateRepoGroupSubEpic(i64, String, String),
     CreateManagedRoleEpic(String, i64, String, String, i64, String),
-    CreateTaskWatcher(i64, i64),
-    DeleteTaskWatcher(i64, i64),
-    DeleteWatchesOfTarget(i64),
-    DeleteWatchesByWatcher(i64),
     BatchPatchSubStatus(usize),
     RespawnPhoenixSuccessor(i64, Box<bindings::Task>),
     RegisterHost(String, String, String),
@@ -634,42 +630,6 @@ impl ReducerCaller for RecordingCaller {
         Ok(EpicId(9))
     }
 
-    async fn create_task_watcher(
-        &self,
-        watcher_task_id: TaskId,
-        target_task_id: TaskId,
-    ) -> anyhow::Result<ReducerOutcome> {
-        let watcher_task_id = watcher_task_id.0;
-        let target_task_id = target_task_id.0;
-        self.answer(Sent::CreateTaskWatcher(watcher_task_id, target_task_id))
-    }
-
-    async fn delete_task_watcher(
-        &self,
-        watcher_task_id: TaskId,
-        target_task_id: TaskId,
-    ) -> anyhow::Result<ReducerOutcome> {
-        let watcher_task_id = watcher_task_id.0;
-        let target_task_id = target_task_id.0;
-        self.answer(Sent::DeleteTaskWatcher(watcher_task_id, target_task_id))
-    }
-
-    async fn delete_watches_of_target(
-        &self,
-        target_task_id: TaskId,
-    ) -> anyhow::Result<ReducerOutcome> {
-        let target_task_id = target_task_id.0;
-        self.answer(Sent::DeleteWatchesOfTarget(target_task_id))
-    }
-
-    async fn delete_watches_by_watcher(
-        &self,
-        watcher_task_id: TaskId,
-    ) -> anyhow::Result<ReducerOutcome> {
-        let watcher_task_id = watcher_task_id.0;
-        self.answer(Sent::DeleteWatchesByWatcher(watcher_task_id))
-    }
-
     async fn create_work_package(
         &self,
         row: bindings::WorkPackage,
@@ -1053,7 +1013,7 @@ async fn a_board_with_no_identity_cannot_create_a_task_in_an_epic_either() {
     assert!(caller.sent().is_empty());
 }
 
-/// A delete names its row and nothing else. The cascade — watchers, shells,
+/// A delete names its row and nothing else. The cascade — shells,
 /// subagents — is the store's, inside the same transaction, because a client
 /// doing it in several calls could be interrupted between them.
 #[tokio::test]
@@ -1777,7 +1737,7 @@ fn at() -> chrono::DateTime<chrono::Utc> {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 6c: feed ingestion, task watchers, and the stragglers
+// Phase 6c: feed ingestion and the stragglers
 // ---------------------------------------------------------------------------
 
 /// A feed-managed task row in `epic`, as the subscription would deliver it.
@@ -1993,34 +1953,6 @@ async fn create_managed_role_epic_stamps_the_identity_and_returns_the_id() {
             300,
             "user-me".to_string()
         )]
-    );
-}
-
-/// The four watcher methods are plain applied-or-refused calls — no id, no
-/// read-back.
-#[tokio::test]
-async fn task_watcher_methods_are_plain_applied_calls() {
-    let (writer, caller) = writer_with(RecordingCaller::returning(&[]));
-
-    writer
-        .create_task_watcher(TaskId(1), TaskId(2))
-        .await
-        .unwrap();
-    writer
-        .delete_task_watcher(TaskId(1), TaskId(2))
-        .await
-        .unwrap();
-    writer.delete_watches_of_target(TaskId(2)).await.unwrap();
-    writer.delete_watches_by_watcher(TaskId(1)).await.unwrap();
-
-    assert_eq!(
-        caller.sent(),
-        vec![
-            Sent::CreateTaskWatcher(1, 2),
-            Sent::DeleteTaskWatcher(1, 2),
-            Sent::DeleteWatchesOfTarget(2),
-            Sent::DeleteWatchesByWatcher(1),
-        ]
     );
 }
 
@@ -2327,10 +2259,6 @@ async fn every_store_mutation_reaches_the_transport() {
     .await
     .unwrap();
 
-    db.create_task_watcher(TaskId(1), TaskId(2)).await.unwrap();
-    db.delete_task_watcher(TaskId(1), TaskId(2)).await.unwrap();
-    db.delete_watches_of_target(TaskId(2)).await.unwrap();
-    db.delete_watches_by_watcher(TaskId(1)).await.unwrap();
     db.batch_patch_sub_status(&[(TaskId(1), SubStatus::Active)])
         .await
         .unwrap();
@@ -2446,10 +2374,6 @@ async fn every_store_mutation_reaches_the_transport() {
             "DropClosedRetiredFeedItems",
             "CreateRepoGroupSubEpic",
             "CreateManagedRoleEpic",
-            "CreateTaskWatcher",
-            "DeleteTaskWatcher",
-            "DeleteWatchesOfTarget",
-            "DeleteWatchesByWatcher",
             "BatchPatchSubStatus",
             "RespawnPhoenixSuccessor",
             "ClaimPollOwner",

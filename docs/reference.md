@@ -543,7 +543,7 @@ writes there and never stops it. Spec: `docs/specs/spacetime-seed.allium`
   store holds is refused, because copying a live commit log can capture it
   half-written. Name that store's address instead.
 - **Add-only, so safe to re-run.** A row whose key is already in the target
-  stays as the target has it; a repo, base branch, watch or setting is also
+  stays as the target has it; a repo, base branch, watch (a dead table, see `docs/specs/spacetime-seed.allium`) or setting is also
   "already there" by its natural key. Nothing is overwritten or deleted, ids are
   never remapped, and a second run reports `imported 0`.
 - **Every shared table** crosses, not only tasks and epics. Ownership columns

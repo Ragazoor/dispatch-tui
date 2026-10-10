@@ -2408,37 +2408,3 @@ async fn role_routed_group_by_repo_creates_no_repo_sub_epic_for_a_retired_item()
         .await
         .is_empty());
 }
-
-/// NotifyWatchersOnDelete fires on TaskRowRemoved, which a feed purge now
-/// produces (UpsertFeedTasks' stale delete). The removed task's watch rows
-/// must not be left dangling (task-watchers.allium; the design doc's
-/// "pre-existing gap fixed in passing").
-#[tokio::test]
-async fn mirror_sync_purge_leaves_no_watch_rows_for_the_removed_task() {
-    let db = Arc::new(Store::open_in_memory().unwrap());
-    let epic = db.create_epic("CVE", "", None).await.unwrap();
-    let items = vec![make_item("cve-1", "")];
-    run_feed_sync(&*db, epic.id, false, entries(&items, &[""], &["main"]))
-        .await
-        .unwrap();
-    let target = subtree_tasks_with_id(&db, epic.id, "cve-1").await[0].id;
-    let watcher = create_manual_task(&db, "watcher", epic.id).await;
-    let other = create_manual_task(&db, "other", epic.id).await;
-    db.create_task_watcher(watcher, target).await.unwrap();
-    // The purged task as a WATCHER of something that survives.
-    db.create_task_watcher(target, other).await.unwrap();
-
-    run_feed_sync(&*db, epic.id, false, vec![]).await.unwrap();
-
-    assert!(
-        crate::store::TaskRead::get_task(&*db, target)
-            .await
-            .is_none(),
-        "fixture: purged"
-    );
-    assert!(db.list_watchers_of(target).await.unwrap().is_empty());
-    assert!(
-        db.list_watchers_of(other).await.unwrap().is_empty(),
-        "the purged task's own subscription goes with it"
-    );
-}

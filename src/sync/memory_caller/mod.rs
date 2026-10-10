@@ -106,7 +106,6 @@ struct Tables {
     subscriptions: BTreeMap<String, module::Subscription>,
     settings: BTreeMap<String, module::Setting>,
     usage_events: BTreeMap<i64, module::UsageEvent>,
-    task_watchers: BTreeMap<i64, module::TaskWatcher>,
     poll_owners: BTreeMap<i64, module::PollOwner>,
     hosts: BTreeMap<String, module::Host>,
     retired_feed_items: BTreeMap<i64, module::RetiredFeedItem>,
@@ -128,7 +127,6 @@ struct Tables {
     next_repo_path_id: i64,
     next_repo_base_branch_id: i64,
     next_usage_event_id: i64,
-    next_task_watcher_id: i64,
     next_poll_owner_id: i64,
     next_retired_feed_item_id: i64,
     next_learning_id: i64,
@@ -144,7 +142,6 @@ impl Tables {
             next_repo_path_id: 1,
             next_repo_base_branch_id: 1,
             next_usage_event_id: 1,
-            next_task_watcher_id: 1,
             next_poll_owner_id: 1,
             next_retired_feed_item_id: 1,
             next_learning_id: 1,
@@ -496,30 +493,6 @@ impl ReducerCaller for MemoryReducerCaller {
             feed_interval_secs,
             created_by,
         )
-    }
-
-    async fn create_task_watcher(
-        &self,
-        watcher_task_id: TaskId,
-        target_task_id: TaskId,
-    ) -> Result<ReducerOutcome> {
-        self.apply_create_task_watcher(watcher_task_id, target_task_id)
-    }
-
-    async fn delete_task_watcher(
-        &self,
-        watcher_task_id: TaskId,
-        target_task_id: TaskId,
-    ) -> Result<ReducerOutcome> {
-        self.apply_delete_task_watcher(watcher_task_id, target_task_id)
-    }
-
-    async fn delete_watches_of_target(&self, target_task_id: TaskId) -> Result<ReducerOutcome> {
-        self.apply_delete_watches_of_target(target_task_id)
-    }
-
-    async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<ReducerOutcome> {
-        self.apply_delete_watches_by_watcher(watcher_task_id)
     }
 
     async fn create_work_package(&self, row: bindings::WorkPackage) -> Result<WorkPackageId> {

@@ -1,4 +1,4 @@
-//! Agent session state, task watchers, poll ownership, host registry and the
+//! Agent session state, poll ownership, host registry and the
 //! task/epic-delete side effects that reach them.
 
 use anyhow::Result;
@@ -14,8 +14,7 @@ use super::super::writes::{DrainReadBack, ReducerOutcome};
 use super::{MemoryReducerCaller, Tables, ACTIVE, AWAITING_REVIEW, NEEDS_INPUT, REVIEW, RUNNING};
 
 impl MemoryReducerCaller {
-    /// Delete every `task_watchers` row naming `task_id` in either direction,
-    /// every `task_subagents` row for it, and detach/cascade its learnings.
+    /// Delete every `task_subagents` row for `task_id`, and detach/cascade its learnings.
     /// Mirrors the module's `delete_task_side_effects` — called at every
     /// point that deletes a task row, exactly the set of call sites the
     /// module itself uses (`delete_task`, `batch_delete`'s task pass,
@@ -24,23 +23,8 @@ impl MemoryReducerCaller {
     /// rather than four hand-copied ones.
     pub(super) fn delete_task_side_effects(&self, tables: &mut Tables, task_id: i64) {
         tables.task_subagents.retain(|s| s.task_id != task_id);
-        let watches: Vec<i64> = tables
-            .task_watchers
-            .values()
-            .filter(|w| w.watcher_task_id == task_id || w.target_task_id == task_id)
-            .map(|w| w.id)
-            .collect();
-        self.delete_watcher_rows(tables, watches);
         self.detach_learnings_from_task(tables, task_id);
         self.delete_work_package_links_to(tables, module::WORK_PACKAGE_ITEM_TASK, task_id);
-    }
-
-    pub(super) fn delete_watcher_rows(&self, tables: &mut Tables, ids: Vec<i64>) {
-        for id in ids {
-            if tables.task_watchers.remove(&id).is_some() {
-                self.rows.remove_task_watcher(id);
-            }
-        }
     }
 
     /// Recompute `live_subagents` from `task_subagents` and write it, if the
@@ -430,82 +414,6 @@ impl MemoryReducerCaller {
             Ok(()) => Ok(ReducerOutcome::Applied(vec![])),
             Err(why) => Ok(ReducerOutcome::Refused(why)),
         }
-    }
-
-    pub(super) fn apply_create_task_watcher(
-        &self,
-        watcher_task_id: TaskId,
-        target_task_id: TaskId,
-    ) -> Result<ReducerOutcome> {
-        let watcher_task_id = watcher_task_id.0;
-        let target_task_id = target_task_id.0;
-        let mut tables = self.lock();
-        let exists = tables
-            .task_watchers
-            .values()
-            .any(|w| w.watcher_task_id == watcher_task_id && w.target_task_id == target_task_id);
-        if !exists {
-            let id = Self::assign_id(0, &mut tables.next_task_watcher_id);
-            let row = module::TaskWatcher {
-                id,
-                watcher_task_id,
-                target_task_id,
-                created_at: self.now(),
-            };
-            tables.task_watchers.insert(id, row.clone());
-            self.rows.upsert_task_watcher(&row.into());
-        }
-        Ok(ReducerOutcome::Applied(vec![]))
-    }
-
-    pub(super) fn apply_delete_task_watcher(
-        &self,
-        watcher_task_id: TaskId,
-        target_task_id: TaskId,
-    ) -> Result<ReducerOutcome> {
-        let watcher_task_id = watcher_task_id.0;
-        let target_task_id = target_task_id.0;
-        let mut tables = self.lock();
-        let ids: Vec<i64> = tables
-            .task_watchers
-            .values()
-            .filter(|w| w.watcher_task_id == watcher_task_id && w.target_task_id == target_task_id)
-            .map(|w| w.id)
-            .collect();
-        self.delete_watcher_rows(&mut tables, ids);
-        Ok(ReducerOutcome::Applied(vec![]))
-    }
-
-    pub(super) fn apply_delete_watches_of_target(
-        &self,
-        target_task_id: TaskId,
-    ) -> Result<ReducerOutcome> {
-        let target_task_id = target_task_id.0;
-        let mut tables = self.lock();
-        let ids: Vec<i64> = tables
-            .task_watchers
-            .values()
-            .filter(|w| w.target_task_id == target_task_id)
-            .map(|w| w.id)
-            .collect();
-        self.delete_watcher_rows(&mut tables, ids);
-        Ok(ReducerOutcome::Applied(vec![]))
-    }
-
-    pub(super) fn apply_delete_watches_by_watcher(
-        &self,
-        watcher_task_id: TaskId,
-    ) -> Result<ReducerOutcome> {
-        let watcher_task_id = watcher_task_id.0;
-        let mut tables = self.lock();
-        let ids: Vec<i64> = tables
-            .task_watchers
-            .values()
-            .filter(|w| w.watcher_task_id == watcher_task_id)
-            .map(|w| w.id)
-            .collect();
-        self.delete_watcher_rows(&mut tables, ids);
-        Ok(ReducerOutcome::Applied(vec![]))
     }
 
     pub(super) fn apply_claim_poll_owner(
