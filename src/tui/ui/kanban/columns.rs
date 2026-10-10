@@ -20,7 +20,7 @@ use super::cards::{
     render_package_item, ColRenderCtx,
 };
 use super::{board_column_constraints, column_bg_color, column_color, render_column_separator};
-use crate::palette::{MUTED, PURPLE};
+use crate::palette::{CYAN, MUTED, PURPLE};
 
 fn render_orphan_separator(col_width: u16, is_first: bool) -> ListItem<'static> {
     // ╌╌ · ╌╌╌╌╌╌╌╌╌╌╌ — dashed rule with centre dot, all muted.
@@ -339,10 +339,17 @@ fn view_border_title(app: &App) -> Option<String> {
 pub(super) fn render_columns(frame: &mut Frame, app: &mut App, data: ColumnsData) {
     // Render the epic view border if applicable.
     if let Some((title, outer_area)) = &data.epic_border {
-        let block = rounded_block(PURPLE)
+        // A package view is teal like its card; an epic view (even one entered
+        // from a package) is purple (`work-packages.allium: EnterPackage`).
+        let (accent, tint) = if matches!(app.view_mode(), ViewMode::Package { .. }) {
+            (CYAN, Color::Rgb(18, 30, 34))
+        } else {
+            (PURPLE, Color::Rgb(24, 20, 34))
+        };
+        let block = rounded_block(accent)
             .title(title.as_str())
-            .title_style(Style::default().fg(PURPLE).add_modifier(Modifier::BOLD))
-            .style(Style::default().bg(Color::Rgb(24, 20, 34)));
+            .title_style(Style::default().fg(accent).add_modifier(Modifier::BOLD))
+            .style(Style::default().bg(tint));
         frame.render_widget(block, *outer_area);
     }
 

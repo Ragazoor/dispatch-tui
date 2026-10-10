@@ -854,3 +854,32 @@ fn the_epic_only_context_does_not_hold_in_a_package_view() {
     assert!(app.context_holds(C::InsideNestedView));
     assert!(app.context_holds(C::NestedViewNoSearch));
 }
+
+#[tokio::test]
+async fn package_view_frame_is_teal_not_epic_purple() {
+    // work-packages.allium EnterPackage: the frame and panel tint take the
+    // package card's CYAN, not an epic view's PURPLE.
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.work_packages = vec![make_package(5, "Pkg")];
+    app.board.view_mode = crate::tui::types::ViewMode::Package {
+        package_id: WorkPackageId(5),
+        selection: crate::tui::types::BoardSelection::new_for_epic(),
+        parent: Box::new(crate::tui::types::ViewMode::Board(
+            crate::tui::types::BoardSelection::new(),
+        )),
+    };
+    let buf = render_to_buffer(&mut app, 160, 30);
+    let cells = || {
+        (buf.area.top()..buf.area.bottom())
+            .flat_map(|y| (buf.area.left()..buf.area.right()).map(move |x| (x, y)))
+    };
+    let border = cells()
+        .filter(|&(x, y)| buf[(x, y)].symbol() == "╭")
+        .map(|(x, y)| buf[(x, y)].fg)
+        .next();
+    assert_eq!(border, Some(crate::palette::CYAN), "package frame is teal");
+    assert!(
+        cells().all(|(x, y)| buf[(x, y)].bg != ratatui::style::Color::Rgb(24, 20, 34)),
+        "package view must not use the epic purple panel tint"
+    );
+}

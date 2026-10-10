@@ -261,6 +261,9 @@ rule EnterPackage {
         -- view does, and the main board's cursor is restored on exit.
         -- The view is framed like an epic view, its border titled with a
         -- square glyph and the package title.
+        -- The frame and its faint panel tint are CYAN/teal, the package
+        -- card's colour, not an epic view's PURPLE. An epic view entered
+        -- from a package is still an epic view and keeps PURPLE.
         -- A refresh in which the open package no longer exists (deleted on
         -- another machine, or by an agent) returns to the main board, from
         -- the package view and from any epic view entered from it.
