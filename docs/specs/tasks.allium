@@ -260,7 +260,12 @@ rule CreateQuickTask {
             created_at: now,
             updated_at: now
         )
-        AgentLaunched(task: task, mode: quick)
+        -- Since store-split M4 quick dispatch is a request like every other
+        -- launch path (store-split.allium: RequestDispatch). It names the
+        -- quick mode, which the module never derives on its own, so the
+        -- host's provisioning launches the quick-dispatch agent
+        -- (dispatch.allium: ProvisionDispatch).
+        DispatchRequested(task: task, requester: core/local_host(), origin: quick, mode: quick)
 
     @guidance
         -- Reached only through QuickDispatchTrustGate, i.e. once the repo
@@ -292,15 +297,18 @@ rule CreateQuickTask {
         -- refs/remotes/origin/HEAD` against repo_path, falling back to
         -- "main" when origin/HEAD is unavailable. This prevents
         -- dispatch failures on repos whose default branch is not main.
-        -- AgentLaunched fires immediately after creation: the task goes
-        -- Backlog -> Running with a worktree and tmux window provisioned,
-        -- and — since QuickDispatchTrustGate — behind the same repo-trust
-        -- gate DispatchTask applies. It is still NOT the DispatchTask rule:
-        -- quick dispatch has no backlog/tag preconditions (the task it just
-        -- created is trivially backlog and untagged), no base-branch history
-        -- recording (see CreateTask guidance), and its own prompt variant
-        -- (build_quick_dispatch_prompt, mode: quick). Trust is the one gate
-        -- the two entry points share.
+        -- The request follows the creation: the module claims the new task
+        -- (Backlog -> Running) and writes the request row, and this board
+        -- then provisions the worktree and tmux window and launches the
+        -- agent, exactly as for DispatchTask — and, since
+        -- QuickDispatchTrustGate, behind the same repo-trust gate. It is
+        -- still NOT the DispatchTask rule: quick dispatch has no backlog/tag
+        -- preconditions of its own (the task it just created is trivially
+        -- backlog and untagged), no base-branch history recording (see
+        -- CreateTask guidance), and its own prompt variant
+        -- (build_quick_dispatch_prompt, mode: quick). Trust and the request
+        -- are what the two entry points share. A request that fails leaves
+        -- the created task in backlog, like any failed dispatch.
 }
 
 -- == Status Movement ==

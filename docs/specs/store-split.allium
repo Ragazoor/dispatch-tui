@@ -5,24 +5,37 @@
 --        and the SpacetimeDB module (spacetime/module/), and the order the
 --        code is migrated in. It says which side owns which kind of
 --        behaviour. Migration steps land one at a time: M2 and M3 (below) have
---        landed, M4-M7 have not. Until a step lands, the rules in the specs
---        listed under Excludes stay authoritative for what the system does
---        today, and nothing here overrides them. Each step runs its own
+--        landed; M4 is the step in progress (task #53257); M5-M7 have not
+--        started. Until a step lands, the rules in the specs listed under
+--        Excludes stay authoritative for what the system does today, and
+--        nothing here overrides them. Each step runs its own
 --        spec -> tests -> code cycle on the spec that owns the behaviour it
 --        moves, and only then rewrites that spec's rules.
+--
+--        M4 IS THE EXCEPTION TO "NOTHING HERE OVERRIDES". Its entity and
+--        rules (DispatchRequest, below) are written here, and dispatch.allium,
+--        mcp-task-tools.allium and sync.allium are already rewritten to match,
+--        because the step lands in the same task as these specs. They describe
+--        dispatch as it is once M4's code lands; until then the code lags
+--        them, and the spec is the target the tests are written against.
 -- Includes: The split rule, the "host work stays thin" rule, the
 --           request-row model for multi-step work, the version gate, the
---           migration order, and the details still undecided.
--- Excludes: Current dispatch behaviour, including the TUI watchdog
---           (dispatch.allium); wrap-up and PR handling (pr-workflow.allium);
+--           migration order, the dispatch request row and its lifecycle
+--           (M4), and the details still undecided.
+-- Excludes: What a host does to provision a claimed dispatch request — the
+--           worktree, the tmux window, the launch (dispatch.allium:
+--           ProvisionDispatch); wrap-up and PR handling (pr-workflow.allium);
 --           feed execution and routing (feeds.allium, feed-scripts.allium);
 --           watcher notices (task-watchers.allium); the store's
---           subscription and connection mechanics (sync.allium); startup
---           checks (startup.allium); the MCP tools (mcp-task-tools.allium).
+--           subscription and connection mechanics, including the ask that
+--           delivers dispatch requests to their host (sync.allium:
+--           SubscribeToThisHostsDispatchRequests); startup checks
+--           (startup.allium); the MCP tools (mcp-task-tools.allium).
 -- Dependencies: sync.allium holds the version gate's rule
---               (AStoreWithOtherRulesFailsTheAttempt). Other entities and
---               rules are added here, or in the owning spec, by the
---               migration step that implements them.
+--               (AStoreWithOtherRulesFailsTheAttempt) and the rules version
+--               itself (config.rules_version). Other entities and rules are
+--               added here, or in the owning spec, by the migration step that
+--               implements them.
 --
 -- Decisions taken with the user (task #53254), recorded so they are not
 -- re-litigated:
@@ -100,6 +113,104 @@
 --           rules version is 2.
 --           See feeds.allium: IngestFeedEmission.
 --       M4  Dispatch becomes request rows plus the scheduled timeout.
+--           IN PROGRESS (task #53257). Decided with the user:
+--           - D1, the row. A NEW table, dispatch_request, one row per request
+--             (DispatchRequest below), not columns on the task. It carries a
+--             kind column, "dispatch" for now, so M5 adds wrap_up and
+--             exit_session requests without a column change. A task holds at
+--             most one OPEN request (requested or provisioning) at a time;
+--             finished rows (dispatched or failed) stay as history. Columns:
+--             id, task_id, kind, host, mode, origin, state, requested_at, claimed_at,
+--             finished_at, reason, worktree, tmux_window. An optional column
+--             is stored as "" for absent, not as an Option, and every
+--             timestamp comes from the module clock.
+--           - D2, the flow. Any client calls the request reducer. The module
+--             claims the task atomically (backlog -> running, as today's
+--             claim, so DispatchClaimExclusive still holds: a second request
+--             for a claimed task is refused) and writes the row. The row's
+--             host is ALWAYS THE REQUESTING HOST, never the task's: you
+--             request work on a task, you provision it on your own machine.
+--             So the module still refuses a task whose worktree is on another
+--             machine, exactly as today's claim does. The host's board sees
+--             the row through its subscription, claims it (requested ->
+--             provisioning), provisions the worktree, tmux window and agent,
+--             and reports either dispatched (with the worktree and window; the
+--             module writes the task's worktree, tmux_window and host) or
+--             failed (with a reason; the module releases the claim
+--             conditionally, as today).
+--           - D3, the mode. mode stays a column (dispatch | research |
+--             quick). The requester may pass it; when it does not, the module
+--             derives it by today's rule (a plan -> dispatch, else the research
+--             tag -> research, else dispatch). quick is never derived: only
+--             quick dispatch names it, for its own prompt variant. The host
+--             reads the mode from the row and never re-derives it.
+--           - D4, the timeout. ONE deadline per request, 60 seconds
+--             (config.dispatch_request_timeout) counted from requested_at,
+--             whatever state the row is in, and the row exposes it. THE HOST
+--             ENFORCES IT: provisioning stops at the deadline — any subprocess
+--             still running is killed, what the attempt made is rolled back
+--             exactly as for a provisioning failure, and the host reports
+--             failed with reason "deadline passed" (dispatch.allium:
+--             ProvisioningStopsAtTheDeadline). The module's timer is only a
+--             BACKSTOP for a host that is gone or hung: a SpacetimeDB schedule
+--             table, one scheduled row per request, cancelled when the request
+--             finishes. It fires 10 seconds after the deadline
+--             (config.dispatch_request_backstop_grace), so a live host's stop
+--             lands first; when it fires on a row still open the module fails
+--             the row with reason "timed out" and releases the claim exactly as
+--             a reported failure does.
+--             The test that holds the host to this is behavioural: a
+--             provisioning whose subprocess stalls fails at the row's
+--             deadline. (This replaces an earlier idea of a test that the
+--             config value is at least the host's subprocess budget.) M5's
+--             requests get their own timeout, decided in M5.
+--             A dispatched report arriving after the row has failed is
+--             refused, and the host tears down what it made. This replaces
+--             the TUI watchdog
+--             (DISPATCH_WATCHDOG_TIMEOUT, dispatch.allium's former
+--             DispatchingTimeout guarantee) and REVERSES its rule that a
+--             timeout does not release the claim: a timed-out request now
+--             returns the task to backlog. UnprovisionedIndicator's claim-stamp
+--             fallback is re-based on the same config value.
+--           - D5, catch-up. A requested row is picked up from its host's
+--             initial subscription rows when that host's board starts. A row
+--             already provisioning when its host restarts is NOT resumed: the
+--             host's startup reports it failed ("host restarted"), which
+--             releases the claim. There is one board per host: startup
+--             restarts the board inside the single dispatch tmux session
+--             (startup.allium), so a starting board's provisioning rows are
+--             never a live sibling's.
+--           - D6, the callers. EVERY launch path moves onto request rows in
+--             M4: the TUI dispatch keys, retry-fresh, research, quick dispatch
+--             (tasks.allium: CreateQuickTask creates the task, then requests),
+--             MCP dispatch_task and the epic auto-dispatch chain
+--             (epics.allium: AutoDispatchNextSubtask, which advances on a
+--             refused request and reports AutoDispatchFailed from the row's
+--             outcome, not from a direct return). dispatch_task writes the
+--             request and waits up to 30 seconds for dispatched or failed,
+--             returning today's result shape (worktree, window) or the failure
+--             reason; when the wait ends first it returns the request id and
+--             its state, and get_task shows the request state. The TUI's
+--             DispatchingFeedback follows the row rather than in-memory state
+--             alone.
+--           - D7, the gate. This moves rules into the module, so the rules
+--             version goes from 2 to 3, hand-bumped in the module crate and in
+--             the board in the same commit (sync.allium: config.rules_version).
+--           - D8, deletion. Deleting a task with an open request fails that
+--             request in the same reducer (reason "task deleted") and cancels
+--             its timer. The host sees the row fail and tears down whatever it
+--             made.
+--             Every module reducer that deletes a task row does this:
+--             DeleteTask, BatchDelete and the stale-subtree delete in
+--             ingest_feed.
+--           - D9, origin. The row records which launch path wrote it
+--             (user | mcp | epic_chain | quick; user covers the TUI keys,
+--             retry-fresh and research). An epic_chain row that fails raises
+--             AutoDispatchFailed from the row itself, on the requesting host's
+--             board only (epics.allium: ReportChainedDispatchFailure), so a
+--             board restart during the chain's wait no longer loses it.
+--           - Deferred, out of M4's scope: how long finished rows are kept,
+--             and whether a board sees other hosts' open requests.
 --       M5  Wrap-up and exit-session become request rows.
 --       M6  Watchers get module-written "notice due" rows; PR state is
 --           derived in the module from the raw gh status the host forwards.
@@ -109,12 +220,365 @@
 -- Design doc: 2026-10-10-tui-store-split-design.md under the superpowers
 -- specs directory (a dated snapshot; this spec is the record).
 
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- What a request asks for. Only dispatch exists in M4; M5 adds wrap_up and
+-- exit_session as further values rather than further tables.
+enum RequestKind { dispatch }
+
+-- Which agent a dispatch launches. Fixed on the row when it is written and
+-- read from the row by the host, never re-derived there (D3). quick is only
+-- ever named by its caller (tasks.allium: CreateQuickTask).
+enum DispatchRequestMode { dispatch | research | quick }
+
+enum DispatchRequestState { requested | provisioning | dispatched | failed }
+
+-- Which launch path wrote the request (D9). user is the TUI keys, including
+-- retry-fresh and research; mcp is dispatch_task; epic_chain is
+-- epics.allium's AutoDispatchNextSubtask; quick is quick dispatch.
+enum DispatchRequestOrigin { user | mcp | epic_chain | quick }
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- One request to dispatch one task, from the moment a client asks until the
+-- host reports or the timer fails it, and kept afterwards as history. Stored
+-- as the module's dispatch_request table. An absent optional field below is
+-- stored as "" rather than as an Option; that is storage, not behaviour.
+entity DispatchRequest {
+    task: core/Task
+    kind: RequestKind
+    -- The machine that provisions this request, which is always the machine
+    -- that asked for it (D2). Its board's subscription delivers the row
+    -- (sync.allium: SubscribeToThisHostsDispatchRequests).
+    host: core/Host
+    mode: DispatchRequestMode
+    origin: DispatchRequestOrigin
+    state: DispatchRequestState
+    requested_at: Timestamp
+    -- Set by HostClaimsDispatch. Null on a row that failed while still
+    -- requested.
+    claimed_at: Timestamp?
+    finished_at: Timestamp when state = dispatched | failed
+    reason: String when state = failed
+    worktree: core/Worktree when state = dispatched
+    tmux_window: core/TmuxWindow when state = dispatched
+
+    transitions state {
+        requested -> provisioning
+        requested -> failed
+        provisioning -> dispatched
+        provisioning -> failed
+        terminal: dispatched, failed
+    }
+
+    is_open: state in {requested, provisioning}
+
+    -- ONE deadline, from requested_at, whatever the state (D4). A row that
+    -- sat requested for a while before its host claimed it has that much less
+    -- time to provision. Not a second timer from claimed_at. Exposed on the
+    -- row because the HOST enforces it (dispatch.allium:
+    -- ProvisioningStopsAtTheDeadline); the module's own timer
+    -- (DispatchRequestTimesOut) is the backstop.
+    deadline: requested_at + config.dispatch_request_timeout
+
+    @invariant OnlyTheClaimedRequestProvisions
+        -- dispatch.allium's DispatchClaimExclusive, restated for the request
+        -- row. A request is written only by the same transaction that claims
+        -- its task (RequestDispatch), so a request that is refused wrote
+        -- nothing and provisions nothing. Only the board whose claim of the
+        -- row was accepted (HostClaimsDispatch) provisions it; a second board
+        -- on the same host, or a redelivered row, is refused by the state
+        -- check. And a row that has finished cannot be reported on again, so a
+        -- worktree provisioned after its request timed out is never recorded
+        -- on the task. Not an expression because it constrains the order of
+        -- writes, not any single state.
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- How long a dispatch request may stay open, measured from requested_at.
+    -- The host stops provisioning at that point and reports failed; the
+    -- module fails a row still open then as a backstop
+    -- (DispatchRequestTimesOut). A module config value, read by the host
+    -- from the row's deadline rather than from a copy of its own. Shorter
+    -- than the host's worst-case subprocess budget (SUBPROCESS_TIMEOUT *
+    -- PROVISION_MAX_SUBPROCESS_CALLS) on purpose: the deadline bounds the
+    -- dispatch, and a subprocess still running at it is killed. Dispatch
+    -- only; M5's requests get their own.
+    dispatch_request_timeout: Duration = 60.seconds
+
+    -- How long after the deadline the module's backstop timer waits before
+    -- failing a row still open (DispatchRequestTimesOut). Long enough for a
+    -- live host's own stop at the deadline, rollback included, to land
+    -- first with "deadline passed"; "timed out" is then only ever the reason
+    -- for a host that is gone or hung.
+    dispatch_request_backstop_grace: Duration = 10.seconds
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Dispatch requests (M4) ==
+
+rule RequestDispatch {
+    when: DispatchRequested(task, requester, origin, mode?)
+
+    requires: task.status = backlog
+    -- Today's claimable_by, unchanged: the request is provisioned on the
+    -- requester's own machine (D2), so a task whose worktree is on another
+    -- machine is refused rather than given a second worktree here.
+    requires: task.host = null or task.host = requester
+    -- Redundant with the backlog check while nothing else moves the task, and
+    -- not otherwise: a manual move back to backlog during provisioning leaves
+    -- the old request open, and a second one beside it would race it.
+    requires: not DispatchRequests.any(r => r.task = task and r.is_open)
+
+    -- D3: the caller's mode when it names one, else today's derivation.
+    let chosen_mode =
+        if mode != null: mode
+        else: if task.has_plan or task.tag != research: dispatch else: research
+
+    -- The claim, as today: one write, conditional on the checks above.
+    ensures: task.status = running
+    ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
+    -- The dispatch-claim subagent clear point (agent-health.allium), moved
+    -- into the same transaction as the claim.
+    ensures:
+        for entry in core/SubagentEntries where task = task:
+            not exists entry
+    ensures: task.live_subagents = 0
+    ensures: task.stop_pending = false
+    ensures: DispatchRequest.created(
+        task: task,
+        kind: dispatch,
+        host: requester,
+        mode: chosen_mode,
+        origin: origin,
+        state: requested,
+        requested_at: now
+    )
+
+    @guidance
+        -- The request reducer. Every launch path that provisions reaches it
+        -- (D6): dispatch.allium's DispatchTask and DispatchResearchTask (the
+        -- TUI keys and retry-fresh), tasks.allium's CreateQuickTask,
+        -- mcp-task-tools.allium's DispatchTaskViaMcp and epics.allium's
+        -- AutoDispatchNextSubtask. Resume paths (ResumeTask, RetryResume)
+        -- reuse an existing worktree, take no claim and write no request.
+        -- requester is the calling client's host, as the store handle
+        -- carries it; a client cannot name some other machine as the host.
+        --
+        -- A refusal is ORDINARY: it is how a caller learns that another entry
+        -- point claimed the task first, as with today's claim_backlog_task.
+        -- The refusal names why (not backlog, owned by another machine, an
+        -- open request already exists), and nothing was written.
+        --
+        -- The module also schedules the request's timer here (D4): one row
+        -- in a SpacetimeDB schedule table, due at the request's deadline, and
+        -- cancelled by whichever rule finishes the request first.
+}
+
+rule HostClaimsDispatch {
+    when: DispatchRequestDelivered(request)
+
+    requires: request.host = core/local_host()
+    requires: request.state = requested
+
+    ensures: request.state = provisioning
+    ensures: request.claimed_at = now
+    ensures: DispatchProvisioningClaimed(request: request)
+
+    @guidance
+        -- DispatchRequestDelivered is the subscription delivering a row that
+        -- names this host: a live insert, or one of the initial rows when the
+        -- board starts (D5). On the initial rows it runs only after
+        -- HostRestartFailsInterrupted has failed the rows that were already
+        -- provisioning, so a board never fails its own fresh claim.
+        --
+        -- The board calls the module's claim reducer, which re-checks
+        -- state = requested inside the transaction. Of two boards on the same
+        -- host, or of a row delivered twice, exactly one claim is accepted,
+        -- and only that board provisions (dispatch.allium: ProvisionDispatch).
+        -- A refused claim does nothing further.
+}
+
+rule HostReportsDispatched {
+    when: DispatchProvisioned(request, reporter, worktree, tmux_window)
+
+    requires: reporter = request.host
+    requires: request.state = provisioning
+
+    ensures: request.state = dispatched
+    ensures: request.finished_at = now
+    ensures: request.worktree = worktree
+    ensures: request.tmux_window = tmux_window
+    -- The writes today's post-provision patch made, now made by the module.
+    -- host is written with worktree because core/Task's HostTracksWorktree
+    -- invariant pairs the two.
+    ensures: request.task.worktree = worktree
+    ensures: request.task.tmux_window = tmux_window
+    ensures: request.task.host = request.host
+
+    @guidance
+        -- Also cancels the request's scheduled timer.
+        --
+        -- A LATE REPORT IS REFUSED. If the timer has already failed the row,
+        -- state is failed and this rule does not apply: the task's fields are
+        -- not written, and the claim has already been released. The host
+        -- then tears down what it made, by the provisioning-failure rollback
+        -- (dispatch.allium: ProvisionDispatch), so no agent keeps running
+        -- against a task that is back in backlog.
+}
+
+rule HostReportsDispatchFailed {
+    when: DispatchProvisioningFailed(request, reporter, reason)
+
+    requires: reporter = request.host
+    requires: request.state = provisioning
+
+    ensures: request.state = failed
+    ensures: request.finished_at = now
+    ensures: request.reason = reason
+
+    @guidance
+        -- The host has already rolled back what it created (dispatch.allium:
+        -- ProvisionDispatch). Its own deadline stop reports through here too,
+        -- with reason "deadline passed" (dispatch.allium:
+        -- ProvisioningStopsAtTheDeadline). The claim is released by
+        -- ReleaseClaimOfFailedRequest, the same rule every failure uses.
+        -- Also cancels the request's scheduled timer.
+}
+
+rule DispatchRequestTimesOut {
+    when: request: DispatchRequest.deadline + config.dispatch_request_backstop_grace <= now
+
+    requires: request.is_open
+
+    ensures: request.state = failed
+    ensures: request.finished_at = now
+    ensures: request.reason = "timed out"
+
+    @guidance
+        -- The scheduled reducer (D4), firing from the request's own schedule
+        -- row. It is the BACKSTOP: a live host stops at the same deadline and
+        -- reports "deadline passed" itself (dispatch.allium:
+        -- ProvisioningStopsAtTheDeadline), which finishes the row and cancels
+        -- this timer. It fires config.dispatch_request_backstop_grace after
+        -- the deadline, so a live host's stop and rollback land first. What is
+        -- left for this rule is a host that never claimed the row (its board
+        -- stopped before it claimed) or one that claimed it and is gone or
+        -- hung; "timed out" names only that case. Unlike the TUI
+        -- watchdog it replaces, it RELEASES
+        -- THE CLAIM (through ReleaseClaimOfFailedRequest): a request past its
+        -- deadline is treated as dead, not slow. That is safe now where it was
+        -- not before, because a late dispatched report is refused
+        -- (HostReportsDispatched) and the host tears down, so a second
+        -- dispatch of the released task cannot meet a first one that still
+        -- records its worktree.
+}
+
+rule HostRestartFailsInterrupted {
+    when: StoreReachedAtStartup(_)
+
+    for request in DispatchRequests where host = core/local_host() and state = provisioning:
+        ensures: DispatchProvisioningFailed(
+            request: request,
+            reporter: core/local_host(),
+            reason: "host restarted"
+        )
+
+    @guidance
+        -- D5. A row this host had claimed before the board stopped is not
+        -- resumed: the process that was provisioning it is gone, and what it
+        -- left on disk is unknown. Reporting it failed releases the claim at
+        -- once instead of leaving the task claimed until the timer fires.
+        -- Fires on the first connection after the board starts
+        -- (sync.allium: FirstConnectionLetsTheBoardDraw), never on a
+        -- reconnect, when this board's own provisioning may still be running.
+        --
+        -- ASSUMPTION: ONE BOARD PER HOST. Startup restarts the board inside
+        -- the single dispatch tmux session rather than starting a second one
+        -- (startup.allium), so the provisioning rows naming this host when a
+        -- board starts belong to a board that is no longer running. A second
+        -- live board on the same host would have its in-flight requests failed
+        -- by this rule; that configuration is not supported.
+}
+
+rule DeletingATaskFailsItsOpenRequest {
+    when: DeleteTask(task)
+
+    let open = DispatchRequests where task = task and is_open
+
+    ensures:
+        for request in open:
+            request.state = failed
+            request.finished_at = now
+            request.reason = "task deleted"
+
+    @guidance
+        -- D8. In the SAME reducer that deletes the task row, and it cancels
+        -- the request's scheduled timer. Confirmed in scope for every module
+        -- reducer that
+        -- deletes a task row (DeleteTask and BatchDelete in tasks.allium, and
+        -- the stale-subtree delete inside ingest_feed, feeds.allium), not only
+        -- the one this trigger names. At most one row matches
+        -- (OneOpenDispatchRequestPerTask). The host sees its row fail through
+        -- its subscription and tears down whatever it made (dispatch.allium:
+        -- ProvisionDispatch, "A report the module refuses"); its later report,
+        -- if any, is refused. ReleaseClaimOfFailedRequest then finds no task
+        -- and does nothing.
+}
+
+rule ReleaseClaimOfFailedRequest {
+    when: request: DispatchRequest.state transitions_to failed
+
+    let task = request.task
+    -- A request failed by its task's deletion (DeletingATaskFailsItsOpenRequest)
+    -- has no task left to release.
+    let still_claimed = exists task and task.status = running and task.worktree = null
+
+    ensures:
+        if still_claimed:
+            task.status = backlog
+            task.sub_status = core/SubStatus.default_for(backlog)
+            task.last_pre_tool_use_at = null
+
+    @guidance
+        -- Today's release_backlog_claim, applied by the module to every
+        -- failure: a reported one, a timeout, a host restart. It is
+        -- conditional, as today: a task that was provisioned or moved on
+        -- meanwhile is left alone rather than stomped back to backlog. The
+        -- last_pre_tool_use_at clear unwinds the stamp RequestDispatch wrote
+        -- (the sanctioned exception in agent-health.allium).
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- D1: a task holds at most one open request. RequestDispatch refuses a second
+-- one while the first is open.
+invariant OneOpenDispatchRequestPerTask {
+    for a in DispatchRequests:
+        for b in DispatchRequests:
+            a != b and a.task = b.task implies not (a.is_open and b.is_open)
+}
+
 ------------------------------------------------------------
 -- Open Questions
 ------------------------------------------------------------
 
-open question "Scheduled timeout duration (M4): how long does the module wait before a scheduled reducer fails a dispatch request its host never reported? Does it keep today's derivation (SUBPROCESS_TIMEOUT * PROVISION_MAX_SUBPROCESS_CALLS, 840s at current values, see dispatch.allium's DispatchingTimeout), which is a host-side subprocess budget the module cannot see, or does it get its own module config value? And do wrap-up and exit-session requests (M5) share that deadline or get their own?"
+open question "Retention of finished request rows (deferred, outside M4): dispatched and failed rows stay as history and their host's subscription delivers all of them. How long are they kept, and what removes them?"
 
-open question "Request rows (M4, M5): are dispatch, wrap-up and exit-session requests a new table (one per kind, or one shared table with a kind field), or new columns on the task row? The answer decides whether a task can hold more than one outstanding request and how a finished request's history is kept."
-
-open question "Offline host catch-up: when a request row names a host that is not running a board at the time the row appears, what happens? Does the host pick it up from its subscription's initial rows when its board next starts, does the scheduled timeout fail it first, and is a request that was claimed (provisioning on host X) but interrupted by that host's restart resumed, re-run, or failed?"
+open question "Seeing other machines' requests (deferred, outside M4): a board's subscription delivers only request rows naming its own host. A teammate's board that shows the same task in a shared epic cannot see the request, so its UnprovisionedIndicator falls back to the claim stamp. Should boards also receive the open requests of every task they can see?"

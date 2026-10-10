@@ -5,6 +5,7 @@
 -- Excludes: Task lifecycle (see tasks.allium), domain model (see core.allium)
 
 use "./core.allium" as core
+use "./store-split.allium" as split
 
 ------------------------------------------------------------
 -- Config
@@ -934,8 +935,12 @@ rule AutoDispatchNextSubtask {
             -- the task id), then by id. Phoenix subtasks are not candidates —
             -- see PhoenixIsNeverChained below.
             let next = first_by_order(epic.subtasks where status = backlog and not phoenix)
+            -- A request, as every launch path writes since store-split M4
+            -- (store-split.allium: RequestDispatch). No mode: the module
+            -- derives it from the subtask. A refused request moves the chain
+            -- to the next candidate (see the guidance).
             if next != null:
-                DispatchTask(next)
+                DispatchRequested(task: next, requester: core/local_host(), origin: epic_chain)
 
     @guidance
         -- Server-side epic chaining. SessionClosed is emitted last by the MCP
@@ -1028,10 +1033,11 @@ rule AutoDispatchNextSubtask {
         -- claims and launches it exactly as it would any other, which is the
         -- entire point of the flag (see the head of the Phoenix section in
         -- tasks.allium — the recurrence is in the queueing, not the running).
-        -- Concretely, the two claim statements differ here and must keep
-        -- differing: the by-epic claim excludes phoenix rows, the by-id claim
-        -- (DispatchClaimExclusive, dispatch.allium) does not. Adding the filter
-        -- to both would make a phoenix task undispatchable.
+        -- Concretely, the filter lives in the chain's candidate selection and
+        -- must stay there: the request reducer the chain and every other entry
+        -- point share (store-split.allium: RequestDispatch) does not exclude
+        -- phoenix rows. Adding the filter to the reducer would make a phoenix
+        -- task undispatchable.
         --
         -- Candidate selection. Only direct Task children are candidates,
         -- ordered by sort_order ascending with the task id both as the fallback
@@ -1044,61 +1050,45 @@ rule AutoDispatchNextSubtask {
         -- only ever chosen once the planned subtasks are exhausted.
         --
         -- At most one agent is launched per closed session, even under
-        -- concurrent closes. Selection is exclusive because selecting and
-        -- claiming are the SAME write: one conditional statement whose ordering
-        -- predicate picks the first backlog subtask and whose update applies to
-        -- exactly that row (implementation: UPDATE tasks ... WHERE id =
-        -- (SELECT ... WHERE status = 'backlog' ORDER BY ... LIMIT 1) RETURNING
-        -- id, serialised through the single writer connection). There is no
-        -- select-then-claim window to lose, so there is no re-selection and no
-        -- retry budget: the statement either returns the subtask it just
-        -- claimed, or returns nothing because none was left. Two sessions
+        -- concurrent closes, and never two for one subtask. Since store-split
+        -- M4 the chain claims through the same dispatch request every entry
+        -- point writes (store-split.allium: RequestDispatch): it offers the
+        -- candidates one at a time, in the order above, and the module
+        -- accepts the first request whose task is still backlog with no open
+        -- request. A refused request is ORDINARY — another entry point or a
+        -- concurrent close got there first — and the chain moves to the next
+        -- candidate; it is not a failure and is not reported. Two sessions
         -- closing on the same epic in the same instant therefore launch two
-        -- DIFFERENT subtasks, never two agents for one subtask. The claim is a
-        -- mechanism rather than domain behaviour, so it is recorded here instead
-        -- of being modelled as a rule — but the exclusivity it buys is
-        -- normative. The three stopping conditions above are consequently
-        -- exhaustive: contention is not a fourth way for the chain to stop.
-        -- Scope of that exclusivity: it is unconditional. Every dispatch entry
-        -- point claims before it provisions — this chain, DispatchTaskViaMcp and
-        -- the TUI dispatch key alike (DispatchClaimExclusive in
-        -- dispatch.allium) — so no two of them can provision the same subtask.
-        -- The other two claim a row they were handed rather than selecting one,
-        -- but it is literally the same statement with the ordering subquery
-        -- replaced by an id: one conditional write, same fields, backlog ->
-        -- running only while the row is still backlog. This chain therefore
-        -- cannot be beaten to a subtask it already holds, and a subtask another
-        -- entry point claimed first is simply no longer backlog, so it is not a
-        -- candidate here — which is stopping condition three, not a fourth.
-        -- Consequence, on every path and not only this one: the status half of
-        -- DispatchTask's postcondition (backlog -> running with the default
-        -- running sub_status, and a seeded last_pre_tool_use_at) is applied
-        -- synchronously at claim time, ahead of worktree provisioning, so a
-        -- task being dispatched is briefly running with worktree = null. Both
-        -- crash detection and activity classification filter on tmux_window !=
+        -- DIFFERENT subtasks. Running out of candidates this way is stopping
+        -- condition three (no backlog subtask left), not a further one.
+        -- Exclusivity is the module's: DispatchClaimExclusive (dispatch.allium)
+        -- binds this chain, DispatchTaskViaMcp and the TUI keys alike.
+        -- The request names this board's host, so this board provisions the
+        -- subtask (dispatch.allium: ProvisionDispatch). The request carries no
+        -- mode, so the module derives it from the subtask: a plan-less
+        -- research-tagged subtask gets the research agent.
+        -- Consequence, on every path and not only this one: the claim applies
+        -- backlog -> running with the default running sub_status and a seeded
+        -- last_pre_tool_use_at ahead of worktree provisioning, so a task being
+        -- dispatched is briefly running with worktree = null. Both crash
+        -- detection and activity classification filter on tmux_window !=
         -- null, so that window produces no spurious Stale or Crashed (see
         -- agent-health.allium), and is_wrappable requires a worktree, so the
         -- subtask cannot be wrapped up before it is provisioned.
         --
-        -- The dispatch itself runs on a background task through the standard
-        -- single-dispatch path, and a refresh notification is sent to the TUI
-        -- when it completes. The ensures above emits DispatchTask, matching
-        -- every other launch site in the specs (DispatchTaskViaMcp,
-        -- JumpToAgentWindow); routing by tag is owned by dispatch.allium, so a
-        -- plan-less research-tagged subtask reaches DispatchResearchTask
-        -- instead. If the dispatch fails, the subtask is
-        -- reverted to backlog with the default backlog sub_status, the
-        -- last_pre_tool_use_at the claim seeded is cleared again, and
-        -- AutoDispatchFailed is emitted (see SurfaceAutoDispatchFailure),
-        -- leaving it dispatchable exactly as before the chain fired.
-        -- That release is itself conditional, mirroring the claim: it applies
-        -- only while the subtask is still running with no worktree, so a task
-        -- that was provisioned or moved on during the dispatch attempt is left
-        -- alone rather than stomped back to backlog. A release that does not
-        -- apply is logged and otherwise ignored.
-        -- The last_pre_tool_use_at clear is the one sanctioned exception to the
-        -- ownership invariant in agent-health.allium: it unwinds a stamp this
-        -- same flow wrote moments earlier, rather than overwriting a hook's.
+        -- The chain learns the outcome FROM THE REQUEST ROW, not from a direct
+        -- return. Its request carries origin epic_chain (store-split.allium:
+        -- DispatchRequest.origin), and when that row ends failed,
+        -- ReportChainedDispatchFailure below raises AutoDispatchFailed from the
+        -- row itself — so nothing about the chain has to be remembered in
+        -- memory, and a board restart while the subtask provisions (which
+        -- fails the row "host restarted") still reports it. A refresh
+        -- notification is sent to the TUI when the row finishes either way. A failed request has already had its claim
+        -- released by the module (store-split.allium:
+        -- ReleaseClaimOfFailedRequest), conditionally, so the subtask is back
+        -- in backlog with the default backlog sub_status and the seeded
+        -- last_pre_tool_use_at cleared, unless it was provisioned or moved on
+        -- meanwhile. The chain releases nothing itself.
         --
         -- No chain failure can fail the close. By the time this rule runs the
         -- closing task has already reached its terminal status and its session
@@ -1106,7 +1096,8 @@ rule AutoDispatchNextSubtask {
         -- its session failed to close when it did not. So the failure travels
         -- to the OPERATOR instead of to the closing agent: a failed dispatch
         -- emits AutoDispatchFailed, which SurfaceAutoDispatchFailure turns into
-        -- board-visible evidence. A missing epic and a claim error stay
+        -- board-visible evidence. A missing epic and a request the store
+        -- could not be reached to write (a transport error, not a refusal) stay
         -- log-only, because both fail before a subtask has been selected: there
         -- is no card to mark and no id to name, and both are indistinguishable
         -- from the normal stops above. A DB error while READING auto_dispatch is fail-CLOSED —
@@ -1116,6 +1107,37 @@ rule AutoDispatchNextSubtask {
         -- may have turned chaining off. (The predecessor dispatch_next tool
         -- failed open, which was right for an explicit agent request; that
         -- reasoning does not transfer to an automatic trigger.)
+}
+
+rule ReportChainedDispatchFailure {
+    when: request: split/DispatchRequest.state transitions_to failed
+
+    requires: request.origin = epic_chain
+    -- Raised ONCE, by the requesting host's board: the row names that host,
+    -- and its subscription is the one that holds it (sync.allium:
+    -- SubscribeToThisHostsDispatchRequests). There is one board per host
+    -- (store-split.allium: HostRestartFailsInterrupted), so no other board
+    -- raises it too.
+    requires: request.host = core/local_host()
+    -- A subtask deleted under its request (reason "task deleted") has no
+    -- card to mark; deleting it was the operator's own act.
+    requires: exists request.task
+
+    ensures: AutoDispatchFailed(
+        task: request.task,
+        epic: request.task.epic,
+        reason: request.reason
+    )
+
+    @guidance
+        -- Every failure reason reaches this rule the same way: a provisioning
+        -- failure, the deadline stop ("deadline passed"), the module's
+        -- backstop ("timed out"), or a host restart ("host restarted"). A
+        -- restart is the case that needed the row: the restarting board fails
+        -- the row itself on startup and sees that transition through its own
+        -- subscription, so the chain's failure is reported although the board
+        -- that started the chain is gone. A dispatched request ends the
+        -- chain's work for this close and reports nothing.
 }
 
 rule SurfaceAutoDispatchFailure {
@@ -1131,10 +1153,11 @@ rule SurfaceAutoDispatchFailure {
             )
 
     @guidance
-        -- AutoDispatchFailed is emitted by AutoDispatchNextSubtask when the
-        -- chained dispatch it started does not provision — the provisioning
-        -- itself failed, or the worker died attempting it. Both arms have
-        -- already released the claim by the time this fires, so the subtask is
+        -- AutoDispatchFailed is emitted by ReportChainedDispatchFailure when
+        -- the request AutoDispatchNextSubtask wrote ends failed — the
+        -- provisioning itself failed, its deadline passed, or its host
+        -- restarted. The module has already released the claim by the time
+        -- this fires, so the subtask is
         -- back in backlog and the epic has stopped progressing. Without this
         -- rule the only evidence is a warn line in the application log, which
         -- no operator is watching: an epic that stalls on a transient network
@@ -1154,7 +1177,7 @@ rule SurfaceAutoDispatchFailure {
         -- already closed and its close already succeeded; see the "No chain
         -- failure can fail the close" paragraph in AutoDispatchNextSubtask.
         --
-        -- The two log-only stops (unresolvable epic, claim error) do not reach
+        -- The two log-only stops (unresolvable epic, unwritable request) do not reach
         -- this rule, and that is a scope decision rather than an omission: both
         -- fail before a subtask is selected, so neither can supply the task
         -- this rule marks.

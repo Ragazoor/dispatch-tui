@@ -30,6 +30,13 @@ config {
     -- How long wrap_up lets the repository's verify command run before it
     -- counts as failed (WrapUpRefusesUnfinishedWork).
     wrap_up_verify_timeout: Duration = 15.minutes
+
+    -- How long dispatch_task waits on its dispatch request before returning
+    -- the request id and its pending state (DispatchTaskViaMcp). Shorter than
+    -- the request's own deadline (store-split.allium:
+    -- config.dispatch_request_timeout), so a slow provisioning returns a
+    -- pending request rather than holding the MCP call open to the end.
+    dispatch_task_wait_cap: Duration = 30.seconds
 }
 
 ------------------------------------------------------------
@@ -872,8 +879,13 @@ rule GetTaskViaMcp {
         --   [Epic (as "<title> (#<id>)", or "#<id>" when the title cannot be
         --   resolved)], [Tag], [Plan], [<url label>: <url> — the typed label
         --   derived from url.url_type], [Worktree], Base branch,
-        --   [Tmux window], [Sort order], [Verify command], [Wrap-up mode],
-        --   [Phoenix], Created, Updated.
+        --   [Tmux window], [Dispatch request], [Sort order], [Verify command],
+        --   [Wrap-up mode], [Phoenix], Created, Updated.
+        -- [Dispatch request] is not a Task field: it is the task's most recent
+        -- store-split.allium DispatchRequest that this board's subscription
+        -- holds, rendered as its id, state and, when failed, its reason.
+        -- Omitted when there is none. It is how a dispatch_task caller whose
+        -- wait ended while the request was still pending learns how it ended.
         -- [Phoenix] renders only when the flag is true, and says the task will
         -- come back — so an agent wrapping up knows it is finishing THIS run of
         -- a recurring task, not the task itself, and can leave notes for its
@@ -1041,32 +1053,54 @@ rule DispatchTaskViaMcp {
 
     requires: task.status = backlog
 
-    ensures: DispatchTask(task)
+    -- No mode: the module derives it from the task (store-split.allium:
+    -- RequestDispatch), by the same rule dispatch.allium's two entry rules
+    -- encode. The request names this board's host, so this board provisions.
+    ensures: DispatchRequested(task: task, requester: core/local_host(), origin: mcp)
 
     @guidance
         -- Returns an error if task.status != backlog.
-        -- A single DispatchTask call covers both has_plan = true
-        -- (with-plan prompt) and has_plan = false (spec-first
-        -- prompt) variants — the prompt builder branches internally.
+        -- One request covers both has_plan = true (with-plan prompt) and
+        -- has_plan = false (spec-first prompt) variants — the prompt builder
+        -- branches internally — and a plan-less research-tagged task gets the
+        -- research mode from the module's derivation.
         -- dispatch_task is the only remaining MCP dispatch tool: it stays the
         -- explicit "dispatch this specific task" call, while epic chaining is
         -- automatic on a session close that takes effect
         -- (AutoDispatchNextSubtask in epics.allium, keyed on the SessionClosed
         -- that ExitSessionViaMcp withholds when its terminal write fails).
-        -- Unlike that chain, this call is synchronous: it waits
-        -- for worktree creation and agent launch to complete before returning.
-        -- Its backlog guard is a claim, not a read: the backlog -> running
-        -- transition is taken conditionally before provisioning starts, so a
-        -- concurrent chain or TUI dispatch either loses to this call or beats it
-        -- outright, and the task is never provisioned twice
-        -- (DispatchClaimExclusive in dispatch.allium). A lost claim is reported
-        -- as the same "not in backlog" error a task that was already running
-        -- would produce, naming the status the task actually holds now.
-        -- On success, the worktree path and tmux window are returned to the caller.
-        -- On failure (e.g. worktree creation or tmux launch error), the error is
-        -- returned immediately and the claim this call won is released, so the
-        -- task is left in backlog status exactly as it was before the call. A call
-        -- that never won the claim releases nothing.
+        --
+        -- == A request, then a capped wait (store-split M4) ==
+        -- The call writes a dispatch request (store-split.allium:
+        -- RequestDispatch), which is also the claim: the backlog -> running
+        -- transition is taken conditionally in the same transaction, so a
+        -- concurrent chain or TUI dispatch either loses to this call or beats
+        -- it outright, and the task is never provisioned twice
+        -- (DispatchClaimExclusive in dispatch.allium). A refused request is
+        -- reported as the same "not in backlog" error a task that was already
+        -- running would produce, naming the status the task actually holds
+        -- now; a task whose worktree is on another machine, or that still has
+        -- an open request, is refused with that reason instead.
+        --
+        -- The call then waits on the request row, for at most
+        -- config.dispatch_task_wait_cap, and answers by the row's state:
+        --   - dispatched: the worktree path and tmux window, and whether the
+        --     worktree was created or reused (below) — the same success
+        --     shape as before M4.
+        --   - failed: an error carrying the row's reason. The claim has
+        --     already been released by the module (store-split.allium:
+        --     ReleaseClaimOfFailedRequest), so the task is left in backlog
+        --     exactly as it was before the call, unless it was moved on
+        --     meanwhile. The call itself releases nothing.
+        --   - still requested or provisioning when the cap passes: NOT an
+        --     error. The response gives the request id and its state, and
+        --     says that get_task shows how the request ends
+        --     (GetTaskViaMcp's [Dispatch request] line). The dispatch carries
+        --     on; nothing is cancelled when the wait ends.
+        -- Because a request always names the host that made it, and the MCP
+        -- endpoint runs in this board, the request this call writes is always
+        -- provisioned by this same board; there is no "another machine"
+        -- answer.
         --
         -- == The success text names which provisioning path ran ==
         -- Provisioning has two paths (DispatchTask in dispatch.allium): a
@@ -1098,7 +1132,11 @@ rule DispatchTaskViaMcp {
         -- and is reported rather than re-derived. Only provisioning can tell
         -- the two apart: it measures the directory BEFORE acting, and by the
         -- time the dispatch has returned the directory exists either way, so a
-        -- later look at it answers a different question.
+        -- later look at it answers a different question. The request row has
+        -- no column for it (store-split.allium: DispatchRequest), so it
+        -- reaches this call from the provisioning inside the same board, not
+        -- through the store; a response given after the wait cap, via
+        -- get_task, cannot say it.
         --
         -- == The tool description advertises both paths and the recovery move ==
         -- The description a caller reads before calling states both paths, that
@@ -1107,7 +1145,10 @@ rule DispatchTaskViaMcp {
         -- resumed in place by setting it back to backlog with update_tasks and
         -- dispatching it again. It also tells the caller to say in the task
         -- what the worktree already holds, because the resumed agent is a new
-        -- agent and carries none of the crashed session's context.
+        -- agent and carries none of the crashed session's context. And it
+        -- says what the call returns when provisioning outlasts the wait: the
+        -- request id and its state rather than the worktree. What to do then
+        -- is told in that response, not in the description.
         --
         -- This description is the ONE place the recovery move is told.
         -- update_tasks' `status` argument carried a copy for a while, on the

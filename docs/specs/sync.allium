@@ -374,7 +374,9 @@ config {
     -- rebuild, and a build version would need a stored minimum that somebody
     -- also has to bump. The rules version is the one number that changes
     -- exactly when the answer to "who enforces this?" changes.
-    rules_version: Integer = 2
+    -- 2 was M3 (feed routing); 3 is M4 (dispatch request rows and their
+    -- scheduled timeout, store-split.allium: DispatchRequest).
+    rules_version: Integer = 3
 }
 
 ------------------------------------------------------------
@@ -592,6 +594,36 @@ rule SubscribeToThisHostsSettings {
         -- The settings are read from these rows and from nowhere else; there
         -- is no local copy to fall back to while the store is down, and a
         -- disconnected board reads none (ADisconnectedBoardDrawsNoSharedRows).
+}
+
+rule SubscribeToThisHostsDispatchRequests {
+    when: UserIdentitySettled(identity)
+
+    let connection = the_board_connection()
+
+    requires: connection.status = connected
+
+    ensures:
+        DispatchRequestSubscriptionAsserted(
+            connection: connection,
+            host: core/local_host()
+        )
+
+    @guidance
+        -- THE FIFTH ASK, scoped by machine like the settings ask above: every
+        -- store-split.allium DispatchRequest row whose host is this machine,
+        -- in every state. A request's host is always the machine that asked
+        -- for it, so this delivers both the work this host must provision
+        -- (store-split.allium: HostClaimsDispatch picks up requested rows,
+        -- including the initial rows a starting board receives) and the
+        -- outcome of every request this host made, which DispatchingFeedback
+        -- and dispatch_task read. Finished rows are included because a row
+        -- leaving a state-filtered query would arrive as a delete, and the
+        -- outcome would be lost.
+        --
+        -- It does not weaken SubscriptionsCoverOnlyTheOwnBoardAndItsEpics:
+        -- the rows are this machine's own. Re-asserted on every connection,
+        -- like the rest.
 }
 
 rule ASubEpicOfAFollowedEpicIsAskedForToo {
