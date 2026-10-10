@@ -41,7 +41,7 @@ prevented it. These surfaces reach the next agent:
 | `docs/*.md` | linked from `CLAUDE.md`, read on demand |
 | `plugin/skills/*/SKILL.md` | the skill the next agent invokes |
 | the knowledge base | injected into the prompt (see the `learnings` skill) |
-| the repo's verify command | shown in `get_task`'s response and echoed in the `wrap_up` response (not in the dispatch prompt) |
+| the repo's verify command | shown in `get_task`'s response and run by `wrap_up` itself (not in the dispatch prompt) |
 
 The test: would the next agent do better? Every finding must trace to a
 concrete moment from this session. A true but harmless inaccuracy

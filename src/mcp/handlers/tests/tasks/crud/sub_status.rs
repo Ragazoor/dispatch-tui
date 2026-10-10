@@ -642,7 +642,7 @@ async fn list_tasks_done_status_filter() {
 #[tokio::test]
 async fn wrap_up_rebase_does_not_change_status() {
     let (state, db) = test_state_with_overrides(
-        DispatchScript::finish().no_remote().shared_runner(),
+        with_clean_status(DispatchScript::finish().no_remote()),
         None,
         None,
     )
@@ -686,7 +686,7 @@ async fn wrap_up_rebase_does_not_change_status() {
 #[tokio::test]
 async fn wrap_up_rebase_does_not_recalculate_epic_status() {
     let (state, db) = test_state_with_overrides(
-        DispatchScript::finish().no_remote().shared_runner(),
+        with_clean_status(DispatchScript::finish().no_remote()),
         None,
         None,
     )
@@ -732,7 +732,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
 #[tokio::test]
 async fn wrap_up_accepts_string_task_id() {
     let (state, db) = test_state_with_overrides(
-        DispatchScript::finish().no_remote().shared_runner(),
+        with_clean_status(DispatchScript::finish().no_remote()),
         None,
         None,
     )

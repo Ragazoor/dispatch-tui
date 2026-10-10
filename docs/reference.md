@@ -902,7 +902,7 @@ summary="Rebase on main resolved the rusqlite version conflict; use that if it r
 
 ## Verify Command
 
-A per-repo, single-line shell command that dispatched agents must run before declaring work complete. Stored on the `repo_paths` row for the task's `repo_path`; set via the `set_verify_command` MCP tool or `cargo run -- repo set-verify <path> <command>`. Newlines and carriage returns are rejected — chain steps with `&&` or `;`. It never appears in the dispatch prompt. Instead it reaches the agent through two surfaces: `get_task`'s "Verify command" line (read by the `/wrap-up` skill in its Step 2, and acted on in its Step 7, before the closing sequence ever calls `wrap_up`), and, as a secondary reminder, the `wrap_up` response's action-specific "Verify before exiting" line (`src/mcp/handlers/tasks/wrap_up.rs::wrap_up_verify_line`). See `docs/specs/dispatch.allium` for why both exist.
+A per-repo, single-line shell command that dispatched agents must run before declaring work complete. Stored on the `repo_paths` row for the task's `repo_path`; set via the `set_verify_command` MCP tool or `cargo run -- repo set-verify <path> <command>`. Newlines and carriage returns are rejected — chain steps with `&&` or `;`. It never appears in the dispatch prompt. It reaches the agent through `get_task`'s "Verify command" line, and the `wrap_up` tool runs it itself in the task's worktree (bounded by a timeout) and refuses to issue an exit token if it exits non-zero or the worktree has uncommitted changes. See `WrapUpRefusesUnfinishedWork` in `docs/specs/mcp-task-tools.allium`.
 
 ## Agent-Facing Skill Copy
 

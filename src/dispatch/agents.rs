@@ -642,10 +642,8 @@ pub async fn prepare_inputs_with_epic_ctx(
 
 /// Fetch the verify command for a repository path from the settings store.
 ///
-/// Called by both `get_task` (the earlier of the two surfaces — the
-/// `/wrap-up` skill reads its "Verify command" line before ever calling
-/// `wrap_up`) and the `wrap_up` handler itself, which echoes it back as a
-/// secondary "Verify before exiting" reminder. No prompt builder reads it, so
+/// Called by `get_task` (its "Verify command" line) and by the `wrap_up`
+/// handler, which runs it and refuses on failure. No prompt builder reads it, so
 /// this has no caller on a dispatch path despite living here. Returns `None`
 /// when no verify command is configured.
 pub async fn fetch_verify_command(

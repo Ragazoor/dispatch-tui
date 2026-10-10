@@ -96,6 +96,32 @@ async fn test_state_with_bg_done() -> (Arc<McpState>, mpsc::UnboundedReceiver<Ba
     (state, rx)
 }
 
+/// A runner that answers `wrap_up`'s commit check on a clean worktree, then
+/// `script`'s calls. Every `wrap_up` makes that check first
+/// (`WrapUpRefusesUnfinishedWork`), so a runner scripted for the action alone
+/// would hand the check the action's first reply.
+fn with_clean_status(
+    script: crate::dispatch::mock_sequence::DispatchScript,
+) -> Arc<MockProcessRunner> {
+    let mut responses = vec![(None, MockProcessRunner::ok_with_stdout(b""))];
+    responses.extend(script.responses());
+    Arc::new(MockProcessRunner::new_with_delays(responses))
+}
+
+/// [`test_state_with_db`] for a `wrap_up` that takes no further subprocess
+/// calls (`done`, `pr`): its runner answers the commit check on a clean
+/// worktree and nothing else.
+async fn wrap_up_state_with_db() -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
+    test_state_with_overrides(
+        Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b""),
+        ])),
+        None,
+        None,
+    )
+    .await
+}
+
 async fn test_state_with_db() -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
     test_state_with_overrides(Arc::new(MockProcessRunner::new(vec![])), None, None).await
 }

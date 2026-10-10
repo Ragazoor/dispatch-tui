@@ -9,11 +9,38 @@
 //! dispatch seam next door exists to prevent. The handler now owns request
 //! parsing and response shaping only.
 
+use std::time::Duration;
+
 use crate::dispatch;
 use crate::models::{SubStatus, Task, TmuxWindow};
-use crate::service::UpdateTaskParams;
+use crate::service::{ServiceError, UpdateTaskParams};
 
 use super::crud::TaskService;
+
+/// How long `wrap_up` lets the repo's verify command run before it counts as
+/// failed. Generous: a cold `cargo test` in a fresh worktree is minutes, and a
+/// verify that outlasts this would also outlast the agent's own tool timeout.
+pub const WRAP_UP_VERIFY_TIMEOUT: Duration = Duration::from_secs(900);
+
+/// Most uncommitted paths a refusal names before it only counts the rest.
+const MAX_NAMED_PATHS: usize = 10;
+/// Most lines of verify output a refusal carries, taken from the end.
+const VERIFY_TAIL_LINES: usize = 25;
+
+/// What the pre-action checks established.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WrapUpChecks {
+    /// The verify command that ran and passed, or `None` when the repo has none.
+    pub verified: Option<String>,
+}
+
+/// The last [`VERIFY_TAIL_LINES`] lines of a command's combined output.
+fn output_tail(output: &std::process::Output) -> String {
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let lines: Vec<&str> = text.lines().collect();
+    lines[lines.len().saturating_sub(VERIFY_TAIL_LINES)..].join("\n")
+}
 
 /// What a [`TaskService::wrap_up_rebase`] attempt made of the task.
 ///
@@ -104,6 +131,102 @@ impl TaskService {
                     message: format!("{e}"),
                 }
             }
+        }
+    }
+
+    /// Refuse a wrap-up whose worktree has uncommitted changes or whose repo's
+    /// verify command does not pass — `WrapUpRefusesUnfinishedWork` in
+    /// `docs/specs/mcp-task-tools.allium`.
+    ///
+    /// The commit check runs first: a dirty tree makes a verify result
+    /// meaningless, and it is cheap. Neither check writes anything, so a
+    /// refusal leaves the task as it was.
+    pub async fn check_wrap_up_ready(&self, task: Task) -> Result<WrapUpChecks, ServiceError> {
+        let Some(worktree) = task.worktree.clone() else {
+            return Err(ServiceError::Internal(anyhow::anyhow!(
+                "check_wrap_up_ready: task has no worktree"
+            )));
+        };
+        let verify = dispatch::fetch_verify_command(&*self.db, &task.repo_path).await;
+        let runner = self.runner.clone();
+
+        let joined = tokio::task::spawn_blocking(move || {
+            let status = crate::git::git_in(
+                &*runner,
+                &worktree,
+                &["status", "--porcelain"],
+                crate::process::SUBPROCESS_TIMEOUT,
+            )
+            .map_err(|e| format!("Could not check the worktree for uncommitted changes: {e}"))?;
+            if !status.status.success() {
+                return Err(format!(
+                    "Could not check the worktree for uncommitted changes: git status exited {}",
+                    status
+                        .status
+                        .code()
+                        .map_or("abnormally".to_string(), |c| c.to_string())
+                ));
+            }
+            let dirty = crate::git::parse_porcelain_files(&status);
+            if !dirty.is_empty() {
+                let shown = dirty
+                    .iter()
+                    .take(MAX_NAMED_PATHS)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let more = dirty.len().saturating_sub(MAX_NAMED_PATHS);
+                let more = if more > 0 {
+                    format!(" and {more} more")
+                } else {
+                    String::new()
+                };
+                return Err(format!(
+                    "The worktree has uncommitted changes: {}{more}. Commit them, then call \
+                     wrap_up again.",
+                    shown.join(", ")
+                ));
+            }
+
+            let Some(command) = verify else {
+                return Ok(WrapUpChecks { verified: None });
+            };
+            // `sh -c` takes the worktree as $0 and the command as $1, so
+            // neither needs quoting into the script text.
+            let output = runner
+                .run_with_timeout(
+                    "sh",
+                    &["-c", "cd \"$0\" && eval \"$1\"", &worktree, &command],
+                    WRAP_UP_VERIFY_TIMEOUT,
+                )
+                .map_err(|e| {
+                    format!(
+                        "Verify command `{command}` did not finish: {e}. Fix the cause, commit, \
+                         then call wrap_up again."
+                    )
+                })?;
+            if output.status.success() {
+                return Ok(WrapUpChecks {
+                    verified: Some(command),
+                });
+            }
+            let code = output
+                .status
+                .code()
+                .map_or("a signal".to_string(), |c| c.to_string());
+            Err(format!(
+                "Verify command `{command}` failed (exit {code}); nothing was rebased or \
+                 closed. Fix the cause, commit, then call wrap_up again. Output tail:\n{}",
+                output_tail(&output)
+            ))
+        })
+        .await;
+
+        match joined {
+            Ok(Ok(checks)) => Ok(checks),
+            Ok(Err(message)) => Err(ServiceError::Validation(message)),
+            Err(e) => Err(ServiceError::Internal(anyhow::anyhow!(
+                "wrap_up checks worker died: {e}"
+            ))),
         }
     }
 

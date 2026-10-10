@@ -1,10 +1,9 @@
 use serde_json::{json, Value};
 
-use crate::dispatch;
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{Task, TaskId};
-use crate::service::WrapUpRebaseOutcome;
+use crate::service::{WrapUpChecks, WrapUpRebaseOutcome};
 
 use super::{
     fetch_caller_task, parse_args, service_err_to_response, ExitSessionArgs, JsonRpcResponse,
@@ -24,48 +23,28 @@ fn exit_instruction(action: WrapUpAction) -> String {
     )
 }
 
-/// Worded per action rather than uniformly, because what changed since the
-/// `/wrap-up` skill's own pre-`wrap_up` verification step (see the get_task
-/// verify-command note in `docs/specs/mcp-task-tools.allium`) differs by
-/// action: `rebase` just ran a real git rebase server-side, which can pull in
-/// sibling-epic changes the skill's check could not have seen, so it names
-/// that as a reason to re-verify. `pr`/`done` perform no git operation at all,
-/// so nothing justifies telling the agent to redo work — the wording defaults
-/// to verifying only when it is not already known to have happened, rather
-/// than granting a blanket permission to skip (an agent that reached
-/// `wrap_up` without running the skill's check must not read this as licence
-/// to skip verifying altogether).
-async fn wrap_up_verify_line(
-    db: &dyn crate::store::TaskReadStore,
-    repo_path: &str,
-    action: WrapUpAction,
-) -> String {
-    match dispatch::fetch_verify_command(db, repo_path).await {
-        Some(cmd) => match action {
-            WrapUpAction::Rebase => format!(
-                " **Verify before exiting**: this rebase may have pulled in changes since \
-                you last checked — run `{cmd}` and confirm it passes."
-            ),
-            WrapUpAction::Pr | WrapUpAction::Done => format!(
-                " **Verify before exiting**: if you haven't already run `{cmd}` and confirmed \
-                it passes earlier in this wrap-up, do so now."
-            ),
-        },
+/// The sentence reporting that `wrap_up` itself ran the verify command, or
+/// nothing when the repo has none. The agent is not asked to verify: the tool
+/// already did, and refused otherwise (`WrapUpRefusesUnfinishedWork` in
+/// `docs/specs/mcp-task-tools.allium`).
+fn verified_line(checks: &WrapUpChecks) -> String {
+    match &checks.verified {
+        Some(cmd) => format!(" Verified: `{cmd}` passed in your worktree."),
         None => String::new(),
     }
 }
 
-/// Common wrap_up finishing sequence shared by all three actions: fetch the
-/// verify-command line, issue the exit token recording `action`, and build
-/// the exit_session instruction. Only the surrounding response prose differs
-/// per action.
-async fn issue_wrap_up_token(
+/// Common wrap_up finishing sequence shared by all three actions: report the
+/// verification, issue the exit token recording `action`, and build the
+/// exit_session instruction. Only the surrounding response prose differs per
+/// action.
+fn issue_wrap_up_token(
     state: &McpState,
     task_id: TaskId,
-    repo_path: &str,
+    checks: &WrapUpChecks,
     action: WrapUpAction,
 ) -> (String, String, String) {
-    let verify_line = wrap_up_verify_line(&*state.db, repo_path, action).await;
+    let verify_line = verified_line(checks);
     let token = state.issue_exit_token(task_id, action);
     let exit_line = exit_instruction(action);
     (verify_line, token, exit_line)
@@ -88,15 +67,14 @@ async fn validate_wrap_up_request(
 
 /// Finishes the two no-rebase actions (`done`, `pr`), which only differ in a
 /// short note on git operations and a trailing `rate_learning` nudge for `pr`.
-async fn finish_wrap_up_simple(
+fn finish_wrap_up_simple(
     state: &McpState,
     id: Option<Value>,
     task_id: TaskId,
-    repo_path: &str,
+    checks: &WrapUpChecks,
     action: WrapUpAction,
 ) -> JsonRpcResponse {
-    let (verify_line, token, exit_line) =
-        issue_wrap_up_token(state, task_id, repo_path, action).await;
+    let (verify_line, token, exit_line) = issue_wrap_up_token(state, task_id, checks, action);
     let no_git_note = match action {
         WrapUpAction::Done => " No git operations performed.",
         WrapUpAction::Pr | WrapUpAction::Rebase => "",
@@ -129,7 +107,12 @@ async fn finish_wrap_up_simple(
 /// [`crate::service::TaskServiceApi::wrap_up_rebase`]; what is left here is
 /// which error code each outcome earns, which notifications it fires, and the
 /// response prose.
-async fn finish_wrap_up_rebase(state: &McpState, id: Option<Value>, task: Task) -> JsonRpcResponse {
+async fn finish_wrap_up_rebase(
+    state: &McpState,
+    id: Option<Value>,
+    task: Task,
+    checks: &WrapUpChecks,
+) -> JsonRpcResponse {
     let task_id = task.id;
     let repo_path = task.repo_path.clone();
 
@@ -140,7 +123,7 @@ async fn finish_wrap_up_rebase(state: &McpState, id: Option<Value>, task: Task) 
             // already current — RefreshRepoSyncStateAfterRebase.
             state.notify_branch_rebased(&repo_path);
             let (verify_line, token, exit_line) =
-                issue_wrap_up_token(state, task_id, &repo_path, WrapUpAction::Rebase).await;
+                issue_wrap_up_token(state, task_id, checks, WrapUpAction::Rebase);
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
@@ -193,11 +176,18 @@ pub(crate) async fn handle_wrap_up(
         Err(resp) => return resp,
     };
 
+    // Before the action, whichever it is: a refusal here has no side effect and
+    // mints no token. `WrapUpRefusesUnfinishedWork`.
+    let checks = match state.task_svc.check_wrap_up_ready(task.clone()).await {
+        Ok(c) => c,
+        Err(e) => return service_err_to_response(id, e),
+    };
+
     match parsed.action {
         WrapUpAction::Done | WrapUpAction::Pr => {
-            finish_wrap_up_simple(state, id, task.id, &task.repo_path, parsed.action).await
+            finish_wrap_up_simple(state, id, task.id, &checks, parsed.action)
         }
-        WrapUpAction::Rebase => finish_wrap_up_rebase(state, id, task).await,
+        WrapUpAction::Rebase => finish_wrap_up_rebase(state, id, task, &checks).await,
     }
 }
 

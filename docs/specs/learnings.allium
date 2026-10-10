@@ -422,8 +422,9 @@ rule WrapUpRateLearningNudge {
         -- /wrap-up skill runs before its commit step, ahead of wrap_up, for
         -- all three actions — it is not driven by wrap_up or exit_session.
         -- Implemented in finish_wrap_up_simple() (src/mcp/handlers/tasks/wrap_up.rs),
-        -- which also emits the verify and exit-token lines documented in
-        -- pr-workflow.allium: WrapUpPr.
+        -- which also emits the verified line and the exit-token line (see
+        -- WrapUpRefusesUnfinishedWork in mcp-task-tools.allium and ExitSession
+        -- in pr-workflow.allium).
 }
 
 -- exit_session is not specified here. Its current contract is a single call —

@@ -590,8 +590,8 @@ default feed interval.",
     async idempotent "set_verify_command" => tasks::handle_set_verify_command,
         "Set or clear the verify command for a repository path — the check an agent working in \
 that repo must run green before declaring work complete. It never appears in a dispatch prompt. \
-It reaches the agent through two surfaces instead: the 'Verify command' line in get_task's \
-response, and the 'Verify before exiting' reminder in the wrap_up response. \
+It reaches the agent through the 'Verify command' line in get_task's response, and wrap_up \
+runs it itself, refusing on failure. \
 Pass command=null to clear it.",
         {
             "type": "object",

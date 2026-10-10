@@ -298,6 +298,7 @@ async fn wrap_up_rebase_returns_started() {
 async fn wrap_up_rebase_returns_exit_token() {
     let (state, db) = test_state_with_overrides(
         Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b""), // wrap_up: clean worktree
             MockProcessRunner::ok_with_stdout(b"main\n"),
             MockProcessRunner::ok_with_stdout(b""),
             MockProcessRunner::fail(""),
@@ -345,7 +346,7 @@ async fn wrap_up_rebase_returns_exit_token() {
 
 #[tokio::test]
 async fn wrap_up_done_returns_exit_token() {
-    let (state, db) = test_state_with_db().await;
+    let (state, db) = wrap_up_state_with_db().await;
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -413,7 +414,7 @@ async fn wrap_up_pr_defers_review_and_url_to_exit_session() {
     // wrap_up(pr) no longer takes pr_url and no longer mutates task.status/url —
     // it only issues a token recording action=pr. The terminal mutation moves
     // to exit_session(action="pr", pr_url=...).
-    let state = test_state().await;
+    let state = wrap_up_state_with_db().await.0;
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
@@ -469,7 +470,7 @@ async fn wrap_up_pr_defers_review_and_url_to_exit_session() {
 
 #[tokio::test]
 async fn wrap_up_pr_response_contains_token_and_no_retro_instruction() {
-    let state = test_state().await;
+    let state = wrap_up_state_with_db().await.0;
     let task_id = state
         .db_write()
         .create_task(CreateTaskRequest {
@@ -546,7 +547,7 @@ async fn make_state_with_runner(
 /// `DispatchScript` rather than a hand-written queue — see `docs/conventions.md`,
 /// "Driving a dispatch: `DispatchScript`, never a hand-written queue".
 fn rebase_ok_runner() -> Arc<dyn ProcessRunner> {
-    DispatchScript::finish().no_remote().shared_runner()
+    with_clean_status(DispatchScript::finish().no_remote())
 }
 
 async fn create_wrappable_task(db: &Arc<dyn store::TaskStore>) -> crate::models::TaskId {
@@ -594,44 +595,6 @@ async fn wrap_up_without_verdicts_still_succeeds() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn wrap_up_success_includes_verify_reminder_when_configured() {
-    let (state, db) = make_state_with_runner(rebase_ok_runner()).await;
-    let task_id = create_wrappable_task(&db).await;
-    db.save_repo_path("/repo").await.unwrap();
-    db.set_verify_command("/repo", Some("cargo test"))
-        .await
-        .unwrap();
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "wrap_up",
-            "arguments": { "task_id": task_id.0, "action": "rebase" }
-        })),
-    )
-    .await;
-
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains("Verify before exiting"),
-        "Expected 'Verify before exiting' in response, got: {text}"
-    );
-    assert!(
-        text.contains("cargo test"),
-        "Expected 'cargo test' in response, got: {text}"
-    );
-    assert!(
-        text.contains("this rebase may have pulled in changes since you last checked"),
-        "Expected the rebase-specific rationale in response, got: {text}"
-    );
-    assert!(
-        text.contains("exit_session"),
-        "Expected 'exit_session' in response, got: {text}"
-    );
-}
-
-#[tokio::test]
 async fn wrap_up_success_omits_verify_reminder_when_unconfigured() {
     let (state, db) = make_state_with_runner(rebase_ok_runner()).await;
     let task_id = create_wrappable_task(&db).await;
@@ -658,97 +621,13 @@ async fn wrap_up_success_omits_verify_reminder_when_unconfigured() {
 }
 
 #[tokio::test]
-async fn wrap_up_pr_success_includes_verify_reminder_when_configured() {
-    // The pr branch previously omitted the verify-command line the spec already
-    // claimed it included — now it's added, matching rebase/done.
-    let state = test_state().await;
-    let task_id = state
-        .db_write()
-        .create_task(CreateTaskRequest {
-            description: "d",
-            status: TaskStatus::Running,
-            ..CreateTaskRequest::fixture("T", "/repo")
-        })
-        .await
-        .unwrap();
-    state
-        .db_write()
-        .patch_task(
-            task_id,
-            &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
-        )
-        .await
-        .unwrap();
-    state.db_write().save_repo_path("/repo").await.unwrap();
-    state
-        .db_write()
-        .set_verify_command("/repo", Some("cargo test"))
-        .await
-        .unwrap();
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "pr" } })),
-    )
-    .await;
-
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains("Verify before exiting"),
-        "Expected 'Verify before exiting' in pr response, got: {text}"
-    );
-    assert!(
-        text.contains("cargo test"),
-        "Expected 'cargo test' in pr response, got: {text}"
-    );
-    assert!(
-        text.contains("if you haven't already") && text.contains("do so now"),
-        "Expected the default-to-verify (not skip-permission) wording in pr response, got: {text}"
-    );
-}
-
-#[tokio::test]
-async fn wrap_up_done_success_includes_verify_reminder_when_configured() {
-    let (state, db) = make_state_with_runner(rebase_ok_runner()).await;
-    let task_id = create_wrappable_task(&db).await;
-    db.save_repo_path("/repo").await.unwrap();
-    db.set_verify_command("/repo", Some("cargo test"))
-        .await
-        .unwrap();
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "wrap_up",
-            "arguments": { "task_id": task_id.0, "action": "done" }
-        })),
-    )
-    .await;
-
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains("Verify before exiting"),
-        "Expected 'Verify before exiting' in done response, got: {text}"
-    );
-    assert!(
-        text.contains("cargo test"),
-        "Expected 'cargo test' in done response, got: {text}"
-    );
-    assert!(
-        text.contains("if you haven't already") && text.contains("do so now"),
-        "Expected done to share pr's default-to-verify wording, got: {text}"
-    );
-}
-
-#[tokio::test]
 async fn wrap_up_rebase_conflict_returns_error() {
     let (state, db) = test_state_with_overrides(
-        DispatchScript::finish()
-            .no_remote()
-            .rebase_conflicts_in_stderr(&["foo.rs"])
-            .shared_runner(),
+        with_clean_status(
+            DispatchScript::finish()
+                .no_remote()
+                .rebase_conflicts_in_stderr(&["foo.rs"]),
+        ),
         None,
         None,
     )
@@ -795,9 +674,7 @@ async fn wrap_up_rebase_dirty_primary_worktree_returns_error() {
     // not conflated with a rebase conflict — and must not flip the task's
     // sub_status to Conflict, since no rebase was ever attempted.
     let (state, db) = test_state_with_overrides(
-        DispatchScript::finish()
-            .dirty_primary(&["unrelated.rs"])
-            .shared_runner(),
+        with_clean_status(DispatchScript::finish().dirty_primary(&["unrelated.rs"])),
         None,
         None,
     )
@@ -855,9 +732,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
     // what makes the stale trailing response this queue used to carry
     // impossible to leave behind.
     let (state, db) = test_state_with_overrides(
-        DispatchScript::finish()
-            .head_branch("feature")
-            .shared_runner(),
+        with_clean_status(DispatchScript::finish().head_branch("feature")),
         None,
         None,
     )
@@ -1276,6 +1151,7 @@ async fn exit_session_after_close_token_is_gone() {
 async fn exit_session_full_flow_rebase() {
     let (state, db) = test_state_with_overrides(
         Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b""), // wrap_up: clean worktree
             MockProcessRunner::ok_with_stdout(b"main\n"),
             MockProcessRunner::ok_with_stdout(b""),
             MockProcessRunner::fail(""),
@@ -1336,12 +1212,14 @@ async fn wrap_up_second_call_overwrites_token() {
     let (state, db) = test_state_with_overrides(
         Arc::new(MockProcessRunner::new(vec![
             // First rebase
+            MockProcessRunner::ok_with_stdout(b""), // wrap_up: clean worktree
             MockProcessRunner::ok_with_stdout(b"main\n"),
             MockProcessRunner::ok_with_stdout(b""),
             MockProcessRunner::fail(""),
             MockProcessRunner::ok(),
             MockProcessRunner::ok(),
             // Second rebase
+            MockProcessRunner::ok_with_stdout(b""), // wrap_up: clean worktree
             MockProcessRunner::ok_with_stdout(b"main\n"),
             MockProcessRunner::ok_with_stdout(b""),
             MockProcessRunner::fail(""),
@@ -1704,6 +1582,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
     // belong to `exit_session`, which the script has no vocabulary to model, so
     // they are appended — the pattern documented on `DispatchScript::responses`.
     let mut responses = DispatchScript::finish().no_remote().responses();
+    responses.insert(0, (None, MockProcessRunner::ok_with_stdout(b"")));
     responses.extend([
         (None, MockProcessRunner::ok()), // tmux has-session
         (None, MockProcessRunner::ok()), // tmux kill-window
@@ -1803,7 +1682,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
 
 #[tokio::test]
 async fn wrap_up_done_defers_done_transition_to_exit_session() {
-    let (state, db) = test_state_with_db().await;
+    let (state, db) = wrap_up_state_with_db().await;
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -1889,7 +1768,7 @@ async fn wrap_up_done_recalculates_epic_status() {
     // wrap_up(done) on an epic's only running subtask must NOT advance the
     // epic yet (status is deferred to exit_session); the closing call is
     // what auto-advances the epic to Done.
-    let (state, db) = test_state_with_db().await;
+    let (state, db) = wrap_up_state_with_db().await;
 
     let epic = db.create_epic("E", "", None).await.unwrap();
     let task_id = db
@@ -1959,7 +1838,7 @@ async fn wrap_up_done_recalculates_epic_status() {
 async fn wrap_up_pr_recalculates_epic_status() {
     // wrap_up(pr) no longer moves the task; exit_session(action="pr") does,
     // and the epic recalc should run from that closing mutation.
-    let state = test_state().await;
+    let state = wrap_up_state_with_db().await.0;
     let epic = state.db_write().create_epic("E", "", None).await.unwrap();
     let task_id = state
         .db_write()
@@ -2183,4 +2062,247 @@ async fn exit_session_tool_schema_requires_action_and_has_pr_url() {
             .contains_key("pr_url"),
         "exit_session schema should have a pr_url property"
     );
+}
+
+// ---------------------------------------------------------------------------
+// wrap_up refuses unfinished work (WrapUpRefusesUnfinishedWork,
+// docs/specs/mcp-task-tools.allium)
+// ---------------------------------------------------------------------------
+
+const WORKTREE: &str = "/repo/.worktrees/1-t";
+
+/// A runner scripted for the two checks `wrap_up` makes before it acts, then
+/// whatever `after` answers. `status` is what `git status --porcelain` prints;
+/// `verify` is the reply to the verify command, or `None` when the repo has no
+/// verify command and so no call is made.
+fn checked_runner(
+    status: &str,
+    verify: Option<anyhow::Result<std::process::Output>>,
+    after: Vec<(
+        Option<std::time::Duration>,
+        anyhow::Result<std::process::Output>,
+    )>,
+) -> Arc<MockProcessRunner> {
+    let mut responses = vec![(None, MockProcessRunner::ok_with_stdout(status.as_bytes()))];
+    if let Some(v) = verify {
+        responses.push((None, v));
+    }
+    responses.extend(after);
+    Arc::new(MockProcessRunner::new_with_delays(responses))
+}
+
+async fn wrappable_task_with_verify(
+    runner: Arc<MockProcessRunner>,
+    verify_command: Option<&str>,
+) -> (Arc<McpState>, crate::models::TaskId) {
+    let (state, db) = make_state_with_runner(runner).await;
+    let task_id = create_wrappable_task(&db).await;
+    if let Some(cmd) = verify_command {
+        db.save_repo_path("/repo").await.unwrap();
+        db.set_verify_command("/repo", Some(cmd)).await.unwrap();
+    }
+    (state, task_id)
+}
+
+async fn wrap_up_call(
+    state: &Arc<McpState>,
+    task_id: crate::models::TaskId,
+    action: &str,
+) -> JsonRpcResponse {
+    call(
+        state,
+        "tools/call",
+        Some(json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": action } })),
+    )
+    .await
+}
+
+fn assert_no_token(state: &McpState, task_id: crate::models::TaskId) {
+    assert!(
+        !state.exit_tokens.read().unwrap().contains_key(&task_id),
+        "a refused wrap_up must not mint an exit token"
+    );
+}
+
+#[tokio::test]
+async fn wrap_up_refuses_a_worktree_with_uncommitted_changes_for_every_action() {
+    for action in ["rebase", "pr", "done"] {
+        let runner = checked_runner(" M src/lib.rs\n?? notes.md\n", None, vec![]);
+        let (state, task_id) = wrappable_task_with_verify(runner.clone(), None).await;
+
+        let resp = wrap_up_call(&state, task_id, action).await;
+
+        assert!(is_error(&resp), "{action}: expected a refusal");
+        let msg = error_message(&resp);
+        assert!(
+            msg.contains("src/lib.rs") && msg.contains("notes.md"),
+            "{action}: the refusal must name the uncommitted paths; got: {msg}"
+        );
+        assert!(
+            msg.contains("commit"),
+            "{action}: the refusal must say to commit; got: {msg}"
+        );
+        assert_no_token(&state, task_id);
+        assert_eq!(
+            runner.flattened_calls(),
+            vec![format!("git -C {WORKTREE} status --porcelain")],
+            "{action}: nothing may run after a dirty tree is found"
+        );
+    }
+}
+
+#[tokio::test]
+async fn wrap_up_refuses_when_the_verify_command_fails_and_never_rebases() {
+    let runner = checked_runner(
+        "",
+        Some(MockProcessRunner::fail_with_code(
+            101,
+            "test result: FAILED. 1 failed",
+        )),
+        vec![],
+    );
+    let (state, task_id) = wrappable_task_with_verify(runner.clone(), Some("cargo test")).await;
+
+    let resp = wrap_up_call(&state, task_id, "rebase").await;
+
+    assert!(is_error(&resp), "expected a refusal");
+    let msg = error_message(&resp);
+    assert!(
+        msg.contains("cargo test"),
+        "must name the command; got: {msg}"
+    );
+    assert!(msg.contains("101"), "must give the exit code; got: {msg}");
+    assert!(
+        msg.contains("1 failed"),
+        "must carry the output tail; got: {msg}"
+    );
+    assert_no_token(&state, task_id);
+    assert_eq!(
+        runner.recorded_calls().len(),
+        2,
+        "only the status check and the verify run may happen; got: {:?}",
+        runner.flattened_calls()
+    );
+}
+
+#[tokio::test]
+async fn wrap_up_refuses_pr_and_done_when_the_verify_command_fails() {
+    for action in ["pr", "done"] {
+        let runner = checked_runner("", Some(MockProcessRunner::fail("boom")), vec![]);
+        let (state, task_id) = wrappable_task_with_verify(runner, Some("make check")).await;
+
+        let resp = wrap_up_call(&state, task_id, action).await;
+
+        assert!(is_error(&resp), "{action}: expected a refusal");
+        assert!(error_message(&resp).contains("make check"));
+        assert_no_token(&state, task_id);
+    }
+}
+
+#[tokio::test]
+async fn wrap_up_refuses_when_the_verify_command_times_out() {
+    let runner = Arc::new(MockProcessRunner::new_with_delays(vec![
+        (None, MockProcessRunner::ok()),
+        (
+            Some(crate::service::WRAP_UP_VERIFY_TIMEOUT),
+            MockProcessRunner::ok(),
+        ),
+    ]));
+    let (state, task_id) = wrappable_task_with_verify(runner, Some("cargo test")).await;
+
+    let resp = wrap_up_call(&state, task_id, "done").await;
+
+    assert!(is_error(&resp), "expected a refusal");
+    assert!(
+        error_message(&resp).contains("timed out"),
+        "got: {}",
+        error_message(&resp)
+    );
+    assert_no_token(&state, task_id);
+}
+
+#[tokio::test]
+async fn wrap_up_runs_verify_in_the_worktree_after_the_commit_check_and_before_the_rebase() {
+    let script = DispatchScript::finish().no_remote();
+    let runner = checked_runner("", Some(MockProcessRunner::ok()), script.responses());
+    let (state, task_id) = wrappable_task_with_verify(runner.clone(), Some("cargo test")).await;
+
+    let resp = wrap_up_call(&state, task_id, "rebase").await;
+
+    assert!(!is_error(&resp), "got: {}", error_message(&resp));
+    let calls = runner.recorded_calls();
+    assert_eq!(
+        calls[0].1,
+        vec!["-C", WORKTREE, "status", "--porcelain"],
+        "the commit check runs first"
+    );
+    let (program, args) = &calls[1];
+    assert_eq!(program, "sh");
+    assert!(
+        args.iter().any(|a| a == WORKTREE) && args.iter().any(|a| a == "cargo test"),
+        "verify must run the stored command in the worktree; got: {args:?}"
+    );
+    assert!(
+        calls[2..]
+            .iter()
+            .any(|(_, a)| a.contains(&"rebase".to_string())),
+        "the rebase comes after verify; got: {:?}",
+        runner.flattened_calls()
+    );
+}
+
+#[tokio::test]
+async fn wrap_up_verified_success_says_so_and_has_no_reverify_instruction() {
+    for action in ["rebase", "pr", "done"] {
+        let after = if action == "rebase" {
+            DispatchScript::finish().no_remote().responses()
+        } else {
+            vec![]
+        };
+        let runner = checked_runner("", Some(MockProcessRunner::ok()), after);
+        let (state, task_id) = wrappable_task_with_verify(runner, Some("cargo test")).await;
+
+        let resp = wrap_up_call(&state, task_id, action).await;
+
+        assert!(!is_error(&resp), "{action}: got: {}", error_message(&resp));
+        let text = extract_response_text(&resp);
+        assert!(
+            !text.contains("Verify before"),
+            "{action}: the tool ran verify, so it must not ask the agent to: {text}"
+        );
+        assert!(
+            text.contains("`cargo test` passed"),
+            "{action}: the response must report the verification: {text}"
+        );
+        assert!(text.contains("exit_session"), "{action}: {text}");
+    }
+}
+
+#[tokio::test]
+async fn wrap_up_without_a_verify_command_only_checks_the_worktree() {
+    let runner = checked_runner("", None, vec![]);
+    let (state, task_id) = wrappable_task_with_verify(runner.clone(), None).await;
+
+    let resp = wrap_up_call(&state, task_id, "done").await;
+
+    assert!(!is_error(&resp), "got: {}", error_message(&resp));
+    assert_eq!(runner.recorded_calls().len(), 1);
+    assert!(!extract_response_text(&resp).contains("passed"));
+}
+
+#[tokio::test]
+async fn wrap_up_refusal_names_at_most_ten_paths() {
+    let status: String = (0..13).map(|i| format!(" M f{i:02}.rs\n")).collect();
+    let runner = checked_runner(&status, None, vec![]);
+    let (state, task_id) = wrappable_task_with_verify(runner, None).await;
+
+    let resp = wrap_up_call(&state, task_id, "done").await;
+
+    assert!(is_error(&resp));
+    let msg = error_message(&resp);
+    assert!(
+        msg.contains("f09.rs") && !msg.contains("f10.rs"),
+        "got: {msg}"
+    );
+    assert!(msg.contains("and 3 more"), "got: {msg}");
 }

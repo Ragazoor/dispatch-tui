@@ -13,7 +13,7 @@ pub use crud::{
 };
 pub use dispatch::{DispatchClaim, DispatchOutcome, DispatchRequest};
 pub use params::{CreateTaskParams, ListTasksFilter, UpdateTaskParams};
-pub use wrap_up::WrapUpRebaseOutcome;
+pub use wrap_up::{WrapUpChecks, WrapUpRebaseOutcome, WRAP_UP_VERIFY_TIMEOUT};
 
 #[cfg(test)]
 mod tests;

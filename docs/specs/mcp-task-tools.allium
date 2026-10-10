@@ -26,6 +26,10 @@ config {
     -- Most entries one resources/list page returns; further entries are
     -- reached through nextCursor (ListContextResourcesViaMcp).
     context_list_page_size: Integer = 50
+
+    -- How long wrap_up lets the repository's verify command run before it
+    -- counts as failed (WrapUpRefusesUnfinishedWork).
+    wrap_up_verify_timeout: Duration = 15.minutes
 }
 
 ------------------------------------------------------------
@@ -861,12 +865,12 @@ rule GetTaskViaMcp {
         --
         -- [Verify command] is not a Task field: it is task.repo_path resolved
         -- against core/SavedRepoPath.verify_command, the same lookup wrap_up
-        -- performs for its own "Verify before exiting" line. Omitted when no
-        -- verify_command is set for the repo. This is the earlier of the two
-        -- surfaces that carry the command to the agent — see
-        -- ThePromptCarriesNoVerifyCommand in dispatch-prompt.allium and
-        -- WrapUpRebase/WrapUpPr/WrapUpDone in pr-workflow.allium for the other
-        -- one and why both exist.
+        -- performs when it runs the command itself (WrapUpRefusesUnfinishedWork).
+        -- Omitted when no verify_command is set for the repo. The line lets an
+        -- agent run the command while it works, so a refusal at wrap_up is not
+        -- its first sight of a failure; wrap_up does not depend on the agent
+        -- having run it. See also ThePromptCarriesNoVerifyCommand in
+        -- dispatch-prompt.allium.
         -- An unknown task_id is a not-found condition, not a validation one:
         -- ServiceError::NotFound surfaces as the -32001 not-found code, the
         -- same mapping every other NotFound uses (see CreateTaskViaMcp).
@@ -1193,6 +1197,19 @@ rule WrapUpViaMcp {
     -- set from TaskTag::ALL, so a third review tag fails there and sends
     -- whoever added it here.
     requires: task.tag != pr_review and task.tag != dependabot
+    -- WrapUpRefusesUnfinishedWork, below: the worktree is committed and the
+    -- repository's verify command, when it has one, exits 0 in the worktree.
+    -- Both are checked before the action runs, so a refusal has no side effect
+    -- and mints no token.
+    -- Both are observations of the worktree made by running a subprocess, so
+    -- they are named by the guarantee rather than modelled as fields:
+    -- `worktree_is_committed` is "git status --porcelain prints nothing"
+    -- (untracked files count), and `verify_passes` is "the command named by
+    -- core/SavedRepoPath.verify_command for task.repo_path, run in the
+    -- worktree, exits 0 within config.wrap_up_verify_timeout" — true when the
+    -- repository has no verify command.
+    requires: worktree_is_committed(task.worktree)
+    requires: verify_passes(task)
 
     -- All three actions leave task.status unchanged (still running/review) and
     -- only issue an exit token that records which action was requested. The
@@ -1257,6 +1274,54 @@ rule WrapUpViaMcp {
         -- to dispatch the epic's next subtask itself. exit_session owns that
         -- behaviour and its description says it happens; there is no tool an
         -- agent could misuse to do it anyway.
+
+    @guarantee WrapUpRefusesUnfinishedWork
+        -- Skipping a wrap-up step is how agents went idle with the branch
+        -- unmerged or shipped code that did not pass, so the two steps a tool
+        -- can check are enforced by the tool, not by the /wrap-up skill's prose.
+        --
+        -- 1. Commit. `git status --porcelain` in the task's worktree must be
+        --    empty, untracked files included. A status that cannot be read (git
+        --    fails or exits non-zero) refuses too: the check fails closed. Otherwise wrap_up is refused, naming the uncommitted paths
+        --    (at most a short list, then a count) and saying to commit them and
+        --    call wrap_up again. This also makes the retro/commit ORDER hold in
+        --    the one way observable from here: a retro fix left uncommitted
+        --    blocks the call instead of being stranded after the rebase.
+        -- 2. Verify. When the task's repo has a verify command, wrap_up runs it
+        --    itself, in the worktree, bounded by config.wrap_up_verify_timeout. A
+        --    non-zero exit or a timeout refuses the call with the command and the
+        --    outcome and no token; a non-zero exit also carries the tail of the
+        --    command's output (a timed-out run's partial output is not kept). The agent fixes the cause,
+        --    commits, and calls wrap_up again. No verify command: this step is a
+        --    no-op, exactly as before.
+        --
+        -- Order: the commit check runs first (a dirty tree makes a verify result
+        -- meaningless, and it is cheap), then verify, then the action. Applies
+        -- to all three actions, so a pr or done wrap-up is verified too — the
+        -- same coverage the skill's verify step gave. The rebase's own
+        -- pull/rebase can still change the code afterwards, and nothing then
+        -- verifies the rebased result before it is fast-forwarded; the response no longer asks the
+        -- agent to re-verify, because the tool now owns verification and an
+        -- instruction to repeat it was a prose rule the tool could not enforce.
+        --
+        -- The pr action is the one place this runs too late to protect the
+        -- remote: the agent pushes and opens the PR before it calls wrap_up(pr).
+        -- The pr reference file therefore has the agent run the get_task
+        -- "Verify command" before pushing; wrap_up(pr) is the backstop.
+        --
+        -- The success response therefore carries no "Verify before exiting"
+        -- line. It states that verification passed when a command ran.
+        --
+        -- What is NOT enforced: that /retro ran. A retro leaves no trace the
+        -- tool can read (it may change nothing), so requiring it would need a
+        -- marker the agent sets itself, which is the same honour system as the
+        -- prose. It stays one line in the skill; only its fixes are held to the
+        -- commit check above. Choosing the action first stays in the skill for
+        -- the same reason: it is a question for the user, not a state of the
+        -- repository.
+        --
+        -- Refused wrap-ups are INVALID_PARAMS errors, as for a backlog task. A
+        -- failed verify or dirty tree changes no task state.
 
     @guarantee ReviewTasksAreNotWrappedUp
         -- A review-tagged task is refused, whatever its status and whatever
@@ -1489,16 +1554,14 @@ rule SetVerifyCommandViaMcp {
         -- with JSON-RPC -32602 (invalid params) before reaching the DB,
         -- which would otherwise surface the constraint as -32603.
         -- Nothing nudges an agent to call this tool: exit_session carries no
-        -- prompt about it, and wrap_up only echoes an already-recorded command
-        -- back as its "Verify before exiting" line (see WrapUpRebase in
-        -- pr-workflow.allium). Recording a verify command is an explicit act by
+        -- prompt about it, and wrap_up only runs an already-recorded command
+        -- (WrapUpRefusesUnfinishedWork). Recording a verify command is an explicit act by
         -- an agent or operator (see the `dispatch repo set-verify` CLI above).
         --
         -- == The tool description does not claim prompt injection ==
         -- The description states that the command never appears in a dispatch
-        -- prompt, and names the two surfaces that do carry it: get_task's
-        -- "Verify command" line and the wrap_up response's "Verify before
-        -- exiting" reminder. It said the opposite for a time — that the command
+        -- prompt, names the surface that does carry it (get_task's "Verify
+        -- command" line) and says wrap_up runs it itself. It said the opposite for a time — that the command
         -- was injected into future agent prompts — which contradicts the
         -- prompt-assembly rule in dispatch-prompt.allium and sends the one reader who
         -- needs the command looking on the single surface that never carries

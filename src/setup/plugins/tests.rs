@@ -1349,12 +1349,12 @@ fn reference_containing(skill: &str, anchor: &str, what: &str) -> (String, &'sta
         })
 }
 
-/// The wrap-up skill's Step 8 closing sequence, up to the next `## ` heading.
+/// The wrap-up skill's Step 7 closing sequence, up to the next `## ` heading.
 fn wrap_up_closing_sequence() -> &'static str {
     let body = skill_body("wrap-up");
-    body.split_once("## Step 8")
+    body.split_once("## Step 7")
         .map(|(_, rest)| rest.split("\n## ").next().unwrap_or(rest))
-        .expect("wrap-up skill must have a Step 8 closing sequence")
+        .expect("wrap-up skill must have a Step 7 closing sequence")
 }
 
 /// "Skill copy" (mcp-task-tools.allium): a SKILL.md carries the flow every
@@ -2104,47 +2104,28 @@ fn plugin_hook_scripts_are_executable() {
     }
 }
 
-/// Task #4193: the verify command must reach the agent, and be acted on,
-/// before `wrap_up` is ever called — not just via the response's
-/// after-the-fact "Verify before exiting" line, which for the rebase path
-/// arrives after the base branch has already been fast-forwarded.
+/// Task #53262: the `wrap_up` tool runs the verify command and refuses on
+/// failure (`WrapUpRefusesUnfinishedWork`), so the skill carries no verify step
+/// of its own — a prose rule the tool enforces is a rule stated twice. The one
+/// exception is the pr path, which pushes before it calls `wrap_up`.
 #[test]
-fn wrap_up_skill_runs_verification_before_calling_wrap_up() {
+fn wrap_up_skill_leaves_verification_to_the_tool() {
     let content = skill_body("wrap-up");
-    let commit_at = content
-        .find("## Step 6: Commit uncommitted changes")
-        .expect("wrap-up skill must have a commit step to anchor verification after");
-    let verify_at = content
-        .find("## Step 7: Run verification")
-        .expect("wrap-up skill must have a verification step between commit and closing");
-    let closing_at = content
-        .find("## Step 8: The closing sequence")
-        .expect("wrap-up skill's closing sequence must be Step 8, after verification");
     assert!(
-        commit_at < verify_at,
-        "verification step must come after the commit step"
+        !content.contains("Run verification"),
+        "the skill must not carry its own verify step — wrap_up runs the command"
     );
+    let closing = wrap_up_closing_sequence();
     assert!(
-        verify_at < closing_at,
-        "verification step must come before the closing sequence (and so before wrap_up \
-         is ever called)"
+        closing.contains("failing verify command") && closing.contains("`wrap_up` again"),
+        "the closing sequence must say a verify refusal is fixed and wrap_up called again, \
+         got: {closing}"
     );
+    let (_, pr) = reference_containing("wrap-up", "### Draft the title and body", "the pr path");
     assert!(
-        !content.contains("## Step 7: The closing sequence"),
-        "the closing sequence must be renumbered to Step 8, not left as Step 7"
-    );
-
-    let verify_section = section_after(content, "## Step 7: Run verification")
-        .expect("wrap-up skill must have a verification step to anchor the section on");
-    assert!(
-        verify_section.contains("Verify command") && verify_section.contains("Step 2"),
-        "verification step must tell the agent to read the Verify command shown by \
-         get_task in Step 2, got: {verify_section}"
-    );
-    assert!(
-        verify_section.to_lowercase().contains("before") && verify_section.contains("`wrap_up`"),
-        "verification step must instruct running verification before calling wrap_up, \
-         got: {verify_section}"
+        pr.contains("Verify command:") && pr.contains("before you push"),
+        "the pr path pushes before wrap_up runs, so its reference must have the agent verify \
+         before pushing, got: {pr}"
     );
 }
 

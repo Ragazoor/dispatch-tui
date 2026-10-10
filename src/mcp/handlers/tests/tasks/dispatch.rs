@@ -1185,7 +1185,7 @@ async fn dispatch_next_tool_no_longer_exists() {
 #[tokio::test]
 async fn wrap_up_rebase_preserves_tmux_window() {
     let (state, db) = test_state_with_overrides(
-        DispatchScript::finish().no_remote().shared_runner(),
+        with_clean_status(DispatchScript::finish().no_remote()),
         None,
         None,
     )
@@ -1239,10 +1239,11 @@ async fn wrap_up_rebase_preserves_tmux_window() {
 #[tokio::test]
 async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
     let (state, db) = test_state_with_overrides(
-        DispatchScript::finish()
-            .no_remote()
-            .rebase_conflicts_in_stderr(&["foo.rs"])
-            .shared_runner(),
+        with_clean_status(
+            DispatchScript::finish()
+                .no_remote()
+                .rebase_conflicts_in_stderr(&["foo.rs"]),
+        ),
         None,
         None,
     )
@@ -1297,10 +1298,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
     // the dirty-worktree porcelain read, so every response after the first
     // answered the wrong call and it still passed.
     let (state, db) = test_state_with_overrides(
-        DispatchScript::finish()
-            .no_remote()
-            .rebase_fails()
-            .shared_runner(),
+        with_clean_status(DispatchScript::finish().no_remote().rebase_fails()),
         None,
         None,
     )
