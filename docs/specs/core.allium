@@ -101,7 +101,7 @@ enum FeedRole { none | reviews_parent | my_reviews | team_reviews | bots | cve }
 -- `manual` is the default for epics created by the user or via MCP.
 -- `repo_group` is set by the system when a per-repo sub-epic is created
 -- automatically by repo grouping (see epics.allium: RegroupEpic /
--- service::grouping). This field is system-assigned and is never exposed
+-- the store's grouping reducers). This field is system-assigned and is never exposed
 -- to MCP callers.
 enum EpicOrigin { manual | repo_group }
 

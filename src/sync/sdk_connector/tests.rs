@@ -134,7 +134,7 @@ fn only_the_review_spelling_counts_as_review() {
 // --- create read-back matching ---
 
 #[test]
-fn a_task_matches_only_on_every_client_chosen_field() {
+fn a_task_matches_on_what_the_client_chose_and_not_on_where_the_store_put_it() {
     let sent = task("A");
     assert!(matches_create(&task("A"), &sent));
     assert!(!matches_create(&task("B"), &sent));
@@ -144,9 +144,11 @@ fn a_task_matches_only_on_every_client_chosen_field() {
     let mut other_time = task("A");
     other_time.created_at = "2026-10-05 10:00:01".into();
     assert!(!matches_create(&other_time, &sent));
-    let mut other_epic = task("A");
-    other_epic.epic_id = 2;
-    assert!(!matches_create(&other_epic, &sent));
+    // The store may route the task into a repo sub-epic, so the epic it lands
+    // in is not something the client can match on.
+    let mut routed = task("A");
+    routed.epic_id = 2;
+    assert!(matches_create(&routed, &sent));
 }
 
 #[test]

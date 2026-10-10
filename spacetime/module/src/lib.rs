@@ -67,25 +67,29 @@ mod agent_state;
 mod blanks;
 mod config;
 mod feed;
+mod grouping;
 mod learning;
+mod packages;
+mod rules;
 mod seed;
 mod sequence;
 mod support;
 mod tables;
 mod tasks_epics;
-mod packages;
 
 pub use agent_state::*;
 pub use blanks::*;
 pub use config::*;
 pub use feed::*;
+pub use grouping::*;
 pub use learning::*;
+pub use packages::*;
+pub use rules::*;
 pub use seed::*;
 pub use sequence::*;
 pub use support::*;
 pub use tables::*;
 pub use tasks_epics::*;
-pub use packages::*;
 
 #[cfg(test)]
 mod tests;
@@ -179,5 +183,56 @@ pub fn set_schema_version(ctx: &ReducerContext, version: i64) {
         ctx.db.schema_version().id().update(row);
     } else {
         ctx.db.schema_version().insert(row);
+    }
+}
+
+/// The data rules this module enforces, published for a board to read.
+///
+/// **A table of its own, not a column of `schema_version`.** A board reads it
+/// before anything else, and it must be readable from a module of ANY age. A
+/// column appended to `schema_version` would make an older module's row fail to
+/// decode on the board (a panic on the SDK's thread, then a connection that
+/// never answers). A table an older module does not have is refused by the
+/// store as "no such table", which the board turns into a named reason: that
+/// module predates the version gate.
+///
+/// One row, `id` 1. Not a shared table and absent from the snapshot: like
+/// `schema_version` it describes the store rather than the domain.
+#[spacetimedb::table(accessor = rules_version, public)]
+#[derive(Clone, Debug)]
+pub struct RulesVersion {
+    #[primary_key]
+    pub id: i64,
+    /// [`RULES_VERSION`], stamped by the module from its own constant — never
+    /// taken from a caller. A board compares it for equality with the number
+    /// it was built with (`sync.allium: AStoreWithOtherRulesFailsTheAttempt`).
+    pub version: i64,
+}
+
+/// Keep the published rules version equal to this module's own, whenever
+/// anyone connects.
+///
+/// **Why on connect rather than in `init` or `set_schema_version`.** `init`
+/// runs only on a brand-new database, and nothing in production calls
+/// `set_schema_version` after a publish — the number would keep describing the
+/// module the database was CREATED with, and a board would refuse the very
+/// module it just published. A connection is the one event that always follows
+/// a publish and always precedes a board's read, and the lifecycle reducer runs
+/// in the module's current code, so the stamp cannot go stale. It writes only
+/// when the number differs, so a steady-state connection costs one read.
+#[spacetimedb::reducer(client_connected)]
+pub fn stamp_rules_version_on_connect(ctx: &ReducerContext) {
+    let row = RulesVersion {
+        id: 1,
+        version: RULES_VERSION,
+    };
+    match ctx.db.rules_version().id().find(1) {
+        Some(existing) if existing.version == RULES_VERSION => {}
+        Some(_) => {
+            ctx.db.rules_version().id().update(row);
+        }
+        None => {
+            ctx.db.rules_version().insert(row);
+        }
     }
 }

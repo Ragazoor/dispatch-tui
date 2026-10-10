@@ -33,6 +33,7 @@ pub mod epics_table;
 pub mod feed_task_upsert_item_type;
 pub mod filter_preset_type;
 pub mod filter_presets_table;
+pub mod flatten_epic_reducer;
 pub mod host_type;
 pub mod hosts_table;
 pub mod learning_patch_type;
@@ -59,6 +60,7 @@ pub mod record_pre_tool_use_reducer;
 pub mod record_usage_event_reducer;
 pub mod record_user_prompt_submit_reducer;
 pub mod register_host_reducer;
+pub mod regroup_epic_reducer;
 pub mod release_backlog_claim_reducer;
 pub mod repo_base_branch_type;
 pub mod repo_base_branches_table;
@@ -68,6 +70,8 @@ pub mod rescope_epic_learnings_reducer;
 pub mod respawn_phoenix_successor_reducer;
 pub mod retired_feed_item_type;
 pub mod retired_feed_items_table;
+pub mod rules_version_table;
+pub mod rules_version_type;
 pub mod save_repo_path_reducer;
 pub mod save_setting_reducer;
 pub mod schema_version_table;
@@ -155,6 +159,7 @@ pub use epics_table::*;
 pub use feed_task_upsert_item_type::FeedTaskUpsertItem;
 pub use filter_preset_type::FilterPreset;
 pub use filter_presets_table::*;
+pub use flatten_epic_reducer::flatten_epic;
 pub use host_type::Host;
 pub use hosts_table::*;
 pub use learning_patch_type::LearningPatch;
@@ -181,6 +186,7 @@ pub use record_pre_tool_use_reducer::record_pre_tool_use;
 pub use record_usage_event_reducer::record_usage_event;
 pub use record_user_prompt_submit_reducer::record_user_prompt_submit;
 pub use register_host_reducer::register_host;
+pub use regroup_epic_reducer::regroup_epic;
 pub use release_backlog_claim_reducer::release_backlog_claim;
 pub use repo_base_branch_type::RepoBaseBranch;
 pub use repo_base_branches_table::*;
@@ -190,6 +196,8 @@ pub use rescope_epic_learnings_reducer::rescope_epic_learnings;
 pub use respawn_phoenix_successor_reducer::respawn_phoenix_successor;
 pub use retired_feed_item_type::RetiredFeedItem;
 pub use retired_feed_items_table::*;
+pub use rules_version_table::*;
+pub use rules_version_type::RulesVersion;
 pub use save_repo_path_reducer::save_repo_path;
 pub use save_setting_reducer::save_setting;
 pub use schema_version_table::*;
@@ -336,6 +344,9 @@ pub enum Reducer {
         feed_epic_id: i64,
         keep_external_ids: Vec<String>,
     },
+    FlattenEpic {
+        root_id: i64,
+    },
     LinkWorkPackageItem {
         work_package_id: i64,
         kind: String,
@@ -403,6 +414,9 @@ pub enum Reducer {
         id: String,
         label: String,
         owner: String,
+    },
+    RegroupEpic {
+        root_id: i64,
     },
     ReleaseBacklogClaim {
         id: i64,
@@ -567,6 +581,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteTask { .. } => "delete_task",
             Reducer::DeleteWorkPackage { .. } => "delete_work_package",
             Reducer::DropClosedRetiredFeedItems { .. } => "drop_closed_retired_feed_items",
+            Reducer::FlattenEpic { .. } => "flatten_epic",
             Reducer::LinkWorkPackageItem { .. } => "link_work_package_item",
             Reducer::MarkPrLearningsGateShown { .. } => "mark_pr_learnings_gate_shown",
             Reducer::OverridePollOwner { .. } => "override_poll_owner",
@@ -583,6 +598,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::RecordUsageEvent { .. } => "record_usage_event",
             Reducer::RecordUserPromptSubmit { .. } => "record_user_prompt_submit",
             Reducer::RegisterHost { .. } => "register_host",
+            Reducer::RegroupEpic { .. } => "regroup_epic",
             Reducer::ReleaseBacklogClaim { .. } => "release_backlog_claim",
             Reducer::RescopeEpicLearnings { .. } => "rescope_epic_learnings",
             Reducer::RespawnPhoenixSuccessor { .. } => "respawn_phoenix_successor",
@@ -763,6 +779,11 @@ impl __sdk::Reducer for Reducer {
                 feed_epic_id: feed_epic_id.clone(),
                 keep_external_ids: keep_external_ids.clone(),
 }),
+            Reducer::FlattenEpic{
+                root_id,
+}             => __sats::bsatn::to_vec(&flatten_epic_reducer::FlattenEpicArgs {
+                root_id: root_id.clone(),
+}),
             Reducer::LinkWorkPackageItem{
                 work_package_id,
                 kind,
@@ -883,6 +904,11 @@ Reducer::RecalculateEpicStatus{
                 id: id.clone(),
                 label: label.clone(),
                 owner: owner.clone(),
+}),
+            Reducer::RegroupEpic{
+                root_id,
+}             => __sats::bsatn::to_vec(&regroup_epic_reducer::RegroupEpicArgs {
+                root_id: root_id.clone(),
 }),
             Reducer::ReleaseBacklogClaim{
                 id,
@@ -1131,6 +1157,7 @@ pub struct DbUpdate {
     repo_base_branches: __sdk::TableUpdate<RepoBaseBranch>,
     repo_paths: __sdk::TableUpdate<RepoPath>,
     retired_feed_items: __sdk::TableUpdate<RetiredFeedItem>,
+    rules_version: __sdk::TableUpdate<RulesVersion>,
     schema_version: __sdk::TableUpdate<SchemaVersion>,
     settings: __sdk::TableUpdate<Setting>,
     subscriptions: __sdk::TableUpdate<Subscription>,
@@ -1177,6 +1204,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "retired_feed_items" => db_update
                     .retired_feed_items
                     .append(retired_feed_items_table::parse_table_update(table_update)?),
+                "rules_version" => db_update
+                    .rules_version
+                    .append(rules_version_table::parse_table_update(table_update)?),
                 "schema_version" => db_update
                     .schema_version
                     .append(schema_version_table::parse_table_update(table_update)?),
@@ -1266,6 +1296,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.retired_feed_items = cache
             .apply_diff_to_table::<RetiredFeedItem>("retired_feed_items", &self.retired_feed_items)
             .with_updates_by_pk(|row| &row.id);
+        diff.rules_version = cache
+            .apply_diff_to_table::<RulesVersion>("rules_version", &self.rules_version)
+            .with_updates_by_pk(|row| &row.id);
         diff.schema_version = cache
             .apply_diff_to_table::<SchemaVersion>("schema_version", &self.schema_version)
             .with_updates_by_pk(|row| &row.id);
@@ -1329,6 +1362,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "retired_feed_items" => db_update
                     .retired_feed_items
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "rules_version" => db_update
+                    .rules_version
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "schema_version" => db_update
                     .schema_version
@@ -1403,6 +1439,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "retired_feed_items" => db_update
                     .retired_feed_items
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "rules_version" => db_update
+                    .rules_version
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "schema_version" => db_update
                     .schema_version
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1460,6 +1499,7 @@ pub struct AppliedDiff<'r> {
     repo_base_branches: __sdk::TableAppliedDiff<'r, RepoBaseBranch>,
     repo_paths: __sdk::TableAppliedDiff<'r, RepoPath>,
     retired_feed_items: __sdk::TableAppliedDiff<'r, RetiredFeedItem>,
+    rules_version: __sdk::TableAppliedDiff<'r, RulesVersion>,
     schema_version: __sdk::TableAppliedDiff<'r, SchemaVersion>,
     settings: __sdk::TableAppliedDiff<'r, Setting>,
     subscriptions: __sdk::TableAppliedDiff<'r, Subscription>,
@@ -1507,6 +1547,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<RetiredFeedItem>(
             "retired_feed_items",
             &self.retired_feed_items,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<RulesVersion>(
+            "rules_version",
+            &self.rules_version,
             event,
         );
         callbacks.invoke_table_row_callbacks::<SchemaVersion>(
@@ -2217,6 +2262,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         repo_base_branches_table::register_table(client_cache);
         repo_paths_table::register_table(client_cache);
         retired_feed_items_table::register_table(client_cache);
+        rules_version_table::register_table(client_cache);
         schema_version_table::register_table(client_cache);
         settings_table::register_table(client_cache);
         subscriptions_table::register_table(client_cache);
@@ -2239,6 +2285,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "repo_base_branches",
         "repo_paths",
         "retired_feed_items",
+        "rules_version",
         "schema_version",
         "settings",
         "subscriptions",

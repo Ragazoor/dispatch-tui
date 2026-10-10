@@ -631,6 +631,19 @@ rule UpdateEpicViaMcp {
             seconds(feed_interval_secs) >= core/config.min_feed_interval
 
     -- parent_epic_id validation: parent must exist and no cycle may be introduced
+    --
+    -- THE STORE ENFORCES THE DATA CHECKS IN THIS RULE (store-split.allium M2,
+    -- task #53255): the patch_epic reducer refuses a parent cycle, a move of a
+    -- repo-group sub-epic, and feed_append_only combined with group_by_repo or
+    -- a feed role, each with the wording given here, against the rows the
+    -- store holds and for every client that patches an epic (this tool,
+    -- ReparentEpicFromTui, ToggleGroupByRepo). EpicService passes the patch
+    -- through; it keeps only the checks that are about the request (an empty
+    -- patch, the feed interval floor) and the not-found answer, including
+    -- the existence of a named parent. So a call that names a missing parent
+    -- answers not-found before the store's repo-group or cycle check runs.
+    -- A store refusal reaches the MCP caller as a -32602 validation error
+    -- carrying the store's own wording.
     requires:
         if parent_epic_id != omitted and parent_epic_id != null:
             Epic.exists(parent_epic_id)
@@ -692,10 +705,18 @@ rule UpdateEpicViaMcp {
     -- second and whether they arrive together or in separate calls; feed_role
     -- is not settable here, so it is read from the stored epic.
     -- See feeds.allium: AppendOnlyFeed for the full argument.
+    --
+    -- CHECKED ONLY WHEN THE CALL TOUCHES ONE OF THE FLAGS. The store's
+    -- patch_epic evaluates the pair only when the patch sets feed_append_only,
+    -- group_by_repo or feed_role, so an unrelated update (a title, a status)
+    -- to an epic that already holds the combination — left by a restore or a
+    -- board that predates the check — is not refused. Any write that would
+    -- create or keep the pair through one of the flags is.
     requires:
-        let appends_only = feed_append_only ?? epic.feed_append_only
-        let grouped = group_by_repo ?? epic.group_by_repo
-        appends_only implies (not grouped and epic.feed_role = none)
+        if feed_append_only != null or group_by_repo != null:
+            let appends_only = feed_append_only ?? epic.feed_append_only
+            let grouped = group_by_repo ?? epic.group_by_repo
+            appends_only implies (not grouped and epic.feed_role = none)
 
     ensures:
         -- feed_append_only is a plain boolean set (absent = no change).
@@ -868,10 +889,11 @@ rule ReparentEpicFromTui {
         -- cannot be its own parent. The UI tree already excludes ineligible
         -- targets, so these guards are a defensive backstop.
         --
-        -- The repo-group guard is NOT a UI-layer concern: this flow patches
-        -- the epic through the same service path as UpdateEpicViaMcp, so an
-        -- attempt to move an origin = repo_group sub-epic fails there and the
-        -- TUI reports the error. The picker does not pre-filter on origin, so
+        -- The repo-group guard and the cycle guard are NOT UI-layer concerns:
+        -- this flow patches the epic through the same path as
+        -- UpdateEpicViaMcp, and the store's patch_epic refuses both (see that
+        -- rule), so an attempt to move an origin = repo_group sub-epic fails
+        -- there and the TUI reports the error. The picker does not pre-filter on origin, so
         -- a repo-group sub-epic can be selected and only then rejected.
         -- updated_at is refreshed automatically by the database layer on
         -- any patch_epic call; the assertion above documents the intent.
@@ -1180,8 +1202,9 @@ rule ToggleGroupByRepo {
         --
         -- EXCEPT when the write is REFUSED. The keypress flips the board's own
         -- copy of the flag first and asks the write path second, so the header
-        -- redraws before the outcome is known. UpdateEpicViaMcp's requires
-        -- refuses grouping on an append-only epic, and that is a refusal a
+        -- redraws before the outcome is known. The store's patch_epic refuses
+        -- grouping on an append-only epic (UpdateEpicViaMcp's requires, which
+        -- the toggle's write shares), and that is a refusal a
         -- user can reach by simply pressing R — the key is offered on every
         -- epic. On refusal the header is restored from the persisted epic, not
         -- merely accompanied by an error popup: otherwise the row would go on
@@ -1215,6 +1238,20 @@ rule ToggleGroupByRepo {
         -- self-healing is poll-driven and symmetric in both directions.
 }
 
+-- Repo grouping runs in the store (store-split.allium M2, task #53255).
+-- route_target is the store's. create_task and respawn_phoenix_successor
+-- place a new task, and set_task_epic places a moved one, into the per-repo
+-- sub-epic when the epic named is a grouped non-feed root (creating the
+-- sub-epic if needed); any other epic is used as named. patch_task, when the
+-- patch carries a repo_path, re-routes a task already inside a grouped
+-- non-feed subtree to the sub-epic for its new repo and deletes the sub-epic
+-- it left if that is now empty (re-scoping its learnings first,
+-- learnings.allium: ReScopeLearningsOnRepoGroupDelete). Each does this inside
+-- the same transaction as the write, and recalculates the epics it touched
+-- there, so no client re-derives it and none can disagree. RegroupEpic and
+-- FlattenEpic are the reducers regroup_epic and flatten_epic; the TUI toggle
+-- only calls them.
+
 rule RegroupEpic {
     when: RegroupEpic(epic)
 
@@ -1232,14 +1269,14 @@ rule RegroupEpic {
         -- only the grouped root): a sub-epic that just received tasks must
         -- leave done if it had settled there empty.
         --
-        -- Both preconditions above are enforced by the TUI caller
+        -- Both preconditions above are checked by the TUI caller
         -- (ToggleGroupByRepo, which flips the flag and then picks
         -- RegroupEpic vs FlattenEpic by its new value, and only for a
-        -- non-feed epic), not by the handler itself: the migration is an
-        -- unconditional walk over the epic's tasks. Same precedent as
-        -- DeleteTask's done-status precondition (tasks.allium).
-        -- There is no second caller today; a new one would have to
-        -- re-establish both guards for itself.
+        -- non-feed epic). The regroup_epic reducer does not refuse an epic
+        -- that fails them, but it cannot misplace a task on one either: its
+        -- route_target answers the epic itself for any epic that is not a
+        -- grouped non-feed root, so no task moves and only the epic's status
+        -- is recalculated. There is no second caller today.
         --
         -- route_target(epic, repo_path) returns the existing per-repo
         -- sub-epic for that repo path, creating one (with origin =

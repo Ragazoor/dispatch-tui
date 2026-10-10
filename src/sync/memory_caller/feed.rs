@@ -348,28 +348,12 @@ impl MemoryReducerCaller {
         title: String,
         created_by: String,
     ) -> Result<EpicId> {
-        let parent_id = parent_id.0;
         let mut tables = self.lock();
-        let existing = tables
-            .epics
-            .values()
-            .find(|e| e.parent_epic_id == parent_id && e.title == title && e.origin == "repo-group")
-            .map(|e| e.id);
-        if let Some(id) = existing {
-            return Ok(EpicId(id));
-        }
-        let now = self.now();
-        Ok(EpicId(self.write_epic(
+        Ok(EpicId(self.find_or_create_repo_group(
             &mut tables,
-            module::Epic {
-                title,
-                parent_epic_id: parent_id,
-                origin: "repo-group".to_string(),
-                created_by,
-                created_at: now.clone(),
-                updated_at: now,
-                ..module::blank_epic()
-            },
+            parent_id.0,
+            &title,
+            created_by,
         )))
     }
 

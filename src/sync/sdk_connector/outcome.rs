@@ -6,7 +6,7 @@ use anyhow::anyhow;
 use crate::models::TaskStatus;
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::TasksTableAccess as _;
-use crate::sync::writes::{DrainReadBack, ReducerOutcome};
+use crate::sync::writes::{DrainReadBack, ReducerOutcome, StoreRefusal};
 
 /// `[live, task_is_now_in_review]` off the task the drain acted on, shared by
 /// every reducer whose answer is that shape (`subagent_stop`/`subagent_clear`).
@@ -134,7 +134,7 @@ pub(super) fn generated_id(answer: ReducerOutcome, what: &str) -> anyhow::Result
                  subscriptions, so its id could not be read back"
             )
         }),
-        ReducerOutcome::Refused(why) => Err(anyhow!("the shared store refused: {why}")),
+        ReducerOutcome::Refused(why) => Err(StoreRefusal(why).into()),
     }
 }
 
@@ -170,11 +170,16 @@ pub(super) fn matches_created_work_package(
 /// identity's own task when the candidate set includes an epic's other tasks
 /// (from the `epic_id`-followed subscription) or nothing at all epic-scoped
 /// (from `own_creations`).
+///
+/// **`epic_id` is deliberately NOT compared.** The store routes a task created
+/// in a `group_by_repo` epic into that epic's per-repo sub-epic
+/// (`epics.allium`'s routing note, store-split M2), so the row that comes back
+/// can carry a different epic from the one sent. The creator and the creation
+/// instant, which are ours, are what identify the row.
 pub(super) fn matches_create(candidate: &bindings::Task, sent: &bindings::Task) -> bool {
     candidate.title == sent.title
         && candidate.repo_path == sent.repo_path
         && candidate.owner == sent.owner
-        && candidate.epic_id == sent.epic_id
         && candidate.created_at == sent.created_at
         && candidate.created_by == sent.created_by
 }

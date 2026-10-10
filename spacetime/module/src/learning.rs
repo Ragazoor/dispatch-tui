@@ -158,6 +158,13 @@ pub fn delete_learning(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 /// not an embedding input, so no row's `embedding` is touched.
 #[spacetimedb::reducer]
 pub fn rescope_epic_learnings(ctx: &ReducerContext, from: i64, to: i64) -> Result<(), String> {
+    rescope_learnings(ctx, from, to);
+    Ok(())
+}
+
+/// [`rescope_epic_learnings`]'s body, callable from another reducer's
+/// transaction (a repo-group sub-epic's deletion re-scopes its learnings).
+pub(crate) fn rescope_learnings(ctx: &ReducerContext, from: i64, to: i64) {
     let from_ref = from.to_string();
     let to_ref = to.to_string();
     update_matching_learnings(
@@ -168,7 +175,6 @@ pub fn rescope_epic_learnings(ctx: &ReducerContext, from: i64, to: i64) -> Resul
             ..row
         },
     );
-    Ok(())
 }
 
 /// Record that `learning_id` was surfaced to `task_id` via `source`.

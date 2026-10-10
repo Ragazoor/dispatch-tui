@@ -679,6 +679,29 @@ mod tests {
         TaskBuilder::new(1).title("T").build()
     }
 
+    /// The store decides repo grouping now (store-split M2); this is the
+    /// board's own read of the same predicate, and the two must not drift.
+    #[test]
+    fn can_auto_group_agrees_with_the_modules_rule() {
+        for grouped in [true, false] {
+            for command in [None, Some("gh pr list".to_string())] {
+                let epic = Epic {
+                    group_by_repo: grouped,
+                    feed_command: command.clone(),
+                    ..test_epic()
+                };
+                assert_eq!(
+                    epic.can_auto_group(),
+                    dispatch_spacetime_module::can_auto_group(
+                        grouped,
+                        command.as_deref().unwrap_or("")
+                    ),
+                    "grouped={grouped} command={command:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn epic_substatus_unplanned() {
         let epic = Epic {

@@ -1647,8 +1647,10 @@ rule FlatFeedReconcile {
     -- FlattenEpic rule acts on, epics.allium) is reconciled: its tasks are
     -- re-homed back to the parent, and a sub-epic that ends up empty (no tasks,
     -- no child epics) is deleted. This mirrors FlattenEpic's semantics; the
-    -- implementation reuses the same src/service/grouping.rs::flatten_epic
-    -- helper rather than duplicating the re-home/delete-if-empty logic. Unlike
+    -- implementation calls the store's flatten_epic reducer
+    -- (spacetime/module, grouping.rs) rather than duplicating the
+    -- re-home/delete-if-empty logic, so the whole step is one store
+    -- transaction. Unlike
     -- the FlattenEpic RULE (which gates on feed_command = null and so never
     -- fires for a feed epic), this rule is the feed epic's route to that same
     -- outcome — poll-driven, not keypress-driven.
@@ -1690,9 +1692,10 @@ rule FlatFeedReconcile {
     @guidance
         -- Implementation: src/feed/ingest/mod.rs::run_feed_sync flat branch
         -- (group_by_repo = false, feed_role != reviews_parent). The re-home +
-        -- delete-if-empty step calls src/service/grouping.rs::flatten_epic
-        -- (shared with the manual FlattenEpic path); confirm no caller relies on
-        -- flatten_epic being non-feed-epic-only before reusing it. Symmetric
+        -- delete-if-empty step calls the store's flatten_epic reducer
+        -- (spacetime/module, grouping.rs), shared with the manual FlattenEpic
+        -- path. The reducer does not check feed_command, so it serves a feed
+        -- epic as readily as a manual one. Symmetric
         -- with GroupedFeedUpsert's ON-side "doubles as migration" behaviour.
         -- The flat branch's upsert_feed_tasks call reports its removed rows in
         -- the same SHAPE as every other path (see UpsertFeedTasks' guidance),
@@ -3173,7 +3176,7 @@ invariant DefaultFeedIntervalClearsTheFloor {
 -- Identity Invariant guarantees at most one task row per external_id within
 -- the subtree at any time. FlatFeedReconcile's re-home step therefore MUST
 -- move the existing row (UPDATE epic_id, the same mechanism
--- src/service/grouping.rs::flatten_epic already uses via set_task_epic_id),
+-- the store's flatten_epic reducer already does, writing epic_id in place),
 -- never delete-and-recreate — a move relocates the sole existing row for
 -- that external_id and can never collide with itself, whereas a
 -- delete+recreate would (even if only transiently) risk two rows sharing an

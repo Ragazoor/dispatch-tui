@@ -675,8 +675,9 @@ rule ReScopeLearningsOnRepoGroupDelete {
 
     @guidance
         -- Fires when a repo-group sub-epic is deleted, either by
-        -- FlattenEpic (toggle off) or reroute_on_repo_change (empty
-        -- sub-epic cleanup after a task's repo_path changes).
+        -- FlattenEpic (toggle off, or a feed epic's FlatFeedReconcile) or by
+        -- the store's patch_task re-routing a task whose repo_path changed
+        -- (empty sub-epic cleanup).
         -- Re-scopes any epic-scoped learnings that pointed at the
         -- now-deleted sub-epic to its parent instead, so they are not
         -- orphaned.
@@ -684,11 +685,13 @@ rule ReScopeLearningsOnRepoGroupDelete {
         -- The learning's summary, detail, kind, and tags are unchanged;
         -- only scope_ref is updated.
         --
-        -- Implemented in delete_if_empty_repo_group (src/service/grouping.rs)
-        -- via db.rescope_epic_learnings(epic_id, parent_id) called immediately
-        -- before db.delete_epic. The DB method issues one atomic UPDATE:
-        --   UPDATE learnings SET scope_ref = parent
-        --   WHERE scope = 'epic' AND scope_ref = sub_id
+        -- Implemented in the store's delete_if_empty_repo_group
+        -- (spacetime/module, grouping.rs), in the same transaction as the
+        -- sub-epic's delete: it re-scopes the learnings immediately before it
+        -- deletes the epic. The re-scope rewrites scope_ref on every
+        -- epic-scoped learning whose scope_ref is the sub-epic's id; because
+        -- it shares the delete's transaction, the two land together or not
+        -- at all.
         --
         -- Residual gap: a hard DeleteEpic on a grouped *root* epic
         -- cascades through the DB and deletes all repo-group sub-epics

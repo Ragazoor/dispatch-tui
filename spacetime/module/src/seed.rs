@@ -91,7 +91,13 @@ pub fn seed_work_package_links(
         if row.id.is_empty() {
             return Err("a work package link needs its derived id".into());
         }
-        if ctx.db.work_package_links().id().find(row.id.clone()).is_some() {
+        if ctx
+            .db
+            .work_package_links()
+            .id()
+            .find(row.id.clone())
+            .is_some()
+        {
             ctx.db.work_package_links().id().update(row);
         } else {
             ctx.db.work_package_links().insert(row);

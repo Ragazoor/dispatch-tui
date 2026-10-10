@@ -2,11 +2,12 @@
 //! [`StoreConnector`] impl over it.
 
 use async_trait::async_trait;
-use spacetimedb_sdk::{DbContext, Identity};
+use spacetimedb_sdk::{DbContext, Identity, SubscriptionHandle as _, Table as _};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
-use crate::spacetime::bindings::{DbConnection, SubscriptionHandle};
+use crate::spacetime::bindings::{DbConnection, RulesVersionTableAccess as _, SubscriptionHandle};
+use crate::sync::rules_gate;
 use crate::sync::{Accepted, ConnectError, StoreConnector, SubscriptionRequest, CONNECT_TIMEOUT};
 
 use super::answer::answer_once;
@@ -112,6 +113,19 @@ impl StoreConnector for SpacetimeSdkConnector {
             Err(_elapsed) => return Err(abandon(connection, ConnectError::timed_out(&target))),
         };
 
+        // THE VERSION GATE (`sync.allium: AStoreWithOtherRulesFailsTheAttempt`).
+        // After the store has accepted, before anything is wired or subscribed:
+        // a board whose rules are not the store's must not draw, write or read
+        // a single shared row.
+        match read_rules_version(&connection, &target).await {
+            Ok(store_rules) => {
+                if let Err(why) = rules_gate::check_rules_version(store_rules) {
+                    return Err(abandon(connection, ConnectError::new(why)));
+                }
+            }
+            Err(error) => return Err(abandon(connection, error)),
+        }
+
         self.wire_rows(&connection);
         self.install(Arc::new(connection));
         Ok(Accepted {
@@ -178,6 +192,47 @@ impl StoreConnector for SpacetimeSdkConnector {
             ))),
         }
     }
+}
+
+/// The rules version the store's module publishes, read once.
+///
+/// A one-shot subscription to the one-row `rules_version` table rather than a
+/// reducer call: it needs no write and no identity. A module with no such table
+/// refuses the subscription, which is reported as a module that predates the
+/// gate; an absent row reads as `0`, which no build expects. The subscription is
+/// dropped again before the board subscribes for real, so the row never reaches
+/// `SharedRows`.
+async fn read_rules_version(connection: &DbConnection, target: &str) -> Result<i64, ConnectError> {
+    let (answer, applied) = answer_once::<Result<(), String>>();
+    let on_error = answer.clone();
+    let handle: SubscriptionHandle = connection
+        .subscription_builder()
+        .on_applied(move |_ctx| answer(Ok(())))
+        .on_error(move |_ctx, error| on_error(Err(error.to_string())))
+        .subscribe(["SELECT * FROM rules_version"]);
+    let outcome = tokio::time::timeout(CONNECT_TIMEOUT, applied).await;
+    let result = match outcome {
+        Ok(Ok(Ok(()))) => Ok(connection
+            .db
+            .rules_version()
+            .iter()
+            .map(|row| row.version)
+            .max()
+            .unwrap_or(0)),
+        // The store refuses a subscription to a table it does not have, and a
+        // module that predates the gate has no `rules_version` table.
+        Ok(Ok(Err(error))) => Err(ConnectError::new(
+            rules_gate::unreadable_rules_version_message(&error),
+        )),
+        Ok(Err(_recv)) => Err(ConnectError::new(
+            "the store dropped the rules-version read without answering",
+        )),
+        Err(_elapsed) => Err(ConnectError::timed_out(target)),
+    };
+    // Read first, then let go: unsubscribing takes the row out of the client's
+    // cache. A failure to unsubscribe changes nothing the caller needs.
+    let _ = handle.unsubscribe();
+    result
 }
 
 /// Close a connection that was established but cannot be used, and return the

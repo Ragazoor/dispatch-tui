@@ -358,6 +358,23 @@ config {
     -- list is a decision taken when a status is removed, never a way to quiet
     -- a warning.
     removed_statuses: Set<String> = {"archived"}
+
+    -- The version of the data rules this build expects the store to enforce.
+    -- Compared for EQUALITY with the rules version the store's module
+    -- publishes; see AStoreWithOtherRulesFailsTheAttempt.
+    --
+    -- HAND-BUMPED, IN THE COMMIT THAT MOVES A RULE. Every step of the
+    -- store-split migration (store-split.allium, M2-M7) that moves a rule from
+    -- the board into the module bumps it. It is held twice, once in the module
+    -- crate and once in the board (the board's release build does not link
+    -- the module crate), and a test fails when the two differ, so both are
+    -- bumped together. A change that moves no rule (a new column, a
+    -- UI change, a bug fix inside a rule) does not. Neither the module's wasm
+    -- hash nor the board's build version is compared: a hash changes on every
+    -- rebuild, and a build version would need a stored minimum that somebody
+    -- also has to bump. The rules version is the one number that changes
+    -- exactly when the answer to "who enforces this?" changes.
+    rules_version: Integer = 1
 }
 
 ------------------------------------------------------------
@@ -1207,6 +1224,54 @@ rule StoreRejectsAnInvalidMutation {
         -- anyway. One authority.
 }
 
+rule AStoreWithOtherRulesFailsTheAttempt {
+    when: StoreRulesVersionRead(connection, store_rules_version)
+
+    requires: connection.status = connecting
+    requires: store_rules_version != config.rules_version
+
+    ensures:
+        ConnectionAttemptFailed(
+            connection,
+            reason: rules_version_mismatch_message(store_rules_version, config.rules_version)
+        )
+
+    @guidance
+        -- THE STARTUP VERSION GATE (store-split.allium, task #53255). It
+        -- runs on every connection attempt, once the store has answered the
+        -- connection with an identity but before the board counts the attempt
+        -- as accepted (ConnectionAccepted, and the identity handshake it
+        -- starts), so a mismatched board never subscribes, draws or writes.
+        -- The read is a one-shot subscription to the module's rules-version
+        -- table, dropped again before the board subscribes for real. On the first attempt the failure aborts
+        -- the launch (FirstConnectionFailureAbortsStartup); on a later one it
+        -- is an ordinary outage with the reason on screen, so a module
+        -- republished under a running board stops that board at its next
+        -- reconnect rather than letting it carry on with the old rules.
+        --
+        -- BOTH DIRECTIONS, ONE COMPARISON. A board older than the module would
+        -- apply rules the module no longer lets it apply, or skip rules the
+        -- module now expects a host to follow. A board newer than the module
+        -- would skip a rule it assumes the store enforces, and the half-moved
+        -- state looks fine while it corrupts quietly. Equality refuses both.
+        -- The message says which side is behind and what to do: update the
+        -- board, or republish the module.
+        --
+        -- A module published before the gate existed has no rules-version
+        -- table, so the store refuses the read itself. That too fails the
+        -- attempt, with a reason naming the store's error, saying the module
+        -- predates the gate and giving the advice for a version-0 module
+        -- (republish). So does a read the store drops unanswered or that
+        -- outlasts config.connect_timeout. A table with no row reads as 0,
+        -- which no build expects, so a board refuses it too.
+        --
+        -- WHAT THE GATE CANNOT DO. A board built before this rule exists has no
+        -- gate to refuse with, so it cannot be stopped from connecting to a
+        -- newer module. The module's own checks still refuse what it can
+        -- (an illegal sub_status, a cycle), with the reason travelling back
+        -- (StoreRejectsAnInvalidMutation). That is "as far as possible".
+}
+
 -- == Staying up, and coming back ==
 
 rule ConnectionAttemptFailed {
@@ -1587,6 +1652,10 @@ surface StoreBoundary {
         -- ASubscriptionTheStoreRefusesIsAnOutage.
         InitialSubscriptionRefused(connection, reason)
             when connection.status = connected
+        -- The rules version the store's module publishes, read once per attempt
+        -- for AStoreWithOtherRulesFailsTheAttempt.
+        StoreRulesVersionRead(connection, store_rules_version)
+            when connection.status = connecting
         StoreRejectedMutation(connection, mutation, reason)
             when connection.status = connected
 

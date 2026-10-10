@@ -112,8 +112,9 @@ fn parse_field(accessor: &str, line: &str) -> Column {
 
 /// The module declares exactly the shared tables, no more and no fewer.
 ///
-/// `schema_version` is excluded on purpose: it describes the store rather than
-/// the domain, and `SharedTable` deliberately omits it (see `snapshot.rs`).
+/// `schema_version` and `rules_version` are excluded on purpose: they describe
+/// the store rather than the domain, and `SharedTable` deliberately omits them
+/// (see `snapshot.rs`).
 #[test]
 fn the_module_declares_every_shared_table_and_nothing_else() {
     let module = module_tables();
@@ -121,7 +122,7 @@ fn the_module_declares_every_shared_table_and_nothing_else() {
     let mut declared: Vec<&str> = module
         .keys()
         .map(String::as_str)
-        .filter(|name| *name != "schema_version")
+        .filter(|name| *name != "schema_version" && *name != "rules_version")
         .collect();
     declared.sort_unstable();
 

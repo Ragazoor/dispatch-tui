@@ -2,7 +2,6 @@ pub mod api;
 pub mod epics;
 #[cfg(any(test, feature = "test-support"))]
 mod fixtures;
-mod grouping;
 pub mod learnings;
 pub mod managed_feeds;
 mod services;
@@ -16,7 +15,6 @@ pub use api::{LearningServiceApiStub, MockLearningService, TaskServiceApiStub};
 pub use epics::{
     require_epic_accepting_work, CreateEpicParams, EpicService, UpdateEpicParams, UpdateEpicResult,
 };
-pub use grouping::{flatten_epic, regroup_epic, reroute_on_repo_change, route_target};
 pub use learnings::{CreateLearningParams, LearningService, QueryLearningsParams};
 pub use managed_feeds::{
     ensure_managed_epics, provision_managed_feeds_from_settings, read_managed_feed_settings,
@@ -69,8 +67,14 @@ impl std::error::Error for ServiceError {
 }
 
 impl From<anyhow::Error> for ServiceError {
+    /// A refusal by a store rule is the caller's data being wrong, not the
+    /// board being broken: it travels as `Validation`, carrying the store's own
+    /// reason, so MCP answers invalid-params with wording an agent can act on.
     fn from(e: anyhow::Error) -> Self {
-        ServiceError::Internal(e)
+        match e.downcast_ref::<crate::sync::writes::StoreRefusal>() {
+            Some(refusal) => ServiceError::Validation(refusal.0.clone()),
+            None => ServiceError::Internal(e),
+        }
     }
 }
 

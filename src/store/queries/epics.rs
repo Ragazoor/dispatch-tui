@@ -150,4 +150,12 @@ impl super::super::EpicCrud for Store {
             .await?
             .applied()
     }
+
+    async fn regroup_epic(&self, root: EpicId) -> Result<()> {
+        self.caller.regroup_epic(root).await?.applied()
+    }
+
+    async fn flatten_epic(&self, root: EpicId) -> Result<()> {
+        self.caller.flatten_epic(root).await?.applied()
+    }
 }

@@ -2,26 +2,27 @@
 -- store-split.allium
 --
 -- Scope: The TARGET split of responsibility between the dispatch TUI process
---        and the SpacetimeDB module (spacetime/module/). It says which side
---        owns which kind of behaviour, and the order the code is migrated
---        in. THE CODE DOES NOT IMPLEMENT THIS YET. Nothing here describes
---        current behaviour, and nothing here overrides a rule in another
---        spec: until a migration step lands, the rules in the specs listed
---        under Excludes stay authoritative for what the system does today.
---        Each migration step (M2-M7 below) runs its own spec -> tests ->
---        code cycle on the spec that owns the behaviour it moves, and only
---        then rewrites that spec's rules.
+--        and the SpacetimeDB module (spacetime/module/), and the order the
+--        code is migrated in. It says which side owns which kind of
+--        behaviour. Migration steps land one at a time: M2 (below) has
+--        landed, M3-M7 have not. Until a step lands, the rules in the specs
+--        listed under Excludes stay authoritative for what the system does
+--        today, and nothing here overrides them. Each step runs its own
+--        spec -> tests -> code cycle on the spec that owns the behaviour it
+--        moves, and only then rewrites that spec's rules.
 -- Includes: The split rule, the "host work stays thin" rule, the
---           request-row model for multi-step work, the version-gate risk,
---           the migration order, and the details still undecided.
+--           request-row model for multi-step work, the version gate, the
+--           migration order, and the details still undecided.
 -- Excludes: Current dispatch behaviour, including the TUI watchdog
 --           (dispatch.allium); wrap-up and PR handling (pr-workflow.allium);
 --           feed execution and routing (feeds.allium, feed-scripts.allium);
 --           watcher notices (task-watchers.allium); the store's
 --           subscription and connection mechanics (sync.allium); startup
 --           checks (startup.allium); the MCP tools (mcp-task-tools.allium).
--- Dependencies: None yet. Entities and rules are added here, or in the
---               owning spec, by the migration step that implements them.
+-- Dependencies: sync.allium holds the version gate's rule
+--               (AStoreWithOtherRulesFailsTheAttempt). Other entities and
+--               rules are added here, or in the owning spec, by the
+--               migration step that implements them.
 --
 -- Decisions taken with the user (task #53254), recorded so they are not
 -- re-litigated:
@@ -53,9 +54,34 @@
 --     module therefore needs a hard startup version gate: a board whose
 --     build predates the step refuses to run against the module rather than
 --     running with the old rule.
+--   - The version gate (decided in task #53255, which landed it). The module
+--     publishes a RULES VERSION, one integer in a one-row table of its own
+--     (a table, so a module that predates the gate answers "no such table"
+--     rather than a row the board cannot decode), stamped by the module from its
+--     own constant whenever a client connects. The board compares it
+--     for EQUALITY with the version compiled into the board, at every
+--     connection attempt, and refuses to run on a difference (sync.allium:
+--     AStoreWithOtherRulesFailsTheAttempt). The number is held twice, in the
+--     module crate and in the board, with a test that fails when they
+--     differ; both are hand-bumped by every migration step that moves a
+--     rule, in the commit that moves it, and by nothing else. Why not the other candidates: the wasm hash
+--     changes on every rebuild whether or not a rule moved, and a build
+--     version needs a stored minimum that someone also has to bump. Limit:
+--     a board built before the gate cannot refuse; it still meets the
+--     module's own checks.
 --   - Migration order, one follow-up task per step:
 --       M2  Pure data checks move into reducers: sub-status legality,
 --           parameter checks, the reparent cycle check, repo grouping.
+--           LANDED (task #53255): patch_task refuses an illegal sub_status;
+--           patch_epic refuses a reparent cycle, a repo-group reparent and
+--           feed_append_only with grouping or a feed role; create_task,
+--           respawn_phoenix_successor and set_task_epic route into
+--           repo-group sub-epics, and patch_task re-routes on a repo_path
+--           change; regroup_epic and flatten_epic are reducers. The
+--           services are pass-through for these. Checks about the request
+--           rather than the data (an empty patch, the feed interval floor,
+--           the typed-url pair, a named epic's existence) stay at the
+--           service and MCP boundary. The version gate landed with it.
 --       M3  Feed routing and reconcile move into the module; the TUI's feed
 --           runner posts raw items only.
 --       M4  Dispatch becomes request rows plus the scheduled timeout.
@@ -73,8 +99,6 @@
 ------------------------------------------------------------
 
 open question "Scheduled timeout duration (M4): how long does the module wait before a scheduled reducer fails a dispatch request its host never reported? Does it keep today's derivation (SUBPROCESS_TIMEOUT * PROVISION_MAX_SUBPROCESS_CALLS, 840s at current values, see dispatch.allium's DispatchingTimeout), which is a host-side subprocess budget the module cannot see, or does it get its own module config value? And do wrap-up and exit-session requests (M5) share that deadline or get their own?"
-
-open question "Startup version gate: what exactly does the board compare against the module at startup -- a module schema/rule version the module publishes, the board's build version against a minimum the module records, or the published module.wasm hash? Who bumps it, and does every migration step bump it or only steps that move a rule?"
 
 open question "Request rows (M4, M5): are dispatch, wrap-up and exit-session requests a new table (one per kind, or one shared table with a kind field), or new columns on the task row? The answer decides whether a task can hold more than one outstanding request and how a finished request's history is kept."
 

@@ -1,0 +1,202 @@
+//! The data rules the board used to enforce, as pure functions the reducers call.
+//!
+//! Spec: `docs/specs/store-split.allium` (step M2, task #53255); the rules
+//! themselves are in `mcp-task-tools.allium` (`UpdateTaskViaMcp`) and
+//! `epics.allium` (`UpdateEpicViaMcp`, `ReparentEpicFromTui`, `RegroupEpic`).
+//!
+//! Pure on purpose, for the reason `derive_epic_status` is: the reducers supply
+//! WHICH rows are visible, and what a rule decides over them is testable
+//! without a store. The in-memory reducer caller (`src/sync/memory_caller/`)
+//! calls the same functions, so the two cannot disagree about a verdict.
+//!
+//! **Every refusal's wording is part of the contract.** These strings reach MCP
+//! callers as invalid-params errors, and are the ones the services produced
+//! before the rules moved here.
+
+use super::*;
+
+/// The version of the data rules this module enforces and a board expects it to.
+///
+/// **Hand-bumped, in the commit that moves a rule into the module, and by
+/// nothing else.** A board compares it for equality with the number it was
+/// built with, at every connection attempt, and refuses to run on a difference
+/// (`sync.allium: AStoreWithOtherRulesFailsTheAttempt`). That is the only
+/// defence against a board on an old build applying old rules to a module that
+/// moved on, or the reverse. Not bumped for a new column, a UI change or a bug
+/// fix inside a rule: none of those changes who enforces what.
+///
+/// 1: store-split M2 — sub-status legality, the reparent cycle, repo-group
+///    reparent and append-only checks, and repo grouping.
+///
+/// `0` is what a module that predates the gate reads as, so this is never 0.
+pub const RULES_VERSION: i64 = 1;
+
+/// Whether `sub_status` is legal for `status`, in the store's spelling.
+///
+/// `mcp-task-tools.allium: UpdateTaskViaMcp`. The twin of
+/// `SubStatus::is_valid_for` in the board's models; a test in the board's
+/// crate compares the two over every pair.
+fn sub_status_is_legal(status: &str, sub_status: &str) -> bool {
+    match status {
+        "backlog" | "done" => sub_status == "none",
+        "running" => matches!(
+            sub_status,
+            "active" | "needs_input" | "stale" | "crashed" | "conflict"
+        ),
+        "review" => matches!(
+            sub_status,
+            "awaiting_review"
+                | "changes_requested"
+                | "approved"
+                | "conflict"
+                | "pr_closed"
+                | "pr_unreachable"
+        ),
+        _ => false,
+    }
+}
+
+/// Refuse a `sub_status` that is not legal for `status`.
+///
+/// `status` is the status the row WILL hold: the patch's own when it moves the
+/// status, else the row's current one.
+pub fn validate_sub_status(status: &str, sub_status: &str) -> Result<(), String> {
+    if sub_status_is_legal(status, sub_status) {
+        Ok(())
+    } else {
+        Err(format!(
+            "sub_status '{sub_status}' is not valid for status '{status}'"
+        ))
+    }
+}
+
+/// How far up an ancestor chain the cycle walk goes before giving up.
+///
+/// A chain this deep is already a loop or a corrupt tree, and the walk must
+/// terminate on one that got in some other way (a restore, an older board).
+const MAX_ANCESTOR_WALK: usize = 1024;
+
+/// Refuse a parent that would put `epic_id` somewhere inside its own ancestry.
+///
+/// `parent_of` answers an epic's `parent_epic_id` as stored (`0` for a root),
+/// `None` for an unknown epic.
+/// Walks `proposed_parent`'s ancestors; the epic appearing among them (or being
+/// the proposed parent itself) is a cycle.
+pub fn validate_epic_parent(
+    epic_id: i64,
+    proposed_parent: i64,
+    parent_of: impl Fn(i64) -> Option<i64>,
+) -> Result<(), String> {
+    const CYCLE: &str = "Setting this parent would create a cycle in the epic hierarchy";
+    if proposed_parent == epic_id {
+        return Err(CYCLE.into());
+    }
+    let mut current = parent_of(proposed_parent);
+    for _ in 0..MAX_ANCESTOR_WALK {
+        match current {
+            None | Some(0) => return Ok(()),
+            Some(id) if id == epic_id => return Err(CYCLE.into()),
+            Some(id) => current = parent_of(id),
+        }
+    }
+    Ok(())
+}
+
+/// Refuse `feed_append_only` together with grouping or a feed role.
+///
+/// All three arguments are the values the epic will hold AFTER the patch, so
+/// the pair is refused whichever flag arrives second.
+/// `epics.allium: UpdateEpicViaMcp`, `feeds.allium: AppendOnlyFeed`.
+pub fn validate_feed_append_only(
+    append_only: bool,
+    group_by_repo: bool,
+    feed_role: &str,
+) -> Result<(), String> {
+    if append_only && (group_by_repo || feed_role != "none") {
+        return Err(
+            "feed_append_only cannot be combined with group_by_repo or a feed role: \
+                    grouping keys on the repo an item belongs to, but an append-only feed's \
+                    items are events keyed by where in the code they fired, and the one URL \
+                    they carry is a configured repo root — so every item would land in the \
+                    same sub-epic. To cover several repos, use one flat append-only epic per \
+                    repo under a common parent."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+/// The refusal for moving an auto-created repo-group sub-epic.
+pub const REPO_GROUP_REPARENT_REFUSED: &str = "Cannot reparent an auto-created repo-group sub-epic";
+
+/// The `origin` of an auto-created per-repo sub-epic.
+pub const REPO_GROUP_ORIGIN: &str = "repo-group";
+
+/// Whether an epic takes part in MANUAL repo grouping: grouped and not a feed.
+/// Feed epics group through ingestion instead.
+pub fn can_auto_group(group_by_repo: bool, feed_command: &str) -> bool {
+    group_by_repo && feed_command.is_empty()
+}
+
+/// What an epic's tasks with no usable repo path are grouped under.
+pub const UNKNOWN_REPO_GROUP: &str = "other";
+
+/// The grouping key for a repo path: its final component.
+///
+/// The twin of `models::repo_name_from_path`, which reads `Path::file_name`;
+/// a test in the board's crate compares the two. Like `Path`, a `.` component
+/// is skipped (`/x/dispatch/.` is `dispatch`) and a final `..` names nothing.
+pub fn repo_name_from_path(repo_path: &str) -> String {
+    repo_path
+        .rsplit('/')
+        .find(|s| !s.is_empty() && *s != ".")
+        .filter(|s| *s != "..")
+        .unwrap_or(UNKNOWN_REPO_GROUP)
+        .to_string()
+}
+
+/// Every check `patch_task` makes over a patch before applying it.
+///
+/// Read against the row as it is NOW, so the verdict is about the true row and
+/// not a client's subscription view. A patch that names no `sub_status` is not
+/// checked: a status move that leaves a stale sub-status is the caller's to
+/// fix, as it was when the service made this check.
+pub fn check_task_patch(row: &Task, patch: &TaskPatch) -> Result<(), String> {
+    if let Some(sub_status) = &patch.sub_status {
+        let status = patch.status.as_deref().unwrap_or(&row.status);
+        validate_sub_status(status, sub_status)?;
+    }
+    Ok(())
+}
+
+/// Every check `patch_epic` makes over a patch before applying it.
+///
+/// `parent_of` answers an epic's stored `parent_epic_id` for the cycle walk
+/// (`0` for a root), `None` for an unknown epic. The append-only pair is checked only when the patch
+/// touches one of its three inputs, so an unrelated write to an epic that
+/// already holds the combination (a restore, an older board) is not blocked.
+pub fn check_epic_patch(
+    row: &Epic,
+    patch: &EpicPatch,
+    parent_of: impl Fn(i64) -> Option<i64>,
+) -> Result<(), String> {
+    if let Some(parent) = patch.parent_epic_id {
+        if row.origin == REPO_GROUP_ORIGIN {
+            return Err(REPO_GROUP_REPARENT_REFUSED.into());
+        }
+        if parent != 0 {
+            validate_epic_parent(row.id, parent, parent_of)?;
+        }
+    }
+    if patch.feed_append_only.is_some()
+        || patch.group_by_repo.is_some()
+        || patch.feed_role.is_some()
+    {
+        validate_feed_append_only(
+            patch.feed_append_only.unwrap_or(row.feed_append_only),
+            patch.group_by_repo.unwrap_or(row.group_by_repo),
+            patch.feed_role.as_deref().unwrap_or(&row.feed_role),
+        )?;
+    }
+    Ok(())
+}

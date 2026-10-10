@@ -572,6 +572,13 @@ pub trait EpicCrud: EpicRead {
     /// Recalculate an epic's status from its active children (tasks + sub-epics).
     /// Propagates upward to the parent epic if one exists.
     async fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()>;
+    /// `epics.allium: RegroupEpic`, decided and applied by the store in one
+    /// transaction: every direct task of `root` moves into its per-repo
+    /// sub-epic.
+    async fn regroup_epic(&self, root: EpicId) -> Result<()>;
+    /// `epics.allium: FlattenEpic`, likewise: the tasks of every `repo-group`
+    /// sub-epic move back onto `root` and the emptied sub-epics are deleted.
+    async fn flatten_epic(&self, root: EpicId) -> Result<()>;
 }
 
 /// Read-only work-package queries (`work-packages.allium`). Held (via

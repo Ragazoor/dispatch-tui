@@ -250,7 +250,9 @@ pub fn apply_epic_patch(row: &mut Epic, patch: EpicPatch) {
 /// `sync.allium: EveryMutationIsAtomicAndAnswered`.
 #[spacetimedb::reducer]
 pub fn create_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
-    let epic_id = row.epic_id;
+    // Into the per-repo sub-epic when the epic named is a grouped root
+    // (`epics.allium`'s routing note). Every client gets the same placement.
+    let epic_id = route_to_repo_group(ctx, row.epic_id, &row.repo_path);
     write_task(
         ctx,
         Task {
@@ -258,6 +260,7 @@ pub fn create_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
             // one would be choosing an id the store has not reserved, and the
             // next generated id would collide with it.
             id: 0,
+            epic_id,
             ..row
         },
     )?;
@@ -276,11 +279,21 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
     let Some(mut row) = ctx.db.tasks().id().find(id) else {
         return Ok(());
     };
+    // Before anything is applied: a refused patch leaves the row untouched.
+    check_task_patch(&row, &patch)?;
     let was_in_epic = row.epic_id;
     let prior_status = row.status.clone();
     // Read before `apply_patch!` consumes the patch's fields.
     let caller_named_a_completion = patch.completed_at.is_some();
     let moved_to_epic = patch.epic_id;
+    // A repo change with no explicit relink re-routes within a grouped subtree.
+    // A patch that repeats the current repo (the editor sends it on every
+    // save) changes nothing to route.
+    let repo_changed_in_place = patch.epic_id.is_none()
+        && patch
+            .repo_path
+            .as_deref()
+            .is_some_and(|repo| repo != row.repo_path);
 
     apply_task_patch(&mut row, patch);
 
@@ -311,6 +324,9 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
         if now_in_epic != was_in_epic {
             recalculate_epic_chain(ctx, now_in_epic);
         }
+    }
+    if repo_changed_in_place {
+        reroute_on_repo_change(ctx, id)?;
     }
     Ok(())
 }
@@ -381,6 +397,9 @@ pub fn set_task_epic(
     let Some(task) = ctx.db.tasks().id().find(id) else {
         return Ok(());
     };
+    // Routed first, then compared: a task already in the per-repo sub-epic of
+    // the grouped root it is "moved" onto is where it belongs.
+    let epic_id = route_to_repo_group(ctx, epic_id, &task.repo_path);
     let was_in = task.epic_id;
     if was_in == epic_id {
         return Ok(());
@@ -407,10 +426,9 @@ pub fn set_task_epic(
 /// failure cannot create a second successor. Mirrors
 /// `src/db/queries/tasks.rs::respawn_phoenix_successor` exactly.
 ///
-/// No internal recalculation: the caller (`PhoenixRespawn` in
-/// `src/service/tasks/crud.rs`) already calls the already-routed
-/// `recalculate_epic_status` itself on success, the same as every feed
-/// ingestion call site below does for its own writes.
+/// The successor is routed into a grouped epic's per-repo sub-epic like any
+/// other created task (`epics.allium`'s routing note), and the epic it lands in
+/// is recalculated here: the caller cannot know which sub-epic that was.
 #[spacetimedb::reducer]
 pub fn respawn_phoenix_successor(
     ctx: &ReducerContext,
@@ -420,7 +438,15 @@ pub fn respawn_phoenix_successor(
     let Some(predecessor_row) = ctx.db.tasks().id().find(predecessor) else {
         return Err(format!("predecessor task {predecessor} not found"));
     };
-    write_task(ctx, Task { id: 0, ..successor })?;
+    let epic_id = route_to_repo_group(ctx, successor.epic_id, &successor.repo_path);
+    write_task(
+        ctx,
+        Task {
+            id: 0,
+            epic_id,
+            ..successor
+        },
+    )?;
     // Nothing between the check above and here can touch `predecessor_row` —
     // reducers run one at a time, and the write above only inserts a NEW
     // successor row — so the row already in hand is still current; no need
@@ -429,6 +455,7 @@ pub fn respawn_phoenix_successor(
         phoenix: false,
         ..predecessor_row
     });
+    recalculate_epic_chain(ctx, epic_id);
     Ok(())
 }
 
@@ -491,6 +518,9 @@ pub fn patch_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
     let Some(mut row) = ctx.db.epics().id().find(id) else {
         return Ok(());
     };
+    check_epic_patch(&row, &patch, |id| {
+        ctx.db.epics().id().find(id).map(|e| e.parent_epic_id)
+    })?;
     let prior_status = row.status.clone();
     let was_child_of = row.parent_epic_id;
     let caller_named_a_completion = patch.completed_at.is_some();
@@ -540,11 +570,23 @@ pub fn delete_epic(ctx: &ReducerContext, id: i64) -> Result<(), String> {
     };
     let parent = row.parent_epic_id;
     let doomed = validate_epic_deletable(ctx, id)?;
-    retire_feed_tasks_before_epic_delete(ctx, &doomed);
-    delete_epic_subtree(ctx, id, 0);
-    drop_retired_feed_items_for_epics(ctx, &doomed);
+    delete_epic_subtree_with_feed_cleanup(ctx, id, &doomed);
     recalculate_epic_chain(ctx, parent);
     Ok(())
+}
+
+/// Delete `id`'s subtree with the retired-feed-item bookkeeping bracketing the
+/// cascade: retire the doomed feed tasks BEFORE their rows go, drop the doomed
+/// feed epics' records after. `doomed` is `collect_epic_subtree_ids(id)`, taken
+/// while the rows still exist. Shared by every path that deletes an epic.
+pub(crate) fn delete_epic_subtree_with_feed_cleanup(
+    ctx: &ReducerContext,
+    id: i64,
+    doomed: &std::collections::HashSet<i64>,
+) {
+    retire_feed_tasks_before_epic_delete(ctx, doomed);
+    delete_epic_subtree(ctx, id, 0);
+    drop_retired_feed_items_for_epics(ctx, doomed);
 }
 
 /// `tasks.allium: BatchDelete`'s atomic server-side counterpart to looping
@@ -614,9 +656,7 @@ pub fn batch_delete(
             continue;
         };
         recalc.insert(row.parent_epic_id);
-        retire_feed_tasks_before_epic_delete(ctx, doomed);
-        delete_epic_subtree(ctx, *id, 0);
-        drop_retired_feed_items_for_epics(ctx, doomed);
+        delete_epic_subtree_with_feed_cleanup(ctx, *id, doomed);
     }
     for &id in &task_ids {
         let Some(row) = ctx.db.tasks().id().find(id) else {

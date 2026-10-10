@@ -463,13 +463,15 @@ Claude Code hooks used to be separate `dispatch` processes, each opening the dat
 
 Two consequences for tests. `stop_pending_at` is stored at millisecond resolution (millisecond-precision `stamp`, `src/sync/encode.rs`, not whole seconds) because the two events can share a second. And a test that needs one hook to be observably later than another must inject a `FixedClock` and advance it — two wall-clock reads in the same test can land in the same millisecond and tie.
 
-## Reparenting an epic — three guards, no immutability
+## Reparenting an epic — the store's guards, no immutability
 
-`parent_epic_id` **is** mutable: `EpicPatch` declares it `nullable` (`src/store/mod.rs::EpicPatch`), `patch_epic` writes it (`src/store/queries/epics.rs::patch_epic`), `EpicService::update_epic` implements reparent-and-detach (`src/service/epics.rs::update_epic`), and the TUI has a reparent picker (`src/tui/ui/kanban/popups/reparent_epic.rs`). Route reparenting through the service — it owns three guards a bare `patch_epic` skips:
+`parent_epic_id` **is** mutable: `EpicPatch` declares it `nullable` (`src/store/mod.rs::EpicPatch`), `patch_epic` writes it (`src/store/queries/epics.rs::patch_epic`), `EpicService::update_epic` implements reparent-and-detach (`src/service/epics.rs::update_epic`), and the TUI has a reparent picker (`src/tui/ui/kanban/popups/reparent_epic.rs`). Since store-split M2 the guards are the store's, in the `patch_epic` reducer (`check_epic_patch` in the module crate), so every client gets them and a bare `patch_epic` call cannot skip them:
 
-1. **Cycle detection** — `check_no_cycle` (`src/service/epics.rs::check_no_cycle`) walks the proposed parent's ancestor chain and rejects with `ServiceError::Validation` if the epic being moved appears in it (self-parent included).
-2. **RepoGroup guard** (in `src/service/epics.rs::update_epic`) — an auto-created `EpicOrigin::RepoGroup` sub-epic cannot be reparented *or* detached to root; either would orphan it outside its grouping root.
+1. **Cycle detection** — the reducer walks the proposed parent's ancestor chain and refuses if the epic being moved appears in it (self-parent included). The refusal reaches callers as `ServiceError::Validation` with the store's wording.
+2. **RepoGroup guard** — an auto-created `EpicOrigin::RepoGroup` sub-epic cannot be reparented *or* detached to root; either would orphan it outside its grouping root.
 3. **The visited-set guard** in the store's epic-status recalculation — defence in depth against a row becoming its own parent.
+
+The service keeps only the existence check on the proposed parent (a `NotFound` answer).
 
 `UpdateEpicParams.parent_epic_id` is an `Option<Option<EpicId>>`: `None` leaves the parent alone, `Some(Some(id))` reparents, `Some(None)` detaches to root.
 

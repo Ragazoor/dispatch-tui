@@ -454,12 +454,6 @@ macro_rules! epic_service_api {
                 root: $crate::models::EpicId
             ) -> Result<(), $crate::service::ServiceError>;
 
-            async fn reroute_on_repo_change(
-                &self,
-                task: $crate::models::TaskId,
-                new_repo: &str
-            ) -> Result<(), $crate::service::ServiceError>;
-
             /// Materialise the managed feed-epic tree from already-read settings. The
             /// caller reads the four settings via its read-only handle
             /// ([`crate::service::read_managed_feed_settings`]) and passes them in; the

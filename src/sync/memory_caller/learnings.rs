@@ -127,24 +127,28 @@ impl MemoryReducerCaller {
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    pub(super) fn apply_rescope_epic_learnings(
-        &self,
-        from: EpicId,
-        to: EpicId,
-    ) -> Result<ReducerOutcome> {
-        let from = from.0;
-        let to = to.0;
-        let mut tables = self.lock();
+    /// Mirrors the module's `rescope_learnings`, callable from another
+    /// reducer's transaction.
+    pub(super) fn rescope_learnings(&self, tables: &mut Tables, from: i64, to: i64) {
         let from_ref = from.to_string();
         let to_ref = to.to_string();
         self.update_matching_learnings(
-            &mut tables,
+            tables,
             |l| l.scope == "epic" && l.scope_ref.as_deref() == Some(from_ref.as_str()),
             |row| module::Learning {
                 scope_ref: Some(to_ref.clone()),
                 ..row
             },
         );
+    }
+
+    pub(super) fn apply_rescope_epic_learnings(
+        &self,
+        from: EpicId,
+        to: EpicId,
+    ) -> Result<ReducerOutcome> {
+        let mut tables = self.lock();
+        self.rescope_learnings(&mut tables, from.0, to.0);
         Ok(ReducerOutcome::Applied(vec![]))
     }
 

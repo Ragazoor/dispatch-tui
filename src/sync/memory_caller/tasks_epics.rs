@@ -9,7 +9,7 @@ use crate::models::{EpicId, TaskId};
 use crate::spacetime::bindings;
 
 use super::super::encode;
-use super::super::writes::ReducerOutcome;
+use super::super::writes::{ReducerOutcome, StoreRefusal};
 use super::{MemoryReducerCaller, Tables, BACKLOG, DONE, MAX_EPIC_DEPTH};
 
 impl MemoryReducerCaller {
@@ -167,20 +167,33 @@ impl MemoryReducerCaller {
         self.delete_work_package_links_to(tables, module::WORK_PACKAGE_ITEM_EPIC, id);
     }
 
+    /// Mirrors the module's `delete_epic_subtree_with_feed_cleanup`.
+    pub(super) fn delete_epic_subtree_with_feed_cleanup(
+        &self,
+        tables: &mut Tables,
+        id: i64,
+        doomed: &std::collections::HashSet<i64>,
+    ) {
+        self.retire_feed_tasks_before_epic_delete(tables, doomed);
+        self.delete_epic_subtree(tables, id, 0);
+        self.drop_retired_feed_items_for_epics(tables, doomed);
+    }
+
     pub(super) fn apply_create_task(&self, row: bindings::Task) -> Result<TaskId> {
-        let epic_id = row.epic_id;
         let mut tables = self.lock();
+        let epic_id = self.route_to_repo_group(&mut tables, row.epic_id, &row.repo_path);
         self.write_task(
             &mut tables,
             module::Task {
                 id: 0,
+                epic_id,
                 ..module::Task::from(row)
             },
         )
         // Same wording `SdkReducerCaller::create_task`'s `generated_id` uses
         // for a real refusal, so a caller cannot tell the two backends apart
         // from the error text alone.
-        .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        .map_err(StoreRefusal)?;
         // The id `write_task` just assigned — read back off the table rather
         // than threaded out of `write_task`, since every other caller of it
         // (patch/claim/release) already knows its own id and does not need one
@@ -199,11 +212,19 @@ impl MemoryReducerCaller {
         let Some(mut row) = tables.tasks.get(&id.0).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
+        let patch = module::TaskPatch::from(patch);
+        if let Err(why) = module::check_task_patch(&row, &patch) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let was_in_epic = row.epic_id;
         let prior_status = row.status.clone();
-        let patch = module::TaskPatch::from(patch);
         let caller_named_a_completion = patch.completed_at.is_some();
         let moved_to_epic = patch.epic_id;
+        let repo_changed_in_place = patch.epic_id.is_none()
+            && patch
+                .repo_path
+                .as_deref()
+                .is_some_and(|repo| repo != row.repo_path);
 
         module::apply_task_patch(&mut row, patch);
 
@@ -222,6 +243,11 @@ impl MemoryReducerCaller {
             self.recalculate_epic_chain(&mut tables, was_in_epic);
             if now_in_epic != was_in_epic {
                 self.recalculate_epic_chain(&mut tables, now_in_epic);
+            }
+        }
+        if repo_changed_in_place {
+            if let Err(why) = self.reroute_on_repo_change(&mut tables, id.0) {
+                return Ok(ReducerOutcome::Refused(why));
             }
         }
         Ok(ReducerOutcome::Applied(vec![]))
@@ -261,6 +287,8 @@ impl MemoryReducerCaller {
         let Some(task) = tables.tasks.get(&id.0).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
+        // Routed first, then compared, as the module does.
+        let epic_id = self.route_to_repo_group(&mut tables, epic_id, &task.repo_path);
         let was_in = task.epic_id;
         if was_in == epic_id {
             return Ok(ReducerOutcome::Applied(vec![]));
@@ -377,9 +405,14 @@ impl MemoryReducerCaller {
         let Some(mut row) = tables.epics.get(&id).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
+        let patch = module::EpicPatch::from(patch);
+        if let Err(why) = module::check_epic_patch(&row, &patch, |epic| {
+            tables.epics.get(&epic).map(|e| e.parent_epic_id)
+        }) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let prior_status = row.status.clone();
         let was_child_of = row.parent_epic_id;
-        let patch = module::EpicPatch::from(patch);
         let caller_named_a_completion = patch.completed_at.is_some();
 
         module::apply_epic_patch(&mut row, patch);
@@ -411,9 +444,7 @@ impl MemoryReducerCaller {
             )));
         }
         let parent = row.parent_epic_id;
-        self.retire_feed_tasks_before_epic_delete(&mut tables, &doomed);
-        self.delete_epic_subtree(&mut tables, id, 0);
-        self.drop_retired_feed_items_for_epics(&mut tables, &doomed);
+        self.delete_epic_subtree_with_feed_cleanup(&mut tables, id, &doomed);
         self.recalculate_epic_chain(&mut tables, parent);
         Ok(ReducerOutcome::Applied(vec![]))
     }
@@ -469,9 +500,7 @@ impl MemoryReducerCaller {
                 continue;
             };
             recalc.insert(row.parent_epic_id);
-            self.retire_feed_tasks_before_epic_delete(&mut tables, doomed);
-            self.delete_epic_subtree(&mut tables, *id, 0);
-            self.drop_retired_feed_items_for_epics(&mut tables, doomed);
+            self.delete_epic_subtree_with_feed_cleanup(&mut tables, *id, doomed);
         }
         for &id in &task_ids {
             let Some(row) = tables.tasks.get(&id).cloned() else {

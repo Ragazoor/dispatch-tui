@@ -54,6 +54,7 @@ mod agent_state;
 mod config;
 mod convert;
 mod feed;
+mod grouping;
 mod learnings;
 mod tasks_epics;
 mod work_packages;
@@ -157,6 +158,9 @@ pub struct MemoryReducerCaller {
     tables: Mutex<Tables>,
     rows: Arc<SharedRows>,
     clock: Arc<dyn Clock>,
+    /// The identity a real reducer reads off `ctx.sender`. Stamped as
+    /// `created_by` on the sub-epics a routed write creates. Empty unless set.
+    sender: String,
 }
 
 impl MemoryReducerCaller {
@@ -169,7 +173,15 @@ impl MemoryReducerCaller {
             tables: Mutex::new(Tables::new()),
             rows,
             clock,
+            sender: String::new(),
         }
+    }
+
+    /// Name the identity this caller writes as, where a reducer would read
+    /// `ctx.sender` — the only place the real module learns who is asking.
+    pub fn with_sender(mut self, sender: impl Into<String>) -> Self {
+        self.sender = sender.into();
+        self
     }
 
     fn now(&self) -> String {
@@ -248,6 +260,14 @@ impl ReducerCaller for MemoryReducerCaller {
 
     async fn recalculate_epic_status(&self, id: EpicId) -> Result<ReducerOutcome> {
         self.apply_recalculate_epic_status(id)
+    }
+
+    async fn regroup_epic(&self, root: EpicId) -> Result<ReducerOutcome> {
+        self.apply_regroup_epic(root)
+    }
+
+    async fn flatten_epic(&self, root: EpicId) -> Result<ReducerOutcome> {
+        self.apply_flatten_epic(root)
     }
 
     async fn batch_delete(

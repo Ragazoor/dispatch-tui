@@ -1355,7 +1355,7 @@ async fn flat_sync_with_no_repo_group_subepics_is_unaffected() {
 
 /// A manually-created (non-RepoGroup) sub-epic under a feed epic is never
 /// touched by flat-path reconciliation, mirroring
-/// `flatten_preserves_manual_sub_epics` in src/service/grouping.rs.
+/// `flatten_preserves_manual_sub_epics` in src/store/tests/grouping.rs.
 #[tokio::test]
 async fn flat_sync_preserves_manual_sub_epic() {
     let db = Arc::new(Store::open_in_memory().unwrap());

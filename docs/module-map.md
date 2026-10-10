@@ -64,7 +64,7 @@ to look.
 | `src/service/learnings.rs` | `LearningService`, `CreateLearningParams` — learning business logic (curated exclusively via MCP; no TUI-facing update/reject/archive path) |
 | `src/service/api.rs` | Service trait objects (`TaskServiceApi`, `EpicServiceApi`, `LearningServiceApi`) + `MockLearningService` for injection in tests. Each seam's signature list lives once, in a spec macro (`task_service_api!`, …) replayed into emitter macros that generate the trait, the delegating impl, and the test-only `*ServiceApiStub` mock scaffolding |
 | `src/service/services.rs` | `Services` — the task, epic and learning services, built once per process and shared by the TUI runtime and the MCP server |
-| `src/service/grouping.rs` | Repo-grouping: routes tasks of a `group_by_repo` epic into per-repo `RepoGroup` sub-epics |
+| `spacetime/module`'s `grouping.rs` and `rules.rs` | The data rules that left the services in store-split M2: repo grouping (routing a `group_by_repo` epic's tasks into per-repo `repo-group` sub-epics, `regroup_epic`, `flatten_epic`) and the pure checks `patch_task`/`patch_epic` run (sub-status legality, reparent cycle, append-only). `src/sync/memory_caller/grouping.rs` mirrors them; `src/sync/rules_gate.rs` is the startup version gate |
 | `src/service/managed_feeds.rs` | Managed feed config read/write (`managed_feed_config`) |
 | `src/embeddings.rs` | `EmbeddingService` — text embedding computation used by RAG and learning search. A leaf module: `dispatch` (prompt RAG) and `service` (learnings) both depend on it, not on each other |
 | `src/clock.rs` | `Clock` trait + `SystemClock`/`FixedClock`: injectable time for services, the store and the reducer callers. A leaf module, so `sync` and `store` need not depend on `service` |

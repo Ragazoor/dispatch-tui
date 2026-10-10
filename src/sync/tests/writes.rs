@@ -55,6 +55,8 @@ enum Sent {
     DeleteEpic(i64),
     BatchDelete(Vec<i64>, Vec<i64>),
     Recalculate(i64),
+    Regroup(i64),
+    Flatten(i64),
     SaveRepoPath(String, String),
     DeleteRepoPath(String),
     SetVerifyCommand(String, String),
@@ -299,6 +301,14 @@ impl ReducerCaller for RecordingCaller {
     async fn recalculate_epic_status(&self, id: EpicId) -> anyhow::Result<ReducerOutcome> {
         let id = id.0;
         self.answer(Sent::Recalculate(id))
+    }
+
+    async fn regroup_epic(&self, root: EpicId) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Regroup(root.0))
+    }
+
+    async fn flatten_epic(&self, root: EpicId) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Flatten(root.0))
     }
 
     async fn save_repo_path(
@@ -2192,6 +2202,8 @@ async fn every_store_mutation_reaches_the_transport() {
         .await
         .unwrap();
     db.recalculate_epic_status(EpicId(1)).await.unwrap();
+    db.regroup_epic(EpicId(1)).await.unwrap();
+    db.flatten_epic(EpicId(1)).await.unwrap();
     db.delete_epic(EpicId(1)).await.unwrap();
     db.batch_delete(&[TaskId(1)], &[EpicId(1)]).await.unwrap();
 
@@ -2348,6 +2360,8 @@ async fn every_store_mutation_reaches_the_transport() {
             "CreateEpic",
             "PatchEpic",
             "Recalculate",
+            "Regroup",
+            "Flatten",
             "DeleteEpic",
             "BatchDelete",
             "SaveRepoPath",

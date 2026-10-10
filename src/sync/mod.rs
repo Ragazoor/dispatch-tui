@@ -58,6 +58,7 @@ pub mod identity;
 #[cfg(any(test, feature = "test-support"))]
 pub mod memory_caller;
 pub mod rows;
+pub mod rules_gate;
 pub mod sdk_connector;
 pub mod session;
 pub mod subtree;

@@ -443,23 +443,7 @@ pub fn create_repo_group_sub_epic(
     title: String,
     created_by: String,
 ) -> Result<(), String> {
-    let existing = ctx
-        .db
-        .epics()
-        .parent_epic_id()
-        .filter(&parent_id)
-        .find(|e| e.title == title && e.origin == "repo-group");
-    if existing.is_none() {
-        ctx.db.epics().insert(Epic {
-            title,
-            parent_epic_id: parent_id,
-            origin: "repo-group".to_string(),
-            created_by,
-            created_at: now(ctx),
-            updated_at: now(ctx),
-            ..blank_epic()
-        });
-    }
+    find_or_create_repo_group(ctx, parent_id, &title, created_by);
     Ok(())
 }
 

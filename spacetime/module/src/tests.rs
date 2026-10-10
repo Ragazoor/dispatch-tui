@@ -18,7 +18,10 @@ mod tests {
     /// part of it.
     #[test]
     fn a_work_package_link_key_names_package_kind_and_item() {
-        assert_eq!(work_package_link_id(1, WORK_PACKAGE_ITEM_TASK, 3), "1/task/3");
+        assert_eq!(
+            work_package_link_id(1, WORK_PACKAGE_ITEM_TASK, 3),
+            "1/task/3"
+        );
         assert_ne!(
             work_package_link_id(1, WORK_PACKAGE_ITEM_TASK, 3),
             work_package_link_id(1, WORK_PACKAGE_ITEM_EPIC, 3)
@@ -441,5 +444,108 @@ mod tests {
     fn the_blank_task_the_burn_throws_away_satisfies_the_invariant() {
         let blank = blank_task();
         assert!(validate_task_ownership(blank.epic_id, &blank.owner).is_ok());
+    }
+}
+
+/// The data rules of store-split.allium step M2 (task #53255), as the pure
+/// functions the reducers call. See `rules.rs`.
+#[cfg(test)]
+mod rules {
+    use super::*;
+    use std::collections::HashMap;
+
+    // Which pairs are legal is checked pair by pair against the board's own
+    // `SubStatus::is_valid_for` in `src/sync/rules_gate.rs`; here, only the
+    // refusal's wording.
+
+    /// The wording reaches MCP callers unchanged from the service that used to
+    /// produce it.
+    #[test]
+    fn an_illegal_sub_status_is_refused_naming_both_values() {
+        assert_eq!(
+            validate_sub_status("backlog", "active").unwrap_err(),
+            "sub_status 'active' is not valid for status 'backlog'"
+        );
+    }
+
+    #[test]
+    fn an_unknown_sub_status_is_refused() {
+        assert!(validate_sub_status("running", "bogus").is_err());
+    }
+
+    fn chain(edges: &[(i64, i64)]) -> impl Fn(i64) -> Option<i64> {
+        let map: HashMap<i64, i64> = edges.iter().copied().collect();
+        move |id| map.get(&id).copied()
+    }
+
+    const CYCLE: &str = "Setting this parent would create a cycle in the epic hierarchy";
+
+    #[test]
+    fn an_epic_cannot_be_its_own_parent() {
+        assert_eq!(validate_epic_parent(1, 1, chain(&[])).unwrap_err(), CYCLE);
+    }
+
+    #[test]
+    fn an_epic_cannot_move_under_its_own_descendant() {
+        // 3 -> 2 -> 1: moving 1 under 3 closes the loop.
+        let parents = chain(&[(3, 2), (2, 1)]);
+        assert_eq!(validate_epic_parent(1, 3, parents).unwrap_err(), CYCLE);
+    }
+
+    #[test]
+    fn an_epic_can_move_under_an_unrelated_epic() {
+        assert!(validate_epic_parent(1, 3, chain(&[(3, 2)])).is_ok());
+    }
+
+    /// A stored `parent_epic_id` of 0 is a root, not epic 0.
+    #[test]
+    fn a_zero_parent_ends_the_walk() {
+        assert!(validate_epic_parent(1, 3, chain(&[(3, 0), (0, 1)])).is_ok());
+    }
+
+    #[test]
+    fn a_walk_that_meets_an_existing_loop_terminates() {
+        // 2 <-> 3 already loop; moving 1 under 2 must not spin forever.
+        let parents = chain(&[(2, 3), (3, 2)]);
+        assert!(validate_epic_parent(1, 2, parents).is_ok());
+    }
+
+    #[test]
+    fn append_only_is_refused_with_grouping_or_a_feed_role() {
+        assert!(validate_feed_append_only(true, true, "none").is_err());
+        assert!(validate_feed_append_only(true, false, "reviews").is_err());
+        assert!(validate_feed_append_only(true, false, "none").is_ok());
+        assert!(validate_feed_append_only(false, true, "reviews").is_ok());
+    }
+
+    #[test]
+    fn the_append_only_refusal_says_what_to_do_instead() {
+        let why = validate_feed_append_only(true, true, "none").unwrap_err();
+        assert!(
+            why.starts_with("feed_append_only cannot be combined"),
+            "{why}"
+        );
+        assert!(why.contains("one flat append-only epic per repo"), "{why}");
+    }
+
+    #[test]
+    fn only_a_grouped_non_feed_epic_auto_groups() {
+        assert!(can_auto_group(true, ""));
+        assert!(!can_auto_group(true, "gh pr list"));
+        assert!(!can_auto_group(false, ""));
+    }
+
+    #[test]
+    fn a_repo_group_is_named_after_the_final_path_component() {
+        assert_eq!(repo_name_from_path("/home/u/dispatch"), "dispatch");
+        assert_eq!(repo_name_from_path("/home/u/dispatch/"), "dispatch");
+        assert_eq!(repo_name_from_path(""), "other");
+        assert_eq!(repo_name_from_path("/"), "other");
+    }
+
+    #[test]
+    fn the_rules_version_is_positive() {
+        // 0 is what a module that predates the gate reads as.
+        assert!(RULES_VERSION > 0);
     }
 }

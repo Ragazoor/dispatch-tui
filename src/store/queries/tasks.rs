@@ -106,17 +106,12 @@ impl TaskCrud for Store {
         if !patch.has_changes() {
             return Ok(());
         }
-        if matches!((patch.status, patch.sub_status), (Some(s), Some(ss)) if !ss.is_valid_for(s)) {
-            anyhow::bail!(
-                "invalid (status, sub_status) pair in patch: {:?}/{:?}",
-                patch.status,
-                patch.sub_status
-            );
-        }
-        // AFTER the two guards above, deliberately. They are cheap, they are
-        // about the ARGUMENTS rather than about the rows, and a store round
-        // trip to be told a patch was empty is a round trip for nothing. Every
-        // check that needs to see other rows is the store's — see
+        // Whether the sub-status is legal for the status is the store's to say
+        // (`patch_task`'s check), not this client's: a second copy here was a
+        // validator free to disagree with the real one. An empty patch is
+        // answered above because it is about the argument, and a round trip to
+        // be told so is a round trip for nothing. Every check that needs to see
+        // other rows is the store's — see
         // `sync.allium: StoreRejectsAnInvalidMutation`.
         self.caller
             .patch_task(id, encode::task_patch(patch))

@@ -2,7 +2,7 @@ use super::*;
 
 // -- Learnings, retrievals and verdicts (task #5003) -----------------------
 
-fn blank_learning() -> bindings::Learning {
+pub(super) fn blank_learning() -> bindings::Learning {
     bindings::Learning {
         id: 0,
         kind: "pitfall".into(),

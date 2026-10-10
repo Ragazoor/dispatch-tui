@@ -213,8 +213,8 @@ impl TaskService {
     ///
     /// Supports the full `UpdateTaskParams` builder (title, description,
     /// repo_path, pr_url, worktree, tmux_window, base_branch, sub_status,
-    /// epic_id, sort_order, tag, status). Calls `recalculate_epic_for_task`
-    /// whenever `params.status` is set.
+    /// epic_id, sort_order, tag, status). Epic recalculation is the store's:
+    /// `patch_task` and `set_task_epic` recalculate the epics they touch.
     ///
     /// This is the only status-writing path on the service: it can transition
     /// to any status including `Done`. The restriction against agents
@@ -238,22 +238,20 @@ impl TaskService {
             return Err(Self::task_not_found(task_id));
         }
         let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
-        let validated_sub_status = self.validate_sub_status(task_id, &params).await?;
 
-        let mut patch =
-            build_task_patch(&params, expanded_repo_path.as_deref(), validated_sub_status);
+        // The sub-status goes through as given: the store's `patch_task`
+        // refuses one that is illegal for the status the row will hold
+        // (`UpdateTaskViaMcp`, store-split M2).
+        let mut patch = build_task_patch(&params, expanded_repo_path.as_deref(), params.sub_status);
 
-        // Snapshot the task before the patch. Needed whenever `epic_id` is
-        // relinked (existing reason), whenever `status` changes and sets a
-        // PR-typed url (existing PR-finalisation check), and now whenever
-        // `status` changes at all — to detect a transition into/out of Done
-        // for the completion-stamp rule below.
+        // Snapshot the task before the patch, whenever `status` changes: the
+        // PR-finalisation check, the completion-stamp rule and ClosePrOnDone
+        // all read the prior row. Nothing else here needs it.
         let is_pr_url_set = matches!(
             params.url.as_ref(),
             Some(UrlUpdate::Set(u)) if u.is_pr()
         );
-        let needs_prior = params.epic_id.is_some() || params.status.is_some();
-        let prior = if needs_prior {
+        let prior = if params.status.is_some() {
             self.db.get_task(task_id).await
         } else {
             None
@@ -282,23 +280,32 @@ impl TaskService {
             patch = with_status_transition(patch, prior_status, new_status, self.clock.now());
         }
 
-        // Resolve grouping target for an explicit epic relink (before the write).
-        let routed_epic_id = if params.epic_id.is_some() {
-            let repo = expanded_repo_path
-                .clone()
-                .or_else(|| prior.as_ref().map(|t| t.repo_path.clone()))
-                .unwrap_or_default();
-            self.resolve_routed_epic(params.epic_id, &repo).await?
-        } else {
-            None
-        };
-
         // Captured before the write so the caller can learn what this call
         // wrote to completed_at (including the Done-transition stamp just
         // above) without a second DB round-trip. See `UpdateTaskResult`.
         let completed_at_after_write = patch.completed_at;
 
+        // ORDER OF THE WRITES (mcp-task-tools.allium: UpdateTaskViaMcp). An
+        // explicit relink goes BEFORE the patch when the call also changes the
+        // repo: the store routes the relink by the repo the task has now, and
+        // the patch's repo change then re-routes it within that subtree, so the
+        // call ends where routing by the new repo puts it. Patch-first would
+        // let the patch's re-route delete an explicitly named sub-epic before
+        // the relink lands in it. Otherwise the patch goes first, so a patch
+        // the store refuses (an illegal sub_status) leaves the task where it
+        // was.
+        let relink_first = params.repo_path.is_some();
+        if relink_first {
+            if let Some(epic_id) = params.epic_id {
+                self.db.set_task_epic_id(task_id, Some(epic_id)).await?;
+            }
+        }
         self.db.patch_task(task_id, &patch).await?;
+        if !relink_first {
+            if let Some(epic_id) = params.epic_id {
+                self.db.set_task_epic_id(task_id, Some(epic_id)).await?;
+            }
+        }
 
         // ClosePrOnDone (docs/specs/pr-workflow.allium): resolved from the
         // final url this call leaves the task with — an explicit `params.url`
@@ -311,14 +318,8 @@ impl TaskService {
         };
         self.close_pr_on_done(task_id, prior.as_ref(), params.status, final_url);
 
-        self.apply_epic_follow_ups(
-            task_id,
-            &params,
-            prior.as_ref(),
-            routed_epic_id,
-            expanded_repo_path.as_deref(),
-        )
-        .await?;
+        // No epic recalculation here: `patch_task` and `set_task_epic`
+        // recalculate every epic they touched, in their own transactions.
 
         // PhoenixRespawn (tasks.allium). After the status write, never as part
         // of it — see `respawn_phoenix`.
@@ -332,39 +333,6 @@ impl TaskService {
             was_pr_finalisation,
             completed_at_after_write,
         })
-    }
-
-    /// The epic bookkeeping `update_task` does after the patch lands: an
-    /// explicit relink, a repo-change reroute, and the status rollup.
-    async fn apply_epic_follow_ups(
-        &self,
-        task_id: TaskId,
-        params: &UpdateTaskParams,
-        prior: Option<&Task>,
-        routed_epic_id: Option<EpicId>,
-        expanded_repo_path: Option<&str>,
-    ) -> Result<(), ServiceError> {
-        if let Some(routed_id) = routed_epic_id {
-            let old_epic_id = prior.and_then(|t| t.epic_id);
-            self.db.set_task_epic_id(task_id, Some(routed_id)).await?;
-            if let Some(old) = old_epic_id {
-                self.recalculate_epic(old).await;
-            }
-            self.recalculate_epic(routed_id).await;
-        }
-
-        // Repo changed without an explicit relink: re-route within a grouped subtree.
-        if params.epic_id.is_none() {
-            if let Some(new_repo) = expanded_repo_path {
-                crate::service::reroute_on_repo_change(&*self.db, &*self.db, task_id, new_repo)
-                    .await?;
-            }
-        }
-
-        if params.status.is_some() {
-            self.recalculate_epic_for_task(task_id).await;
-        }
-        Ok(())
     }
 
     /// Apply a session close: the terminal status, its default sub-status, the
@@ -539,77 +507,30 @@ impl TaskService {
 
     /// Move a task to a different epic, or detach it to standalone when
     /// `new_epic` is `None`. Validates that a chosen target epic exists, then
-    /// routes through `route_target` (so a task moved onto a `group_by_repo`
-    /// non-feed root lands in the correct per-repo sub-epic), and recalculates
-    /// the status of both the previous epic (if any) and the new epic (if any)
-    /// per the epic-status-recalculation invariant.
+    /// hands the move to the store's `set_task_epic`, which routes a task moved
+    /// onto a `group_by_repo` non-feed root into its per-repo sub-epic and
+    /// recalculates both the previous epic and the new one.
     pub async fn move_task_to_epic(
         &self,
         task_id: TaskId,
         new_epic: Option<EpicId>,
     ) -> Result<(), ServiceError> {
         // A chosen target must exist; a null target detaches the task.
-        // Validate against the ORIGINAL requested epic (route_target may
-        // create/return a sub-epic, but the caller's intent is this epic).
+        // Validate against the ORIGINAL requested epic (the store may route
+        // into a sub-epic, but the caller's intent is this epic).
         // Detach (`None`) is never checked: there is no target to exist.
         if let Some(epic_id) = new_epic {
             crate::service::require_epic_accepting_work(&*self.db, epic_id).await?;
         }
 
-        let task = self
-            .db
-            .get_task(task_id)
-            .await
-            .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", task_id.0)))?;
-        let old_epic_id = task.epic_id;
-
-        // When moving to a target, route through grouping logic so a task
-        // dropped onto a group_by_repo (non-feed) root lands in its per-repo
-        // sub-epic instead of directly on the root. Detach (None) is unchanged.
-        let routed_epic = self.resolve_routed_epic(new_epic, &task.repo_path).await?;
-
-        self.db.set_task_epic_id(task_id, routed_epic).await?;
-
-        if let Some(old) = old_epic_id {
-            self.recalculate_epic(old).await;
+        if !self.db.task_exists(task_id).await {
+            return Err(Self::task_not_found(task_id));
         }
-        if let Some(routed) = routed_epic {
-            self.recalculate_epic(routed).await;
-        }
+
+        // The store routes a task dropped onto a group_by_repo (non-feed) root
+        // into its per-repo sub-epic, and recalculates both epics it touched.
+        self.db.set_task_epic_id(task_id, new_epic).await?;
         Ok(())
-    }
-
-    /// Validate `params.sub_status` against the task's effective (current or
-    /// requested) status. Returns the sub_status to write, if any.
-    ///
-    /// Intentional TOCTOU: we read the current status here to validate the
-    /// sub_status, then write via patch_task in `update_task` afterwards. A
-    /// concurrent update between the two is theoretically possible but benign
-    /// in practice — Dispatch is a single-process tokio runtime with
-    /// cooperative scheduling, so no two MCP handlers run truly concurrently
-    /// on the same task. The store serialises writes regardless.
-    async fn validate_sub_status(
-        &self,
-        task_id: TaskId,
-        params: &UpdateTaskParams,
-    ) -> Result<Option<SubStatus>, ServiceError> {
-        let Some(ss) = params.sub_status else {
-            return Ok(None);
-        };
-        let effective_status = match params.status {
-            Some(s) => Some(s),
-            None => self.db.get_task(task_id).await.map(|t| t.status),
-        };
-        if let Some(eff) = effective_status {
-            if !ss.is_valid_for(eff) {
-                return Err(ServiceError::Validation(format!(
-                    "sub_status '{}' is not valid for status '{}'",
-                    ss.as_str(),
-                    eff.as_str()
-                )));
-            }
-        }
-        Ok(Some(ss))
     }
 
     /// Expand `~` in a repo path and canonicalise a plan path, the same
@@ -627,22 +548,6 @@ impl TaskService {
                 .unwrap_or_else(|_| p.to_string())
         });
         (repo_path, plan)
-    }
-
-    /// Resolve the actual epic a task should land in: if `epic_id` targets a
-    /// group_by_repo (non-feed) epic, route into its per-repo sub-epic; else
-    /// return `epic_id` unchanged. `None` stays `None`.
-    async fn resolve_routed_epic(
-        &self,
-        epic_id: Option<EpicId>,
-        repo_path: &str,
-    ) -> Result<Option<EpicId>, ServiceError> {
-        match epic_id {
-            Some(id) => Ok(Some(
-                crate::service::route_target(&*self.db, id, repo_path).await?,
-            )),
-            None => Ok(None),
-        }
     }
 
     /// Recalculate the given epic, logging any database error.
@@ -719,7 +624,7 @@ impl TaskService {
         // The named epic must exist, checked before the insert so a refused
         // target leaves no task behind rather than a loose one the caller
         // never asked for. Checked on the epic the caller NAMED, not on
-        // whatever `resolve_routed_epic` below routes the task into — routing
+        // whatever sub-epic the store's `create_task` routes it into — routing
         // only ever substitutes a `RepoGroup` sub-epic, which cannot outlive
         // its parent, so there is no existence gap to close there.
         //
@@ -732,10 +637,8 @@ impl TaskService {
             crate::service::require_epic_accepting_work(&*self.db, epic_id).await?;
         }
 
-        // Repo-grouping: a task assigned to a group_by_repo (non-feed) epic is
-        // placed into its per-repo sub-epic instead of the parent.
-        let effective_epic_id = self.resolve_routed_epic(params.epic_id, &repo_path).await?;
-
+        // Repo-grouping: the store places a task assigned to a group_by_repo
+        // (non-feed) epic into its per-repo sub-epic, in the same transaction.
         let task_id = self
             .db
             .create_task(CreateTaskRequest {
@@ -745,7 +648,7 @@ impl TaskService {
                 plan: plan.as_deref(),
                 status: TaskStatus::Backlog,
                 base_branch: &base_branch,
-                epic_id: effective_epic_id,
+                epic_id: params.epic_id,
                 sort_order: params.sort_order,
                 tag: params.tag,
                 wrap_up_mode: params.wrap_up_mode,
@@ -753,10 +656,6 @@ impl TaskService {
                 phoenix: params.phoenix,
             })
             .await?;
-
-        if let Some(eid) = effective_epic_id {
-            self.recalculate_epic(eid).await;
-        }
 
         self.get_task(task_id).await
     }
@@ -812,18 +711,6 @@ impl TaskService {
         // creates a second one.
         let (repo_path, plan) =
             Self::normalize_repo_and_plan(&task.repo_path, task.plan_path.as_deref());
-        let effective_epic_id = match self.resolve_routed_epic(task.epic_id, &repo_path).await {
-            Ok(id) => id,
-            Err(e) => {
-                tracing::error!(
-                    task_id = task_id.0,
-                    error = %e,
-                    "phoenix respawn failed; the task stays Done and keeps its flag"
-                );
-                return;
-            }
-        };
-
         let successor_id = self
             .db
             .respawn_phoenix_successor(
@@ -835,7 +722,7 @@ impl TaskService {
                     plan: plan.as_deref(),
                     status: TaskStatus::Backlog,
                     base_branch: &task.base_branch,
-                    epic_id: effective_epic_id,
+                    epic_id: task.epic_id,
                     // Left unset so the copy sorts by its own id, at the
                     // bottom of backlog, rather than inheriting a position in
                     // a column the predecessor has left.
@@ -854,11 +741,6 @@ impl TaskService {
                 error = %e,
                 "phoenix respawn failed; the task stays Done and keeps its flag"
             );
-            return;
-        }
-
-        if let Some(eid) = effective_epic_id {
-            self.recalculate_epic(eid).await;
         }
     }
 

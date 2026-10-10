@@ -95,7 +95,7 @@ async fn dispatch_task_persist_writes_status_to_db() {
     let (rt, mut app) = test_runtime().await;
     let mut task = seed(&rt, "Persist me", models::TaskStatus::Backlog).await;
     // Mirror what every production status move does: the sub-status travels
-    // with the status (`SubStatus::default_for`), because the service
+    // with the status (`SubStatus::default_for`), because the store
     // rejects any (status, sub_status) pair `SubStatus::is_valid_for`
     // disallows.
     task.status = models::TaskStatus::Running;

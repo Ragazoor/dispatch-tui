@@ -198,7 +198,7 @@ pub(crate) async fn run_feed_sync(
             .iter()
             .any(|e| e.origin == crate::models::EpicOrigin::RepoGroup);
         if has_repo_group_sub_epic {
-            crate::service::flatten_epic(db, db, epic_id).await?;
+            db.flatten_epic(epic_id).await?;
         }
         drop_closed_retired_feed_items(db, epic_id, &entries, mode).await;
         let (items, repo_paths, base_branches) = FeedItemWithTarget::unzip(entries);

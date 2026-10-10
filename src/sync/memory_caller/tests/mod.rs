@@ -123,4 +123,5 @@ mod config;
 mod epics;
 mod feed;
 mod learnings;
+mod rules;
 mod tasks;

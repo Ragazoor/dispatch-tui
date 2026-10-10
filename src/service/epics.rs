@@ -11,8 +11,8 @@ use super::{validate_feed_interval, FieldUpdate, ServiceError};
 /// Extracted because the existence check had been written inline three times
 /// and had begun to drift: the same operator mistake, naming an epic that does
 /// not exist, answered `NotFound` on the reassign path and something else on
-/// the create path. One helper means one answer. Never a routed substitute —
-/// see `resolve_routed_epic`.
+/// the create path. One helper means one answer. Never a routed substitute:
+/// the store routes a grouped epic's work into its sub-epic itself.
 pub async fn require_epic_accepting_work(
     db: &dyn store::EpicRead,
     epic_id: EpicId,
@@ -166,21 +166,13 @@ fn count_progress(tasks: &[&Task]) -> (usize, usize) {
 
 pub struct EpicService {
     pub db: Arc<dyn store::TaskAndEpicStore>,
-    /// The same store as `db`, narrowed to its learnings, for the repo-group
-    /// cleanup rule: deleting an empty `RepoGroup` sub-epic re-scopes its
-    /// learnings onto the parent first.
-    learnings: Arc<dyn store::LearningStore>,
     clock: Arc<dyn crate::clock::Clock>,
 }
 
 impl EpicService {
-    /// One handle, narrowed here: the epic writes and the learnings the
-    /// repo-group cleanup re-scopes are the same store, so a caller cannot
-    /// hand in two that disagree.
     pub fn new(db: Arc<dyn store::TaskStore>) -> Self {
         Self {
             db: db.clone(),
-            learnings: db,
             clock: Arc::new(crate::clock::SystemClock),
         }
     }
@@ -416,16 +408,17 @@ impl EpicService {
         let epic_id = params.epic_id;
         let existing = self.db.get_epic(epic_id).await;
 
-        Self::check_append_only_compatible(&params, existing.as_ref())?;
-
+        // The data checks on this update — a parent cycle, moving a repo-group
+        // sub-epic, feed_append_only with grouping or a feed role — are the
+        // store's: `patch_epic` refuses them against the true rows
+        // (`UpdateEpicViaMcp`, store-split M2). What stays here is what is about
+        // the request, and the not-found answer.
         let mut patch = Self::base_patch(&params);
 
-        // Fetch the prior epic whenever status changes, to detect a
-        // transition INTO Done for the completion-stamp rule. This method has
-        // no other prior-fetch to reuse (the RepoGroup-reparent guard below
-        // does its own, gated on a different condition).
+        // The prior epic's status, to detect a transition INTO Done for the
+        // completion-stamp rule.
         if let Some(new_status) = params.status {
-            if let Some(prior_epic) = self.db.get_epic(params.epic_id).await {
+            if let Some(prior_epic) = existing.as_ref() {
                 if let Some(at) = completed_at_for_status_transition(
                     prior_epic.status,
                     new_status,
@@ -436,23 +429,10 @@ impl EpicService {
             }
         }
 
-        // Prevent reparenting or detaching a RepoGroup sub-epic: both
-        // Some(Some(_)) (reparent) and Some(None) (detach to root) would
-        // orphan an auto-created sub-epic outside its grouping root.
-        if matches!(params.parent_epic_id, Some(Some(_)) | Some(None)) {
-            if let Some(ref epic) = existing {
-                if epic.origin == crate::models::EpicOrigin::RepoGroup {
-                    return Err(ServiceError::Validation(
-                        "Cannot reparent an auto-created repo-group sub-epic".into(),
-                    ));
-                }
-            }
-        }
-
         match params.parent_epic_id {
             Some(Some(new_parent_id)) => {
-                let parent = self.get_epic(new_parent_id).await?;
-                self.check_no_cycle(epic_id, &parent).await?;
+                // Existence only: the cycle walk is the store's.
+                self.get_epic(new_parent_id).await?;
                 patch = patch.parent_epic_id(Some(new_parent_id));
             }
             Some(None) => {
@@ -473,59 +453,6 @@ impl EpicService {
             epic_id,
             completed_at_after_write,
         })
-    }
-
-    /// Refuse `feed_append_only` together with `group_by_repo` or a feed role.
-    fn check_append_only_compatible(
-        params: &UpdateEpicParams,
-        existing: Option<&Epic>,
-    ) -> Result<(), ServiceError> {
-        // Repo is a MIRRORING feed's key: a PR, a CVE, a Dependabot alert each
-        // belongs to exactly one repo and carries that repo's URL as its own,
-        // so group_by_repo partitions the emission along an axis its items
-        // already have. An APPEND-ONLY feed's items are events keyed by where
-        // in the code they fired (a log record's level, module and message
-        // head), and the one url they carry is a configured repo root that
-        // exists only so dispatch can resolve a local clone. Grouping such an
-        // epic would put every item in a single sub-epic — grouping by a
-        // constant. Several repos' events are covered by one flat append-only
-        // epic per repo under a common parent, which FeedRunner polls exactly
-        // as it polls root epics.
-        //
-        // This restriction is PERMANENT (task #4640 decided it), not the
-        // conservative holding position it started as. In particular it does
-        // not hinge on the grouped path's migration deadlock — see
-        // feeds.allium: AppendOnlyFeed for why that was a symptom of a defect
-        // in GroupedFeedUpsert's own migration rather than the reason here.
-        //
-        // Evaluated against the POST-update values, so the pair is refused
-        // whichever flag arrives second and whether they arrive together or
-        // apart. feed_role is not settable here, so it is read as-is.
-        let appends_only = params
-            .feed_append_only
-            .or_else(|| existing.as_ref().map(|e| e.feed_append_only))
-            .unwrap_or(false);
-        if appends_only {
-            let grouped = params
-                .group_by_repo
-                .or_else(|| existing.as_ref().map(|e| e.group_by_repo))
-                .unwrap_or(false);
-            let routed = existing
-                .as_ref()
-                .is_some_and(|e| e.feed_role != crate::models::FeedRole::None);
-            if grouped || routed {
-                return Err(ServiceError::Validation(
-                    "feed_append_only cannot be combined with group_by_repo or a feed role: \
-                     grouping keys on the repo an item belongs to, but an append-only feed's \
-                     items are events keyed by where in the code they fired, and the one URL \
-                     they carry is a configured repo root — so every item would land in the \
-                     same sub-epic. To cover several repos, use one flat append-only epic per \
-                     repo under a common parent."
-                        .to_string(),
-                ));
-            }
-        }
-        Ok(())
     }
 
     /// The patch for the plain fields `params` carries.
@@ -604,51 +531,12 @@ impl EpicService {
         }
     }
 
-    /// Walk the ancestor chain of `proposed_parent` and return a Validation error
-    /// if `epic_id` appears in it (which would create a cycle).
-    /// Takes a pre-fetched `&Epic` to avoid an extra DB round-trip.
-    async fn check_no_cycle(
-        &self,
-        epic_id: EpicId,
-        proposed_parent: &Epic,
-    ) -> Result<(), ServiceError> {
-        if proposed_parent.id == epic_id {
-            return Err(ServiceError::Validation(
-                "Setting this parent would create a cycle in the epic hierarchy".into(),
-            ));
-        }
-        let mut current_opt = proposed_parent.parent_epic_id;
-        loop {
-            let current = match current_opt {
-                None => return Ok(()),
-                Some(c) => c,
-            };
-            if current == epic_id {
-                return Err(ServiceError::Validation(
-                    "Setting this parent would create a cycle in the epic hierarchy".into(),
-                ));
-            }
-            match self.db.get_epic(current).await {
-                Some(e) => current_opt = e.parent_epic_id,
-                None => return Ok(()),
-            }
-        }
-    }
-
     pub async fn regroup_epic(&self, root: EpicId) -> Result<(), ServiceError> {
-        crate::service::regroup_epic(&*self.db, root).await
+        Ok(self.db.regroup_epic(root).await?)
     }
 
     pub async fn flatten_epic(&self, root: EpicId) -> Result<(), ServiceError> {
-        crate::service::flatten_epic(&*self.db, &*self.learnings, root).await
-    }
-
-    pub async fn reroute_on_repo_change(
-        &self,
-        task: crate::models::TaskId,
-        new_repo: &str,
-    ) -> Result<(), ServiceError> {
-        crate::service::reroute_on_repo_change(&*self.db, &*self.learnings, task, new_repo).await
+        Ok(self.db.flatten_epic(root).await?)
     }
 
     /// The delete pre-check (`DeleteEpic`, epics.allium): every task in the

@@ -10,7 +10,7 @@ use crate::models::{NotificationWrite, PollScopeId, SubStatus, TaskId};
 use crate::spacetime::bindings;
 
 use super::super::encode;
-use super::super::writes::{DrainReadBack, ReducerOutcome};
+use super::super::writes::{DrainReadBack, ReducerOutcome, StoreRefusal};
 use super::{MemoryReducerCaller, Tables, ACTIVE, AWAITING_REVIEW, NEEDS_INPUT, REVIEW, RUNNING};
 
 impl MemoryReducerCaller {
@@ -477,12 +477,15 @@ impl MemoryReducerCaller {
         if !tables.tasks.contains_key(&predecessor) {
             return Err(anyhow::anyhow!("predecessor task {predecessor} not found"));
         }
+        let epic_id =
+            self.route_to_repo_group(&mut tables, successor.epic_id, &successor.repo_path);
         let successor_row = module::Task {
             id: 0,
+            epic_id,
             ..module::Task::from(successor)
         };
         self.write_task(&mut tables, successor_row)
-            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+            .map_err(StoreRefusal)?;
         let new_id = tables.next_task_id - 1;
         if let Some(predecessor_row) = tables.tasks.get(&predecessor).cloned() {
             let updated = module::Task {
@@ -492,6 +495,7 @@ impl MemoryReducerCaller {
             tables.tasks.insert(predecessor, updated.clone());
             self.rows.upsert_task(&updated.into());
         }
+        self.recalculate_epic_chain(&mut tables, epic_id);
         Ok(TaskId(new_id))
     }
 

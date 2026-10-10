@@ -60,13 +60,31 @@ pub enum ReducerOutcome {
     Refused(String),
 }
 
+/// The store declined a mutation, and why.
+///
+/// A type of its own, inside the `anyhow` chain, so a layer that has to answer
+/// a caller (the services, for MCP) can tell "the data rule said no" from "the
+/// store is broken" and pass the reason on in the right class. The reason is
+/// the store's own wording: with the data rules in the reducers
+/// (`store-split.allium`, M2) it is the text an agent reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreRefusal(pub String);
+
+impl std::fmt::Display for StoreRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the shared store refused: {}", self.0)
+    }
+}
+
+impl std::error::Error for StoreRefusal {}
+
 impl ReducerOutcome {
     /// Turn a refusal into an error. The right reading for every mutation whose
     /// refusal means something went wrong, which is all of them except a claim.
     pub fn into_result(self) -> Result<Vec<i64>> {
         match self {
             Self::Applied(ids) => Ok(ids),
-            Self::Refused(why) => Err(anyhow::anyhow!("the shared store refused: {why}")),
+            Self::Refused(why) => Err(anyhow::Error::new(StoreRefusal(why))),
         }
     }
 
@@ -125,6 +143,13 @@ pub trait ReducerCaller: Send + Sync {
     async fn patch_epic(&self, id: EpicId, patch: bindings::EpicPatch) -> Result<ReducerOutcome>;
     async fn delete_epic(&self, id: EpicId) -> Result<ReducerOutcome>;
     async fn recalculate_epic_status(&self, id: EpicId) -> Result<ReducerOutcome>;
+
+    /// `epics.allium: RegroupEpic`, in one transaction: every direct task of
+    /// `root` moves into its per-repo sub-epic. Idempotent.
+    async fn regroup_epic(&self, root: EpicId) -> Result<ReducerOutcome>;
+    /// `epics.allium: FlattenEpic`, in one transaction: every `repo-group`
+    /// sub-epic's tasks move back onto `root` and the emptied sub-epics go.
+    async fn flatten_epic(&self, root: EpicId) -> Result<ReducerOutcome>;
 
     /// `tasks.allium: BatchDelete`'s atomic call — see
     /// `spacetime/module/src/tasks_epics.rs::batch_delete`'s doc comment for why this
