@@ -25,9 +25,8 @@ Feedback the user actually gave is the subject. A stale spec is the `weed`
 skill's job, and a command that failed until you found the right invocation is
 a tooling problem, not a correction.
 
-Also note what went well and is worth repeating. Keep it grounded in what
-happened: "nothing notable" is a real and common answer, and inventing a
-finding is how retro turns into busywork.
+Note what went well too. "Nothing notable" is a real and common answer;
+inventing a finding is how retro turns into busywork.
 
 ## What is worth changing
 
@@ -44,8 +43,7 @@ prevented it. These surfaces reach the next agent:
 | the repo's verify command | shown in `get_task`'s response and run by `wrap_up` itself (not in the dispatch prompt) |
 
 The test: would the next agent do better? Every finding must trace to a
-concrete moment from this session. A true but harmless inaccuracy
-is not a finding.
+concrete moment from this session. A true but harmless inaccuracy is not one.
 
 Also ask whether the root cause sits in the tool or environment running you —
 the sandbox, dispatch itself, or Claude Code — rather than in this repo. If so,

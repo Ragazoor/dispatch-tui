@@ -15,21 +15,13 @@ Reach for `tag_filter` only when you already know the tag you want. It is a soft
 
 ## Rating entries you acted on
 
-When you act on a knowledge base entry that was surfaced to you (injected into your prompt or returned by `query_learnings`), give feedback right away:
+When you act on an entry that was surfaced to you (injected into your prompt or returned by `query_learnings`), rate it at that moment, not deferred to wrap-up:
+
 ```
 rate_learning(learning_id=<id>, task_id=<your task id>, verdict="helped")
 ```
 
-- `verdict="helped"` — the entry applied and was useful (upvotes it).
-- `verdict="wrong"` — the entry misled you or is inaccurate (downvotes it; may go negative). Neither verdict changes the entry's status — there is no human review step. If it's clearly wrong rather than just unhelpful, delete it instead (see below).
-
-Do this at the moment you act on it, not deferred to wrap-up. You can only rate entries that were surfaced to you this task.
-
-**Rate `helped` when:** an entry saved you from a pitfall, matched a convention you applied, or guided a decision you made.
-
-**Rate `wrong` when:** an entry was misleading or no longer accurate.
-
-**Don't rate:** entries you read but didn't act on.
+Use `helped` when the entry saved you from a pitfall or guided a decision, and `wrong` when it misled you or is out of date. Neither verdict changes the entry's status — there is no human review step. An entry that is clearly wrong should be deleted instead. Don't rate entries you read but didn't act on.
 
 ## Recording new entries
 
