@@ -76,6 +76,8 @@ Logs do not go to stderr — stderr belongs to the TUI. They append to `app.log`
 
 `store::Store` is the board's one read/write handle (`TaskStore` and friends narrow it). It talks to the shared store through the `sync` adapters: `sync::writes` for reducer calls, `sync::sdk_connector` for the SpacetimeDB SDK. `spacetime/` holds the server lifecycle (`managed_store.rs`), generated `bindings/` and snapshot tooling. `sync/memory_caller/` is the in-memory test double, conformance-checked by `tests/memory_caller_conformance.rs`. See [docs/module-map.md](docs/module-map.md).
 
+**Direction of travel:** rules about shared data belong in the SpacetimeDB module's reducers; the TUI keeps only work that needs the operator's machine (git, tmux, claude, gh, local files). Don't add new data rules to `src/service/`. The target and its migration steps are in `docs/specs/store-split.allium` (epic #32769).
+
 ## External Dependencies
 
 **tmux**, **git**, **gh**, and **claude** must be on `PATH` at runtime. There is **no startup preflight** — nothing checks binary availability, so a missing binary surfaces as a failed shell command mid-operation. Per-binary detail (which module calls what, and the two load-bearing `claude` flags) is under "External Dependencies" in [docs/reference.md](docs/reference.md).

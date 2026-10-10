@@ -1,0 +1,81 @@
+-- allium: 3
+-- store-split.allium
+--
+-- Scope: The TARGET split of responsibility between the dispatch TUI process
+--        and the SpacetimeDB module (spacetime/module/). It says which side
+--        owns which kind of behaviour, and the order the code is migrated
+--        in. THE CODE DOES NOT IMPLEMENT THIS YET. Nothing here describes
+--        current behaviour, and nothing here overrides a rule in another
+--        spec: until a migration step lands, the rules in the specs listed
+--        under Excludes stay authoritative for what the system does today.
+--        Each migration step (M2-M7 below) runs its own spec -> tests ->
+--        code cycle on the spec that owns the behaviour it moves, and only
+--        then rewrites that spec's rules.
+-- Includes: The split rule, the "host work stays thin" rule, the
+--           request-row model for multi-step work, the version-gate risk,
+--           the migration order, and the details still undecided.
+-- Excludes: Current dispatch behaviour, including the TUI watchdog
+--           (dispatch.allium); wrap-up and PR handling (pr-workflow.allium);
+--           feed execution and routing (feeds.allium, feed-scripts.allium);
+--           watcher notices (task-watchers.allium); the store's
+--           subscription and connection mechanics (sync.allium); startup
+--           checks (startup.allium); the MCP tools (mcp-task-tools.allium).
+-- Dependencies: None yet. Entities and rules are added here, or in the
+--               owning spec, by the migration step that implements them.
+--
+-- Decisions taken with the user (task #53254), recorded so they are not
+-- re-litigated:
+--   - S1, the split rule. A piece of behaviour stays in the TUI process only
+--     if it needs the operator's machine: git, tmux, launching claude, gh,
+--     local repo files, or the local embedding model. Every rule about the
+--     shared data's shape, consistency or state transitions belongs in the
+--     SpacetimeDB module's reducers, so every client gets the same rule
+--     rather than each client re-implementing it.
+--   - S2, host work stays in the TUI process, and stays thin. The MCP and
+--     hook HTTP endpoint, feed script execution and PR polling remain in the
+--     TUI process. There is no separate daemon: agents still need a board
+--     running. Each of these only performs the local call and forwards the
+--     raw result through one reducer call. None of them decides a state
+--     change; the module does.
+--   - S3, the module drives multi-step work. Dispatch, wrap-up and
+--     exit-session start as request rows that any client may write. The
+--     module sets each state of the request (for example requested ->
+--     provisioning on host X -> running | failed). The host that owns the
+--     work reacts through its subscription, does the local work, and reports
+--     the outcome by reducer call. A scheduled reducer fails work that its
+--     host never reports. That replaces today's in-memory TUI dispatch
+--     watchdog (DISPATCH_WATCHDOG_TIMEOUT; dispatch.allium's
+--     DispatchingTimeout), which only the board that started the dispatch
+--     can enforce.
+--   - Cross-cutting risk: a board on an old build would apply old rules
+--     against a newer module, or fail to apply rules the module now expects
+--     a host to follow. Every migration step that moves a rule into the
+--     module therefore needs a hard startup version gate: a board whose
+--     build predates the step refuses to run against the module rather than
+--     running with the old rule.
+--   - Migration order, one follow-up task per step:
+--       M2  Pure data checks move into reducers: sub-status legality,
+--           parameter checks, the reparent cycle check, repo grouping.
+--       M3  Feed routing and reconcile move into the module; the TUI's feed
+--           runner posts raw items only.
+--       M4  Dispatch becomes request rows plus the scheduled timeout.
+--       M5  Wrap-up and exit-session become request rows.
+--       M6  Watchers get module-written "notice due" rows; PR state is
+--           derived in the module from the raw gh status the host forwards.
+--       M7  Leftover service logic is removed; MCP handlers call reducers
+--           directly.
+--
+-- Design doc: 2026-10-10-tui-store-split-design.md under the superpowers
+-- specs directory (a dated snapshot; this spec is the record).
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Scheduled timeout duration (M4): how long does the module wait before a scheduled reducer fails a dispatch request its host never reported? Does it keep today's derivation (SUBPROCESS_TIMEOUT * PROVISION_MAX_SUBPROCESS_CALLS, 840s at current values, see dispatch.allium's DispatchingTimeout), which is a host-side subprocess budget the module cannot see, or does it get its own module config value? And do wrap-up and exit-session requests (M5) share that deadline or get their own?"
+
+open question "Startup version gate: what exactly does the board compare against the module at startup -- a module schema/rule version the module publishes, the board's build version against a minimum the module records, or the published module.wasm hash? Who bumps it, and does every migration step bump it or only steps that move a rule?"
+
+open question "Request rows (M4, M5): are dispatch, wrap-up and exit-session requests a new table (one per kind, or one shared table with a kind field), or new columns on the task row? The answer decides whether a task can hold more than one outstanding request and how a finished request's history is kept."
+
+open question "Offline host catch-up: when a request row names a host that is not running a board at the time the row appears, what happens? Does the host pick it up from its subscription's initial rows when its board next starts, does the scheduled timeout fail it first, and is a request that was claimed (provisioning on host X) but interrupted by that host's restart resumed, re-run, or failed?"
