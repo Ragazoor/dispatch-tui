@@ -979,7 +979,6 @@ fn plugin_embeds_required_files() {
         "skills/decompose-review/SKILL.md",
         "skills/decompose-review/references/plan-template.md",
         "skills/learnings/SKILL.md",
-        "skills/summarize/SKILL.md",
         "skills/grill/SKILL.md",
         "skills/allium-loop/SKILL.md",
         "skills/allium-loop/prompt.md",
@@ -1811,24 +1810,6 @@ fn decompose_review_skill_does_not_pass_repo_path_to_create_epic() {
     );
 }
 
-/// Every sub-skill wrap-up invokes is a place the agent can mistake the
-/// sub-skill's end for the session's end and go idle — retro and simplify
-/// both needed explicit guards for exactly that. Summarize sat in the
-/// closing sequence, between `wrap_up` and `exit_session`, which is the
-/// worst possible place to stall: the rebase has already fast-forwarded
-/// base_branch and the task is stuck in its old status. It bought a recap
-/// the user rarely needed, so it is gone rather than guarded (task #4505).
-#[test]
-fn wrap_up_skill_does_not_invoke_summarize() {
-    let content = skill_body("wrap-up");
-    assert!(
-        !content.contains(r#"skill: "summarize""#),
-        "wrap-up must not invoke the summarize skill — a sub-skill call \
-         between wrap_up and exit_session is a stall point on the one path \
-         where stalling has already touched base_branch"
-    );
-}
-
 /// A preset `wrap_up_mode` is the user's answer, given earlier. Suppressing
 /// the question without carrying the wrap-up through leaves the agent idle
 /// with the question it was told not to ask unanswered, and nothing reaches
@@ -1859,22 +1840,6 @@ fn wrap_up_skill_carries_a_preset_mode_through_without_asking_or_stopping() {
         "a preset mode must come with an explicit instruction not to stop \
          part-way — suppressing the question alone is what left agents idle \
          at a blank prompt"
-    );
-}
-
-#[test]
-fn summarize_skill_does_not_claim_unconditional_finality() {
-    // summarize is usually run standalone (/summarize), but any skill may
-    // invoke it mid-flow as a sub-step. An unconditional "this is always
-    // the final step" claim reads as an instruction to stop the whole
-    // session right there, stranding whatever the caller had left to do.
-    // wrap-up used to be that caller and stalled exactly this way, which
-    // is why its call is gone — see wrap_up_skill_does_not_invoke_summarize.
-    let content = skill_body("summarize");
-    assert!(
-        !content.contains("always the final step"),
-        "summarize skill must not unconditionally claim to be the final step, \
-         since wrap-up invokes it as a mid-flow sub-step"
     );
 }
 

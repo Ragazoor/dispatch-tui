@@ -238,19 +238,6 @@ fn learnings_description_covers_the_whole_lifecycle() {
     }
 }
 
-/// summarize's Step 4 branches on whether it was invoked standalone or as a
-/// sub-step of another skill, and the two endings differ (stop, versus resume
-/// the caller in the same turn). The description described only the standalone
-/// case.
-#[test]
-fn summarize_description_mentions_its_sub_step_role() {
-    let desc = shipped_description("summarize").to_lowercase();
-    assert!(
-        desc.contains("sub-step") || desc.contains("another skill"),
-        "summarize's description must say it also runs as another skill's sub-step, got: {desc}"
-    );
-}
-
 /// Every markdown file under `dir`, recursively.
 fn markdown_under(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();

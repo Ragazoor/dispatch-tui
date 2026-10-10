@@ -906,7 +906,7 @@ A per-repo, single-line shell command that dispatched agents must run before dec
 
 ## Agent-Facing Skill Copy
 
-`plugin/skills/*/SKILL.md` is the **source of truth** for the skills agents run (`/wrap-up`, `/retro`, `/learnings`, `/grill`, `/summarize`, `/decompose-review`, `/allium-loop`). The directory is embedded in the binary via `include_dir!` and only reaches `~/.claude/plugins/local/dispatch/` when `dispatch tui`'s startup configuration check reports the plugin stale and the operator accepts (`docs/specs/startup.allium`) — editing the installed copy is editing a build artifact.
+`plugin/skills/*/SKILL.md` is the **source of truth** for the skills agents run (`/wrap-up`, `/retro`, `/learnings`, `/grill`, `/decompose-review`, `/allium-loop`). The directory is embedded in the binary via `include_dir!` and only reaches `~/.claude/plugins/local/dispatch/` when `dispatch tui`'s startup configuration check reports the plugin stale and the operator accepts (`docs/specs/startup.allium`) — editing the installed copy is editing a build artifact.
 
 A SKILL.md carries the flow every invocation walks; detail only one branch needs lives in a `references/` file beside it, and SKILL.md names that file where the branch is taken ("Skill copy" in `docs/specs/mcp-task-tools.allium`). Changes are asserted by the `contains` tests in `src/setup/plugins/tests.rs` (via its `skill_body` and `skill_text` helpers); see [testing.md](testing.md).
 
