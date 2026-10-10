@@ -13,7 +13,7 @@ This is a quick-dispatched task with a placeholder title. Start by asking the us
 
 Then, before making any changes:
 
-Design the solution spec-first: elicit the intended behaviour with `allium:elicit`, capture it in docs/specs/ with `allium:tend`, generate tests with `allium:propagate` and confirm they fail before you write any code, implement the minimum that makes them pass, then check spec and code agree with `allium:weed`.
+If the task changes what the system does, design it spec-first: elicit the intended behaviour with `allium:elicit`, capture it in docs/specs/ with `allium:tend`, generate tests with `allium:propagate` and confirm they fail before you write any code, implement the minimum that makes them pass, then check spec and code agree with `allium:weed`.
 
 Writing a plan to docs/plans/ and attaching it with update_tasks is your judgement call, not a requirement — do it only if the implementation is big enough that its steps are worth recording.
 

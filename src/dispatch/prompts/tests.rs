@@ -400,6 +400,23 @@ names every skill, got: {sentence:?} in {text}"
     );
 }
 
+/// `TheDesignStepNamesSkillsNotProcedure`: the design step applies only when
+/// the task changes behaviour, and the agent judges that. Both design steps
+/// open with the same condition, so a research-shaped chore is not told to
+/// tend a spec with no subject.
+#[test]
+fn design_steps_apply_only_when_the_task_changes_behaviour() {
+    for (name, text) in [
+        ("spec_first_instruction", spec_first_instruction()),
+        ("brainstorm_instruction", brainstorm_instruction()),
+    ] {
+        assert!(
+            text.starts_with("If the task changes what the system does, "),
+            "{name} must open with the behaviour-change condition, got: {text}"
+        );
+    }
+}
+
 /// It is not a numbered procedure: the five-step list paraphrased each skill
 /// it named.
 #[test]
@@ -2010,7 +2027,7 @@ fn cve_task_prompt_replaces_the_design_step() {
     );
     for token in [
         "allium:elicit",
-        "Design the solution spec-first",
+        "If the task changes what the system does",
         "Always use TDD",
     ] {
         assert!(

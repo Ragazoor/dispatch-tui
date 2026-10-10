@@ -644,6 +644,16 @@ rule NameTheDesignStep {
         -- skills carry their own process, and a prompt that restates it can
         -- only drift from them.
         --
+        -- The sentence is conditional on the task changing behaviour, and the
+        -- agent judges whether it does: it opens "If the task changes what the
+        -- system does". A task that changes no behaviour — an audit, a
+        -- research-shaped chore, a docs edit — skips the design step rather
+        -- than tending a spec with no subject. Tags cannot make this call: a
+        -- chore tag covers both a refactor and "read this article and report",
+        -- and task #49159 was the second kind yet was told to elicit, tend and
+        -- propagate. The brainstorm step (DesignStepMatchesTheReposSpecs)
+        -- carries the same condition, so the two design steps stay alike.
+        --
         -- It does not tell the agent to interview the user. Who is there to
         -- ask differs by launch — a quick dispatch is already a conversation,
         -- an unattended dispatch may have nobody watching — and a mandate to
@@ -688,8 +698,10 @@ rule NameTheDesignStep {
         --     phrase survives on both lines where the stopping-point rule
         --     around it does not). This wording is
         --     otherwise NOT tag-conditional — Bug, Feature, Chore, Fix, and
-        --     no-tag all reach this same addendum and all imply working
-        --     code. Research is excluded without a branch here:
+        --     no-tag all reach this same addendum. Whether the design step
+        --     applies is the agent's judgement, stated in the sentence's own
+        --     "If the task changes what the system does" condition, not a
+        --     per-tag branch. Research is excluded without a branch here:
         --     DispatchResearchTask already diverts a no-plan
         --     research-tagged task to build_research_prompt before
         --     build_prompt's addendum is ever selected (see
