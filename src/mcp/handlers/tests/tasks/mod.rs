@@ -79,7 +79,7 @@ async fn get_epic_found() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -96,7 +96,7 @@ async fn get_epic_not_found() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": 9999 }
         })),
     )
@@ -140,7 +140,7 @@ async fn get_epic_shows_subtask_summary() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -165,7 +165,7 @@ async fn get_epic_accepts_string_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": epic.id.0.to_string() }
         })),
     )
@@ -594,7 +594,7 @@ async fn get_epic_shows_feed_command() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )

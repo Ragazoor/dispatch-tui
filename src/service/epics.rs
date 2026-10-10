@@ -271,8 +271,8 @@ impl EpicService {
     /// Progress for a single epic, rolled up the same way as
     /// [`list_epics_with_progress`](Self::list_epics_with_progress): a
     /// `group_by_repo` epic's counts include its descendant sub-epics, not
-    /// just its direct subtasks. Used by `get_epic` so it agrees with the
-    /// board/`list_epics` view instead of undercounting to 0/0.
+    /// just its direct subtasks. Used by `list_epics` with `epic_id` so it
+    /// agrees with the list rows and the board instead of undercounting to 0/0.
     ///
     /// Only `group_by_repo` epics need the whole-board rollup — every other
     /// epic still counts its own direct subtasks, so the common case stays as

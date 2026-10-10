@@ -504,10 +504,20 @@ rule CreateEpicViaMcp {
         -- editor, EditEpic) or via UpdateEpicViaMcp.
 }
 
+-- One epic is read through list_epics with epic_id: there is no separate
+-- get_epic tool (docs/mcp-tool-design.md, rule 1: a get and a list of the same
+-- entity are one capability). The two forms are separate rules because their
+-- replies differ: the list gives one row per epic, the epic_id form the full
+-- record. list_work_packages(work_package_id) is the same shape.
 rule GetEpicViaMcp {
-    when: McpGetEpic(epic_id)
+    when: McpListEpics(epic_id, parent_epic_id?, recursive?, query?, limit?)
 
     requires: core/Epic.exists(epic_id)
+    -- epic_id picks one epic, so no filter can narrow it further. A call
+    -- that sets epic_id together with any other argument is invalid params
+    -- (-32602), not a silent ignore.
+    requires: parent_epic_id = null and recursive = null and query = null
+              and limit = null
 
     -- Returns the Epic record for epic_id along with a subtask summary
     -- (done_count, total_count) rolled up exactly as ListEpicsViaMcp
@@ -522,8 +532,8 @@ rule GetEpicViaMcp {
         -- status = done and T is the total.
         -- The counts come from EpicService::get_epic_with_progress, which
         -- reuses the same rollup as list_epics_with_progress
-        -- (ListEpicsViaMcp) so get_epic, list_epics and the board never
-        -- disagree: for a group_by_repo epic the tasks of all descendant
+        -- (ListEpicsViaMcp) so the one-epic reply, the list rows and the
+        -- board never disagree: for a group_by_repo epic the tasks of all descendant
         -- sub-epics are aggregated recursively; for any other epic only
         -- the direct subtasks are counted. Without the shared rollup a
         -- group_by_repo epic whose tasks all live in per-repo sub-epics
@@ -546,8 +556,10 @@ rule GetEpicViaMcp {
 }
 
 rule ListEpicsViaMcp {
-    when: McpListEpics(parent_epic_id?, recursive?, query?, limit?)
+    when: McpListEpics(epic_id?, parent_epic_id?, recursive?, query?, limit?)
 
+    -- With epic_id set the call is GetEpicViaMcp (above).
+    requires: epic_id = null
     requires:
         if parent_epic_id != null: core/Epic.exists(parent_epic_id)
     -- recursive narrows nothing on its own: the unfiltered list is already
@@ -589,10 +601,10 @@ rule ListEpicsViaMcp {
         -- (when a plan is attached) followed by a status indicator (when
         -- the status is not backlog), then " (parent:<id>)" when the epic has
         -- a parent, and finally the description. The parent is on every row so
-        -- a caller can rebuild the tree from one call instead of one get_epic
-        -- per epic. The id
+        -- a caller can rebuild the tree from one call instead of one
+        -- list_epics(epic_id) per epic. The id
         -- is included because it is how the caller addresses the epic in
-        -- follow-up calls (get_epic, update_epic, create_task).
+        -- follow-up calls (list_epics with epic_id, update_epic, create_task).
         -- An empty result returns an informational "No epics found"
         -- message rather than an error.
 }

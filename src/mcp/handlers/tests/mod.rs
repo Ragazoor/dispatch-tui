@@ -1151,7 +1151,6 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("list_tasks", json!({})),
         ("list_epics", json!({})),
         ("create_epic", json!({"title": "t"})),
-        ("get_epic", json!({"epic_id": 1})),
         ("update_epic", json!({"epic_id": 1})),
         ("wrap_up", json!({"task_id": 1, "action": "rebase"})),
         ("dispatch_task", json!({"task_id": 1})),
@@ -1177,7 +1176,6 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("create_work_package", json!({"title": "t"})),
         ("list_work_packages", json!({})),
         ("update_work_package", json!({"work_package_id": 1})),
-        ("delete_work_package", json!({"work_package_id": 1})),
     ];
 
     let covered: std::collections::BTreeSet<&str> = payloads.iter().map(|(n, _)| *n).collect();
@@ -1351,7 +1349,6 @@ fn tool_definitions_carry_annotations() {
     const READ_ONLY: &[&str] = &[
         "get_task",
         "list_tasks",
-        "get_epic",
         "list_epics",
         "query_learnings",
         "query_usage",
@@ -1359,7 +1356,7 @@ fn tool_definitions_carry_annotations() {
         "list_keybindings",
         "list_work_packages",
     ];
-    const DESTRUCTIVE: &[&str] = &["delete_learning", "exit_session", "delete_work_package"];
+    const DESTRUCTIVE: &[&str] = &["delete_learning", "exit_session", "update_work_package"];
     let defs = tool_definitions();
     for tool in defs["tools"].as_array().unwrap() {
         let name = tool["name"].as_str().unwrap();

@@ -10,8 +10,8 @@ use crate::models::{EpicId, TaskId, WorkPackageId, WorkPackageItem};
 use crate::service::{CreateWorkPackageParams, UpdateWorkPackageParams, WorkPackageView};
 
 use super::types::{
-    deserialize_flexible_id, deserialize_optional_flexible_id, parse_args, service_err_to_response,
-    FlexibleId, JsonRpcResponse,
+    deserialize_flexible_id, deserialize_optional_flexible_id, parse_args, reject_alongside,
+    service_err_to_response, FlexibleId, JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -54,13 +54,8 @@ struct UpdateWorkPackageArgs {
     link_epic_ids: Vec<FlexibleId<EpicId>>,
     #[serde(default)]
     unlink_epic_ids: Vec<FlexibleId<EpicId>>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DeleteWorkPackageArgs {
-    #[serde(deserialize_with = "deserialize_flexible_id")]
-    work_package_id: WorkPackageId,
+    #[serde(default)]
+    delete: bool,
 }
 
 fn items(tasks: Vec<FlexibleId<TaskId>>, epics: Vec<FlexibleId<EpicId>>) -> Vec<WorkPackageItem> {
@@ -189,19 +184,24 @@ pub(super) async fn handle_update_work_package(
     let package_id = parsed.work_package_id;
     tracing::info!(work_package_id = package_id.0, "MCP update_work_package");
 
-    let mut fields = Vec::new();
-    for (name, set) in [
+    let named = [
         ("title", parsed.title.is_some()),
         ("description", parsed.description.is_some()),
         ("link_task_ids", !parsed.link_task_ids.is_empty()),
         ("unlink_task_ids", !parsed.unlink_task_ids.is_empty()),
         ("link_epic_ids", !parsed.link_epic_ids.is_empty()),
         ("unlink_epic_ids", !parsed.unlink_epic_ids.is_empty()),
-    ] {
-        if set {
-            fields.push(name);
+    ];
+    if parsed.delete {
+        if let Some(refusal) = reject_alongside(&id, "delete", &named) {
+            return refusal;
         }
+        return delete_work_package(state, id, package_id).await;
     }
+    let fields: Vec<&str> = named
+        .iter()
+        .filter_map(|&(name, set)| set.then_some(name))
+        .collect();
     let params = UpdateWorkPackageParams {
         id: package_id,
         title: parsed.title,
@@ -221,18 +221,17 @@ pub(super) async fn handle_update_work_package(
     }
 }
 
-pub(super) async fn handle_delete_work_package(
+/// work-packages.allium: DeleteWorkPackageViaMcp, the `delete: true` form of
+/// update_work_package.
+async fn delete_work_package(
     state: &McpState,
     id: Option<Value>,
-    _identity: &CallerIdentity,
-    args: Value,
+    package_id: WorkPackageId,
 ) -> JsonRpcResponse {
-    let parsed = match parse_args::<DeleteWorkPackageArgs>(&id, args) {
-        Ok(a) => a,
-        Err(resp) => return resp,
-    };
-    let package_id = parsed.work_package_id;
-    tracing::info!(work_package_id = package_id.0, "MCP delete_work_package");
+    tracing::info!(
+        work_package_id = package_id.0,
+        "MCP update_work_package delete"
+    );
     match state.work_package_svc.delete_work_package(package_id).await {
         Ok(()) => {
             state.notify();

@@ -308,26 +308,17 @@ passing it here is rejected.",
             "required": ["title"]
         };
 
-    async read_only "get_epic" => epics::handle_get_epic,
-        "Get one epic by ID: its title, description, status, plan and a summary of its subtasks \
-by status. Read-only. Use it to check an epic's progress before adding work to it or closing it \
-out. It does not return the subtasks themselves — call list_tasks with epic_id for those.",
-        {
-            "type": "object",
-            "properties": {
-                "epic_id": { "type": "integer", "description": "The epic ID" }
-            },
-            "required": ["epic_id"]
-        };
-
     async read_only "list_epics" => epics::handle_list_epics,
         "List epics on the kanban board, one row each, with each sub-epic's parent id. With no \
 arguments it lists every epic. Pass parent_epic_id for that epic's direct children, plus \
 recursive=true for its whole subtree. Pass query to search titles and descriptions. Use it to find an epic's ID when you only know its title. \
-For one epic's detail or its subtask counts, call get_epic instead.",
+Pass epic_id instead for one epic in full: its description, status, plan, parent, feed settings \
+and a count of its subtasks by status, but not the subtasks themselves — call list_tasks with \
+epic_id for those.",
         {
             "type": "object",
             "properties": {
+                "epic_id": { "type": "integer", "description": "Return this one epic in full instead of a list. Takes no other argument." },
                 "parent_epic_id": { "type": "integer", "description": "List only the sub-epics of this epic." },
                 "recursive": { "type": "boolean", "description": "With parent_epic_id, list every descendant rather than only direct children." },
                 "query": {
@@ -397,13 +388,14 @@ the items.",
             }
         };
 
-    async idempotent "update_work_package" => work_packages::handle_update_work_package,
+    async destructive "update_work_package" => work_packages::handle_update_work_package,
         "Update a work package in place: rename it with title, rewrite description, and change \
 its links with link_task_ids, unlink_task_ids, link_epic_ids and unlink_epic_ids. Unlinks apply \
 before links, linking an item already linked and unlinking one not linked are both silent, and \
 the tasks and epics themselves are never changed. Every id is checked before anything is written, \
 and an id named in both a link and an unlink list is refused. Every field left out is untouched, \
-and at least one must be given.",
+and at least one must be given. Pass delete=true, and nothing else, to delete the package once it \
+has served its purpose: its linked tasks and epics stay where they are, with their status unchanged.",
         {
             "type": "object",
             "properties": {
@@ -413,19 +405,8 @@ and at least one must be given.",
                 "link_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing tasks to link." },
                 "unlink_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of tasks to unlink." },
                 "link_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing epics to link." },
-                "unlink_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of epics to unlink." }
-            },
-            "required": ["work_package_id"]
-        };
-
-    async destructive "delete_work_package" => work_packages::handle_delete_work_package,
-        "Delete a work package and its links. The linked tasks and epics are not touched: they \
-stay where they are in the epic tree, with their status unchanged. Use it when the package has \
-served its purpose; to drop single items, unlink them with update_work_package instead.",
-        {
-            "type": "object",
-            "properties": {
-                "work_package_id": { "type": "integer", "description": "The work package ID" }
+                "unlink_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of epics to unlink." },
+                "delete": { "type": "boolean", "description": "When true, delete the package and its links. Must be the only field besides work_package_id. False is the same as leaving it out." }
             },
             "required": ["work_package_id"]
         };

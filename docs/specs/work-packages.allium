@@ -137,6 +137,28 @@ rule LinkItem {
         -- PackageViewCards).
 }
 
+rule DeleteWorkPackageViaMcp {
+    when: McpUpdateWorkPackage(package, delete, title?, description?,
+                               link_task_ids?, unlink_task_ids?,
+                               link_epic_ids?, unlink_epic_ids?)
+
+    requires: delete = true
+    -- A delete is a call of its own: the same call must not also rename or
+    -- relink, since those writes would be thrown away with the package. A
+    -- call that sets delete with any other field is invalid params (-32602)
+    -- and nothing is written. The same rule as update_tasks with
+    -- status="done" (mcp-task-tools.allium).
+    requires: title = null and description = null
+              and link_task_ids = null and unlink_task_ids = null
+              and link_epic_ids = null and unlink_epic_ids = null
+
+    ensures: DeleteWorkPackage(package)
+
+    @guidance
+        -- delete: false is the same as leaving it out. The reply names the
+        -- deleted package and says its tasks and epics are kept.
+}
+
 rule UnlinkItem {
     when: UnlinkItem(package, item)
 
@@ -404,7 +426,7 @@ rule DeletePackageFromBoard {
 ------------------------------------------------------------
 
 -- Agents are first-class users of packages: everything the board can do has
--- a tool. Four tools, in the merged style of update_tasks:
+-- a tool. Three tools, in the merged style of update_tasks:
 --
 --   create_work_package(title, description?, link_task_ids?, link_epic_ids?)
 --       write. Creates the package (CreateWorkPackage) and links the given
@@ -417,18 +439,24 @@ rule DeletePackageFromBoard {
 --       hold is left out.
 --   update_work_package(work_package_id, title?, description?,
 --                       link_task_ids?, unlink_task_ids?, link_epic_ids?,
---                       unlink_epic_ids?)
---       idempotent. Applies UpdateWorkPackage, then every unlink, then every
+--                       unlink_epic_ids?, delete?)
+--       destructive. Applies UpdateWorkPackage, then every unlink, then every
 --       link. An id appearing in both a link and an unlink list is refused
 --       before anything is written, and so is a call that names no field.
---   delete_work_package(work_package_id)
---       destructive. DeleteWorkPackage.
+--       delete: true is DeleteWorkPackage (DeleteWorkPackageViaMcp below).
+--
+-- There is no delete_work_package tool. A delete is the last update of a
+-- package, so it is a field of update_work_package (docs/mcp-tool-design.md,
+-- rule 1: extend the update tool; do not add a delete twin). The cost is the
+-- access class: annotations describe a whole tool, so update_work_package is
+-- declared destructive, as managed_feed_config is declared a write for its
+-- reading form.
 --
 -- The package argument is `work_package_id`, not a bare `id`: every other
 -- tool names its selector after the entity (task_id, epic_id), and
 -- docs/mcp-tool-design.md asks for unambiguous argument names.
 --
--- A missing package id is not-found, on update, list and delete alike; so is
+-- A missing package id is not-found, on update (delete included) and list alike; so is
 -- the id of a package another user created, which this board does not hold. A
 -- link to a task or epic id that does not exist is not-found, and nothing in
 -- that call is written: the call validates every id before the first write.

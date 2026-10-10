@@ -9,7 +9,8 @@ use crate::service::{CreateEpicParams, UpdateEpicParams};
 use super::types::{
     deserialize_flexible_id, deserialize_nullable_flexible_i64, deserialize_nullable_flexible_id,
     deserialize_nullable_string, deserialize_optional_flexible_i64,
-    deserialize_optional_flexible_id, parse_args, service_err_to_response, JsonRpcResponse,
+    deserialize_optional_flexible_id, parse_args, reject_alongside, service_err_to_response,
+    JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -30,18 +31,13 @@ pub(super) struct CreateEpicArgs {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct GetEpicArgs {
-    #[serde(deserialize_with = "deserialize_flexible_id")]
-    pub(super) epic_id: EpicId,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct ListEpicsArgs {
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_id")]
+    pub(super) epic_id: Option<EpicId>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_id")]
     pub(super) parent_epic_id: Option<EpicId>,
     #[serde(default)]
-    pub(super) recursive: bool,
+    pub(super) recursive: Option<bool>,
     #[serde(default)]
     pub(super) query: Option<String>,
     #[serde(default)]
@@ -114,23 +110,14 @@ pub(super) async fn handle_create_epic(
     }
 }
 
-pub(super) async fn handle_get_epic(
-    state: &McpState,
-    id: Option<Value>,
-    _identity: &CallerIdentity,
-    args: Value,
-) -> JsonRpcResponse {
-    let parsed = match parse_args::<GetEpicArgs>(&id, args) {
-        Ok(a) => a,
-        Err(resp) => return resp,
-    };
-    tracing::info!(epic_id = parsed.epic_id.0, "MCP get_epic");
+/// epics.allium: GetEpicViaMcp, the `epic_id` form of list_epics.
+async fn get_epic(state: &McpState, id: Option<Value>, epic_id: EpicId) -> JsonRpcResponse {
+    tracing::info!(epic_id = epic_id.0, "MCP list_epics one epic");
 
-    let (epic, done_count, total) =
-        match state.epic_svc.get_epic_with_progress(parsed.epic_id).await {
-            Ok(found) => found,
-            Err(e) => return service_err_to_response(id, e),
-        };
+    let (epic, done_count, total) = match state.epic_svc.get_epic_with_progress(epic_id).await {
+        Ok(found) => found,
+        Err(e) => return service_err_to_response(id, e),
+    };
     let mut text = format!(
         "Epic {id}: {title}\nDescription: {desc}\nStatus: {status}",
         id = epic.id,
@@ -178,11 +165,27 @@ pub(super) async fn handle_list_epics(
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(parent_epic_id = ?parsed.parent_epic_id, recursive = parsed.recursive, "MCP list_epics");
+    if let Some(epic_id) = parsed.epic_id {
+        if let Some(refusal) = reject_alongside(
+            &id,
+            "epic_id",
+            &[
+                ("parent_epic_id", parsed.parent_epic_id.is_some()),
+                ("recursive", parsed.recursive.is_some()),
+                ("query", parsed.query.is_some()),
+                ("limit", parsed.limit.is_some()),
+            ],
+        ) {
+            return refusal;
+        }
+        return get_epic(state, id, epic_id).await;
+    }
+    let recursive = parsed.recursive.unwrap_or(false);
+    tracing::info!(parent_epic_id = ?parsed.parent_epic_id, recursive, "MCP list_epics");
 
     let epics = match state
         .epic_svc
-        .list_epics_with_progress_under(parsed.parent_epic_id, parsed.recursive)
+        .list_epics_with_progress_under(parsed.parent_epic_id, recursive)
         .await
     {
         Ok(epics) => epics,

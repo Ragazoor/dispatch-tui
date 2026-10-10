@@ -198,8 +198,8 @@ async fn delete_work_package_keeps_the_items() {
 
     let resp = tool(
         &state,
-        "delete_work_package",
-        json!({"work_package_id": id.0}),
+        "update_work_package",
+        json!({"work_package_id": id.0, "delete": true}),
     )
     .await;
 
@@ -212,8 +212,53 @@ async fn delete_work_package_keeps_the_items() {
 #[tokio::test]
 async fn delete_work_package_of_an_unknown_id_is_not_found() {
     let state = test_state().await;
-    let resp = tool(&state, "delete_work_package", json!({"work_package_id": 9})).await;
+    let resp = tool(
+        &state,
+        "update_work_package",
+        json!({"work_package_id": 9, "delete": true}),
+    )
+    .await;
     assert_error(&resp, "Work package 9 not found");
+}
+
+/// work-packages.allium: DeleteWorkPackageViaMcp. A delete is a call of its
+/// own: mixed with a rename or a relink it is refused, and nothing is written.
+#[tokio::test]
+async fn delete_with_another_field_is_refused_and_writes_nothing() {
+    let state = test_state().await;
+    let t = seed_task(&state, "kept").await;
+    tool(&state, "create_work_package", json!({"title": "W"})).await;
+    let id = only_package(&state).await;
+
+    let resp = tool(
+        &state,
+        "update_work_package",
+        json!({"work_package_id": id.0, "delete": true, "link_task_ids": [t.0]}),
+    )
+    .await;
+
+    assert_error(&resp, "delete");
+    assert_eq!(state.db.list_work_packages().await.len(), 1);
+    assert!(links(&state).await.is_empty());
+}
+
+#[tokio::test]
+async fn delete_false_is_the_same_as_leaving_it_out() {
+    let state = test_state().await;
+    tool(&state, "create_work_package", json!({"title": "W"})).await;
+    let id = only_package(&state).await;
+
+    let resp = tool(
+        &state,
+        "update_work_package",
+        json!({"work_package_id": id.0, "delete": false, "title": "Renamed"}),
+    )
+    .await;
+
+    assert!(!is_error(&resp), "{resp:?}");
+    let packages = state.db.list_work_packages().await;
+    assert_eq!(packages.len(), 1);
+    assert_eq!(packages[0].title, "Renamed");
 }
 
 #[test]
@@ -221,9 +266,20 @@ fn work_package_tools_carry_their_access_class() {
     let defs = tool_definitions();
     let hints = |name: &str| tool_def_from(&defs, name)["annotations"].clone();
     assert_eq!(hints("list_work_packages")["readOnlyHint"], json!(true));
-    assert_eq!(hints("update_work_package")["idempotentHint"], json!(true));
-    assert_eq!(hints("delete_work_package")["destructiveHint"], json!(true));
+    assert_eq!(hints("update_work_package")["destructiveHint"], json!(true));
     assert_eq!(hints("create_work_package")["idempotentHint"], json!(false));
+}
+
+/// work-packages.allium: a delete is a field of update_work_package, so
+/// there is no delete_work_package tool.
+#[test]
+fn there_is_no_delete_work_package_tool() {
+    let defs = tool_definitions();
+    assert!(!defs["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t["name"] == "delete_work_package"));
 }
 
 fn tool_def_from(defs: &Value, name: &str) -> Value {

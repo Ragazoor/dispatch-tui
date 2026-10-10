@@ -74,7 +74,7 @@ async fn get_epic_found() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -91,7 +91,7 @@ async fn get_epic_not_found() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": 9999 }
         })),
     )
@@ -99,7 +99,7 @@ async fn get_epic_not_found() {
     assert_error(&resp, "not found");
 }
 
-// `get_epic` must agree with `list_epics` on a `group_by_repo` epic's progress —
+// `list_epics` with `epic_id` must agree with its list rows on a `group_by_repo` epic's progress —
 // both roll up descendant sub-epics rather than counting only direct subtasks.
 #[tokio::test]
 async fn get_epic_matches_list_epics_progress_for_grouped_epic() {
@@ -148,7 +148,7 @@ async fn get_epic_matches_list_epics_progress_for_grouped_epic() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": root.id.0 }
         })),
     )
@@ -196,7 +196,7 @@ async fn get_epic_shows_subtask_summary() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -221,7 +221,7 @@ async fn get_epic_accepts_string_id() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": epic.id.0.to_string() }
         })),
     )
@@ -696,7 +696,7 @@ async fn get_epic_shows_feed_command() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -730,7 +730,7 @@ async fn get_epic_shows_parent_when_set() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": child.id.0 }
         })),
     )
@@ -755,7 +755,7 @@ async fn get_epic_shows_bare_parent_id_when_parent_is_missing() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": child.id.0 }
         })),
     )
@@ -780,7 +780,7 @@ async fn get_epic_omits_parent_line_when_unset() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "get_epic",
+            "name": "list_epics",
             "arguments": { "epic_id": epic.id.0 }
         })),
     )
@@ -1187,4 +1187,43 @@ async fn list_epics_limit_caps_rows_and_hints() {
             .as_ref()
             .is_some_and(|r| r["isError"] == json!(true));
     assert!(rejected, "limit 0 must be rejected: {resp:?}");
+}
+
+/// epics.allium: GetEpicViaMcp. epic_id picks one epic, so no filter can
+/// narrow it; a call that mixes it with one is refused, not silently ignored.
+#[tokio::test]
+async fn list_epics_with_epic_id_and_a_filter_is_refused() {
+    let state = test_state().await;
+    let epic = state.db_write().create_epic("One", "", None).await.unwrap();
+
+    for extra in [
+        json!({"parent_epic_id": epic.id.0}),
+        json!({"recursive": true}),
+        json!({"query": "One"}),
+        json!({"limit": 1}),
+    ] {
+        let mut args = json!({"epic_id": epic.id.0});
+        args.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({"name": "list_epics", "arguments": args})),
+        )
+        .await;
+        assert_error(&resp, "epic_id");
+    }
+}
+
+/// epics.allium: one epic is read through list_epics, so there is no get_epic
+/// tool.
+#[test]
+fn there_is_no_get_epic_tool() {
+    let defs = tool_definitions();
+    assert!(!defs["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t["name"] == "get_epic"));
 }

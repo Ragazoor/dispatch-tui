@@ -85,7 +85,7 @@ impl RoleSubEpics {
     }
 
     /// Extract can_auto_group from `existing_subs` (already loaded), avoiding
-    /// an extra get_epic round-trip. A newly-created role sub-epic is not in
+    /// an extra epic lookup. A newly-created role sub-epic is not in
     /// the list and defaults to false (group_by_repo is false on creation).
     pub(super) fn can_auto_group(&self, id: EpicId) -> bool {
         self.existing_subs

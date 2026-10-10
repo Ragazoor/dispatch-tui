@@ -455,6 +455,32 @@ pub(super) fn parse_args<T: serde::de::DeserializeOwned>(
     })
 }
 
+/// Refuse a call that sets `exclusive` together with any other argument.
+/// `others` pairs each competing argument's name with whether the call set it;
+/// the refusal names the ones that were, and nothing has been written yet.
+pub(super) fn reject_alongside(
+    id: &Option<Value>,
+    exclusive: &str,
+    others: &[(&str, bool)],
+) -> Option<JsonRpcResponse> {
+    let set: Vec<&str> = others
+        .iter()
+        .filter_map(|&(name, is_set)| is_set.then_some(name))
+        .collect();
+    if set.is_empty() {
+        return None;
+    }
+    Some(JsonRpcResponse::err(
+        id.clone(),
+        INVALID_PARAMS,
+        format!(
+            "{exclusive} must be the only argument besides the id, but {} was also set; \
+             drop {exclusive}, or drop the others",
+            set.join(", ")
+        ),
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // Caller task lookup helper
 // ---------------------------------------------------------------------------
