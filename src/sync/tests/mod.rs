@@ -9,6 +9,7 @@
 mod board_reads;
 mod connection;
 mod decode;
+mod dispatch_requests;
 mod encode;
 mod host_file_identity;
 mod identity;

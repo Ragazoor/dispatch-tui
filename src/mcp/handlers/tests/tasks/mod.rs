@@ -2,6 +2,7 @@ use super::*;
 
 mod crud;
 mod dispatch;
+mod dispatch_requests;
 mod verify;
 mod wrap_up;
 

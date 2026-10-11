@@ -1473,55 +1473,12 @@ fn dispatch_claim_lost_clears_the_spinner_without_releasing() {
     );
 }
 
-/// `DISPATCH_WATCHDOG_TIMEOUT` must be derived from `provision_worktree`'s
-/// real worst-case subprocess budget (#4201), not mirror `SUBPROCESS_TIMEOUT`
-/// 1:1 — the old 1:1 relationship is exactly the bug: a fetch legitimately
-/// retrying within `FetchPolicy::Required`'s budget could still exceed a
-/// watchdog sized for a single subprocess call.
-#[test]
-fn dispatch_watchdog_timeout_matches_provision_worst_case() {
-    assert_eq!(
-        crate::tui::DISPATCH_WATCHDOG_TIMEOUT,
-        crate::process::SUBPROCESS_TIMEOUT * crate::dispatch::PROVISION_MAX_SUBPROCESS_CALLS,
-        "the watchdog must be sized off SUBPROCESS_TIMEOUT * PROVISION_MAX_SUBPROCESS_CALLS \
-         (PROVISION_MAX_SUBPROCESS_CALLS > 1, so this also rules out the old 1:1 mirror — \
-         exactly the bug #4201 fixed: fetch_origin's retry budget under FetchPolicy::Required \
-         can issue several SUBPROCESS_TIMEOUT-bounded calls before a fresh dispatch succeeds \
-         or gives up)"
-    );
-}
-
-/// The watchdog must NOT release, even though it drains `dispatching`.
-///
-/// "Slower than the deadline" is not "dead" — a `git fetch` on a slow network outlives the
-/// deadline with its worker perfectly alive. Releasing would return the task to
-/// Backlog mid-provision and let a second dispatch land on the same branch, which
-/// is the double-provisioning `DispatchClaimExclusive` rules out. The watchdog
-/// stays a UI backstop: it clears the spinner and says so. A truly dead worker
-/// leaves the task Running with no worktree, which renders as detached and is
-/// recoverable via retry-fresh.
-#[test]
-fn dispatching_timeout_does_not_release_the_claim() {
-    let mut app = make_app();
-    app.update(Message::Task(TaskMessage::MarkDispatching(TaskId(1))));
-    app.dispatching.insert(
-        TaskId(1),
-        Instant::now() - crate::tui::DISPATCH_WATCHDOG_TIMEOUT - Duration::from_secs(1),
-    );
-
-    let cmds = app.update(Message::System(SystemMessage::Tick));
-
-    assert!(
-        !app.is_dispatching(TaskId(1)),
-        "the watchdog still drains the spinner"
-    );
-    assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::Task(TaskCommand::ReleaseClaim(_)))),
-        "a slow-but-alive dispatch must keep its claim, got: {cmds:?}"
-    );
-}
+// The in-memory watchdog tests that stood here
+// (`dispatch_watchdog_timeout_matches_provision_worst_case`,
+// `dispatching_timeout_does_not_release_the_claim`) pinned
+// `DispatchingTimeout`, which store-split M4 REPLACES with the request row's
+// own deadline (`dispatch.allium: FailedRequestReported`). Its successors are in
+// `src/tui/tests/dispatch_requests.rs`.
 
 /// The claim flips the task to Running before provisioning finishes, so the
 /// "dispatching…" indicator has to survive that transition. Before the claim
@@ -1611,34 +1568,9 @@ fn handle_dispatch_task_rejects_when_already_dispatching() {
     assert!(app.status.message_sticky);
 }
 
-#[test]
-fn dispatching_timeout_clears_stuck_task() {
-    let mut app = make_app();
-    app.update(Message::Task(TaskMessage::MarkDispatching(TaskId(1))));
-    assert!(app.is_dispatching(TaskId(1)));
-
-    // Backdate the start time past the watchdog deadline.
-    app.dispatching.insert(
-        TaskId(1),
-        Instant::now() - crate::tui::DISPATCH_WATCHDOG_TIMEOUT - Duration::from_secs(1),
-    );
-
-    app.update(Message::System(SystemMessage::Tick));
-
-    assert!(
-        !app.is_dispatching(TaskId(1)),
-        "watchdog should remove a task that has been mid-dispatch past the deadline"
-    );
-    let popup = app
-        .status
-        .error_popup
-        .as_deref()
-        .expect("watchdog should set an error popup");
-    assert!(
-        popup.contains("timed out") || popup.contains("timeout"),
-        "expected timeout-related error popup, got: {popup}"
-    );
-}
+// `dispatching_timeout_clears_stuck_task` (the watchdog force-fail) is
+// superseded by `a_tick_never_force_fails_a_dispatch` and the
+// FailedRequestReported tests in `src/tui/tests/dispatch_requests.rs`.
 
 #[test]
 fn dispatching_start_time_recorded_on_mark() {

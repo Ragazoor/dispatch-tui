@@ -282,3 +282,35 @@ fn a_covered_sub_epic_is_asked_for_by_its_tasks_and_its_children() {
         ]
     );
 }
+
+/// `sync.allium: SubscribeToThisHostsDispatchRequests`. Every dispatch request
+/// row naming THIS machine, in every state, and no other machine's: the host
+/// provisions what it asked for (`store-split.allium: HostClaimsDispatch`) and
+/// reads the outcome of every request it made (DispatchingFeedback,
+/// dispatch_task). Unfiltered by state on purpose — a row leaving a
+/// state-filtered query would arrive as a delete and its outcome would be
+/// lost.
+#[test]
+fn dispatch_requests_are_asked_for_by_this_hosts_own_id_in_every_state() {
+    let queries = subscription_queries(&SubscriptionRequest::new(ID, vec![], HOST)).unwrap();
+
+    let asked: Vec<&String> = queries
+        .iter()
+        .filter(|q| q.contains("FROM dispatch_requests"))
+        .collect();
+    assert_eq!(
+        asked.len(),
+        1,
+        "expected exactly one ask for dispatch_requests, got: {queries:?}"
+    );
+    assert!(
+        asked[0].contains(&format!("host = '{HOST}'")),
+        "dispatch requests must be filtered to this host's own id: {}",
+        asked[0]
+    );
+    assert!(
+        !asked[0].contains(OTHER_HOST) && !asked[0].contains("state"),
+        "the ask names only this host and filters on no state: {}",
+        asked[0]
+    );
+}

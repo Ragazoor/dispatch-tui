@@ -120,6 +120,7 @@ fn blank_epic_patch() -> bindings::EpicPatch {
 
 mod agent_state;
 mod config;
+mod dispatch_requests;
 mod epics;
 mod feed;
 mod learnings;

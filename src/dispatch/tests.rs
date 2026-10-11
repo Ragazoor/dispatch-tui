@@ -433,6 +433,7 @@ fn validate_repo_path_not_a_dir() {
 
 mod agent_launch;
 mod companion_pane;
+mod dispatch_requests;
 mod finish_and_guards;
 mod pr_review;
 mod pr_status;

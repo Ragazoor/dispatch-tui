@@ -813,6 +813,7 @@ async fn exec_save_repo_path_expands_tilde() {
 }
 
 mod command_dispatch;
+mod dispatch_requests;
 mod event_loop;
 mod feeds;
 mod host_file_bootstrap;

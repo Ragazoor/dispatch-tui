@@ -690,25 +690,23 @@ mod tick_tests {
         assert_eq!(app.status.message.as_deref(), Some("hello"));
     }
 
+    /// No watchdog: however long a pending entry has sat, the tick only drops
+    /// deleted tasks and advances the spinner (`dispatch.allium:
+    /// FailedRequestReported` replaced `DispatchingTimeout`).
     #[test]
-    fn watchdog_does_not_force_fail_dispatch_within_deadline() {
+    fn tick_dispatching_never_force_fails_an_entry() {
         let mut app = make_app();
         let task = make_task(60, TaskStatus::Backlog);
         let id = task.id;
         app.board.tasks.push(task);
-        // A hair under the deadline (not past it) must still survive —
-        // `dispatching_timeout_clears_stuck_task` in tui/tests/dispatch.rs covers
-        // the past-deadline force-fail at the message-flow level.
-        app.dispatching.insert(
-            id,
-            Instant::now() - crate::tui::DISPATCH_WATCHDOG_TIMEOUT + Duration::from_secs(1),
-        );
+        app.dispatching
+            .insert(id, Instant::now() - Duration::from_secs(24 * 3600));
 
         app.tick_dispatching();
 
         assert!(
             app.dispatching.contains_key(&id),
-            "a dispatch just under the deadline must not be force-failed"
+            "the row's deadline, not the board, ends a stuck dispatch"
         );
         assert!(app.status.error_popup.is_none());
     }

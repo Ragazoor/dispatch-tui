@@ -7,6 +7,7 @@ mod commands;
 mod confirm_done;
 mod delete;
 mod dispatch;
+mod dispatch_requests;
 mod done_ordering;
 mod epic_folds;
 mod epic_jump;

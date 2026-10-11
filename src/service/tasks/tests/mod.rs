@@ -74,6 +74,7 @@ async fn make_task(svc: &TaskService, epic_id: Option<EpicId>) -> TaskId {
 
 mod crud;
 mod dispatch;
+mod dispatch_requests;
 mod property_tests;
 mod validators;
 mod wrap_up;
