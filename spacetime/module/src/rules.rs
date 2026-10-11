@@ -28,9 +28,11 @@ use super::*;
 /// 1: store-split M2 — sub-status legality, the reparent cycle, repo-group
 ///    reparent and append-only checks, and repo grouping.
 /// 2: store-split M3 — feed routing and reconcile (`ingest_feed`).
+/// 3: store-split M4 — dispatch as request rows with a scheduled backstop
+///    timer (`dispatch_request.rs`).
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 2;
+pub const RULES_VERSION: i64 = 3;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///

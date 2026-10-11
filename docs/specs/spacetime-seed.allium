@@ -66,6 +66,14 @@ use "./core.allium" as core
 -- surfaces at the moment the table is introduced rather than at the moment
 -- somebody needs the backup.
 --
+-- The dispatch request tables, `dispatch_requests` and
+-- `dispatch_request_timeouts` (store-split.allium: DispatchRequest, M4 D10),
+-- are held by the store and deliberately NOT here: they are in-flight state,
+-- not domain. A restored open request would have no timer to fail it and
+-- would hold its task's claim forever, and a restored timer would fire against
+-- a store that never asked for it. Losing the request history on a restore is
+-- accepted. They are the one exception to "every table it holds" below.
+--
 -- What is NOT here is as load-bearing as what is, and it is shorter than an
 -- earlier revision of this note claimed: the knowledge base (`learnings`,
 -- `learning_retrievals`) and host-scoped `settings` are shared and ARE below —

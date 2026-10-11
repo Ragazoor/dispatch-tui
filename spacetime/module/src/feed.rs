@@ -13,9 +13,7 @@ pub(crate) fn nearest_feed_epic(ctx: &ReducerContext, epic_id: i64) -> Option<i6
         if next == 0 {
             return None;
         }
-        let Some(epic) = ctx.db.epics().id().find(next) else {
-            return None;
-        };
+        let epic = ctx.db.epics().id().find(next)?;
         if !epic.feed_command.is_empty() {
             return Some(epic.id);
         }

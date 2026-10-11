@@ -115,6 +115,12 @@ fn parse_field(accessor: &str, line: &str) -> Column {
 /// `schema_version` and `rules_version` are excluded on purpose: they describe
 /// the store rather than the domain, and `SharedTable` deliberately omits them
 /// (see `snapshot.rs`).
+///
+/// `dispatch_requests` and `dispatch_request_timeouts` are excluded too: they
+/// are in-flight state, not domain, and no snapshot carries them
+/// (`spacetime-seed.allium`'s note on `SharedTable`, and `store-split.allium`
+/// M4's D10). A restored open request would have no timer and would hold its
+/// task's claim forever.
 #[test]
 fn the_module_declares_every_shared_table_and_nothing_else() {
     let module = module_tables();
@@ -122,7 +128,15 @@ fn the_module_declares_every_shared_table_and_nothing_else() {
     let mut declared: Vec<&str> = module
         .keys()
         .map(String::as_str)
-        .filter(|name| *name != "schema_version" && *name != "rules_version")
+        .filter(|name| {
+            !matches!(
+                *name,
+                "schema_version"
+                    | "rules_version"
+                    | "dispatch_requests"
+                    | "dispatch_request_timeouts"
+            )
+        })
         .collect();
     declared.sort_unstable();
 

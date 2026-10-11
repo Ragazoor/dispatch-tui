@@ -364,7 +364,7 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 }
 
 /// Every non-row side effect a task removal owes, beyond deleting the `tasks`
-/// row itself: live-session state and learning detachment/retrieval-cascade. SQLite gets most of
+/// row itself: live-session state, learning detachment/retrieval-cascade and failing the task's open dispatch request. SQLite gets most of
 /// this for free from `ON DELETE CASCADE`/`SET NULL`; the module has no such
 /// mechanism, so every path that deletes a task row explicitly reproduces it
 /// by calling here — `delete_task` itself, `batch_delete`'s plain-task pass,
@@ -375,6 +375,8 @@ pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
     delete_agent_state_for(ctx, task_id);
     detach_learnings_from_task(ctx, task_id);
     delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, task_id);
+    // store-split.allium: DeletingATaskFailsItsOpenRequest (D8).
+    fail_open_dispatch_requests_of(ctx, task_id);
 }
 
 /// Move a task into an epic, out of one, or between two.
@@ -862,14 +864,33 @@ pub(crate) fn recalculate_one(ctx: &ReducerContext, epic: &Epic) {
 
 /// Everything a claim writes to the row it wins.
 pub(crate) fn apply_claim(ctx: &ReducerContext, task: Task) -> Task {
+    claimed_task(task, &now(ctx))
+}
+
+/// [`apply_claim`]'s writes at a given instant, pure so `RequestDispatch`'s
+/// claim (`dispatch_request.rs`) is the same claim and testable without a
+/// store.
+pub(crate) fn claimed_task(task: Task, now: &str) -> Task {
     Task {
         status: RUNNING.into(),
-        sub_status: "active".into(),
+        sub_status: ACTIVE.into(),
         // Seeded so the dispatch watchdog measures from the claim rather than
         // from whenever the agent first says something. An unseeded claim looks
         // like a task that has been silent since the epoch.
-        last_pre_tool_use_at: now(ctx),
-        updated_at: now(ctx),
+        last_pre_tool_use_at: now.into(),
+        updated_at: now.into(),
+        ..task
+    }
+}
+
+/// What releasing a claim writes, shared by [`release_backlog_claim`] and
+/// `ReleaseClaimOfFailedRequest` (`dispatch_request.rs`). `updated_at` is the
+/// caller's to stamp.
+pub(crate) fn released_task(task: Task) -> Task {
+    Task {
+        status: BACKLOG.into(),
+        sub_status: "none".into(),
+        last_pre_tool_use_at: String::new(),
         ..task
     }
 }
@@ -968,11 +989,8 @@ pub fn release_backlog_claim(ctx: &ReducerContext, id: i64) -> Result<(), String
     write_task(
         ctx,
         Task {
-            status: BACKLOG.into(),
-            sub_status: "none".into(),
-            last_pre_tool_use_at: String::new(),
             updated_at: now(ctx),
-            ..task
+            ..released_task(task)
         },
     )
 }

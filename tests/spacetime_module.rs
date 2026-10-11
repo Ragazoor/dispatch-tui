@@ -3910,6 +3910,29 @@ fn a_dispatch_request_claims_the_task_and_writes_a_requested_row() {
     );
 }
 
+/// `DispatchRequest.deadline` is stored on the row by the module: its own
+/// `requested_at` plus `config.dispatch_request_timeout` (60 seconds), in the
+/// store's timestamp spelling, so the host reads it straight off the row.
+#[test]
+fn a_dispatch_request_stores_its_deadline_sixty_seconds_after_it_was_requested() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    seed_dispatchable(&instance, &[(1, "", "", "")]);
+    let requested = request_dispatch(&instance, 1, "host-a", "user", "");
+    assert!(requested.status.success(), "{}", describe(&requested));
+
+    let format = "%Y-%m-%d %H:%M:%S%.3f";
+    let parse = |s: &str| {
+        chrono::NaiveDateTime::parse_from_str(s, format)
+            .unwrap_or_else(|e| panic!("{s:?} is not a store timestamp: {e}"))
+    };
+    let requested_at = parse(&request_column(&instance, "requested_at", 1));
+    let deadline = parse(&request_column(&instance, "deadline", 1));
+    assert_eq!(deadline - requested_at, chrono::Duration::seconds(60));
+}
+
 /// `RequestDispatch` moves the dispatch-claim subagent clear point into the
 /// same transaction: entries gone, count zero, no stop pending.
 #[test]

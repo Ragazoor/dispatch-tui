@@ -188,3 +188,23 @@ pub(crate) fn blank_retired_feed_item() -> RetiredFeedItem {
         retired_at: String::new(),
     }
 }
+
+/// The one blank dispatch request row: every optional column absent (`""`).
+pub fn blank_dispatch_request() -> DispatchRequest {
+    DispatchRequest {
+        id: 0,
+        task_id: 0,
+        kind: String::new(),
+        host: String::new(),
+        mode: String::new(),
+        origin: String::new(),
+        state: String::new(),
+        requested_at: String::new(),
+        claimed_at: String::new(),
+        finished_at: String::new(),
+        reason: String::new(),
+        worktree: String::new(),
+        tmux_window: String::new(),
+        deadline: String::new(),
+    }
+}

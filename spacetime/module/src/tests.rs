@@ -734,6 +734,22 @@ mod dispatch_requests {
         assert_eq!(row.tmux_window, "");
     }
 
+    /// The deadline is STORED on the row, computed by the module from the
+    /// row's own `requested_at`, so the host reads it rather than re-deriving
+    /// it from a copy of the config (D4).
+    #[test]
+    fn a_new_request_stores_its_deadline() {
+        let row = new_dispatch_request(1, HOST_A, "dispatch", "user", NOW);
+        assert_eq!(row.deadline, "2026-10-10 12:01:00.000");
+        assert_eq!(row.deadline, dispatch_request_deadline(&row.requested_at));
+    }
+
+    #[test]
+    fn an_unparseable_requested_at_has_no_deadline() {
+        assert_eq!(dispatch_request_deadline(""), "");
+        assert_eq!(dispatch_request_deadline("yesterday"), "");
+    }
+
     #[test]
     fn only_the_four_launch_paths_are_origins() {
         for origin in ["user", "mcp", "epic_chain", "quick"] {

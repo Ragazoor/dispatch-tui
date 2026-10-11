@@ -79,8 +79,14 @@ fn module_tables() -> BTreeSet<String> {
 /// siblings are invoked by the store, never by a client, so the generator emits
 /// no client module for them. Counting them here would make this test fail
 /// against correct bindings, which is worse than not having it.
+///
+/// **Scheduled reducers are excluded for the same reason.** A reducer a
+/// `#[spacetimedb::table(.., scheduled(name))]` table names is run by the
+/// store's scheduler (`expire_dispatch_request` refuses any other caller), and
+/// the generator emits no client module for it either.
 fn module_reducers() -> BTreeSet<String> {
     let source = module_source();
+    let scheduled = scheduled_reducers(&source);
     let mut names = BTreeSet::new();
     let mut lines = source.lines().peekable();
     while let Some(line) = lines.next() {
@@ -109,7 +115,20 @@ fn module_reducers() -> BTreeSet<String> {
             panic!("unexpected line between a reducer annotation and its fn: `{trimmed}`");
         }
     }
+    names.retain(|name| !scheduled.contains(name));
     names
+}
+
+/// The reducers named by a table's `scheduled(..)` attribute.
+fn scheduled_reducers(source: &str) -> BTreeSet<String> {
+    source
+        .lines()
+        .filter(|line| line.trim().starts_with("#[spacetimedb::table("))
+        .filter_map(|line| {
+            let rest = &line[line.find("scheduled(")? + "scheduled(".len()..];
+            Some(rest[..rest.find(')')?].trim().to_string())
+        })
+        .collect()
 }
 
 /// The `pub mod <name>;` lines in the bindings index, with the generator's

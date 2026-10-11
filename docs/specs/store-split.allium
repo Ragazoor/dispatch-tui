@@ -209,6 +209,10 @@
 --             AutoDispatchFailed from the row itself, on the requesting host's
 --             board only (epics.allium: ReportChainedDispatchFailure), so a
 --             board restart during the chain's wait no longer loses it.
+--           - D10, snapshots. dispatch_request and its timer table are
+--             in-flight state and are not in any snapshot
+--             (spacetime-seed.allium: SharedTable); a restore loses request
+--             history, by decision.
 --           - Deferred, out of M4's scope: how long finished rows are kept,
 --             and whether a board sees other hosts' open requests.
 --       M5  Wrap-up and exit-session become request rows.

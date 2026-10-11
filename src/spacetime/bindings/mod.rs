@@ -12,6 +12,7 @@ pub mod batch_delete_reducer;
 pub mod batch_patch_sub_status_reducer;
 pub mod burn_id_sequence_reducer;
 pub mod claim_backlog_task_reducer;
+pub mod claim_dispatch_request_reducer;
 pub mod claim_poll_owner_reducer;
 pub mod clear_setting_reducer;
 pub mod create_epic_reducer;
@@ -26,10 +27,15 @@ pub mod delete_repo_path_reducer;
 pub mod delete_stale_subtree_feed_tasks_reducer;
 pub mod delete_task_reducer;
 pub mod delete_work_package_reducer;
+pub mod dispatch_request_timeout_type;
+pub mod dispatch_request_timeouts_table;
+pub mod dispatch_request_type;
+pub mod dispatch_requests_table;
 pub mod drop_closed_retired_feed_items_reducer;
 pub mod epic_patch_type;
 pub mod epic_type;
 pub mod epics_table;
+pub mod fail_interrupted_dispatch_requests_reducer;
 pub mod feed_ingest_item_type;
 pub mod feed_task_upsert_item_type;
 pub mod filter_preset_type;
@@ -68,6 +74,9 @@ pub mod repo_base_branch_type;
 pub mod repo_base_branches_table;
 pub mod repo_path_type;
 pub mod repo_paths_table;
+pub mod report_dispatch_failed_reducer;
+pub mod report_dispatch_provisioned_reducer;
+pub mod request_dispatch_reducer;
 pub mod rescope_epic_learnings_reducer;
 pub mod respawn_phoenix_successor_reducer;
 pub mod retired_feed_item_type;
@@ -140,6 +149,7 @@ pub use batch_delete_reducer::batch_delete;
 pub use batch_patch_sub_status_reducer::batch_patch_sub_status;
 pub use burn_id_sequence_reducer::burn_id_sequence;
 pub use claim_backlog_task_reducer::claim_backlog_task;
+pub use claim_dispatch_request_reducer::claim_dispatch_request;
 pub use claim_poll_owner_reducer::claim_poll_owner;
 pub use clear_setting_reducer::clear_setting;
 pub use create_epic_reducer::create_epic;
@@ -154,10 +164,15 @@ pub use delete_repo_path_reducer::delete_repo_path;
 pub use delete_stale_subtree_feed_tasks_reducer::delete_stale_subtree_feed_tasks;
 pub use delete_task_reducer::delete_task;
 pub use delete_work_package_reducer::delete_work_package;
+pub use dispatch_request_timeout_type::DispatchRequestTimeout;
+pub use dispatch_request_timeouts_table::*;
+pub use dispatch_request_type::DispatchRequest;
+pub use dispatch_requests_table::*;
 pub use drop_closed_retired_feed_items_reducer::drop_closed_retired_feed_items;
 pub use epic_patch_type::EpicPatch;
 pub use epic_type::Epic;
 pub use epics_table::*;
+pub use fail_interrupted_dispatch_requests_reducer::fail_interrupted_dispatch_requests;
 pub use feed_ingest_item_type::FeedIngestItem;
 pub use feed_task_upsert_item_type::FeedTaskUpsertItem;
 pub use filter_preset_type::FilterPreset;
@@ -196,6 +211,9 @@ pub use repo_base_branch_type::RepoBaseBranch;
 pub use repo_base_branches_table::*;
 pub use repo_path_type::RepoPath;
 pub use repo_paths_table::*;
+pub use report_dispatch_failed_reducer::report_dispatch_failed;
+pub use report_dispatch_provisioned_reducer::report_dispatch_provisioned;
+pub use request_dispatch_reducer::request_dispatch;
 pub use rescope_epic_learnings_reducer::rescope_epic_learnings;
 pub use respawn_phoenix_successor_reducer::respawn_phoenix_successor;
 pub use retired_feed_item_type::RetiredFeedItem;
@@ -291,6 +309,10 @@ pub enum Reducer {
         id: i64,
         host: String,
     },
+    ClaimDispatchRequest {
+        request_id: i64,
+        host: String,
+    },
     ClaimPollOwner {
         scope: String,
         scope_id: i64,
@@ -347,6 +369,9 @@ pub enum Reducer {
     DropClosedRetiredFeedItems {
         feed_epic_id: i64,
         keep_external_ids: Vec<String>,
+    },
+    FailInterruptedDispatchRequests {
+        host: String,
     },
     FlattenEpic {
         root_id: i64,
@@ -430,6 +455,23 @@ pub enum Reducer {
     },
     ReleaseBacklogClaim {
         id: i64,
+    },
+    ReportDispatchFailed {
+        request_id: i64,
+        reporter: String,
+        reason: String,
+    },
+    ReportDispatchProvisioned {
+        request_id: i64,
+        reporter: String,
+        worktree: String,
+        tmux_window: String,
+    },
+    RequestDispatch {
+        task_id: i64,
+        requester: String,
+        origin: String,
+        mode: String,
     },
     RescopeEpicLearnings {
         from: i64,
@@ -576,6 +618,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::BatchPatchSubStatus { .. } => "batch_patch_sub_status",
             Reducer::BurnIdSequence { .. } => "burn_id_sequence",
             Reducer::ClaimBacklogTask { .. } => "claim_backlog_task",
+            Reducer::ClaimDispatchRequest { .. } => "claim_dispatch_request",
             Reducer::ClaimPollOwner { .. } => "claim_poll_owner",
             Reducer::ClearSetting { .. } => "clear_setting",
             Reducer::CreateEpic { .. } => "create_epic",
@@ -591,6 +634,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteTask { .. } => "delete_task",
             Reducer::DeleteWorkPackage { .. } => "delete_work_package",
             Reducer::DropClosedRetiredFeedItems { .. } => "drop_closed_retired_feed_items",
+            Reducer::FailInterruptedDispatchRequests { .. } => "fail_interrupted_dispatch_requests",
             Reducer::FlattenEpic { .. } => "flatten_epic",
             Reducer::IngestFeed { .. } => "ingest_feed",
             Reducer::LinkWorkPackageItem { .. } => "link_work_package_item",
@@ -611,6 +655,9 @@ impl __sdk::Reducer for Reducer {
             Reducer::RegisterHost { .. } => "register_host",
             Reducer::RegroupEpic { .. } => "regroup_epic",
             Reducer::ReleaseBacklogClaim { .. } => "release_backlog_claim",
+            Reducer::ReportDispatchFailed { .. } => "report_dispatch_failed",
+            Reducer::ReportDispatchProvisioned { .. } => "report_dispatch_provisioned",
+            Reducer::RequestDispatch { .. } => "request_dispatch",
             Reducer::RescopeEpicLearnings { .. } => "rescope_epic_learnings",
             Reducer::RespawnPhoenixSuccessor { .. } => "respawn_phoenix_successor",
             Reducer::SaveRepoPath { .. } => "save_repo_path",
@@ -689,6 +736,13 @@ impl __sdk::Reducer for Reducer {
                 host,
 }             => __sats::bsatn::to_vec(&claim_backlog_task_reducer::ClaimBacklogTaskArgs {
                 id: id.clone(),
+                host: host.clone(),
+}),
+            Reducer::ClaimDispatchRequest{
+                request_id,
+                host,
+}             => __sats::bsatn::to_vec(&claim_dispatch_request_reducer::ClaimDispatchRequestArgs {
+                request_id: request_id.clone(),
                 host: host.clone(),
 }),
             Reducer::ClaimPollOwner{
@@ -789,6 +843,11 @@ impl __sdk::Reducer for Reducer {
 }             => __sats::bsatn::to_vec(&drop_closed_retired_feed_items_reducer::DropClosedRetiredFeedItemsArgs {
                 feed_epic_id: feed_epic_id.clone(),
                 keep_external_ids: keep_external_ids.clone(),
+}),
+            Reducer::FailInterruptedDispatchRequests{
+                host,
+}             => __sats::bsatn::to_vec(&fail_interrupted_dispatch_requests_reducer::FailInterruptedDispatchRequestsArgs {
+                host: host.clone(),
 }),
             Reducer::FlattenEpic{
                 root_id,
@@ -936,6 +995,37 @@ Reducer::RecalculateEpicStatus{
                 id,
 }             => __sats::bsatn::to_vec(&release_backlog_claim_reducer::ReleaseBacklogClaimArgs {
                 id: id.clone(),
+}),
+            Reducer::ReportDispatchFailed{
+                request_id,
+                reporter,
+                reason,
+}             => __sats::bsatn::to_vec(&report_dispatch_failed_reducer::ReportDispatchFailedArgs {
+                request_id: request_id.clone(),
+                reporter: reporter.clone(),
+                reason: reason.clone(),
+}),
+            Reducer::ReportDispatchProvisioned{
+                request_id,
+                reporter,
+                worktree,
+                tmux_window,
+}             => __sats::bsatn::to_vec(&report_dispatch_provisioned_reducer::ReportDispatchProvisionedArgs {
+                request_id: request_id.clone(),
+                reporter: reporter.clone(),
+                worktree: worktree.clone(),
+                tmux_window: tmux_window.clone(),
+}),
+            Reducer::RequestDispatch{
+                task_id,
+                requester,
+                origin,
+                mode,
+}             => __sats::bsatn::to_vec(&request_dispatch_reducer::RequestDispatchArgs {
+                task_id: task_id.clone(),
+                requester: requester.clone(),
+                origin: origin.clone(),
+                mode: mode.clone(),
 }),
             Reducer::RescopeEpicLearnings{
                 from,
@@ -1170,6 +1260,8 @@ Reducer::RecalculateEpicStatus{
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct DbUpdate {
+    dispatch_request_timeouts: __sdk::TableUpdate<DispatchRequestTimeout>,
+    dispatch_requests: __sdk::TableUpdate<DispatchRequest>,
     epics: __sdk::TableUpdate<Epic>,
     filter_presets: __sdk::TableUpdate<FilterPreset>,
     hosts: __sdk::TableUpdate<Host>,
@@ -1199,6 +1291,12 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_update in __sdk::transaction_update_iter_table_updates(raw) {
             match &table_update.table_name[..] {
+                "dispatch_request_timeouts" => db_update.dispatch_request_timeouts.append(
+                    dispatch_request_timeouts_table::parse_table_update(table_update)?,
+                ),
+                "dispatch_requests" => db_update
+                    .dispatch_requests
+                    .append(dispatch_requests_table::parse_table_update(table_update)?),
                 "epics" => db_update
                     .epics
                     .append(epics_table::parse_table_update(table_update)?),
@@ -1288,6 +1386,15 @@ impl __sdk::DbUpdate for DbUpdate {
     ) -> AppliedDiff<'_> {
         let mut diff = AppliedDiff::default();
 
+        diff.dispatch_request_timeouts = cache
+            .apply_diff_to_table::<DispatchRequestTimeout>(
+                "dispatch_request_timeouts",
+                &self.dispatch_request_timeouts,
+            )
+            .with_updates_by_pk(|row| &row.scheduled_id);
+        diff.dispatch_requests = cache
+            .apply_diff_to_table::<DispatchRequest>("dispatch_requests", &self.dispatch_requests)
+            .with_updates_by_pk(|row| &row.id);
         diff.epics = cache
             .apply_diff_to_table::<Epic>("epics", &self.epics)
             .with_updates_by_pk(|row| &row.id);
@@ -1358,6 +1465,12 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "dispatch_request_timeouts" => db_update
+                    .dispatch_request_timeouts
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "dispatch_requests" => db_update
+                    .dispatch_requests
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "epics" => db_update
                     .epics
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -1434,6 +1547,12 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "dispatch_request_timeouts" => db_update
+                    .dispatch_request_timeouts
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "dispatch_requests" => db_update
+                    .dispatch_requests
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "epics" => db_update
                     .epics
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1512,6 +1631,8 @@ impl __sdk::DbUpdate for DbUpdate {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
+    dispatch_request_timeouts: __sdk::TableAppliedDiff<'r, DispatchRequestTimeout>,
+    dispatch_requests: __sdk::TableAppliedDiff<'r, DispatchRequest>,
     epics: __sdk::TableAppliedDiff<'r, Epic>,
     filter_presets: __sdk::TableAppliedDiff<'r, FilterPreset>,
     hosts: __sdk::TableAppliedDiff<'r, Host>,
@@ -1546,6 +1667,16 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         event: &EventContext,
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
+        callbacks.invoke_table_row_callbacks::<DispatchRequestTimeout>(
+            "dispatch_request_timeouts",
+            &self.dispatch_request_timeouts,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<DispatchRequest>(
+            "dispatch_requests",
+            &self.dispatch_requests,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<Epic>("epics", &self.epics, event);
         callbacks.invoke_table_row_callbacks::<FilterPreset>(
             "filter_presets",
@@ -2275,6 +2406,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
     type QueryBuilder = __sdk::QueryBuilder;
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
+        dispatch_request_timeouts_table::register_table(client_cache);
+        dispatch_requests_table::register_table(client_cache);
         epics_table::register_table(client_cache);
         filter_presets_table::register_table(client_cache);
         hosts_table::register_table(client_cache);
@@ -2298,6 +2431,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         work_packages_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
+        "dispatch_request_timeouts",
+        "dispatch_requests",
         "epics",
         "filter_presets",
         "hosts",
