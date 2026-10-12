@@ -333,8 +333,8 @@
 --             exit_session), action (rebase | done | pr), host, requested_by
 --             (D11), state (requested | running | done | failed),
 --             requested_at, claimed_at, finished_at, reason, pr_url and
---             deadline; and three the flow needs, recorded here because the
---             list above did not name them: wrap_up_request (on an
+--             deadline; and three the flow needs, added while writing the
+--             spec and ACCEPTED by the user: wrap_up_request (on an
 --             exit_session row, the wrap_up row whose token it consumed),
 --             tmux_window (on an exit_session row, the window to tear down)
 --             and chained_task (on an exit_session row, the subtask the epic
@@ -345,14 +345,17 @@
 --             kind; finished rows stay as history.
 --           - W2, the wrap_up flow. The MCP handler first runs the
 --             host-local checks, BEFORE writing anything: the task is
---             wrappable (mcp-task-tools.allium: ReviewTasksAreNotWrappedUp),
---             its worktree names a branch, the worktree is committed and the
---             verify command passes (WrapUpRefusesUnfinishedWork). A refusal
---             there writes no row and issues no token. Then it calls
---             request_wrap_up(task, host, action), host being this board's
---             own. The module checks D11, that the task is running or review
---             with a worktree on that host, and that the task has no open
---             session request (RequestWrapUp). For action rebase the row is
+--             wrappable, its worktree names a branch (rebase only), the
+--             worktree is committed and the verify command passes
+--             (WrapUpRefusesUnfinishedWork). A refusal there writes no row
+--             and issues no token. Then it calls request_wrap_up(task, host,
+--             action), host being this board's own. The module checks D11,
+--             that the task is running or review with a worktree on that
+--             host, that it is not review-tagged (pr_review or dependabot:
+--             mcp-task-tools.allium's ReviewTasksAreNotWrappedUp, decided
+--             with the user to be the module's; the tool may keep the same
+--             check as an early refusal with the same wording), and that the
+--             task has no open session request (RequestWrapUp). For action rebase the row is
 --             requested; the owning host claims it (requested -> running),
 --             which clears a Conflict sub_status in the same transaction, as
 --             the optimistic clear does today (HostClaimsSessionRequest);
@@ -368,11 +371,17 @@
 --             token shown to the agent is that row's id. Only the task's most
 --             recent done wrap_up row is valid, as a newer token replaces an
 --             older one today, and each is consumed once. Unlike the
---             in-memory token it survives a board restart.
+--             in-memory token it survives a board restart. A LATER DISPATCH
+--             VOIDS IT (decided with the user): a token is valid only if its
+--             wrap_up row finished after the finished_at of the task's latest
+--             dispatched request, so a token from an earlier session of a
+--             re-dispatched task cannot close the new session. A voided token
+--             is refused with "invalid exit token".
 --           - W4, the exit_session flow. exit_session calls
 --             request_exit_session(task, token, action, pr_url). The module
 --             requires a done wrap_up row for the task whose id is the token,
---             that is the task's most recent, whose action matches, and that
+--             that is the task's most recent, that finished after the task's
+--             latest dispatched request (W3), whose action matches, and that
 --             no exit_session row has consumed; pr_url is required for pr
 --             (RequestExitSession). In the same call it applies the terminal
 --             state (rebase or done -> Done, pr -> Review with the pr url;
@@ -382,7 +391,11 @@
 --             window for the teardown. The close is one transaction, so it
 --             either took effect whole or not at all: today's "close did not
 --             persist but the token is spent" case is gone, and a refused or
---             failed call leaves the token valid for a retry.
+--             failed call leaves the token valid for a retry. exit_session
+--             does NOT wait for the teardown (decided with the user): the
+--             teardown kills the calling agent's own window, so a reply that
+--             waited for it would never be read (mcp-task-tools.allium:
+--             ExitSessionViaMcp).
 --           - W5, the teardown. The host's board claims the exit_session row,
 --             kills the window and reports done, or failed with a reason. A
 --             failed teardown does NOT revert the close; it is recorded on
@@ -443,11 +456,11 @@
 --             repo-sync refresh after a rebase it ran), ClosePrOnDone's gh
 --             call (W5), the MCP waits and response text. update_tasks'
 --             status="done" path (mcp-task-tools.allium: MarkTaskDoneViaMcp)
---             keeps its board-side close and teardown in M5; see the open
---             questions.
+--             keeps its board-side close and teardown UNTIL M7, by decision;
+--             how it moves then is an open question for M7.
 --           - Deferred, out of M5's scope as out of M4's: how long finished
 --             rows are kept.
---       M6Watchers get module-written "notice due" rows; PR state is
+--       M6  Watchers get module-written "notice due" rows; PR state is
 --           derived in the module from the raw gh status the host forwards.
 --       M7  Leftover service logic is removed; MCP handlers call reducers
 --           directly.
@@ -616,10 +629,14 @@ entity SessionRequest {
 
     -- The exit token this row is, while it is one (W3): a done wrap_up row
     -- for its task with no newer done wrap_up row beside it (newer by
-    -- requested_at, ties broken by row id) and no exit_session row that
-    -- consumed it.
+    -- requested_at, ties broken by row id), finished after the task's latest
+    -- dispatched request (a later dispatch voids it), and with no
+    -- exit_session row that consumed it.
     is_valid_token:
         kind = wrap_up and state = done
+        and not DispatchRequests.any(d =>
+            d.task = task and d.state = dispatched
+            and d.finished_at >= finished_at)
         and not SessionRequests.any(r =>
             r.task = task and r.kind = wrap_up and r.state = done
             and r.requested_at > requested_at)
@@ -1003,6 +1020,11 @@ rule RequestWrapUp {
 
     requires: task.status = running or task.status = review
     requires: task.worktree != null
+    -- mcp-task-tools.allium's ReviewTasksAreNotWrappedUp, in the module by
+    -- decision (W2): a review-tagged task has no wrap-up to perform. The
+    -- refusal carries that guarantee's wording (the tag, that a review task
+    -- ends at its PR, and the retag way out).
+    requires: task.tag != pr_review and task.tag != dependabot
     -- The rebase runs where the worktree is, so the row names the task's own
     -- host, and only that host may ask (the MCP endpoint an agent reaches is
     -- its own machine's board).
@@ -1043,9 +1065,9 @@ rule RequestWrapUp {
         -- checks have passed (W2), so a refusal there wrote nothing. host is
         -- the calling board's own host, as the store handle carries it.
         --
-        -- A refusal names why (not running or review, no worktree, the
-        -- worktree is on another machine, an open session request already
-        -- exists) and writes nothing; the tool returns it as an
+        -- A refusal names why (not running or review, no worktree, a
+        -- review-tagged task, the worktree is on another machine, an open
+        -- session request already exists) and writes nothing; the tool returns it as an
         -- INVALID_PARAMS error.
         --
         -- No task field is written here. The Conflict clear waits for the
@@ -1200,6 +1222,11 @@ rule RequestExitSession {
     -- token is the wrap_up row the agent was handed (W3).
     requires: token.task = task
     requires: token.is_valid_token
+    -- Part of is_valid_token, stated on its own because it is the newest
+    -- condition (W3, decided with the user): a dispatch of the task that
+    -- finished at or after the token's row voids the token.
+    requires: not DispatchRequests.any(d =>
+        d.task = task and d.state = dispatched and d.finished_at >= token.finished_at)
     requires: action = token.action
     requires: task.tmux_window != null
     requires: action = pr implies (pr_url != null and pr_url != "")
@@ -1248,8 +1275,10 @@ rule RequestExitSession {
         -- the module's words, in the order the module checks them:
         --   - no done wrap_up row for the task, or the token's row was
         --     already consumed: "no exit token — call wrap_up first";
-        --   - the token names some other row, or a done wrap_up row newer
-        --     than it exists: "invalid exit token";
+        --   - the token names some other row, a done wrap_up row newer
+        --     than it exists, or the task was dispatched again after the
+        --     token's row finished (a dispatched request of the task whose
+        --     finished_at is not earlier, W3): "invalid exit token";
         --   - action differs from the token's: an error naming both actions;
         --   - task.tmux_window is null: "task #<id> has no active session",
         --     which the /wrap-up skill treats as success, as today;
@@ -1381,15 +1410,9 @@ invariant EveryExitSessionHadAWrapUp {
 
 open question "Retention of finished request rows (deferred, outside M4 and M5): dispatched and failed dispatch rows, and done and failed session rows, stay as history and their host's subscription delivers all of them. How long are they kept, and what removes them? A done wrap_up row that is still a valid exit token must outlive any cleanup."
 
-open question "M5 columns beyond the decided list (W1): the flow needs wrap_up_request (the wrap_up row an exit_session row consumed; without it 'not already consumed' has nothing to test), tmux_window (the window the teardown kills; the close clears it from the task in the same transaction) and chained_task (the subtask the in-module epic chain requested, which exit_session's response names and a reducer cannot return). Confirm these three, or name another way to carry each."
-
 open question "M5 window left alive (W5, W7, W8): an exit_session row the backstop fails because its board was closed or hung, or one the restart sweep fails, may leave the agent's tmux window alive on a task that is already Done or Review. The spec has the starting board kill the window of a row its own sweep failed, and a host kill the window of a row failed by deletion. Should a starting board also kill the windows of exit_session rows that failed 'timed out' while it was not running (W8 otherwise treats them as history, as D12 does), or is a surviving window acceptable?"
 
-open question "M5 exit token lifetime (W3): the in-memory token lasted until the board restarted; a done wrap_up row is a valid token until consumed or superseded, with no expiry, so a token from an earlier session of the same task (wrapped up, never exited, later re-dispatched) can close the new session. Should a token also be invalidated by a later dispatch of its task, or expire?"
-
-open question "M5 and the update_tasks status='done' path (mcp-task-tools.allium: MarkTaskDoneViaMcp): it shares exit_session's board-side close and teardown today (close_session, kill_session_window). M5 moves only exit_session into the module, so that path keeps the board-side close (with its close_persisted gate) and its own teardown. Should it also become a module close with a teardown row (M5 or M7)?"
-
-open question "M5 and ReviewTasksAreNotWrappedUp (mcp-task-tools.allium): the review-tag refusal is a rule about the task's data, which S1 puts in the module, but the decided request_wrap_up checks do not include it, so it stays in the MCP handler's pre-checks. Should request_wrap_up refuse a pr_review or dependabot task too?"
+open question "M7 and the update_tasks status='done' path (mcp-task-tools.allium: MarkTaskDoneViaMcp): by decision it keeps its board-side close (close_session, with its close_persisted gate) and teardown (kill_session_window) through M5 and until M7, so the terminal fields of a close are applied by two implementations meanwhile. In M7, should it become a module close with an exit_session-style teardown row (without a token and without the epic chain), or something else?"
 
 open question "M5 and ClosePrOnDone (pr-workflow.allium): a close through exit_session with action rebase or done that takes a task carrying a pr-typed url into Done must still run gh pr close, which only a host can. The spec has the exit_session row's host do it while serving the teardown (W5), reading the url from the task. Is that the intended owner, or should it wait for M6 (PR state in the module)?"
 

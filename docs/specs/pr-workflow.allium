@@ -820,7 +820,8 @@ rule ExitSession {
         -- close_session and kill_session_window via the `perform_close`
         -- helper (src/mcp/handlers/tasks/wrap_up.rs), with no token and no
         -- chain. Before M5 exit_session shared that helper; since M5 it is
-        -- that path's alone (see the open question in store-split.allium).
+        -- that path's alone (by decision until M7; how it moves then is an open question in
+        -- store-split.allium).
         -- Its close_persisted gate keeps the rationale it had here:
         -- close_persisted is the outcome of ONE purpose-built persistence call
         -- that does nothing but apply the terminal patch and recalculate the
@@ -851,8 +852,10 @@ rule ExitSession {
         -- refused in the tool before any call), in this order:
         --   • a missing token, no done wrap_up row for the task, or an
         --     already-consumed one → "no exit token — call wrap_up first";
-        --     a token that names another row, or one superseded by a newer
-        --     wrap_up → "invalid exit token".
+        --     a token that names another row, one superseded by a newer
+        --     wrap_up, or one voided by a later dispatch of the task (its row
+        --     finished before the task's latest dispatched request did;
+        --     store-split.allium, W3) → "invalid exit token".
         --   • the supplied action must equal the action recorded on the row.
         --     A missing action → "action is required". A mismatch (e.g. token
         --     issued for wrap_up(rebase) but the agent calls
