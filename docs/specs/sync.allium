@@ -378,9 +378,7 @@ config {
     -- scheduled timeout, store-split.allium: DispatchRequest); 4 is M5
     -- (wrap-up and exit-session request rows, the conflict sub_status, the
     -- close and the epic chain in the module, store-split.allium:
-    -- SessionRequest, W12). M5 is written spec first: the module crate and
-    -- the board still hold 3 until the M5 code lands, and both move to 4 in
-    -- that commit.
+    -- SessionRequest, W12). The module crate and the board both hold it.
     rules_version: Integer = 4
 }
 

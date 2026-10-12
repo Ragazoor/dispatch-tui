@@ -4,12 +4,8 @@
 -- Scope: The TARGET split of responsibility between the dispatch TUI process
 --        and the SpacetimeDB module (spacetime/module/), and the order the
 --        code is migrated in. It says which side owns which kind of
---        behaviour. Migration steps land one at a time: M2, M3 and M4 (below)
---        have landed; M5 is DESCRIBED BUT NOT YET LANDED (spec first: its
---        entity and rules below, and the M5 passages in the owning specs, are
---        the behaviour the M5 code is to implement, while the code still runs
---        wrap-up and exit-session in the board with an in-memory exit token);
---        M6-M7 have not started. Until a step lands, the rules in
+--        behaviour. Migration steps land one at a time: M2, M3, M4 and M5 (below)
+--        have landed; M6-M7 have not started. Until a step lands, the rules in
 --        the specs listed under Excludes stay authoritative for what the
 --        system does today, and nothing here overrides them. Each step runs
 --        its own spec -> tests -> code cycle on the spec that owns the
@@ -293,8 +289,7 @@
 --       M5  Wrap-up and exit-session become request rows; the module owns
 --           the conflict sub_status and the close, the host runs the rebase
 --           and the teardown.
---           DESCRIBED, NOT YET LANDED (task #53258; spec first, tests and code
---           follow): the wrap_up MCP tool still runs its host-local checks
+--           LANDED (task #53258): the wrap_up MCP tool still runs its host-local checks
 --           first, then calls the request_wrap_up reducer, which writes a
 --           session_requests row. A rebase row is claimed by its host's board
 --           (claim_session_request, which clears a Conflict sub_status),

@@ -22,6 +22,7 @@ to look.
 | `src/runtime/commands.rs` | `Command` side-effect dispatcher (called by `execute_commands`) |
 | `src/runtime/tasks.rs` | Per-command runtime handlers for tasks (refresh, dispatch requests, finish, etc.) |
 | `src/runtime/dispatch_host.rs` | The host reactor (store-split M4): serves this host's `requested` dispatch request rows once each, after every row-pump reload and at startup behind the restart sweep (`recover_dispatch_requests`), and reports a landed dispatch to the App |
+| `src/runtime/session_host.rs` | The session reactor (store-split M5): serves this host's `requested` wrap_up and exit_session rows once each through `TaskService::serve_session_request`, kills the window of an exit_session row it sees fail, and refreshes the repository a rebase moved; at startup fails the rows a previous board left `running`, kills their windows, then catches up on `requested` ones |
 | `src/runtime/{editor,epics,learnings,pr,settings,split}.rs` | Domain-specific runtime helpers |
 | `src/tui/mod.rs` | `App` struct, lifecycle, `update()` entry point, timing constants (`STATUS_MESSAGE_TTL`, `PR_POLL_INTERVAL`, `GG_CHORD_TIMEOUT`). Column-listing helpers: `column_items_for_status_with_placements` (the board's only column builder — takes a pre-computed `EpicPlacementMap`, used by kanban columns) and `compute_epic_placements`, which builds that map. A *task* card's column is its `TaskStatus` and nothing else; an *epic* card is drawn in every column its subtree has visible work in. Sub-status groups cards into sections *within* a column. `column_items_for_status` is test-only. |
 | `src/tui/columns.rs` | `BoardView`, the read-only layout view (`app.view()`): column items, `compute_epic_placements`, fingerprints, epic search and filter queries, column item counts. The `&mut self` cache methods (`cached_epic_stats`, `invalidate_layout_cache`) stay on `App`. Read the layout-cache coherence paragraph in `docs/invariants.md` before editing |
@@ -51,6 +52,7 @@ to look.
 | `src/models/agent_events.rs` | What an agent reports through hooks: `HookEventKind`, `SubagentEvent`, `StopOutcome`, `NotificationKind`/`NotificationWrite`, `classify_agent_activity` |
 | `src/models/{epics,learnings,review,usage}.rs` | Domain types per area. `review.rs` holds `ReviewDecision` and `pr_number_from_url` |
 | `src/models/url.rs` | `TaskUrl` / `UrlType` — the typed URL on a task (PR, issue, security alert), stored explicitly rather than sniffed |
+| `src/models/{dispatch_request,session_request}.rs` | The request rows the board reads (store-split M4 and M5): `DispatchRequest`, `SessionRequest` (a wrap_up or exit_session request; a done wrap_up row's id is the exit token) and their state, kind and origin vocabularies |
 | `src/models/ids.rs` | `define_id_newtype!` macro behind `TaskId`/`EpicId`/`LearningId` |
 | `src/models/string_enum.rs` | `define_str_enum!` macro behind `TaskStatus`/`SubStatus`/`ColumnSection`/`TaskTag`/`WrapUpMode` string conversions |
 | `src/models/paths.rs` | `expand_tilde`, plus the whole repo-grouping family — `repo_name_from_path`, `repo_name_from_url`, `extract_github_repo`, `UNKNOWN_REPO_GROUP`. Both grouping halves share the fallback, so they stay in one module; turning a repo name into a *local* path is the adapter's job (`resolve_repo_path`) |
@@ -60,7 +62,8 @@ to look.
 | `src/service/tasks/mod.rs` | `TaskService` — task business logic |
 | `src/service/tasks/{crud,params,validators}.rs` | Task CRUD methods, `*Params` request types, validation helpers |
 | `src/service/tasks/dispatch.rs` | The dispatch seam on request rows (store-split M4): `TaskService::request_dispatch` — the one call every launch path makes, which claims the task and writes a `requested` row naming this host — and `TaskService::serve_dispatch_request` — this host's provisioning of such a row: claim it, run the prologue and the row's `DispatchMode` under the row's deadline, report dispatched or failed. The module records the result and releases a failed claim |
-| `src/service/tasks/wrap_up.rs` | `TaskService::wrap_up_rebase` (the `WrapUpRebase` git work plus its `Conflict` sub_status maintenance) and `kill_session_window` (the tmux teardown `ExitSession` owes) — both moved out of the MCP transport |
+| `src/service/tasks/session.rs` | The session seam on request rows (store-split M5): `TaskService::request_wrap_up` and `request_exit_session` — thin calls to the module, whose close, token check, Conflict sub_status and epic chain are the module's — and `serve_session_request` — this host's work for a row naming it: claim it, run `finish_task` (a rebase) or kill the window the row names (a teardown) under the row's deadline, run `gh pr close` for a close into Done, report done or failed. Also `tear_down_failed_exit_window` and `fail_interrupted_session_requests` |
+| `src/service/tasks/wrap_up.rs` | `check_wrap_up_ready` (the host-local pre-checks `wrap_up` makes before it writes a request: committed worktree, verify command) and `kill_session_window` (the tmux kill the session seam and `update_tasks`' board-side close share) |
 | `src/service/epics.rs` | `EpicService`, `UpdateEpicParams`, `CreateEpicParams` — epic business logic, including reparenting with cycle detection |
 | `src/service/learnings.rs` | `LearningService`, `CreateLearningParams` — learning business logic (curated exclusively via MCP; no TUI-facing update/reject/archive path) |
 | `src/service/api.rs` | Service trait objects (`TaskServiceApi`, `EpicServiceApi`, `LearningServiceApi`) + `MockLearningService` for injection in tests. Each seam's signature list lives once, in a spec macro (`task_service_api!`, …) replayed into emitter macros that generate the trait, the delegating impl, and the test-only `*ServiceApiStub` mock scaffolding |
@@ -83,7 +86,7 @@ to look.
 | `src/dispatch/prompts/` | Markdown bodies for the two review addenda (`pr-review.md`, `dependabot.md`), inlined via `include_str!`. `dependabot/` holds the runbook's five interchangeable fragments — one decision body per bump kind plus the merge terminal — of which `src/dispatch/prompts.rs::dependabot_decision` picks the pair that applies |
 | `src/dispatch/prompts_snapshots.rs` | Insta snapshot tests locking the rendered output of every `build_*_prompt` variant (snapshots in `src/dispatch/snapshots/`) |
 | `src/dispatch/worktree.rs` | Worktree creation/teardown |
-| `src/dispatch/request_host.rs` | The pure pieces of the host's side of a dispatch request: `DispatchRequestObserver` (which delivered rows to serve, once, handing a row out again if its claim got no answer), `DeadlineRunner` (every provisioning subprocess bounded by the row's deadline) and the request timeout |
+| `src/dispatch/request_host.rs` | The pure pieces of the host's side of a dispatch request: `DispatchRequestObserver` (which delivered rows to serve, once, handing a row out again if its claim got no answer), `DeadlineRunner` (every provisioning subprocess bounded by the row's deadline) and the request timeout. Store-split M5 adds `SessionRequestObserver` (the same decision for session rows, plus which failed exit_session rows owe their window a kill) and the wrap-up and teardown timeouts |
 | `src/dispatch/trust.rs` | Reads and writes Claude Code's per-project trust flag in `~/.claude.json` so a fresh worktree doesn't stall on the trust prompt |
 | `src/dispatch/finish.rs` | Rebase + fast-forward branch onto base branch (`finish_task`); git only — the session teardown is the caller's, gated on the task's terminal write. Defines `FinishError` |
 | `src/dispatch/split_panes.rs` | Multi-step tmux sequences behind the board's split-pane feature: `join_task_window_into_pane` (pin, killing the leftover agent-tree companion) and `swap_task_window_into_pane` (swap + rename/kill + `@dispatch_dir` rewrite + companion resync). Lives here rather than in `src/tmux.rs` because it carries policy and calls `resync_agent_tree_pane`; `src/runtime/split.rs` keeps only the `spawn_blocking` + message emission |
@@ -102,6 +105,7 @@ to look.
 | `src/keybindings.rs`, `src/keybindings/` | The keybinding table (`KEY_BINDINGS`, in `src/keybindings/table.rs`): the one place every key is declared, read by the key handlers, the `?` overlay and `list_keybindings`. See `docs/specs/keybindings.allium` |
 | `src/backoff.rs` | Exponential backoff shared by the PR poller and the board's store connection |
 | `src/board_event.rs` | `BoardEvent`, the change notifications the MCP server and feed runner send the board runtime |
+| `src/sync/memory_caller/{dispatch_requests,session_requests}.rs` | The in-memory twins of the M4 and M5 request reducers, built from the module's own pure functions (`tests/memory_caller_conformance.rs` diffs them against the real module). `expire_*_request` stand in for the module's scheduled backstops |
 | `src/sync/rows.rs` | `SharedRows` — what the subscription has delivered, decoded and ordered exactly as each SQL `ORDER BY` orders it, plus the change signal that redraws the board without polling. Not a cache: no read-through, cleared on disconnect |
 | `src/sync/writes.rs` | `ReducerCaller` — the transport every `Store` write goes through — with `ReducerOutcome` (the store's verdict on a call), `WriterIdentity`/`SettledIdentity` (who a write is stamped with) and `push_host_registration` |
 | `src/sync/decode.rs` | One store row → one domain value, undoing the module's sentinels. The shared-store decoder for tasks; `sync::tests::decode` pins it against the in-memory store's decoder |
@@ -122,8 +126,8 @@ to look.
 | `src/mcp/handlers/dispatch.rs` | JSON-RPC entry point (`handle_mcp`) plus the `mcp_tools!` macro that generates `tool_definitions()`, `dispatch_tool()`, and `TOOL_NAMES` from one declarative tool list |
 | `src/mcp/handlers/tasks/mod.rs` | Task arg structs, shared response helpers, re-exports |
 | `src/mcp/handlers/tasks/crud.rs` | CRUD task handlers: `update_tasks`, `create_task`, `get_task`, `list_tasks`, `query_usage` |
-| `src/mcp/handlers/tasks/dispatch.rs` | Dispatch handlers: `dispatch_task`, plus `auto_dispatch_next` (the epic chain fired by `exit_session`) |
-| `src/mcp/handlers/tasks/wrap_up.rs` | Wrap-up handlers: `wrap_up`, `exit_session` |
+| `src/mcp/handlers/tasks/dispatch.rs` | Dispatch handler: `dispatch_task` (the epic chain that `exit_session` fires is the module's, in `request_exit_session`'s transaction) |
+| `src/mcp/handlers/tasks/wrap_up.rs` | Wrap-up handlers: `wrap_up` (checks, then a request row, then a wait on it for a rebase) and `exit_session` (one `request_exit_session` call, answered without waiting for the teardown), plus `perform_close` for `update_tasks`' board-side close |
 | `src/mcp/handlers/tasks/verify.rs` | Verify handler: `set_verify_command` |
 | `src/mcp/handlers/epics.rs` | Epic tool handlers (thin wrappers): parse JSON-RPC args → call `EpicService` → format response |
 | `src/mcp/handlers/learnings.rs` | Knowledge base tool handlers |
@@ -131,5 +135,5 @@ to look.
 | `src/mcp/handlers/types.rs` | JSON-RPC request/response types, flexible integer deserializer |
 | `src/mcp/handlers/tests/mod.rs` | MCP handler integration tests entry point |
 | `src/mcp/handlers/tests/tasks/mod.rs` | Task test entry point: module declarations and shared helpers |
-| `src/mcp/handlers/tests/tasks/{crud,dispatch,wrap_up,verify}.rs` | Task handler tests per sub-domain |
+| `src/mcp/handlers/tests/tasks/{crud,dispatch,dispatch_requests,session_requests,wrap_up,verify}.rs` | Task handler tests per sub-domain |
 | `src/mcp/handlers/tests/{epics,learnings,managed_feeds,usage}.rs` | MCP handler tests per domain |

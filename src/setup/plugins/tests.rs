@@ -1061,36 +1061,39 @@ fn wrap_up_skill_does_not_instruct_calling_dispatch_next() {
     );
 }
 
-/// A regression in this guidance is silent: an agent that reads a non-error
-/// response as a completed close leaves a live tmux window and a task stuck
-/// in its old status, with no error anywhere to notice.
+/// A regression in this guidance is silent: an agent that stops at a refused
+/// close leaves a live tmux window and a task stuck in its old status, when one
+/// more call would have closed it. Since store-split M5 the close is one
+/// all-or-nothing module step, so it is an ERROR that changed nothing.
 #[test]
-fn wrap_up_skill_warns_a_successful_exit_session_can_report_a_failed_close() {
+fn wrap_up_skill_says_a_failed_close_is_an_error_that_changed_nothing() {
+    let section = failed_close_guidance();
     assert!(
-        failed_close_guidance().contains("success"),
-        "failed-close guidance must say the response is a *successful* one, \
-         not an error — that is the whole trap"
+        section.contains("error") && section.contains("changes nothing"),
+        "failed-close guidance must say the close errored and changed nothing"
     );
 }
 
 /// The one reaction that must survive any rewording of the failed-close
-/// guidance: the exit token is consumed before the terminal write is
-/// attempted, so neither retrying `exit_session` nor taking a fresh token
-/// from `wrap_up` can work. Asserted positively — a negative "must not
-/// contain 'retry'" would also pass if the guidance were deleted outright,
-/// which is the regression that matters.
+/// guidance: the exit token is NOT spent by a failed close (the close is one
+/// transaction), so calling `exit_session` again is the way out, and a fresh
+/// `wrap_up` is not. Asserted positively — a negative check would also pass if
+/// the guidance were deleted outright, which is the regression that matters.
 #[test]
-fn wrap_up_skill_tells_the_agent_not_to_retry_a_failed_close() {
+fn wrap_up_skill_tells_the_agent_to_call_exit_session_again_after_a_failed_close() {
     let section = failed_close_guidance();
     assert!(
-        section.contains("not retry") || section.contains("n't retry"),
-        "failed-close guidance must tell the agent not to retry exit_session"
+        section.contains("exit_session") && section.contains("again"),
+        "failed-close guidance must tell the agent to call exit_session again"
     );
     assert!(
-        section.contains("wrap_up")
-            && (section.contains("again") || section.contains("fresh token")),
-        "failed-close guidance must tell the agent not to call wrap_up again \
-         for a fresh token"
+        section.contains("still valid"),
+        "failed-close guidance must say the exit token is still valid"
+    );
+    assert!(
+        section.contains("wrap_up") && section.contains("do not"),
+        "failed-close guidance must tell the agent not to call wrap_up again for a \
+         fresh token"
     );
 }
 
@@ -1194,8 +1197,8 @@ fn wrap_up_skill_pr_body_test_plan_is_opt_in_not_default() {
 }
 
 /// The wrap-up skill's failed-close guidance block, lowercased: the heading
-/// section telling the agent that a *successful* `exit_session` response can
-/// still report that the close did not take effect.
+/// section telling the agent that an `exit_session` error can report that the
+/// close did not take effect, and that the token is then still valid.
 ///
 /// Scoped to that one section deliberately — "do not retry" also appears in
 /// the neighbouring `exit_session` *errors* section, so a whole-document
@@ -1208,8 +1211,8 @@ fn failed_close_guidance() -> String {
     // exit_session-errors reference file, not in SKILL.md.
     let content = references_text("wrap-up").to_lowercase();
     section_after(&content, "did not take effect").expect(
-        "wrap-up skill must document that a successful exit_session response \
-         can still report the close did not take effect",
+        "wrap-up skill must document that an exit_session error can report \
+         that the close did not take effect",
     )
 }
 
@@ -1410,9 +1413,9 @@ fn wrap_up_pr_path_lives_in_a_reference_named_from_the_branch() {
 }
 
 /// pr-workflow.allium ExitSession: the exit_session error handling — the
-/// "has no active session" case treated as success, and the successful
-/// response that reports a close which did not take effect — lives in a
-/// reference file the skill names at the exit_session step.
+/// "has no active session" case treated as success, and the error that
+/// reports a close which did not take effect — lives in a reference file the
+/// skill names at the exit_session step.
 #[test]
 fn wrap_up_exit_session_errors_live_in_a_reference_named_at_the_step() {
     let body = skill_body("wrap-up");
