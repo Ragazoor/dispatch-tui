@@ -109,6 +109,16 @@ pub(in crate::sync) fn subscription_queries(
         // row leaving a state-filtered query would arrive as a delete, and its
         // outcome would be lost.
         format!("SELECT * FROM dispatch_requests WHERE host = '{host}'"),
+        // Session requests (store-split M5, `sync.allium:
+        // SubscribeToThisHostsSessionRequests`). Scoped by HOST like the
+        // dispatch requests: a wrap-up or exit-session request names the
+        // machine holding the task's worktree and window, so this delivers the
+        // rebase and teardown this host must do, the outcome `wrap_up` waits
+        // on, and the done wrap_up rows `exit_session`'s no-answer settling
+        // reads. Unfiltered by state for the same reason. The module's
+        // `session_request_timeouts` schedule table is its own, never asked
+        // for.
+        format!("SELECT * FROM session_requests WHERE host = '{host}'"),
     ];
 
     // The epic ids are integers by type, so they need no validation beyond

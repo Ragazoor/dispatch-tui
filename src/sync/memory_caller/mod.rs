@@ -43,7 +43,7 @@ use dispatch_spacetime_module as module;
 use crate::clock::Clock;
 use crate::models::{
     DispatchRequestId, EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId,
-    RetrievalSource, SubStatus, TaskId, WorkPackageId, WorkPackageItem,
+    RetrievalSource, SessionRequestId, SubStatus, TaskId, WorkPackageId, WorkPackageItem,
 };
 use crate::spacetime::bindings;
 
@@ -57,6 +57,7 @@ mod dispatch_requests;
 mod feed;
 mod grouping;
 mod learnings;
+mod session_requests;
 mod tasks_epics;
 mod work_packages;
 
@@ -126,6 +127,9 @@ struct Tables {
     /// store-split M4. The module's timer table has no counterpart: the
     /// backstop is [`MemoryReducerCaller::expire_dispatch_request`].
     dispatch_requests: BTreeMap<i64, module::DispatchRequest>,
+    /// store-split M5. As above, the module's timer table has no counterpart:
+    /// the backstop is [`MemoryReducerCaller::expire_session_request`].
+    session_requests: BTreeMap<i64, module::SessionRequest>,
     next_task_id: i64,
     next_epic_id: i64,
     next_repo_path_id: i64,
@@ -137,6 +141,7 @@ struct Tables {
     next_learning_retrieval_id: i64,
     next_work_package_id: i64,
     next_dispatch_request_id: i64,
+    next_session_request_id: i64,
 }
 
 impl Tables {
@@ -153,6 +158,7 @@ impl Tables {
             next_learning_retrieval_id: 1,
             next_work_package_id: 1,
             next_dispatch_request_id: 1,
+            next_session_request_id: 1,
             ..Self::default()
         }
     }
@@ -198,10 +204,12 @@ impl MemoryReducerCaller {
     }
 
     /// Make the next call to `reducer` end in a transport error, `fault`
-    /// saying whether the module applied it first. Only the dispatch request
-    /// reducers a host calls honour it (`claim_dispatch_request`,
-    /// `report_dispatch_provisioned`, `report_dispatch_failed`); queue it
-    /// twice to fail two calls.
+    /// saying whether the module applied it first. Only the request reducers a
+    /// host calls honour it (`claim_dispatch_request`,
+    /// `report_dispatch_provisioned`, `report_dispatch_failed`,
+    /// `claim_session_request`, `report_session_request_done`,
+    /// `report_session_request_failed`, `request_exit_session`); queue it twice
+    /// to fail two calls.
     pub fn fail_next(&self, reducer: &'static str, fault: InjectedFault) {
         self.faults
             .lock()
@@ -709,5 +717,62 @@ impl ReducerCaller for MemoryReducerCaller {
 
     async fn fail_interrupted_dispatch_requests(&self, host: String) -> Result<ReducerOutcome> {
         self.apply_fail_interrupted_dispatch_requests(host)
+    }
+
+    async fn request_wrap_up(
+        &self,
+        task: TaskId,
+        host: String,
+        action: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_request_wrap_up(task, host, action)
+    }
+
+    async fn claim_session_request(
+        &self,
+        id: SessionRequestId,
+        host: String,
+    ) -> Result<ReducerOutcome> {
+        self.faulted("claim_session_request", || {
+            self.apply_claim_session_request(id, host)
+        })
+    }
+
+    async fn report_session_request_done(
+        &self,
+        id: SessionRequestId,
+        reporter: String,
+    ) -> Result<ReducerOutcome> {
+        self.faulted("report_session_request_done", || {
+            self.apply_report_session_request_done(id, reporter)
+        })
+    }
+
+    async fn report_session_request_failed(
+        &self,
+        id: SessionRequestId,
+        reporter: String,
+        reason: String,
+        conflict: bool,
+    ) -> Result<ReducerOutcome> {
+        self.faulted("report_session_request_failed", || {
+            self.apply_report_session_request_failed(id, reporter, reason, conflict)
+        })
+    }
+
+    async fn request_exit_session(
+        &self,
+        task: TaskId,
+        token: SessionRequestId,
+        action: String,
+        pr_url: String,
+    ) -> Result<ReducerOutcome> {
+        self.faulted("request_exit_session", || {
+            self.apply_request_exit_session(task, token, action, pr_url)
+        })
+    }
+
+    async fn fail_interrupted_session_requests(&self, host: String) -> Result<ReducerOutcome> {
+        self.apply_fail_interrupted_session_requests(host)
     }
 }

@@ -15,30 +15,33 @@ use super::outcome::{
 use super::SpacetimeSdkConnector;
 use crate::models::{
     DispatchRequestId, EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId,
-    RetrievalSource, SubStatus, TaskId, WorkPackageId, WorkPackageItem,
+    RetrievalSource, SessionRequestId, SubStatus, TaskId, WorkPackageId, WorkPackageItem,
 };
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
     apply_learning_verdicts as _, archive_stale_learnings as _, batch_delete as _,
     batch_patch_sub_status as _, claim_dispatch_request as _, claim_poll_owner as _,
-    clear_setting as _, create_epic as _, create_learning as _, create_managed_role_epic as _,
-    create_repo_group_sub_epic as _, create_task as _, create_work_package as _, delete_epic as _,
-    delete_learning as _, delete_repo_path as _, delete_stale_subtree_feed_tasks as _,
-    delete_task as _, delete_work_package as _, drop_closed_retired_feed_items as _,
-    fail_interrupted_dispatch_requests as _, flatten_epic as _, ingest_feed as _,
+    claim_session_request as _, clear_setting as _, create_epic as _, create_learning as _,
+    create_managed_role_epic as _, create_repo_group_sub_epic as _, create_task as _,
+    create_work_package as _, delete_epic as _, delete_learning as _, delete_repo_path as _,
+    delete_stale_subtree_feed_tasks as _, delete_task as _, delete_work_package as _,
+    drop_closed_retired_feed_items as _, fail_interrupted_dispatch_requests as _,
+    fail_interrupted_session_requests as _, flatten_epic as _, ingest_feed as _,
     link_work_package_item as _, mark_pr_learnings_gate_shown as _, override_poll_owner as _,
     patch_epic as _, patch_learning as _, patch_task as _, patch_work_package as _,
     recalculate_epic_status as _, record_base_branch as _, record_learning_retrieval as _,
     record_notification as _, record_pre_tool_use as _, record_usage_event as _,
     record_user_prompt_submit as _, register_host as _, regroup_epic as _,
-    report_dispatch_failed as _, report_dispatch_provisioned as _, request_dispatch as _,
-    rescope_epic_learnings as _, respawn_phoenix_successor as _, save_repo_path as _,
-    save_setting as _, set_task_epic as _, set_verify_command as _, subagent_clear as _,
-    subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
-    subscribe_to_epic as _, try_record_stop as _, unlink_work_package_item as _,
-    unsubscribe_from_epic as _, upsert_feed_tasks as _, upsert_feed_tasks_additive as _,
-    DbConnection, DispatchRequestsTableAccess as _, EpicsTableAccess as _,
-    LearningsTableAccess as _, TasksTableAccess as _, WorkPackagesTableAccess as _,
+    report_dispatch_failed as _, report_dispatch_provisioned as _,
+    report_session_request_done as _, report_session_request_failed as _, request_dispatch as _,
+    request_exit_session as _, request_wrap_up as _, rescope_epic_learnings as _,
+    respawn_phoenix_successor as _, save_repo_path as _, save_setting as _, set_task_epic as _,
+    set_verify_command as _, subagent_clear as _, subagent_clear_and_void_pending_stop as _,
+    subagent_start as _, subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
+    unlink_work_package_item as _, unsubscribe_from_epic as _, upsert_feed_tasks as _,
+    upsert_feed_tasks_additive as _, DbConnection, DispatchRequestsTableAccess as _,
+    EpicsTableAccess as _, LearningsTableAccess as _, SessionRequestsTableAccess as _,
+    TasksTableAccess as _, WorkPackagesTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -1000,6 +1003,134 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "the interrupted-dispatch sweep",
             fail_interrupted_dispatch_requests_then(host)
+        )
+    }
+
+    /// The wrap_up row's id is read back off the transaction: the highest
+    /// wrap_up row this call just wrote for `task` on `host`. A task has at
+    /// most one OPEN session request (`OneOpenSessionRequestPerTask`) and a
+    /// finished one is older, so the highest id is this call's; the
+    /// subscription delivers it because a board only ever requests as its own
+    /// host (`sync.allium: SubscribeToThisHostsSessionRequests`).
+    async fn request_wrap_up(
+        &self,
+        task: TaskId,
+        host: String,
+        action: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        let connection = self.connection()?;
+        let for_host = host.clone();
+        awaiting_answer("the wrap-up request", move |tx| {
+            connection
+                .reducers
+                .request_wrap_up_then(task.0, host, action, move |ctx, result| {
+                    fire(
+                        tx,
+                        outcome_with_ids(result, || {
+                            ctx.db
+                                .session_requests()
+                                .iter()
+                                .filter(|r| {
+                                    r.task_id == task.0 && r.host == for_host && r.kind == "wrap_up"
+                                })
+                                .map(|r| r.id)
+                                .max()
+                                .into_iter()
+                                .collect()
+                        }),
+                    );
+                })
+        })
+        .await
+    }
+
+    async fn claim_session_request(
+        &self,
+        id: SessionRequestId,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the session request claim",
+            claim_session_request_then(id.0, host)
+        )
+    }
+
+    async fn report_session_request_done(
+        &self,
+        id: SessionRequestId,
+        reporter: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the session request done report",
+            report_session_request_done_then(id.0, reporter)
+        )
+    }
+
+    async fn report_session_request_failed(
+        &self,
+        id: SessionRequestId,
+        reporter: String,
+        reason: String,
+        conflict: bool,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the session request failure report",
+            report_session_request_failed_then(id.0, reporter, reason, conflict)
+        )
+    }
+
+    /// The exit_session row's id is read back off the transaction: the row
+    /// that consumed `token` (`wrap_up_request`), which the module wrote for
+    /// this task in the same call.
+    async fn request_exit_session(
+        &self,
+        task: TaskId,
+        token: SessionRequestId,
+        action: String,
+        pr_url: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        let connection = self.connection()?;
+        awaiting_answer("the exit-session request", move |tx| {
+            connection.reducers.request_exit_session_then(
+                task.0,
+                token.0,
+                action,
+                pr_url,
+                move |ctx, result| {
+                    fire(
+                        tx,
+                        outcome_with_ids(result, || {
+                            ctx.db
+                                .session_requests()
+                                .iter()
+                                .filter(|r| {
+                                    r.task_id == task.0
+                                        && r.kind == "exit_session"
+                                        && r.wrap_up_request == token.0
+                                })
+                                .map(|r| r.id)
+                                .max()
+                                .into_iter()
+                                .collect()
+                        }),
+                    );
+                },
+            )
+        })
+        .await
+    }
+
+    async fn fail_interrupted_session_requests(
+        &self,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the interrupted-session sweep",
+            fail_interrupted_session_requests_then(host)
         )
     }
 }

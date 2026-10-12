@@ -32,9 +32,9 @@ use chrono::{DateTime, Utc};
 use crate::models::{
     DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, DispatchRequestState, Epic,
     EpicId, EpicOrigin, FeedRole, Learning, LearningId, LearningKind, LearningRetrieval,
-    LearningScope, LearningStatus, RetrievalSource, SubStatus, Task, TaskId, TaskStatus, TaskTag,
-    TaskUrl, TmuxWindow, UrlType, WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink,
-    WrapUpMode,
+    LearningScope, LearningStatus, RetrievalSource, SessionRequest, SessionRequestId,
+    SessionRequestKind, SessionRequestState, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUrl,
+    TmuxWindow, UrlType, WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink, WrapUpMode,
 };
 use crate::spacetime::bindings;
 
@@ -465,8 +465,9 @@ pub fn retired_feed_item(row: &bindings::RetiredFeedItem) -> RetiredFeedItemRow 
 // Dispatch requests (store-split M4)
 // ---------------------------------------------------------------------------
 
-/// The `kind` every M4 row carries. M5 adds wrap-up and exit-session kinds,
-/// which this binary does not know and so refuses rather than misreads.
+/// The `kind` every dispatch request row carries. M5's wrap-up and exit-session
+/// requests are their own table (`session_requests`), so any other kind here is
+/// from a newer binary and is refused rather than misread.
 const DISPATCH_REQUEST_KIND: &str = "dispatch";
 
 /// The store's `dispatch_requests` row as the board's [`DispatchRequest`].
@@ -504,5 +505,46 @@ pub fn dispatch_request(row: &bindings::DispatchRequest) -> Decoded<DispatchRequ
         tmux_window: tmux_window(&row.tmux_window),
         reused_worktree: row.reused_worktree,
         deadline: required_timestamp(T, row.id, "deadline", &row.deadline)?,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Session requests (store-split M5)
+// ---------------------------------------------------------------------------
+
+/// The store's `session_requests` row as the board's [`SessionRequest`].
+///
+/// An unknown kind, action or state refuses the row, as for dispatch requests:
+/// read as open, a row from a newer binary would keep a `wrap_up` waiting
+/// forever; read as finished, it would issue a token nobody earned. The
+/// deadline is `""` on a row with no host work and decodes to `None`.
+pub fn session_request(row: &bindings::SessionRequest) -> Decoded<SessionRequest> {
+    const T: &str = "session_requests";
+    let refuse = |detail: String| DecodeError::new(T, row.id, detail);
+
+    let kind = SessionRequestKind::parse(&row.kind)
+        .ok_or_else(|| refuse(format!("unknown kind {:?}", row.kind)))?;
+    let action = WrapUpMode::parse(&row.action)
+        .ok_or_else(|| refuse(format!("unknown action {:?}", row.action)))?;
+    let state = SessionRequestState::parse(&row.state)
+        .ok_or_else(|| refuse(format!("unknown state {:?}", row.state)))?;
+
+    Ok(SessionRequest {
+        id: SessionRequestId(row.id),
+        task_id: TaskId(row.task_id),
+        kind,
+        action,
+        host: row.host.clone(),
+        requested_by: row.requested_by.clone(),
+        state,
+        requested_at: required_timestamp(T, row.id, "requested_at", &row.requested_at)?,
+        claimed_at: timestamp(T, row.id, "claimed_at", &row.claimed_at)?,
+        finished_at: timestamp(T, row.id, "finished_at", &row.finished_at)?,
+        reason: text(&row.reason).map(str::to_owned),
+        pr_url: text(&row.pr_url).map(str::to_owned),
+        wrap_up_request: id(row.wrap_up_request).map(SessionRequestId),
+        tmux_window: tmux_window(&row.tmux_window),
+        chained_task: id(row.chained_task).map(TaskId),
+        deadline: timestamp(T, row.id, "deadline", &row.deadline)?,
     })
 }

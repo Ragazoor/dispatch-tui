@@ -361,3 +361,25 @@ mirror!(
         reused_worktree,
     }
 );
+
+mirror!(
+    module::SessionRequest,
+    bindings::SessionRequest {
+        id,
+        task_id,
+        kind,
+        action,
+        host,
+        requested_by,
+        state,
+        requested_at,
+        claimed_at,
+        finished_at,
+        reason,
+        pr_url,
+        wrap_up_request,
+        tmux_window,
+        chained_task,
+        deadline,
+    }
+);

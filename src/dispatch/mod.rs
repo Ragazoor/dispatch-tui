@@ -52,7 +52,8 @@ pub use finish::{finish_task, FinishContext, FinishError};
 pub(crate) use prompts::RESEARCH_AGENT_INTRO;
 pub use prompts::{build_and_record_injections, EpicContext, LearningInjections};
 pub use request_host::{
-    DeadlineRunner, DispatchRequestObserver, DEADLINE_PASSED, DISPATCH_REQUEST_TIMEOUT,
+    DeadlineRunner, DispatchRequestObserver, SessionRequestObserver, SessionWork, DEADLINE_PASSED,
+    DISPATCH_REQUEST_TIMEOUT, EXIT_SESSION_TEARDOWN_TIMEOUT, WRAP_UP_REBASE_TIMEOUT,
 };
 pub use split_panes::{join_task_window_into_pane, swap_task_window_into_pane};
 pub(crate) use trust::{is_trusted_at, trust_at};

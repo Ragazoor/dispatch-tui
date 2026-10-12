@@ -38,7 +38,7 @@ fn find_request(tables: &Tables, id: i64) -> Result<module::DispatchRequest, Str
 impl MemoryReducerCaller {
     /// Mirrors the module's `require_acting_for` (D11): only `host`'s
     /// registered owner — this caller's sender — may act for it.
-    fn acting_for(&self, tables: &Tables, host: &str) -> Result<(), String> {
+    pub(super) fn acting_for(&self, tables: &Tables, host: &str) -> Result<(), String> {
         module::validate_host_acting_for(tables.hosts.get(host), host, &self.sender)
     }
 
@@ -127,20 +127,36 @@ impl MemoryReducerCaller {
             .any(|r| r.task_id == task_id && module::dispatch_request_is_open(&r.state));
         module::validate_dispatch_request(&row, requester, origin, has_open)?;
         let mode = module::choose_dispatch_mode(&row, mode)?;
+        let id = self.create_dispatch_request_body(&mut tables, row, requester, mode, origin)?;
+        Ok(vec![id])
+    }
 
+    /// Mirrors the module's `create_dispatch_request`, shared by
+    /// `request_dispatch` and the epic chain `request_exit_session` runs: claim
+    /// the task, roll up its epic chain, write the `requested` row. The one
+    /// fallible step, the claim's write, runs first, so an `Err` has written
+    /// nothing and the chain can move on to its next candidate.
+    pub(super) fn create_dispatch_request_body(
+        &self,
+        tables: &mut Tables,
+        task: module::Task,
+        requester: &str,
+        mode: &str,
+        origin: &str,
+    ) -> Result<i64, String> {
         let stamp = self.now();
-        let epic_id = row.epic_id;
-        Self::delete_all_subagents(&mut tables, task_id);
-        self.write_task(&mut tables, module::apply_dispatch_claim(row, &stamp))?;
-        self.recalculate_epic_chain(&mut tables, epic_id);
-        let id = self.write_dispatch_request(
-            &mut tables,
+        let task_id = task.id;
+        let epic_id = task.epic_id;
+        self.write_task(tables, module::apply_dispatch_claim(task, &stamp))?;
+        Self::delete_all_subagents(tables, task_id);
+        self.recalculate_epic_chain(tables, epic_id);
+        Ok(self.write_dispatch_request(
+            tables,
             module::DispatchRequest {
                 requested_by: self.sender.clone(),
                 ..module::new_dispatch_request(task_id, requester, mode, origin, &stamp)
             },
-        );
-        Ok(vec![id])
+        ))
     }
 
     pub(super) fn apply_claim_dispatch_request(

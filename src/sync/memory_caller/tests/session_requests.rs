@@ -65,39 +65,32 @@ fn refusal(outcome: ReducerOutcome) -> String {
     }
 }
 
-/// A task dispatched on [`HOST`]: running, with a worktree and a window, the
-/// state every wrap-up starts from. Goes through the real request path, so the
-/// task's host and the dispatch history are the ones the module writes.
+/// A task running on [`HOST`] with a worktree and a window, the state every
+/// wrap-up starts from. Patched in directly rather than dispatched: this
+/// double's fixed clock stamps a dispatch and the wrap-up that follows alike,
+/// and a dispatch finishing at or after the token voids it (W3).
 async fn dispatched_task(caller: &MemoryReducerCaller) -> TaskId {
     dispatched_task_in(caller, blank_task()).await
 }
 
 async fn dispatched_task_in(caller: &MemoryReducerCaller, row: bindings::Task) -> TaskId {
     let task = caller.create_task(row).await.unwrap();
-    let id = match caller
-        .request_dispatch(task, HOST.into(), "user".into(), "dispatch".into())
-        .await
-        .unwrap()
-    {
-        ReducerOutcome::Applied(ids) => crate::models::DispatchRequestId(ids[0]),
-        other => panic!("the dispatch request must apply: {other:?}"),
-    };
-    assert!(caller
-        .claim_dispatch_request(id, HOST.into())
-        .await
-        .unwrap()
-        .won());
-    assert!(caller
-        .report_dispatch_provisioned(
-            id,
-            HOST.into(),
-            format!("/repo/.worktrees/{}-t", task.0),
-            format!("task-{}", task.0),
-            false,
+    caller
+        .patch_task(
+            task,
+            bindings::TaskPatch {
+                status: Some("running".into()),
+                sub_status: Some("active".into()),
+                worktree: Some(format!("/repo/.worktrees/{}-t", task.0)),
+                tmux_window: Some(format!("task-{}", task.0)),
+                host: Some(HOST.into()),
+                ..blank_task_patch()
+            },
         )
         .await
         .unwrap()
-        .won());
+        .applied()
+        .unwrap();
     task
 }
 
@@ -764,14 +757,15 @@ async fn an_exit_session_recalculates_the_epic() {
         &caller,
         bindings::Task {
             epic_id: epic.0,
+            owner: String::new(),
             ..blank_task()
         },
     )
     .await;
-    assert_eq!(
+    assert_ne!(
         rows.epic(epic).unwrap().status,
-        crate::models::TaskStatus::Running,
-        "the dispatch rolled the epic up"
+        crate::models::TaskStatus::Done,
+        "a running subtask keeps the epic open"
     );
     let token = token_for(&caller, task, "done").await;
 
@@ -802,6 +796,7 @@ async fn an_exit_session_chains_the_next_subtask_passing_over_a_phoenix_one() {
         &caller,
         bindings::Task {
             epic_id: epic.0,
+            owner: String::new(),
             ..blank_task()
         },
     )
@@ -809,6 +804,7 @@ async fn an_exit_session_chains_the_next_subtask_passing_over_a_phoenix_one() {
     let phoenix = caller
         .create_task(bindings::Task {
             epic_id: epic.0,
+            owner: String::new(),
             phoenix: true,
             sort_order: Some(1),
             ..blank_task()
@@ -818,6 +814,7 @@ async fn an_exit_session_chains_the_next_subtask_passing_over_a_phoenix_one() {
     let next = caller
         .create_task(bindings::Task {
             epic_id: epic.0,
+            owner: String::new(),
             sort_order: Some(2),
             ..blank_task()
         })
@@ -860,6 +857,7 @@ async fn the_chain_stops_without_auto_dispatch_or_a_backlog_subtask() {
         &caller,
         bindings::Task {
             epic_id: epic.0,
+            owner: String::new(),
             ..blank_task()
         },
     )
@@ -867,6 +865,7 @@ async fn the_chain_stops_without_auto_dispatch_or_a_backlog_subtask() {
     let waiting = caller
         .create_task(bindings::Task {
             epic_id: epic.0,
+            owner: String::new(),
             ..blank_task()
         })
         .await
@@ -961,6 +960,20 @@ async fn deleting_a_task_fails_its_open_session_request() {
     let finished_task = dispatched_task(&caller).await;
     let finished = token_for(&caller, finished_task, "done").await;
 
+    // A task is deleted only from Done (`tasks.allium: DeleteTask`).
+    for done in [task, finished_task] {
+        caller
+            .patch_task(
+                done,
+                bindings::TaskPatch {
+                    status: Some("done".into()),
+                    sub_status: Some("none".into()),
+                    ..blank_task_patch()
+                },
+            )
+            .await
+            .unwrap();
+    }
     assert!(caller.delete_task(task).await.unwrap().won());
     assert!(caller.delete_task(finished_task).await.unwrap().won());
 

@@ -27,6 +27,8 @@ impl MemoryReducerCaller {
         self.delete_work_package_links_to(tables, module::WORK_PACKAGE_ITEM_TASK, task_id);
         // store-split.allium: DeletingATaskFailsItsOpenRequest (D8).
         self.fail_open_dispatch_requests_of(tables, task_id);
+        // store-split.allium: DeletingATaskFailsItsOpenSessionRequest (W9).
+        self.fail_open_session_requests_of(tables, task_id);
     }
 
     /// Recompute `live_subagents` from `task_subagents` and write it, if the

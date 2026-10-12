@@ -31,7 +31,7 @@ use chrono::{DateTime, Utc};
 
 use crate::models::{
     DispatchRequestId, EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId,
-    RetrievalSource, SubStatus, TaskId, WorkPackageId, WorkPackageItem,
+    RetrievalSource, SessionRequestId, SubStatus, TaskId, WorkPackageId, WorkPackageItem,
 };
 use crate::spacetime::bindings;
 
@@ -466,6 +466,61 @@ pub trait ReducerCaller: Send + Sync {
     ) -> Result<ReducerOutcome>;
     /// `HostRestartFailsInterrupted`: fail `host`'s provisioning rows.
     async fn fail_interrupted_dispatch_requests(&self, host: String) -> Result<ReducerOutcome>;
+
+    // -- Session requests (store-split M5) ----------------------------------------
+    //
+    // `store-split.allium`: `RequestWrapUp` and the rules after it. As for the
+    // dispatch requests, every refusal is an ordinary answer (`Refused`): a
+    // lost race, a late report, a spent token and a redelivered claim all look
+    // like this.
+
+    /// `RequestWrapUp`: write a wrap_up row for `task` on `host`. `action` is
+    /// `rebase`, `done` or `pr`; the last two are written already done. An
+    /// applied call reads the new row's id back as the outcome's one id.
+    async fn request_wrap_up(
+        &self,
+        task: TaskId,
+        host: String,
+        action: String,
+    ) -> Result<ReducerOutcome>;
+    /// `HostClaimsSessionRequest`: requested -> running, by the row's host
+    /// only, clearing a Conflict sub_status for a wrap_up.
+    async fn claim_session_request(
+        &self,
+        id: SessionRequestId,
+        host: String,
+    ) -> Result<ReducerOutcome>;
+    /// `HostReportsSessionRequestDone`. Refused on a row that is no longer
+    /// running, and, for a rebase, past the row's deadline. A repeat of a
+    /// report the row already records is accepted and changes nothing
+    /// (`HostRepeatsSessionRequestDone`).
+    async fn report_session_request_done(
+        &self,
+        id: SessionRequestId,
+        reporter: String,
+    ) -> Result<ReducerOutcome>;
+    /// `HostReportsSessionRequestFailed`. `conflict` is true only for a genuine
+    /// rebase conflict; the module then sets the Conflict sub_status.
+    async fn report_session_request_failed(
+        &self,
+        id: SessionRequestId,
+        reporter: String,
+        reason: String,
+        conflict: bool,
+    ) -> Result<ReducerOutcome>;
+    /// `RequestExitSession`: check `token` (a done wrap_up row's id), apply the
+    /// close, run the epic chain and write the exit_session row, all in one
+    /// transaction. `pr_url` is `""` unless the action is `pr`. An applied call
+    /// reads the new exit_session row's id back as the outcome's one id.
+    async fn request_exit_session(
+        &self,
+        task: TaskId,
+        token: SessionRequestId,
+        action: String,
+        pr_url: String,
+    ) -> Result<ReducerOutcome>;
+    /// `HostRestartFailsInterruptedSessionRequests`: fail `host`'s running rows.
+    async fn fail_interrupted_session_requests(&self, host: String) -> Result<ReducerOutcome>;
 }
 
 /// Push this machine's current host row to the store, best-effort.

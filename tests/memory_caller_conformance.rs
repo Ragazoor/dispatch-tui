@@ -2634,7 +2634,7 @@ fn session_shape(r: &dispatch_tui::models::SessionRequest) -> SessionShape {
 /// by `src/sync/memory_caller/tests/session_requests.rs`.
 #[test]
 fn memory_caller_serves_session_requests_like_the_real_module() {
-    use dispatch_tui::models::{DispatchRequestId, SessionRequestId};
+    use dispatch_tui::models::SessionRequestId;
 
     if !spacetime_available_or_skip() {
         return;
@@ -2732,40 +2732,40 @@ fn memory_caller_serves_session_requests_like_the_real_module() {
         };
         let mine = |epic_id: i64, tag: &str| bindings::Task {
             created_by: identity.clone(),
-            owner: identity.clone(),
+            // A task in an epic carries no owner (`OwnerTracksUserBoardTask`).
+            owner: if epic_id == 0 {
+                identity.clone()
+            } else {
+                String::new()
+            },
             tag: tag.into(),
             ..blank_task_in_epic(epic_id)
         };
-        // A task dispatched on host-a: the state every wrap-up starts from.
+        // A task running on host-a: the state every wrap-up starts from. Patched
+        // in directly, not dispatched: a dispatch finishing in the same
+        // millisecond as the wrap-up would void the token (W3) on one side and
+        // not the other.
         let dispatched = |task: TaskId| {
             let real = &real;
             let mem = &mem;
             async move {
                 for caller in [real as &dyn ReducerCaller, mem as &dyn ReducerCaller] {
-                    let req = match caller
-                        .request_dispatch(task, "host-a".into(), "user".into(), "dispatch".into())
-                        .await
-                        .unwrap()
-                    {
-                        ReducerOutcome::Applied(ids) => DispatchRequestId(ids[0]),
-                        other => panic!("the dispatch request must apply: {other:?}"),
-                    };
-                    assert!(caller
-                        .claim_dispatch_request(req, "host-a".into())
-                        .await
-                        .unwrap()
-                        .won());
-                    assert!(caller
-                        .report_dispatch_provisioned(
-                            req,
-                            "host-a".into(),
-                            format!("/repo/.worktrees/{}-t", task.0),
-                            format!("task-{}", task.0),
-                            false,
+                    caller
+                        .patch_task(
+                            task,
+                            bindings::TaskPatch {
+                                status: Some("running".into()),
+                                sub_status: Some("active".into()),
+                                worktree: Some(format!("/repo/.worktrees/{}-t", task.0)),
+                                tmux_window: Some(format!("task-{}", task.0)),
+                                host: Some("host-a".into()),
+                                ..blank_task_patch()
+                            },
                         )
                         .await
                         .unwrap()
-                        .won());
+                        .applied()
+                        .unwrap();
                 }
             }
         };
@@ -3144,6 +3144,22 @@ fn memory_caller_serves_session_requests_like_the_real_module() {
                 .await
                 .unwrap(),
         );
+        // A task is deleted only from Done (`tasks.allium: DeleteTask`).
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .patch_task(
+                    doomed,
+                    bindings::TaskPatch {
+                        status: Some("done".into()),
+                        sub_status: Some("none".into()),
+                        ..blank_task_patch()
+                    },
+                )
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
         real.delete_task(doomed).await.unwrap().applied().unwrap();
         mem.delete_task(doomed).await.unwrap().applied().unwrap();
         wait_for!(rows_real

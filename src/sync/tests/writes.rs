@@ -87,6 +87,12 @@ enum Sent {
     ReportDispatchProvisioned(i64, String, String, String, bool),
     ReportDispatchFailed(i64, String, String),
     FailInterruptedDispatchRequests(String),
+    RequestWrapUp(TaskId, String, String),
+    ClaimSessionRequest(i64, String),
+    ReportSessionRequestDone(i64, String),
+    ReportSessionRequestFailed(i64, String, String, bool),
+    RequestExitSession(TaskId, i64, String, String),
+    FailInterruptedSessionRequests(String),
     SaveSetting(String, String, String),
     ClearSetting(String, String),
     CreateLearning(Box<bindings::Learning>),
@@ -798,6 +804,60 @@ impl ReducerCaller for RecordingCaller {
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::FailInterruptedDispatchRequests(host))
     }
+
+    async fn request_wrap_up(
+        &self,
+        task: TaskId,
+        host: String,
+        action: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::RequestWrapUp(task, host, action))
+    }
+
+    async fn claim_session_request(
+        &self,
+        id: crate::models::SessionRequestId,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ClaimSessionRequest(id.0, host))
+    }
+
+    async fn report_session_request_done(
+        &self,
+        id: crate::models::SessionRequestId,
+        reporter: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ReportSessionRequestDone(id.0, reporter))
+    }
+
+    async fn report_session_request_failed(
+        &self,
+        id: crate::models::SessionRequestId,
+        reporter: String,
+        reason: String,
+        conflict: bool,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ReportSessionRequestFailed(
+            id.0, reporter, reason, conflict,
+        ))
+    }
+
+    async fn request_exit_session(
+        &self,
+        task: TaskId,
+        token: crate::models::SessionRequestId,
+        action: String,
+        pr_url: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::RequestExitSession(task, token.0, action, pr_url))
+    }
+
+    async fn fail_interrupted_session_requests(
+        &self,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::FailInterruptedSessionRequests(host))
+    }
 }
 
 /// The instant the fixed clock sits at, and the string it must produce.
@@ -1323,11 +1383,96 @@ async fn a_request_names_the_machine_making_it() {
     );
 }
 
-// The chain's candidate loop moved to the service with store-split M4
-// (`TaskService::request_next_backlog_subtask`): its ordering, phoenix and
-// refusal rules are pinned in `src/store/tests/tasks_patch.rs`, and its
-// outage-is-not-an-empty-backlog rule in
-// `src/service/tasks/tests/crud/claim_and_close.rs`.
+// The chain's candidate loop moved to the service with store-split M4 and into
+// the module with M5 (`store-split.allium: RequestExitSession` runs
+// `AutoDispatchNextSubtask` in its own transaction): its ordering, phoenix and
+// refusal rules are pinned in `src/sync/memory_caller/tests/session_requests.rs`
+// and the module's own tests.
+
+/// `store-split.allium: RequestWrapUp`, `RequestExitSession` and the host
+/// rules after them. A wrap-up names the machine making it, with the action in
+/// the module's spelling; an exit_session carries the token and the url only
+/// for the pr action; every host call names this machine. A refusal is an
+/// answer, an outage an error, as for dispatch requests.
+#[tokio::test]
+async fn session_requests_name_the_machine_and_speak_the_modules_vocabulary() {
+    use crate::models::{SessionRequestId, WrapUpMode};
+    use crate::store::{SessionRequestAnswer, SessionRequestStore};
+    let (writer, caller) = writer_with(RecordingCaller::returning(&[7]));
+
+    let wrap = writer
+        .request_wrap_up(TaskId(3), WrapUpMode::Rebase)
+        .await
+        .unwrap();
+    assert_eq!(wrap, SessionRequestAnswer::Requested(SessionRequestId(7)));
+    writer
+        .request_exit_session(
+            TaskId(3),
+            SessionRequestId(7),
+            WrapUpMode::Done,
+            Some("ignored"),
+        )
+        .await
+        .unwrap();
+    writer
+        .request_exit_session(
+            TaskId(4),
+            SessionRequestId(8),
+            WrapUpMode::Pr,
+            Some("https://github.com/o/r/pull/9"),
+        )
+        .await
+        .unwrap();
+    assert!(writer
+        .claim_session_request(SessionRequestId(7))
+        .await
+        .unwrap());
+    assert!(writer
+        .report_session_request_done(SessionRequestId(7))
+        .await
+        .unwrap());
+    assert!(writer
+        .report_session_request_failed(SessionRequestId(8), "boom", true)
+        .await
+        .unwrap());
+    writer.fail_interrupted_session_requests().await.unwrap();
+
+    assert_eq!(
+        caller.sent(),
+        vec![
+            Sent::RequestWrapUp(TaskId(3), "host-me".into(), "rebase".into()),
+            Sent::RequestExitSession(TaskId(3), 7, "done".into(), "ignored".into()),
+            Sent::RequestExitSession(
+                TaskId(4),
+                8,
+                "pr".into(),
+                "https://github.com/o/r/pull/9".into()
+            ),
+            Sent::ClaimSessionRequest(7, "host-me".into()),
+            Sent::ReportSessionRequestDone(7, "host-me".into()),
+            Sent::ReportSessionRequestFailed(8, "host-me".into(), "boom".into(), true),
+            Sent::FailInterruptedSessionRequests("host-me".into()),
+        ]
+    );
+
+    let (loser, _) = writer_with(RecordingCaller::rejecting());
+    assert!(matches!(
+        loser
+            .request_wrap_up(TaskId(1), WrapUpMode::Done)
+            .await
+            .unwrap(),
+        SessionRequestAnswer::Refused(_)
+    ));
+    assert!(!loser
+        .claim_session_request(SessionRequestId(1))
+        .await
+        .unwrap());
+    let (offline, _) = writer_with(RecordingCaller::refusing("store unreachable"));
+    assert!(offline
+        .request_exit_session(TaskId(1), SessionRequestId(1), WrapUpMode::Done, None)
+        .await
+        .is_err());
+}
 
 // -- The refusal names the outage -------------------------------------------
 
@@ -2258,6 +2403,22 @@ async fn every_store_mutation_reaches_the_transport() {
         db.report_dispatch_failed(request, "boom").await.unwrap();
         db.fail_interrupted_dispatch_requests().await.unwrap();
     }
+    {
+        use crate::models::{SessionRequestId, WrapUpMode};
+        use crate::store::SessionRequestStore;
+        let request = SessionRequestId(1);
+        // The default caller reads no id back: the call reached the transport.
+        let _ = db.request_wrap_up(TaskId(1), WrapUpMode::Rebase).await;
+        db.claim_session_request(request).await.unwrap();
+        db.report_session_request_done(request).await.unwrap();
+        db.report_session_request_failed(request, "boom", false)
+            .await
+            .unwrap();
+        let _ = db
+            .request_exit_session(TaskId(1), request, WrapUpMode::Done, None)
+            .await;
+        db.fail_interrupted_session_requests().await.unwrap();
+    }
 
     db.create_epic("E", "", None).await.unwrap();
     db.patch_epic(EpicId(1), &crate::store::EpicPatch::new().title("e"))
@@ -2425,6 +2586,12 @@ async fn every_store_mutation_reaches_the_transport() {
             "ReportDispatchProvisioned",
             "ReportDispatchFailed",
             "FailInterruptedDispatchRequests",
+            "RequestWrapUp",
+            "ClaimSessionRequest",
+            "ReportSessionRequestDone",
+            "ReportSessionRequestFailed",
+            "RequestExitSession",
+            "FailInterruptedSessionRequests",
             "CreateEpic",
             "PatchEpic",
             "Recalculate",

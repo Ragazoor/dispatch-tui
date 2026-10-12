@@ -529,8 +529,8 @@ async fn mark_pr_learnings_gate_shown_missing_task_is_false() {
 // Since M4 the claim IS the dispatch request (`store-split.allium:
 // RequestDispatch`): one module transaction that claims the task and writes
 // the row. These pin the claim's guarantees at the store, through
-// `request_dispatch`, and the epic chain's ordering through the service that
-// now picks its candidates (`TaskService::request_next_backlog_subtask`).
+// `request_dispatch`, and the epic chain's ordering through the close that now
+// runs it in the module (`request_exit_session`, store-split M5).
 
 /// Helper: a subtask of `epic_id` in `status`, with an explicit `sort_order`.
 async fn subtask(
@@ -582,17 +582,47 @@ fn applied(answer: &RequestDispatchAnswer) -> bool {
     matches!(answer, RequestDispatchAnswer::Requested(_))
 }
 
-/// The service the epic chain claims through, over `db`.
-fn chain(db: &std::sync::Arc<Store>) -> crate::service::TaskService {
-    crate::service::TaskService::new(db.clone(), crate::process::MockProcessRunner::unused())
-}
-
+/// Close a session of `epic` through the module and answer the subtask its
+/// chain requested in the same transaction (`RequestExitSession`,
+/// `AutoDispatchNextSubtask`): a task of the epic running here is wrapped up
+/// (`done`, so the token is a row at once) and then closed.
 async fn next_in_chain(db: &std::sync::Arc<Store>, epic: EpicId) -> Option<TaskId> {
-    chain(db)
-        .request_next_backlog_subtask(epic)
+    use crate::models::WrapUpMode;
+    use crate::store::{SessionRequestAnswer, SessionRequestRead, SessionRequestStore};
+    db.patch_epic(epic, &crate::store::EpicPatch::new().auto_dispatch(true))
+        .await
+        .unwrap();
+    let closing = db
+        .create_task(CreateTaskRequest {
+            status: TaskStatus::Running,
+            epic_id: Some(epic),
+            ..CreateTaskRequest::fixture("closing", "/tmp/r")
+        })
+        .await
+        .unwrap();
+    let window = crate::models::TmuxWindow::for_task(closing);
+    db.patch_task(
+        closing,
+        &TaskPatch::new()
+            .worktree(Some("/tmp/r/.worktrees/closing"))
+            .host(Some(MEMORY_HOST_ID))
+            .tmux_window(Some(&window)),
+    )
+    .await
+    .unwrap();
+    let SessionRequestAnswer::Requested(token) =
+        db.request_wrap_up(closing, WrapUpMode::Done).await.unwrap()
+    else {
+        panic!("the wrap-up must apply");
+    };
+    let SessionRequestAnswer::Requested(close) = db
+        .request_exit_session(closing, token, WrapUpMode::Done, None)
         .await
         .unwrap()
-        .map(|task| task.id)
+    else {
+        panic!("the close must apply");
+    };
+    db.session_request(close).await.unwrap().chained_task
 }
 
 #[tokio::test]

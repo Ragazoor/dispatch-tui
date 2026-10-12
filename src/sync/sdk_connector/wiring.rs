@@ -11,9 +11,9 @@ use crate::spacetime::bindings::{
     DbConnection, DispatchRequestsTableAccess as _, EpicsTableAccess as _, HostsTableAccess as _,
     LearningRetrievalsTableAccess as _, LearningsTableAccess as _, PollOwnersTableAccess as _,
     RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _, RetiredFeedItemsTableAccess as _,
-    SettingsTableAccess as _, SubscriptionHandle, SubscriptionsTableAccess as _,
-    TasksTableAccess as _, UsageEventsTableAccess as _, WorkPackageLinksTableAccess as _,
-    WorkPackagesTableAccess as _,
+    SessionRequestsTableAccess as _, SettingsTableAccess as _, SubscriptionHandle,
+    SubscriptionsTableAccess as _, TasksTableAccess as _, UsageEventsTableAccess as _,
+    WorkPackageLinksTableAccess as _, WorkPackagesTableAccess as _,
 };
 use crate::sync::subtree::SubtreeCover;
 
@@ -147,6 +147,12 @@ impl SpacetimeSdkConnector {
             upsert_dispatch_request,
             remove_dispatch_request,
             |row: &bindings::DispatchRequest| row.id
+        );
+        wire!(
+            session_requests,
+            upsert_session_request,
+            remove_session_request,
+            |row: &bindings::SessionRequest| row.id
         );
     }
 

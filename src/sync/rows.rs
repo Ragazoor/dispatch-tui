@@ -42,7 +42,8 @@ use tokio::sync::watch;
 
 use crate::models::{
     DispatchRequest, DispatchRequestId, Epic, EpicId, Learning, LearningId, LearningRetrieval,
-    PollScopeId, Task, TaskId, UsageSummary, WorkPackage, WorkPackageId, WorkPackageLink,
+    PollScopeId, SessionRequest, SessionRequestId, Task, TaskId, UsageSummary, WorkPackage,
+    WorkPackageId, WorkPackageLink,
 };
 use crate::spacetime::bindings;
 use crate::store::{LearningFilter, UsageQuery};
@@ -162,6 +163,10 @@ struct Rows {
     /// `WHERE host = …` (`sync.allium: SubscribeToThisHostsDispatchRequests`),
     /// in every state, so nothing here filters by host or state.
     dispatch_requests: BTreeMap<i64, DispatchRequest>,
+    /// store-split M5. Arrive scoped to THIS host by the subscription's
+    /// `WHERE host = …` (`sync.allium: SubscribeToThisHostsSessionRequests`),
+    /// in every state, so nothing here filters by host or state.
+    session_requests: BTreeMap<i64, SessionRequest>,
 }
 
 impl Rows {
@@ -181,6 +186,7 @@ impl Rows {
             && self.work_packages.is_empty()
             && self.work_package_links.is_empty()
             && self.dispatch_requests.is_empty()
+            && self.session_requests.is_empty()
     }
 }
 
@@ -509,6 +515,26 @@ impl SharedRows {
         self.write(|rows| rows.dispatch_requests.remove(&id).is_some());
     }
 
+    /// A session request row (store-split M5). An undecodable one is dropped,
+    /// as a dispatch request is: read as open or as finished it would drive the
+    /// `wrap_up` wait and the exit token wrongly either way.
+    pub fn upsert_session_request(&self, row: &bindings::SessionRequest) {
+        match decode::session_request(row) {
+            Ok(request) => self.write(|rows| {
+                rows.session_requests.insert(request.id.0, request);
+                true
+            }),
+            Err(e) => {
+                crate::store::drop_undecodable("session request", &e);
+                self.write(|rows| rows.session_requests.remove(&row.id).is_some());
+            }
+        }
+    }
+
+    pub fn remove_session_request(&self, id: i64) {
+        self.write(|rows| rows.session_requests.remove(&id).is_some());
+    }
+
     /// Drop everything.
     ///
     /// Called when a connection goes down. The rows belonged to that
@@ -670,6 +696,17 @@ impl SharedRows {
     /// every state — oldest first (by id).
     pub fn dispatch_requests(&self) -> Vec<DispatchRequest> {
         self.read(|rows| rows.dispatch_requests.values().cloned().collect())
+    }
+
+    /// One session request row by id.
+    pub fn session_request(&self, id: SessionRequestId) -> Option<SessionRequest> {
+        self.read(|rows| rows.session_requests.get(&id.0).cloned())
+    }
+
+    /// Every session request row this subscription holds — this host's, in
+    /// every state — oldest first (by id).
+    pub fn session_requests(&self) -> Vec<SessionRequest> {
+        self.read(|rows| rows.session_requests.values().cloned().collect())
     }
 
     /// `task`'s most recent dispatch request (the highest id), if this

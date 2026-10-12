@@ -27,9 +27,10 @@ use std::sync::Arc;
 use crate::models::{
     DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, Epic, EpicId, FeedItem,
     FeedRole, Learning, LearningId, LearningKind, LearningRetrieval, LearningScope, LearningStatus,
-    LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource, StopOutcome, SubStatus,
-    SubagentDrain, Task, TaskId, TaskStatus, TaskTag, TmuxWindow, UserPromptOutcome, WorkPackage,
-    WorkPackageId, WorkPackageItem, WorkPackageLink, WrapUpMode,
+    LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource, SessionRequest,
+    SessionRequestId, StopOutcome, SubStatus, SubagentDrain, Task, TaskId, TaskStatus, TaskTag,
+    TmuxWindow, UserPromptOutcome, WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink,
+    WrapUpMode,
 };
 
 // ---------------------------------------------------------------------------
@@ -571,6 +572,86 @@ pub trait DispatchRequestStore: DispatchRequestRead {
     async fn report_dispatch_failed(&self, id: DispatchRequestId, reason: &str) -> Result<bool>;
     /// `HostRestartFailsInterrupted`: fail this host's provisioning rows.
     async fn fail_interrupted_dispatch_requests(&self) -> Result<()>;
+}
+
+// ---------------------------------------------------------------------------
+// Session requests (store-split M5)
+// ---------------------------------------------------------------------------
+
+/// What [`SessionRequestStore::request_wrap_up`] and
+/// [`SessionRequestStore::request_exit_session`] answered. A refusal is an
+/// ORDINARY answer, not an error (`store-split.allium: RequestWrapUp`,
+/// `RequestExitSession`): it carries the module's reason, verbatim, and wrote
+/// nothing. A store that could not be reached — or a call that got no answer,
+/// which may or may not have landed — is the `Err` of the enclosing `Result`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionRequestAnswer {
+    /// The row exists: a wrap_up row (its id is the exit token once done) or the
+    /// exit_session row the close wrote.
+    Requested(SessionRequestId),
+    /// The module's reason, verbatim.
+    Refused(String),
+}
+
+/// Reading this host's session request rows — the ones its subscription holds
+/// (`sync.allium: SubscribeToThisHostsSessionRequests`), in every state. On
+/// [`TaskReadStore`] so a read-only handle can follow a request's outcome; the
+/// writes are on [`SessionRequestStore`].
+#[async_trait::async_trait]
+pub trait SessionRequestRead: Send + Sync {
+    async fn session_request(&self, id: SessionRequestId) -> Option<SessionRequest>;
+    /// Every row this host's subscription holds, oldest first.
+    async fn session_requests(&self) -> Vec<SessionRequest>;
+    /// Fires whenever the subscribed rows move — a session row among them. What
+    /// a caller WAITING on a row's outcome waits on (`wrap_up`,
+    /// `mcp-task-tools.allium: WrapUpViaMcp`), so the wait is a signal, never a
+    /// poll. Subscribe before writing, then re-read on each wake.
+    fn session_request_changes(&self) -> tokio::sync::watch::Receiver<u64>;
+}
+
+/// The session request reducers (`store-split.allium`: `RequestWrapUp` and the
+/// host rules after it). Every call names THIS host, so a caller cannot ask or
+/// report on another machine's behalf.
+///
+/// A close rewrites its task, so this is a task mutation: reachable from the
+/// service layer, not from a read-only handle.
+#[async_trait::async_trait]
+pub trait SessionRequestStore: SessionRequestRead {
+    /// `RequestWrapUp`. `done` and `pr` are answered with a row already done.
+    async fn request_wrap_up(
+        &self,
+        task: TaskId,
+        action: WrapUpMode,
+    ) -> Result<SessionRequestAnswer>;
+    /// `RequestExitSession`: the token check, the close, the epic chain and the
+    /// exit_session row, in one module transaction. `pr_url` is only read for
+    /// the `pr` action.
+    async fn request_exit_session(
+        &self,
+        task: TaskId,
+        token: SessionRequestId,
+        action: WrapUpMode,
+        pr_url: Option<&str>,
+    ) -> Result<SessionRequestAnswer>;
+    /// `HostClaimsSessionRequest`. `false` is a refused claim — another board,
+    /// a redelivery or the deadline got there first — and the caller does
+    /// nothing.
+    async fn claim_session_request(&self, id: SessionRequestId) -> Result<bool>;
+    /// `HostReportsSessionRequestDone`. `false` is a refused report: the row
+    /// failed under this host, or a rebase finished past its deadline.
+    async fn report_session_request_done(&self, id: SessionRequestId) -> Result<bool>;
+    /// `HostReportsSessionRequestFailed`. `conflict` is true only for a genuine
+    /// rebase conflict; the module then sets the Conflict sub_status. `false`
+    /// when the row had already finished.
+    async fn report_session_request_failed(
+        &self,
+        id: SessionRequestId,
+        reason: &str,
+        conflict: bool,
+    ) -> Result<bool>;
+    /// `HostRestartFailsInterruptedSessionRequests`: fail this host's running
+    /// rows.
+    async fn fail_interrupted_session_requests(&self) -> Result<()>;
 }
 
 /// Poll ownership (Phase 7): `core.allium: PollOwner`.
@@ -1178,6 +1259,7 @@ pub trait TaskStore:
     + LearningRetrievalStore
     + UsageStore
     + DispatchRequestStore
+    + SessionRequestStore
     + TaskReadStore
 {
 }
@@ -1194,6 +1276,7 @@ impl<
             + LearningRetrievalStore
             + UsageStore
             + DispatchRequestStore
+            + SessionRequestStore
             + TaskReadStore,
     > TaskStore for T
 {
@@ -1253,6 +1336,7 @@ pub trait TaskReadStore:
     + LearningRetrievalStore
     + UsageStore
     + DispatchRequestRead
+    + SessionRequestRead
 {
 }
 
@@ -1268,7 +1352,8 @@ impl<
             + LearningStore
             + LearningRetrievalStore
             + UsageStore
-            + DispatchRequestRead,
+            + DispatchRequestRead
+            + SessionRequestRead,
     > TaskReadStore for T
 {
 }
