@@ -364,6 +364,19 @@ async fn subtask(
     .unwrap()
 }
 
+/// Close a session of `epic` through the real tools — a done wrap-up, then
+/// `exit_session` — which runs the chain in the module (store-split M5,
+/// `RequestExitSession`). Answers the `exit_session` response.
+async fn close_a_session_in(state: &Arc<McpState>, epic: crate::models::EpicId) -> JsonRpcResponse {
+    let closing = create_running_task_with_window_in(state, "/repo", Some(epic)).await;
+    close_session_via_mcp(
+        state,
+        closing,
+        crate::mcp::handlers::tasks::WrapUpAction::Done,
+    )
+    .await
+}
+
 /// The chain writes a request like every launch path: origin `epic_chain`, no
 /// mode (a plan-less research subtask gets research from the module), naming
 /// this board's host — and provisions nothing itself.
@@ -380,9 +393,12 @@ async fn the_chain_requests_its_next_subtask_with_origin_epic_chain() {
     )
     .await;
 
-    let chosen = crate::mcp::handlers::tasks::dispatch::auto_dispatch_next(&state, epic).await;
+    let resp = close_a_session_in(&state, epic).await;
 
-    assert_eq!(chosen.map(|(id, _)| id), Some(next));
+    assert!(
+        extract_response_text(&resp).contains(&format!("#{}", next.0)),
+        "the close names the subtask the module chained: {resp:?}"
+    );
     let row = db
         .latest_dispatch_request_for_task(next)
         .await
@@ -411,9 +427,12 @@ async fn the_chain_moves_to_the_next_candidate_on_a_refused_request() {
     .unwrap();
     let second = subtask(&db, epic, "Mine", 20, None).await;
 
-    let chosen = crate::mcp::handlers::tasks::dispatch::auto_dispatch_next(&state, epic).await;
+    let resp = close_a_session_in(&state, epic).await;
 
-    assert_eq!(chosen.map(|(id, _)| id), Some(second));
+    assert!(
+        extract_response_text(&resp).contains(&format!("#{}", second.0)),
+        "{resp:?}"
+    );
     assert!(db.latest_dispatch_request_for_task(foreign).await.is_none());
     assert_eq!(
         db.get_task(foreign).await.unwrap().status,

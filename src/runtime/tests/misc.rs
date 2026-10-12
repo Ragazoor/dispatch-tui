@@ -581,38 +581,12 @@ mod repo_sync {
         }
     }
 
-    // rule-success.RefreshRepoSyncStateAfterRebase: a rebase that moved the repo's
-    // base branch triggers a non-fetching refresh.
-    #[tokio::test]
-    async fn apply_loop_event_branch_rebased_refreshes_the_repo() {
-        let db = test_db().await;
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"),
-            MockProcessRunner::ok_with_stdout(b"2\t0\n"),
-        ]));
-        let rt = make_runtime(db, tx, mock.clone()).await;
-        let mut app = App::new(vec![]);
-
-        let cmds = apply_loop_event(
-            &mut app,
-            LoopEvent::Mcp(crate::board_event::BoardEvent::BranchRebased {
-                repo_path: "/repo".to_string(),
-            }),
-            &rt,
-        );
-
-        assert!(cmds.is_empty(), "the refresh is spawned, not queued");
-        let m = expect_measurement(&mut rx).await;
-        assert_eq!(m.repo_path, "/repo");
-        assert!(
-            !mock
-                .recorded_calls()
-                .iter()
-                .any(|(_, a)| a.contains(&"fetch".to_string())),
-            "the rebase already refreshed the refs"
-        );
-    }
+    // `RefreshRepoSyncStateAfterRebase` used to arrive here as a
+    // `BoardEvent::BranchRebased` from the MCP handler. Since store-split M5 the
+    // rebase is this host's own work on a wrap_up row, so the session host
+    // refreshes the repository itself: pinned in
+    // `src/runtime/tests/session_requests.rs`
+    // (`a_served_rebase_refreshes_the_repository_drift`).
 
     // rule-success.RefreshRepoSyncStateAfterDispatch for a launch the board did
     // not ask for (the dispatch_task tool, or epic auto-dispatch chaining).
@@ -667,30 +641,6 @@ mod repo_sync {
             }
             other => panic!("expected Dispatched, got {other:?}"),
         }
-    }
-
-    // rule-failure.RefreshRepoSyncStateAfterRebase.1: no repository could be
-    // resolved from the rebased branch, so nothing is refreshed.
-    #[tokio::test]
-    async fn apply_loop_event_branch_rebased_without_a_repo_refreshes_nothing() {
-        let db = test_db().await;
-        let (tx, _rx) = mpsc::unbounded_channel();
-        let mock = Arc::new(MockProcessRunner::new(vec![]));
-        let rt = make_runtime(db, tx, mock.clone()).await;
-        let mut app = App::new(vec![]);
-
-        apply_loop_event(
-            &mut app,
-            LoopEvent::Mcp(crate::board_event::BoardEvent::BranchRebased {
-                repo_path: String::new(),
-            }),
-            &rt,
-        );
-
-        assert!(
-            mock.recorded_calls().is_empty(),
-            "an unresolvable repository must not be measured"
-        );
     }
 
     // `apply_loop_event_auto_dispatch_failed_marks_the_subtask` pinned the

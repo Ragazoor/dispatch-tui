@@ -763,6 +763,7 @@ impl TuiRuntime {
         let tx = self.msg_tx.clone();
         let watermark = Arc::clone(&self.last_change_count);
         let dispatch_host = self.dispatch_host();
+        let session_host = self.session_host();
         tokio::spawn(async move {
             let mut changed = rows.changed();
             // Every wake-up reads the WHOLE board rather than applying a delta.
@@ -782,6 +783,11 @@ impl TuiRuntime {
                 // reload, so the App has seen the row open before it is
                 // claimed, and from the reload's own read of the rows.
                 drop(dispatch_host.serve_rows(&requests).await);
+                // The same for a session request this host must rebase or tear
+                // down for (store-split.allium: HostClaimsSessionRequest), and
+                // for an exit_session row seen failing.
+                let sessions = reads.session_requests().await;
+                drop(session_host.serve_rows(&sessions).await);
             }
         })
     }

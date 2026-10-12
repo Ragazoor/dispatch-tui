@@ -265,6 +265,9 @@ pub(super) async fn make_runtime(
         dispatch_observer: Arc::new(std::sync::Mutex::new(
             crate::dispatch::DispatchRequestObserver::new("test-host"),
         )),
+        session_observer: Arc::new(std::sync::Mutex::new(
+            crate::dispatch::SessionRequestObserver::new("test-host"),
+        )),
     }
 }
 

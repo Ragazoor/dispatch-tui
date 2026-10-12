@@ -641,7 +641,7 @@ async fn list_tasks_done_status_filter() {
 
 #[tokio::test]
 async fn wrap_up_rebase_does_not_change_status() {
-    let (state, db) = test_state_with_overrides(
+    let (state, db) = test_state_with_host(
         with_clean_status(DispatchScript::finish().no_remote()),
         None,
         None,
@@ -658,7 +658,9 @@ async fn wrap_up_rebase_does_not_change_status() {
         .unwrap();
     db.patch_task(
         task_id,
-        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-rebase-done")),
+        &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
+            .worktree(Some("/repo/.worktrees/1-rebase-done")),
     )
     .await
     .unwrap();
@@ -685,7 +687,7 @@ async fn wrap_up_rebase_does_not_change_status() {
 
 #[tokio::test]
 async fn wrap_up_rebase_does_not_recalculate_epic_status() {
-    let (state, db) = test_state_with_overrides(
+    let (state, db) = test_state_with_host(
         with_clean_status(DispatchScript::finish().no_remote()),
         None,
         None,
@@ -704,7 +706,9 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
     db.patch_task(
         task_id,
-        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-only-task")),
+        &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
+            .worktree(Some("/repo/.worktrees/1-only-task")),
     )
     .await
     .unwrap();
@@ -731,7 +735,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
 
 #[tokio::test]
 async fn wrap_up_accepts_string_task_id() {
-    let (state, db) = test_state_with_overrides(
+    let (state, db) = test_state_with_host(
         with_clean_status(DispatchScript::finish().no_remote()),
         None,
         None,
@@ -748,7 +752,9 @@ async fn wrap_up_accepts_string_task_id() {
         .unwrap();
     db.patch_task(
         task_id,
-        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+        &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
+            .worktree(Some("/repo/.worktrees/1-t")),
     )
     .await
     .unwrap();
@@ -805,6 +811,7 @@ async fn get_task_shows_all_fields() {
         .patch_task(
             task_id,
             &store::TaskPatch::new()
+                .host(Some(crate::store::MEMORY_HOST_ID))
                 .worktree(Some("/repo/.worktrees/1-full"))
                 .tmux_window(Some(&test_tmux_window("task-1")))
                 .url(Some(&full_url))

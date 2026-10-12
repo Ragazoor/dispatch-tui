@@ -307,15 +307,6 @@ macro_rules! task_service_api {
                 mode: Option<$crate::models::DispatchMode>
             ) -> Result<$crate::store::RequestDispatchAnswer, $crate::service::ServiceError>;
 
-            /// The epic chain's claim (`epics.allium: AutoDispatchNextSubtask`):
-            /// request the epic's backlog subtasks in board order, origin
-            /// `epic_chain`, until the module accepts one. `Ok(None)` is "no
-            /// candidate left", never "gave up under contention".
-            async fn request_next_backlog_subtask(
-                &self,
-                epic_id: $crate::models::EpicId
-            ) -> Result<Option<$crate::models::Task>, $crate::service::ServiceError>;
-
             /// `HostClaimsDispatch` -> `ProvisionDispatch` for one delivered
             /// row: claim it, provision with the row's mode under the row's
             /// deadline, report dispatched or failed. THE dispatch seam — the
@@ -332,14 +323,52 @@ macro_rules! task_service_api {
                 &self
             ) -> Result<(), $crate::service::ServiceError>;
 
-            /// Rebase a wrapping task's branch onto its base branch, clearing
-            /// the `Conflict` sub_status before and re-setting it on a
-            /// conflict. `WrapUpRebase` in `docs/specs/pr-workflow.allium`.
-            /// Never `Err`; the caller shapes the outcome into its response.
-            async fn wrap_up_rebase(
+            /// `store-split.allium: RequestWrapUp`: write a wrap_up row naming
+            /// THIS host, after the caller's host-local checks. `done` and `pr`
+            /// come back with a row already done, whose id is the exit token; a
+            /// `rebase` row is served by this host's board
+            /// ([`Self::serve_session_request`]). A refusal is an ordinary
+            /// `SessionRequestAnswer::Refused` carrying the module's reason.
+            async fn request_wrap_up(
                 &self,
-                task: $crate::models::Task
-            ) -> $crate::service::WrapUpRebaseOutcome;
+                task_id: $crate::models::TaskId,
+                action: $crate::models::WrapUpMode
+            ) -> Result<$crate::store::SessionRequestAnswer, $crate::service::ServiceError>;
+
+            /// `store-split.allium: RequestExitSession`: the token check, the
+            /// close, the epic chain and the exit_session row in one module
+            /// transaction — whole or absent, the token valid after a refusal.
+            /// Tears nothing down.
+            async fn request_exit_session(
+                &self,
+                task_id: $crate::models::TaskId,
+                token: $crate::models::SessionRequestId,
+                action: $crate::models::WrapUpMode,
+                pr_url: Option<String>
+            ) -> Result<$crate::store::SessionRequestAnswer, $crate::service::ServiceError>;
+
+            /// `HostClaimsSessionRequest` -> `WrapUpRebase` /
+            /// `ExitSessionTeardown` for one delivered row: claim it, do the
+            /// host work under the row's deadline, report done or failed. THE
+            /// session seam — the only place the board rebases for a wrap-up or
+            /// tears a closed session's window down. Never `Err`.
+            async fn serve_session_request(
+                &self,
+                request: $crate::models::SessionRequest
+            ) -> $crate::service::ServedSession;
+
+            /// `KillWindowOfFailedExitSession`: best-effort kill of the window a
+            /// failed exit_session row names.
+            async fn tear_down_failed_exit_window(
+                &self,
+                request: &$crate::models::SessionRequest
+            ) -> ();
+
+            /// `HostRestartFailsInterruptedSessionRequests`: fail the rows this
+            /// host left `running`. Once, at startup.
+            async fn fail_interrupted_session_requests(
+                &self
+            ) -> Result<(), $crate::service::ServiceError>;
 
             /// The checks `wrap_up` makes before it acts: the worktree is
             /// committed and the repo's verify command, if any, passes in it.

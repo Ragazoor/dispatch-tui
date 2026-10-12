@@ -4,7 +4,7 @@ use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{
     DispatchOrigin, DispatchRequest, DispatchRequestId, DispatchRequestState, DispatchResult,
-    EpicId, TaskId,
+    TaskId,
 };
 use crate::store::RequestDispatchAnswer;
 
@@ -12,62 +12,6 @@ use super::{
     parse_args, service_err_to_response, DispatchTaskArgs, JsonRpcResponse, INTERNAL_ERROR,
     INVALID_PARAMS,
 };
-
-/// Requests the next backlog subtask of `epic_id`, if any. Returns
-/// `Some((id, title))` when a request was written, `None` when the chain stops
-/// here (auto_dispatch off, no backlog subtask, or a lookup failure). Never
-/// returns an error: a chain problem must not fail the caller.
-///
-/// Implements `AutoDispatchNextSubtask` in `docs/specs/epics.allium`, fired by
-/// `handle_exit_session` as the last thing a session close does. Since
-/// store-split M4 the chain only ASKS: the request (origin `epic_chain`, no
-/// mode) names this board's host, so this board's host reactor provisions it,
-/// and a failure is raised from the row itself (`ReportChainedDispatchFailure`),
-/// not from here.
-pub(in crate::mcp::handlers) async fn auto_dispatch_next(
-    state: &McpState,
-    epic_id: EpicId,
-) -> Option<(TaskId, String)> {
-    // Fail closed: nothing *requested* this chain, so a DB hiccup must not
-    // launch an agent on an epic whose operator turned chaining off. Every
-    // non-dispatch outcome here is indistinguishable from the documented
-    // normal stops.
-    let epic = match state.epic_svc.get_epic(epic_id).await {
-        Ok(epic) => epic,
-        Err(crate::service::ServiceError::NotFound(_)) => {
-            tracing::warn!("auto_dispatch_next: epic #{} not found", epic_id.0);
-            return None;
-        }
-        Err(e) => {
-            tracing::warn!(
-                "auto_dispatch_next: failed to fetch epic #{}: {e}",
-                epic_id.0
-            );
-            return None;
-        }
-    };
-    if !epic.auto_dispatch {
-        return None;
-    }
-
-    // The request is the claim, and the chain offers the subtasks one at a
-    // time: a concurrent close on the same epic can never win the same one.
-    let next_task = match state.task_svc.request_next_backlog_subtask(epic_id).await {
-        Ok(Some(next)) => next,
-        Ok(None) => return None,
-        Err(e) => {
-            tracing::warn!(
-                "auto_dispatch_next: failed to request the next subtask of epic #{}: {e}",
-                epic_id.0
-            );
-            return None;
-        }
-    };
-
-    state.notify_task_changed(next_task.id);
-    state.notify_epic_changed(epic_id);
-    Some((next_task.id, next_task.title))
-}
 
 pub(crate) async fn handle_dispatch_task(
     state: &McpState,

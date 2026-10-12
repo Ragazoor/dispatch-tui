@@ -450,7 +450,7 @@ impl TaskService {
     /// entering Done via `PrMerged` itself, which this rule does not
     /// distinguish from any other route in) logs at debug; anything else
     /// warns.
-    fn spawn_close_attached_pr(&self, task_id: TaskId, url: String) {
+    pub(super) fn spawn_close_attached_pr(&self, task_id: TaskId, url: String) {
         let runner = self.runner.clone();
         let close = async move {
             let joined =
@@ -1105,58 +1105,6 @@ impl TaskService {
     /// recalculation is involved.
     pub async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool, ServiceError> {
         Ok(self.db.mark_pr_learnings_gate_shown(id).await?)
-    }
-
-    /// `epics.allium: AutoDispatchNextSubtask`'s claim: offer the epic's
-    /// backlog subtasks to the module as dispatch requests (origin
-    /// `epic_chain`, no mode), one at a time in board order, until one is
-    /// accepted. Returns that subtask as the candidate read before the
-    /// request (its row now holds the claim), or `Ok(None)` when no candidate
-    /// is left.
-    ///
-    /// A refused request is ORDINARY — another entry point or a concurrent
-    /// close got there first, or the subtask's worktree is on another machine
-    /// — and the chain moves on, so two sessions closing concurrently request
-    /// two DIFFERENT subtasks (`DispatchClaimExclusive` in
-    /// `docs/specs/dispatch.allium`). The candidates are read from the same
-    /// rows the board draws, so the chain takes the task the column shows as
-    /// next. A `phoenix` subtask is refused by the request itself
-    /// (`PhoenixIsNeverChained`, keyed on the `epic_chain` origin) and passed
-    /// over like any other refusal.
-    pub async fn request_next_backlog_subtask(
-        &self,
-        epic_id: EpicId,
-    ) -> Result<Option<Task>, ServiceError> {
-        // Read only to honour the NotFound contract.
-        self.db
-            .get_epic(epic_id)
-            .await
-            .ok_or_else(|| ServiceError::NotFound(format!("Epic {} not found", epic_id.0)))?;
-
-        // `list_tasks_for_epic` is already in `COALESCE(sort_order, id)` order —
-        // the order the board draws them in, and the order the chain takes.
-        let candidates: Vec<Task> = self
-            .db
-            .list_tasks_for_epic(epic_id)
-            .await
-            .into_iter()
-            .filter(|t| t.status == TaskStatus::Backlog)
-            .collect();
-        for task in candidates {
-            match self
-                .request_dispatch(task.id, crate::models::DispatchOrigin::EpicChain, None)
-                .await?
-            {
-                crate::store::RequestDispatchAnswer::Requested(_) => return Ok(Some(task)),
-                crate::store::RequestDispatchAnswer::Refused(why) => {
-                    tracing::info!(
-                        task_id = task.id.0,
-                        "the epic chain's request was refused, trying the next subtask: {why}"
-                    );
-                }
-            }
-        }
-        Ok(None)
     }
 }
 

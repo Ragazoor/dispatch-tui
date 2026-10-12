@@ -5,6 +5,7 @@
 mod crud;
 mod dispatch;
 mod params;
+mod session;
 mod validators;
 mod wrap_up;
 
@@ -13,7 +14,8 @@ pub use crud::{
 };
 pub use dispatch::ServedDispatch;
 pub use params::{CreateTaskParams, ListTasksFilter, UpdateTaskParams};
-pub use wrap_up::{WrapUpChecks, WrapUpRebaseOutcome, WRAP_UP_VERIFY_TIMEOUT};
+pub use session::{ServedSession, SessionOutcome};
+pub use wrap_up::{WrapUpChecks, WRAP_UP_VERIFY_TIMEOUT};
 
 #[cfg(test)]
 mod tests;

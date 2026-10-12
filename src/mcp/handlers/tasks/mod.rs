@@ -16,8 +16,7 @@ pub(super) use super::types::{
 
 mod crud;
 // `pub(super)` so the handler tests under `handlers::tests` can reach
-// `auto_dispatch_next` directly for the one branch `exit_session` cannot drive
-// (a task whose epic_id does not resolve — blocked by a foreign key).
+// `dispatched_text`, the success wording `dispatch_task` pins.
 pub(super) mod dispatch;
 mod verify;
 mod wrap_up;
@@ -232,10 +231,10 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) phoenix: bool,
 }
 
-// WrapUpAction lives in `crate::mcp` — it's shared between wrap_up (which
-// issues an ExitToken recording it) and exit_session (which validates
-// against it), not a handler-local concept. Re-exported here so callers in
-// this module can keep referring to it unqualified.
+// WrapUpAction lives in `crate::mcp` — it's shared between wrap_up (whose
+// request row records it) and exit_session (whose call must name the same
+// one), not a handler-local concept. Re-exported here so callers in this
+// module can keep referring to it unqualified.
 pub(super) use crate::mcp::WrapUpAction;
 
 #[derive(Deserialize)]
@@ -251,7 +250,10 @@ pub(super) struct WrapUpArgs {
 pub(super) struct ExitSessionArgs {
     #[serde(deserialize_with = "deserialize_flexible_id")]
     pub(super) task_id: TaskId,
-    #[serde(default)]
+    /// The exit token: the id of the done wrap_up row. Sent as a string (the
+    /// schema's type) or, by an agent that echoes the number it was shown, as
+    /// an integer.
+    #[serde(default, deserialize_with = "deserialize_token")]
     pub(super) token: Option<String>,
     #[serde(default)]
     pub(super) action: Option<WrapUpAction>,
@@ -480,6 +482,26 @@ this repo or task? If so, call record_learning with a brief summary."
     } else {
         ""
     }
+}
+
+/// An exit token as the agent sent it: a string, or the integer the
+/// `Exit token:` line showed.
+fn deserialize_token<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Token {
+        Text(String),
+        Number(i64),
+    }
+    Ok(
+        Option::<Token>::deserialize(deserializer)?.map(|t| match t {
+            Token::Text(s) => s,
+            Token::Number(n) => n.to_string(),
+        }),
+    )
 }
 
 #[cfg(test)]

@@ -108,6 +108,60 @@ fn with_clean_status(
     Arc::new(MockProcessRunner::new_with_delays(responses))
 }
 
+/// This board's host reactor, as the runtime runs it (`store-split.allium`:
+/// `HostClaimsDispatch`, `HostClaimsSessionRequest`): serve every `requested`
+/// dispatch and session row naming this host, once, as the rows arrive. Since
+/// store-split M4 and M5 the tools only WRITE requests — `dispatch_task`, the
+/// epic chain, `wrap_up(rebase)`, the `exit_session` teardown — so a test that
+/// wants an agent launched, a branch rebased or a window killed runs this beside
+/// them, over the same service. Dropped with the test's runtime.
+fn spawn_host(state: &Arc<McpState>) -> tokio::task::JoinHandle<()> {
+    let state = state.clone();
+    tokio::spawn(async move {
+        let mut changes = state.db.dispatch_request_changes();
+        let mut dispatches = crate::dispatch::DispatchRequestObserver::new(state.db.host_id());
+        let mut sessions = crate::dispatch::SessionRequestObserver::new(state.db.host_id());
+        loop {
+            let rows = state.db.dispatch_requests().await;
+            for row in dispatches.observe(&rows) {
+                let svc = state.task_svc.clone();
+                let emb = state.embedding_service.clone();
+                tokio::spawn(async move {
+                    svc.serve_dispatch_request(row, emb).await;
+                });
+            }
+            let rows = state.db.session_requests().await;
+            let work = sessions.observe(&rows);
+            for row in work.tear_down {
+                let svc = state.task_svc.clone();
+                tokio::spawn(async move { svc.tear_down_failed_exit_window(&row).await });
+            }
+            for row in work.serve {
+                let svc = state.task_svc.clone();
+                tokio::spawn(async move {
+                    svc.serve_session_request(row).await;
+                });
+            }
+            if changes.changed().await.is_err() {
+                return;
+            }
+        }
+    })
+}
+
+/// [`test_state_with_overrides`] with this board's host reactor running
+/// ([`spawn_host`]): what a test needs for a `wrap_up(rebase)` to finish, since
+/// the rebase is the host's work on the row the tool writes.
+async fn test_state_with_host(
+    runner: Arc<dyn ProcessRunner>,
+    notify_tx: Option<mpsc::UnboundedSender<crate::board_event::BoardEvent>>,
+    task_svc: Option<Arc<dyn crate::service::TaskServiceApi>>,
+) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
+    let (state, db) = test_state_with_overrides(runner, notify_tx, task_svc).await;
+    drop(spawn_host(&state));
+    (state, db)
+}
+
 /// [`test_state_with_db`] for a `wrap_up` that takes no further subprocess
 /// calls (`done`, `pr`): its runner answers the commit check on a clean
 /// worktree and nothing else.
@@ -230,8 +284,11 @@ async fn create_running_task_with_window_in(
         .unwrap();
     let worktree = format!("{repo_path}/.worktrees/{}-running-task", task_id.0);
     let window = crate::models::TmuxWindow::for_task(task_id);
+    // On this board's host, as a dispatched task is: the module only wraps up a
+    // task whose worktree is on the machine asking (`RequestWrapUp`).
     let patch = crate::store::TaskPatch::new()
         .worktree(Some(worktree.as_str()))
+        .host(Some(crate::store::MEMORY_HOST_ID))
         .tmux_window(Some(&window));
     state.db_write().patch_task(task_id, &patch).await.unwrap();
     task_id
@@ -240,23 +297,26 @@ async fn create_running_task_with_window_in(
 /// The PR url [`close_session_via_mcp`] supplies for the `Pr` action.
 const TEST_PR_URL: &str = "https://github.com/acme/repo/pull/1";
 
-/// Seed the in-memory exit token `wrap_up` would have issued for `action`, and
-/// return it. Shared because the token's shape is one struct in one map and
-/// every close test needs it — inlining it made the shape a 15-site edit.
-fn seed_exit_token(
+/// Seed the exit token `wrap_up` would have issued for `action` — a done
+/// wrap_up request row, whose id is the token (`store-split.allium`, W3) — and
+/// return it. Shared because every close test needs it. A rebase row is claimed
+/// and reported done the way this board's host would.
+async fn seed_exit_token(
     state: &Arc<McpState>,
     task_id: crate::models::TaskId,
     action: crate::mcp::handlers::tasks::WrapUpAction,
 ) -> String {
-    let token = "tok".to_string();
-    state.exit_tokens.write().unwrap().insert(
-        task_id,
-        crate::mcp::ExitToken {
-            token: token.clone(),
-            action,
-        },
-    );
-    token
+    let db = state.db_write();
+    let crate::store::SessionRequestAnswer::Requested(id) =
+        db.request_wrap_up(task_id, action.mode()).await.unwrap()
+    else {
+        panic!("seeding the wrap-up request must apply");
+    };
+    if action == crate::mcp::handlers::tasks::WrapUpAction::Rebase {
+        assert!(db.claim_session_request(id).await.unwrap());
+        assert!(db.report_session_request_done(id).await.unwrap());
+    }
+    id.0.to_string()
 }
 
 /// Close `task_id`'s session with `action`, seeding the exit token the same way
@@ -266,7 +326,7 @@ async fn close_session_via_mcp(
     task_id: crate::models::TaskId,
     action: crate::mcp::handlers::tasks::WrapUpAction,
 ) -> JsonRpcResponse {
-    let token = seed_exit_token(state, task_id, action);
+    let token = seed_exit_token(state, task_id, action).await;
     let mut arguments = json!({
         "task_id": task_id.0,
         "token": token,
@@ -281,6 +341,17 @@ async fn close_session_via_mcp(
         Some(json!({ "name": "exit_session", "arguments": arguments })),
     )
     .await
+}
+
+/// The exit token a successful `wrap_up` response carries: the id of its done
+/// request row, after `Exit token: `.
+fn token_in_response(text: &str) -> String {
+    text.split("Exit token: ")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no exit token in: {text}"))
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect()
 }
 
 /// Returns `true` if the response is either a JSON-RPC protocol error or an

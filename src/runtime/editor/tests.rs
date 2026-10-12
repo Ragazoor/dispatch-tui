@@ -282,6 +282,9 @@ pub(super) fn editor_runtime_on_host(
         dispatch_observer: Arc::new(Mutex::new(crate::dispatch::DispatchRequestObserver::new(
             host_id,
         ))),
+        session_observer: Arc::new(Mutex::new(crate::dispatch::SessionRequestObserver::new(
+            host_id,
+        ))),
     }
 }
 

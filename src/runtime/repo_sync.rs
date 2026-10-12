@@ -6,6 +6,25 @@
 
 use super::*;
 
+/// Measure `repo_path`'s drift off the event loop and send the result as
+/// [`crate::tui::messages::RepoSyncMessage::Measured`]. Shared by the runtime's
+/// own refreshes and the session host's, which refreshes the repository a
+/// `wrap_up` rebase just fast-forwarded (`repo-sync.allium:
+/// RefreshRepoSyncStateAfterRebase`).
+pub(super) fn spawn_repo_measurement(
+    tx: mpsc::UnboundedSender<Message>,
+    runner: Arc<dyn ProcessRunner>,
+    repo_path: String,
+    fetch_first: bool,
+) -> tokio::task::JoinHandle<()> {
+    tokio::task::spawn_blocking(move || {
+        let measurement = crate::repo_sync::measure_repo(&repo_path, fetch_first, &*runner);
+        let _ = tx.send(Message::RepoSync(
+            crate::tui::messages::RepoSyncMessage::Measured(measurement),
+        ));
+    })
+}
+
 impl TuiRuntime {
     /// Measure one repository's drift off the event loop and report the result
     /// as [`crate::tui::messages::RepoSyncMessage::Measured`] (rule
@@ -15,14 +34,12 @@ impl TuiRuntime {
         repo_path: String,
         fetch_first: bool,
     ) -> tokio::task::JoinHandle<()> {
-        let tx = self.msg_tx.clone();
-        let runner = Arc::clone(&self.runner);
-        tokio::task::spawn_blocking(move || {
-            let measurement = crate::repo_sync::measure_repo(&repo_path, fetch_first, &*runner);
-            let _ = tx.send(Message::RepoSync(
-                crate::tui::messages::RepoSyncMessage::Measured(measurement),
-            ));
-        })
+        spawn_repo_measurement(
+            self.msg_tx.clone(),
+            Arc::clone(&self.runner),
+            repo_path,
+            fetch_first,
+        )
     }
 
     /// One fetching refresh per saved repo path (rule

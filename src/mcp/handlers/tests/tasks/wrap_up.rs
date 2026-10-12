@@ -10,12 +10,27 @@ use crate::models::test_tmux_window;
 /// after the rebase has already fast-forwarded the base branch, so the edits
 /// land nowhere — and re-file findings it filed minutes earlier. Asserted for
 /// each action separately because they reach the response through two different
-/// handlers (`finish_wrap_up_rebase` and `finish_wrap_up_simple`).
+/// paths (the rebase's wait on its request row and the no-host-work actions' immediate answer).
 fn assert_no_retro_instruction(action: &str, text: &str) {
     assert!(
         !text.to_lowercase().contains("retro"),
         "wrap_up({action}) response must not instruct the agent to run /retro; got: {text}"
     );
+}
+
+/// The exit token `wrap_up` last issued for `task_id`: the id of the task's
+/// most recent wrap_up request row (`store-split.allium`, W3).
+async fn latest_token(state: &Arc<McpState>, task_id: crate::models::TaskId) -> String {
+    state
+        .db
+        .session_requests()
+        .await
+        .into_iter()
+        .filter(|r| r.task_id == task_id && r.kind == crate::models::SessionRequestKind::WrapUp)
+        .map(|r| r.id.0)
+        .max()
+        .expect("wrap_up must have written a request row")
+        .to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -63,7 +78,7 @@ async fn wrap_up_rejects_backlog_task() {
 
 #[tokio::test]
 async fn wrap_up_accepts_running_blocked_task() {
-    let (state, db) = test_state_with_overrides(rebase_ok_runner(), None, None).await;
+    let (state, db) = test_state_with_host(rebase_ok_runner(), None, None).await;
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -76,6 +91,7 @@ async fn wrap_up_accepts_running_blocked_task() {
     db.patch_task(
         task_id,
         &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
             .worktree(Some("/repo/.worktrees/1-my-task"))
             .sub_status(crate::models::SubStatus::NeedsInput),
     )
@@ -101,7 +117,7 @@ async fn wrap_up_accepts_running_blocked_task() {
 
 #[tokio::test]
 async fn wrap_up_accepts_running_active_task() {
-    let (state, db) = test_state_with_overrides(rebase_ok_runner(), None, None).await;
+    let (state, db) = test_state_with_host(rebase_ok_runner(), None, None).await;
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -113,7 +129,9 @@ async fn wrap_up_accepts_running_active_task() {
         .unwrap();
     db.patch_task(
         task_id,
-        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+        &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
+            .worktree(Some("/repo/.worktrees/1-t")),
     )
     .await
     .unwrap();
@@ -141,7 +159,7 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
     //   - name exit_session as the next call,
     //   - be imperative (not advisory like "when ready"),
     //   - say the session is not yet closed so the agent does not stop.
-    let (state, db) = test_state_with_overrides(rebase_ok_runner(), None, None).await;
+    let (state, db) = test_state_with_host(rebase_ok_runner(), None, None).await;
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -153,7 +171,9 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
         .unwrap();
     db.patch_task(
         task_id,
-        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+        &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
+            .worktree(Some("/repo/.worktrees/1-t")),
     )
     .await
     .unwrap();
@@ -190,12 +210,15 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
         "response must tell the agent which action to pass to exit_session; got: {text}"
     );
 
-    let map = state.exit_tokens.read().unwrap();
-    let et = map
-        .get(&task_id)
-        .expect("token should be stored after successful rebase");
+    let row = state
+        .db
+        .session_requests()
+        .await
+        .into_iter()
+        .find(|r| r.task_id == task_id)
+        .expect("the wrap_up request row is the token after a successful rebase");
     assert!(
-        text.contains(&et.token),
+        text.contains(&row.id.0.to_string()),
         "response must include the exit token; got: {text}"
     );
 }
@@ -241,7 +264,9 @@ async fn wrap_up_invalid_action() {
         .db_write()
         .patch_task(
             task_id,
-            &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+            &store::TaskPatch::new()
+                .host(Some(crate::store::MEMORY_HOST_ID))
+                .worktree(Some("/repo/.worktrees/1-t")),
         )
         .await
         .unwrap();
@@ -260,7 +285,7 @@ async fn wrap_up_invalid_action() {
 
 #[tokio::test]
 async fn wrap_up_rebase_returns_started() {
-    let (state, db) = test_state_with_overrides(rebase_ok_runner(), None, None).await;
+    let (state, db) = test_state_with_host(rebase_ok_runner(), None, None).await;
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -272,7 +297,9 @@ async fn wrap_up_rebase_returns_started() {
         .unwrap();
     db.patch_task(
         task_id,
-        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-my-task")),
+        &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
+            .worktree(Some("/repo/.worktrees/1-my-task")),
     )
     .await
     .unwrap();
@@ -296,7 +323,7 @@ async fn wrap_up_rebase_returns_started() {
 
 #[tokio::test]
 async fn wrap_up_rebase_returns_exit_token() {
-    let (state, db) = test_state_with_overrides(
+    let (state, db) = test_state_with_host(
         Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b""), // wrap_up: clean worktree
             MockProcessRunner::ok_with_stdout(b"main\n"),
@@ -327,20 +354,19 @@ async fn wrap_up_rebase_returns_exit_token() {
     );
     let text = extract_response_text(&resp);
 
-    let map = state.exit_tokens.read().unwrap();
-    let et = map
-        .get(&task_id)
-        .expect("token should be in exit_tokens after wrap_up rebase");
-    assert!(!et.token.is_empty(), "token must be non-empty");
+    let row = state
+        .db
+        .session_requests()
+        .await
+        .into_iter()
+        .find(|r| r.task_id == task_id)
+        .expect("the wrap_up request row is the token after wrap_up rebase");
     assert_eq!(
-        et.action,
-        crate::mcp::handlers::tasks::WrapUpAction::Rebase,
-        "token must record the action it was issued for"
+        row.action,
+        crate::models::WrapUpMode::Rebase,
+        "the row must record the action the token was issued for"
     );
-    assert!(
-        text.contains(&et.token),
-        "response text must contain the token; got: {text}"
-    );
+    assert_eq!(token_in_response(&text), row.id.0.to_string());
     assert_no_retro_instruction("rebase", &text);
 }
 
@@ -359,6 +385,7 @@ async fn wrap_up_done_returns_exit_token() {
     db.patch_task(
         task_id,
         &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
             .worktree(Some("/repo/.worktrees/1-t"))
             .tmux_window(Some(&test_tmux_window("task-1"))),
     )
@@ -380,20 +407,19 @@ async fn wrap_up_done_returns_exit_token() {
     let text = extract_response_text(&resp);
 
     {
-        let map = state.exit_tokens.read().unwrap();
-        let et = map
-            .get(&task_id)
-            .expect("token should be in exit_tokens after wrap_up done");
-        assert!(!et.token.is_empty(), "token must be non-empty");
+        let row = state
+            .db
+            .session_requests()
+            .await
+            .into_iter()
+            .find(|r| r.task_id == task_id)
+            .expect("the wrap_up request row is the token after wrap_up done");
         assert_eq!(
-            et.action,
-            crate::mcp::handlers::tasks::WrapUpAction::Done,
-            "token must record the action it was issued for"
+            row.action,
+            crate::models::WrapUpMode::Done,
+            "the row must record the action the token was issued for"
         );
-        assert!(
-            text.contains(&et.token),
-            "response text must contain the token; got: {text}"
-        );
+        assert_eq!(token_in_response(&text), row.id.0.to_string());
         assert_no_retro_instruction("done", &text);
     }
 
@@ -428,7 +454,9 @@ async fn wrap_up_pr_defers_review_and_url_to_exit_session() {
         .db_write()
         .patch_task(
             task_id,
-            &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-pr-task")),
+            &store::TaskPatch::new()
+                .host(Some(crate::store::MEMORY_HOST_ID))
+                .worktree(Some("/repo/.worktrees/1-pr-task")),
         )
         .await
         .unwrap();
@@ -457,14 +485,17 @@ async fn wrap_up_pr_defers_review_and_url_to_exit_session() {
     );
     assert!(task.url.is_none(), "url must not be set yet");
 
-    let map = state.exit_tokens.read().unwrap();
-    let et = map
-        .get(&task_id)
-        .expect("token should be in exit_tokens after wrap_up pr");
+    let row = state
+        .db
+        .session_requests()
+        .await
+        .into_iter()
+        .find(|r| r.task_id == task_id)
+        .expect("the wrap_up request row is the token after wrap_up pr");
     assert_eq!(
-        et.action,
-        crate::mcp::handlers::tasks::WrapUpAction::Pr,
-        "token must record action=pr"
+        row.action,
+        crate::models::WrapUpMode::Pr,
+        "the row must record action=pr"
     );
 }
 
@@ -484,7 +515,9 @@ async fn wrap_up_pr_response_contains_token_and_no_retro_instruction() {
         .db_write()
         .patch_task(
             task_id,
-            &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+            &store::TaskPatch::new()
+                .host(Some(crate::store::MEMORY_HOST_ID))
+                .worktree(Some("/repo/.worktrees/1-t")),
         )
         .await
         .unwrap();
@@ -506,14 +539,18 @@ async fn wrap_up_pr_response_contains_token_and_no_retro_instruction() {
     );
 
     // A token IS issued now — the pr path is no longer exit_session-free.
-    let map = state.exit_tokens.read().unwrap();
-    let et = map
-        .get(&task_id)
-        .expect("wrap_up(pr) must insert an exit token");
+    let row = state
+        .db
+        .session_requests()
+        .await
+        .into_iter()
+        .find(|r| r.task_id == task_id)
+        .expect("wrap_up(pr) must write a request row, which is the exit token");
 
     let text = extract_response_text(&resp);
-    assert!(
-        text.contains(&et.token),
+    assert_eq!(
+        token_in_response(&text),
+        row.id.0.to_string(),
         "response must include the exit token; got: {text}"
     );
     assert!(
@@ -539,7 +576,7 @@ async fn wrap_up_pr_response_contains_token_and_no_retro_instruction() {
 async fn make_state_with_runner(
     runner: Arc<dyn ProcessRunner>,
 ) -> (Arc<McpState>, Arc<dyn store::TaskStore>) {
-    test_state_with_overrides(runner, None, None).await
+    test_state_with_host(runner, None, None).await
 }
 
 /// A runner scripted for one clean `finish_task`: the preflight reads pass, no
@@ -561,7 +598,9 @@ async fn create_wrappable_task(db: &Arc<dyn store::TaskStore>) -> crate::models:
         .unwrap();
     db.patch_task(
         task_id,
-        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+        &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
+            .worktree(Some("/repo/.worktrees/1-t")),
     )
     .await
     .unwrap();
@@ -622,7 +661,7 @@ async fn wrap_up_success_omits_verify_reminder_when_unconfigured() {
 
 #[tokio::test]
 async fn wrap_up_rebase_conflict_returns_error() {
-    let (state, db) = test_state_with_overrides(
+    let (state, db) = test_state_with_host(
         with_clean_status(
             DispatchScript::finish()
                 .no_remote()
@@ -643,7 +682,9 @@ async fn wrap_up_rebase_conflict_returns_error() {
         .unwrap();
     db.patch_task(
         task_id,
-        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-conflict-task")),
+        &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
+            .worktree(Some("/repo/.worktrees/1-conflict-task")),
     )
     .await
     .unwrap();
@@ -673,7 +714,7 @@ async fn wrap_up_rebase_dirty_primary_worktree_returns_error() {
     // A dirty primary worktree must be reported as its own distinct error —
     // not conflated with a rebase conflict — and must not flip the task's
     // sub_status to Conflict, since no rebase was ever attempted.
-    let (state, db) = test_state_with_overrides(
+    let (state, db) = test_state_with_host(
         with_clean_status(DispatchScript::finish().dirty_primary(&["unrelated.rs"])),
         None,
         None,
@@ -690,7 +731,9 @@ async fn wrap_up_rebase_dirty_primary_worktree_returns_error() {
         .unwrap();
     db.patch_task(
         task_id,
-        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-dirty-primary-task")),
+        &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
+            .worktree(Some("/repo/.worktrees/1-dirty-primary-task")),
     )
     .await
     .unwrap();
@@ -731,7 +774,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
     // its first call — the script declares that as its whole sequence, which is
     // what makes the stale trailing response this queue used to carry
     // impossible to leave behind.
-    let (state, db) = test_state_with_overrides(
+    let (state, db) = test_state_with_host(
         with_clean_status(DispatchScript::finish().head_branch("feature")),
         None,
         None,
@@ -748,7 +791,9 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
         .unwrap();
     db.patch_task(
         task_id,
-        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-wrong-branch")),
+        &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
+            .worktree(Some("/repo/.worktrees/1-wrong-branch")),
     )
     .await
     .unwrap();
@@ -818,7 +863,7 @@ async fn test_state_with_notify() -> (
 ) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let (state, _db) =
-        test_state_with_overrides(Arc::new(MockProcessRunner::new(vec![])), Some(tx), None).await;
+        test_state_with_host(Arc::new(MockProcessRunner::new(vec![])), Some(tx), None).await;
     (state, rx)
 }
 
@@ -899,7 +944,7 @@ async fn failed_update_does_not_send_notification() {
 // =======================================================================
 
 async fn make_rebase_state() -> (Arc<dyn store::TaskStore>, Arc<McpState>) {
-    let (state, db) = test_state_with_overrides(rebase_ok_runner(), None, None).await;
+    let (state, db) = test_state_with_host(rebase_ok_runner(), None, None).await;
     (db, state)
 }
 
@@ -917,10 +962,12 @@ async fn seed_task_with_worktree(
         .unwrap();
     db.patch_task(
         task_id,
-        &store::TaskPatch::new().worktree(Some(&format!(
-            "/repo/.worktrees/{}-task-{suffix}",
-            task_id.0
-        ))),
+        &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
+            .worktree(Some(&format!(
+                "/repo/.worktrees/{}-task-{suffix}",
+                task_id.0
+            ))),
     )
     .await
     .unwrap();
@@ -1040,7 +1087,7 @@ async fn exit_session_pr_sets_review_and_url() {
 async fn exit_session_pr_without_pr_url_errors() {
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
-    let token = seed_exit_token(&state, task_id, WrapUpAction::Pr);
+    let token = seed_exit_token(&state, task_id, WrapUpAction::Pr).await;
 
     let resp = call(
         &state,
@@ -1068,7 +1115,7 @@ async fn exit_session_action_mismatch_errors() {
     // closing as another.
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
-    let token = seed_exit_token(&state, task_id, WrapUpAction::Rebase);
+    let token = seed_exit_token(&state, task_id, WrapUpAction::Rebase).await;
 
     let resp = call(
         &state,
@@ -1102,7 +1149,7 @@ async fn exit_session_action_mismatch_errors() {
 async fn exit_session_without_action_errors() {
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
-    let token = seed_exit_token(&state, task_id, WrapUpAction::Done);
+    let token = seed_exit_token(&state, task_id, WrapUpAction::Done).await;
 
     let resp = call(
         &state,
@@ -1120,7 +1167,7 @@ async fn exit_session_without_action_errors() {
 async fn exit_session_after_close_token_is_gone() {
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
-    let token = seed_exit_token(&state, task_id, WrapUpAction::Done);
+    let token = seed_exit_token(&state, task_id, WrapUpAction::Done).await;
 
     // Close.
     let resp = call(
@@ -1149,7 +1196,7 @@ async fn exit_session_after_close_token_is_gone() {
 
 #[tokio::test]
 async fn exit_session_full_flow_rebase() {
-    let (state, db) = test_state_with_overrides(
+    let (state, db) = test_state_with_host(
         Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b""), // wrap_up: clean worktree
             MockProcessRunner::ok_with_stdout(b"main\n"),
@@ -1181,14 +1228,7 @@ async fn exit_session_full_flow_rebase() {
     .await;
     assert!(!is_error(&wrap_resp));
 
-    let token = state
-        .exit_tokens
-        .read()
-        .unwrap()
-        .get(&task_id)
-        .unwrap()
-        .token
-        .clone();
+    let token = latest_token(&state, task_id).await;
 
     // Single exit_session call closes the session.
     let close_resp = call(
@@ -1209,7 +1249,7 @@ async fn exit_session_full_flow_rebase() {
 
 #[tokio::test]
 async fn wrap_up_second_call_overwrites_token() {
-    let (state, db) = test_state_with_overrides(
+    let (state, db) = test_state_with_host(
         Arc::new(MockProcessRunner::new(vec![
             // First rebase
             MockProcessRunner::ok_with_stdout(b""), // wrap_up: clean worktree
@@ -1246,14 +1286,7 @@ async fn wrap_up_second_call_overwrites_token() {
         ),
     )
     .await;
-    let first_token = state
-        .exit_tokens
-        .read()
-        .unwrap()
-        .get(&task_id)
-        .unwrap()
-        .token
-        .clone();
+    let first_token = latest_token(&state, task_id).await;
 
     call(
         &state,
@@ -1263,14 +1296,7 @@ async fn wrap_up_second_call_overwrites_token() {
         ),
     )
     .await;
-    let second_token = state
-        .exit_tokens
-        .read()
-        .unwrap()
-        .get(&task_id)
-        .unwrap()
-        .token
-        .clone();
+    let second_token = latest_token(&state, task_id).await;
 
     assert_ne!(
         first_token, second_token,
@@ -1310,10 +1336,16 @@ async fn exit_session_unknown_task_returns_error() {
 #[tokio::test]
 async fn exit_session_task_without_window_returns_error() {
     let state = test_state().await;
-    let task_id = create_task_fixture(&state).await; // Backlog task, no tmux_window
+    let task_id = create_running_task_with_window(&state).await;
 
-    // Insert a matching token+action so we get past those checks.
-    let token = seed_exit_token(&state, task_id, WrapUpAction::Done);
+    // A matching token+action gets past those checks; the window is gone by the
+    // time the closing call arrives (some other path tore the session down).
+    let token = seed_exit_token(&state, task_id, WrapUpAction::Done).await;
+    state
+        .db_write()
+        .patch_task(task_id, &crate::store::TaskPatch::new().tmux_window(None))
+        .await
+        .unwrap();
 
     let resp = call(
         &state,
@@ -1348,7 +1380,7 @@ async fn exit_session_with_wrong_token_errors() {
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
 
-    let token = seed_exit_token(&state, task_id, WrapUpAction::Done);
+    let token = seed_exit_token(&state, task_id, WrapUpAction::Done).await;
     assert_ne!(token, "wrong-token", "the token below must not match");
 
     let resp = call(
@@ -1380,6 +1412,7 @@ async fn wrap_up_rebase_does_not_kill_window() {
     // Set up worktree + tmux_window so is_wrappable passes.
     let window = test_tmux_window("task-rebase-window");
     let patch = crate::store::TaskPatch::new()
+        .host(Some(crate::store::MEMORY_HOST_ID))
         .worktree(Some("/repo/.worktrees/task-rebase"))
         .tmux_window(Some(&window));
     state.db_write().patch_task(task_id, &patch).await.unwrap();
@@ -1415,7 +1448,7 @@ async fn exit_session_marks_task_done_with_no_epic() {
     // recalculate_epic_status.
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
-    let token = seed_exit_token(&state, task_id, WrapUpAction::Done);
+    let token = seed_exit_token(&state, task_id, WrapUpAction::Done).await;
 
     let resp = call(
         &state,
@@ -1441,6 +1474,10 @@ async fn exit_session_already_done_task_stays_done() {
     // closes must remain Done after the closing call.
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
+    // The token is issued while the task is still running (the module only
+    // wraps up a running or review task); the task is Done by the time the
+    // closing call arrives.
+    let token = seed_exit_token(&state, task_id, WrapUpAction::Done).await;
     state
         .db_write()
         .patch_task(
@@ -1449,7 +1486,6 @@ async fn exit_session_already_done_task_stays_done() {
         )
         .await
         .unwrap();
-    let token = seed_exit_token(&state, task_id, WrapUpAction::Done);
 
     call(
         &state,
@@ -1487,7 +1523,7 @@ async fn exit_session_recalculates_epic_status() {
         TaskStatus::Done,
         "precondition: epic should be in-progress before exit_session"
     );
-    let token = seed_exit_token(&state, task_id, WrapUpAction::Done);
+    let token = seed_exit_token(&state, task_id, WrapUpAction::Done).await;
 
     call(
         &state,
@@ -1521,7 +1557,7 @@ async fn exit_session_resets_sub_status_to_default_for_done() {
         )
         .await
         .unwrap();
-    let token = seed_exit_token(&state, task_id, WrapUpAction::Done);
+    let token = seed_exit_token(&state, task_id, WrapUpAction::Done).await;
 
     call(
         &state,
@@ -1549,7 +1585,7 @@ async fn exit_session_emits_refresh_after_done_patch() {
     let (state, mut rx) = test_state_with_notify().await;
     let task_id = create_running_task_with_window(&state).await;
 
-    let token = seed_exit_token(&state, task_id, WrapUpAction::Done);
+    let token = seed_exit_token(&state, task_id, WrapUpAction::Done).await;
     while rx.try_recv().is_ok() {}
 
     let resp = call(
@@ -1587,7 +1623,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
         (None, MockProcessRunner::ok()), // tmux has-session
         (None, MockProcessRunner::ok()), // tmux kill-window
     ]);
-    let (state, db) = test_state_with_overrides(
+    let (state, db) = test_state_with_host(
         Arc::new(MockProcessRunner::new_with_delays(responses)),
         None,
         None,
@@ -1607,6 +1643,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
     db.patch_task(
         task_id,
         &crate::store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
             .worktree(Some("/repo/.worktrees/e2e"))
             .tmux_window(Some(&test_tmux_window("e2e-window"))),
     )
@@ -1643,14 +1680,8 @@ async fn wrap_up_then_exit_session_end_to_end() {
         "after wrap_up: epic status must not change"
     );
 
-    // Extract the token that wrap_up placed in exit_tokens.
-    let token = {
-        let map = state.exit_tokens.read().unwrap();
-        map.get(&task_id)
-            .expect("wrap_up must have inserted an exit token")
-            .token
-            .clone()
-    };
+    // The token wrap_up issued: its request row's id.
+    let token = latest_token(&state, task_id).await;
 
     // Single exit_session call closes the session.
     let close_resp = call(
@@ -1695,6 +1726,7 @@ async fn wrap_up_done_defers_done_transition_to_exit_session() {
     db.patch_task(
         task_id,
         &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
             .worktree(Some("/repo/.worktrees/1-done-task"))
             .tmux_window(Some(&test_tmux_window("task-1"))),
     )
@@ -1734,14 +1766,7 @@ async fn wrap_up_done_defers_done_transition_to_exit_session() {
     );
 
     // Closing the session is what actually marks it Done.
-    let token = state
-        .exit_tokens
-        .read()
-        .unwrap()
-        .get(&task_id)
-        .unwrap()
-        .token
-        .clone();
+    let token = latest_token(&state, task_id).await;
     call(
         &state,
         "tools/call",
@@ -1782,6 +1807,7 @@ async fn wrap_up_done_recalculates_epic_status() {
     db.patch_task(
         task_id,
         &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
             .worktree(Some("/repo/.worktrees/1-t"))
             .tmux_window(Some(&test_tmux_window("task-1"))),
     )
@@ -1808,14 +1834,7 @@ async fn wrap_up_done_recalculates_epic_status() {
         "epic must not advance until exit_session closes"
     );
 
-    let token = state
-        .exit_tokens
-        .read()
-        .unwrap()
-        .get(&task_id)
-        .unwrap()
-        .token
-        .clone();
+    let token = latest_token(&state, task_id).await;
     call(
         &state,
         "tools/call",
@@ -1858,6 +1877,7 @@ async fn wrap_up_pr_recalculates_epic_status() {
         .patch_task(
             task_id,
             &store::TaskPatch::new()
+                .host(Some(crate::store::MEMORY_HOST_ID))
                 .worktree(Some("/repo/.worktrees/1-t"))
                 .tmux_window(Some(&test_tmux_window("task-1"))),
         )
@@ -1890,14 +1910,7 @@ async fn wrap_up_pr_recalculates_epic_status() {
         "wrap_up(pr) must not move the task to review yet"
     );
 
-    let token = state
-        .exit_tokens
-        .read()
-        .unwrap()
-        .get(&task_id)
-        .unwrap()
-        .token
-        .clone();
+    let token = latest_token(&state, task_id).await;
     let resp = call(
         &state,
         "tools/call",
@@ -2122,10 +2135,15 @@ async fn wrap_up_call(
     .await
 }
 
-fn assert_no_token(state: &McpState, task_id: crate::models::TaskId) {
+async fn assert_no_token(state: &McpState, task_id: crate::models::TaskId) {
     assert!(
-        !state.exit_tokens.read().unwrap().contains_key(&task_id),
-        "a refused wrap_up must not mint an exit token"
+        !state
+            .db
+            .session_requests()
+            .await
+            .iter()
+            .any(|r| r.task_id == task_id),
+        "a refused wrap_up must not write a request row, so mints no exit token"
     );
 }
 
@@ -2147,7 +2165,7 @@ async fn wrap_up_refuses_a_worktree_with_uncommitted_changes_for_every_action() 
             msg.contains("commit"),
             "{action}: the refusal must say to commit; got: {msg}"
         );
-        assert_no_token(&state, task_id);
+        assert_no_token(&state, task_id).await;
         assert_eq!(
             runner.flattened_calls(),
             vec![format!("git -C {WORKTREE} status --porcelain")],
@@ -2181,7 +2199,7 @@ async fn wrap_up_refuses_when_the_verify_command_fails_and_never_rebases() {
         msg.contains("1 failed"),
         "must carry the output tail; got: {msg}"
     );
-    assert_no_token(&state, task_id);
+    assert_no_token(&state, task_id).await;
     assert_eq!(
         runner.recorded_calls().len(),
         2,
@@ -2200,7 +2218,7 @@ async fn wrap_up_refuses_pr_and_done_when_the_verify_command_fails() {
 
         assert!(is_error(&resp), "{action}: expected a refusal");
         assert!(error_message(&resp).contains("make check"));
-        assert_no_token(&state, task_id);
+        assert_no_token(&state, task_id).await;
     }
 }
 
@@ -2223,7 +2241,7 @@ async fn wrap_up_refuses_when_the_verify_command_times_out() {
         "got: {}",
         error_message(&resp)
     );
-    assert_no_token(&state, task_id);
+    assert_no_token(&state, task_id).await;
 }
 
 #[tokio::test]

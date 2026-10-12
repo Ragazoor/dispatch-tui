@@ -2,8 +2,11 @@ use serde_json::{json, Value};
 
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
-use crate::models::{Task, TaskId};
-use crate::service::{WrapUpChecks, WrapUpRebaseOutcome};
+use crate::models::{
+    SessionRequest, SessionRequestId, SessionRequestKind, SessionRequestState, Task, TaskId,
+};
+use crate::service::WrapUpChecks;
+use crate::store::SessionRequestAnswer;
 
 use super::{
     fetch_caller_task, parse_args, service_err_to_response, ExitSessionArgs, JsonRpcResponse,
@@ -34,25 +37,10 @@ fn verified_line(checks: &WrapUpChecks) -> String {
     }
 }
 
-/// Common wrap_up finishing sequence shared by all three actions: report the
-/// verification, issue the exit token recording `action`, and build the
-/// exit_session instruction. Only the surrounding response prose differs per
-/// action.
-fn issue_wrap_up_token(
-    state: &McpState,
-    task_id: TaskId,
-    checks: &WrapUpChecks,
-    action: WrapUpAction,
-) -> (String, String, String) {
-    let verify_line = verified_line(checks);
-    let token = state.issue_exit_token(task_id, action);
-    let exit_line = exit_instruction(action);
-    (verify_line, token, exit_line)
-}
-
 /// Checks the task is wrappable, returning the JSON-RPC error response to
-/// return immediately if not. The worktree/branch pair is only needed by the
-/// rebase path, so it is resolved behind the service seam rather than here.
+/// return immediately if not. The module checks it again when the request is
+/// written; this is the early refusal, with the same wording, before the
+/// commit and verify checks (`ReviewTasksAreNotWrappedUp`).
 async fn validate_wrap_up_request(
     state: &McpState,
     id: &Option<Value>,
@@ -65,96 +53,122 @@ async fn validate_wrap_up_request(
         .map_err(|e| service_err_to_response(id.clone(), e))
 }
 
-/// Finishes the two no-rebase actions (`done`, `pr`), which only differ in a
-/// short note on git operations and a trailing `rate_learning` nudge for `pr`.
-fn finish_wrap_up_simple(
-    state: &McpState,
+/// The success response of a wrap-up whose request row is done: report the
+/// verification, hand over the row's id as the exit token recording `action`,
+/// and name the exit_session call. Only the surrounding prose differs per
+/// action.
+fn wrap_up_complete(
     id: Option<Value>,
     task_id: TaskId,
     checks: &WrapUpChecks,
     action: WrapUpAction,
+    token: SessionRequestId,
 ) -> JsonRpcResponse {
-    let (verify_line, token, exit_line) = issue_wrap_up_token(state, task_id, checks, action);
+    let verify_line = verified_line(checks);
+    let exit_line = exit_instruction(action);
+    let tail = match action {
+        WrapUpAction::Rebase => {
+            " You MUST call `exit_session` next as your final action — without it, the tmux window stays alive \
+             and the task remains in its current status."
+                .to_string()
+        }
+        WrapUpAction::Done | WrapUpAction::Pr => {
+            let rate_learning_nudge = match action {
+                WrapUpAction::Pr => {
+                    "\n\n\
+                    Before you finish: if any knowledge base entry was surfaced to you this task \
+                    and you haven't rated it yet, call `rate_learning` now (helped or wrong). \
+                    You can only rate learnings that were surfaced to you during this session."
+                }
+                WrapUpAction::Done | WrapUpAction::Rebase => "",
+            };
+            format!("{rate_learning_nudge} You MUST call `exit_session` next as your final action.")
+        }
+    };
     let no_git_note = match action {
         WrapUpAction::Done => " No git operations performed.",
         WrapUpAction::Pr | WrapUpAction::Rebase => "",
-    };
-    let rate_learning_nudge = match action {
-        WrapUpAction::Pr => {
-            "\n\n\
-            Before you finish: if any knowledge base entry was surfaced to you this task \
-            and you haven't rated it yet, call `rate_learning` now (helped or wrong). \
-            You can only rate learnings that were surfaced to you during this session."
-        }
-        WrapUpAction::Done | WrapUpAction::Rebase => "",
     };
     JsonRpcResponse::ok(
         id,
         json!({"content": [{"type": "text", "text": format!(
             "wrap_up complete (task {tid}, action: {action_str}).{no_git_note} \
         The session is NOT yet closed.{verify_line} \
-        Exit token: {token} — {exit_line}.{rate_learning_nudge} \
-        You MUST call `exit_session` next as your final action.",
+        Exit token: {token} — {exit_line}.{tail}",
             tid = task_id.0,
             action_str = action.as_str(),
+            token = token.0,
         )}]}),
     )
 }
 
-/// Shapes the outcome of the service-owned rebase (`WrapUpRebase` in
+/// Wait for `request` to finish, for at most the state's wait cap
+/// ([`crate::mcp::WRAP_UP_WAIT_CAP`]). Wakes on the subscription's change
+/// signal, never on a timer of its own. Returns the row as last seen.
+async fn wait_for_session_request(
+    state: &McpState,
+    request: SessionRequestId,
+    changes: &mut tokio::sync::watch::Receiver<u64>,
+) -> Option<SessionRequest> {
+    let until = tokio::time::Instant::now() + state.wrap_up_wait_cap;
+    loop {
+        let row = state.db.session_request(request).await;
+        if row.as_ref().is_some_and(|r| !r.is_open()) {
+            return row;
+        }
+        match tokio::time::timeout_at(until, changes.changed()).await {
+            Ok(Ok(())) => continue,
+            // The cap passed, or the rows' sender is gone (the board is going
+            // away): answer with what is known.
+            Ok(Err(_)) | Err(_) => return row,
+        }
+    }
+}
+
+/// Shapes the outcome of a rebase request row (`WrapUpRebase` in
 /// `docs/specs/pr-workflow.allium`) into a JSON-RPC response. The git work, the
-/// `Conflict` sub_status maintenance and the failure taxonomy all live in
-/// [`crate::service::TaskServiceApi::wrap_up_rebase`]; what is left here is
-/// which error code each outcome earns, which notifications it fires, and the
-/// response prose.
-async fn finish_wrap_up_rebase(
+/// `Conflict` sub_status and the report are this board's host and the module's;
+/// what is left here is which error code each outcome earns and the prose.
+async fn answer_rebase(
     state: &McpState,
     id: Option<Value>,
-    task: Task,
+    task_id: TaskId,
     checks: &WrapUpChecks,
+    request: SessionRequestId,
+    changes: &mut tokio::sync::watch::Receiver<u64>,
 ) -> JsonRpcResponse {
-    let task_id = task.id;
-    let repo_path = task.repo_path.clone();
-
-    match state.task_svc.wrap_up_rebase(task).await {
-        WrapUpRebaseOutcome::Rebased => {
-            state.notify_task_changed(task_id);
-            // Local base provably just moved ahead of origin, and the refs are
-            // already current — RefreshRepoSyncStateAfterRebase.
-            state.notify_branch_rebased(&repo_path);
-            let (verify_line, token, exit_line) =
-                issue_wrap_up_token(state, task_id, checks, WrapUpAction::Rebase);
-            JsonRpcResponse::ok(
+    let row = wait_for_session_request(state, request, changes).await;
+    // The module sets the Conflict flag with a failed report, and the host's
+    // refresh follows the row; nudge the board to re-read the task now.
+    state.notify_task_changed(task_id);
+    match row {
+        Some(row) if row.state == SessionRequestState::Done => {
+            wrap_up_complete(id, task_id, checks, WrapUpAction::Rebase, request)
+        }
+        Some(row) if row.state == SessionRequestState::Failed => {
+            let reason = row
+                .reason
+                .unwrap_or_else(|| "no reason recorded".to_string());
+            JsonRpcResponse::err(id, INTERNAL_ERROR, format!("wrap_up failed: {reason}"))
+        }
+        // Still open when the wait ended (the store unreachable, or the host
+        // gone without the backstop yet firing): not a token, and the next
+        // request is refused while this one is still open.
+        open => {
+            let state_word = open
+                .as_ref()
+                .map(|r| r.state.as_str())
+                .unwrap_or(SessionRequestState::Requested.as_str());
+            JsonRpcResponse::err(
                 id,
-                json!({"content": [{"type": "text", "text": format!(
-                    "wrap_up complete (task {}, action: rebase). The session is NOT yet closed.{verify_line} \
-                Exit token: {token} — {exit_line}. \
-                You MUST call `exit_session` next as your final action — without it, the tmux window stays alive \
-                and the task remains in its current status.",
-                    task_id.0
-                )}]}),
+                INTERNAL_ERROR,
+                format!(
+                    "wrap_up request #{} for task #{} is still {state_word} and no exit token was \
+                     issued. Wait a moment and call wrap_up again — a second request is refused \
+                     while this one is still open.",
+                    request.0, task_id.0
+                ),
             )
-        }
-        // Defence in depth: `validate_wrap_up` (via `is_wrappable`) guarantees
-        // the worktree is `Some` today, but a future change to the validator
-        // could silently break that contract. An internal JSON-RPC error keeps
-        // a violation from panicking the runtime.
-        WrapUpRebaseOutcome::MissingWorktree => JsonRpcResponse::err(
-            id,
-            INTERNAL_ERROR,
-            "internal: validate_wrap_up returned task without worktree".to_string(),
-        ),
-        WrapUpRebaseOutcome::UnderivableBranch { worktree } => JsonRpcResponse::err(
-            id,
-            INVALID_PARAMS,
-            format!("Cannot derive branch from worktree: {worktree}"),
-        ),
-        WrapUpRebaseOutcome::Failed { message } => {
-            state.notify_task_changed(task_id);
-            JsonRpcResponse::err(id, INTERNAL_ERROR, format!("wrap_up failed: {message}"))
-        }
-        WrapUpRebaseOutcome::WorkerDied(e) => {
-            JsonRpcResponse::err(id, INTERNAL_ERROR, format!("internal error: {e}"))
         }
     }
 }
@@ -176,27 +190,55 @@ pub(crate) async fn handle_wrap_up(
         Err(resp) => return resp,
     };
 
-    // Before the action, whichever it is: a refusal here has no side effect and
-    // mints no token. `WrapUpRefusesUnfinishedWork`.
+    // The host-local checks, before anything is written: a refusal here writes
+    // no request row and issues no token. `WrapUpRefusesUnfinishedWork`.
     let checks = match state.task_svc.check_wrap_up_ready(task.clone()).await {
         Ok(c) => c,
         Err(e) => return service_err_to_response(id, e),
     };
+    // For rebase the worktree path names a branch (the rebase needs one):
+    // refused as a bad request rather than reported as a failed rebase.
+    if parsed.action == WrapUpAction::Rebase {
+        let worktree = task.worktree.clone().unwrap_or_default();
+        if crate::dispatch::branch_from_worktree(&worktree).is_none() {
+            return JsonRpcResponse::err(
+                id,
+                INVALID_PARAMS,
+                format!("Cannot derive branch from worktree: {worktree}"),
+            );
+        }
+    }
+
+    // Subscribed BEFORE the request is written, so no change to the row can
+    // land between writing it and starting to wait on it.
+    let mut changes = state.db.session_request_changes();
+    let request = match state
+        .task_svc
+        .request_wrap_up(task.id, parsed.action.mode())
+        .await
+    {
+        Ok(SessionRequestAnswer::Requested(request)) => request,
+        Ok(SessionRequestAnswer::Refused(why)) => {
+            return JsonRpcResponse::err(id, INVALID_PARAMS, why)
+        }
+        Err(e) => return service_err_to_response(id, e),
+    };
 
     match parsed.action {
+        // No host work: the module wrote the row already done.
         WrapUpAction::Done | WrapUpAction::Pr => {
-            finish_wrap_up_simple(state, id, task.id, &checks, parsed.action)
+            wrap_up_complete(id, task.id, &checks, parsed.action, request)
         }
-        WrapUpAction::Rebase => finish_wrap_up_rebase(state, id, task, &checks).await,
+        WrapUpAction::Rebase => {
+            answer_rebase(state, id, task.id, &checks, request, &mut changes).await
+        }
     }
 }
 
 /// What applying a [`CloseSessionOutcome`](crate::service::CloseSessionOutcome) made of the close, once
-/// [`perform_close`] has taken care of the tmux teardown. Callers still shape
-/// their own response text from this — wording differs between `exit_session`
-/// (which always had a live window, per its own precondition) and update_tasks's
-/// dedicated `status="done"` path (which may not) — but neither re-derives the
-/// mechanics themselves.
+/// [`perform_close`] has taken care of the tmux teardown. Only
+/// `update_tasks(status="done")` still closes in the board
+/// (`MarkTaskDoneViaMcp`, until M7); its response text is its own.
 pub(super) enum ClosePathOutcome {
     /// The terminal write did not persist: the task keeps its prior status
     /// (and any live window it had) and nothing was torn down.
@@ -209,24 +251,12 @@ pub(super) enum ClosePathOutcome {
 }
 
 /// Apply `outcome` via [`TaskService::close_session`](crate::service::TaskService::close_session), notify, and tear down
-/// any live tmux window in the background — the tail every route to
-/// Done/Review shares once it holds a validated `(task, outcome)` pair.
-/// `task` supplies the epic_id for the epic-changed notification; its own
-/// status/window fields are not read after this point — the close's own
-/// return value is authoritative.
+/// any live tmux window in the background.
 ///
-/// Shared by `handle_exit_session` (below) and update_tasks's dedicated
-/// `status="done"` handler (`MarkTaskDoneViaMcp`, mcp-task-tools.allium) —
-/// see that rule's `@guidance` for why a second copy of this sequence is
-/// exactly the hazard worth avoiding here.
-///
-/// The epic auto-dispatch chain is deliberately NOT here. It has a single
-/// caller — `handle_exit_session`, the only close with a `wrap_up` behind it
-/// — so it lives at that call site, and "only exit_session chains" holds by
-/// structure rather than by a flag each caller must pass correctly. Returning
-/// [`ClosePathOutcome::Persisted`] only after the terminal write and both
-/// change notifications is what makes that call site's ordering sound; see
-/// `AutoDispatchNextSubtask` in `docs/specs/epics.allium`.
+/// Since store-split M5 this is `update_tasks(status="done")`'s alone: the
+/// `exit_session` route is the module's close and the host's teardown row. The
+/// terminal write's `Err` means exactly "it did not land", which is what makes
+/// the teardown gating sound.
 pub(super) async fn perform_close(
     state: &McpState,
     task: &Task,
@@ -270,68 +300,64 @@ pub(super) async fn perform_close(
     ClosePathOutcome::Persisted
 }
 
-/// Validate the exit token, action, window liveness and the PR link, then
-/// remove the token — all in one write-lock so a concurrent second call can't
-/// observe a half-consumed token. `Err` is the `INVALID_PARAMS` message.
-fn consume_exit_token(
+/// The accepted close's response: "Session closed.", or, when the epic chain
+/// requested a subtask in the same transaction (the exit_session row's
+/// `chained_task`), the one it names.
+async fn session_closed(
     state: &McpState,
+    id: Option<Value>,
     task: &Task,
-    token: String,
-    action: Option<WrapUpAction>,
-    pr_url: Option<String>,
-) -> Result<(WrapUpAction, Option<String>), String> {
-    let task_id = task.id;
-    let mut map = state.exit_tokens.write().unwrap_or_else(|e| e.into_inner());
-    let stored_action = match map.get(&task_id) {
-        None => return Err(ERR_NO_TOKEN.to_string()),
-        Some(et) if et.token != token => return Err("invalid exit token".to_string()),
-        Some(et) => et.action,
+    request: SessionRequestId,
+) -> JsonRpcResponse {
+    state.notify_task_changed(task.id);
+    if let Some(epic_id) = task.epic_id {
+        state.notify_epic_changed(epic_id);
+    }
+    let chained = match state
+        .db
+        .session_request(request)
+        .await
+        .and_then(|r| r.chained_task)
+    {
+        Some(next) => {
+            state.notify_task_changed(next);
+            Some((
+                next,
+                state.task_svc.get_task(next).await.ok().map(|t| t.title),
+            ))
+        }
+        None => None,
     };
-    let action = action
-        .ok_or_else(|| "action is required — pass the same action used in wrap_up".to_string())?;
-    if action != stored_action {
-        return Err(format!(
-            "exit token was issued for wrap_up(action=\"{}\"), but exit_session was called \
-            with action=\"{}\"",
-            stored_action.as_str(),
-            action.as_str()
-        ));
-    }
-    if task.tmux_window.is_none() {
-        return Err(format!("task #{} has no active session", task_id.0));
-    }
-    let pr_url =
-        if action == WrapUpAction::Pr {
-            match pr_url.filter(|u| !u.is_empty()) {
-                Some(u) => Some(u),
-                None => return Err(
-                    "pr_url is required for action 'pr' — pass the URL returned by `gh pr create`"
-                        .to_string(),
-                ),
-            }
-        } else {
-            None
-        };
-    map.remove(&task_id);
-    Ok((action, pr_url))
+    let text = match chained {
+        Some((next, Some(title))) => format!(
+            "Session closed. Dispatching next epic subtask #{} '{title}'.",
+            next.0
+        ),
+        Some((next, None)) => format!("Session closed. Dispatching next epic subtask #{}.", next.0),
+        None => "Session closed.".to_string(),
+    };
+    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
-/// How `exit_session` closes the task for `action`.
-fn close_outcome(
-    action: WrapUpAction,
-    pr_url: Option<String>,
-) -> crate::service::CloseSessionOutcome {
-    match (action, pr_url) {
-        (WrapUpAction::Pr, Some(pr_url)) => crate::service::CloseSessionOutcome::Review {
-            pr_url: crate::models::TaskUrl::new(pr_url, crate::models::UrlType::Pr),
-        },
-        // `consume_exit_token` requires the PR link whenever action = Pr, so this
-        // (Pr, None) arm is unreachable in practice — Done is a safe, non-panicking
-        // fallback rather than asserting an invariant the compiler can't see.
-        (WrapUpAction::Pr, None) | (WrapUpAction::Rebase, _) | (WrapUpAction::Done, _) => {
-            crate::service::CloseSessionOutcome::Done
-        }
-    }
+/// A call that got no answer from the store may or may not have landed. The
+/// rows settle it: an exit_session row that consumed this token means the close
+/// took effect.
+async fn settled_request(
+    state: &McpState,
+    task_id: TaskId,
+    token: SessionRequestId,
+) -> Option<SessionRequestId> {
+    state
+        .db
+        .session_requests()
+        .await
+        .into_iter()
+        .find(|r| {
+            r.kind == SessionRequestKind::ExitSession
+                && r.task_id == task_id
+                && r.wrap_up_request == Some(token)
+        })
+        .map(|r| r.id)
 }
 
 pub(crate) async fn handle_exit_session(
@@ -351,66 +377,49 @@ pub(crate) async fn handle_exit_session(
         Err(resp) => return resp,
     };
 
-    let token = match parsed.token {
-        Some(t) => t,
-        None => return JsonRpcResponse::err(id, INVALID_PARAMS, ERR_NO_TOKEN),
+    // Checked here, before any call: there is nothing to ask the module
+    // without them.
+    let Some(token_text) = parsed.token else {
+        return JsonRpcResponse::err(id, INVALID_PARAMS, ERR_NO_TOKEN);
     };
+    let Some(action) = parsed.action else {
+        return JsonRpcResponse::err(
+            id,
+            INVALID_PARAMS,
+            "action is required — pass the same action used in wrap_up",
+        );
+    };
+    // A token that is not a row id names no row; the module refuses it in its
+    // own words (id 0 is never a real row).
+    let token = SessionRequestId(token_text.trim().parse().unwrap_or(0));
 
-    let (action, pr_url) =
-        match consume_exit_token(state, &task, token, parsed.action, parsed.pr_url) {
-            Ok(v) => v,
-            Err(msg) => return JsonRpcResponse::err(id, INVALID_PARAMS, msg),
-        };
-
-    let outcome = close_outcome(action, pr_url);
-    // `close_persisted` in `ExitSession` (docs/specs/pr-workflow.allium): the
-    // terminal mutation, the tmux teardown and the trailing SessionClosed
-    // emission are all gated on this single write landing. Only consuming the
-    // token (already done above) happens either way. `perform_close` exists so
-    // that gate is sound — its `NotPersisted` means the write did not land and
-    // nothing else. See its doc comment before re-deriving this sequence.
-    match perform_close(state, &task, outcome).await {
-        ClosePathOutcome::NotPersisted => {
-            // Still a successful response: the exit token was consumed above, so
-            // an error would strand the agent with no retry path and no session.
-            // The text is what carries the failure. Neither the teardown nor the
-            // chain ran — the task keeps its live window and its `tmux_window`
-            // reference, so it never satisfies `is_detached` and cannot drift
-            // into the awaiting-merge rendering, and a broken close is never
-            // compounded into a second dispatch.
-            JsonRpcResponse::ok(
-                id,
-                json!({"content": [{"type": "text", "text": format!(
-                    "Task #{} could NOT be moved to its terminal status — the close did not take \
-                     effect, and your tmux session is still alive. Stop here and hand back to \
-                     the user: the task is still in its previous status and needs closing by hand. \
-                     Retry neither `exit_session` (the token is spent) nor `wrap_up` (a fresh token \
-                     reaches the same failing close).",
-                    task_id.0
-                )}]}),
-            )
+    match state
+        .task_svc
+        .request_exit_session(task_id, token, action.mode(), parsed.pr_url)
+        .await
+    {
+        // The module applied the close, consumed the token and wrote the
+        // teardown row. The answer does NOT wait for the teardown: it kills this
+        // agent's own window, so a reply that waited would never be read.
+        Ok(SessionRequestAnswer::Requested(request)) => {
+            session_closed(state, id, &task, request).await
         }
-        ClosePathOutcome::Persisted => {
-            // SessionClosed: emitted here and nowhere else, so the chain runs
-            // only for a close that had a `wrap_up` ahead of it — see
-            // AutoDispatchNextSubtask in docs/specs/epics.allium. Reaching
-            // this arm already means the terminal patch and both change
-            // notifications have landed, so the next subtask's worktree is
-            // cut from a base_branch that already contains this task's work.
-            // Never fails the close: `auto_dispatch_next` swallows every
-            // chain problem.
-            let chained = match task.epic_id {
-                Some(epic_id) => super::dispatch::auto_dispatch_next(state, epic_id).await,
-                None => None,
-            };
-            let text = match chained {
-                Some((next_id, next_title)) => format!(
-                    "Session closed. Dispatching next epic subtask #{} '{next_title}'.",
-                    next_id.0
-                ),
-                None => "Session closed.".to_string(),
-            };
-            JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
-        }
+        Ok(SessionRequestAnswer::Refused(why)) => JsonRpcResponse::err(id, INVALID_PARAMS, why),
+        Err(e) => match settled_request(state, task_id, token).await {
+            Some(request) => session_closed(state, id, &task, request).await,
+            None => {
+                tracing::warn!(task_id = task_id.0, "exit_session got no answer: {e}");
+                JsonRpcResponse::err(
+                    id,
+                    INTERNAL_ERROR,
+                    format!(
+                        "exit_session got no answer from the shared store and the close did not \
+                         take effect: task #{} is unchanged, your tmux session is still alive and \
+                         the token is still valid — call exit_session again.",
+                        task_id.0
+                    ),
+                )
+            }
+        },
     }
 }

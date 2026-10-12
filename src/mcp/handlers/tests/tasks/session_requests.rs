@@ -20,7 +20,6 @@ use std::time::Duration;
 use crate::models::{
     SessionRequest, SessionRequestId, SessionRequestKind, SessionRequestState, TaskId, TmuxWindow,
 };
-use crate::store::{SessionRequestRead, SessionRequestStore};
 use crate::sync::{InjectedFault, MemoryReducerCaller, SettledIdentity, SharedRows};
 
 /// Bound on awaiting a completion signal — a deadline on a signal, never a

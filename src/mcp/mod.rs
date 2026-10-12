@@ -3,10 +3,7 @@ pub mod identity;
 pub mod middleware;
 pub mod trajectory;
 
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-
-use uuid::Uuid;
+use std::sync::Arc;
 
 use axum::{routing::post, Router};
 use tokio::sync::mpsc;
@@ -29,16 +26,16 @@ pub enum BackgroundWrite {
     Usage,
     /// A trajectory entry was appended.
     Trajectory,
-    /// `exit_session`'s detached tmux teardown (`kill_window`) ran to
-    /// completion — fired whether or not a window existed to kill. See
-    /// `close_persisted` in `docs/specs/pr-workflow.allium`.
+    /// `update_tasks(status="done")`'s detached tmux teardown
+    /// (`kill_window`) ran to completion — fired whether or not a window
+    /// existed to kill. See `close_persisted` in `docs/specs/pr-workflow.allium`.
+    /// (`exit_session`'s teardown is the host's, from the exit_session row.)
     KillWindow,
 }
 
 /// The wrap-up action a task is being closed out with. Shared between
-/// `wrap_up` (which issues an `ExitToken` recording it) and `exit_session`
-/// (which validates the closing call's action against it), so it lives here
-/// rather than in a handler submodule.
+/// `wrap_up` (whose request row records it) and `exit_session` (whose call must
+/// name the same one), so it lives here rather than in a handler submodule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum WrapUpAction {
@@ -48,6 +45,15 @@ pub(crate) enum WrapUpAction {
 }
 
 impl WrapUpAction {
+    /// The domain value the request rows carry.
+    pub(crate) fn mode(self) -> crate::models::WrapUpMode {
+        match self {
+            WrapUpAction::Rebase => crate::models::WrapUpMode::Rebase,
+            WrapUpAction::Done => crate::models::WrapUpMode::Done,
+            WrapUpAction::Pr => crate::models::WrapUpMode::Pr,
+        }
+    }
+
     pub(crate) const ALL: &'static [WrapUpAction] =
         &[WrapUpAction::Rebase, WrapUpAction::Done, WrapUpAction::Pr];
 
@@ -58,15 +64,6 @@ impl WrapUpAction {
             WrapUpAction::Pr => "pr",
         }
     }
-}
-
-/// One-time token linking a wrap_up call to its exit_session close.
-/// `action` records which wrap_up action issued it, so exit_session can
-/// reject a call whose action doesn't match (e.g. issued for "rebase" but
-/// closed with "pr").
-pub(crate) struct ExitToken {
-    pub(crate) token: String,
-    pub(crate) action: WrapUpAction,
 }
 
 /// Shared dependencies threaded through the MCP entry points.
@@ -85,6 +82,13 @@ pub struct McpDeps {
 /// (`crate::dispatch::DISPATCH_REQUEST_TIMEOUT`), so a slow provisioning
 /// answers pending rather than holding the call open to the end.
 pub const DISPATCH_TASK_WAIT_CAP: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// How long `wrap_up(rebase)` waits on its request row before answering that it
+/// is still open: `config.wrap_up_rebase_timeout` plus
+/// `config.session_request_backstop_grace` (`mcp-task-tools.allium:
+/// WrapUpViaMcp`), by which time this board's host or the module's backstop
+/// has finished the row.
+pub const WRAP_UP_WAIT_CAP: std::time::Duration = std::time::Duration::from_secs(120 + 10);
 
 pub struct McpState {
     /// Read-only DB handle. Task/epic *mutations* must go through `task_svc` /
@@ -106,14 +110,15 @@ pub struct McpState {
     /// Embedding service used for RAG-based query_learnings and for computing
     /// embeddings when a learning is recorded via MCP.
     pub embedding_service: Arc<EmbeddingService>,
-    /// In-memory tokens issued by wrap_up, consumed by exit_session.
-    pub(crate) exit_tokens: Arc<RwLock<HashMap<TaskId, ExitToken>>>,
     /// Dispatch data directory (where the store's local files live). Trajectory files are
     /// written here under `trajectories/<task_id>.jsonl`.
     pub data_dir: std::path::PathBuf,
     /// How long `dispatch_task` waits on its request — [`DISPATCH_TASK_WAIT_CAP`]
     /// outside tests, which shorten it to drive the pending answer.
     pub(crate) dispatch_task_wait_cap: std::time::Duration,
+    /// How long `wrap_up(rebase)` waits on its request — [`WRAP_UP_WAIT_CAP`]
+    /// outside tests, which shorten it to drive the still-open answer.
+    pub(crate) wrap_up_wait_cap: std::time::Duration,
     /// Fields that exist only to make async tests deterministic. See [`TestHooks`].
     pub(crate) test_hooks: TestHooks,
 }
@@ -173,9 +178,9 @@ impl McpState {
             work_package_svc,
             notify_tx,
             embedding_service: deps.embedding_service,
-            exit_tokens: Arc::new(RwLock::new(HashMap::new())),
             data_dir: deps.data_dir,
             dispatch_task_wait_cap: DISPATCH_TASK_WAIT_CAP,
+            wrap_up_wait_cap: WRAP_UP_WAIT_CAP,
             test_hooks: TestHooks {
                 bg_write_done_tx: None,
                 #[cfg(test)]
@@ -212,35 +217,6 @@ impl McpState {
         if let Some(tx) = &self.notify_tx {
             let _ = tx.send(BoardEvent::EpicChanged(epic_id));
         }
-    }
-
-    /// Notify the runtime that a `wrap_up(rebase)` fast-forwarded `repo_path`'s
-    /// local base branch, so its drift measurement is now out of date
-    /// (docs/specs/repo-sync.allium: rule RefreshRepoSyncStateAfterRebase).
-    pub(crate) fn notify_branch_rebased(&self, repo_path: &str) {
-        if let Some(tx) = &self.notify_tx {
-            let _ = tx.send(BoardEvent::BranchRebased {
-                repo_path: repo_path.to_string(),
-            });
-        }
-    }
-
-    /// Issue a fresh exit token for a task, overwriting any existing one.
-    /// Records which action issued it (validated against on exit_session).
-    /// Returns the token string to embed in the response.
-    pub(crate) fn issue_exit_token(&self, task_id: TaskId, action: WrapUpAction) -> String {
-        let token = Uuid::new_v4().to_string();
-        self.exit_tokens
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(
-                task_id,
-                ExitToken {
-                    token: token.clone(),
-                    action,
-                },
-            );
-        token
     }
 }
 

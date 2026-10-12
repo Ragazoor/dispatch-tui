@@ -35,7 +35,7 @@ use crate::models::{
 use crate::process::{MockProcessRunner, ProcessRunner};
 use crate::service::SessionOutcome;
 use crate::store::SessionRequestAnswer;
-use crate::sync::{InjectedFault, MemoryReducerCaller, SettledIdentity, SharedRows};
+use crate::sync::{InjectedFault, MemoryReducerCaller, ReducerCaller, SettledIdentity, SharedRows};
 
 /// This board's host: the one the store handle is built with.
 const HOST: &str = "m5-host";
@@ -96,6 +96,10 @@ impl Fx {
     /// wrap-up starts from. Goes through the dispatch request path, so the
     /// task's host is the one the module writes.
     async fn running_task(&self) -> TaskId {
+        self.running_task_at(WORKTREE).await
+    }
+
+    async fn running_task_at(&self, worktree: &str) -> TaskId {
         let svc = self.svc(MockProcessRunner::unused());
         let id = svc
             .create_task(make_task_params_on_branch(REPO, "main"))
@@ -118,12 +122,15 @@ impl Fx {
             .db
             .report_dispatch_provisioned(
                 request,
-                WORKTREE,
+                worktree,
                 &crate::models::test_tmux_window(&format!("task-{}", id.0)),
                 false
             )
             .await
             .unwrap());
+        // The token is voided by a dispatch that finished at or after it
+        // (`store-split.allium`, W3), so the wrap-ups that follow start later.
+        self.clock.advance(chrono::Duration::seconds(1));
         id
     }
 
@@ -343,6 +350,57 @@ async fn serve_claims_rebases_and_reports_done() {
     assert_eq!(svc.get_task(task).await.unwrap(), before);
 }
 
+/// A worktree path that names no branch is reported failed without running
+/// git: the row cannot be served, which is not a failed rebase. (The tool
+/// refuses it before writing a row; this is the host's own guard.)
+#[tokio::test]
+async fn an_underivable_branch_is_reported_failed_without_running_git() {
+    let fx = fx();
+    // A root path has no final component, so no branch name.
+    let task = fx.running_task_at("/").await;
+    let runner = Arc::new(MockProcessRunner::new(vec![]));
+    let svc = fx.svc(runner.clone());
+    let id = asked(svc.request_wrap_up(task, WrapUpMode::Rebase).await.unwrap());
+
+    let served = svc.serve_session_request(fx.row(id).await).await;
+
+    let SessionOutcome::Failed(reason) = &served.outcome else {
+        panic!("expected Failed, got {served:?}");
+    };
+    assert!(
+        reason.contains("Cannot derive branch from worktree"),
+        "{reason}"
+    );
+    assert!(runner.recorded_calls().is_empty());
+    assert_eq!(fx.row(id).await.state, SessionRequestState::Failed);
+}
+
+/// A task deleted between the request and the claim is reported failed "task
+/// deleted"; the module has already failed the row, so the report is refused
+/// and the row keeps the module's reason.
+#[tokio::test]
+async fn a_row_whose_task_is_gone_keeps_the_task_deleted_reason() {
+    let fx = fx();
+    let task = fx.running_task().await;
+    let svc = fx.svc(MockProcessRunner::unused());
+    let id = asked(svc.request_wrap_up(task, WrapUpMode::Rebase).await.unwrap());
+    let stale = fx.row(id).await;
+    // A task is deleted only from Done (`tasks.allium: DeleteTask`).
+    fx.db
+        .patch_task(task, &store::TaskPatch::new().status(TaskStatus::Done))
+        .await
+        .unwrap();
+    assert!(fx.caller.delete_task(task).await.unwrap().won());
+
+    let served = svc.serve_session_request(stale).await;
+
+    assert!(
+        matches!(served.outcome, SessionOutcome::ClaimRefused(_)),
+        "the module failed the row with the task: {served:?}"
+    );
+    assert_eq!(fx.row(id).await.reason.as_deref(), Some("task deleted"));
+}
+
 /// A rebase conflict is reported failed with conflict = true and the reason
 /// naming the files; THE MODULE then sets the Conflict sub_status, and no
 /// token is issued.
@@ -471,29 +529,38 @@ async fn serve_tells_an_unsent_claim_from_a_refused_one() {
     assert!(runner.recorded_calls().is_empty());
 }
 
-/// A row for another host is refused by the module at the claim.
+/// A row naming another host is refused by the module at the claim: only the
+/// row's own host claims it.
 #[tokio::test]
 async fn serve_ignores_a_row_for_another_host() {
     let fx = fx();
     let task = fx.running_task().await;
-    // A second wrap-up row, but naming the other host: the module refuses the
-    // request itself (the worktree is here), so build the row by hand.
-    let mut row = {
-        let svc = fx.svc(MockProcessRunner::unused());
-        let id = asked(svc.request_wrap_up(task, WrapUpMode::Rebase).await.unwrap());
-        fx.row(id).await
+    // The worktree is on the other machine, so the module accepts a wrap-up
+    // requested as that host (its owner is this test's user).
+    fx.db
+        .patch_task(task, &store::TaskPatch::new().host(Some("another-host")))
+        .await
+        .unwrap();
+    let id = match fx
+        .caller
+        .request_wrap_up(task, "another-host".into(), "rebase".into())
+        .await
+        .unwrap()
+    {
+        crate::sync::ReducerOutcome::Applied(ids) => SessionRequestId(ids[0]),
+        other => panic!("seeding the other host's request must apply: {other:?}"),
     };
-    row.host = "another-host".into();
     let runner = Arc::new(MockProcessRunner::new(vec![]));
     let svc = fx.svc(runner.clone());
 
-    let served = svc.serve_session_request(row).await;
+    let served = svc.serve_session_request(fx.row(id).await).await;
 
     assert!(
         matches!(served.outcome, SessionOutcome::ClaimRefused(_)),
         "{served:?}"
     );
     assert!(runner.recorded_calls().is_empty());
+    assert_eq!(fx.row(id).await.state, SessionRequestState::Requested);
 }
 
 // ===========================================================================

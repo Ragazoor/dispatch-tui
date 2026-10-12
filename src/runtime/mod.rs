@@ -715,6 +715,10 @@ struct TuiRuntime {
     /// already handed out (`dispatch_host`). Shared with the row pump, so a
     /// redelivered row is served once.
     dispatch_observer: Arc<std::sync::Mutex<crate::dispatch::DispatchRequestObserver>>,
+    /// Which of this host's session request rows the reactor has already handed
+    /// out, and which exit_session rows it has seen open (`session_host`).
+    /// Shared with the row pump, so a redelivered row is served once.
+    session_observer: Arc<std::sync::Mutex<crate::dispatch::SessionRequestObserver>>,
 }
 
 mod budget;
@@ -726,6 +730,7 @@ mod event_loop;
 mod learnings;
 mod pr;
 mod repo_sync;
+mod session_host;
 mod settings;
 mod split;
 mod store_target;
@@ -936,6 +941,9 @@ impl TuiRuntime {
         // catch-up — on this first connection only, before the row pump can
         // serve anything (sync.allium: FirstConnectionLetsTheBoardDraw).
         drop(runtime.recover_dispatch_requests().await);
+        // store-split.allium: HostRestartFailsInterruptedSessionRequests, then
+        // the W8 catch-up, on the same terms.
+        drop(runtime.recover_session_requests().await);
 
         runtime.start_background_tasks(&parts, session, sync_store, app.repo_paths());
 
@@ -1027,6 +1035,9 @@ impl TuiRuntime {
             split_restores: std::sync::Mutex::new(Vec::new()),
             dispatch_observer: Arc::new(std::sync::Mutex::new(
                 crate::dispatch::DispatchRequestObserver::new(host_id),
+            )),
+            session_observer: Arc::new(std::sync::Mutex::new(
+                crate::dispatch::SessionRequestObserver::new(host_id),
             )),
         };
         (runtime, msg_rx)

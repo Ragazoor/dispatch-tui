@@ -109,15 +109,6 @@ fn apply_board_event(event: crate::board_event::BoardEvent, rt: &TuiRuntime) -> 
             drop(rt.spawn_refresh_epic(epic_id));
             vec![]
         }
-        BoardEvent::BranchRebased { repo_path } => {
-            // A rebase wrap-up pulled origin/<base> and fast-forwarded
-            // local <base>, so the refs are current and no fetch is
-            // needed. An unresolved repository measures nothing.
-            if !repo_path.is_empty() {
-                drop(rt.exec_refresh_repo_sync(repo_path, false));
-            }
-            vec![]
-        }
     }
 }
 

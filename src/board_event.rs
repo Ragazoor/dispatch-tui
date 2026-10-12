@@ -18,11 +18,4 @@ pub enum BoardEvent {
     /// A single epic changed — reload just that row (and the epic's task list,
     /// since feed-sync changes appear here as a batch update for the epic).
     EpicChanged(EpicId),
-    /// A `wrap_up(rebase)` succeeded, so the repository's local base branch was
-    /// just fast-forwarded and its drift changed (docs/specs/repo-sync.allium:
-    /// rule RefreshRepoSyncStateAfterRebase). Carries the repository taken from
-    /// the rebased branch's task, which in practice always names one; the
-    /// consumer still treats an empty path as "no repository" and measures
-    /// nothing, so a future emitter that cannot resolve one has a safe encoding.
-    BranchRebased { repo_path: String },
 }

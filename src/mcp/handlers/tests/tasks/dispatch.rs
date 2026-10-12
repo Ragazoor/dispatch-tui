@@ -4,23 +4,6 @@ use crate::models::test_tmux_window;
 use crate::dispatch::mock_sequence::DispatchScript;
 use crate::mcp::handlers::tasks::WrapUpAction;
 
-/// An epic that does not resolve stops the chain silently. This is the
-/// warn-and-skip branch of `AutoDispatchNextSubtask`: a chain problem must never
-/// surface as an error, because by the time it runs the session has already
-/// closed. `tasks.epic_id` carries a foreign key, so this branch is only
-/// reachable by calling the chain directly — not by wiring a task to a missing
-/// epic and closing it.
-#[tokio::test]
-async fn auto_dispatch_next_returns_none_for_missing_epic() {
-    let state = test_state().await;
-    assert!(crate::mcp::handlers::tasks::dispatch::auto_dispatch_next(
-        &state,
-        crate::models::EpicId(9999)
-    )
-    .await
-    .is_none());
-}
-
 async fn wait_for_task_changed(
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::board_event::BoardEvent>,
     expected_id: crate::models::TaskId,
@@ -32,32 +15,6 @@ async fn wait_for_task_changed(
             None => panic!("notification channel closed before dispatch completed"),
         }
     }
-}
-
-/// This board's host reactor, as the runtime runs it (`store-split.allium:
-/// HostClaimsDispatch`): serve every `requested` row naming this host, once,
-/// as the rows arrive. Since store-split M4 neither `dispatch_task` nor the
-/// chain provisions — they write requests — so a test that wants an agent
-/// launched runs this beside them, over the same service.
-fn spawn_host(state: &Arc<McpState>) -> tokio::task::JoinHandle<()> {
-    let state = state.clone();
-    tokio::spawn(async move {
-        let mut changes = state.db.dispatch_request_changes();
-        let mut observer = crate::dispatch::DispatchRequestObserver::new(state.db.host_id());
-        loop {
-            let rows = state.db.dispatch_requests().await;
-            for row in observer.observe(&rows) {
-                let svc = state.task_svc.clone();
-                let emb = state.embedding_service.clone();
-                tokio::spawn(async move {
-                    svc.serve_dispatch_request(row, emb).await;
-                });
-            }
-            if changes.changed().await.is_err() {
-                return;
-            }
-        }
-    })
 }
 
 // -- automatic epic chaining on exit_session ---------------------------------
@@ -258,6 +215,28 @@ impl ChainFixture {
         .expect("the request must finish")
     }
 
+    /// Wait for `task`'s exit_session row to finish — the host's teardown ran
+    /// and reported. A deadline on a signal, not a wall-clock wait: it wakes on
+    /// every row change and returns the instant the row finishes.
+    async fn wait_for_teardown(&self, task: crate::models::TaskId) {
+        let mut changes = self.db.session_request_changes();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let finished = self.db.session_requests().await.into_iter().any(|r| {
+                    r.task_id == task
+                        && r.kind == crate::models::SessionRequestKind::ExitSession
+                        && !r.is_open()
+                });
+                if finished {
+                    return;
+                }
+                changes.changed().await.expect("the rows outlive the test");
+            }
+        })
+        .await
+        .expect("the teardown must finish");
+    }
+
     /// Every `tmux kill-window` the close path issued, in order.
     fn kill_window_calls(&self) -> Vec<(String, Vec<String>)> {
         self.runner
@@ -354,22 +333,21 @@ impl ChainFixture {
 
 // -- update_task(status="done") closes but never chains ----------------------
 //
-// MarkTaskDoneViaMcp (mcp-task-tools.allium) reuses exit_session's own
-// close_session / kill_session_window tail (the `perform_close` helper in
-// wrap_up.rs), so the teardown guarantees exercised above for exit_session
-// must hold here too. The chain is not part of that tail — it lives at
-// exit_session's own call site, because only exit_session has a wrap_up
-// behind it and so can say the closed work reached base_branch. These are the
-// parity checks plus that one divergence, not a full re-derivation of every
-// exit_session chain test.
+// MarkTaskDoneViaMcp (mcp-task-tools.allium) is the one close still made in the
+// board (until M7, store-split.allium: W13): `close_session` plus
+// `kill_session_window` through the `perform_close` helper in wrap_up.rs, with
+// no token and no chain. The chain is the module's, inside
+// `request_exit_session`'s transaction, and only a close with a wrap_up behind
+// it can say the closed work reached base_branch. These are the teardown
+// checks plus that one divergence.
 
 /// update_task(status="done") leaves the epic's next backlog subtask in
 /// backlog — the divergence from `exit_session_dispatches_first_backlog_subtask`.
 ///
-/// The assertion is sound without waiting for anything: `auto_dispatch_next`
-/// claims its subtask inline (only the provisioning is detached), so a chain
-/// that was going to fire has already moved the row to Running by the time the
-/// close responds.
+/// The assertion is sound without waiting for anything: the module's chain
+/// claims its subtask in `request_exit_session`'s own transaction, and this
+/// path never calls it, so a chain that was going to fire would have moved the
+/// row to Running by the time the close responds.
 #[tokio::test]
 async fn update_task_done_does_not_chain_the_next_subtask() {
     let fx = ChainFixture::new().await;
@@ -437,9 +415,8 @@ async fn update_task_done_kills_the_tmux_window() {
 }
 
 /// A terminal write that does not persist must leave the task exactly as it
-/// was — no status change, no cleared window, no chain — the same guarantee
-/// `exit_session_failed_close_leaves_the_task_unchanged` asserts for the
-/// exit_session path, since both now share `perform_close`.
+/// was — no status change, no cleared window, no chain. (`exit_session`'s own
+/// close is the module's, whole or absent: `a_refused_exit_session_changes_nothing_kills_nothing_and_does_not_chain`.)
 #[tokio::test]
 async fn update_task_done_failed_close_leaves_the_task_unchanged() {
     let fx = ChainFixture::with_failing_close().await;
@@ -618,13 +595,10 @@ async fn exit_session_with_no_backlog_subtask_closes_without_chaining() {
     );
 }
 
-// Migrated from `dispatch_next_epic_not_found_returns_error`, with the
-// assertion inverted: an unresolvable epic is warn-and-skip, not an error. It
-// cannot be driven from here — `tasks.epic_id` carries a foreign key onto
-// `epics(id)` and `PRAGMA foreign_keys=ON`, so a dangling reference is not a
-// reachable database state. The branch is covered directly instead by
-// `auto_dispatch_next_returns_none_for_missing_epic`, inline in
-// src/mcp/handlers/tasks/dispatch.rs.
+// The missing-epic case of the old board-side chain (`dispatch_next_epic_not_found_returns_error`,
+// then `auto_dispatch_next`'s warn-and-skip) has no counterpart any more: the
+// chain runs in the module's transaction against the epic it reads there, and a
+// dangling epic reference is not a reachable state.
 
 // allow-phantom-symbol: renamed test, cited for provenance
 /// Migrated from `dispatch_next_returns_disabled_when_auto_dispatch_off`
@@ -841,20 +815,17 @@ async fn exit_session_chain_reports_no_failure_when_dispatch_succeeds() {
     );
 }
 
-// -- a close whose terminal write does not take effect -----------------------
+// -- a close that does not take effect ----------------------------------------
 //
-// `ExitSession` (docs/specs/pr-workflow.allium) and `ExitSessionViaMcp`
-// (docs/specs/mcp-task-tools.allium) gate the terminal mutation, the tmux
-// teardown (`not exists window`) and the `SessionClosed(task)` emission on
-// `close_persisted` — whether the single patch carrying status, sub_status, url
-// and the cleared tmux_window actually landed. Only consuming the exit token is
-// unconditional. The tests below drive the `close_persisted = false` branch.
+// Since store-split M5 `exit_session`'s close is the module's, in ONE
+// transaction with the token, the epic rollup and the chain
+// (`pr-workflow.allium: ExitSession`): it took effect whole or not at all. The
+// board-side `close_persisted` gate survives only on `update_tasks`
+// status="done" (`MarkTaskDoneViaMcp`, until M7), whose tests drive it below.
 
-/// A task service whose `close_session` always fails, so `exit_session`'s
-/// terminal close patch cannot land. Every other method inherits the panicking
-/// default from `TaskServiceApiStub` — which is itself an assertion: if the
-/// chain ever fired on this path it would panic on
-/// `request_next_backlog_subtask` rather than pass quietly.
+/// A task service whose `close_session` always fails, so `update_tasks`'
+/// board-side close patch cannot land. Every other method inherits the
+/// panicking default from `TaskServiceApiStub` — which is itself an assertion.
 #[derive(Default)]
 struct FailingCloseTaskService {
     /// Bound by the fixture once its database exists; backs the real read the
@@ -931,71 +902,84 @@ impl crate::service::TaskServiceApiStub for LostClaimTaskService {
 
 crate::task_service_api!(service_api_stub_bridge, LostClaimTaskService);
 
-/// The terminal mutation is withheld: the task keeps the status, sub_status and
-/// tmux_window it had, so it stays visible in its current column for a manual
-/// retry instead of silently appearing finished.
+/// A refused close changes NOTHING and leaves the token valid — the module
+/// checks the token, applies the close and writes the teardown row in one
+/// transaction. The task keeps its status, sub_status and window (so it stays
+/// visible in its current column, and its live agent stays attachable), no
+/// window is killed, no row is written and the chain does not fire. This
+/// replaces the old board-side "terminal write did not land but the token is
+/// spent" cases, which can no longer happen.
 #[tokio::test]
-async fn exit_session_failed_close_leaves_the_task_unchanged() {
-    let fx = ChainFixture::with_failing_close().await;
-    let closing = fx.closing_subtask(None).await;
+async fn a_refused_exit_session_changes_nothing_kills_nothing_and_does_not_chain() {
+    let fx = ChainFixture::new().await;
+    let epic_id = fx.epic(true).await;
+    let closing = fx.closing_subtask(Some(epic_id)).await;
+    let next = fx
+        .backlog_subtask(Some(epic_id), "Successor", Some(10), None)
+        .await;
+    let token = seed_exit_token(&fx.state, closing, WrapUpAction::Done).await;
     let before = fx.db.get_task(closing).await.unwrap();
+    let rows_before = fx.db.session_requests().await.len();
 
-    fx.close(closing, WrapUpAction::Done).await;
+    // The action differs from the one the token was issued for.
+    let resp = call(
+        &fx.state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": closing.0, "token": token, "action": "rebase" }
+        })),
+    )
+    .await;
 
+    assert!(is_error(&resp));
     let after = fx.db.get_task(closing).await.unwrap();
-    assert_eq!(
-        after.status, before.status,
-        "a close that did not persist must not move the task"
-    );
+    assert_eq!(after.status, before.status);
     assert_eq!(after.sub_status, before.sub_status);
     assert_eq!(
         after.tmux_window, before.tmux_window,
-        "the task's record of its window is only cleared when the write lands"
+        "the task's window is only cleared by a close that took effect"
     );
-}
-
-/// The teardown is inside `if close_persisted:`, so a close that did not persist
-/// issues no `tmux kill-window` at all: the window survives, still hosting a live
-/// agent the human can attach to in order to retry the close. Leaving the task's
-/// `tmux_window` pointing at a killed window is what used to make the failure
-/// read as `crashed` from running and as awaiting-merge (via `is_detached`) from
-/// review.
-///
-/// The negative assertion is deterministic rather than a timing snapshot: on this
-/// branch nothing is spawned, so no pending task exists that could still issue a
-/// kill after the call returns. (The positive counterpart — a persisting close
-/// DOES kill the window — is
-/// [`exit_session_successful_close_kills_the_tmux_window`], below: the teardown
-/// is a detached, never-joined `spawn_blocking`, but `BackgroundWrite::KillWindow`
-/// gives it a completion signal a test can await instead of sleeping.)
-#[tokio::test]
-async fn exit_session_failed_close_issues_no_kill_window() {
-    let fx = ChainFixture::with_failing_close().await;
-    let closing = fx.closing_subtask(None).await;
-
-    fx.close(closing, WrapUpAction::Done).await;
-
-    let kills = fx.kill_window_calls();
+    assert_eq!(fx.db.session_requests().await.len(), rows_before);
     assert!(
-        kills.is_empty(),
-        "a close that did not persist must leave the tmux window alive, but it ran: {kills:?}"
+        fx.kill_window_calls().is_empty(),
+        "a refused close must leave the tmux window alive: {:?}",
+        fx.kill_window_calls()
+    );
+    assert_eq!(
+        fx.db.get_task(next).await.unwrap().status,
+        TaskStatus::Backlog,
+        "a refused close must not chain"
+    );
+
+    // The token is still valid: the retry with the right action closes.
+    let retry = call(
+        &fx.state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": closing.0, "token": token, "action": "done" }
+        })),
+    )
+    .await;
+    assert!(
+        extract_response_text(&retry).starts_with("Session closed."),
+        "{retry:?}"
     );
 }
 
-/// The positive direction of the same `close_persisted` gate
-/// (`docs/specs/pr-workflow.allium`: `ExitSession`): a *successful* close issues
-/// exactly one `tmux kill-window` for the closing task's window, and only after
-/// the terminal Done write has landed. Without a window leak — the exact bug
-/// this test exists to prevent — a closed task's tmux window would survive
+/// The teardown is the HOST's, from the exit_session row: a close that took
+/// effect leaves exactly one `tmux kill-window` for the closing task's window,
+/// issued only after the terminal Done write landed (the row is written in the
+/// same transaction). Without it a closed task's tmux window would survive
 /// forever.
 ///
-/// `ChainFixture::with_bg_done` gives the detached teardown spawned by
-/// `exit_session` a completion signal (`BackgroundWrite::KillWindow`) so this
-/// test can await it deterministically instead of sleeping — see the
-/// "No `tokio::time::sleep` in tests" section of `docs/conventions.md`.
+/// Awaits the row finishing on the subscription's change signal rather than
+/// sleeping — see the "No `tokio::time::sleep` in tests" section of
+/// `docs/conventions.md`.
 #[tokio::test]
 async fn exit_session_successful_close_kills_the_tmux_window() {
-    let mut fx = ChainFixture::with_bg_done().await;
+    let fx = ChainFixture::new().await;
     let closing = fx.closing_subtask(None).await;
     let window = fx
         .db
@@ -1007,17 +991,12 @@ async fn exit_session_successful_close_kills_the_tmux_window() {
 
     let resp = fx.close(closing, WrapUpAction::Done).await;
     assert!(resp.error.is_none(), "close must succeed: {:?}", resp.error);
-
-    // The Done write is synchronous and already landed by the time `close`
-    // returns; only the teardown is detached, so this is the point that needs
-    // awaiting.
-    fx.wait_for_kill_window_done().await;
-
     assert_eq!(
         fx.db.get_task(closing).await.unwrap().status,
         TaskStatus::Done,
-        "the kill-window signal must not fire before the terminal write lands"
+        "the Done write lands with the row the teardown is served from"
     );
+    fx.wait_for_teardown(closing).await;
 
     // `kill_window` resolves the window name to tmux's pane-id target
     // (`window_target` in `src/tmux.rs`) before issuing `kill-window`, so the
@@ -1033,132 +1012,6 @@ async fn exit_session_successful_close_kills_the_tmux_window() {
     assert!(
         kills[0].1.iter().any(|arg| arg == &pane_id),
         "expected kill-window to target {pane_id:?} (window {window:?}), got: {kills:?}"
-    );
-}
-
-/// The pr branch of the same gate: neither the Review transition nor the
-/// pr-typed url is recorded when the write fails.
-#[tokio::test]
-async fn exit_session_failed_close_records_no_pr_url() {
-    let fx = ChainFixture::with_failing_close().await;
-    let closing = fx.closing_subtask(None).await;
-
-    fx.close(closing, WrapUpAction::Pr).await;
-
-    let after = fx.db.get_task(closing).await.unwrap();
-    assert_eq!(after.status, TaskStatus::Running);
-    assert!(
-        after.url.is_none(),
-        "the pr url is part of the same patch, so it must not appear on its own"
-    );
-}
-
-/// Still a successful JSON-RPC response — the exit token is already consumed by
-/// this point, so an error would strand the agent with no retry path — but the
-/// text must not claim the session closed.
-#[tokio::test]
-async fn exit_session_failed_close_returns_success_reporting_the_failure() {
-    let fx = ChainFixture::with_failing_close().await;
-    let closing = fx.closing_subtask(None).await;
-
-    let resp = fx.close(closing, WrapUpAction::Done).await;
-
-    assert!(
-        resp.error.is_none(),
-        "must not be a JSON-RPC error: {:?}",
-        resp.error
-    );
-    assert!(
-        !is_error(&resp),
-        "must not be an isError tools/call result either"
-    );
-    let text = extract_response_text(&resp);
-    assert!(
-        !text.contains("Session closed"),
-        "the response must not claim the session closed, got: {text}"
-    );
-    assert!(
-        !text.contains("torn down"),
-        "the teardown is gated on the same write, so the response must not claim the \
-         session was torn down — it is still alive, got: {text}"
-    );
-    assert!(
-        text.contains(&format!("#{}", closing.0)),
-        "the response must name the task whose close failed, got: {text}"
-    );
-}
-
-/// The exit token is consumed either way, so a naive retry cannot re-enter the
-/// close path — it hits the "call wrap_up first" branch instead.
-#[tokio::test]
-async fn exit_session_failed_close_still_consumes_the_exit_token() {
-    let fx = ChainFixture::with_failing_close().await;
-    let closing = fx.closing_subtask(None).await;
-
-    fx.close(closing, WrapUpAction::Done).await;
-
-    assert!(
-        fx.state.exit_tokens.read().unwrap().get(&closing).is_none(),
-        "consuming the token is unconditional"
-    );
-}
-
-/// `SessionClosed` is withheld, so `AutoDispatchNextSubtask` never runs: a
-/// broken close must not be compounded by a freshly launched successor.
-#[tokio::test]
-async fn exit_session_failed_close_does_not_chain() {
-    let fx = ChainFixture::with_failing_close().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    let next = fx
-        .backlog_subtask(Some(epic_id), "Successor", Some(10), None)
-        .await;
-
-    let resp = fx.close(closing, WrapUpAction::Done).await;
-    let text = extract_response_text(&resp);
-    assert!(
-        !text.contains("Dispatching next epic subtask"),
-        "a failed close must not report a chain, got: {text}"
-    );
-
-    // The claim is synchronous and completes before exit_session returns, so a
-    // subtask still in Backlog here was never claimed and can never transition.
-    let untouched = fx.db.get_task(next).await.unwrap();
-    assert_eq!(untouched.status, TaskStatus::Backlog);
-    assert!(untouched.worktree.is_none());
-}
-
-/// `ExitSessionViaMcp` / pr-workflow.allium `ExitSession`: the failed-close
-/// RESPONSE is the just-in-time surface for an agent without the /wrap-up
-/// skill loaded, so it carries the reaction itself — stop and hand back to the
-/// human, and retry neither exit_session nor wrap_up (the token was consumed,
-/// so both are dead ends). The tool description no longer carries it
-/// (TheNextCallIsNamedJustInTime).
-#[tokio::test]
-async fn exit_session_failed_close_response_says_stop_and_retry_neither_call() {
-    let fx = ChainFixture::with_failing_close().await;
-    let closing = fx.closing_subtask(None).await;
-
-    let resp = fx.close(closing, WrapUpAction::Done).await;
-    let text = extract_response_text(&resp);
-    let lower = text.to_lowercase();
-
-    assert!(
-        lower.contains("did not take effect"),
-        "the response must still say the close did not take effect, got: {text}"
-    );
-    assert!(
-        lower.contains("stop"),
-        "the response must tell the agent to stop, got: {text}"
-    );
-    assert!(
-        lower.contains("user") || lower.contains("human"),
-        "the response must tell the agent to hand back to the human, got: {text}"
-    );
-    assert!(
-        text.contains("exit_session") && text.contains("wrap_up"),
-        "the response must name both dead-end retries — exit_session again, and a \
-         fresh token from wrap_up — got: {text}"
     );
 }
 
@@ -1184,15 +1037,7 @@ async fn wrap_up_then_exit_session_chains_without_an_agent_tool_call() {
     )
     .await;
     assert!(wrap.error.is_none(), "wrap_up failed: {:?}", wrap.error);
-    let token = fx
-        .state
-        .exit_tokens
-        .read()
-        .unwrap()
-        .get(&closing)
-        .unwrap()
-        .token
-        .clone();
+    let token = token_in_response(&extract_response_text(&wrap));
 
     let resp = call(
         &fx.state,
@@ -1234,7 +1079,7 @@ async fn dispatch_next_tool_no_longer_exists() {
 
 #[tokio::test]
 async fn wrap_up_rebase_preserves_tmux_window() {
-    let (state, db) = test_state_with_overrides(
+    let (state, db) = test_state_with_host(
         with_clean_status(DispatchScript::finish().no_remote()),
         None,
         None,
@@ -1252,6 +1097,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
     db.patch_task(
         task_id,
         &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
             .worktree(Some("/repo/.worktrees/1-rebase-preserve"))
             .tmux_window(Some(&test_tmux_window("task-99"))),
     )
@@ -1288,7 +1134,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
 
 #[tokio::test]
 async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
-    let (state, db) = test_state_with_overrides(
+    let (state, db) = test_state_with_host(
         with_clean_status(
             DispatchScript::finish()
                 .no_remote()
@@ -1309,7 +1155,9 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
         .unwrap();
     db.patch_task(
         task_id,
-        &store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-conflict-sub")),
+        &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
+            .worktree(Some("/repo/.worktrees/1-conflict-sub")),
     )
     .await
     .unwrap();
@@ -1347,7 +1195,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
     // `detect_default_branch` response `finish_task` never asks for, and omitted
     // the dirty-worktree porcelain read, so every response after the first
     // answered the wrong call and it still passed.
-    let (state, db) = test_state_with_overrides(
+    let (state, db) = test_state_with_host(
         with_clean_status(DispatchScript::finish().no_remote().rebase_fails()),
         None,
         None,
@@ -1365,6 +1213,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
     db.patch_task(
         task_id,
         &store::TaskPatch::new()
+            .host(Some(crate::store::MEMORY_HOST_ID))
             .worktree(Some("/repo/.worktrees/1-stale-conflict"))
             .sub_status(SubStatus::Conflict),
     )

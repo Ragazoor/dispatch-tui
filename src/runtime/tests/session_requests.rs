@@ -12,15 +12,9 @@
 // of an exit_session row it failed) and then catches up on `requested` ones
 // (W8).
 use super::*;
-use crate::models::{
-    DispatchMode, DispatchOrigin, SessionRequestId, SessionRequestKind, SessionRequestState,
-    WrapUpMode,
-};
-use crate::store::{
-    DispatchRequestStore, RequestDispatchAnswer, SessionRequestAnswer, SessionRequestRead,
-    SessionRequestStore,
-};
-use crate::sync::{InjectedFault, MemoryReducerCaller, ReducerCaller, SettledIdentity, SharedRows};
+use crate::models::{SessionRequestId, SessionRequestKind, SessionRequestState, WrapUpMode};
+use crate::store::{SessionRequestAnswer, SessionRequestRead, SessionRequestStore};
+use crate::sync::{InjectedFault, MemoryReducerCaller, SettledIdentity, SharedRows};
 
 /// The worktree `DispatchScript::finish()` scripts its git calls for.
 const REPO: &str = "/repo";
@@ -82,8 +76,10 @@ fn asked(answer: SessionRequestAnswer) -> SessionRequestId {
 }
 
 impl SessionRig {
-    /// A task dispatched on this host: running, with the worktree the finish
-    /// script expects and a window.
+    /// A task running on this host, with the worktree the finish script expects
+    /// and a window. Patched in directly, not dispatched: a dispatch request
+    /// finishing in the same millisecond as the wrap-up would void the exit
+    /// token (`store-split.allium`, W3).
     async fn running_task(&self) -> models::TaskId {
         let task = create_task_returning(
             &*self.db,
@@ -91,31 +87,20 @@ impl SessionRig {
             "desc",
             REPO,
             None,
-            models::TaskStatus::Backlog,
+            models::TaskStatus::Running,
         )
         .await
         .unwrap();
-        let request = match self
-            .rt
-            .task_svc
-            .request_dispatch(task.id, DispatchOrigin::User, Some(DispatchMode::Dispatch))
-            .await
-            .unwrap()
-        {
-            RequestDispatchAnswer::Requested(r) => r,
-            RequestDispatchAnswer::Refused(why) => panic!("{why}"),
-        };
-        assert!(self.db.claim_dispatch_request(request).await.unwrap());
-        assert!(self
-            .db
-            .report_dispatch_provisioned(
-                request,
-                WORKTREE,
-                &test_tmux_window(&format!("task-{}", task.id.0)),
-                false
+        self.db
+            .patch_task(
+                task.id,
+                &crate::store::TaskPatch::new()
+                    .worktree(Some(WORKTREE))
+                    .host(Some(crate::store::MEMORY_HOST_ID))
+                    .tmux_window(Some(&test_tmux_window(&format!("task-{}", task.id.0)))),
             )
             .await
-            .unwrap());
+            .unwrap();
         task.id
     }
 
