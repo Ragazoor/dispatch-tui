@@ -524,13 +524,17 @@ rule ProvisionDispatch {
         -- backstop timer (store-split.allium: DispatchRequestTimesOut), or the
         -- task's deletion (DeletingATaskFailsItsOpenRequest). Either way the
         -- module has finished the row, and this host's dispatched report,
-        -- if it sends one, is refused. The host treats a row that failed under
-        -- it — seen through its subscription, or learnt from a refused report
-        -- — as a provisioning failure after the fact: it stops the attempt and
-        -- applies the provisioning-failure rollback below to what this attempt
-        -- created (the window it opened, a FRESH worktree and its branch; never
-        -- a reused one), so no agent keeps running against a task that is back
-        -- in backlog, or gone, and may already be requested again.
+        -- if it sends one, is refused. The host learns that the row failed
+        -- under it from that refused report, when its provisioning ends — it
+        -- does not watch the row mid-attempt — and treats it as a provisioning
+        -- failure after the fact: it applies the provisioning-failure rollback
+        -- below to what this attempt created (the window it opened, a FRESH
+        -- worktree and its branch; never a reused one), so no agent keeps
+        -- running against a task that is back in backlog, or gone, and may
+        -- already be requested again. The attempt itself is bounded by the
+        -- row's deadline either way (ProvisioningStopsAtTheDeadline), and the
+        -- backstop cannot fail the row before that deadline has passed, so in
+        -- practice only a task's deletion fails a row mid-attempt.
         --
         -- == Provisioning-failure rollback ==
         -- "Dispatchable exactly as before" is a claim about disk state (and
@@ -1509,6 +1513,15 @@ surface DispatchingFeedback {
         -- DispatchRequestTimesOut), as are "host restarted" and "task
         -- deleted"; none is a separate path.
         --
+        -- Raised for a failure this board SEES HAPPEN. Its first look at the
+        -- rows, when it starts, is a baseline: rows already failed in it are
+        -- history and raise nothing, so a restart does not re-raise every
+        -- failure the store keeps. That baseline is taken before the restart
+        -- sweep (store-split.allium: HostRestartFailsInterrupted), so the
+        -- "host restarted" failures the sweep writes are raised. A row that
+        -- failed while no board ran on this host — the backstop firing on a
+        -- board that was down — is in the baseline and is not raised.
+        --
         -- This REPLACES the former DispatchingTimeout guarantee, the
         -- in-memory TUI watchdog (DISPATCH_WATCHDOG_TIMEOUT), which only the
         -- board that started a dispatch could enforce and which a board
@@ -1520,8 +1533,8 @@ surface DispatchingFeedback {
         -- branch. The module's timer releases (store-split.allium:
         -- ReleaseClaimOfFailedRequest) because that hazard is now closed
         -- elsewhere: the slow worker's late report is refused and it tears
-        -- down what it made (ProvisionDispatch, "A report the module
-        -- refuses"), so the task is never recorded against the old attempt.
+        -- down what it made (ProvisionDispatch, "A row that fails under this
+        -- host"), so the task is never recorded against the old attempt.
         -- A stuck dispatch therefore returns its task to backlog instead of
         -- stranding it running with no worktree.
 

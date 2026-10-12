@@ -4,20 +4,18 @@
 -- Scope: The TARGET split of responsibility between the dispatch TUI process
 --        and the SpacetimeDB module (spacetime/module/), and the order the
 --        code is migrated in. It says which side owns which kind of
---        behaviour. Migration steps land one at a time: M2 and M3 (below) have
---        landed; M4 is the step in progress (task #53257); M5-M7 have not
---        started. Until a step lands, the rules in the specs listed under
---        Excludes stay authoritative for what the system does today, and
---        nothing here overrides them. Each step runs its own
---        spec -> tests -> code cycle on the spec that owns the behaviour it
---        moves, and only then rewrites that spec's rules.
+--        behaviour. Migration steps land one at a time: M2, M3 and M4 (below)
+--        have landed; M5-M7 have not started. Until a step lands, the rules in
+--        the specs listed under Excludes stay authoritative for what the
+--        system does today, and nothing here overrides them. Each step runs
+--        its own spec -> tests -> code cycle on the spec that owns the
+--        behaviour it moves, and only then rewrites that spec's rules.
 --
---        M4 IS THE EXCEPTION TO "NOTHING HERE OVERRIDES". Its entity and
---        rules (DispatchRequest, below) are written here, and dispatch.allium,
---        mcp-task-tools.allium and sync.allium are already rewritten to match,
---        because the step lands in the same task as these specs. They describe
---        dispatch as it is once M4's code lands; until then the code lags
---        them, and the spec is the target the tests are written against.
+--        M4's entity and rules (DispatchRequest, below) live here rather than
+--        in an owning spec, because the module owns the request row outright.
+--        They describe dispatch as it is now; dispatch.allium,
+--        mcp-task-tools.allium, epics.allium, tasks.allium and sync.allium
+--        are rewritten to match and point back here.
 -- Includes: The split rule, the "host work stays thin" rule, the
 --           request-row model for multi-step work, the version gate, the
 --           migration order, the dispatch request row and its lifecycle
@@ -113,7 +111,23 @@
 --           rules version is 2.
 --           See feeds.allium: IngestFeedEmission.
 --       M4  Dispatch becomes request rows plus the scheduled timeout.
---           IN PROGRESS (task #53257). Decided with the user:
+--           LANDED (task #53257): every launch path (the TUI keys,
+--           retry-fresh, research, quick dispatch, MCP dispatch_task and the
+--           epic chain) calls the request_dispatch reducer, which claims the
+--           task, writes a dispatch_requests row naming the requesting host
+--           and schedules a dispatch_request_timeouts backstop row. The host's
+--           board sees the row through its host-scoped subscription, claims
+--           it (claim_dispatch_request), provisions under the row's deadline
+--           and reports report_dispatch_provisioned or report_dispatch_failed;
+--           the module writes the task's worktree, window and host, or fails
+--           the row and releases the claim, and rolls up the epic chain
+--           either way. A starting board fails its own provisioning rows
+--           (fail_interrupted_dispatch_requests) before serving requested
+--           ones; every task delete fails the task's open request. The TUI
+--           watchdog (DISPATCH_WATCHDOG_TIMEOUT), the board's own claim
+--           release and its post-provision patch are gone. register_host now
+--           enforces core.allium's LocalHostOwnerIsWrittenOnce (D11). The
+--           rules version is 3. Decided with the user:
 --           - D1, the row. A NEW table, dispatch_request, one row per request
 --             (DispatchRequest below), not columns on the task. It carries a
 --             kind column, "dispatch" for now, so M5 adds wrap_up and
@@ -121,7 +135,8 @@
 --             most one OPEN request (requested or provisioning) at a time;
 --             finished rows (dispatched or failed) stay as history. Columns:
 --             id, task_id, kind, host, mode, origin, state, requested_at, claimed_at,
---             finished_at, reason, worktree, tmux_window. An optional column
+--             finished_at, reason, worktree, tmux_window, deadline (D4) and
+--             requested_by (D11). An optional column
 --             is stored as "" for absent, not as an Option, and every
 --             timestamp comes from the module clock.
 --           - D2, the flow. Any client calls the request reducer. The module
@@ -583,7 +598,7 @@ rule DeletingATaskFailsItsOpenRequest {
         -- the one this trigger names. At most one row matches
         -- (OneOpenDispatchRequestPerTask). The host sees its row fail through
         -- its subscription and tears down whatever it made (dispatch.allium:
-        -- ProvisionDispatch, "A report the module refuses"); its later report,
+        -- ProvisionDispatch, "A row that fails under this host"); its later report,
         -- if any, is refused. ReleaseClaimOfFailedRequest then finds no task
         -- and does nothing.
 }
@@ -640,3 +655,5 @@ invariant OneOpenDispatchRequestPerTask {
 open question "Retention of finished request rows (deferred, outside M4): dispatched and failed rows stay as history and their host's subscription delivers all of them. How long are they kept, and what removes them?"
 
 open question "Seeing other machines' requests (deferred, outside M4): a board's subscription delivers only request rows naming its own host. A teammate's board that shows the same task in a shared epic cannot see the request, so its UnprovisionedIndicator falls back to the claim stamp. Should boards also receive the open requests of every task they can see?"
+
+open question "Failures while no board ran (found by weed after M4 landed): a request whose host's board was down when the backstop failed it is already failed in the starting board's baseline, so neither FailedRequestReported nor epics.allium's ReportChainedDispatchFailure raises it, and an epic chain that stalled that way leaves no ChainStallMarked. Should a starting board raise failures it did not see happen, for example epic_chain rows failed since it last ran?"

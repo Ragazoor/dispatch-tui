@@ -1138,6 +1138,12 @@ rule ReportChainedDispatchFailure {
         -- subscription, so the chain's failure is reported although the board
         -- that started the chain is gone. A dispatched request ends the
         -- chain's work for this close and reports nothing.
+        --
+        -- The transition must be one this board sees. A row that failed while
+        -- no board ran on this host (the backstop firing during a long
+        -- outage) is already failed in the starting board's first look at
+        -- the rows, which is history, and raises nothing (dispatch.allium:
+        -- DispatchingFeedback, FailedRequestReported).
 }
 
 rule SurfaceAutoDispatchFailure {
