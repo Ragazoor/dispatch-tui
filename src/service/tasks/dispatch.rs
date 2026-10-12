@@ -72,19 +72,11 @@ impl TaskService {
     /// `provisioning` when its previous board stopped, releasing their claims.
     /// Run once, on the first connection, before any `requested` row is served
     /// (D5).
+    ///
+    /// The module rolls up each released task's epic chain itself
+    /// (`ReleaseClaimOfFailedRequest`), so nothing is recalculated here.
     pub async fn fail_interrupted_dispatch_requests(&self) -> Result<(), ServiceError> {
-        let interrupted: Vec<TaskId> = self
-            .db
-            .dispatch_requests()
-            .await
-            .into_iter()
-            .filter(|r| r.state == crate::models::DispatchRequestState::Provisioning)
-            .map(|r| r.task_id)
-            .collect();
         self.db.fail_interrupted_dispatch_requests().await?;
-        for task in interrupted {
-            self.recalculate_epic_for_task(task).await;
-        }
         Ok(())
     }
 
@@ -205,7 +197,6 @@ impl TaskService {
                 let reason = self.row_reason(id).await.unwrap_or_else(|| {
                     "the dispatch request failed while it was being provisioned".to_string()
                 });
-                self.recalculate_epic_for_task(request.task_id).await;
                 ServedDispatch::Failed(reason)
             }
             Err(e) => {
@@ -243,7 +234,8 @@ impl TaskService {
                 reason.to_string()
             }
         };
-        self.recalculate_epic_for_task(request.task_id).await;
+        // The module rolled up the task's epic chain with the release
+        // (`ReleaseClaimOfFailedRequest`); nothing to recalculate here.
         ServedDispatch::Failed(recorded)
     }
 

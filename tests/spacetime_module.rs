@@ -4436,3 +4436,100 @@ fn a_feed_ingest_that_deletes_a_stale_task_fails_its_open_request() {
         "SELECT request_id FROM dispatch_request_timeouts"
     ));
 }
+
+// -- The epic rollup follows every request outcome ------------------------------
+//
+// `store-split.allium`: `ReleaseClaimOfFailedRequest` and
+// `HostReportsDispatched` run the epic status rollup for the task's epic
+// chain in the same reducer, so an epic never waits on a board to recalculate
+// it after the module moved its subtask. Observed through a STALE epic: one
+// seeded `done` over an unfinished subtask, which any rollup returns to
+// backlog. The backstop timer takes the same failure path
+// (`finish_failed_request`) but is not fired here — see the section header
+// above.
+
+/// [`seed_dispatchable`]'s one task, under an epic left `done` by a rollup
+/// that never ran.
+fn seed_under_a_stale_done_epic(instance: &Instance) {
+    let seeded = instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "done", 0)]).to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+    let seeded = instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([task_json(1, "t", "backlog", 1, "")]).to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+}
+
+/// A requested and claimed row for task 1 on `host-a`, under the stale epic.
+/// Returns the request id. The request itself does not roll the epic up.
+fn provisioning_under_a_stale_done_epic(instance: &Instance) -> String {
+    seed_under_a_stale_done_epic(instance);
+    let requested = request_dispatch(instance, 1, "host-a", "user", "");
+    assert!(requested.status.success(), "{}", describe(&requested));
+    let id = request_column(instance, "id", 1);
+    let claimed = instance.call("claim_dispatch_request", &[&id, "host-a"]);
+    assert!(claimed.status.success(), "{}", describe(&claimed));
+    assert_eq!(
+        column(instance, "SELECT status FROM epics WHERE id = 1"),
+        "done",
+        "the fixture's epic must still be stale when the outcome lands"
+    );
+    id
+}
+
+#[test]
+fn a_failed_report_rolls_up_the_released_subtasks_epic() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    let id = provisioning_under_a_stale_done_epic(&instance);
+
+    let failed = instance.call("report_dispatch_failed", &[&id, "host-a", "boom"]);
+    assert!(failed.status.success(), "{}", describe(&failed));
+
+    assert_eq!(
+        column(&instance, "SELECT status FROM epics WHERE id = 1"),
+        "backlog"
+    );
+}
+
+#[test]
+fn a_restart_sweep_rolls_up_the_released_subtasks_epic() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    provisioning_under_a_stale_done_epic(&instance);
+
+    let swept = instance.call("fail_interrupted_dispatch_requests", &["host-a"]);
+    assert!(swept.status.success(), "{}", describe(&swept));
+
+    assert_eq!(
+        column(&instance, "SELECT status FROM epics WHERE id = 1"),
+        "backlog"
+    );
+}
+
+#[test]
+fn a_dispatched_report_rolls_up_the_subtasks_epic() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    let id = provisioning_under_a_stale_done_epic(&instance);
+
+    let reported = instance.call(
+        "report_dispatch_provisioned",
+        &[&id, "host-a", "/wt/1-t", "task-1"],
+    );
+    assert!(reported.status.success(), "{}", describe(&reported));
+
+    assert_eq!(
+        column(&instance, "SELECT status FROM epics WHERE id = 1"),
+        "backlog"
+    );
+}

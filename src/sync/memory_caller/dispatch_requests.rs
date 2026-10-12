@@ -25,9 +25,10 @@ impl MemoryReducerCaller {
         id
     }
 
-    /// Mirrors the module's `finish_failed_request`: write the failed row and
-    /// release the task's claim when it is still the bare claim
-    /// (`ReleaseClaimOfFailedRequest`). There is no timer row to cancel here.
+    /// Mirrors the module's `finish_failed_request`: write the failed row,
+    /// release the task's claim when it is still the bare claim and roll up
+    /// its epic chain (`ReleaseClaimOfFailedRequest`). There is no timer row to
+    /// cancel here.
     fn finish_failed_request(
         &self,
         tables: &mut Tables,
@@ -37,6 +38,7 @@ impl MemoryReducerCaller {
         let task_id = failed.task_id;
         self.write_dispatch_request(tables, failed);
         if let Some(task) = tables.tasks.get(&task_id).cloned() {
+            let epic_id = task.epic_id;
             if let Some(released) = module::release_claim_after_failure(task) {
                 self.write_task(
                     tables,
@@ -46,6 +48,7 @@ impl MemoryReducerCaller {
                     },
                 )?;
             }
+            self.recalculate_epic_chain(tables, epic_id);
         }
         Ok(())
     }
@@ -172,10 +175,12 @@ impl MemoryReducerCaller {
             )));
         };
         let row = module::dispatched_request_row(row, &worktree, &tmux_window, &self.now());
+        let epic_id = task.epic_id;
         if let Err(why) = self.write_task(&mut tables, module::apply_dispatched_to_task(task, &row))
         {
             return Ok(ReducerOutcome::Refused(why));
         }
+        self.recalculate_epic_chain(&mut tables, epic_id);
         self.write_dispatch_request(&mut tables, row);
         Ok(ReducerOutcome::Applied(vec![]))
     }

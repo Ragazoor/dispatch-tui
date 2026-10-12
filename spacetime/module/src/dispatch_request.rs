@@ -369,7 +369,11 @@ pub(crate) fn fail_dispatch_request(
 }
 
 /// [`fail_dispatch_request`] for a row already failed by a pure rule
-/// ([`expire_dispatch_request_row`]): write it, cancel its timer, release.
+/// ([`expire_dispatch_request_row`]): write it, cancel its timer, release, and
+/// run the epic status rollup for the task's epic chain
+/// (`ReleaseClaimOfFailedRequest`), so no board has to recalculate after the
+/// module moved its subtask. A task already deleted has no chain to roll up;
+/// its delete rolled it up.
 fn finish_failed_request(ctx: &ReducerContext, failed: DispatchRequest) -> Result<(), String> {
     let stamp = failed.finished_at.clone();
     let task_id = failed.task_id;
@@ -377,6 +381,7 @@ fn finish_failed_request(ctx: &ReducerContext, failed: DispatchRequest) -> Resul
     ctx.db.dispatch_requests().id().update(failed);
     cancel_dispatch_request_timer(ctx, request_id);
     if let Some(task) = ctx.db.tasks().id().find(task_id) {
+        let epic_id = task.epic_id;
         if let Some(released) = release_claim_after_failure(task) {
             write_task(
                 ctx,
@@ -386,6 +391,7 @@ fn finish_failed_request(ctx: &ReducerContext, failed: DispatchRequest) -> Resul
                 },
             )?;
         }
+        recalculate_epic_chain(ctx, epic_id);
     }
     Ok(())
 }
@@ -474,8 +480,8 @@ pub fn claim_dispatch_request(
     Ok(())
 }
 
-/// `HostReportsDispatched`: record the result on the row and the task, and
-/// cancel the timer. A late report, on a row that already failed, is refused.
+/// `HostReportsDispatched`: record the result on the row and the task, roll up
+/// the task's epic chain, and cancel the timer. A late report, on a row that already failed, is refused.
 #[spacetimedb::reducer]
 pub fn report_dispatch_provisioned(
     ctx: &ReducerContext,
@@ -495,7 +501,11 @@ pub fn report_dispatch_provisioned(
         return Err(format!("task {} no longer exists", row.task_id));
     };
     let row = dispatched_request_row(row, &worktree, &tmux_window, &now(ctx));
+    let epic_id = task.epic_id;
     write_task(ctx, apply_dispatched_to_task(task, &row))?;
+    // The epic status rollup for the task's epic chain, in this reducer
+    // (`HostReportsDispatched`).
+    recalculate_epic_chain(ctx, epic_id);
     cancel_dispatch_request_timer(ctx, row.id);
     ctx.db.dispatch_requests().id().update(row);
     Ok(())

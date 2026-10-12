@@ -433,6 +433,10 @@ rule HostReportsDispatched {
     ensures: request.task.worktree = worktree
     ensures: request.task.tmux_window = tmux_window
     ensures: request.task.host = request.host
+    -- The epic status rollup for the task's epic chain, in the same reducer.
+    ensures:
+        if request.task.epic != null:
+            RecalculateEpicStatus(request.task.epic)
 
     @guidance
         -- Also cancels the request's scheduled timer.
@@ -557,12 +561,22 @@ rule ReleaseClaimOfFailedRequest {
             task.status = backlog
             task.sub_status = core/SubStatus.default_for(backlog)
             task.last_pre_tool_use_at = null
+    -- The epic status rollup for the task's epic chain, in the same reducer,
+    -- whether or not the release applied. Every failure reaches it: a
+    -- reported one, the backstop, a host restart. A deleted task has no chain
+    -- left here; its delete rolled the chain up.
+    ensures:
+        if exists task and task.epic != null:
+            RecalculateEpicStatus(task.epic)
 
     @guidance
         -- Today's release_backlog_claim, applied by the module to every
         -- failure: a reported one, a timeout, a host restart. It is
         -- conditional, as today: a task that was provisioned or moved on
         -- meanwhile is left alone rather than stomped back to backlog. The
+        -- rollup runs in the module so no board has to recalculate an epic
+        -- after the module moved its subtask (the backstop and the restart
+        -- sweep have no board report behind them to do it). The
         -- last_pre_tool_use_at clear unwinds the stamp RequestDispatch wrote
         -- (the sanctioned exception in agent-health.allium).
 }
