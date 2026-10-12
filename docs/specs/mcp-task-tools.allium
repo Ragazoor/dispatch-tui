@@ -1132,11 +1132,11 @@ rule DispatchTaskViaMcp {
         -- and is reported rather than re-derived. Only provisioning can tell
         -- the two apart: it measures the directory BEFORE acting, and by the
         -- time the dispatch has returned the directory exists either way, so a
-        -- later look at it answers a different question. The request row has
-        -- no column for it (store-split.allium: DispatchRequest), so it
-        -- reaches this call from the provisioning inside the same board, not
-        -- through the store; a response given after the wait cap, via
-        -- get_task, cannot say it.
+        -- later look at it answers a different question. So provisioning
+        -- reports it with the dispatched report, the module records it on the
+        -- request row (store-split.allium: DispatchRequest.reused_worktree,
+        -- HostReportsDispatched), and this call reads it from the row it
+        -- waited on.
         --
         -- == The tool description advertises both paths and the recovery move ==
         -- The description a caller reads before calling states both paths, that

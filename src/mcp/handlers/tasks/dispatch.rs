@@ -114,24 +114,16 @@ pub(crate) async fn handle_dispatch_task(
     match row {
         Some(row) if row.state == DispatchRequestState::Dispatched => {
             let text = match (row.worktree.as_deref(), row.tmux_window.as_ref()) {
-                (Some(worktree), Some(window)) => {
-                    match state.task_svc.dispatched_worktree_reused(request).await {
-                        Some(reused_worktree) => dispatched_text(
-                            task_id,
-                            &DispatchResult {
-                                worktree_path: worktree.to_string(),
-                                tmux_window: window.clone(),
-                                reused_worktree,
-                            },
-                        ),
-                        // Not provisioned by this board's service, so which
-                        // path ran is unknown and not guessed.
-                        None => format!(
-                            "dispatched task #{} — worktree: {worktree}, tmux: {window}",
-                            task_id.0
-                        ),
-                    }
-                }
+                // Whether the worktree was reused is provisioning's own
+                // answer, recorded on the row with the dispatched report.
+                (Some(worktree), Some(window)) => dispatched_text(
+                    task_id,
+                    &DispatchResult {
+                        worktree_path: worktree.to_string(),
+                        tmux_window: window.clone(),
+                        reused_worktree: row.reused_worktree,
+                    },
+                ),
                 _ => format!("dispatched task #{} (request #{})", task_id.0, request.0),
             };
             JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))

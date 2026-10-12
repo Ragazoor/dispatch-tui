@@ -243,11 +243,15 @@ rule ProvisionDispatch {
         -- the way is rolled back here and reported instead as
         -- DispatchProvisioningFailed(request, reporter, reason)
         -- (store-split.allium: HostReportsDispatchFailed).
+        -- reused_worktree is whether the worktree directory already existed,
+        -- measured before acting, and was reused rather than created (see
+        -- "Fresh vs reused" below).
         DispatchProvisioned(
             request: request,
             reporter: local_host(),
             worktree: worktree,
-            tmux_window: window
+            tmux_window: window,
+            reused_worktree: existed_before_provisioning(worktree.path)
         )
 
     -- THE HOST IS FIXED BEFORE ANYTHING IS PROVISIONED, and that ordering
@@ -521,16 +525,23 @@ rule ProvisionDispatch {
         --
         -- == A report that ends in a transport error ==
         -- A dispatched report that gets no answer may or may not have been
-        -- recorded. The host reads the row before deciding: dispatched with
-        -- this attempt's worktree means the report landed, and the agent is
-        -- kept; still provisioning means it did not (or has not arrived), and
-        -- the host sends it once more. A refusal of that retry is read
-        -- against the row again — the module answers in order, so the first
-        -- report's effect, if any, is in the subscription by then. Only a row
-        -- that is NOT dispatched with this worktree is torn down: finished
-        -- otherwise, it is a row that failed under this host (below); still
-        -- unknown after the retry, the host tears down and reports the
-        -- failure, which the module accepts while the row is provisioning.
+        -- recorded. The host sends it once more: the module accepts a repeat
+        -- of a report that already landed and changes nothing
+        -- (store-split.allium: HostRepeatsDispatchedReport), so an accepted
+        -- retry means the agent is kept, whichever send landed. A refused
+        -- retry is a refused report (below): the host tears down and reports
+        -- the failure. A retry that also gets no answer leaves the outcome
+        -- unknown; the host tears down and reports the failure, which the
+        -- module accepts while the row is still provisioning.
+        --
+        -- == A refused dispatched report ==
+        -- Whatever refused it — the row failed under this host (below), or
+        -- the row's deadline passed before the report landed
+        -- (store-split.allium: HostReportsDispatched) — nothing was recorded
+        -- on the task, so the host tears down what this attempt made and
+        -- reports the failure: "deadline passed" once the deadline has gone
+        -- by. On a row that already failed that report is refused in turn,
+        -- and the row keeps the module's reason.
         --
         -- == The row's deadline bounds provisioning ==
         -- Provisioning runs against the request's deadline (requested_at plus
@@ -996,6 +1007,13 @@ rule ProvisioningStopsAtTheDeadline {
         -- for a host that is gone or hung (DispatchRequestTimesOut, reason
         -- "timed out"); a live host's stop and rollback land within that grace,
         -- so its reason is the one the row records.
+        --
+        -- An attempt that finishes provisioning just past the deadline is not
+        -- re-checked on the host: its dispatched report is refused by the
+        -- module, whose clock decides (store-split.allium:
+        -- HostReportsDispatched requires now < request.deadline), and the
+        -- refused-report path in ProvisionDispatch tears it down and reports
+        -- "deadline passed".
         --
         -- Covered by a test in which a provisioning subprocess stalls: the
         -- dispatch fails at the row's deadline, with nothing left on disk or

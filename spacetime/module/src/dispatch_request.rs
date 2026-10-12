@@ -64,6 +64,12 @@ pub struct DispatchRequest {
     /// the table migrates in place.
     #[default("")]
     pub requested_by: String,
+    /// Whether provisioning reused a worktree that already existed rather
+    /// than creating it, as the host reported it
+    /// (`HostReportsDispatched`); `false` until then. Appended last, with a
+    /// default, so the table migrates in place.
+    #[default(false)]
+    pub reused_worktree: bool,
 }
 
 /// The backstop timer: one scheduled row per open request
@@ -103,7 +109,8 @@ pub const DISPATCH_DISPATCHED: &str = "dispatched";
 pub const DISPATCH_FAILED: &str = "failed";
 
 pub const DISPATCH_MODES: [&str; 3] = ["dispatch", "research", "quick"];
-pub const DISPATCH_ORIGINS: [&str; 4] = ["user", "mcp", "epic_chain", "quick"];
+pub const DISPATCH_ORIGIN_EPIC_CHAIN: &str = "epic_chain";
+pub const DISPATCH_ORIGINS: [&str; 4] = ["user", "mcp", DISPATCH_ORIGIN_EPIC_CHAIN, "quick"];
 
 /// The backstop's reason (`DispatchRequestTimesOut`).
 pub const DISPATCH_REASON_TIMED_OUT: &str = "timed out";
@@ -172,18 +179,30 @@ pub fn validate_dispatch_origin(origin: &str) -> Result<(), String> {
     }
 }
 
-/// `RequestDispatch`'s three `requires`, in the order a caller is best told
+/// `RequestDispatch`'s task `requires`, in the order a caller is best told
 /// about them. `has_open_request` is whether the task already holds an open
 /// request (`OneOpenDispatchRequestPerTask`).
+///
+/// `epics.allium: PhoenixIsNeverChained` lives here, keyed on the origin: the
+/// epic chain's request for a phoenix task is refused like any other refusal,
+/// and the chain moves on to its next candidate. Every other origin may take
+/// a phoenix task.
 pub fn validate_dispatch_request(
     task: &Task,
     requester: &str,
+    origin: &str,
     has_open_request: bool,
 ) -> Result<(), String> {
     validate_claim_acceptance(task, requester)?;
     if has_open_request {
         return Err(format!(
             "task {} already holds an open dispatch request",
+            task.id
+        ));
+    }
+    if origin == DISPATCH_ORIGIN_EPIC_CHAIN && task.phoenix {
+        return Err(format!(
+            "task {} is a phoenix task, which the epic chain never dispatches",
             task.id
         ));
     }
@@ -332,11 +351,41 @@ pub fn validate_dispatch_report(row: &DispatchRequest, reporter: &str) -> Result
     Ok(())
 }
 
+/// `HostReportsDispatched`'s D4 `requires`: a dispatched report is in time
+/// only while the module clock is before the row's deadline. Both are the
+/// store's fixed-width timestamp spelling, so they compare as strings. A row
+/// with no deadline (an unparseable `requested_at`) is never too late.
+pub fn validate_dispatched_report_in_time(row: &DispatchRequest, now: &str) -> Result<(), String> {
+    if !row.deadline.is_empty() && now >= row.deadline.as_str() {
+        return Err(format!(
+            "dispatch request {}'s deadline {} has passed, so the dispatched report is refused",
+            row.id, row.deadline
+        ));
+    }
+    Ok(())
+}
+
+/// `HostRepeatsDispatchedReport`: whether a dispatched report repeats the one
+/// the row already records — its own host, on a row dispatched with the same
+/// worktree and window. Such a report is accepted and changes nothing.
+pub fn dispatch_report_is_repeat(
+    row: &DispatchRequest,
+    reporter: &str,
+    worktree: &str,
+    tmux_window: &str,
+) -> bool {
+    row.state == DISPATCH_DISPATCHED
+        && row.host == reporter
+        && row.worktree == worktree
+        && row.tmux_window == tmux_window
+}
+
 /// `HostReportsDispatched`'s writes to the row.
 pub fn dispatched_request_row(
     row: DispatchRequest,
     worktree: &str,
     tmux_window: &str,
+    reused_worktree: bool,
     now: &str,
 ) -> DispatchRequest {
     DispatchRequest {
@@ -344,6 +393,7 @@ pub fn dispatched_request_row(
         finished_at: now.into(),
         worktree: worktree.into(),
         tmux_window: tmux_window.into(),
+        reused_worktree,
         ..row
     }
 }
@@ -499,7 +549,7 @@ pub fn request_dispatch(
         .task_id()
         .filter(&task_id)
         .any(|r| dispatch_request_is_open(&r.state));
-    validate_dispatch_request(&task, &requester, has_open)?;
+    validate_dispatch_request(&task, &requester, &origin, has_open)?;
     let mode = choose_dispatch_mode(&task, &mode)?;
 
     let stamp = now(ctx);
@@ -544,7 +594,11 @@ pub fn claim_dispatch_request(
 }
 
 /// `HostReportsDispatched`: record the result on the row and the task, roll up
-/// the task's epic chain, and cancel the timer. A late report, on a row that already failed, is refused.
+/// the task's epic chain, and cancel the timer. A late report — on a row that
+/// already failed, or past the row's deadline — is refused. A repeat of the
+/// report the row already records is accepted and writes nothing
+/// (`HostRepeatsDispatchedReport`), so a host whose report got no answer can
+/// simply send it again.
 #[spacetimedb::reducer]
 pub fn report_dispatch_provisioned(
     ctx: &ReducerContext,
@@ -552,10 +606,16 @@ pub fn report_dispatch_provisioned(
     reporter: String,
     worktree: String,
     tmux_window: String,
+    reused_worktree: bool,
 ) -> Result<(), String> {
     let row = find_request(ctx, request_id)?;
+    if dispatch_report_is_repeat(&row, &reporter, &worktree, &tmux_window) {
+        return require_acting_for(ctx, &reporter);
+    }
     validate_dispatch_report(&row, &reporter)?;
     require_acting_for(ctx, &reporter)?;
+    let stamp = now(ctx);
+    validate_dispatched_report_in_time(&row, &stamp)?;
     if worktree.is_empty() {
         return Err(format!(
             "dispatch request {request_id}: a dispatched report must name the worktree"
@@ -564,7 +624,7 @@ pub fn report_dispatch_provisioned(
     let Some(task) = ctx.db.tasks().id().find(row.task_id) else {
         return Err(format!("task {} no longer exists", row.task_id));
     };
-    let row = dispatched_request_row(row, &worktree, &tmux_window, &now(ctx));
+    let row = dispatched_request_row(row, &worktree, &tmux_window, reused_worktree, &stamp);
     let epic_id = task.epic_id;
     write_task(ctx, apply_dispatched_to_task(task, &row))?;
     // The epic status rollup for the task's epic chain, in this reducer

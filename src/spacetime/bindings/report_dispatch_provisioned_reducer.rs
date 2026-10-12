@@ -11,6 +11,7 @@ pub(super) struct ReportDispatchProvisionedArgs {
     pub reporter: String,
     pub worktree: String,
     pub tmux_window: String,
+    pub reused_worktree: bool,
 }
 
 impl From<ReportDispatchProvisionedArgs> for super::Reducer {
@@ -20,6 +21,7 @@ impl From<ReportDispatchProvisionedArgs> for super::Reducer {
             reporter: args.reporter,
             worktree: args.worktree,
             tmux_window: args.tmux_window,
+            reused_worktree: args.reused_worktree,
         }
     }
 }
@@ -45,12 +47,14 @@ pub trait report_dispatch_provisioned {
         reporter: String,
         worktree: String,
         tmux_window: String,
+        reused_worktree: bool,
     ) -> __sdk::Result<()> {
         self.report_dispatch_provisioned_then(
             request_id,
             reporter,
             worktree,
             tmux_window,
+            reused_worktree,
             |_, _| {},
         )
     }
@@ -67,6 +71,7 @@ pub trait report_dispatch_provisioned {
         reporter: String,
         worktree: String,
         tmux_window: String,
+        reused_worktree: bool,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -81,6 +86,7 @@ impl report_dispatch_provisioned for super::RemoteReducers {
         reporter: String,
         worktree: String,
         tmux_window: String,
+        reused_worktree: bool,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -92,6 +98,7 @@ impl report_dispatch_provisioned for super::RemoteReducers {
                 reporter,
                 worktree,
                 tmux_window,
+                reused_worktree,
             },
             callback,
         )

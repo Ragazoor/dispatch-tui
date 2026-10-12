@@ -22,6 +22,7 @@ pub struct DispatchRequest {
     pub tmux_window: String,
     pub deadline: String,
     pub requested_by: String,
+    pub reused_worktree: bool,
 }
 
 impl __sdk::InModule for DispatchRequest {
@@ -47,6 +48,7 @@ pub struct DispatchRequestCols {
     pub tmux_window: __sdk::__query_builder::Col<DispatchRequest, String>,
     pub deadline: __sdk::__query_builder::Col<DispatchRequest, String>,
     pub requested_by: __sdk::__query_builder::Col<DispatchRequest, String>,
+    pub reused_worktree: __sdk::__query_builder::Col<DispatchRequest, bool>,
 }
 
 impl __sdk::__query_builder::HasCols for DispatchRequest {
@@ -68,6 +70,7 @@ impl __sdk::__query_builder::HasCols for DispatchRequest {
             tmux_window: __sdk::__query_builder::Col::new(table_name, "tmux_window"),
             deadline: __sdk::__query_builder::Col::new(table_name, "deadline"),
             requested_by: __sdk::__query_builder::Col::new(table_name, "requested_by"),
+            reused_worktree: __sdk::__query_builder::Col::new(table_name, "reused_worktree"),
         }
     }
 }

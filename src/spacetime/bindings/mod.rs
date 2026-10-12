@@ -466,6 +466,7 @@ pub enum Reducer {
         reporter: String,
         worktree: String,
         tmux_window: String,
+        reused_worktree: bool,
     },
     RequestDispatch {
         task_id: i64,
@@ -1010,11 +1011,13 @@ Reducer::RecalculateEpicStatus{
                 reporter,
                 worktree,
                 tmux_window,
+                reused_worktree,
 }             => __sats::bsatn::to_vec(&report_dispatch_provisioned_reducer::ReportDispatchProvisionedArgs {
                 request_id: request_id.clone(),
                 reporter: reporter.clone(),
                 worktree: worktree.clone(),
                 tmux_window: tmux_window.clone(),
+                reused_worktree: reused_worktree.clone(),
 }),
             Reducer::RequestDispatch{
                 task_id,

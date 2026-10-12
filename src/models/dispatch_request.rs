@@ -79,6 +79,10 @@ pub struct DispatchRequest {
     pub reason: Option<String>,
     pub worktree: Option<String>,
     pub tmux_window: Option<TmuxWindow>,
+    /// Whether provisioning reused a worktree that already existed, as the
+    /// host reported it with the dispatched report; `false` until then.
+    /// `dispatch_task`'s success text names it.
+    pub reused_worktree: bool,
     /// `requested_at + config.dispatch_request_timeout`, as the module stored
     /// it. The host enforces THIS value (`dispatch.allium:
     /// ProvisioningStopsAtTheDeadline`), never a copy of the config.

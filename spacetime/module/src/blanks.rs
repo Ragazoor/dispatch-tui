@@ -207,5 +207,6 @@ pub fn blank_dispatch_request() -> DispatchRequest {
         tmux_window: String::new(),
         deadline: String::new(),
         requested_by: String::new(),
+        reused_worktree: false,
     }
 }

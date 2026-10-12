@@ -445,13 +445,16 @@ pub trait ReducerCaller: Send + Sync {
         host: String,
     ) -> Result<ReducerOutcome>;
     /// `HostReportsDispatched`. Refused on a row that is no longer
-    /// provisioning — a late report after the backstop failed it.
+    /// provisioning — a late report after the backstop failed it — and past
+    /// the row's deadline. A repeat of the report the row already records is
+    /// accepted and changes nothing (`HostRepeatsDispatchedReport`).
     async fn report_dispatch_provisioned(
         &self,
         id: DispatchRequestId,
         reporter: String,
         worktree: String,
         tmux_window: String,
+        reused_worktree: bool,
     ) -> Result<ReducerOutcome>;
     /// `HostReportsDispatchFailed`: the module fails the row and releases the
     /// claim (`ReleaseClaimOfFailedRequest`).

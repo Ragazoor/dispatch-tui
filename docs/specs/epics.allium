@@ -932,8 +932,10 @@ rule AutoDispatchNextSubtask {
     ensures:
         if epic != null and epic.auto_dispatch:
             -- First backlog subtask, ordered by sort_order (nulls fall back to
-            -- the task id), then by id. Phoenix subtasks are not candidates —
-            -- see PhoenixIsNeverChained below.
+            -- the task id), then by id, whose epic_chain request is accepted.
+            -- Phoenix subtasks never are: the request refuses them
+            -- (store-split.allium: RequestDispatch) — see
+            -- PhoenixIsNeverChained below.
             let next = first_by_order(epic.subtasks where status = backlog and not phoenix)
             -- A request, as every launch path writes since store-split M4
             -- (store-split.allium: RequestDispatch). No mode: the module
@@ -1033,11 +1035,12 @@ rule AutoDispatchNextSubtask {
         -- claims and launches it exactly as it would any other, which is the
         -- entire point of the flag (see the head of the Phoenix section in
         -- tasks.allium — the recurrence is in the queueing, not the running).
-        -- Concretely, the filter lives in the chain's candidate selection and
-        -- must stay there: the request reducer the chain and every other entry
-        -- point share (store-split.allium: RequestDispatch) does not exclude
-        -- phoenix rows. Adding the filter to the reducer would make a phoenix
-        -- task undispatchable.
+        -- Concretely, the filter lives in the request reducer the chain and
+        -- every other entry point share (store-split.allium: RequestDispatch),
+        -- keyed on the request's origin: only an epic_chain request for a
+        -- phoenix task is refused. The chain treats that refusal like any
+        -- other and offers its next candidate; a request from any other
+        -- origin takes a phoenix task as it would any other.
         --
         -- Candidate selection. Only direct Task children are candidates,
         -- ordered by sort_order ascending with the task id both as the fallback

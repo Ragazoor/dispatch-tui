@@ -556,13 +556,16 @@ pub trait DispatchRequestStore: DispatchRequestRead {
     /// a redelivery, got it — and the caller provisions nothing.
     async fn claim_dispatch_request(&self, id: DispatchRequestId) -> Result<bool>;
     /// `HostReportsDispatched`. `false` is a refused report: the row failed
-    /// under this host (the backstop, or the task's deletion), and the caller
-    /// owes the teardown of what it made.
+    /// under this host (the backstop, or the task's deletion), or its
+    /// deadline passed first, and the caller owes the teardown of what it
+    /// made. `reused_worktree` is provisioning's own answer, recorded on the
+    /// row.
     async fn report_dispatch_provisioned(
         &self,
         id: DispatchRequestId,
         worktree: &str,
         tmux_window: &TmuxWindow,
+        reused_worktree: bool,
     ) -> Result<bool>;
     /// `HostReportsDispatchFailed`. `false` when the row had already finished.
     async fn report_dispatch_failed(&self, id: DispatchRequestId, reason: &str) -> Result<bool>;

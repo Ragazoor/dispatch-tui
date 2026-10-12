@@ -157,13 +157,6 @@ pub struct TaskService {
     pub db: Arc<dyn store::TaskStore>,
     pub(super) clock: Arc<dyn crate::clock::Clock>,
     pub(super) runner: Arc<dyn crate::process::ProcessRunner>,
-    /// Whether each dispatch request this board provisioned reused its
-    /// worktree — what `dispatch_task`'s success text names, and which only
-    /// provisioning can tell (`DispatchTaskViaMcp`). In memory on purpose: the
-    /// request row has no column for it. See
-    /// [`Self::dispatched_worktree_reused`].
-    pub(super) reused_worktrees:
-        std::sync::Mutex<std::collections::HashMap<crate::models::DispatchRequestId, bool>>,
     /// Handles for in-flight `ClosePrOnDone` closes (`spawn_close_attached_pr`),
     /// so a test can wait for a fire-and-forget close to actually finish —
     /// deterministically, rather than sleeping — before asserting on
@@ -190,7 +183,6 @@ impl TaskService {
             db,
             clock: Arc::new(crate::clock::SystemClock),
             runner,
-            reused_worktrees: std::sync::Mutex::new(std::collections::HashMap::new()),
             #[cfg(test)]
             background_pr_closes: std::sync::Mutex::new(Vec::new()),
         }
@@ -1128,8 +1120,9 @@ impl TaskService {
     /// two DIFFERENT subtasks (`DispatchClaimExclusive` in
     /// `docs/specs/dispatch.allium`). The candidates are read from the same
     /// rows the board draws, so the chain takes the task the column shows as
-    /// next. `phoenix` rows are passed over (`PhoenixIsNeverChained`): the
-    /// request reducer does not exclude them, so the filter has to live here.
+    /// next. A `phoenix` subtask is refused by the request itself
+    /// (`PhoenixIsNeverChained`, keyed on the `epic_chain` origin) and passed
+    /// over like any other refusal.
     pub async fn request_next_backlog_subtask(
         &self,
         epic_id: EpicId,
@@ -1147,7 +1140,7 @@ impl TaskService {
             .list_tasks_for_epic(epic_id)
             .await
             .into_iter()
-            .filter(|t| t.status == TaskStatus::Backlog && !t.phoenix)
+            .filter(|t| t.status == TaskStatus::Backlog)
             .collect();
         for task in candidates {
             match self

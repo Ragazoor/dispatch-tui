@@ -765,7 +765,7 @@ mod dispatch_requests {
 
     #[test]
     fn a_backlog_task_with_no_open_request_may_be_requested() {
-        assert!(validate_dispatch_request(&backlog_task(), HOST_A, false).is_ok());
+        assert!(validate_dispatch_request(&backlog_task(), HOST_A, "user", false).is_ok());
     }
 
     /// `DispatchClaimExclusive`, through the request reducer: a claimed task is
@@ -777,7 +777,7 @@ mod dispatch_requests {
                 status: status.into(),
                 ..backlog_task()
             };
-            let why = validate_dispatch_request(&task, HOST_A, false).unwrap_err();
+            let why = validate_dispatch_request(&task, HOST_A, "user", false).unwrap_err();
             assert!(why.contains("already claimed"), "{status}: {why}");
         }
     }
@@ -789,8 +789,8 @@ mod dispatch_requests {
             host: HOST_A.into(),
             ..backlog_task()
         };
-        assert!(validate_dispatch_request(&task, HOST_A, false).is_ok());
-        let why = validate_dispatch_request(&task, HOST_B, false).unwrap_err();
+        assert!(validate_dispatch_request(&task, HOST_A, "user", false).is_ok());
+        let why = validate_dispatch_request(&task, HOST_B, "user", false).unwrap_err();
         assert!(why.contains(HOST_A), "{why}");
     }
 
@@ -799,8 +799,28 @@ mod dispatch_requests {
     /// refused rather than written beside it.
     #[test]
     fn a_task_with_an_open_request_is_refused_even_in_backlog() {
-        let why = validate_dispatch_request(&backlog_task(), HOST_A, true).unwrap_err();
+        let why = validate_dispatch_request(&backlog_task(), HOST_A, "user", true).unwrap_err();
         assert!(why.contains("open dispatch request"), "{why}");
+    }
+
+    /// `epics.allium: PhoenixIsNeverChained`, enforced by the request: the
+    /// epic chain's request for a phoenix task is refused with that reason,
+    /// and every other origin may take it.
+    #[test]
+    fn the_epic_chain_may_not_request_a_phoenix_task() {
+        let phoenix = Task {
+            phoenix: true,
+            ..backlog_task()
+        };
+        let why = validate_dispatch_request(&phoenix, HOST_A, "epic_chain", false).unwrap_err();
+        assert!(why.contains("phoenix"), "{why}");
+        for origin in ["user", "mcp", "quick"] {
+            assert!(
+                validate_dispatch_request(&phoenix, HOST_A, origin, false).is_ok(),
+                "{origin}"
+            );
+        }
+        assert!(validate_dispatch_request(&backlog_task(), HOST_A, "epic_chain", false).is_ok());
     }
 
     // -- RequestDispatch: the mode (D3) ----------------------------------
@@ -935,6 +955,7 @@ mod dispatch_requests {
             request("provisioning", HOST_A),
             "/wt/1-task",
             "task-1",
+            false,
             LATER,
         );
         assert_eq!(row.state, "dispatched");
@@ -942,6 +963,57 @@ mod dispatch_requests {
         assert_eq!(row.worktree, "/wt/1-task");
         assert_eq!(row.tmux_window, "task-1");
         assert_eq!(row.reason, "");
+    }
+
+    /// The host's report of whether provisioning reused the worktree is kept
+    /// on the row (`DispatchRequest.reused_worktree`).
+    #[test]
+    fn a_dispatched_report_records_whether_the_worktree_was_reused() {
+        let reused =
+            dispatched_request_row(request("provisioning", HOST_A), "/wt", "task-1", true, LATER);
+        assert!(reused.reused_worktree);
+        let created =
+            dispatched_request_row(request("provisioning", HOST_A), "/wt", "task-1", false, LATER);
+        assert!(!created.reused_worktree);
+        assert!(!request("requested", HOST_A).reused_worktree, "false until then");
+    }
+
+    /// D4: a dispatched report is refused once the row's deadline has passed
+    /// by the module's clock; before it, it is in time.
+    #[test]
+    fn a_dispatched_report_past_the_deadline_is_refused() {
+        let row = DispatchRequest {
+            deadline: dispatch_request_deadline(NOW),
+            ..request("provisioning", HOST_A)
+        };
+        assert!(validate_dispatched_report_in_time(&row, LATER).is_ok());
+        let why = validate_dispatched_report_in_time(&row, "2026-10-10 12:01:00.000").unwrap_err();
+        assert!(why.contains("deadline"), "{why}");
+        assert!(validate_dispatched_report_in_time(&row, "2026-10-10 12:05:00.000").is_err());
+    }
+
+    /// `HostRepeatsDispatchedReport`: the same report on a row it already
+    /// dispatched is a repeat; any other report is not.
+    #[test]
+    fn a_repeat_of_the_dispatched_report_is_recognised() {
+        let dispatched =
+            dispatched_request_row(request("provisioning", HOST_A), "/wt", "task-1", false, LATER);
+        assert!(dispatch_report_is_repeat(&dispatched, HOST_A, "/wt", "task-1"));
+        assert!(!dispatch_report_is_repeat(&dispatched, HOST_B, "/wt", "task-1"));
+        assert!(!dispatch_report_is_repeat(&dispatched, HOST_A, "/other", "task-1"));
+        assert!(!dispatch_report_is_repeat(&dispatched, HOST_A, "/wt", "task-2"));
+        let failed = DispatchRequest {
+            worktree: "/wt".into(),
+            tmux_window: "task-1".into(),
+            ..request("failed", HOST_A)
+        };
+        assert!(!dispatch_report_is_repeat(&failed, HOST_A, "/wt", "task-1"));
+        assert!(!dispatch_report_is_repeat(
+            &request("provisioning", HOST_A),
+            HOST_A,
+            "",
+            ""
+        ));
     }
 
     /// The writes today's post-provision patch made: worktree, window, and the
@@ -953,6 +1025,7 @@ mod dispatch_requests {
             request("provisioning", HOST_A),
             "/wt/1-task",
             "task-1",
+            false,
             LATER,
         );
         let task = apply_dispatched_to_task(running, &row);

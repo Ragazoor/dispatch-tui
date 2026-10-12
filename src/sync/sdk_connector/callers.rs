@@ -964,11 +964,18 @@ impl ReducerCaller for SdkReducerCaller {
         reporter: String,
         worktree: String,
         tmux_window: String,
+        reused_worktree: bool,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the dispatched report",
-            report_dispatch_provisioned_then(id.0, reporter, worktree, tmux_window)
+            report_dispatch_provisioned_then(
+                id.0,
+                reporter,
+                worktree,
+                tmux_window,
+                reused_worktree
+            )
         )
     }
 

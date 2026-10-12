@@ -358,5 +358,6 @@ mirror!(
         tmux_window,
         deadline,
         requested_by,
+        reused_worktree,
     }
 );

@@ -21,8 +21,7 @@ use std::sync::Arc;
 
 use crate::dispatch::{self, DeadlineRunner, DEADLINE_PASSED};
 use crate::models::{
-    DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, DispatchRequestState,
-    DispatchResult, TaskId,
+    DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, DispatchResult, TaskId,
 };
 use crate::service::ServiceError;
 use crate::store::RequestDispatchAnswer;
@@ -46,18 +45,6 @@ pub enum ServedDispatch {
     /// deadline (rolled back and reported), or the row failed under it (torn
     /// down). The string is the reason the row records.
     Failed(String),
-}
-
-/// What the subscription's copy of a request says about a provisioning whose
-/// dispatched report got no answer.
-#[derive(Debug, PartialEq, Eq)]
-enum RowSays {
-    /// Still `provisioning`: the report did not land, or has not arrived yet.
-    Provisioning,
-    /// `dispatched` with this attempt's worktree: the report landed.
-    Ours,
-    /// Finished some other way — failed, dispatched elsewhere, or gone.
-    Finished,
 }
 
 impl TaskService {
@@ -90,28 +77,16 @@ impl TaskService {
         Ok(())
     }
 
-    /// Whether the worktree a request this board provisioned was reused rather
-    /// than created — what `dispatch_task`'s success text names. Only
-    /// provisioning can tell (the row has no column for it), so it is kept
-    /// here, in memory, for the requests this board served. `None` for any
-    /// other request.
-    pub async fn dispatched_worktree_reused(&self, id: DispatchRequestId) -> Option<bool> {
-        self.reused_worktrees
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&id)
-            .copied()
-    }
-
     /// `HostClaimsDispatch` then `ProvisionDispatch` for one delivered row.
     ///
     /// Claims the row (exactly one board's claim is accepted), provisions with
     /// the ROW's mode — never re-derived — under the ROW's deadline
     /// ([`DeadlineRunner`]), and reports. Every failure is rolled back by the
     /// provisioning itself and reported; the module releases the claim. A row
-    /// that failed under this host — the backstop, or the task's deletion — is
-    /// learnt from the refused report and torn down here, so no agent keeps
-    /// running for a task that is back in backlog or gone.
+    /// that failed under this host — the backstop, or the task's deletion — or
+    /// whose deadline passed before the dispatched report landed is learnt
+    /// from the refused report, torn down here and reported failed, so no
+    /// agent keeps running for a task that is back in backlog or gone.
     ///
     /// Never `Err`: every outcome is a [`ServedDispatch`]. Only this host's
     /// rows reach here: [`dispatch::DispatchRequestObserver`] hands out no
@@ -183,46 +158,38 @@ impl TaskService {
             }
         };
 
-        // Checked once more after the last step: an attempt that finished past
-        // its deadline is not reported dispatched (ProvisioningStopsAtTheDeadline).
-        if self.deadline_passed(&request) {
-            self.tear_down(&repo_path, &provisioned).await;
-            return self.report_failure(&request, DEADLINE_PASSED).await;
-        }
-
-        let report = self.report_provisioned(id, &provisioned).await;
-        let report = match report {
-            Err(e) => self.settle_unanswered_report(id, &provisioned, e).await,
+        // A report that got no answer is sent once more: the module accepts a
+        // repeat of a report that already landed and changes nothing
+        // (`store-split.allium: HostRepeatsDispatchedReport`), so whichever
+        // send landed, an accepted retry means the agent is kept.
+        let report = match self.report_provisioned(id, &provisioned).await {
+            Err(first) => {
+                tracing::warn!(
+                    request = id.0,
+                    "the dispatched report got no answer, sending it again: {first:#}"
+                );
+                self.report_provisioned(id, &provisioned).await
+            }
             answered => answered,
         };
-        match report {
-            Ok(true) => {
-                self.reused_worktrees
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(id, provisioned.reused_worktree);
-                ServedDispatch::Dispatched(provisioned)
-            }
-            Ok(false) => {
-                // The row failed under this host and the report was refused:
-                // nothing was recorded on the task, so what this attempt made
-                // must go.
-                self.tear_down(&repo_path, &provisioned).await;
-                let reason = self.row_reason(id).await.unwrap_or_else(|| {
-                    "the dispatch request failed while it was being provisioned".to_string()
-                });
-                ServedDispatch::Failed(reason)
-            }
-            Err(e) => {
-                // Still unknown after the retry. Tear down rather than leave an
-                // agent running against a task whose request the backstop will
-                // fail and release; while the row is still provisioning the
-                // failure report below lands and releases it now.
-                self.tear_down(&repo_path, &provisioned).await;
-                self.report_failure(&request, &format!("could not report the dispatch: {e:#}"))
-                    .await
-            }
-        }
+        let reason = match report {
+            Ok(true) => return ServedDispatch::Dispatched(provisioned),
+            // Refused: the row failed under this host, or its deadline passed
+            // before the report landed — the module's clock decides
+            // (`HostReportsDispatched`). Nothing was recorded on the task.
+            Ok(false) if self.deadline_passed(&request) => DEADLINE_PASSED.to_string(),
+            Ok(false) => "the dispatched report was refused".to_string(),
+            // Still unknown after the retry. The failure report below lands
+            // while the row is still provisioning and releases the claim now,
+            // rather than when the backstop fires.
+            Err(e) => format!("could not report the dispatch: {e:#}"),
+        };
+        // Either way what this attempt made must go, so no agent keeps running
+        // against a task that is back in backlog or gone. On a row that
+        // already failed the failure report is refused in turn, and the row
+        // keeps the module's reason.
+        self.tear_down(&repo_path, &provisioned).await;
+        self.report_failure(&request, &reason).await
     }
 
     async fn report_provisioned(
@@ -231,55 +198,13 @@ impl TaskService {
         provisioned: &DispatchResult,
     ) -> anyhow::Result<bool> {
         self.db
-            .report_dispatch_provisioned(id, &provisioned.worktree_path, &provisioned.tmux_window)
+            .report_dispatch_provisioned(
+                id,
+                &provisioned.worktree_path,
+                &provisioned.tmux_window,
+                provisioned.reused_worktree,
+            )
             .await
-    }
-
-    /// A dispatched report that ended in a transport error: the module may or
-    /// may not have recorded it (`dispatch.allium: ProvisionDispatch`, "A
-    /// report that ends in a transport error"). The row says which. Answers
-    /// `Ok(true)` when the row is dispatched with THIS attempt's worktree,
-    /// `Ok(false)` when the module has finished it otherwise, and `Err` when
-    /// the outcome is still unknown after one retry.
-    ///
-    /// A row still `provisioning` gets the report once more. A refusal of that
-    /// retry is read against the row again: the module answers calls in
-    /// order, so by the time the refusal arrives the subscription holds the
-    /// first report's effect if it had one.
-    async fn settle_unanswered_report(
-        &self,
-        id: DispatchRequestId,
-        provisioned: &DispatchResult,
-        first: anyhow::Error,
-    ) -> anyhow::Result<bool> {
-        tracing::warn!(
-            request = id.0,
-            "the dispatched report got no answer: {first:#}"
-        );
-        match self.row_says(id, provisioned).await {
-            RowSays::Ours => return Ok(true),
-            RowSays::Finished => return Ok(false),
-            RowSays::Provisioning => {}
-        }
-        match self.report_provisioned(id, provisioned).await {
-            Ok(true) => Ok(true),
-            Ok(false) => Ok(self.row_says(id, provisioned).await == RowSays::Ours),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// What the subscription's copy of `id` says about this attempt.
-    async fn row_says(&self, id: DispatchRequestId, provisioned: &DispatchResult) -> RowSays {
-        match self.db.dispatch_request(id).await {
-            Some(row) if row.state == DispatchRequestState::Provisioning => RowSays::Provisioning,
-            Some(row)
-                if row.state == DispatchRequestState::Dispatched
-                    && row.worktree.as_deref() == Some(provisioned.worktree_path.as_str()) =>
-            {
-                RowSays::Ours
-            }
-            _ => RowSays::Finished,
-        }
     }
 
     fn deadline_passed(&self, request: &DispatchRequest) -> bool {

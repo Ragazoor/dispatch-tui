@@ -4144,7 +4144,7 @@ fn a_dispatched_report_records_the_result_on_the_row_and_the_task() {
 
     let reported = instance.call(
         "report_dispatch_provisioned",
-        &[&id, "host-a", "/wt/1-t", "task-1"],
+        &[&id, "host-a", "/wt/1-t", "task-1", "true"],
     );
     assert!(reported.status.success(), "{}", describe(&reported));
 
@@ -4152,6 +4152,11 @@ fn a_dispatched_report_records_the_result_on_the_row_and_the_task() {
     assert_eq!(request_column(&instance, "finished_at", 1).len(), 23);
     assert_eq!(request_column(&instance, "worktree", 1), "/wt/1-t");
     assert_eq!(request_column(&instance, "tmux_window", 1), "task-1");
+    assert_eq!(
+        request_column(&instance, "reused_worktree", 1),
+        "true",
+        "the host's reused-worktree answer is kept on the row"
+    );
     assert_eq!(
         column(&instance, "SELECT worktree FROM tasks WHERE id = 1"),
         "/wt/1-t"
@@ -4171,6 +4176,78 @@ fn a_dispatched_report_records_the_result_on_the_row_and_the_task() {
     assert_eq!(timer_count(&instance, id.parse().unwrap()), "0");
 }
 
+/// `HostRepeatsDispatchedReport`: the same dispatched report sent again — a
+/// host whose first report got no answer — is accepted and changes nothing;
+/// a report naming another worktree is still refused.
+#[test]
+fn a_repeated_dispatched_report_is_accepted_and_changes_nothing() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    seed_dispatchable(&instance, &[(1, "", "", "")]);
+    request_dispatch(&instance, 1, "host-a", "user", "");
+    let id = request_column(&instance, "id", 1);
+    instance.call("claim_dispatch_request", &[&id, "host-a"]);
+    let first = instance.call(
+        "report_dispatch_provisioned",
+        &[&id, "host-a", "/wt/1-t", "task-1", "false"],
+    );
+    assert!(first.status.success(), "{}", describe(&first));
+    let finished_at = request_column(&instance, "finished_at", 1);
+    let updated_at = column(&instance, "SELECT updated_at FROM tasks WHERE id = 1");
+
+    let again = instance.call(
+        "report_dispatch_provisioned",
+        &[&id, "host-a", "/wt/1-t", "task-1", "false"],
+    );
+    assert!(again.status.success(), "{}", describe(&again));
+    assert_eq!(request_column(&instance, "finished_at", 1), finished_at);
+    assert_eq!(
+        column(&instance, "SELECT updated_at FROM tasks WHERE id = 1"),
+        updated_at
+    );
+
+    let other = instance.call(
+        "report_dispatch_provisioned",
+        &[&id, "host-a", "/wt/other", "task-1", "false"],
+    );
+    assert!(!other.status.success(), "{}", describe(&other));
+    assert_eq!(request_column(&instance, "worktree", 1), "/wt/1-t");
+}
+
+/// `epics.allium: PhoenixIsNeverChained`, enforced by `RequestDispatch`: the
+/// epic chain's request for a phoenix task is refused and writes nothing;
+/// a request from the TUI takes it.
+#[test]
+fn the_epic_chain_may_not_request_a_phoenix_task() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    seed_dispatchable(&instance, &[(1, "", "", "")]);
+    let mut patch = empty_task_patch();
+    patch["phoenix"] = serde_json::json!({"some": true});
+    let marked = instance.call("patch_task", &["1", &patch.to_string()]);
+    assert!(marked.status.success(), "{}", describe(&marked));
+
+    let chained = request_dispatch(&instance, 1, "host-a", "epic_chain", "");
+    assert!(!chained.status.success(), "{}", describe(&chained));
+    assert!(
+        describe(&chained).contains("phoenix"),
+        "{}",
+        describe(&chained)
+    );
+    assert_eq!(request_count(&instance), "0");
+    assert_eq!(
+        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
+        "backlog"
+    );
+
+    let by_hand = request_dispatch(&instance, 1, "host-a", "user", "");
+    assert!(by_hand.status.success(), "{}", describe(&by_hand));
+}
+
 /// `requires: reporter = request.host` and `requires: request.state =
 /// provisioning`, for both reports.
 #[test]
@@ -4185,7 +4262,7 @@ fn a_report_from_another_host_or_on_an_unclaimed_row_is_refused() {
 
     let unclaimed = instance.call(
         "report_dispatch_provisioned",
-        &[&id, "host-a", "/wt/1-t", "task-1"],
+        &[&id, "host-a", "/wt/1-t", "task-1", "false"],
     );
     assert!(!unclaimed.status.success(), "{}", describe(&unclaimed));
     let unclaimed = instance.call("report_dispatch_failed", &[&id, "host-a", "boom"]);
@@ -4194,7 +4271,7 @@ fn a_report_from_another_host_or_on_an_unclaimed_row_is_refused() {
     instance.call("claim_dispatch_request", &[&id, "host-a"]);
     let foreign = instance.call(
         "report_dispatch_provisioned",
-        &[&id, "host-b", "/wt/1-t", "task-1"],
+        &[&id, "host-b", "/wt/1-t", "task-1", "false"],
     );
     assert!(!foreign.status.success(), "{}", describe(&foreign));
     let foreign = instance.call("report_dispatch_failed", &[&id, "host-b", "boom"]);
@@ -4298,7 +4375,7 @@ fn a_dispatched_report_after_the_row_failed_is_refused() {
 
     let late = instance.call(
         "report_dispatch_provisioned",
-        &[&id, "host-a", "/wt/1-t", "task-1"],
+        &[&id, "host-a", "/wt/1-t", "task-1", "false"],
     );
     assert!(!late.status.success(), "{}", describe(&late));
     assert_eq!(request_column(&instance, "state", 1), "failed");
@@ -4586,7 +4663,7 @@ fn a_dispatched_report_rolls_up_the_subtasks_epic() {
 
     let reported = instance.call(
         "report_dispatch_provisioned",
-        &[&id, "host-a", "/wt/1-t", "task-1"],
+        &[&id, "host-a", "/wt/1-t", "task-1", "false"],
     );
     assert!(reported.status.success(), "{}", describe(&reported));
 
@@ -4705,7 +4782,7 @@ fn claims_reports_and_the_sweep_are_refused_for_another_persons_host() {
     assert!(!claim.status.success(), "{}", describe(&claim));
     let dispatched = teammate(
         "report_dispatch_provisioned",
-        &[&provisioning, "host-a", "/wt/2-t", "task-2"],
+        &[&provisioning, "host-a", "/wt/2-t", "task-2", "false"],
     );
     assert!(!dispatched.status.success(), "{}", describe(&dispatched));
     let failed = teammate("report_dispatch_failed", &[&provisioning, "host-a", "x"]);

@@ -332,14 +332,6 @@ macro_rules! task_service_api {
                 &self
             ) -> Result<(), $crate::service::ServiceError>;
 
-            /// Whether the worktree of a request this board provisioned was
-            /// reused rather than created (`DispatchTaskViaMcp`'s success text).
-            /// `None` for a request this board did not serve.
-            async fn dispatched_worktree_reused(
-                &self,
-                id: $crate::models::DispatchRequestId
-            ) -> Option<bool>;
-
             /// Rebase a wrapping task's branch onto its base branch, clearing
             /// the `Conflict` sub_status before and re-setting it on a
             /// conflict. `WrapUpRebase` in `docs/specs/pr-workflow.allium`.

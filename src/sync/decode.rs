@@ -502,6 +502,7 @@ pub fn dispatch_request(row: &bindings::DispatchRequest) -> Decoded<DispatchRequ
         reason: text(&row.reason).map(str::to_owned),
         worktree: text(&row.worktree).map(str::to_owned),
         tmux_window: tmux_window(&row.tmux_window),
+        reused_worktree: row.reused_worktree,
         deadline: required_timestamp(T, row.id, "deadline", &row.deadline)?,
     })
 }

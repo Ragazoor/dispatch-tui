@@ -2446,13 +2446,13 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
         };
         let (id, who, wt, win) = report(r_req);
         assert!(real
-            .report_dispatch_provisioned(id, who, wt, win)
+            .report_dispatch_provisioned(id, who, wt, win, false)
             .await
             .unwrap()
             .won());
         let (id, who, wt, win) = report(m_req);
         assert!(mem
-            .report_dispatch_provisioned(id, who, wt, win)
+            .report_dispatch_provisioned(id, who, wt, win, false)
             .await
             .unwrap()
             .won());

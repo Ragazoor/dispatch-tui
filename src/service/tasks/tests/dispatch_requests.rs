@@ -763,6 +763,76 @@ async fn a_task_deleted_under_the_host_is_torn_down() {
     );
 }
 
+/// D4, `HostReportsDispatched`'s deadline: an attempt that finishes
+/// provisioning just past the row's deadline has its dispatched report
+/// refused by the module's clock. The host tears down what it made and
+/// reports "deadline passed", which releases the claim.
+#[tokio::test]
+async fn a_dispatch_finished_past_the_deadline_is_torn_down_and_failed() {
+    let fx = fx();
+    let (task, _repo) = fx.backlog_task(None).await;
+    let id = requested(
+        fx.svc(MockProcessRunner::unused())
+            .request_dispatch(task.id, DispatchOrigin::User, Some(DispatchMode::Dispatch))
+            .await
+            .unwrap(),
+    );
+    // The clock passes the deadline during the LAST provisioning call, after
+    // the deadline runner let it start, so provisioning itself succeeds.
+    let clock = fx.clock.clone();
+    let runner = Arc::new(OnCall {
+        inner: script_with_spare_teardown(),
+        needle: "@dispatch_pane_role",
+        action: Mutex::new(Some(Box::new(move || {
+            clock.advance(chrono::Duration::seconds(61));
+        }))),
+    });
+    let svc = fx.svc(runner.clone());
+
+    let outcome = svc.serve_dispatch_request(fx.row(id).await, emb()).await;
+
+    let ServedDispatch::Failed(reason) = outcome else {
+        panic!("a report past the deadline is a failure, got {outcome:?}");
+    };
+    assert_eq!(reason, crate::dispatch::DEADLINE_PASSED);
+    let row = fx.row(id).await;
+    assert_eq!(row.state, DispatchRequestState::Failed);
+    assert_eq!(
+        row.reason.as_deref(),
+        Some(crate::dispatch::DEADLINE_PASSED)
+    );
+    assert!(
+        killed_a_window(&runner.inner),
+        "{:?}",
+        runner.inner.flattened_calls()
+    );
+    let stored = fx.db.get_task(task.id).await.unwrap();
+    assert_eq!(stored.status, TaskStatus::Backlog);
+    assert!(
+        stored.worktree.is_none(),
+        "a refused report is never recorded"
+    );
+}
+
+/// `DispatchRequest.reused_worktree`: provisioning's own answer travels with
+/// the dispatched report and is kept on the row.
+#[tokio::test]
+async fn the_dispatched_report_records_whether_the_worktree_was_reused() {
+    let fx = fx();
+    let (task, _repo) = fx.backlog_task(None).await;
+
+    let (outcome, id, _runner) = serve_with_report_faults(&fx, &task, &[]).await;
+
+    let ServedDispatch::Dispatched(result) = outcome else {
+        panic!("expected a dispatch, got {outcome:?}");
+    };
+    assert!(
+        result.reused_worktree,
+        "the fixture's worktree already exists"
+    );
+    assert!(fx.row(id).await.reused_worktree);
+}
+
 // ===========================================================================
 // A dispatched report that ends in a transport error
 // ===========================================================================
@@ -800,9 +870,10 @@ async fn serve_with_report_faults(
 
 /// `dispatch.allium: ProvisionDispatch`, "A report that ends in a transport
 /// error": the module recorded the report but the reply was lost. The host
-/// re-reads the row, finds it dispatched with this attempt's worktree, and
-/// keeps the agent — tearing it down would orphan a task the module already
-/// shows as running there.
+/// sends it again, the module accepts the repeat and changes nothing
+/// (`store-split.allium: HostRepeatsDispatchedReport`), and the host keeps
+/// the agent — tearing it down would orphan a task the module already shows
+/// as running there.
 #[tokio::test]
 async fn a_lost_reply_to_a_recorded_report_keeps_the_dispatch() {
     let fx = fx();

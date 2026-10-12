@@ -39,6 +39,7 @@ fn row(
         task_id: TaskId(task),
         host: host.to_string(),
         requested_by: "owner".to_string(),
+        reused_worktree: false,
         mode: DispatchMode::Dispatch,
         origin,
         state,

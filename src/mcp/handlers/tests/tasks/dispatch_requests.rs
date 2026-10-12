@@ -135,6 +135,7 @@ async fn dispatch_task_answers_with_the_worktree_once_the_row_is_dispatched() {
             row.id,
             "/repo/.worktrees/1-test-task",
             &TmuxWindow::for_task(task),
+            false,
         )
         .await
         .unwrap());

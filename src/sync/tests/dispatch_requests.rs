@@ -37,6 +37,7 @@ fn requested_row(id: i64) -> bindings::DispatchRequest {
         tmux_window: String::new(),
         deadline: "2026-10-11 12:01:00.000".into(),
         requested_by: "c0ffee".into(),
+        reused_worktree: false,
     }
 }
 

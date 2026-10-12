@@ -125,7 +125,7 @@ impl MemoryReducerCaller {
             .dispatch_requests
             .values()
             .any(|r| r.task_id == task_id && module::dispatch_request_is_open(&r.state));
-        module::validate_dispatch_request(&row, requester, has_open)?;
+        module::validate_dispatch_request(&row, requester, origin, has_open)?;
         let mode = module::choose_dispatch_mode(&row, mode)?;
 
         let stamp = self.now();
@@ -167,8 +167,15 @@ impl MemoryReducerCaller {
         reporter: String,
         worktree: String,
         tmux_window: String,
+        reused_worktree: bool,
     ) -> Result<ReducerOutcome> {
-        outcome(self.report_dispatch_provisioned_body(id.0, &reporter, &worktree, &tmux_window))
+        outcome(self.report_dispatch_provisioned_body(
+            id.0,
+            &reporter,
+            &worktree,
+            &tmux_window,
+            reused_worktree,
+        ))
     }
 
     fn report_dispatch_provisioned_body(
@@ -177,11 +184,18 @@ impl MemoryReducerCaller {
         reporter: &str,
         worktree: &str,
         tmux_window: &str,
+        reused_worktree: bool,
     ) -> Result<Vec<i64>, String> {
         let mut tables = self.lock();
         let row = find_request(&tables, id)?;
+        if module::dispatch_report_is_repeat(&row, reporter, worktree, tmux_window) {
+            self.acting_for(&tables, reporter)?;
+            return Ok(vec![]);
+        }
         module::validate_dispatch_report(&row, reporter)?;
         self.acting_for(&tables, reporter)?;
+        let stamp = self.now();
+        module::validate_dispatched_report_in_time(&row, &stamp)?;
         if worktree.is_empty() {
             return Err(format!(
                 "dispatch request {id}: a dispatched report must name the worktree"
@@ -190,7 +204,8 @@ impl MemoryReducerCaller {
         let Some(task) = tables.tasks.get(&row.task_id).cloned() else {
             return Err(format!("task {} no longer exists", row.task_id));
         };
-        let row = module::dispatched_request_row(row, worktree, tmux_window, &self.now());
+        let row =
+            module::dispatched_request_row(row, worktree, tmux_window, reused_worktree, &stamp);
         let epic_id = task.epic_id;
         self.write_task(&mut tables, module::apply_dispatched_to_task(task, &row))?;
         self.recalculate_epic_chain(&mut tables, epic_id);

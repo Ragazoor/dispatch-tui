@@ -99,6 +99,7 @@ impl DispatchRequestStore for Store {
         id: DispatchRequestId,
         worktree: &str,
         tmux_window: &TmuxWindow,
+        reused_worktree: bool,
     ) -> Result<bool> {
         Ok(won_logged(
             self.caller
@@ -107,6 +108,7 @@ impl DispatchRequestStore for Store {
                     self.host.clone(),
                     worktree.to_string(),
                     tmux_window.as_str().to_string(),
+                    reused_worktree,
                 )
                 .await?,
             "dispatched report",

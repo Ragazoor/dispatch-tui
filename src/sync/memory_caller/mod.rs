@@ -683,9 +683,16 @@ impl ReducerCaller for MemoryReducerCaller {
         reporter: String,
         worktree: String,
         tmux_window: String,
+        reused_worktree: bool,
     ) -> Result<ReducerOutcome> {
         self.faulted("report_dispatch_provisioned", || {
-            self.apply_report_dispatch_provisioned(id, reporter, worktree, tmux_window)
+            self.apply_report_dispatch_provisioned(
+                id,
+                reporter,
+                worktree,
+                tmux_window,
+                reused_worktree,
+            )
         })
     }
 

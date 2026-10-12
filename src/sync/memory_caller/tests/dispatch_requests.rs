@@ -35,6 +35,18 @@ fn caller() -> (MemoryReducerCaller, Arc<SharedRows>) {
     (caller, rows)
 }
 
+/// [`caller`] on a clock the test can move, for the deadline.
+fn caller_with_clock() -> (MemoryReducerCaller, Arc<SharedRows>, Arc<FixedClock>) {
+    let rows = Arc::new(SharedRows::new());
+    let clock = Arc::new(FixedClock::new(
+        Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+    ));
+    let caller = MemoryReducerCaller::new(rows.clone(), clock.clone())
+        .with_sender(ME)
+        .with_registered_host(HOST, ME);
+    (caller, rows, clock)
+}
+
 /// The request id an applied `request_dispatch` reads back.
 fn request_id(outcome: ReducerOutcome) -> DispatchRequestId {
     match outcome {
@@ -284,6 +296,7 @@ async fn report_dispatch_provisioned_records_the_result_on_the_row_and_the_task(
             HOST.into(),
             "/repo/.worktrees/1-t".into(),
             "task-1".into(),
+            false,
         )
         .await
         .unwrap();
@@ -303,6 +316,104 @@ async fn report_dispatch_provisioned_records_the_result_on_the_row_and_the_task(
     assert_eq!(t.host.as_deref(), Some(HOST), "HostTracksWorktree");
 }
 
+/// The host's reused-worktree answer is kept on the row
+/// (`DispatchRequest.reused_worktree`), for `dispatch_task`'s success text.
+#[tokio::test]
+async fn report_dispatch_provisioned_records_whether_the_worktree_was_reused() {
+    let (caller, rows) = caller();
+    let (_task, id) = provisioning_request(&caller).await;
+    assert!(
+        !rows.dispatch_request(id).unwrap().reused_worktree,
+        "false until reported"
+    );
+
+    caller
+        .report_dispatch_provisioned(id, HOST.into(), "/w".into(), "task-1".into(), true)
+        .await
+        .unwrap();
+
+    assert!(rows.dispatch_request(id).unwrap().reused_worktree);
+}
+
+/// `HostRepeatsDispatchedReport`: a host whose report got no answer sends it
+/// again; the repeat is accepted and changes nothing, even past the deadline.
+/// A report naming another worktree is still refused.
+#[tokio::test]
+async fn a_repeated_dispatched_report_is_accepted_and_changes_nothing() {
+    let (caller, rows, clock) = caller_with_clock();
+    let (task, id) = provisioning_request(&caller).await;
+    assert!(caller
+        .report_dispatch_provisioned(id, HOST.into(), "/w".into(), "task-1".into(), false)
+        .await
+        .unwrap()
+        .won());
+    let row = rows.dispatch_request(id).unwrap();
+    let stored = rows.task(task).unwrap();
+
+    clock.advance(chrono::Duration::seconds(120));
+    let again = caller
+        .report_dispatch_provisioned(id, HOST.into(), "/w".into(), "task-1".into(), false)
+        .await
+        .unwrap();
+    assert!(again.won(), "{again:?}");
+    assert_eq!(rows.dispatch_request(id).unwrap(), row);
+    assert_eq!(rows.task(task).unwrap().updated_at, stored.updated_at);
+
+    let other = caller
+        .report_dispatch_provisioned(id, HOST.into(), "/other".into(), "task-1".into(), false)
+        .await
+        .unwrap();
+    assert!(!other.won(), "a different worktree is not a repeat");
+}
+
+/// D4: a dispatched report that lands at or past the row's deadline, by the
+/// store's clock, is refused and records nothing; the row stays provisioning
+/// for the host's failure report.
+#[tokio::test]
+async fn a_dispatched_report_past_the_deadline_is_refused() {
+    let (caller, rows, clock) = caller_with_clock();
+    let (task, id) = provisioning_request(&caller).await;
+
+    clock.advance(chrono::Duration::seconds(60));
+    let late = caller
+        .report_dispatch_provisioned(id, HOST.into(), "/w".into(), "task-1".into(), false)
+        .await
+        .unwrap();
+
+    match late {
+        ReducerOutcome::Refused(why) => assert!(why.contains("deadline"), "{why}"),
+        other => panic!("a report past the deadline must be refused, got {other:?}"),
+    }
+    assert_eq!(
+        rows.dispatch_request(id).unwrap().state,
+        DispatchRequestState::Provisioning
+    );
+    assert!(rows.task(task).unwrap().worktree.is_none());
+}
+
+/// `PhoenixIsNeverChained`, enforced by the request: the epic chain's request
+/// for a phoenix task is refused and writes nothing; the TUI's is accepted.
+#[tokio::test]
+async fn the_epic_chain_may_not_request_a_phoenix_task() {
+    let (caller, rows) = caller();
+    let task = caller
+        .create_task(bindings::Task {
+            phoenix: true,
+            ..blank_task()
+        })
+        .await
+        .unwrap();
+
+    match request(&caller, task, HOST, "epic_chain", "").await {
+        ReducerOutcome::Refused(why) => assert!(why.contains("phoenix"), "{why}"),
+        other => panic!("the chain must not take a phoenix task, got {other:?}"),
+    }
+    assert!(rows.dispatch_requests().is_empty());
+    assert_eq!(rows.task(task).unwrap().status, TaskStatus::Backlog);
+
+    request_id(request(&caller, task, HOST, "user", "dispatch").await);
+}
+
 /// Only the row's host reports, and only while it is provisioning.
 #[tokio::test]
 async fn reports_are_refused_from_another_host_or_off_a_requested_row() {
@@ -311,7 +422,7 @@ async fn reports_are_refused_from_another_host_or_off_a_requested_row() {
     let id = request_id(request(&caller, task, HOST, "user", "dispatch").await);
 
     let unclaimed = caller
-        .report_dispatch_provisioned(id, HOST.into(), "/w".into(), "task-1".into())
+        .report_dispatch_provisioned(id, HOST.into(), "/w".into(), "task-1".into(), false)
         .await
         .unwrap();
     assert!(!unclaimed.won(), "a requested row has not been claimed yet");
@@ -406,7 +517,7 @@ async fn the_backstop_fails_an_open_row_and_a_late_report_is_refused() {
     assert_eq!(rows.task(task).unwrap().status, TaskStatus::Backlog);
 
     let late = caller
-        .report_dispatch_provisioned(id, HOST.into(), "/w".into(), "task-1".into())
+        .report_dispatch_provisioned(id, HOST.into(), "/w".into(), "task-1".into(), false)
         .await
         .unwrap();
     assert!(
@@ -425,7 +536,7 @@ async fn the_backstop_leaves_a_finished_row_alone() {
     let (caller, rows) = caller();
     let (_task, id) = provisioning_request(&caller).await;
     caller
-        .report_dispatch_provisioned(id, HOST.into(), "/w".into(), "task-1".into())
+        .report_dispatch_provisioned(id, HOST.into(), "/w".into(), "task-1".into(), false)
         .await
         .unwrap();
 
@@ -594,7 +705,13 @@ async fn claims_reports_and_the_sweep_are_refused_for_a_host_the_caller_does_not
         .unwrap()
         .won());
     assert!(!caller
-        .report_dispatch_provisioned(provisioning, HOST.into(), "/w".into(), "task-1".into())
+        .report_dispatch_provisioned(
+            provisioning,
+            HOST.into(),
+            "/w".into(),
+            "task-1".into(),
+            false
+        )
         .await
         .unwrap()
         .won());

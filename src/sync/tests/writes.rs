@@ -84,7 +84,7 @@ enum Sent {
     RegisterHost(String, String, String),
     RequestDispatch(TaskId, String, String, String),
     ClaimDispatchRequest(i64, String),
-    ReportDispatchProvisioned(i64, String, String, String),
+    ReportDispatchProvisioned(i64, String, String, String, bool),
     ReportDispatchFailed(i64, String, String),
     FailInterruptedDispatchRequests(String),
     SaveSetting(String, String, String),
@@ -772,12 +772,14 @@ impl ReducerCaller for RecordingCaller {
         reporter: String,
         worktree: String,
         tmux_window: String,
+        reused_worktree: bool,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::ReportDispatchProvisioned(
             id.0,
             reporter,
             worktree,
             tmux_window,
+            reused_worktree,
         ))
     }
 
@@ -2249,6 +2251,7 @@ async fn every_store_mutation_reaches_the_transport() {
             request,
             "/wt",
             &crate::models::TmuxWindow::for_task(TaskId(1)),
+            false,
         )
         .await
         .unwrap();

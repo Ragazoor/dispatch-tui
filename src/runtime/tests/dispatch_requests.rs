@@ -394,6 +394,7 @@ fn seed_requested_row(rows: &SharedRows, id: i64, requested_by: &str) {
         tmux_window: String::new(),
         deadline: "2099-01-01 00:00:00.000".into(),
         requested_by: requested_by.into(),
+        reused_worktree: false,
     });
 }
 
