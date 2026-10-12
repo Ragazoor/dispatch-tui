@@ -75,7 +75,7 @@ pub use connector::{Accepted, ConnectError, StoreConnector, SubscriptionRequest}
 pub use decode::DecodeError;
 pub use identity::{identity_conflict_message, settle_identity, IdentityVerdict};
 #[cfg(any(test, feature = "test-support"))]
-pub use memory_caller::MemoryReducerCaller;
+pub use memory_caller::{InjectedFault, MemoryReducerCaller};
 pub use rows::{HostRow, RepoBaseBranchRow, RepoPathRow, SharedRows};
 pub use sdk_connector::{SdkReducerCaller, SpacetimeSdkConnector};
 pub use session::{StepOutcome, SyncSession, SyncStore};

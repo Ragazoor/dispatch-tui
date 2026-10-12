@@ -1,6 +1,6 @@
 //! Retry, kill-and-retry handlers.
 
-use crate::models::{DispatchMode, SubStatus, TaskId, TaskStatus};
+use crate::models::{SubStatus, TaskId, TaskStatus};
 
 use super::super::commands::CleanupFollowUp;
 use super::super::types::*;
@@ -127,10 +127,14 @@ impl App {
                 fields,
             )));
             self.mark_dispatching(id);
+            // No mode: the module derives it (store-split.allium D3), so a
+            // research task without a plan goes back to research
+            // (DispatchResearchTask) and every other one to DispatchTask —
+            // the same agent the task would get from a fresh dispatch.
             cmds.push(Command::Task(
                 crate::tui::commands::TaskCommand::DispatchAgent {
                     task: task_clone,
-                    mode: DispatchMode::Dispatch,
+                    mode: None,
                 },
             ));
             cmds

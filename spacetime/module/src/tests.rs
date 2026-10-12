@@ -1132,10 +1132,24 @@ mod dispatch_requests {
         );
     }
 
-    /// A host may be registered before its owner is known.
+    /// A NEW host row must name its owner: host ids are public, so an
+    /// ownerless row would be adoptable by whichever caller registered the id
+    /// next — a teammate could lock a new machine out of its own host.
     #[test]
-    fn an_ownerless_registration_is_accepted_while_the_owner_is_unknown() {
-        assert_eq!(validate_host_registration(None, "", "c0ffee"), Ok(()));
+    fn a_new_host_may_not_be_registered_ownerless() {
+        let why = validate_host_registration(None, "", "c0ffee").unwrap_err();
+        assert!(why.contains("owner"), "{why}");
+    }
+
+    /// A legacy row written before owners were enforced may still be adopted
+    /// by the first caller naming itself, and an ownerless re-register of it
+    /// changes no ownership.
+    #[test]
+    fn a_legacy_ownerless_row_may_still_be_adopted() {
+        assert_eq!(
+            validate_host_registration(Some(&host("")), "c0ffee", "c0ffee"),
+            Ok(())
+        );
         assert_eq!(validate_host_registration(Some(&host("")), "", "c0ffee"), Ok(()));
     }
 

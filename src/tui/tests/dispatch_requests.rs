@@ -336,8 +336,10 @@ fn an_open_request_row_counts_as_in_flight() {
 
 // -- RetryFresh goes through DispatchTask ---------------------------------------------
 
-/// `dispatch.allium: RetryFresh` ensures `DispatchTask(task)`: the standard
-/// dispatch command, which writes a `user` request with mode `dispatch`.
+/// `dispatch.allium: RetryFresh` re-dispatches through the standard dispatch
+/// command, a `user` request, naming NO mode: the module derives it
+/// (`store-split.allium` D3), so a research-tagged task without a plan goes
+/// back to research (`DispatchResearchTask`) and every other one to dispatch.
 #[test]
 fn retry_fresh_redispatches_through_the_standard_dispatch() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
@@ -349,12 +351,9 @@ fn retry_fresh_redispatches_through_the_standard_dispatch() {
     assert!(
         cmds.iter().any(|c| matches!(
             c,
-            Command::Task(crate::tui::commands::TaskCommand::DispatchAgent {
-                mode: DispatchMode::Dispatch,
-                ..
-            })
+            Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { mode: None, .. })
         )),
-        "got: {cmds:?}"
+        "retry-fresh lets the module derive the mode, got: {cmds:?}"
     );
 }
 

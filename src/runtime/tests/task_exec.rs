@@ -239,7 +239,7 @@ async fn exec_dispatch_sends_dispatched_message() {
     .await
     .unwrap();
     let id = task.id;
-    rt.exec_dispatch_agent(Box::new(task), models::DispatchMode::Dispatch)
+    rt.exec_dispatch_agent(Box::new(task), Some(models::DispatchMode::Dispatch))
         .await;
 
     // The request is the claim, and it owns the Running write
@@ -294,7 +294,7 @@ async fn exec_dispatch_agent_routes_research_mode_to_the_research_agent() {
     )
     .await
     .unwrap();
-    rt.exec_dispatch_agent(Box::new(task), models::DispatchMode::Research)
+    rt.exec_dispatch_agent(Box::new(task), Some(models::DispatchMode::Research))
         .await;
     serve(&rt).await;
 
@@ -350,7 +350,7 @@ async fn exec_dispatch_agent_lost_claim_provisions_nothing() {
         crate::store::RequestDispatchAnswer::Requested(_)
     ));
 
-    rt.exec_dispatch_agent(Box::new(task.clone()), models::DispatchMode::Dispatch)
+    rt.exec_dispatch_agent(Box::new(task.clone()), Some(models::DispatchMode::Dispatch))
         .await;
 
     let msg1 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
@@ -416,7 +416,7 @@ async fn exec_dispatch_failure_fails_the_request_and_releases_the_claim() {
     )
     .await
     .unwrap();
-    rt.exec_dispatch_agent(Box::new(task.clone()), models::DispatchMode::Dispatch)
+    rt.exec_dispatch_agent(Box::new(task.clone()), Some(models::DispatchMode::Dispatch))
         .await;
     serve(&rt).await;
 

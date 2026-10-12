@@ -230,9 +230,16 @@ pub fn apply_dispatch_claim(task: Task, now: &str) -> Task {
 }
 
 /// `core.allium: LocalHostOwnerIsWrittenOnce`, as `register_host` enforces
-/// it: `owner` may name only the caller itself (or nobody yet), and an owned
-/// host's owner is never rewritten — not to another identity, not to empty.
-/// A re-register with the same owner (a rename) passes.
+/// it: `owner` may name only the caller itself, and an owned host's owner is
+/// never rewritten — not to another identity, not to empty. A re-register
+/// with the same owner (a rename) passes.
+///
+/// A NEW row must name its owner (`store-split.allium`, D11). Host ids are
+/// public, so an ownerless row would go to whichever caller registered the id
+/// next with itself as owner — a teammate could take a new machine's host
+/// before its own board did, and lock it out. A legacy row written ownerless
+/// before this was enforced may still be adopted by the first caller naming
+/// itself, and an ownerless re-register of it changes no ownership.
 pub fn validate_host_registration(
     existing: Option<&Host>,
     owner: &str,
@@ -242,6 +249,11 @@ pub fn validate_host_registration(
         return Err(format!(
             "{caller} may not register a host as owned by {owner}; only as its own"
         ));
+    }
+    if existing.is_none() && owner.is_empty() {
+        return Err(
+            "a new host must be registered with its owner, the caller's own identity".to_string(),
+        );
     }
     if let Some(existing) = existing {
         if !existing.owner.is_empty() && existing.owner != owner {

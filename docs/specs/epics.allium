@@ -1143,7 +1143,9 @@ rule ReportChainedDispatchFailure {
         -- no board ran on this host (the backstop firing during a long
         -- outage) is already failed in the starting board's first look at
         -- the rows, which is history, and raises nothing (dispatch.allium:
-        -- DispatchingFeedback, FailedRequestReported).
+        -- DispatchingFeedback, FailedRequestReported). By decision
+        -- (store-split.allium, D12): the failed card shows it, and a chain
+        -- stalled that way gets no ChainStallMarked.
 }
 
 rule SurfaceAutoDispatchFailure {

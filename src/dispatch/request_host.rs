@@ -37,6 +37,13 @@ pub const DEADLINE_PASSED: &str = "deadline passed";
 /// the row pump redelivers the whole set — a live insert and the initial rows
 /// a starting board receives alike (D5). The module refuses a second claim
 /// anyway; this keeps the board from asking twice.
+///
+/// Handing a row out marks it, so two wake-ups racing on the same set never
+/// both serve it. A row whose claim was never answered — the claim could not
+/// be sent, or the board had no settled identity to check the requester
+/// against — is [`released`](Self::release), and the next reload hands it
+/// out again. That retry ends when the row stops being `requested`: claimed,
+/// or failed by the module's backstop at its deadline.
 #[derive(Debug)]
 pub struct DispatchRequestObserver {
     host: String,
@@ -59,6 +66,12 @@ impl DispatchRequestObserver {
             .filter(|r| self.served.insert(r.id))
             .cloned()
             .collect()
+    }
+
+    /// Forget that `id` was handed out, so the next [`Self::observe`] that
+    /// still sees it `requested` hands it out again.
+    pub fn release(&mut self, id: DispatchRequestId) {
+        self.served.remove(&id);
     }
 }
 

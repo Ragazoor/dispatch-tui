@@ -60,7 +60,7 @@ impl TuiRuntime {
 
         match trust_result {
             Ok(()) => {
-                self.exec_dispatch_agent(task, mode).await;
+                self.exec_dispatch_agent(task, Some(mode)).await;
             }
             Err(e) => {
                 // Abandoned, not failed: the trust grant runs *upstream* of
@@ -485,7 +485,8 @@ impl TuiRuntime {
 
     /// `dispatch.allium: DispatchTask` / `DispatchResearchTask` (and, through
     /// the same command, retry-fresh): write a `user` request naming this host
-    /// with the operator's mode, and provision NOTHING here — this host's
+    /// with the operator's mode — or none, for retry-fresh, so the module
+    /// derives it (`store-split.allium` D3) — and provision NOTHING here — this host's
     /// reactor claims and provisions the row (`serve_dispatch_requests`).
     ///
     /// The request is the guard, not the caller's snapshot:
@@ -496,9 +497,9 @@ impl TuiRuntime {
     pub(super) async fn exec_dispatch_agent(
         &self,
         task: Box<models::Task>,
-        mode: models::DispatchMode,
+        mode: Option<models::DispatchMode>,
     ) {
-        self.request_for_dispatch(task.id, models::DispatchOrigin::User, Some(mode))
+        self.request_for_dispatch(task.id, models::DispatchOrigin::User, mode)
             .await;
     }
 

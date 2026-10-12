@@ -21,7 +21,8 @@ use std::sync::Arc;
 
 use crate::dispatch::{self, DeadlineRunner, DEADLINE_PASSED};
 use crate::models::{
-    DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, DispatchResult, TaskId,
+    DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, DispatchRequestState,
+    DispatchResult, TaskId,
 };
 use crate::service::ServiceError;
 use crate::store::RequestDispatchAnswer;
@@ -34,16 +35,32 @@ pub enum ServedDispatch {
     /// The row names another machine; it is not this board's to claim
     /// (`HostClaimsDispatch`'s `requires: request.host = local_host()`).
     NotThisHost,
-    /// The claim was refused — another board or an earlier delivery took the
-    /// row, or it already finished — or could not be sent. Nothing was
-    /// provisioned and nothing is owed (`OnlyTheClaimedRequestProvisions`).
+    /// The module refused the claim — another board or an earlier delivery
+    /// took the row, or it already finished. Nothing was provisioned and
+    /// nothing is owed (`OnlyTheClaimedRequestProvisions`).
     ClaimRefused(String),
+    /// The claim got no answer (a transport error): the row may still be
+    /// `requested`, and is this board's to claim again on the next reload.
+    /// Nothing was provisioned.
+    ClaimNotSent(String),
     /// The agent is running and the module recorded the worktree and window.
     Dispatched(DispatchResult),
     /// The row ended failed: this host's provisioning failed or stopped at the
     /// deadline (rolled back and reported), or the row failed under it (torn
     /// down). The string is the reason the row records.
     Failed(String),
+}
+
+/// What the subscription's copy of a request says about a provisioning whose
+/// dispatched report got no answer.
+#[derive(Debug, PartialEq, Eq)]
+enum RowSays {
+    /// Still `provisioning`: the report did not land, or has not arrived yet.
+    Provisioning,
+    /// `dispatched` with this attempt's worktree: the report landed.
+    Ours,
+    /// Finished some other way — failed, dispatched elsewhere, or gone.
+    Finished,
 }
 
 impl TaskService {
@@ -117,7 +134,7 @@ impl TaskService {
                     id.0
                 ))
             }
-            Err(e) => return ServedDispatch::ClaimRefused(format!("{e:#}")),
+            Err(e) => return ServedDispatch::ClaimNotSent(format!("{e:#}")),
         }
 
         if self.deadline_passed(&request) {
@@ -173,11 +190,12 @@ impl TaskService {
             return self.report_failure(&request, DEADLINE_PASSED).await;
         }
 
-        match self
-            .db
-            .report_dispatch_provisioned(id, &provisioned.worktree_path, &provisioned.tmux_window)
-            .await
-        {
+        let report = self.report_provisioned(id, &provisioned).await;
+        let report = match report {
+            Err(e) => self.settle_unanswered_report(id, &provisioned, e).await,
+            answered => answered,
+        };
+        match report {
             Ok(true) => {
                 self.reused_worktrees
                     .lock()
@@ -196,13 +214,71 @@ impl TaskService {
                 ServedDispatch::Failed(reason)
             }
             Err(e) => {
-                // Unknown whether the store recorded it. Tear down rather than
-                // leave an agent running against a task whose request the
-                // backstop will fail and release.
+                // Still unknown after the retry. Tear down rather than leave an
+                // agent running against a task whose request the backstop will
+                // fail and release; while the row is still provisioning the
+                // failure report below lands and releases it now.
                 self.tear_down(&repo_path, &provisioned).await;
                 self.report_failure(&request, &format!("could not report the dispatch: {e:#}"))
                     .await
             }
+        }
+    }
+
+    async fn report_provisioned(
+        &self,
+        id: DispatchRequestId,
+        provisioned: &DispatchResult,
+    ) -> anyhow::Result<bool> {
+        self.db
+            .report_dispatch_provisioned(id, &provisioned.worktree_path, &provisioned.tmux_window)
+            .await
+    }
+
+    /// A dispatched report that ended in a transport error: the module may or
+    /// may not have recorded it (`dispatch.allium: ProvisionDispatch`, "A
+    /// report that ends in a transport error"). The row says which. Answers
+    /// `Ok(true)` when the row is dispatched with THIS attempt's worktree,
+    /// `Ok(false)` when the module has finished it otherwise, and `Err` when
+    /// the outcome is still unknown after one retry.
+    ///
+    /// A row still `provisioning` gets the report once more. A refusal of that
+    /// retry is read against the row again: the module answers calls in
+    /// order, so by the time the refusal arrives the subscription holds the
+    /// first report's effect if it had one.
+    async fn settle_unanswered_report(
+        &self,
+        id: DispatchRequestId,
+        provisioned: &DispatchResult,
+        first: anyhow::Error,
+    ) -> anyhow::Result<bool> {
+        tracing::warn!(
+            request = id.0,
+            "the dispatched report got no answer: {first:#}"
+        );
+        match self.row_says(id, provisioned).await {
+            RowSays::Ours => return Ok(true),
+            RowSays::Finished => return Ok(false),
+            RowSays::Provisioning => {}
+        }
+        match self.report_provisioned(id, provisioned).await {
+            Ok(true) => Ok(true),
+            Ok(false) => Ok(self.row_says(id, provisioned).await == RowSays::Ours),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// What the subscription's copy of `id` says about this attempt.
+    async fn row_says(&self, id: DispatchRequestId, provisioned: &DispatchResult) -> RowSays {
+        match self.db.dispatch_request(id).await {
+            Some(row) if row.state == DispatchRequestState::Provisioning => RowSays::Provisioning,
+            Some(row)
+                if row.state == DispatchRequestState::Dispatched
+                    && row.worktree.as_deref() == Some(provisioned.worktree_path.as_str()) =>
+            {
+                RowSays::Ours
+            }
+            _ => RowSays::Finished,
         }
     }
 

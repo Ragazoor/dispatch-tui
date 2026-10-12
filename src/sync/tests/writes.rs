@@ -2078,7 +2078,13 @@ async fn push_host_registration_swallows_a_transport_failure() {
 
     // Would panic on an unhandled `Err` if this propagated instead of
     // logging — the assertion is that this line completes at all.
-    push_host_registration(&caller, "host-1".to_string(), String::new(), String::new()).await;
+    push_host_registration(
+        &caller,
+        "host-1".to_string(),
+        String::new(),
+        "user-me".to_string(),
+    )
+    .await;
 }
 
 /// Best-effort: a store REFUSAL (a reachable store that said no) is also
@@ -2087,7 +2093,36 @@ async fn push_host_registration_swallows_a_transport_failure() {
 async fn push_host_registration_swallows_a_refusal() {
     let caller = RecordingCaller::rejecting();
 
-    push_host_registration(&caller, "host-1".to_string(), String::new(), String::new()).await;
+    push_host_registration(
+        &caller,
+        "host-1".to_string(),
+        String::new(),
+        "user-me".to_string(),
+    )
+    .await;
+}
+
+/// `sync.allium: RegisterHostOnConnect` registers only once the identity has
+/// settled, and always as that identity: an empty owner is never sent. The
+/// store refuses a NEW ownerless host anyway (`store-split.allium`, D11), and
+/// waiting for the next settle is what leaves the id free for its owner.
+#[tokio::test]
+async fn push_host_registration_never_sends_an_ownerless_row() {
+    let caller = RecordingCaller::returning(&[]);
+
+    push_host_registration(
+        &caller,
+        "host-1".to_string(),
+        "label".to_string(),
+        String::new(),
+    )
+    .await;
+
+    assert_eq!(
+        caller.sent(),
+        vec![],
+        "an unsettled identity registers nothing"
+    );
 }
 
 // -- Settings (Phase 9) -------------------------------------------------------

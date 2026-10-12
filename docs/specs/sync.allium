@@ -833,6 +833,14 @@ rule RegisterHostOnConnect {
         -- arrive from — this rule's job stops at getting the write to the
         -- store the first time.
         --
+        -- ALWAYS AS THE SETTLED IDENTITY, NEVER OWNERLESS. The row is sent
+        -- with the identity this rule's trigger settled as its owner, and a
+        -- connection with no settled identity sends nothing — it waits for
+        -- the settle rather than register the host without an owner. The
+        -- store refuses a NEW ownerless host anyway (core/Host's
+        -- LocalHostOwnerIsWrittenOnce; store-split.allium, D11): an ownerless
+        -- row would be open to whoever registered its public id first.
+        --
         -- SENT ONCE THE CONNECTION IS ALL THE WAY UP, not at the instant the
         -- identity settles: after the initial subscription has been applied.
         -- A connection whose initial subscription is refused

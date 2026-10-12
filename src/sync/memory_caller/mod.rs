@@ -159,6 +159,17 @@ impl Tables {
     }
 }
 
+/// A transport failure a test makes the next call to one reducer answer
+/// with ([`MemoryReducerCaller::fail_next`]): the two ways a real call can
+/// end in `Err` without the module having refused it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InjectedFault {
+    /// The call never reached the module: nothing was applied.
+    Unsent,
+    /// The module applied the call, but its reply was lost on the way back.
+    ReplyLost,
+}
+
 /// The native in-process stand-in for a real SpacetimeDB reducer call.
 pub struct MemoryReducerCaller {
     tables: Mutex<Tables>,
@@ -167,6 +178,9 @@ pub struct MemoryReducerCaller {
     /// The identity a real reducer reads off `ctx.sender`. Stamped as
     /// `created_by` on the sub-epics a routed write creates. Empty unless set.
     sender: String,
+    /// Faults queued by [`Self::fail_next`], each consumed by the next call
+    /// to the reducer it names.
+    faults: Mutex<Vec<(&'static str, InjectedFault)>>,
 }
 
 impl MemoryReducerCaller {
@@ -180,6 +194,44 @@ impl MemoryReducerCaller {
             rows,
             clock,
             sender: String::new(),
+            faults: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Make the next call to `reducer` end in a transport error, `fault`
+    /// saying whether the module applied it first. Only the dispatch request
+    /// reducers a host calls honour it (`claim_dispatch_request`,
+    /// `report_dispatch_provisioned`, `report_dispatch_failed`); queue it
+    /// twice to fail two calls.
+    pub fn fail_next(&self, reducer: &'static str, fault: InjectedFault) {
+        self.faults
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((reducer, fault));
+    }
+
+    /// Run `apply` as `reducer` would, unless a fault is queued for it.
+    fn faulted(
+        &self,
+        reducer: &'static str,
+        apply: impl FnOnce() -> Result<ReducerOutcome>,
+    ) -> Result<ReducerOutcome> {
+        let fault = {
+            let mut faults = self.faults.lock().unwrap_or_else(|e| e.into_inner());
+            faults
+                .iter()
+                .position(|(r, _)| *r == reducer)
+                .map(|i| faults.remove(i).1)
+        };
+        match fault {
+            None => apply(),
+            Some(InjectedFault::Unsent) => {
+                anyhow::bail!("injected transport failure: {reducer} was never sent")
+            }
+            Some(InjectedFault::ReplyLost) => {
+                let _ = apply();
+                anyhow::bail!("injected transport failure: the reply to {reducer} was lost")
+            }
         }
     }
 
@@ -629,7 +681,9 @@ impl ReducerCaller for MemoryReducerCaller {
         id: DispatchRequestId,
         host: String,
     ) -> Result<ReducerOutcome> {
-        self.apply_claim_dispatch_request(id, host)
+        self.faulted("claim_dispatch_request", || {
+            self.apply_claim_dispatch_request(id, host)
+        })
     }
 
     async fn report_dispatch_provisioned(
@@ -639,7 +693,9 @@ impl ReducerCaller for MemoryReducerCaller {
         worktree: String,
         tmux_window: String,
     ) -> Result<ReducerOutcome> {
-        self.apply_report_dispatch_provisioned(id, reporter, worktree, tmux_window)
+        self.faulted("report_dispatch_provisioned", || {
+            self.apply_report_dispatch_provisioned(id, reporter, worktree, tmux_window)
+        })
     }
 
     async fn report_dispatch_failed(
@@ -648,7 +704,9 @@ impl ReducerCaller for MemoryReducerCaller {
         reporter: String,
         reason: String,
     ) -> Result<ReducerOutcome> {
-        self.apply_report_dispatch_failed(id, reporter, reason)
+        self.faulted("report_dispatch_failed", || {
+            self.apply_report_dispatch_failed(id, reporter, reason)
+        })
     }
 
     async fn fail_interrupted_dispatch_requests(&self, host: String) -> Result<ReducerOutcome> {

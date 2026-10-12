@@ -509,6 +509,29 @@ rule ProvisionDispatch {
         -- a loser to call (LostClaimReported on the DispatchingFeedback
         -- surface).
         --
+        -- == A claim that gets no answer ==
+        -- Only a claim the module ANSWERED — accepted or refused — settles
+        -- whether this host serves the row. A claim that could not be sent
+        -- (a transport error), or a row held back because this board has no
+        -- settled identity yet to compare requested_by against, is not
+        -- served: the row is still requested, and the next delivery of this
+        -- host's rows hands it out again (store-split.allium:
+        -- HostClaimsDispatch). The retry ends when the row stops being
+        -- requested — claimed, or failed by the backstop at its deadline.
+        --
+        -- == A report that ends in a transport error ==
+        -- A dispatched report that gets no answer may or may not have been
+        -- recorded. The host reads the row before deciding: dispatched with
+        -- this attempt's worktree means the report landed, and the agent is
+        -- kept; still provisioning means it did not (or has not arrived), and
+        -- the host sends it once more. A refusal of that retry is read
+        -- against the row again — the module answers in order, so the first
+        -- report's effect, if any, is in the subscription by then. Only a row
+        -- that is NOT dispatched with this worktree is torn down: finished
+        -- otherwise, it is a row that failed under this host (below); still
+        -- unknown after the retry, the host tears down and reports the
+        -- failure, which the module accepts while the row is provisioning.
+        --
         -- == The row's deadline bounds provisioning ==
         -- Provisioning runs against the request's deadline (requested_at plus
         -- store-split.allium's config.dispatch_request_timeout, exposed on the
@@ -1184,16 +1207,27 @@ rule RetryFresh {
     -- is what a human does about it. See core/Task's
     -- PendingStopOnlyWhileRunning invariant.
     ensures: task.stop_pending = false
-    ensures: DispatchTask(task: task)
+    -- The agent a fresh dispatch of this task would get: research for a
+    -- research task without a plan, the standard one otherwise.
+    ensures:
+        if task.has_plan or task.tag != research:
+            DispatchTask(task: task)
+        else:
+            DispatchResearchTask(task: task)
 
     @guidance
-        -- RetryFresh re-dispatches through DispatchTask, so the new attempt
-        -- is a request row like every other dispatch (store-split.allium:
-        -- RequestDispatch) and meets the same claim. The reset above leaves
-        -- the task backlog with no worktree and no host, so the request's
-        -- checks pass and it names this machine. The unified prompt skeleton handles both has_plan = true
-        -- (review-and-implement) and has_plan = false (spec-first)
-        -- variants without any branch in this rule.
+        -- RetryFresh re-dispatches through DispatchTask or
+        -- DispatchResearchTask, so the new attempt is a request row like
+        -- every other dispatch (store-split.allium: RequestDispatch) and
+        -- meets the same claim. The reset above leaves the task backlog with
+        -- no worktree and no host, so the request's checks pass and it names
+        -- this machine. The board's request names NO mode: the module
+        -- derives it from the task (store-split.allium, D3), which is the
+        -- choice the ensures above states, so a retried research task is
+        -- not relaunched as a standard agent. The unified prompt skeleton
+        -- handles both has_plan = true (review-and-implement) and
+        -- has_plan = false (spec-first) variants without any branch in this
+        -- rule.
         --
         -- The host gate is the least optional of the three. ResumeTask's
         -- ungated failure is an agent launched into a directory that is not
@@ -1520,7 +1554,8 @@ surface DispatchingFeedback {
         -- sweep (store-split.allium: HostRestartFailsInterrupted), so the
         -- "host restarted" failures the sweep writes are raised. A row that
         -- failed while no board ran on this host — the backstop firing on a
-        -- board that was down — is in the baseline and is not raised.
+        -- board that was down — is in the baseline and is not raised, by
+        -- decision (store-split.allium, D12): the failed card shows it.
         --
         -- This REPLACES the former DispatchingTimeout guarantee, the
         -- in-memory TUI watchdog (DISPATCH_WATCHDOG_TIMEOUT), which only the

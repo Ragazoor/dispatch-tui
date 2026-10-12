@@ -35,6 +35,13 @@ struct Rig {
 }
 
 async fn rig(runner: Arc<dyn ProcessRunner>) -> Rig {
+    let identity = Arc::new(SettledIdentity::default());
+    identity.settle("test-user");
+    rig_with_identity(runner, identity).await
+}
+
+/// [`rig`] whose board identity the test holds, so it can leave it unsettled.
+async fn rig_with_identity(runner: Arc<dyn ProcessRunner>, identity: Arc<SettledIdentity>) -> Rig {
     let rows = Arc::new(SharedRows::new());
     let clock: Arc<dyn crate::clock::Clock> = Arc::new(crate::clock::SystemClock);
     // Calls are sent as "test-user", who owns this host and the other one a
@@ -45,8 +52,6 @@ async fn rig(runner: Arc<dyn ProcessRunner>) -> Rig {
             .with_registered_host(crate::store::MEMORY_HOST_ID, "test-user")
             .with_registered_host("other-host", "test-user"),
     );
-    let identity = Arc::new(SettledIdentity::default());
-    identity.settle("test-user");
     let host_dir = tempfile::tempdir().unwrap();
     // `make_runtime` names its host "test-host"; the store must agree, or the
     // runtime would be serving some other machine's rows.
@@ -148,7 +153,7 @@ async fn the_dispatch_key_requests_and_provisions_nothing_inline() {
 
     r.dispatch(Command::Task(TaskCommand::DispatchAgent {
         task: Box::new(task.clone()),
-        mode: DispatchMode::Dispatch,
+        mode: Some(DispatchMode::Dispatch),
     }))
     .await;
 
@@ -186,7 +191,41 @@ async fn the_research_key_requests_research_mode() {
 
     r.dispatch(Command::Task(TaskCommand::DispatchAgent {
         task: Box::new(task.clone()),
-        mode: DispatchMode::Research,
+        mode: Some(DispatchMode::Research),
+    }))
+    .await;
+
+    let row = r.request_for(task.id).await;
+    assert_eq!(row.mode, DispatchMode::Research);
+    assert_eq!(row.origin, DispatchOrigin::User);
+}
+
+/// `dispatch.allium: RetryFresh` re-dispatches with no mode, and the module
+/// derives it (`store-split.allium` D3): a research-tagged task without a plan
+/// goes back to research (`DispatchResearchTask`), not to a standard agent.
+#[tokio::test]
+async fn a_dispatch_without_a_mode_lets_the_module_derive_research() {
+    let mut r = rig(Arc::new(MockProcessRunner::new(vec![]))).await;
+    let task = create_task_returning(
+        &*r.db,
+        "Retry me",
+        "desc",
+        "/repo",
+        None,
+        models::TaskStatus::Backlog,
+    )
+    .await
+    .unwrap();
+    r.db.patch_task(
+        task.id,
+        &crate::store::TaskPatch::new().tag(Some(models::TaskTag::Research)),
+    )
+    .await
+    .unwrap();
+
+    r.dispatch(Command::Task(TaskCommand::DispatchAgent {
+        task: Box::new(task.clone()),
+        mode: None,
     }))
     .await;
 
@@ -220,7 +259,7 @@ async fn a_refused_request_is_reported_as_abandoned() {
 
     r.dispatch(Command::Task(TaskCommand::DispatchAgent {
         task: Box::new(task.clone()),
-        mode: DispatchMode::Dispatch,
+        mode: Some(DispatchMode::Dispatch),
     }))
     .await;
 
@@ -336,6 +375,90 @@ async fn the_host_serves_its_own_requested_rows_and_ignores_others() {
     );
 }
 
+/// A `requested` row naming this host, written straight into the
+/// subscription as `requested_by` — a row for task 1, which need not exist.
+fn seed_requested_row(rows: &SharedRows, id: i64, requested_by: &str) {
+    rows.upsert_dispatch_request(&crate::spacetime::bindings::DispatchRequest {
+        id,
+        task_id: 1,
+        kind: "dispatch".into(),
+        host: crate::store::MEMORY_HOST_ID.into(),
+        mode: "dispatch".into(),
+        origin: "user".into(),
+        state: "requested".into(),
+        requested_at: "2026-10-11 12:00:00.000".into(),
+        claimed_at: String::new(),
+        finished_at: String::new(),
+        reason: String::new(),
+        worktree: String::new(),
+        tmux_window: String::new(),
+        deadline: "2099-01-01 00:00:00.000".into(),
+        requested_by: requested_by.into(),
+    });
+}
+
+/// A claim that never reached the module leaves the row `requested` and this
+/// board's to serve: the next reload hands it out again, and that claim
+/// provisions it (`store-split.allium: HostClaimsDispatch`). Only an
+/// answered claim — accepted or refused — marks a row served.
+#[tokio::test]
+async fn a_claim_that_could_not_be_sent_is_retried_on_the_next_reload() {
+    let r = rig(DispatchScript::dispatch().shared_runner()).await;
+    let (task, _repo) = r.provisionable_task().await;
+    let id = requested(
+        r.rt.task_svc
+            .request_dispatch(task.id, DispatchOrigin::User, None)
+            .await
+            .unwrap(),
+    );
+    r.caller
+        .fail_next("claim_dispatch_request", crate::sync::InjectedFault::Unsent);
+
+    for handle in r.rt.serve_dispatch_requests().await {
+        handle.await.unwrap();
+    }
+    assert_eq!(
+        r.db.dispatch_request(id).await.unwrap().state,
+        DispatchRequestState::Requested,
+        "the claim never reached the module"
+    );
+
+    for handle in r.rt.serve_dispatch_requests().await {
+        handle.await.unwrap();
+    }
+    assert_eq!(
+        r.db.dispatch_request(id).await.unwrap().state,
+        DispatchRequestState::Dispatched,
+        "the next reload serves the row again"
+    );
+}
+
+/// A board whose identity has not settled serves nothing yet — and forgets
+/// nothing: once it settles, the row it held back is served.
+#[tokio::test]
+async fn a_row_held_back_for_an_unsettled_identity_is_served_once_it_settles() {
+    let identity = Arc::new(SettledIdentity::default());
+    let runner = Arc::new(MockProcessRunner::new(vec![]));
+    let r = rig_with_identity(runner, identity.clone()).await;
+    seed_requested_row(&r.rows, 77, "test-user");
+
+    assert!(
+        r.rt.serve_dispatch_requests().await.is_empty(),
+        "no settled identity, nothing served"
+    );
+
+    identity.settle("test-user");
+    let served = r.rt.serve_dispatch_requests().await;
+    assert_eq!(
+        served.len(),
+        1,
+        "the held-back row is served once it settles"
+    );
+    for handle in served {
+        handle.await.unwrap();
+    }
+}
+
 /// D11's second line (`dispatch.allium: ProvisionDispatch`): a row naming
 /// this host that its owner did not request is ignored — not claimed, not
 /// provisioned — whatever let it in.
@@ -343,24 +466,7 @@ async fn the_host_serves_its_own_requested_rows_and_ignores_others() {
 async fn the_host_ignores_a_row_its_owner_did_not_request() {
     let runner = Arc::new(MockProcessRunner::new(vec![]));
     let r = rig(runner.clone()).await;
-    r.rows
-        .upsert_dispatch_request(&crate::spacetime::bindings::DispatchRequest {
-            id: 99,
-            task_id: 1,
-            kind: "dispatch".into(),
-            host: crate::store::MEMORY_HOST_ID.into(),
-            mode: "dispatch".into(),
-            origin: "user".into(),
-            state: "requested".into(),
-            requested_at: "2026-10-11 12:00:00.000".into(),
-            claimed_at: String::new(),
-            finished_at: String::new(),
-            reason: String::new(),
-            worktree: String::new(),
-            tmux_window: String::new(),
-            deadline: "2099-01-01 00:00:00.000".into(),
-            requested_by: "beef".into(),
-        });
+    seed_requested_row(&r.rows, 99, "beef");
 
     let served = r.rt.serve_dispatch_requests().await;
 

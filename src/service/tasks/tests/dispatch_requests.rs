@@ -34,7 +34,7 @@ use crate::models::{
 use crate::process::{MockProcessRunner, ProcessRunner};
 use crate::service::ServedDispatch;
 use crate::store::RequestDispatchAnswer;
-use crate::sync::{MemoryReducerCaller, ReducerCaller, SettledIdentity, SharedRows};
+use crate::sync::{InjectedFault, MemoryReducerCaller, ReducerCaller, SettledIdentity, SharedRows};
 
 /// This board's host: the one the store handle is built with.
 const HOST: &str = "m4-host";
@@ -394,6 +394,32 @@ async fn serve_provisions_nothing_when_its_claim_is_refused() {
     assert!(runner.recorded_calls().is_empty());
 }
 
+/// A claim that got no answer is not a refusal: it is `ClaimNotSent`, so the
+/// host reactor serves the row again, and nothing is provisioned meanwhile.
+#[tokio::test]
+async fn serve_tells_an_unsent_claim_from_a_refused_one() {
+    let fx = fx();
+    let (task, _repo) = fx.backlog_task(None).await;
+    let runner = Arc::new(MockProcessRunner::new(vec![]));
+    let svc = fx.svc(runner.clone());
+    let id = requested(
+        svc.request_dispatch(task.id, DispatchOrigin::User, Some(DispatchMode::Dispatch))
+            .await
+            .unwrap(),
+    );
+    fx.caller
+        .fail_next("claim_dispatch_request", InjectedFault::Unsent);
+
+    let outcome = svc.serve_dispatch_request(fx.row(id).await, emb()).await;
+
+    assert!(
+        matches!(outcome, ServedDispatch::ClaimNotSent(_)),
+        "expected ClaimNotSent, got {outcome:?}"
+    );
+    assert_eq!(fx.row(id).await.state, DispatchRequestState::Requested);
+    assert!(runner.recorded_calls().is_empty());
+}
+
 /// A provisioning failure is rolled back here and REPORTED; the module fails
 /// the row with the host's reason and releases the claim.
 #[tokio::test]
@@ -731,5 +757,112 @@ async fn a_task_deleted_under_the_host_is_torn_down() {
     assert!(
         calls.iter().any(|c| c.contains("kill-window")),
         "the deleted task's window must be killed: {calls:?}"
+    );
+}
+
+// ===========================================================================
+// A dispatched report that ends in a transport error
+// ===========================================================================
+
+/// The kill of the window a dispatch opened, among a runner's calls.
+fn killed_a_window(runner: &MockProcessRunner) -> bool {
+    runner
+        .flattened_calls()
+        .iter()
+        .any(|c| c.contains("kill-window"))
+}
+
+/// A served request whose provisioning succeeded, with `faults` queued on
+/// `report_dispatch_provisioned` first. Answers the outcome, the request and
+/// the runner, which also scripts any teardown.
+async fn serve_with_report_faults(
+    fx: &Fx,
+    task: &Task,
+    faults: &[InjectedFault],
+) -> (ServedDispatch, DispatchRequestId, Arc<MockProcessRunner>) {
+    let id = requested(
+        fx.svc(MockProcessRunner::unused())
+            .request_dispatch(task.id, DispatchOrigin::User, Some(DispatchMode::Dispatch))
+            .await
+            .unwrap(),
+    );
+    for fault in faults {
+        fx.caller.fail_next("report_dispatch_provisioned", *fault);
+    }
+    let runner = Arc::new(script_with_spare_teardown());
+    let svc = fx.svc(runner.clone());
+    let outcome = svc.serve_dispatch_request(fx.row(id).await, emb()).await;
+    (outcome, id, runner)
+}
+
+/// `dispatch.allium: ProvisionDispatch`, "A report that ends in a transport
+/// error": the module recorded the report but the reply was lost. The host
+/// re-reads the row, finds it dispatched with this attempt's worktree, and
+/// keeps the agent — tearing it down would orphan a task the module already
+/// shows as running there.
+#[tokio::test]
+async fn a_lost_reply_to_a_recorded_report_keeps_the_dispatch() {
+    let fx = fx();
+    let (task, _repo) = fx.backlog_task(None).await;
+
+    let (outcome, id, runner) =
+        serve_with_report_faults(&fx, &task, &[InjectedFault::ReplyLost]).await;
+
+    let ServedDispatch::Dispatched(result) = outcome else {
+        panic!("a recorded report is a dispatch, got {outcome:?}");
+    };
+    let row = fx.row(id).await;
+    assert_eq!(row.state, DispatchRequestState::Dispatched);
+    assert_eq!(row.worktree.as_deref(), Some(result.worktree_path.as_str()));
+    assert!(
+        !killed_a_window(&runner),
+        "a dispatched row keeps its agent: {:?}",
+        runner.flattened_calls()
+    );
+    let stored = fx.db.get_task(task.id).await.unwrap();
+    assert_eq!(
+        stored.worktree.as_deref(),
+        Some(result.worktree_path.as_str())
+    );
+}
+
+/// The report never reached the module: the row is still provisioning, so the
+/// host sends it once more, and the retry lands.
+#[tokio::test]
+async fn an_unsent_report_is_retried_once() {
+    let fx = fx();
+    let (task, _repo) = fx.backlog_task(None).await;
+
+    let (outcome, id, runner) =
+        serve_with_report_faults(&fx, &task, &[InjectedFault::Unsent]).await;
+
+    assert!(
+        matches!(outcome, ServedDispatch::Dispatched(_)),
+        "the retried report lands, got {outcome:?}"
+    );
+    assert_eq!(fx.row(id).await.state, DispatchRequestState::Dispatched);
+    assert!(!killed_a_window(&runner), "{:?}", runner.flattened_calls());
+}
+
+/// Both sends fail: the host cannot learn the outcome, so it tears down what
+/// it made and reports the failure, which the module accepts while the row
+/// is still provisioning.
+#[tokio::test]
+async fn a_report_that_fails_twice_is_torn_down_and_failed() {
+    let fx = fx();
+    let (task, _repo) = fx.backlog_task(None).await;
+
+    let (outcome, id, runner) =
+        serve_with_report_faults(&fx, &task, &[InjectedFault::Unsent, InjectedFault::Unsent]).await;
+
+    assert!(
+        matches!(outcome, ServedDispatch::Failed(_)),
+        "expected Failed, got {outcome:?}"
+    );
+    assert_eq!(fx.row(id).await.state, DispatchRequestState::Failed);
+    assert!(killed_a_window(&runner), "{:?}", runner.flattened_calls());
+    assert_eq!(
+        fx.db.get_task(task.id).await.unwrap().status,
+        TaskStatus::Backlog
     );
 }

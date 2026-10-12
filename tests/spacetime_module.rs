@@ -3798,19 +3798,19 @@ fn a_board_connecting_to_an_upgraded_store_passes_the_version_gate() {
 // to go away when the request finishes; what it does when it fires is the
 // module unit test `the_backstop_fails_an_open_row_as_timed_out`.
 
-/// Register `host` in the host registry with `owner` (`""` for none).
+/// Register `host` in the host registry with `owner`, which a new host must
+/// name (`store-split.allium`, D11).
 fn register_host(instance: &Instance, host: &str, owner: &str) {
     let registered = instance.call("register_host", &[host, "", owner]);
     assert!(registered.status.success(), "{}", describe(&registered));
 }
 
-/// A host owned by a SECOND identity, "teammate" — somebody else's machine.
-/// Registered by the teammate, ownerless first so their identity is known,
-/// then claimed as theirs (`core.allium: LocalHostOwnerIsWrittenOnce` lets
-/// an owner go "" -> identity once). Returns the teammate's identity.
+/// A host owned by a SECOND identity, "teammate" — somebody else's machine,
+/// registered by the teammate as theirs. The teammate's CLI logs in on its
+/// first call, so a throwaway call (refused: a new host must name its owner)
+/// comes first to make their identity known. Returns the teammate's identity.
 fn register_teammates_host(instance: &Instance, host: &str) -> String {
-    let unowned = instance.call_as("teammate", "register_host", &[host, "", ""]);
-    assert!(unowned.status.success(), "{}", describe(&unowned));
+    instance.call_as("teammate", "register_host", &["scratch", "", ""]);
     let them = instance.identity_as("teammate");
     let owned = instance.call_as("teammate", "register_host", &[host, "", &them]);
     assert!(owned.status.success(), "{}", describe(&owned));
@@ -4647,7 +4647,12 @@ fn a_request_naming_another_persons_host_is_refused() {
     );
 }
 
-/// A host with no owner yet, or none registered at all, cannot be named.
+/// A NEW host may not be registered ownerless (`store-split.allium`, D11):
+/// host ids are public, so an ownerless row would go to whoever registered
+/// the id next as their own. The refused registration writes no row, and a
+/// host with no row cannot be named. (An ownerless LEGACY row is refused for
+/// everyone too; no reducer can write one any more, so that branch is the
+/// module unit test `nobody_may_act_for_an_ownerless_host`.)
 #[test]
 fn a_request_naming_an_ownerless_or_unregistered_host_is_refused() {
     if !spacetime_available_or_skip() {
@@ -4655,22 +4660,27 @@ fn a_request_naming_an_ownerless_or_unregistered_host_is_refused() {
     }
     let instance = published_instance();
     seed_dispatchable(&instance, &[(1, "", "", "")]);
-    register_host(&instance, "fresh-host", "");
-
-    let ownerless = request_dispatch(&instance, 1, "fresh-host", "user", "");
+    let ownerless = instance.call("register_host", &["fresh-host", "", ""]);
     assert!(!ownerless.status.success(), "{}", describe(&ownerless));
     assert!(
-        describe(&ownerless).contains("no owner"),
+        describe(&ownerless).contains("owner"),
         "{}",
         describe(&ownerless)
     );
+    assert!(no_rows(
+        &instance,
+        "SELECT id FROM hosts WHERE id = 'fresh-host'"
+    ));
 
-    let unregistered = request_dispatch(&instance, 1, "nowhere", "user", "");
-    assert!(
-        !unregistered.status.success(),
-        "{}",
-        describe(&unregistered)
-    );
+    for host in ["fresh-host", "nowhere"] {
+        let refused = request_dispatch(&instance, 1, host, "user", "");
+        assert!(!refused.status.success(), "{}", describe(&refused));
+        assert!(
+            describe(&refused).contains("not registered"),
+            "{}",
+            describe(&refused)
+        );
+    }
     assert_eq!(request_count(&instance), "0");
 }
 
@@ -4707,7 +4717,8 @@ fn claims_reports_and_the_sweep_are_refused_for_another_persons_host() {
     assert_eq!(request_column(&instance, "state", 2), "provisioning");
 }
 
-/// ...and nobody may sweep or claim for an ownerless host.
+/// ...and nobody may sweep or claim for a host that has no owned row — the
+/// ownerless registration that would have made one is refused.
 #[test]
 fn the_sweep_and_a_claim_are_refused_for_an_ownerless_host() {
     if !spacetime_available_or_skip() {
@@ -4717,12 +4728,13 @@ fn the_sweep_and_a_claim_are_refused_for_an_ownerless_host() {
     seed_dispatchable(&instance, &[(1, "", "", "")]);
     request_dispatch(&instance, 1, "host-a", "user", "");
     let id = request_column(&instance, "id", 1);
-    register_host(&instance, "fresh-host", "");
+    let ownerless = instance.call("register_host", &["fresh-host", "", ""]);
+    assert!(!ownerless.status.success(), "{}", describe(&ownerless));
 
     let swept = instance.call("fail_interrupted_dispatch_requests", &["fresh-host"]);
     assert!(!swept.status.success(), "{}", describe(&swept));
     assert!(
-        describe(&swept).contains("no owner"),
+        describe(&swept).contains("not registered"),
         "{}",
         describe(&swept)
     );

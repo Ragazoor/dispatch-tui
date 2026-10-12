@@ -121,9 +121,12 @@ pub enum TaskCommand {
         task_ids: Vec<TaskId>,
         epic_ids: Vec<EpicId>,
     },
+    /// Request a dispatch of `task`. `mode` `None` lets the module derive it
+    /// (`store-split.allium` D3) — retry-fresh's case; the dispatch and
+    /// research keys name theirs.
     DispatchAgent {
         task: Box<Task>,
-        mode: DispatchMode,
+        mode: Option<DispatchMode>,
     },
     TrustAndDispatch {
         task: Box<Task>,

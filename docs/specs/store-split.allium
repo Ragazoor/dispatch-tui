@@ -158,7 +158,9 @@
 --             derives it by today's rule (a plan -> dispatch, else the research
 --             tag -> research, else dispatch). quick is never derived: only
 --             quick dispatch names it, for its own prompt variant. The host
---             reads the mode from the row and never re-derives it.
+--             reads the mode from the row and never re-derives it. MCP, the
+--             epic chain and retry-fresh name no mode (dispatch.allium:
+--             RetryFresh), so a retried research task stays research.
 --           - D4, the timeout. ONE deadline per request, 60 seconds
 --             (config.dispatch_request_timeout) counted from requested_at,
 --             whatever state the row is in, and the row exposes it. THE HOST
@@ -242,11 +244,28 @@
 --             can rest on because the host registry's own write enforces
 --             core.allium's LocalHostOwnerIsWrittenOnce: a caller may name
 --             only itself as a host's owner, and an owned host's owner is
---             never rewritten. LIMIT, by decision: one person's machines
+--             never rewritten. A NEW host row must name its owner: host ids
+--             are public, so an ownerless row would go to whichever caller
+--             registered that id next as its own, and a teammate could lock a
+--             new machine out of its own host. A legacy row written ownerless
+--             before this was enforced may still be adopted by the first
+--             caller naming itself. The board registers only once its
+--             identity has settled, and always as that identity
+--             (sync.allium: RegisterHostOnConnect). LIMIT, by decision: one person's machines
 --             share an owner, so one of their machines can still name
 --             another of theirs; a teammate cannot. The older reducers that
 --             take a host argument (the backlog claim, poll ownership,
 --             settings) do not check it yet; that gap is tracked separately.
+--           - D12, failures while no board ran. A request its host's board
+--             was not running to see fail — the backstop fired while the
+--             board was closed — is already failed in the starting board's
+--             baseline, and the starting board does NOT raise it: neither
+--             FailedRequestReported nor epics.allium's
+--             ReportChainedDispatchFailure fires for it, epic_chain rows
+--             included, and a chain stalled that way gets no
+--             ChainStallMarked. The failed card shows it: the task is back in
+--             backlog and the row records the reason. Decided with the user
+--             after M4 landed (raised by weed).
 --           - Deferred, out of M4's scope: how long finished rows are kept,
 --             and whether a board sees other hosts' open requests.
 --       M5  Wrap-up and exit-session become request rows.
@@ -463,6 +482,13 @@ rule HostClaimsDispatch {
         -- host, or of a row delivered twice, exactly one claim is accepted,
         -- and only that board provisions (dispatch.allium: ProvisionDispatch).
         -- A refused claim does nothing further.
+        --
+        -- Only an ANSWERED claim settles the delivery. A claim that could not
+        -- be sent, or a row held back because the board's identity has not
+        -- settled (ProvisionDispatch's requested_by check needs it), leaves
+        -- the row requested and this board's to claim: the next delivery
+        -- serves it again, until the row is claimed or the backstop fails it
+        -- at its deadline (DispatchRequestTimesOut).
 }
 
 rule HostReportsDispatched {
@@ -655,5 +681,3 @@ invariant OneOpenDispatchRequestPerTask {
 open question "Retention of finished request rows (deferred, outside M4): dispatched and failed rows stay as history and their host's subscription delivers all of them. How long are they kept, and what removes them?"
 
 open question "Seeing other machines' requests (deferred, outside M4): a board's subscription delivers only request rows naming its own host. A teammate's board that shows the same task in a shared epic cannot see the request, so its UnprovisionedIndicator falls back to the claim stamp. Should boards also receive the open requests of every task they can see?"
-
-open question "Failures while no board ran (found by weed after M4 landed): a request whose host's board was down when the backstop failed it is already failed in the starting board's baseline, so neither FailedRequestReported nor epics.allium's ReportChainedDispatchFailure raises it, and an epic chain that stalled that way leaves no ChainStallMarked. Should a starting board raise failures it did not see happen, for example epic_chain rows failed since it last ran?"

@@ -2376,8 +2376,9 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
         };
 
         // -- D11: both sides refuse a host the caller does not own ----------------
-        // host-a is this connection's own; their-host has no owner, so nobody
-        // may act for it. (Naming another identity as owner is itself refused:
+        // host-a is this connection's own; their-host never got a row, because
+        // a NEW host may not be registered ownerless, so nobody may act for it.
+        // (Naming another identity as owner is itself refused:
         // `core.allium: LocalHostOwnerIsWrittenOnce`, checked below.)
         for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
             caller
@@ -2386,13 +2387,15 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
                 .unwrap()
                 .applied()
                 .unwrap();
-            caller
-                .register_host("their-host".into(), String::new(), String::new())
-                .await
-                .unwrap()
-                .applied()
-                .unwrap();
         }
+        both_refuse(
+            real.register_host("their-host".into(), String::new(), String::new())
+                .await
+                .unwrap(),
+            mem.register_host("their-host".into(), String::new(), String::new())
+                .await
+                .unwrap(),
+        );
         // LocalHostOwnerIsWrittenOnce: neither side lets a caller name another
         // identity as owner, nor disown its own host.
         both_refuse(

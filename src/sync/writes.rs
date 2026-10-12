@@ -492,6 +492,17 @@ pub async fn push_host_registration(
     owner: String,
 ) {
     let host_id = id.clone();
+    // `sync.allium: RegisterHostOnConnect` fires on a settled identity and
+    // registers as it, never ownerless: the store refuses a NEW ownerless host
+    // (`store-split.allium`, D11), and waiting for the next settle keeps the
+    // id free for its owner rather than open to whoever registers it first.
+    if owner.is_empty() {
+        tracing::warn!(
+            host_id,
+            "not registering this host before its user identity has settled"
+        );
+        return;
+    }
     match caller.register_host(id, label, owner).await {
         Ok(ReducerOutcome::Applied(_)) => {}
         Ok(ReducerOutcome::Refused(why)) => {

@@ -1364,7 +1364,7 @@ async fn dispatch_task_dispatch_agent_claims_then_provisions() {
 
     h.dispatch(Command::Task(TaskCommand::DispatchAgent {
         task: Box::new(task),
-        mode: models::DispatchMode::Dispatch,
+        mode: Some(models::DispatchMode::Dispatch),
     }))
     .await;
     // The arm only asked: the request is the claim
@@ -1409,7 +1409,7 @@ async fn dispatch_task_dispatch_agent_carries_the_mode_to_the_launcher() {
 
     h.dispatch(Command::Task(TaskCommand::DispatchAgent {
         task: Box::new(task),
-        mode: models::DispatchMode::Research,
+        mode: Some(models::DispatchMode::Research),
     }))
     .await;
     h.serve_requests().await;

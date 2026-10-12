@@ -489,6 +489,28 @@ async fn register_host_keeps_an_owner_written_once() {
     );
 }
 
+/// `store-split.allium` D11: a NEW host row must name its owner. Host ids are
+/// public, so an ownerless row would go to whoever registered the id next —
+/// a teammate could lock a new machine out of its own host.
+#[tokio::test]
+async fn register_host_refuses_an_ownerless_new_host() {
+    let (caller, _rows) = alices_caller();
+    assert!(
+        !caller
+            .register_host("fresh".into(), "laptop".into(), String::new())
+            .await
+            .unwrap()
+            .won(),
+        "a new host may not be registered ownerless"
+    );
+    // The id stays free for its real owner.
+    assert!(caller
+        .register_host("fresh".into(), "laptop".into(), "alice".into())
+        .await
+        .unwrap()
+        .won());
+}
+
 #[tokio::test]
 async fn register_host_refuses_an_empty_id() {
     let (caller, _rows) = caller();

@@ -39,16 +39,18 @@ impl DispatchHost {
     /// board with no settled identity serves nothing.
     pub(super) async fn serve(&self) -> Vec<tokio::task::JoinHandle<()>> {
         let rows = self.database.dispatch_requests().await;
-        let to_serve = self
-            .observer
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .observe(&rows);
+        let to_serve = self.observer().observe(&rows);
         if to_serve.is_empty() {
             return Vec::new();
         }
         let Some(owner) = self.database.own_identity().await else {
             tracing::warn!("this board has no settled identity yet; serving no dispatch requests");
+            // Held back, not served: the next reload after the identity
+            // settles hands them out again.
+            let mut observer = self.observer();
+            for row in &to_serve {
+                observer.release(row.id);
+            }
             return Vec::new();
         };
         to_serve
@@ -72,8 +74,13 @@ impl DispatchHost {
             .collect()
     }
 
+    fn observer(&self) -> std::sync::MutexGuard<'_, crate::dispatch::DispatchRequestObserver> {
+        self.observer.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     async fn serve_one(self, row: models::DispatchRequest) {
         let task_id = row.task_id;
+        let request = row.id;
         // Quick dispatch is the one launch path that jumps to the new agent
         // (tasks.allium: CreateQuickTask).
         let switch_focus = row.origin == models::DispatchOrigin::Quick;
@@ -100,6 +107,15 @@ impl DispatchHost {
             }
             crate::service::ServedDispatch::ClaimRefused(why) => {
                 tracing::info!(task_id = task_id.0, "dispatch request not claimed: {why}");
+            }
+            // Only an answered claim marks a row served: one that never
+            // reached the module is retried on the next reload.
+            crate::service::ServedDispatch::ClaimNotSent(why) => {
+                tracing::warn!(
+                    task_id = task_id.0,
+                    "could not send the claim of a dispatch request; retrying on the next reload: {why}"
+                );
+                self.observer().release(request);
             }
             crate::service::ServedDispatch::NotThisHost => {}
         }
