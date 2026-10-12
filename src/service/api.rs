@@ -288,52 +288,60 @@ macro_rules! task_service_api {
                 id: $crate::models::TaskId
             ) -> Result<(), $crate::service::ServiceError>;
 
-            /// Select and atomically claim the epic's next backlog subtask,
-            /// moving it to `Running` before any provisioning happens. Exclusive
-            /// under concurrency — see `AutoDispatchNextSubtask` in
-            /// `docs/specs/epics.allium`.
+            /// `store-split.allium: RequestDispatch` — the one call every
+            /// launch path makes (D6): claim the task and write a `requested`
+            /// dispatch request naming THIS host, in one module transaction.
+            /// Provisions nothing; this host's board serves the row
+            /// ([`Self::serve_dispatch_request`]). `mode` `None` lets the module
+            /// derive it (D3).
             ///
-            /// Deliberately the only selection method on this seam: a
-            /// non-atomic "find the next backlog task" sibling would be an easy
-            /// way to reintroduce the double-dispatch this replaced.
-            async fn claim_next_backlog_task(
+            /// A refusal is an ordinary `RequestDispatchAnswer::Refused`, not an
+            /// `Err`: it is how a caller learns another entry point claimed the
+            /// task first (`DispatchClaimExclusive` in
+            /// `docs/specs/dispatch.allium`). Do not add a "read the status,
+            /// then provision" path beside it.
+            async fn request_dispatch(
+                &self,
+                task_id: $crate::models::TaskId,
+                origin: $crate::models::DispatchOrigin,
+                mode: Option<$crate::models::DispatchMode>
+            ) -> Result<$crate::store::RequestDispatchAnswer, $crate::service::ServiceError>;
+
+            /// The epic chain's claim (`epics.allium: AutoDispatchNextSubtask`):
+            /// request the epic's backlog subtasks in board order, origin
+            /// `epic_chain`, until the module accepts one. `Ok(None)` is "no
+            /// candidate left", never "gave up under contention".
+            async fn request_next_backlog_subtask(
                 &self,
                 epic_id: $crate::models::EpicId
-            ) -> Result<Option<$crate::models::Task>, $crate::service::ServiceError>;
+            ) -> Result<
+                Option<($crate::models::Task, $crate::models::DispatchRequestId)>,
+                $crate::service::ServiceError,
+            >;
 
-            /// Atomically claim one specific `Backlog` task for dispatch,
-            /// moving it to `Running` before any provisioning happens. Returns
-            /// whether the claim was won; `false` (or `Err`, which writes
-            /// nothing) means this caller must provision nothing and has no
-            /// claim to release.
-            ///
-            /// Every dispatch entry point goes through this — see
-            /// `DispatchClaimExclusive` in `docs/specs/dispatch.allium`. Do not
-            /// add a "read the status, then dispatch" path alongside it: that is
-            /// the double-provisioning hole this closes.
-            async fn claim_backlog_task(
+            /// `HostClaimsDispatch` -> `ProvisionDispatch` for one delivered
+            /// row: claim it, provision with the row's mode under the row's
+            /// deadline, report dispatched or failed. THE dispatch seam — the
+            /// only place the board provisions a dispatch. Never `Err`.
+            async fn serve_dispatch_request(
                 &self,
-                task_id: $crate::models::TaskId
-            ) -> Result<bool, $crate::service::ServiceError>;
+                request: $crate::models::DispatchRequest,
+                emb_svc: std::sync::Arc<$crate::embeddings::EmbeddingService>
+            ) -> $crate::service::ServedDispatch;
 
-            /// Provision a task and launch its agent: claim (per
-            /// `DispatchClaim`) → dispatch prologue → `DispatchMode` match →
-            /// blocking provision → record the worktree/tmux window →
-            /// release the claim on failure.
-            ///
-            /// The dispatch orchestration seam. Both MCP entry points —
-            /// `dispatch_task` and the epic chain — take all of it, so
-            /// `DispatchClaimExclusive` and the release-on-failure unwind
-            /// (`docs/specs/dispatch.allium`) are asserted here once instead
-            /// of in each. The TUI runtime deliberately does not: it shares
-            /// the claim, the prologue and the mode match but owns its own
-            /// persist and release — see `TuiRuntime::exec_dispatch_agent`.
-            /// Never `Err`: the failure modes are distinct outcomes and only
-            /// some of them owe a release.
-            async fn dispatch(
+            /// `HostRestartFailsInterrupted`: fail the rows this host left
+            /// `provisioning`, releasing their claims. Once, at startup.
+            async fn fail_interrupted_dispatch_requests(
+                &self
+            ) -> Result<(), $crate::service::ServiceError>;
+
+            /// Whether the worktree of a request this board provisioned was
+            /// reused rather than created (`DispatchTaskViaMcp`'s success text).
+            /// `None` for a request this board did not serve.
+            async fn dispatched_worktree_reused(
                 &self,
-                request: $crate::service::DispatchRequest
-            ) -> $crate::service::DispatchOutcome;
+                id: $crate::models::DispatchRequestId
+            ) -> Option<bool>;
 
             /// Rebase a wrapping task's branch onto its base branch, clearing
             /// the `Conflict` sub_status before and re-setting it on a
@@ -358,14 +366,6 @@ macro_rules! task_service_api {
             /// only tmux call the MCP layer needs behind the service boundary
             /// — see `ExitSession` in `docs/specs/pr-workflow.allium`.
             async fn kill_session_window(&self, window: $crate::models::TmuxWindow) -> ();
-
-            /// Undo an unprovisioned claim, returning the subtask to `Backlog`.
-            /// Conditional on the task still being claimed-and-unprovisioned;
-            /// returns whether it applied.
-            async fn release_claim(
-                &self,
-                task_id: $crate::models::TaskId
-            ) -> Result<bool, $crate::service::ServiceError>;
         }
     };
 }

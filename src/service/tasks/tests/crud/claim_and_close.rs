@@ -114,10 +114,12 @@ async fn close_session_recalculates_the_parent_epic() {
     );
 }
 
-// -- claim_next_backlog_task -----------------------------------------------
+// -- request_next_backlog_subtask (the epic chain's claim) ----------------------
 //
-// The atomic claim is what makes AutoDispatchNextSubtask's "at most one agent
-// per closed session" guarantee hold under concurrent closes
+// Since store-split M4 the chain claims through the same dispatch request
+// every entry point writes (`store-split.allium: RequestDispatch`). The
+// request is what makes AutoDispatchNextSubtask's "at most one agent per
+// closed session" guarantee hold under concurrent closes
 // (docs/specs/epics.allium).
 
 /// Create an epic with `count` backlog subtasks, sort_order 1..=count.
@@ -147,13 +149,20 @@ async fn epic_with_backlog_subtasks(
 }
 
 #[tokio::test]
-async fn claim_next_backlog_task_marks_the_claimed_task_running() {
+async fn the_chain_requests_its_first_subtask_and_marks_it_running() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let (epic_id, ids) = epic_with_backlog_subtasks(&db, 2).await;
 
-    let claimed = svc.claim_next_backlog_task(epic_id).await.unwrap().unwrap();
-    assert_eq!(claimed.id, ids[0], "claims the first subtask by sort_order");
+    let (claimed, request) = svc
+        .request_next_backlog_subtask(epic_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        claimed.id, ids[0],
+        "requests the first subtask by sort_order"
+    );
     assert_eq!(claimed.status, TaskStatus::Running);
     assert_eq!(
         claimed.sub_status,
@@ -163,111 +172,180 @@ async fn claim_next_backlog_task_marks_the_claimed_task_running() {
         claimed.last_pre_tool_use_at.is_some(),
         "the claim seeds last_pre_tool_use_at so the tick classifier keeps the task Active"
     );
-
-    let persisted = db.get_task(ids[0]).await.unwrap();
-    assert_eq!(persisted.status, TaskStatus::Running);
-    assert!(persisted.worktree.is_none(), "the claim does not provision");
+    let row = db.dispatch_request(request).await.unwrap();
+    assert_eq!(row.origin, crate::models::DispatchOrigin::EpicChain);
+    assert!(
+        db.get_task(ids[0]).await.unwrap().worktree.is_none(),
+        "the request does not provision"
+    );
 }
 
 #[tokio::test]
-async fn claim_next_backlog_task_returns_none_when_no_backlog_remains() {
+async fn the_chain_finds_nothing_once_no_backlog_remains() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let (epic_id, _) = epic_with_backlog_subtasks(&db, 1).await;
 
     assert!(svc
-        .claim_next_backlog_task(epic_id)
+        .request_next_backlog_subtask(epic_id)
         .await
         .unwrap()
         .is_some());
     assert!(
-        svc.claim_next_backlog_task(epic_id)
+        svc.request_next_backlog_subtask(epic_id)
             .await
             .unwrap()
             .is_none(),
-        "a claimed task is out of contention"
+        "a requested task is out of contention"
     );
 }
 
 #[tokio::test]
-async fn claim_next_backlog_task_is_exclusive_under_concurrency() {
+async fn the_chain_is_exclusive_under_concurrency() {
     let db = test_db().await;
     let svc = Arc::new(task_svc(&db));
     let (epic_id, _) = epic_with_backlog_subtasks(&db, 2).await;
 
     let a = {
         let svc = svc.clone();
-        tokio::spawn(async move { svc.claim_next_backlog_task(epic_id).await })
+        tokio::spawn(async move { svc.request_next_backlog_subtask(epic_id).await })
     };
     let b = {
         let svc = svc.clone();
-        tokio::spawn(async move { svc.claim_next_backlog_task(epic_id).await })
+        tokio::spawn(async move { svc.request_next_backlog_subtask(epic_id).await })
     };
-    let first = a.await.unwrap().unwrap().expect("first claim");
-    let second = b.await.unwrap().unwrap().expect("second claim");
+    let (first, _) = a.await.unwrap().unwrap().expect("first request");
+    let (second, _) = b.await.unwrap().unwrap().expect("second request");
 
     assert_ne!(
         first.id, second.id,
-        "two concurrent claims must never win the same subtask"
+        "two concurrent chains must never request the same subtask"
     );
     assert!(
-        svc.claim_next_backlog_task(epic_id)
+        svc.request_next_backlog_subtask(epic_id)
             .await
             .unwrap()
             .is_none(),
-        "both subtasks are claimed, so a third caller gets None"
+        "both subtasks are requested, so a third caller gets None"
     );
 }
 
 #[tokio::test]
-async fn claim_next_backlog_task_clears_leftover_subagents_without_flipping() {
+async fn the_chain_passes_over_a_phoenix_subtask() {
     let db = test_db().await;
     let svc = task_svc(&db);
-    let (epic_id, ids) = epic_with_backlog_subtasks(&db, 1).await;
-
-    // Leftovers from a previous run of this same task.
-    db.subagent_start(ids[0], "stale", "old-session", chrono::Utc::now())
-        .await
-        .unwrap();
-    db.patch_task(ids[0], &crate::store::TaskPatch::new().stop_pending(true))
+    let (epic_id, ids) = epic_with_backlog_subtasks(&db, 2).await;
+    db.patch_task(ids[0], &crate::store::TaskPatch::new().phoenix(true))
         .await
         .unwrap();
 
-    let claimed = svc.claim_next_backlog_task(epic_id).await.unwrap().unwrap();
-    assert_eq!(claimed.id, ids[0]);
+    let (claimed, _) = svc
+        .request_next_backlog_subtask(epic_id)
+        .await
+        .unwrap()
+        .unwrap();
 
-    let task = db.get_task(ids[0]).await.unwrap();
-    assert_eq!(task.live_subagents, 0, "a fresh dispatch starts from zero");
-    assert!(!task.stop_pending);
-    assert_eq!(
-        task.status,
-        TaskStatus::Running,
-        "dispatch owns the status; the drain path must not flip it to Review"
+    assert_eq!(claimed.id, ids[1], "epics.allium: PhoenixIsNeverChained");
+}
+
+/// A store that is DOWN fails on the first offer rather than walking the
+/// whole list and reporting an empty backlog. An outage must not look like a
+/// finished epic.
+#[tokio::test]
+async fn the_chain_with_the_store_down_fails_loudly() {
+    let db = test_db().await;
+    let (epic_id, _) = epic_with_backlog_subtasks(&db, 1).await;
+    // The same rows, written through a transport that was never connected:
+    // every reducer call is refused as an outage.
+    let rows = std::sync::Arc::new(crate::sync::SharedRows::new());
+    for epic in db.list_epics().await {
+        let mut row = crate::sync::encode::create_epic_row(
+            &epic.title,
+            "",
+            None,
+            "u",
+            "2026-10-11 12:00:00.000",
+        );
+        row.id = epic.id.0;
+        rows.upsert_epic(&row);
+    }
+    for task in db.list_all().await {
+        let mut row = crate::sync::encode::create_task_row(
+            &crate::store::CreateTaskRequest {
+                epic_id: task.epic_id,
+                ..crate::store::CreateTaskRequest::fixture(&task.title, &task.repo_path)
+            },
+            "",
+            "u",
+            "2026-10-11 12:00:00.000",
+        );
+        row.id = task.id.0;
+        rows.upsert_task(&row);
+    }
+    let offline = crate::sync::SdkReducerCaller::new(
+        std::sync::Arc::new(crate::sync::SpacetimeSdkConnector::new(
+            "offline",
+            rows.clone(),
+        )),
+        std::sync::Arc::new(crate::sync::SettledIdentity::default()),
     );
+    let host_dir = tempfile::tempdir().unwrap();
+    let store: Arc<dyn store::TaskStore> = Arc::new(Store::new(
+        rows,
+        std::sync::Arc::new(offline),
+        std::sync::Arc::new(crate::sync::SettledIdentity::default()),
+        std::sync::Arc::new(crate::clock::SystemClock),
+        "test-host".to_string(),
+        host_dir.path(),
+    ));
+    let svc = task_svc(&store);
+
+    assert!(svc.request_next_backlog_subtask(epic_id).await.is_err());
 }
 
 #[tokio::test]
-async fn claim_next_backlog_task_epic_not_found() {
+async fn the_chain_epic_not_found() {
     let db = test_db().await;
     let svc = task_svc(&db);
-    let err = svc.claim_next_backlog_task(EpicId(999)).await.unwrap_err();
+    let err = svc
+        .request_next_backlog_subtask(EpicId(999))
+        .await
+        .unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
-// -- claim_backlog_task (by id) ---------------------------------------------
+// -- request_dispatch (by id) -------------------------------------------------
 //
-// The by-id twin of the claim above. Every dispatch entry point takes this
-// before it provisions, which is what makes DispatchClaimExclusive
-// (docs/specs/dispatch.allium) hold across entry points and not merely
-// between chains.
+// The request every dispatch entry point writes. The claim is in the same
+// module transaction, which is what makes DispatchClaimExclusive
+// (docs/specs/dispatch.allium) hold across entry points.
+
+fn requested(answer: crate::store::RequestDispatchAnswer) -> crate::models::DispatchRequestId {
+    match answer {
+        crate::store::RequestDispatchAnswer::Requested(id) => id,
+        crate::store::RequestDispatchAnswer::Refused(why) => {
+            panic!("expected the request to apply: {why}")
+        }
+    }
+}
+
+async fn request(svc: &TaskService, id: TaskId) -> crate::store::RequestDispatchAnswer {
+    svc.request_dispatch(
+        id,
+        crate::models::DispatchOrigin::User,
+        Some(crate::models::DispatchMode::Dispatch),
+    )
+    .await
+    .unwrap()
+}
 
 #[tokio::test]
-async fn claim_backlog_task_moves_the_task_running_without_provisioning() {
+async fn a_request_moves_the_task_running_without_provisioning() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
 
-    assert!(svc.claim_backlog_task(id).await.unwrap());
+    requested(request(&svc, id).await);
 
     let claimed = db.get_task(id).await.unwrap();
     assert_eq!(claimed.status, TaskStatus::Running);
@@ -281,12 +359,12 @@ async fn claim_backlog_task_moves_the_task_running_without_provisioning() {
     );
     assert!(
         claimed.worktree.is_none(),
-        "the claim runs ahead of provisioning"
+        "the request runs ahead of provisioning"
     );
 }
 
 #[tokio::test]
-async fn dispatch_claim_clears_leftover_subagents_without_flipping() {
+async fn a_request_clears_leftover_subagents_without_flipping() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
@@ -299,7 +377,7 @@ async fn dispatch_claim_clears_leftover_subagents_without_flipping() {
         .await
         .unwrap();
 
-    assert!(svc.claim_backlog_task(id).await.unwrap());
+    requested(request(&svc, id).await);
 
     let task = db.get_task(id).await.unwrap();
     assert_eq!(task.live_subagents, 0, "a fresh dispatch starts from zero");
@@ -312,7 +390,7 @@ async fn dispatch_claim_clears_leftover_subagents_without_flipping() {
 }
 
 #[tokio::test]
-async fn claim_backlog_task_lost_claim_writes_nothing() {
+async fn a_refused_request_writes_nothing() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
@@ -324,57 +402,73 @@ async fn claim_backlog_task_lost_claim_writes_nothing() {
     .await
     .unwrap();
 
-    assert!(!svc.claim_backlog_task(id).await.unwrap());
+    assert!(matches!(
+        request(&svc, id).await,
+        crate::store::RequestDispatchAnswer::Refused(_)
+    ));
 
-    // The extras patch must be gated on the transition winning, or a lost
-    // claim would stamp last_pre_tool_use_at on someone else's task.
+    // A refused request must not stamp last_pre_tool_use_at on someone
+    // else's task, nor leave a row behind.
     let after = db.get_task(id).await.unwrap();
     assert_eq!(after.status, TaskStatus::Review);
     assert_eq!(after.sub_status, SubStatus::default_for(TaskStatus::Review));
     assert!(
         after.last_pre_tool_use_at.is_none(),
-        "a lost claim must not seed the activity stamp"
+        "a refused request must not seed the activity stamp"
     );
+    assert!(db.latest_dispatch_request_for_task(id).await.is_none());
 }
 
 #[tokio::test]
-async fn claim_backlog_task_is_false_for_a_missing_task() {
+async fn a_request_for_a_missing_task_is_refused() {
     let db = test_db().await;
     let svc = task_svc(&db);
-    assert!(!svc.claim_backlog_task(TaskId(999_999)).await.unwrap());
+    assert!(matches!(
+        request(&svc, TaskId(999_999)).await,
+        crate::store::RequestDispatchAnswer::Refused(_)
+    ));
 }
 
 #[tokio::test]
-async fn claim_backlog_task_is_exclusive_under_concurrency() {
+async fn a_request_is_exclusive_under_concurrency() {
     let db = test_db().await;
     let svc = Arc::new(task_svc(&db));
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
 
     let a = {
         let svc = svc.clone();
-        tokio::spawn(async move { svc.claim_backlog_task(id).await })
+        tokio::spawn(async move { request(&svc, id).await })
     };
     let b = {
         let svc = svc.clone();
-        tokio::spawn(async move { svc.claim_backlog_task(id).await })
+        tokio::spawn(async move { request(&svc, id).await })
     };
-    let first = a.await.unwrap().unwrap();
-    let second = b.await.unwrap().unwrap();
+    let won = |a: &crate::store::RequestDispatchAnswer| {
+        matches!(a, crate::store::RequestDispatchAnswer::Requested(_))
+    };
+    let (first, second) = (a.await.unwrap(), b.await.unwrap());
 
     assert!(
-        first ^ second,
-        "exactly one of two concurrent claims on the same task may win"
+        won(&first) ^ won(&second),
+        "exactly one of two concurrent requests for the same task may apply"
     );
 }
 
+/// The release a failed request makes is the module's
+/// (`store-split.allium: ReleaseClaimOfFailedRequest`), not the caller's: the
+/// task returns to backlog with the stamp cleared and is dispatchable again.
 #[tokio::test]
-async fn release_claim_undoes_a_by_id_claim() {
+async fn a_failed_request_returns_the_task_to_backlog() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
-    assert!(svc.claim_backlog_task(id).await.unwrap());
+    let request_id = requested(request(&svc, id).await);
+    assert!(db.claim_dispatch_request(request_id).await.unwrap());
 
-    assert!(svc.release_claim(id).await.unwrap());
+    assert!(db
+        .report_dispatch_failed(request_id, "worktree add failed")
+        .await
+        .unwrap());
 
     let released = db.get_task(id).await.unwrap();
     assert_eq!(released.status, TaskStatus::Backlog);
@@ -386,8 +480,5 @@ async fn release_claim_undoes_a_by_id_claim() {
         released.last_pre_tool_use_at.is_none(),
         "the release clears the stamp the claim seeded"
     );
-    assert!(
-        svc.claim_backlog_task(id).await.unwrap(),
-        "a released task is dispatchable again"
-    );
+    requested(request(&svc, id).await);
 }

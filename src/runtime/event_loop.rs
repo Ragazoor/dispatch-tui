@@ -76,7 +76,7 @@ pub(super) fn apply_loop_event(app: &mut App, event: LoopEvent, rt: &TuiRuntime)
             // Spawn DB work so this never blocks key-event processing. Results
             // arrive back via msg_rx and are applied on the next iteration.
             app.dirty = true;
-            apply_board_event(app, event, rt)
+            apply_board_event(event, rt)
         }
         // Handlers set app.dirty themselves when they detect visible changes.
         LoopEvent::Tick => app.update(Message::System(crate::tui::messages::SystemMessage::Tick)),
@@ -84,11 +84,7 @@ pub(super) fn apply_loop_event(app: &mut App, event: LoopEvent, rt: &TuiRuntime)
 }
 
 /// The `LoopEvent::Mcp` arm of [`apply_loop_event`].
-fn apply_board_event(
-    app: &mut App,
-    event: crate::board_event::BoardEvent,
-    rt: &TuiRuntime,
-) -> Vec<Command> {
+fn apply_board_event(event: crate::board_event::BoardEvent, rt: &TuiRuntime) -> Vec<Command> {
     use crate::board_event::BoardEvent;
     match event {
         BoardEvent::Refresh => {
@@ -121,31 +117,6 @@ fn apply_board_event(
                 drop(rt.exec_refresh_repo_sync(repo_path, false));
             }
             vec![]
-        }
-        BoardEvent::AgentLaunched { repo_path } => {
-            // RefreshRepoSyncStateAfterDispatch: provisioning the agent's
-            // worktree already fetched origin/<base>, so this is a local
-            // ref read at no network cost. The board's own dispatch takes
-            // the same refresh through a command; these are the off-board
-            // launches (dispatch_task, epic auto-dispatch chaining).
-            drop(rt.exec_refresh_repo_sync(repo_path, false));
-            vec![]
-        }
-        BoardEvent::AutoDispatchFailed {
-            task_id,
-            epic_id,
-            reason,
-        } => {
-            // No refresh is spawned here: the chain sends TaskChanged
-            // for the released subtask right behind this, so reloading
-            // the row is already covered.
-            app.update(Message::Task(
-                crate::tui::messages::TaskMessage::AutoDispatchFailed {
-                    task_id,
-                    epic_id,
-                    reason,
-                },
-            ))
         }
     }
 }

@@ -58,7 +58,7 @@ impl super::super::EpicCrud for Store {
         // THE ROW AS SENT, WITH THE ID FILLED IN, rather than a read-back.
         //
         // Elsewhere this codebase insists the row is the truth and re-reads it
-        // — `claim_next_backlog_task` says so explicitly. A create is the one
+        // — `request_next_backlog_subtask` re-reads its claimed task. A create is the one
         // case where there is nothing to drift from: every field was chosen
         // here a moment ago, including both timestamps, and the store added
         // exactly one thing. Re-reading would also mean waiting for the

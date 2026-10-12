@@ -441,9 +441,11 @@ branch for a review task carrying a PR url. If it already exists it is \
 REUSED as-is — its branch, its commits and its uncommitted changes are all still there, and the \
 agent starts in them. So a crashed or stalled task is resumed in place: set it back to backlog \
 with update_tasks, then dispatch_task it. Tell the resumed agent in the task what its worktree \
-already holds — it is a new agent and has none of the previous session's context. Waits for the \
-dispatch to complete; the success text says whether the worktree was created or reused, and names \
-it along with the tmux window. Errors if the task is not in backlog status or the dispatch fails.",
+already holds — it is a new agent and has none of the previous session's context. Waits up to 30 \
+seconds for the dispatch to complete; the success text says whether the worktree was created or \
+reused, and names it along with the tmux window. If provisioning takes longer, it returns the \
+dispatch request's id and state instead, and the dispatch carries on. Errors if the task is not in \
+backlog status or the dispatch fails.",
         {
             "type": "object",
             "properties": {

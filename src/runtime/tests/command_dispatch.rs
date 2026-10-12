@@ -733,6 +733,16 @@ impl Harness {
         commands::dispatch(cmd, &mut self.app, &self.rt).await
     }
 
+    /// Serve the dispatch requests the arms under test wrote, the way this
+    /// host's reactor would once the row pump delivers them
+    /// (`store-split.allium: HostClaimsDispatch`), and wait for each to land.
+    /// Since store-split M4 no launch arm provisions inline: it only asks.
+    async fn serve_requests(&self) {
+        for handle in self.rt.serve_dispatch_requests().await {
+            handle.await.unwrap();
+        }
+    }
+
     /// Put `task` on the board, which several arms require before their
     /// result message is applied at all.
     fn seed_board(&mut self, task: models::Task) {
@@ -1357,6 +1367,13 @@ async fn dispatch_task_dispatch_agent_claims_then_provisions() {
         mode: models::DispatchMode::Dispatch,
     }))
     .await;
+    // The arm only asked: the request is the claim
+    // (`DispatchClaimExclusive` in docs/specs/dispatch.allium).
+    let claimed = h.rt.database.get_task(id).await.unwrap();
+    assert_eq!(claimed.status, models::TaskStatus::Running);
+    assert!(claimed.worktree.is_none(), "nothing provisioned inline");
+
+    h.serve_requests().await;
 
     let msg = h.next_msg().await;
     assert!(
@@ -1366,11 +1383,9 @@ async fn dispatch_task_dispatch_agent_claims_then_provisions() {
         ),
         "Expected Dispatched, got: {msg:?}"
     );
-    // Nothing here runs the Persist `handle_dispatched` emits, so the row can
-    // only have left Backlog via the pre-provisioning claim
-    // (`DispatchClaimExclusive` in docs/specs/dispatch.allium).
-    let claimed = h.rt.database.get_task(id).await.unwrap();
-    assert_eq!(claimed.status, models::TaskStatus::Running);
+    // The module, not the board, recorded where the agent landed.
+    let provisioned = h.rt.database.get_task(id).await.unwrap();
+    assert!(provisioned.worktree.is_some());
 }
 
 /// `Research` must reach the research agent. The mode travels on the command,
@@ -1397,6 +1412,7 @@ async fn dispatch_task_dispatch_agent_carries_the_mode_to_the_launcher() {
         mode: models::DispatchMode::Research,
     }))
     .await;
+    h.serve_requests().await;
 
     assert!(matches!(
         h.next_msg().await,
@@ -1507,6 +1523,7 @@ async fn dispatch_task_trust_and_dispatch_grants_trust_then_dispatches() {
         mode: models::DispatchMode::Dispatch,
     }))
     .await;
+    h.serve_requests().await;
 
     assert!(matches!(
         h.next_msg().await,
@@ -1519,8 +1536,7 @@ async fn dispatch_task_trust_and_dispatch_grants_trust_then_dispatches() {
 }
 
 /// The grant's own failure — a `claude.json` that cannot even be parsed —
-/// must abandon the dispatch before anything is provisioned, distinct from
-/// `DispatchFailed` because there is no claim yet to release.
+/// must abandon the dispatch before anything is requested or provisioned.
 #[tokio::test]
 async fn dispatch_task_trust_and_dispatch_abandons_on_a_trust_write_failure() {
     let (_claude_dir, claude_json_path) = tempfile_claude_json_path();
@@ -1590,6 +1606,7 @@ async fn dispatch_task_trust_and_quick_dispatch_grants_trust_then_dispatches() {
         epic_id: None,
     }))
     .await;
+    h.serve_requests().await;
 
     // `Created` applies to `app` directly, the same way `MarkDispatching`
     // does — only the eventual dispatch outcome travels over `msg_tx`.
@@ -1642,6 +1659,7 @@ async fn dispatch_task_check_trust_and_dispatch_proceeds_when_already_trusted() 
     for cmd in extra {
         drain(&h.rt, &mut h.app, cmd).await;
     }
+    h.serve_requests().await;
 
     assert!(
         matches!(
@@ -1677,6 +1695,7 @@ async fn dispatch_task_quick_dispatch_proceeds_when_already_trusted() {
         epic_id: None,
     }))
     .await;
+    h.serve_requests().await;
 
     assert_eq!(
         h.app.tasks().len(),
@@ -1689,31 +1708,13 @@ async fn dispatch_task_quick_dispatch_proceeds_when_already_trusted() {
     ));
 }
 
-#[tokio::test]
-async fn dispatch_task_release_claim_returns_the_task_to_backlog() {
-    let mut h = quiet_harness().await;
-    let task = create_task_returning(
-        &**h.rt.db_write(),
-        "Claimed",
-        "desc",
-        "/repo",
-        None,
-        models::TaskStatus::Backlog,
-    )
-    .await
-    .unwrap();
-    assert!(h.rt.task_svc.claim_backlog_task(task.id).await.unwrap());
-
-    h.dispatch(Command::Task(TaskCommand::ReleaseClaim(task.id)))
-        .await;
-
-    let released = h.rt.database.get_task(task.id).await.unwrap();
-    assert_eq!(released.status, models::TaskStatus::Backlog);
-    assert!(
-        released.last_pre_tool_use_at.is_none(),
-        "the release clears the stamp the claim seeded"
-    );
-}
+// `dispatch_task_release_claim_returns_the_task_to_backlog` pinned
+// `TaskCommand::ReleaseClaim`, which store-split M4 retired: no client releases
+// a claim, a failed request does (`store-split.allium:
+// ReleaseClaimOfFailedRequest`). Its guarantee — a failed dispatch returns the
+// task to backlog with the seeded stamp cleared — is pinned against the
+// request flow in `src/service/tasks/tests/crud/claim_and_close.rs`
+// (`a_failed_request_returns_the_task_to_backlog`).
 
 #[tokio::test]
 async fn dispatch_task_clear_subagents_drops_the_live_count() {

@@ -166,26 +166,10 @@ impl App {
         ]
     }
 
-    /// A dispatch that *held* the claim ended without provisioning: drain the
-    /// spinner and hand the claim back. The funnel for every failure downstream of
-    /// a won claim, which is why the release rides here rather than at each
-    /// producer.
-    ///
-    /// Anything that ended *without* holding the claim goes to
-    /// [`Self::handle_dispatch_abandoned`] instead — see
-    /// [`crate::tui::messages::TaskMessage::DispatchAbandoned`] for why that split
-    /// is load-bearing.
-    pub(in crate::tui) fn handle_dispatch_failed(&mut self, id: TaskId) -> Vec<Command> {
-        self.unmark_dispatching(id);
-        vec![Command::Task(
-            crate::tui::commands::TaskCommand::ReleaseClaim(id),
-        )]
-    }
-
-    /// A dispatch ended before it ever held the claim — it lost the claim, or
-    /// gave up upstream of it (a failed repo-trust grant). Drain the spinner and
-    /// touch nothing else. See [`Self::handle_dispatch_failed`] for why this must
-    /// not release.
+    /// A dispatch ask ended without writing a request — refused, unreachable,
+    /// or given up before asking (a failed repo-trust grant). Drain the pending
+    /// entry and touch nothing else (`dispatch.allium: LostClaimReported`): a
+    /// refused request holds nothing, and no client releases a claim.
     pub(in crate::tui) fn handle_dispatch_abandoned(&mut self, id: TaskId) -> Vec<Command> {
         self.unmark_dispatching(id);
         vec![]
@@ -196,9 +180,103 @@ impl App {
         vec![]
     }
 
-    /// An epic's auto-dispatch chain claimed a subtask, failed to provision it,
-    /// and released it back to backlog — so the epic has stopped progressing
-    /// (`SurfaceAutoDispatchFailure` in docs/specs/epics.allium).
+    /// This host's dispatch request rows, as the latest board reload read
+    /// them (store-split M4).
+    ///
+    /// - DispatchingFeedback's OPEN membership is rebuilt from the open rows,
+    ///   and an open row supersedes the task's pending entry (`SpansTheClaim`).
+    /// - A row that reached failed is raised once as an error popup carrying
+    ///   its reason (`FailedRequestReported`) — every reason the same way.
+    /// - A failed `epic_chain` row for a task this board still holds raises
+    ///   the chain's AutoDispatchFailed (`epics.allium:
+    ///   ReportChainedDispatchFailure`).
+    ///
+    /// The FIRST delivery is the baseline: rows already failed in it are
+    /// history and raise nothing, so a restart does not re-raise every failure
+    /// the store keeps. Failures after it — this board's own startup sweep
+    /// ("host restarted") among them — are reported.
+    pub(in crate::tui) fn handle_dispatch_requests_refreshed(
+        &mut self,
+        rows: Vec<crate::models::DispatchRequest>,
+    ) -> Vec<Command> {
+        use crate::models::{DispatchOrigin, DispatchRequestState};
+
+        let baseline = !self.dispatch_requests.baselined;
+        self.dispatch_requests.baselined = true;
+        let local_host = self.local_host_id().map(str::to_string);
+
+        let mut open = std::collections::HashMap::new();
+        let mut newly_failed = Vec::new();
+        for row in rows {
+            // The subscription delivers only this host's rows; this keeps a
+            // stray one from driving this board's feedback.
+            if local_host.as_deref().is_some_and(|h| h != row.host) {
+                continue;
+            }
+            if row.is_open() {
+                open.insert(row.task_id, row.id);
+                continue;
+            }
+            if row.state == DispatchRequestState::Failed
+                && self.dispatch_requests.reported.insert(row.id)
+                && !baseline
+            {
+                newly_failed.push(row);
+            }
+        }
+        for task in open.keys() {
+            // The ask is answered and its row is in the subscription: the
+            // open row carries the membership from here on.
+            self.dispatching.remove(task);
+        }
+        let changed = open != self.dispatch_requests.open;
+        self.dispatch_requests.open = open;
+        if changed || !newly_failed.is_empty() {
+            self.refresh_dispatching_status();
+            self.dirty = true;
+        }
+
+        let mut cmds = Vec::new();
+        if newly_failed.is_empty() {
+            return cmds;
+        }
+        let reason_of = |row: &crate::models::DispatchRequest| {
+            row.reason
+                .clone()
+                .unwrap_or_else(|| "no reason recorded".to_string())
+        };
+        self.status.error_popup = Some(match newly_failed.as_slice() {
+            [row] => format!(
+                "Dispatch of task #{} failed: {}",
+                row.task_id.0,
+                reason_of(row)
+            ),
+            rows => {
+                let each: Vec<String> = rows
+                    .iter()
+                    .map(|r| format!("#{}: {}", r.task_id.0, reason_of(r)))
+                    .collect();
+                format!("{} dispatches failed — {}", rows.len(), each.join("; "))
+            }
+        });
+        for row in &newly_failed {
+            if row.origin != DispatchOrigin::EpicChain {
+                continue;
+            }
+            // `requires: exists request.task` — a subtask deleted under its
+            // request has no card to mark.
+            let Some(epic_id) = self.board.find_task(row.task_id).and_then(|t| t.epic_id) else {
+                continue;
+            };
+            cmds.extend(self.handle_auto_dispatch_failed(row.task_id, epic_id, reason_of(row)));
+        }
+        cmds
+    }
+
+    /// An epic's auto-dispatch chain requested a subtask and the request
+    /// failed, so the claim was released back to backlog and the epic has
+    /// stopped progressing (`ReportChainedDispatchFailure` and
+    /// `SurfaceAutoDispatchFailure` in docs/specs/epics.allium).
     ///
     /// Three surfaces, because they fail at different distances from the board:
     /// the status message reaches an operator who is looking at it, the
@@ -206,7 +284,7 @@ impl App {
     /// hour later. Only the marker is durable; see
     /// [`crate::tui::types::AgentTracking::auto_dispatch_failed`].
     ///
-    /// No claim is released here: the chain released it before sending this.
+    /// No claim is released here: the module released it when the row failed.
     pub(in crate::tui) fn handle_auto_dispatch_failed(
         &mut self,
         task_id: TaskId,

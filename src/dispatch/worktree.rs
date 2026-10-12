@@ -31,10 +31,12 @@ pub(super) const FETCH_MAX_ATTEMPTS: u32 = 3;
 /// the add's index out of the scripted worst-case shape rather than mirroring
 /// it here.
 ///
-/// `pub(crate)` (via the re-export in `src/dispatch/mod.rs`) so
-/// `DISPATCH_WATCHDOG_TIMEOUT` (`src/tui/mod.rs`) can derive its budget from
-/// this instead of mirroring the number by hand — see `FETCH_MAX_ATTEMPTS`'s
-/// own doc comment for why mirroring is the hazard this avoids (#4201).
+/// The worst case a provisioning would spend WITHOUT a deadline. Since
+/// store-split M4 none runs without one: the request row's deadline
+/// (`store-split.allium: config.dispatch_request_timeout`, 60s) is shorter
+/// than `SUBPROCESS_TIMEOUT * PROVISION_MAX_SUBPROCESS_CALLS` on purpose, and
+/// the deadline wins (`crate::dispatch::DeadlineRunner`). Kept, and pinned by
+/// its test, as the measure that comparison is made against.
 ///
 /// Deliberately stops at `git worktree add`: the three tmux calls that follow
 /// it in `provision_worktree`'s `post_add` step are unbounded today (they call
@@ -44,7 +46,8 @@ pub(super) const FETCH_MAX_ATTEMPTS: u32 = 3;
 /// calls *after* `WorktreeAdd`, and this constant must grow to cover them —
 /// nothing here or in the test that pins this value would catch that drift on
 /// its own.
-pub(crate) const PROVISION_MAX_SUBPROCESS_CALLS: u32 = FETCH_MAX_ATTEMPTS + 5;
+#[cfg(test)]
+pub(super) const PROVISION_MAX_SUBPROCESS_CALLS: u32 = FETCH_MAX_ATTEMPTS + 5;
 
 // Zero delay under `cfg(test)` so the retry tests below don't spend real
 // wall-clock time sleeping — flagged by adversarial review of this plan,
@@ -1021,6 +1024,10 @@ pub(super) fn rollback_failed_provisioning(
     runner: &dyn ProcessRunner,
 ) {
     let worktree_arg = (!reused_worktree).then_some(worktree_path);
+    // A deadline-bounded runner refuses to start anything once the request's
+    // deadline has passed, and a rollback is exactly what still has to run
+    // then (`ProvisioningStopsAtTheDeadline`).
+    let runner = runner.unbounded_for_teardown().unwrap_or(runner);
     if let Err(e) = teardown_task(repo_path, worktree_arg, tmux_window, runner) {
         tracing::warn!(
             worktree_path,

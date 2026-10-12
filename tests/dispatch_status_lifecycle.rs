@@ -60,24 +60,64 @@ async fn dispatching_status_visible_across_lifecycle_success() {
     );
 }
 
+/// Since store-split M4 a failed dispatch reaches the board as its request
+/// row: the open row keeps the task a member, and the row reaching failed
+/// ends the membership, clears the status and raises the row's reason
+/// (`dispatch.allium: DispatchingFeedback`, `FailedRequestReported`).
 #[tokio::test]
 async fn dispatching_status_visible_across_lifecycle_failure() {
-    let mut app = make_app(make_task(8, "Refactor module"));
+    use dispatch_tui::models::{
+        DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, DispatchRequestState,
+    };
+    use dispatch_tui::tui::messages::TaskMessage;
 
-    app.update(Message::Task(
-        dispatch_tui::tui::messages::TaskMessage::MarkDispatching(TaskId(8)),
-    ));
+    let mut app = make_app(make_task(8, "Refactor module"));
+    app.update(Message::Task(TaskMessage::DispatchRequestsRefreshed(
+        vec![],
+    )));
+
+    app.update(Message::Task(TaskMessage::MarkDispatching(TaskId(8))));
     assert!(app.is_dispatching(TaskId(8)));
     assert!(app.status_message().is_some());
 
-    app.update(Message::Task(
-        dispatch_tui::tui::messages::TaskMessage::DispatchFailed(TaskId(8)),
-    ));
+    let requested_at = chrono::Utc::now();
+    let row = |state, reason: Option<&str>| DispatchRequest {
+        id: DispatchRequestId(1),
+        task_id: TaskId(8),
+        host: "this-host".into(),
+        mode: DispatchMode::Dispatch,
+        origin: DispatchOrigin::User,
+        state,
+        requested_at,
+        claimed_at: Some(requested_at),
+        finished_at: reason.map(|_| requested_at),
+        reason: reason.map(str::to_string),
+        worktree: None,
+        tmux_window: None,
+        deadline: requested_at + chrono::Duration::seconds(60),
+    };
+    app.update(Message::Task(TaskMessage::DispatchRequestsRefreshed(vec![
+        row(DispatchRequestState::Provisioning, None),
+    ])));
+    assert!(
+        app.is_dispatching(TaskId(8)),
+        "the open row keeps it a member"
+    );
+
+    app.update(Message::Task(TaskMessage::DispatchRequestsRefreshed(vec![
+        row(
+            DispatchRequestState::Failed,
+            Some("git worktree add failed"),
+        ),
+    ])));
     assert!(!app.is_dispatching(TaskId(8)));
     assert!(
         app.status_message().is_none(),
         "status should clear when dispatch fails"
     );
+    assert!(app
+        .error_popup()
+        .is_some_and(|p| p.contains("git worktree add failed")));
 }
 
 #[tokio::test]

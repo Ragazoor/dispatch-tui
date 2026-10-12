@@ -84,6 +84,11 @@ enum Sent {
     BatchPatchSubStatus(usize),
     RespawnPhoenixSuccessor(i64, Box<bindings::Task>),
     RegisterHost(String, String, String),
+    RequestDispatch(TaskId, String, String, String),
+    ClaimDispatchRequest(i64, String),
+    ReportDispatchProvisioned(i64, String, String, String),
+    ReportDispatchFailed(i64, String, String),
+    FailInterruptedDispatchRequests(String),
     SaveSetting(String, String, String),
     ClearSetting(String, String),
     CreateLearning(Box<bindings::Learning>),
@@ -752,6 +757,55 @@ impl ReducerCaller for RecordingCaller {
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::RegisterHost(id, label, owner))
     }
+
+    async fn request_dispatch(
+        &self,
+        task: TaskId,
+        requester: String,
+        origin: String,
+        mode: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::RequestDispatch(task, requester, origin, mode))
+    }
+
+    async fn claim_dispatch_request(
+        &self,
+        id: crate::models::DispatchRequestId,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ClaimDispatchRequest(id.0, host))
+    }
+
+    async fn report_dispatch_provisioned(
+        &self,
+        id: crate::models::DispatchRequestId,
+        reporter: String,
+        worktree: String,
+        tmux_window: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ReportDispatchProvisioned(
+            id.0,
+            reporter,
+            worktree,
+            tmux_window,
+        ))
+    }
+
+    async fn report_dispatch_failed(
+        &self,
+        id: crate::models::DispatchRequestId,
+        reporter: String,
+        reason: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ReportDispatchFailed(id.0, reporter, reason))
+    }
+
+    async fn fail_interrupted_dispatch_requests(
+        &self,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::FailInterruptedDispatchRequests(host))
+    }
 }
 
 /// The instant the fixed clock sits at, and the string it must produce.
@@ -821,24 +875,6 @@ fn writer_over(
     caller: RecordingCaller,
 ) -> (Store, Arc<RecordingCaller>) {
     store_over(rows, Some("user-me"), caller)
-}
-
-/// A backlog subtask of epic 1, as the subscription would deliver it.
-fn backlog_row(id: i64, sort_order: Option<i64>, host: &str, phoenix: bool) -> bindings::Task {
-    let mut row = crate::sync::encode::create_task_row(
-        &CreateTaskRequest {
-            epic_id: Some(EpicId(1)),
-            ..a_request()
-        },
-        "",
-        "user-me",
-        AT_STORED,
-    );
-    row.id = id;
-    row.sort_order = sort_order;
-    row.host = host.to_string();
-    row.phoenix = phoenix;
-    row
 }
 
 fn a_request() -> CreateTaskRequest<'static> {
@@ -1060,25 +1096,37 @@ async fn a_delete_sends_only_the_id() {
 /// THE DISTINCTION THE CLAIM DEPENDS ON. A store that says no is a different
 /// thing from a store that is not there, and only one of them is a failure.
 ///
-/// Losing a race is the ordinary outcome of two hosts reaching for one task;
-/// the caller handles it by provisioning nothing. A store that is DOWN is an
-/// outage the operator has to see. Collapsing the two would make a board that
-/// lost its connection look like a board losing every race.
+/// Since store-split M4 the claim is the dispatch request
+/// (`store-split.allium: RequestDispatch`). Losing a race is the ordinary
+/// outcome of two entry points reaching for one task; the caller handles it
+/// by provisioning nothing. A store that is DOWN is an outage the operator
+/// has to see. Collapsing the two would make a board that lost its
+/// connection look like a board losing every race.
 #[tokio::test]
-async fn a_lost_claim_is_an_answer_and_an_outage_is_an_error() {
-    let (winner, _) = writer_with(RecordingCaller::default());
-    assert!(winner.try_claim_backlog_task(TaskId(1)).await.unwrap());
+async fn a_refused_request_is_an_answer_and_an_outage_is_an_error() {
+    use crate::store::{DispatchRequestStore, RequestDispatchAnswer};
+    let ask = |db: Store| async move {
+        db.request_dispatch(TaskId(1), crate::models::DispatchOrigin::User, None)
+            .await
+    };
+
+    let (winner, _) = writer_with(RecordingCaller::returning(&[5]));
+    assert_eq!(
+        ask(winner).await.unwrap(),
+        RequestDispatchAnswer::Requested(crate::models::DispatchRequestId(5)),
+        "an applied request reads its row's id back"
+    );
 
     let (loser, _) = writer_with(RecordingCaller::rejecting());
     assert!(
-        !loser.try_claim_backlog_task(TaskId(1)).await.unwrap(),
-        "a refused claim is Ok(false) — somebody else got there first"
+        matches!(ask(loser).await.unwrap(), RequestDispatchAnswer::Refused(_)),
+        "a refused request is an answer — somebody else got there first"
     );
 
     let (offline, _) = writer_with(RecordingCaller::refusing("store unreachable"));
     assert!(
-        offline.try_claim_backlog_task(TaskId(1)).await.is_err(),
-        "a claim with the store down must fail rather than report a lost race"
+        ask(offline).await.is_err(),
+        "a request with the store down must fail rather than report a lost race"
     );
 }
 
@@ -1252,120 +1300,42 @@ async fn an_empty_work_package_patch_sends_nothing() {
     assert!(caller.sent().is_empty());
 }
 
-/// The claim carries THIS machine's host id, which is what lets the store pass
-/// over a task whose worktree is somewhere else.
+/// The request carries THIS machine's host id, which is what lets the store
+/// pass over a task whose worktree is somewhere else — and names this machine
+/// as the one that provisions it (`store-split.allium`, D2). No mode is sent
+/// as `""`, which asks the module to derive it (D3).
 #[tokio::test]
-async fn a_claim_names_the_machine_making_it() {
-    let (writer, caller) = writer_with(RecordingCaller::default());
+async fn a_request_names_the_machine_making_it() {
+    use crate::store::DispatchRequestStore;
+    let (writer, caller) = writer_with(RecordingCaller::returning(&[1]));
 
-    writer.try_claim_backlog_task(TaskId(3)).await.unwrap();
+    writer
+        .request_dispatch(TaskId(3), crate::models::DispatchOrigin::Mcp, None)
+        .await
+        .unwrap();
+    writer
+        .request_dispatch(
+            TaskId(4),
+            crate::models::DispatchOrigin::Quick,
+            Some(crate::models::DispatchMode::Quick),
+        )
+        .await
+        .unwrap();
 
     assert_eq!(
         caller.sent(),
-        vec![Sent::Claim(TaskId(3), "host-me".into())]
+        vec![
+            Sent::RequestDispatch(TaskId(3), "host-me".into(), "mcp".into(), String::new()),
+            Sent::RequestDispatch(TaskId(4), "host-me".into(), "quick".into(), "quick".into()),
+        ]
     );
 }
 
-// -- The chain's candidate loop ---------------------------------------------
-
-/// The chain takes the task the board draws as next: `COALESCE(sort_order, id)`
-/// then id. A chain that disagreed with the column would be a board doing
-/// something other than what it displays.
-#[tokio::test]
-async fn the_chain_takes_the_task_the_board_draws_as_next() {
-    let rows = Arc::new(crate::sync::SharedRows::new());
-    for row in [
-        backlog_row(10, None, "", false),
-        backlog_row(20, Some(5), "", false),
-        backlog_row(30, None, "", false),
-    ] {
-        rows.upsert_task(&row);
-    }
-    let (writer, caller) = writer_over(rows, RecordingCaller::default());
-
-    let claimed = writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap();
-
-    assert_eq!(claimed, Some(TaskId(20)), "the explicit sort_order wins");
-    assert_eq!(
-        caller.sent(),
-        vec![Sent::Claim(TaskId(20), "host-me".into())]
-    );
-}
-
-/// A phoenix subtask is passed over, never claimed.
-/// `epics.allium: PhoenixIsNeverChained` — a recurring subtask respawns on
-/// completion, so chaining its successor would launch an agent at it
-/// immediately, forever.
-#[tokio::test]
-async fn the_chain_passes_over_a_phoenix() {
-    let rows = Arc::new(crate::sync::SharedRows::new());
-    rows.upsert_task(&backlog_row(1, None, "", true));
-    rows.upsert_task(&backlog_row(2, None, "", false));
-    let (writer, _) = writer_over(rows, RecordingCaller::default());
-
-    assert_eq!(
-        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
-        Some(TaskId(2))
-    );
-}
-
-/// ...and so is a task whose worktree is on another machine. Claiming it would
-/// dispatch an agent with nowhere to work.
-#[tokio::test]
-async fn the_chain_passes_over_another_hosts_task() {
-    let rows = Arc::new(crate::sync::SharedRows::new());
-    rows.upsert_task(&backlog_row(1, None, "host-other", false));
-    rows.upsert_task(&backlog_row(2, None, "host-me", false));
-    let (writer, _) = writer_over(rows, RecordingCaller::default());
-
-    assert_eq!(
-        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
-        Some(TaskId(2))
-    );
-}
-
-/// An epic with nothing left claims nothing, and that is not an error. It is
-/// the ordinary end of a chain, which `exit_session` reaches on every wrap-up.
-#[tokio::test]
-async fn an_empty_backlog_ends_the_chain_quietly() {
-    let (writer, caller) = writer_over(
-        Arc::new(crate::sync::SharedRows::new()),
-        RecordingCaller::default(),
-    );
-
-    assert_eq!(
-        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
-        None
-    );
-    assert!(caller.sent().is_empty(), "nothing to offer, nothing sent");
-}
-
-/// THE RACE. Every candidate is taken by somebody else, so the loop runs out
-/// and reports an empty backlog rather than claiming something it lost.
-#[tokio::test]
-async fn a_chain_that_loses_every_race_claims_nothing() {
-    let rows = Arc::new(crate::sync::SharedRows::new());
-    rows.upsert_task(&backlog_row(1, None, "", false));
-    rows.upsert_task(&backlog_row(2, None, "", false));
-    let (writer, _) = writer_over(rows, RecordingCaller::rejecting());
-
-    assert_eq!(
-        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
-        None
-    );
-}
-
-/// ...but a store that is DOWN fails on the first offer rather than walking the
-/// whole list and reporting an empty backlog. An outage must not look like a
-/// finished epic.
-#[tokio::test]
-async fn a_chain_with_the_store_down_fails_loudly() {
-    let rows = Arc::new(crate::sync::SharedRows::new());
-    rows.upsert_task(&backlog_row(1, None, "", false));
-    let (writer, _) = writer_over(rows, RecordingCaller::refusing("store unreachable"));
-
-    assert!(writer.try_claim_next_backlog_task(EpicId(1)).await.is_err());
-}
+// The chain's candidate loop moved to the service with store-split M4
+// (`TaskService::request_next_backlog_subtask`): its ordering, phoenix and
+// refusal rules are pinned in `src/store/tests/tasks_patch.rs`, and its
+// outage-is-not-an-empty-backlog rule in
+// `src/service/tasks/tests/crud/claim_and_close.rs`.
 
 // -- The refusal names the outage -------------------------------------------
 
@@ -1662,7 +1632,7 @@ async fn record_user_prompt_submit_stamps_both_timestamps_from_the_passed_now() 
 }
 
 /// `Applied`/`Refused` map straight onto the PR gate's `true`/`false` via
-/// `ReducerOutcome::won()` — the exact `try_claim_backlog_task` shape.
+/// `ReducerOutcome::won()`.
 #[tokio::test]
 async fn mark_pr_learnings_gate_shown_wins_when_applied_and_loses_when_refused() {
     let (applied_writer, _) = writer_with(RecordingCaller::returning(&[]));
@@ -2221,9 +2191,9 @@ async fn the_settled_identity_is_none_until_the_store_names_us() {
 /// call each one produced — in order, so a method that sends nothing or sends
 /// the wrong call shows up as a mismatch at its position.
 ///
-/// `try_claim_next_backlog_task` is absent: with no rows it has no candidate
-/// to offer, which `a_chain_that_loses_every_race_claims_nothing` and its
-/// neighbours cover.
+/// The epic chain's candidate loop is absent: it is the service's, not a
+/// store method, and `a_chain_refused_on_every_candidate_requests_nothing` and
+/// its neighbours in `src/store/tests/tasks_patch.rs` cover it.
 #[tokio::test]
 async fn every_store_mutation_reaches_the_transport() {
     let (db, caller) = writer_with(RecordingCaller::default());
@@ -2237,8 +2207,29 @@ async fn every_store_mutation_reaches_the_transport() {
         .await
         .unwrap();
     db.delete_task(TaskId(1)).await.unwrap();
-    db.try_claim_backlog_task(TaskId(1)).await.unwrap();
-    db.try_release_backlog_claim(TaskId(1)).await.unwrap();
+    // The default caller reads no id back, which the store reports as an
+    // error AFTER the call reached the transport — the only part asserted here.
+    let _ = crate::store::DispatchRequestStore::request_dispatch(
+        &db,
+        TaskId(1),
+        crate::models::DispatchOrigin::User,
+        None,
+    )
+    .await;
+    {
+        use crate::store::DispatchRequestStore;
+        let request = crate::models::DispatchRequestId(1);
+        db.claim_dispatch_request(request).await.unwrap();
+        db.report_dispatch_provisioned(
+            request,
+            "/wt",
+            &crate::models::TmuxWindow::for_task(TaskId(1)),
+        )
+        .await
+        .unwrap();
+        db.report_dispatch_failed(request, "boom").await.unwrap();
+        db.fail_interrupted_dispatch_requests().await.unwrap();
+    }
 
     db.create_epic("E", "", None).await.unwrap();
     db.patch_epic(EpicId(1), &crate::store::EpicPatch::new().title("e"))
@@ -2401,8 +2392,11 @@ async fn every_store_mutation_reaches_the_transport() {
             "PatchTask",
             "SetTaskEpic",
             "DeleteTask",
-            "Claim",
-            "Release",
+            "RequestDispatch",
+            "ClaimDispatchRequest",
+            "ReportDispatchProvisioned",
+            "ReportDispatchFailed",
+            "FailInterruptedDispatchRequests",
             "CreateEpic",
             "PatchEpic",
             "Recalculate",

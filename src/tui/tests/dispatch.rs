@@ -287,13 +287,20 @@ fn dispatched_sets_fields_and_transitions_to_running() {
             .num_seconds()
             < 5
     );
-    // Persist plus the trailing repo-sync refresh
-    // (docs/specs/repo-sync.allium: RefreshRepoSyncStateAfterDispatch).
-    // No SeedActivity: the pre-provisioning claim already wrote the activity
+    // Only the trailing repo-sync refresh
+    // (docs/specs/repo-sync.allium: RefreshRepoSyncStateAfterDispatch). No
+    // Persist: since store-split M4 the module wrote the worktree, window and
+    // host when the host's report landed (HostReportsDispatched), so the board
+    // only follows. No SeedActivity: the claim already wrote the activity
     // stamp, so re-writing it here would be redundant — and would clobber a
     // real hook stamp if this handling ever ran later than it does.
-    assert_eq!(cmds.len(), 2, "got: {cmds:?}");
-    assert!(matches!(&cmds[0], Command::Task(TaskCommand::Persist(_))));
+    assert_eq!(cmds.len(), 1, "got: {cmds:?}");
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Task(TaskCommand::Persist(_)))),
+        "the module records the dispatch; the board writes nothing"
+    );
     assert!(
         !cmds
             .iter()
@@ -337,11 +344,10 @@ fn dispatched_with_switch_focus_emits_jump() {
         tmux_window: test_tmux_window("win"),
         switch_focus: true,
     }));
-    // Persist, JumpToTmux, and the trailing repo-sync refresh.
-    assert_eq!(cmds.len(), 3, "got: {cmds:?}");
-    assert!(matches!(&cmds[0], Command::Task(TaskCommand::Persist(_))));
+    // JumpToTmux, and the trailing repo-sync refresh.
+    assert_eq!(cmds.len(), 2, "got: {cmds:?}");
     assert!(
-        matches!(&cmds[1], Command::Task(TaskCommand::JumpToTmux { window }) if window == "win")
+        matches!(&cmds[0], Command::Task(TaskCommand::JumpToTmux { window }) if window == "win")
     );
 }
 
@@ -1370,17 +1376,27 @@ fn dispatched_clears_in_flight() {
     assert!(!app.is_dispatching(TaskId(1)));
 }
 
+/// The in-flight guard follows the request row: once the row fails, the task
+/// is no longer a member and can be dispatched again
+/// (`dispatch.allium: DispatchingFeedback`, ClearedWhenEmpty).
 #[test]
-fn dispatch_failed_clears_in_flight() {
+fn a_failed_request_clears_in_flight() {
     let mut app = make_app();
-    // Dispatch task 1
     app.update(Message::Task(TaskMessage::Dispatch(
         TaskId(1),
         DispatchMode::Dispatch,
     )));
     assert!(app.is_dispatching(TaskId(1)));
-    // DispatchFailed clears the in-flight guard
-    app.update(Message::Task(TaskMessage::DispatchFailed(TaskId(1))));
+    app.update(requests_refreshed(vec![request_row(
+        1,
+        1,
+        crate::models::DispatchRequestState::Requested,
+    )]));
+    app.update(requests_refreshed(vec![request_row(
+        1,
+        1,
+        crate::models::DispatchRequestState::Failed,
+    )]));
     assert!(!app.is_dispatching(TaskId(1)));
     // Can dispatch again
     let cmds = app.update(Message::Task(TaskMessage::Dispatch(
@@ -1416,44 +1432,22 @@ fn dispatch_different_tasks_both_succeed() {
     ));
 }
 
-#[test]
-fn dispatch_failed_clears_mark_dispatching_guard() {
-    let mut app = make_app();
-    app.update(Message::Task(TaskMessage::MarkDispatching(TaskId(1))));
-    assert!(app.is_dispatching(TaskId(1)));
-    app.update(Message::Task(TaskMessage::DispatchFailed(TaskId(1))));
-    assert!(!app.is_dispatching(TaskId(1)));
-}
+// `dispatch_failed_clears_mark_dispatching_guard` and
+// `dispatch_failed_releases_the_claim` pinned `TaskMessage::DispatchFailed` and
+// the `ReleaseClaim` it emitted, both retired by store-split M4: a failed
+// dispatch reaches the board as its failed request row (pinned above and in
+// `src/tui/tests/dispatch_requests.rs`), and no client releases a claim — the
+// module does, for every failed request (`store-split.allium:
+// ReleaseClaimOfFailedRequest`).
 
-/// Every dispatch entry point claims before it provisions, so every way a
-/// dispatch can end without provisioning owes the claim back. `DispatchFailed`
-/// is the single funnel for all of them — the failed and panicked dispatch arms
-/// and the failed repo-trust grant — so the release rides on it rather than
-/// being re-derived at each producer.
-#[test]
-fn dispatch_failed_releases_the_claim() {
-    let mut app = make_app();
-    app.update(Message::Task(TaskMessage::MarkDispatching(TaskId(1))));
-
-    let cmds = app.update(Message::Task(TaskMessage::DispatchFailed(TaskId(1))));
-
-    assert!(
-        cmds.iter().any(|c| matches!(
-            c,
-            Command::Task(TaskCommand::ReleaseClaim(id)) if *id == TaskId(1)
-        )),
-        "DispatchFailed must release the claim, got: {cmds:?}"
-    );
-}
-
-/// A *lost* claim must NOT release, and so cannot travel on `DispatchFailed`.
+/// A *refused* request must drain the spinner and do nothing else
+/// (`dispatch.allium: LostClaimReported`).
 ///
 /// The winner of a contested claim is itself Running with no worktree while it
-/// provisions — exactly the state `release_claim` is conditional on. So a loser
-/// that released would hand the winner's task back to Backlog mid-provision,
-/// leaving the winner to patch a worktree onto a task the board thinks is
-/// dispatchable and inviting a third dispatch of the same work. The loser owns
-/// no claim, so it drains its spinner and stops there.
+/// provisions. A loser that wrote anything to the task could hand the winner's
+/// task back to Backlog mid-provision and invite a second dispatch of the same
+/// work. The loser wrote nothing and holds nothing, so it drains its spinner
+/// and stops there.
 #[test]
 fn dispatch_claim_lost_clears_the_spinner_without_releasing() {
     let mut app = make_app();
@@ -1466,10 +1460,8 @@ fn dispatch_claim_lost_clears_the_spinner_without_releasing() {
         "a lost claim must still drain the spinner"
     );
     assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::Task(TaskCommand::ReleaseClaim(_)))),
-        "the loser owns no claim and must not release the winner's, got: {cmds:?}"
+        cmds.is_empty(),
+        "the loser owns no claim and must touch nothing, got: {cmds:?}"
     );
 }
 
@@ -2231,12 +2223,56 @@ fn space_on_empty_column_is_noop() {
 // in docs/specs/epics.allium
 // ---------------------------------------------------------------------------
 
-fn auto_dispatch_failed_msg(id: i64) -> Message {
-    Message::Task(TaskMessage::AutoDispatchFailed {
-        task_id: TaskId(id),
-        epic_id: EpicId(7),
-        reason: "git fetch origin main failed".to_string(),
-    })
+/// A dispatch request row for task `task` on this (unnamed) host.
+fn request_row(
+    id: i64,
+    task: i64,
+    state: crate::models::DispatchRequestState,
+) -> crate::models::DispatchRequest {
+    use crate::models::DispatchRequestState as S;
+    let requested_at = chrono::Utc::now();
+    let finished = matches!(state, S::Dispatched | S::Failed);
+    crate::models::DispatchRequest {
+        id: crate::models::DispatchRequestId(id),
+        task_id: TaskId(task),
+        host: "this-machine".to_string(),
+        mode: DispatchMode::Dispatch,
+        origin: crate::models::DispatchOrigin::User,
+        state,
+        requested_at,
+        claimed_at: (state != S::Requested).then_some(requested_at),
+        finished_at: finished.then_some(requested_at),
+        reason: (state == S::Failed).then(|| "git fetch origin main failed".to_string()),
+        worktree: None,
+        tmux_window: None,
+        deadline: requested_at + chrono::Duration::seconds(60),
+    }
+}
+
+fn requests_refreshed(rows: Vec<crate::models::DispatchRequest>) -> Message {
+    Message::Task(TaskMessage::DispatchRequestsRefreshed(rows))
+}
+
+/// Fail subtask `id`'s chained dispatch the way the board learns of it since
+/// store-split M4: its `epic_chain` request row reaching failed
+/// (`epics.allium: ReportChainedDispatchFailure`). Puts the task in epic 7
+/// first, and delivers the open row before the failed one so the failure is
+/// not mistaken for baseline history.
+fn fail_chain(app: &mut App, id: i64) -> Vec<Command> {
+    use crate::models::{DispatchOrigin, DispatchRequestState};
+    if let Some(task) = app.board.tasks.iter_mut().find(|t| t.id == TaskId(id)) {
+        task.epic_id = Some(EpicId(7));
+    }
+    let chained = |state| crate::models::DispatchRequest {
+        origin: DispatchOrigin::EpicChain,
+        ..request_row(100 + id, id, state)
+    };
+    app.update(requests_refreshed(vec![chained(
+        DispatchRequestState::Provisioning,
+    )]));
+    app.update(requests_refreshed(vec![chained(
+        DispatchRequestState::Failed,
+    )]))
 }
 
 /// The marker is what survives once the status message and the notification
@@ -2247,7 +2283,7 @@ fn auto_dispatch_failure_marks_the_subtask() {
     let mut app = make_app();
     assert!(!app.auto_dispatch_failed(TaskId(1)));
 
-    app.update(auto_dispatch_failed_msg(1));
+    fail_chain(&mut app, 1);
 
     assert!(app.auto_dispatch_failed(TaskId(1)));
     assert!(
@@ -2262,7 +2298,7 @@ fn auto_dispatch_failure_marks_the_subtask() {
 fn auto_dispatch_failure_sets_a_status_message_naming_the_task() {
     let mut app = make_app();
 
-    app.update(auto_dispatch_failed_msg(1));
+    fail_chain(&mut app, 1);
 
     let status = app.status_message().unwrap_or_default().to_string();
     assert!(
@@ -2282,7 +2318,7 @@ fn auto_dispatch_failure_notifies_when_notifications_are_enabled() {
     let mut app = make_app();
     app.set_notifications_enabled(true);
 
-    let cmds = app.update(auto_dispatch_failed_msg(1));
+    let cmds = fail_chain(&mut app, 1);
 
     assert!(
         cmds.iter().any(|c| matches!(
@@ -2299,7 +2335,7 @@ fn auto_dispatch_failure_does_not_notify_when_notifications_are_disabled() {
     let mut app = make_app();
     app.set_notifications_enabled(false);
 
-    let cmds = app.update(auto_dispatch_failed_msg(1));
+    let cmds = fail_chain(&mut app, 1);
 
     assert!(
         !cmds
@@ -2318,7 +2354,7 @@ fn auto_dispatch_failure_does_not_notify_when_notifications_are_disabled() {
 #[test]
 fn auto_dispatch_failure_marker_cleared_by_a_new_dispatch() {
     let mut app = make_app();
-    app.update(auto_dispatch_failed_msg(1));
+    fail_chain(&mut app, 1);
 
     app.update(Message::Task(TaskMessage::MarkDispatching(TaskId(1))));
 
@@ -2331,7 +2367,7 @@ fn auto_dispatch_failure_marker_cleared_by_a_new_dispatch() {
 #[test]
 fn auto_dispatch_failure_marker_cleared_when_the_task_leaves_backlog() {
     let mut app = make_app();
-    app.update(auto_dispatch_failed_msg(1));
+    fail_chain(&mut app, 1);
 
     app.update(Message::Task(TaskMessage::Updated(Box::new(make_task(
         1,
@@ -2347,7 +2383,7 @@ fn auto_dispatch_failure_marker_cleared_when_the_task_leaves_backlog() {
 #[test]
 fn auto_dispatch_failure_marker_survives_a_backlog_refresh() {
     let mut app = make_app();
-    app.update(auto_dispatch_failed_msg(1));
+    fail_chain(&mut app, 1);
 
     app.update(Message::Task(TaskMessage::Updated(Box::new(make_task(
         1,
@@ -2363,7 +2399,10 @@ fn auto_dispatch_failure_marker_survives_a_backlog_refresh() {
 #[test]
 fn stalled_chain_card_shows_auto_dispatch_failed() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-    app.update(auto_dispatch_failed_msg(1));
+    // The marker as the chain's failure leaves it, set directly so the card
+    // stays an ordinary board card for the render (a chained subtask's own
+    // path to it is `fail_chain`, above).
+    app.handle_auto_dispatch_failed(TaskId(1), EpicId(7), "git fetch origin main failed".into());
 
     let buf = render_to_buffer(&mut app, 120, 20);
 
@@ -2378,7 +2417,7 @@ fn stalled_chain_card_shows_auto_dispatch_failed() {
 #[test]
 fn stalled_chain_card_yields_to_the_dispatching_spinner() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-    app.update(auto_dispatch_failed_msg(1));
+    app.handle_auto_dispatch_failed(TaskId(1), EpicId(7), "git fetch origin main failed".into());
     // Re-insert the marker behind the spinner: a real retry clears it, so this
     // asserts the render precedence rather than the clearing.
     app.mark_dispatching(TaskId(1));

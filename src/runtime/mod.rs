@@ -711,10 +711,15 @@ struct TuiRuntime {
     /// pane, and keeping only the newest would quit out from under the older
     /// one.
     split_restores: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// Which of this host's `requested` dispatch request rows the reactor has
+    /// already handed out (`dispatch_host`). Shared with the row pump, so a
+    /// redelivered row is served once.
+    dispatch_observer: Arc<std::sync::Mutex<crate::dispatch::DispatchRequestObserver>>,
 }
 
 mod budget;
 mod commands;
+mod dispatch_host;
 mod editor;
 mod epics;
 mod event_loop;
@@ -899,6 +904,16 @@ impl TuiRuntime {
 
         let mut app = hydrate_app(tasks, &host_id, &database, &*runner).await;
         app.set_store_server(Some(store_server.clone()));
+        // The App's first look at this host's dispatch requests is its
+        // BASELINE: finished rows in it are history and raise nothing. Taken
+        // before the restart sweep below, so the rows that sweep fails ("host
+        // restarted") are reported like any later failure — the epic chain's
+        // among them (epics.allium: ReportChainedDispatchFailure).
+        app.update(Message::Task(
+            crate::tui::messages::TaskMessage::DispatchRequestsRefreshed(
+                store::DispatchRequestRead::dispatch_requests(&*database).await,
+            ),
+        ));
 
         // WHERE THIS BOARD'S CARDS COME FROM: the subscription, always. There
         // is deliberately no fallback to the local copy when the store is down:
@@ -916,6 +931,11 @@ impl TuiRuntime {
             feed_notify_tx,
             paths,
         );
+
+        // store-split.allium: HostRestartFailsInterrupted, then the D5
+        // catch-up — on this first connection only, before the row pump can
+        // serve anything (sync.allium: FirstConnectionLetsTheBoardDraw).
+        drop(runtime.recover_dispatch_requests().await);
 
         runtime.start_background_tasks(&parts, session, sync_store, app.repo_paths());
 
@@ -1005,6 +1025,9 @@ impl TuiRuntime {
             budget_snapshot_path: crate::budget_snapshot_path(),
             claude_json_path: paths.claude_json_path.clone(),
             split_restores: std::sync::Mutex::new(Vec::new()),
+            dispatch_observer: Arc::new(std::sync::Mutex::new(
+                crate::dispatch::DispatchRequestObserver::new(host_id),
+            )),
         };
         (runtime, msg_rx)
     }

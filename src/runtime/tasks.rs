@@ -1,71 +1,5 @@
 use super::*;
 
-/// Spawn a blocking dispatch call, sending `Dispatched`/`DispatchFailed`/`Error`
-/// back via `msg_tx`. Handles `catch_unwind` and panic-string extraction so
-/// callers only supply the label, `switch_focus` flag, and the dispatch closure.
-///
-/// `pub(super)` so `runtime::tests` can drive all three arms — in particular the
-/// `Err(panic)` arm, which no production caller can trigger on demand.
-pub(super) fn run_blocking_dispatch(
-    id: TaskId,
-    label: &'static str,
-    switch_focus: bool,
-    msg_tx: tokio::sync::mpsc::UnboundedSender<Message>,
-    f: impl FnOnce() -> anyhow::Result<models::DispatchResult> + Send + 'static,
-) {
-    tokio::task::spawn_blocking(move || {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-        match result {
-            Ok(Ok(r)) => {
-                let _ = msg_tx.send(Message::Task(
-                    crate::tui::messages::TaskMessage::Dispatched {
-                        id,
-                        worktree: r.worktree_path,
-                        tmux_window: r.tmux_window,
-                        switch_focus,
-                    },
-                ));
-            }
-            Ok(Err(e)) => {
-                let _ = msg_tx.send(Message::Task(
-                    crate::tui::messages::TaskMessage::DispatchFailed(id),
-                ));
-                let _ = msg_tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                    format!("{label} failed: {e:#}"),
-                )));
-            }
-            Err(panic) => {
-                let detail = panic
-                    .downcast_ref::<&'static str>()
-                    .map(|s| s.to_string())
-                    .or_else(|| panic.downcast_ref::<String>().cloned())
-                    .unwrap_or_else(|| "unknown".to_string());
-                tracing::error!(task_id = id.0, label, "dispatch panicked: {detail}");
-                let _ = msg_tx.send(Message::Task(
-                    crate::tui::messages::TaskMessage::DispatchFailed(id),
-                ));
-                let _ = msg_tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                    format!("{label} panicked: {detail}"),
-                )));
-            }
-        }
-    });
-}
-
-fn run_quick_dispatch(
-    task: models::Task,
-    runner: Arc<dyn ProcessRunner>,
-    inputs: dispatch::DispatchInputs,
-    msg_tx: tokio::sync::mpsc::UnboundedSender<Message>,
-) {
-    let id = task.id;
-    run_blocking_dispatch(id, "Quick dispatch", true, msg_tx, move || {
-        let dispatch::DispatchInputs { epic_ctx, injected } = inputs;
-        let injections = dispatch::LearningInjections::from(injected.as_slice());
-        dispatch::quick_dispatch_agent(&task, &*runner, epic_ctx.as_ref(), &injections)
-    });
-}
-
 impl TuiRuntime {
     pub(super) async fn exec_insert_task(
         &self,
@@ -263,25 +197,16 @@ impl TuiRuntime {
         let _ = self.database.save_repo_path(&expanded).await;
         let paths = self.board_reads.list_repo_paths().await;
         app.update(Message::RepoPathsUpdated(paths));
-        // Claim before provisioning, exactly as exec_dispatch_agent does. This
-        // task was created moments ago, so the claim is effectively uncontended
-        // — it is taken anyway so that the Running write, the activity stamp and
-        // the release-on-failure unwind are identical across entry points rather
-        // than quick dispatch keeping a second, subtly different shape.
-        if !self.claim_for_dispatch(task.id).await {
-            return;
-        }
-        let db = Arc::clone(&self.database);
-        let emb_svc = Arc::clone(&self.emb_svc);
-        let msg_tx = self.msg_tx.clone();
-        let runner = Arc::clone(&self.runner);
-
-        // Spawn a background task so the TUI command loop is never blocked
-        // waiting for the embedding thread (which may be busy computing embeddings).
-        tokio::spawn(async move {
-            let inputs = dispatch::prepare_inputs(&*db, &task, &emb_svc).await;
-            run_quick_dispatch(task, runner, inputs, msg_tx);
-        });
+        // A request like every other launch path (tasks.allium:
+        // CreateQuickTask): origin `quick`, and the `quick` mode the module
+        // never derives on its own, so this host's provisioning launches the
+        // quick-dispatch agent. Nothing is provisioned here.
+        self.request_for_dispatch(
+            task.id,
+            models::DispatchOrigin::Quick,
+            Some(models::DispatchMode::Quick),
+        )
+        .await;
     }
 
     pub(super) async fn exec_persist_task(
@@ -558,97 +483,50 @@ impl TuiRuntime {
         }
     }
 
-    /// Claim `task` for dispatch, then provision it in the background.
+    /// `dispatch.allium: DispatchTask` / `DispatchResearchTask` (and, through
+    /// the same command, retry-fresh): write a `user` request naming this host
+    /// with the operator's mode, and provision NOTHING here — this host's
+    /// reactor claims and provisions the row (`serve_dispatch_requests`).
     ///
-    /// The claim is the guard, not the caller's snapshot: `handle_dispatch_task`
-    /// filters on the board's copy of the status, which can be stale by the time
-    /// this runs, and a chain or MCP `dispatch_task` landing in between would
-    /// otherwise get the same task provisioned twice
+    /// The request is the guard, not the caller's snapshot:
+    /// `handle_dispatch_task` filters on the board's copy of the status, which
+    /// can be stale by the time this runs, and the module refuses a request
+    /// for a task another entry point claimed first
     /// (`DispatchClaimExclusive` in `docs/specs/dispatch.allium`).
-    ///
-    /// A lost claim reports `DispatchAbandoned` plus an error naming why, so the
-    /// spinner never outlives the attempt.
-    ///
-    /// # Why this is not [`crate::service::TaskServiceApi::dispatch`]
-    ///
-    /// The seam next door owns claim → prepare → provision → *record the
-    /// worktree/tmux window* → release-on-failure, and the two MCP entry points
-    /// take all of it. The board cannot take the last two steps: it applies the
-    /// dispatch to its in-memory card first (`handle_dispatched`) and persists
-    /// from that copy, and it releases a failed claim through
-    /// `TaskMessage::DispatchFailed` so the spinner and the release drain
-    /// together. Taking the seam's writes as well would mean two writers for the
-    /// same two columns and a release fired from both sides.
-    ///
-    /// What it *does* share is everything that can silently drift: the claim
-    /// ([`Self::claim_for_dispatch`] → `claim_backlog_task`), the prologue
-    /// ([`dispatch::prepare_inputs`]) and the `DispatchMode` match
-    /// ([`dispatch::run_agent_for_mode`]).
-    /// Takes the `Task` boxed and keeps it that way: it is captured twice more
-    /// below (a `tokio::spawn` future, then a `spawn_blocking` closure), both of
-    /// which are heap-allocated, so unboxing here would re-inline ~470 bytes
-    /// into each capture.
     pub(super) async fn exec_dispatch_agent(
         &self,
         task: Box<models::Task>,
         mode: models::DispatchMode,
     ) {
-        if !self.claim_for_dispatch(task.id).await {
-            return;
-        }
-        let db = Arc::clone(&self.database);
-        let emb_svc = Arc::clone(&self.emb_svc);
-        let msg_tx = self.msg_tx.clone();
-        let runner = Arc::clone(&self.runner);
-
-        // Spawn a background task so the TUI command loop is never blocked
-        // waiting for the embedding thread (which may be busy computing embeddings).
-        tokio::spawn(async move {
-            let inputs = dispatch::prepare_inputs(&*db, &task, &emb_svc).await;
-            let label = mode.label();
-            let id = task.id;
-            tracing::info!(task_id = id.0, label, "dispatching");
-            run_blocking_dispatch(id, label, false, msg_tx, move || {
-                dispatch::run_agent_for_mode(&task, mode, &*runner, inputs)
-            });
-        });
+        self.request_for_dispatch(task.id, models::DispatchOrigin::User, Some(mode))
+            .await;
     }
 
-    /// Take the pre-provisioning claim. Returns whether the caller may provision.
+    /// Write a dispatch request for `id`. Returns whether it was written.
     ///
-    /// Shared by [`Self::exec_dispatch_agent`] and [`Self::exec_quick_dispatch`]
-    /// so both entry points claim identically.
-    async fn claim_for_dispatch(&self, id: TaskId) -> bool {
-        // Both failure modes are `DispatchAbandoned`: the claim is a single
-        // statement, so neither a lost claim nor an errored one leaves this
-        // caller holding anything to release.
-        let reason = match self.task_svc.claim_backlog_task(id).await {
-            Ok(true) => return true,
-            Ok(false) => format!("Task #{} was already dispatched by something else", id.0),
-            Err(e) => Self::db_error("claiming task for dispatch", e),
+    /// A refused or errored request drains the pending DispatchingFeedback
+    /// entry with a message (`LostClaimReported`): it wrote nothing and holds
+    /// nothing, so there is nothing to release. A written one needs no message
+    /// — its open row reaches the App through the next board reload and
+    /// supersedes the pending entry (`SpansTheClaim`).
+    async fn request_for_dispatch(
+        &self,
+        id: TaskId,
+        origin: models::DispatchOrigin,
+        mode: Option<models::DispatchMode>,
+    ) -> bool {
+        let reason = match self.task_svc.request_dispatch(id, origin, mode).await {
+            Ok(crate::store::RequestDispatchAnswer::Requested(_)) => return true,
+            Ok(crate::store::RequestDispatchAnswer::Refused(why)) => {
+                format!("Task #{} was not dispatched: {why}", id.0)
+            }
+            Err(e) => Self::db_error("requesting the dispatch", e),
         };
         let _ = self.msg_tx.send(Message::Task(
             crate::tui::messages::TaskMessage::DispatchAbandoned(id),
         ));
         self.send_system_error(reason);
         false
-    }
-
-    /// Undo a claim whose dispatch never provisioned anything, returning the
-    /// task to `Backlog`. Driven by `TaskCommand::ReleaseClaim`, which
-    /// `handle_dispatch_failed` emits. The dispatch watchdog deliberately does
-    /// not — see `tick_dispatching`.
-    ///
-    /// Conditional in the service layer: a task that *was* provisioned, or that
-    /// moved on meanwhile, is left alone. `Ok(false)` is therefore an expected
-    /// outcome, not an error — a lost claim releases nothing, and neither does a
-    /// dispatch that failed after provisioning.
-    pub(super) async fn exec_release_claim(&self, app: &mut App, id: TaskId) {
-        if let Err(e) = self.task_svc.release_claim(id).await {
-            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                Self::db_error("releasing dispatch claim", e),
-            )));
-        }
     }
 
     pub(super) fn exec_check_window(
@@ -886,6 +764,7 @@ impl TuiRuntime {
         let reads = Arc::clone(&self.board_reads);
         let tx = self.msg_tx.clone();
         let watermark = Arc::clone(&self.last_change_count);
+        let dispatch_host = self.dispatch_host();
         tokio::spawn(async move {
             let mut changed = rows.changed();
             // Every wake-up reads the WHOLE board rather than applying a delta.
@@ -900,6 +779,11 @@ impl TuiRuntime {
                 // on every single teammate edit.
                 let revision = reads.revision().await as i64;
                 watermark.store(revision, std::sync::atomic::Ordering::Relaxed);
+                // A pushed row may be a dispatch request this host must
+                // provision (store-split.allium: HostClaimsDispatch). After the
+                // reload, so the App has seen the row open before it is
+                // claimed.
+                drop(dispatch_host.serve().await);
             }
         })
     }
@@ -944,6 +828,13 @@ impl TuiRuntime {
         let pairs = db.list_all_base_branches().await;
         let _ = tx.send(Message::BaseBranchesUpdated(
             super::group_base_branches_by_repo(pairs),
+        ));
+
+        // This host's dispatch requests, from the same reload as the cards, so
+        // DispatchingFeedback follows the row (dispatch.allium).
+        let requests = db.dispatch_requests().await;
+        let _ = tx.send(Message::Task(
+            crate::tui::messages::TaskMessage::DispatchRequestsRefreshed(requests),
         ));
     }
 
@@ -1017,10 +908,14 @@ impl TuiRuntime {
         }
 
         let tasks = self.board_reads.list_all().await;
-        let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        let mut cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
             tasks,
         )));
         self.exec_refresh_epics_from_db(app).await;
+        let requests = self.board_reads.dispatch_requests().await;
+        cmds.extend(app.update(Message::Task(
+            crate::tui::messages::TaskMessage::DispatchRequestsRefreshed(requests),
+        )));
         // Snapshot *after* the refresh so the next tick only re-reads when a
         // write has occurred since this point.
         self.record_refreshed_at(self.board_reads.revision().await);

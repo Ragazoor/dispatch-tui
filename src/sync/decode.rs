@@ -30,7 +30,8 @@
 use chrono::{DateTime, Utc};
 
 use crate::models::{
-    Epic, EpicId, EpicOrigin, FeedRole, Learning, LearningId, LearningKind, LearningRetrieval,
+    DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, DispatchRequestState, Epic,
+    EpicId, EpicOrigin, FeedRole, Learning, LearningId, LearningKind, LearningRetrieval,
     LearningScope, LearningStatus, RetrievalSource, SubStatus, Task, TaskId, TaskStatus, TaskTag,
     TaskUrl, TmuxWindow, UrlType, WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink,
     WrapUpMode,
@@ -458,4 +459,48 @@ pub fn retired_feed_item(row: &bindings::RetiredFeedItem) -> RetiredFeedItemRow 
         external_id: row.external_id.clone(),
         retired_at: row.retired_at.clone(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch requests (store-split M4)
+// ---------------------------------------------------------------------------
+
+/// The `kind` every M4 row carries. M5 adds wrap-up and exit-session kinds,
+/// which this binary does not know and so refuses rather than misreads.
+const DISPATCH_REQUEST_KIND: &str = "dispatch";
+
+/// The store's `dispatch_requests` row as the board's [`DispatchRequest`].
+///
+/// An unknown kind, mode, origin or state refuses the row: read as open, a
+/// row from a newer binary would keep a spinner alive forever; read as
+/// finished, it would raise a failure nobody caused.
+pub fn dispatch_request(row: &bindings::DispatchRequest) -> Decoded<DispatchRequest> {
+    const T: &str = "dispatch_requests";
+    let refuse = |detail: String| DecodeError::new(T, row.id, detail);
+
+    if row.kind != DISPATCH_REQUEST_KIND {
+        return Err(refuse(format!("unknown kind {:?}", row.kind)));
+    }
+    let mode = DispatchMode::parse(&row.mode)
+        .ok_or_else(|| refuse(format!("unknown mode {:?}", row.mode)))?;
+    let origin = DispatchOrigin::parse(&row.origin)
+        .ok_or_else(|| refuse(format!("unknown origin {:?}", row.origin)))?;
+    let state = DispatchRequestState::parse(&row.state)
+        .ok_or_else(|| refuse(format!("unknown state {:?}", row.state)))?;
+
+    Ok(DispatchRequest {
+        id: DispatchRequestId(row.id),
+        task_id: TaskId(row.task_id),
+        host: row.host.clone(),
+        mode,
+        origin,
+        state,
+        requested_at: required_timestamp(T, row.id, "requested_at", &row.requested_at)?,
+        claimed_at: timestamp(T, row.id, "claimed_at", &row.claimed_at)?,
+        finished_at: timestamp(T, row.id, "finished_at", &row.finished_at)?,
+        reason: text(&row.reason).map(str::to_owned),
+        worktree: text(&row.worktree).map(str::to_owned),
+        tmux_window: tmux_window(&row.tmux_window),
+        deadline: required_timestamp(T, row.id, "deadline", &row.deadline)?,
+    })
 }

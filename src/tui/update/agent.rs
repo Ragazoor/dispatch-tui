@@ -7,8 +7,7 @@ use crate::models::{SubStatus, Task, TaskId, TaskStatus, TmuxWindow};
 
 use super::super::types::*;
 use super::super::{
-    App, DISPATCH_SPINNER_FRAMES, DISPATCH_WATCHDOG_TIMEOUT, GG_CHORD_TIMEOUT, PR_POLL_INTERVAL,
-    STATUS_MESSAGE_TTL,
+    App, DISPATCH_SPINNER_FRAMES, GG_CHORD_TIMEOUT, PR_POLL_INTERVAL, STATUS_MESSAGE_TTL,
 };
 
 impl App {
@@ -219,17 +218,16 @@ impl App {
         }
     }
 
-    /// Reconcile the in-flight dispatching set: drop deleted tasks, force-fail
-    /// dispatches past the watchdog timeout, and advance the spinner. No-op when
-    /// nothing is dispatching (so the spinner only advances while active).
+    /// Reconcile DispatchingFeedback on a tick: drop pending entries whose task
+    /// has been deleted (`DeletedTaskPruned`) and advance the spinner. No-op
+    /// when nothing is a member, so the spinner only advances while active.
     ///
-    /// Deliberately does **not** release the dispatch claim, even though it
-    /// drains the marker: the deadline means "slow", not "dead", so releasing
-    /// would hand a still-provisioning task back to Backlog and allow a second
-    /// agent on one branch. Full reasoning, and what the resulting stranded state
-    /// costs, in `@guarantee DispatchingTimeout` (`docs/specs/dispatch.allium`).
+    /// There is no watchdog. However long an entry has sat, a tick never
+    /// force-fails it: the request row's own deadline — enforced by its host,
+    /// backstopped by the module — is what ends a stuck dispatch, and its
+    /// failure reaches the App as the row (`FailedRequestReported`).
     fn tick_dispatching(&mut self) {
-        if self.dispatching.is_empty() {
+        if self.dispatching.is_empty() && self.dispatch_requests.open.is_empty() {
             return;
         }
         // Drop dispatching IDs whose task has been deleted from the list.
@@ -238,26 +236,6 @@ impl App {
         self.dispatching.retain(|id, _| live_ids.contains(id));
         if self.dispatching.len() != before {
             self.refresh_dispatching_status();
-        }
-
-        // Watchdog: force-fail any dispatch that has exceeded the timeout.
-        let timed_out: Vec<TaskId> = self
-            .dispatching
-            .iter()
-            .filter(|(_, started)| started.elapsed() > DISPATCH_WATCHDOG_TIMEOUT)
-            .map(|(id, _)| *id)
-            .collect();
-        for id in &timed_out {
-            self.dispatching.remove(id);
-        }
-        if !timed_out.is_empty() {
-            self.refresh_dispatching_status();
-            let label = if timed_out.len() == 1 {
-                format!("Dispatch for task #{} timed out", timed_out[0].0)
-            } else {
-                format!("{} dispatches timed out", timed_out.len())
-            };
-            self.status.error_popup = Some(label);
         }
 
         self.spinner_tick = (self.spinner_tick + 1) % DISPATCH_SPINNER_FRAMES;
@@ -503,6 +481,7 @@ impl App {
             || self.agents.message_flash.len() != flash_count_before
             || self.agents.message_flash_sent.len() != flash_sent_count_before
             || !self.dispatching.is_empty()
+            || !self.dispatch_requests.open.is_empty()
         // spinner always advances when dispatching
         {
             self.dirty = true;

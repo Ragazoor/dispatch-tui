@@ -870,13 +870,13 @@ fn provision_worktree_retries_fetch_before_falling_back() {
     );
 }
 
-/// `PROVISION_MAX_SUBPROCESS_CALLS` (`src/dispatch/worktree.rs`) is what
-/// `DISPATCH_WATCHDOG_TIMEOUT` (`src/tui/mod.rs`) derives its budget from —
-/// see #4201. Pin it to the real worst-case shape (a fetch that only
-/// succeeds on its last allowed attempt) via `DispatchScript`'s own
-/// step-counting, rather than trusting a hand-maintained literal: if
-/// `fetch_origin`'s retry/classify logic ever grows another call, this fails
-/// instead of silently under-sizing the watchdog again.
+/// `PROVISION_MAX_SUBPROCESS_CALLS` (`src/dispatch/worktree.rs`) is the
+/// unbounded worst case the request deadline is deliberately shorter than
+/// (`store-split.allium: config.dispatch_request_timeout`). Pin it to the real
+/// worst-case shape (a fetch that only succeeds on its last allowed attempt)
+/// via `DispatchScript`'s own step-counting, rather than trusting a
+/// hand-maintained literal: if `fetch_origin`'s retry/classify logic ever
+/// grows another call, this fails.
 ///
 /// `index_of(Step::WorktreeAdd) + 1` counts only up through the last
 /// `SUBPROCESS_TIMEOUT`-bounded call in the sequence — it says nothing about

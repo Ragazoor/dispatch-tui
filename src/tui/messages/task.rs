@@ -43,30 +43,21 @@ pub enum TaskMessage {
         id: TaskId,
         tmux_window: TmuxWindow,
     },
-    /// A dispatch that **held** the claim failed or panicked. Drains the spinner
-    /// *and* releases the claim.
-    DispatchFailed(TaskId),
-    /// A dispatch ended without ever holding the claim: it lost the claim to
-    /// another entry point, or gave up before claiming (a failed repo-trust
-    /// grant). Drains the spinner and nothing else.
-    ///
-    /// Deliberately not `DispatchFailed`. Releasing here would target a claim
-    /// belonging to someone else: the winner of a contested claim is itself
-    /// Running-with-no-worktree for as long as its provisioning takes, which is
-    /// the exact state `release_claim` fires on, so the release would hand the
-    /// winner's task back to Backlog mid-provision.
+    /// A dispatch ask ended without writing a request: the module refused it
+    /// (another entry point claimed the task first, its worktree is on another
+    /// machine, an open request already exists), the store could not be
+    /// reached, or the ask gave up before requesting (a failed repo-trust
+    /// grant). Drains the pending entry and nothing else
+    /// (`dispatch.allium: LostClaimReported`): a refused request holds
+    /// nothing, and no client releases a claim.
     DispatchAbandoned(TaskId),
     MarkDispatching(TaskId),
-    /// An epic's auto-dispatch chain failed to provision the subtask it claimed,
-    /// so the chain has stopped (`SurfaceAutoDispatchFailure` in
-    /// docs/specs/epics.allium). Arrives from the MCP server rather than from a
-    /// board-initiated dispatch, so it carries no spinner to drain: the claim is
-    /// already released by the time it is sent.
-    AutoDispatchFailed {
-        task_id: TaskId,
-        epic_id: EpicId,
-        reason: String,
-    },
+    /// This host's dispatch request rows, every state, as the latest board
+    /// reload read them (store-split M4). They drive DispatchingFeedback's
+    /// open membership, `FailedRequestReported` and the epic chain's
+    /// `ReportChainedDispatchFailure`. The FIRST one an App receives is its
+    /// baseline: rows already failed in it are history and raise nothing.
+    DispatchRequestsRefreshed(Vec<crate::models::DispatchRequest>),
     Edited(TaskEdit),
     QuickDispatch {
         repo_path: String,
@@ -152,14 +143,11 @@ impl TaskMessage {
             TaskMessage::Updated(task) => app.handle_task_updated(*task),
             TaskMessage::Resume(id) => app.handle_resume_task(id),
             TaskMessage::Resumed { id, tmux_window } => app.handle_resumed(id, tmux_window),
-            TaskMessage::DispatchFailed(id) => app.handle_dispatch_failed(id),
             TaskMessage::DispatchAbandoned(id) => app.handle_dispatch_abandoned(id),
             TaskMessage::MarkDispatching(id) => app.handle_mark_dispatching(id),
-            TaskMessage::AutoDispatchFailed {
-                task_id,
-                epic_id,
-                reason,
-            } => app.handle_auto_dispatch_failed(task_id, epic_id, reason),
+            TaskMessage::DispatchRequestsRefreshed(rows) => {
+                app.handle_dispatch_requests_refreshed(rows)
+            }
             TaskMessage::Edited(edit) => app.handle_task_edited(edit),
             TaskMessage::QuickDispatch { repo_path, epic_id } => {
                 app.handle_quick_dispatch(repo_path, epic_id)

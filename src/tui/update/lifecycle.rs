@@ -193,7 +193,9 @@ impl App {
     /// [`Self::handle_trust_and_dispatch`]: a Backlog task not already
     /// dispatching is marked dispatching and returned; anything else is `None`.
     fn claim_for_dispatch(&mut self, id: TaskId) -> Option<Box<Task>> {
-        if self.dispatching.contains_key(&id) {
+        // A member already has an ask pending or an open request; the module
+        // would refuse a second one (`OneOpenDispatchRequestPerTask`).
+        if self.is_dispatching(id) {
             return None;
         }
         let task = self
@@ -248,6 +250,12 @@ impl App {
         vec![]
     }
 
+    /// This host's reactor provisioned a dispatch request and the module
+    /// recorded it (`store-split.allium: HostReportsDispatched`). The worktree,
+    /// window and host are already written — by the module, not here — so this
+    /// only brings the board's copy up to date ahead of the next reload, drains
+    /// any pending entry, jumps to the agent for quick dispatch, and refreshes
+    /// the repository's drift measurement.
     pub(in crate::tui) fn handle_dispatched(
         &mut self,
         id: TaskId,
@@ -260,37 +268,20 @@ impl App {
         if let Some(task) = self.find_task_mut(id) {
             task.worktree = Some(worktree);
             task.tmux_window = Some(tmux_window.clone());
-            // Paired with `worktree` per core/Task's `HostTracksWorktree`
-            // invariant (docs/specs/core.allium) — this is the write that
-            // records the worktree, so it owes the host (`DispatchTask` /
-            // `DispatchResearchTask` in docs/specs/dispatch.allium).
-            //
-            // `None` only before `bootstrap` has set the id, which a real
-            // launch cannot reach — it aborts instead of drawing a board
-            // without one (startup.allium:
-            // AbortWhenTheHostIdentityStoreIsUnusable). So the `None` arm
-            // covers an `App` built directly, as tests do, and leaves `host`
-            // null: the pre-mint gap `is_locally_owned` already treats as
-            // unowned, rather than a placeholder that would be a permanent
-            // wrong value once a real id is minted.
+            // The module wrote `host` with the worktree (core/Task's
+            // `HostTracksWorktree`); the board's copy follows. `None` only for
+            // an `App` built directly, as tests do.
             if let Some(local_host_id) = local_host_id {
                 task.host = Some(local_host_id);
             }
             task.status = TaskStatus::Running;
             task.sub_status = SubStatus::default_for(TaskStatus::Running);
-            // The status/sub_status/stamp are set on the board's copy only — the
-            // pre-provisioning claim already wrote all three to the DB
-            // (`DispatchTask` in docs/specs/dispatch.allium), so there is no
-            // SeedActivity command here. Emitting one would re-write the stamp
-            // the claim just set, and would overwrite a real hook stamp outright
-            // if `Dispatched` handling ever moved behind slower work.
+            // The board's copy only: the claim already wrote the stamp to the
+            // store, and re-writing it would clobber a real hook stamp.
             task.last_pre_tool_use_at = Some(chrono::Utc::now());
-            let fields = crate::tui::commands::PersistFields::from_task(task);
             let repo_path = task.repo_path.clone();
             self.sync_board_selection();
-            let mut cmds = vec![Command::Task(crate::tui::commands::TaskCommand::Persist(
-                fields,
-            ))];
+            let mut cmds = Vec::new();
             if switch_focus {
                 cmds.push(Command::Task(
                     crate::tui::commands::TaskCommand::JumpToTmux {

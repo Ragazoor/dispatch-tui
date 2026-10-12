@@ -303,17 +303,40 @@ pub(super) async fn build_epic_titles(state: &McpState) -> HashMap<EpicId, Strin
 /// The text `get_task` returns for `task`; `dispatch://task/self` serves the
 /// same rendering (`task_detail_text` in the spec).
 pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
-    let (epic_titles, verify_command) = tokio::join!(
+    let (epic_titles, verify_command, dispatch_request) = tokio::join!(
         build_epic_titles(state),
-        crate::dispatch::fetch_verify_command(&*state.db, &task.repo_path)
+        crate::dispatch::fetch_verify_command(&*state.db, &task.repo_path),
+        state.db.latest_dispatch_request_for_task(task.id)
     );
-    format_task_detail(task, &epic_titles, verify_command.as_deref())
+    format_task_detail(
+        task,
+        &epic_titles,
+        verify_command.as_deref(),
+        dispatch_request.as_ref(),
+    )
+}
+
+/// `GetTaskViaMcp`'s `[Dispatch request]` line: the task's most recent
+/// dispatch request this board's subscription holds — its id, its state and,
+/// when failed, its reason. How a `dispatch_task` caller whose wait ended while
+/// the request was still pending learns how it ended.
+fn dispatch_request_line(request: &crate::models::DispatchRequest) -> String {
+    let mut line = format!(
+        "\nDispatch request: #{} {}",
+        request.id,
+        request.state.as_str()
+    );
+    if let Some(reason) = &request.reason {
+        line.push_str(&format!(" — {reason}"));
+    }
+    line
 }
 
 fn format_task_detail(
     task: &Task,
     epic_titles: &HashMap<EpicId, String>,
     verify_command: Option<&str>,
+    dispatch_request: Option<&crate::models::DispatchRequest>,
 ) -> String {
     let mut text = format!(
         "Task {id}: {title}\nStatus: {status}\nRepo: {repo}\nDescription: {desc}",
@@ -346,6 +369,9 @@ fn format_task_detail(
     text.push_str(&format!("\nBase branch: {}", task.base_branch));
     if let Some(ref tmux_window) = task.tmux_window {
         text.push_str(&format!("\nTmux window: {tmux_window}"));
+    }
+    if let Some(request) = dispatch_request {
+        text.push_str(&dispatch_request_line(request));
     }
     if let Some(sort_order) = task.sort_order {
         text.push_str(&format!("\nSort order: {sort_order}"));
@@ -475,7 +501,7 @@ mod tests {
     #[test]
     fn format_task_detail_includes_base_branch() {
         let task = make_task("develop");
-        let output = format_task_detail(&task, &HashMap::new(), None);
+        let output = format_task_detail(&task, &HashMap::new(), None, None);
         assert!(
             output.contains("Base branch: develop"),
             "expected 'Base branch: develop' in output, got:\n{output}"
@@ -485,7 +511,7 @@ mod tests {
     #[test]
     fn format_task_detail_includes_verify_command_when_set() {
         let task = make_task("main");
-        let output = format_task_detail(&task, &HashMap::new(), Some("cargo test"));
+        let output = format_task_detail(&task, &HashMap::new(), Some("cargo test"), None);
         assert!(
             output.contains("Verify command: cargo test"),
             "expected 'Verify command: cargo test' in output, got:\n{output}"
@@ -502,7 +528,7 @@ mod tests {
     fn get_task_description_quotes_only_labels_the_renderer_emits() {
         let mut task = make_task("main");
         task.wrap_up_mode = Some(crate::models::WrapUpMode::Rebase);
-        let output = format_task_detail(&task, &HashMap::new(), Some("cargo test"));
+        let output = format_task_detail(&task, &HashMap::new(), Some("cargo test"), None);
 
         let defs = crate::mcp::handlers::dispatch::tool_definitions();
         let desc = defs["tools"]
@@ -533,7 +559,7 @@ mod tests {
     #[test]
     fn format_task_detail_omits_verify_command_when_unset() {
         let task = make_task("main");
-        let output = format_task_detail(&task, &HashMap::new(), None);
+        let output = format_task_detail(&task, &HashMap::new(), None, None);
         assert!(
             !output.contains("Verify command"),
             "expected no 'Verify command' line in output, got:\n{output}"

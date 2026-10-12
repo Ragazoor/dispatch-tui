@@ -79,6 +79,13 @@ pub struct McpDeps {
     pub data_dir: std::path::PathBuf,
 }
 
+/// `mcp-task-tools.allium: config.dispatch_task_wait_cap`: how long
+/// `dispatch_task` waits on its dispatch request before answering with the
+/// request's id and pending state. Shorter than the request's own deadline
+/// (`crate::dispatch::DISPATCH_REQUEST_TIMEOUT`), so a slow provisioning
+/// answers pending rather than holding the call open to the end.
+pub const DISPATCH_TASK_WAIT_CAP: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub struct McpState {
     /// Read-only DB handle. Task/epic *mutations* must go through `task_svc` /
     /// `epic_svc` — calling a mutating method here is a compile error. See the
@@ -104,6 +111,9 @@ pub struct McpState {
     /// Dispatch data directory (where the store's local files live). Trajectory files are
     /// written here under `trajectories/<task_id>.jsonl`.
     pub data_dir: std::path::PathBuf,
+    /// How long `dispatch_task` waits on its request — [`DISPATCH_TASK_WAIT_CAP`]
+    /// outside tests, which shorten it to drive the pending answer.
+    pub(crate) dispatch_task_wait_cap: std::time::Duration,
     /// Fields that exist only to make async tests deterministic. See [`TestHooks`].
     pub(crate) test_hooks: TestHooks,
 }
@@ -165,6 +175,7 @@ impl McpState {
             embedding_service: deps.embedding_service,
             exit_tokens: Arc::new(RwLock::new(HashMap::new())),
             data_dir: deps.data_dir,
+            dispatch_task_wait_cap: DISPATCH_TASK_WAIT_CAP,
             test_hooks: TestHooks {
                 bg_write_done_tx: None,
                 #[cfg(test)]
@@ -209,19 +220,6 @@ impl McpState {
     pub(crate) fn notify_branch_rebased(&self, repo_path: &str) {
         if let Some(tx) = &self.notify_tx {
             let _ = tx.send(BoardEvent::BranchRebased {
-                repo_path: repo_path.to_string(),
-            });
-        }
-    }
-
-    /// Notify the runtime that an agent was just launched into a worktree under
-    /// `repo_path`, so its drift measurement is now out of date
-    /// (docs/specs/repo-sync.allium: rule RefreshRepoSyncStateAfterDispatch).
-    /// Call this only after a dispatch that actually launched an agent — a failed
-    /// provisioning moved nothing.
-    pub(crate) fn notify_agent_launched(&self, repo_path: &str) {
-        if let Some(tx) = &self.notify_tx {
-            let _ = tx.send(BoardEvent::AgentLaunched {
                 repo_path: repo_path.to_string(),
             });
         }

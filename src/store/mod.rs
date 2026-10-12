@@ -25,10 +25,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::models::{
-    Epic, EpicId, FeedItem, FeedRole, Learning, LearningId, LearningKind, LearningRetrieval,
-    LearningScope, LearningStatus, LearningVerdict, NotificationWrite, PollScopeId,
-    RetrievalSource, StopOutcome, SubStatus, SubagentDrain, Task, TaskId, TaskStatus, TaskTag,
-    UserPromptOutcome, WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink, WrapUpMode,
+    DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, Epic, EpicId, FeedItem,
+    FeedRole, Learning, LearningId, LearningKind, LearningRetrieval, LearningScope, LearningStatus,
+    LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource, StopOutcome, SubStatus,
+    SubagentDrain, Task, TaskId, TaskStatus, TaskTag, TmuxWindow, UserPromptOutcome, WorkPackage,
+    WorkPackageId, WorkPackageItem, WorkPackageLink, WrapUpMode,
 };
 
 // ---------------------------------------------------------------------------
@@ -378,37 +379,6 @@ pub trait TaskCrud: TaskRead {
         id: TaskId,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<UserPromptOutcome>;
-    /// Atomically select *and* claim `epic_id`'s next backlog subtask for
-    /// dispatch: the first one ordered by `COALESCE(sort_order, id)` then `id`
-    /// moves to `Running` with the default running sub-status and
-    /// `last_pre_tool_use_at` stamped. Returns the id it claimed, or `None` when
-    /// the epic has no backlog subtask left.
-    ///
-    /// Selection and claim are one statement — the ordering predicate lives in
-    /// the `WHERE id = (SELECT … LIMIT 1)` subquery — so there is no
-    /// select-then-claim window for a concurrent caller to win, and hence no
-    /// retry. Exclusivity comes from that plus the single writer connection all
-    /// mutations serialise through, not from a lock. Backs the epic-chaining
-    /// claim described by `AutoDispatchNextSubtask` in `docs/specs/epics.allium`.
-    async fn try_claim_next_backlog_task(&self, epic_id: EpicId) -> Result<Option<TaskId>>;
-    /// The by-id twin of [`Self::try_claim_next_backlog_task`]: claim `id` for
-    /// dispatch if and only if it is still `Backlog`, applying the same
-    /// `Running` + default sub-status + `last_pre_tool_use_at` write. Returns
-    /// whether the claim was won.
-    ///
-    /// For callers handed a specific task rather than selecting one — the MCP
-    /// `dispatch_task` tool and every TUI dispatch path. One statement, so a
-    /// claim never half-applies: `Ok(false)` means someone else holds it (or it
-    /// is gone) and `Err` means nothing was written, which is what lets callers
-    /// treat a failed claim as "provision nothing" with no unwind to do. Backs
-    /// `DispatchClaimExclusive` in `docs/specs/dispatch.allium`.
-    async fn try_claim_backlog_task(&self, id: TaskId) -> Result<bool>;
-    /// The inverse of [`Self::try_claim_next_backlog_task`]: return a claimed but
-    /// still-unprovisioned task to `Backlog` and clear the activity stamp the
-    /// claim seeded. Conditional on `status = running AND worktree IS NULL`, so
-    /// it cannot stomp a task that has since been provisioned or moved by
-    /// someone else. Returns whether the release applied.
-    async fn try_release_backlog_claim(&self, id: TaskId) -> Result<bool>;
     /// Upsert tasks from a feed. Inserts new tasks; on conflict (epic_id, external_id)
     /// updates title and description only — status and other user-managed fields are preserved.
     ///
@@ -520,6 +490,79 @@ pub trait TaskCrud: TaskRead {
         feed_epic_id: EpicId,
         keep_external_ids: &[String],
     ) -> Result<()>;
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch requests (store-split M4)
+// ---------------------------------------------------------------------------
+
+/// What [`DispatchRequestStore::request_dispatch`] answered. A refusal is an
+/// ORDINARY answer, not an error (`store-split.allium: RequestDispatch`): it
+/// is how a caller learns another entry point claimed the task first, that
+/// its worktree is on another machine, or that an open request already
+/// exists, and it wrote nothing. A store that could not be reached is the
+/// `Err` of the enclosing `Result` instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequestDispatchAnswer {
+    /// The task is claimed and a `requested` row naming this host exists.
+    Requested(DispatchRequestId),
+    /// The module's reason, verbatim.
+    Refused(String),
+}
+
+/// Reading this host's dispatch request rows — the ones its subscription
+/// holds (`sync.allium: SubscribeToThisHostsDispatchRequests`), in every
+/// state. On [`TaskReadStore`] so a read-only handle can follow a request's
+/// outcome; the writes are on [`DispatchRequestStore`], behind the mutation
+/// boundary.
+#[async_trait::async_trait]
+pub trait DispatchRequestRead: Send + Sync {
+    async fn dispatch_request(&self, id: DispatchRequestId) -> Option<DispatchRequest>;
+    /// Every row this host's subscription holds, oldest first.
+    async fn dispatch_requests(&self) -> Vec<DispatchRequest>;
+    /// `task`'s most recent request this subscription holds, if any — the
+    /// row `get_task`'s `[Dispatch request]` line shows.
+    async fn latest_dispatch_request_for_task(&self, task: TaskId) -> Option<DispatchRequest>;
+    /// Fires whenever the subscribed rows move — a request row among them.
+    /// What a caller WAITING on a request's outcome waits on (`dispatch_task`,
+    /// `mcp-task-tools.allium: DispatchTaskViaMcp`), so the wait is a signal,
+    /// never a poll. Subscribe before reading the row, then re-read on each
+    /// wake.
+    fn dispatch_request_changes(&self) -> tokio::sync::watch::Receiver<u64>;
+}
+
+/// The dispatch request reducers (`store-split.allium`: `RequestDispatch` and
+/// the host rules after it). Every call names THIS host — the requester and
+/// the reporter are always the machine the handle was built for — so a
+/// caller cannot ask on another machine's behalf.
+///
+/// A request claims its task, so this is a task mutation: reachable from the
+/// service layer, not from a read-only handle.
+#[async_trait::async_trait]
+pub trait DispatchRequestStore: DispatchRequestRead {
+    /// `RequestDispatch`. `mode` `None` lets the module derive it (D3).
+    async fn request_dispatch(
+        &self,
+        task: TaskId,
+        origin: DispatchOrigin,
+        mode: Option<DispatchMode>,
+    ) -> Result<RequestDispatchAnswer>;
+    /// `HostClaimsDispatch`. `false` is a refused claim — another board, or
+    /// a redelivery, got it — and the caller provisions nothing.
+    async fn claim_dispatch_request(&self, id: DispatchRequestId) -> Result<bool>;
+    /// `HostReportsDispatched`. `false` is a refused report: the row failed
+    /// under this host (the backstop, or the task's deletion), and the caller
+    /// owes the teardown of what it made.
+    async fn report_dispatch_provisioned(
+        &self,
+        id: DispatchRequestId,
+        worktree: &str,
+        tmux_window: &TmuxWindow,
+    ) -> Result<bool>;
+    /// `HostReportsDispatchFailed`. `false` when the row had already finished.
+    async fn report_dispatch_failed(&self, id: DispatchRequestId, reason: &str) -> Result<bool>;
+    /// `HostRestartFailsInterrupted`: fail this host's provisioning rows.
+    async fn fail_interrupted_dispatch_requests(&self) -> Result<()>;
 }
 
 /// Poll ownership (Phase 7): `core.allium: PollOwner`.
@@ -1126,6 +1169,7 @@ pub trait TaskStore:
     + LearningStore
     + LearningRetrievalStore
     + UsageStore
+    + DispatchRequestStore
     + TaskReadStore
 {
 }
@@ -1141,6 +1185,7 @@ impl<
             + LearningStore
             + LearningRetrievalStore
             + UsageStore
+            + DispatchRequestStore
             + TaskReadStore,
     > TaskStore for T
 {
@@ -1199,6 +1244,7 @@ pub trait TaskReadStore:
     + LearningStore
     + LearningRetrievalStore
     + UsageStore
+    + DispatchRequestRead
 {
 }
 
@@ -1213,7 +1259,8 @@ impl<
             + PollOwnershipStore
             + LearningStore
             + LearningRetrievalStore
-            + UsageStore,
+            + UsageStore
+            + DispatchRequestRead,
     > TaskReadStore for T
 {
 }

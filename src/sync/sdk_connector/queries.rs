@@ -101,6 +101,14 @@ pub(in crate::sync) fn subscription_queries(
         // narrow it. A link whose package or item this board does not hold
         // draws nothing (`work-packages.allium: PackageViewCards`).
         "SELECT * FROM work_package_links".to_string(),
+        // Dispatch requests (store-split M4, `sync.allium:
+        // SubscribeToThisHostsDispatchRequests`). Scoped by HOST, like
+        // settings: a request is always provisioned by the machine that made
+        // it, so this delivers both the work this host must provision and the
+        // outcome of every request it made. Unfiltered by state on purpose: a
+        // row leaving a state-filtered query would arrive as a delete, and its
+        // outcome would be lost.
+        format!("SELECT * FROM dispatch_requests WHERE host = '{host}'"),
     ];
 
     // The epic ids are integers by type, so they need no validation beyond

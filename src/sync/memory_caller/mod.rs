@@ -42,8 +42,8 @@ use dispatch_spacetime_module as module;
 
 use crate::clock::Clock;
 use crate::models::{
-    EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource,
-    SubStatus, TaskId, WorkPackageId, WorkPackageItem,
+    DispatchRequestId, EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId,
+    RetrievalSource, SubStatus, TaskId, WorkPackageId, WorkPackageItem,
 };
 use crate::spacetime::bindings;
 
@@ -53,6 +53,7 @@ use super::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
 mod agent_state;
 mod config;
 mod convert;
+mod dispatch_requests;
 mod feed;
 mod grouping;
 mod learnings;
@@ -123,6 +124,9 @@ struct Tables {
     work_packages: BTreeMap<i64, module::WorkPackage>,
     /// Keyed by the module's derived link id (`module::work_package_link_id`).
     work_package_links: BTreeMap<String, module::WorkPackageLink>,
+    /// store-split M4. The module's timer table has no counterpart: the
+    /// backstop is [`MemoryReducerCaller::expire_dispatch_request`].
+    dispatch_requests: BTreeMap<i64, module::DispatchRequest>,
     next_task_id: i64,
     next_epic_id: i64,
     next_repo_path_id: i64,
@@ -133,6 +137,7 @@ struct Tables {
     next_learning_id: i64,
     next_learning_retrieval_id: i64,
     next_work_package_id: i64,
+    next_dispatch_request_id: i64,
 }
 
 impl Tables {
@@ -148,6 +153,7 @@ impl Tables {
             next_learning_id: 1,
             next_learning_retrieval_id: 1,
             next_work_package_id: 1,
+            next_dispatch_request_id: 1,
             ..Self::default()
         }
     }
@@ -591,5 +597,46 @@ impl ReducerCaller for MemoryReducerCaller {
         owner: String,
     ) -> Result<ReducerOutcome> {
         self.apply_register_host(id, label, owner)
+    }
+
+    async fn request_dispatch(
+        &self,
+        task: TaskId,
+        requester: String,
+        origin: String,
+        mode: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_request_dispatch(task, requester, origin, mode)
+    }
+
+    async fn claim_dispatch_request(
+        &self,
+        id: DispatchRequestId,
+        host: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_claim_dispatch_request(id, host)
+    }
+
+    async fn report_dispatch_provisioned(
+        &self,
+        id: DispatchRequestId,
+        reporter: String,
+        worktree: String,
+        tmux_window: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_report_dispatch_provisioned(id, reporter, worktree, tmux_window)
+    }
+
+    async fn report_dispatch_failed(
+        &self,
+        id: DispatchRequestId,
+        reporter: String,
+        reason: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_report_dispatch_failed(id, reporter, reason)
+    }
+
+    async fn fail_interrupted_dispatch_requests(&self, host: String) -> Result<ReducerOutcome> {
+        self.apply_fail_interrupted_dispatch_requests(host)
     }
 }

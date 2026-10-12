@@ -41,8 +41,8 @@ use chrono::{DateTime, Utc};
 use tokio::sync::watch;
 
 use crate::models::{
-    Epic, EpicId, Learning, LearningId, LearningRetrieval, PollScopeId, Task, TaskId, UsageSummary,
-    WorkPackage, WorkPackageId, WorkPackageLink,
+    DispatchRequest, DispatchRequestId, Epic, EpicId, Learning, LearningId, LearningRetrieval,
+    PollScopeId, Task, TaskId, UsageSummary, WorkPackage, WorkPackageId, WorkPackageLink,
 };
 use crate::spacetime::bindings;
 use crate::store::{LearningFilter, UsageQuery};
@@ -158,6 +158,10 @@ struct Rows {
     work_packages: BTreeMap<i64, WorkPackage>,
     /// Keyed by the store's derived link id.
     work_package_links: BTreeMap<String, WorkPackageLink>,
+    /// store-split M4. Arrive scoped to THIS host by the subscription's
+    /// `WHERE host = …` (`sync.allium: SubscribeToThisHostsDispatchRequests`),
+    /// in every state, so nothing here filters by host or state.
+    dispatch_requests: BTreeMap<i64, DispatchRequest>,
 }
 
 impl Rows {
@@ -176,6 +180,7 @@ impl Rows {
             && self.retired_feed_items.is_empty()
             && self.work_packages.is_empty()
             && self.work_package_links.is_empty()
+            && self.dispatch_requests.is_empty()
     }
 }
 
@@ -484,6 +489,26 @@ impl SharedRows {
         self.write(|rows| rows.work_package_links.remove(&id).is_some());
     }
 
+    /// A dispatch request row (store-split M4). An undecodable one is dropped,
+    /// as a task is: read as open or as finished it would drive the dispatch
+    /// feedback wrongly either way.
+    pub fn upsert_dispatch_request(&self, row: &bindings::DispatchRequest) {
+        match decode::dispatch_request(row) {
+            Ok(request) => self.write(|rows| {
+                rows.dispatch_requests.insert(request.id.0, request);
+                true
+            }),
+            Err(e) => {
+                crate::store::drop_undecodable("dispatch request", &e);
+                self.write(|rows| rows.dispatch_requests.remove(&row.id).is_some());
+            }
+        }
+    }
+
+    pub fn remove_dispatch_request(&self, id: i64) {
+        self.write(|rows| rows.dispatch_requests.remove(&id).is_some());
+    }
+
     /// Drop everything.
     ///
     /// Called when a connection goes down. The rows belonged to that
@@ -633,6 +658,29 @@ impl SharedRows {
                 .poll_owners_by_scope
                 .get(&(scope.to_string(), scope_id))?;
             rows.poll_owners.get(id).cloned()
+        })
+    }
+
+    /// One dispatch request row by id.
+    pub fn dispatch_request(&self, id: DispatchRequestId) -> Option<DispatchRequest> {
+        self.read(|rows| rows.dispatch_requests.get(&id.0).cloned())
+    }
+
+    /// Every dispatch request row this subscription holds — this host's, in
+    /// every state — oldest first (by id).
+    pub fn dispatch_requests(&self) -> Vec<DispatchRequest> {
+        self.read(|rows| rows.dispatch_requests.values().cloned().collect())
+    }
+
+    /// `task`'s most recent dispatch request (the highest id), if this
+    /// subscription holds one.
+    pub fn latest_dispatch_request_for_task(&self, task: TaskId) -> Option<DispatchRequest> {
+        self.read(|rows| {
+            rows.dispatch_requests
+                .values()
+                .rev()
+                .find(|r| r.task_id == task)
+                .cloned()
         })
     }
 

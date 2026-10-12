@@ -34,6 +34,7 @@ pub(crate) mod git_output;
 #[cfg(test)]
 pub(crate) mod mock_sequence;
 mod prompts;
+mod request_host;
 mod split_panes;
 mod trust;
 mod worktree;
@@ -50,9 +51,11 @@ pub use finish::{finish_task, FinishContext, FinishError};
 #[cfg(test)]
 pub(crate) use prompts::RESEARCH_AGENT_INTRO;
 pub use prompts::{build_and_record_injections, EpicContext, LearningInjections};
+pub use request_host::{
+    DeadlineRunner, DispatchRequestObserver, DEADLINE_PASSED, DISPATCH_REQUEST_TIMEOUT,
+};
 pub use split_panes::{join_task_window_into_pane, swap_task_window_into_pane};
 pub(crate) use trust::{is_trusted_at, trust_at};
-pub(crate) use worktree::PROVISION_MAX_SUBPROCESS_CALLS;
 pub use worktree::{branch_from_worktree, teardown_task, validate_repo_path, TeardownFailure};
 
 // ---------------------------------------------------------------------------

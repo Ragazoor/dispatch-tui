@@ -4,6 +4,16 @@
 use super::*;
 use crate::models::test_tmux_window;
 
+/// Serve the dispatch requests an arm wrote, the way this host's reactor would
+/// once the row pump delivers them (`store-split.allium: HostClaimsDispatch`),
+/// and wait for each to land. Since store-split M4 no launch arm provisions
+/// inline.
+async fn serve(rt: &TuiRuntime) {
+    for handle in rt.serve_dispatch_requests().await {
+        handle.await.unwrap();
+    }
+}
+
 #[tokio::test]
 async fn exec_save_base_branch_records_and_updates_app_state() {
     let (rt, mut app) = test_runtime().await;
@@ -114,7 +124,9 @@ async fn exec_quick_dispatch_does_not_record_base_branch_history() {
     );
     assert!(rt.database.list_all_base_branches().await.is_empty());
 
-    // Drain the async Dispatched message so the sender isn't left dangling.
+    // Serve the request and drain the Dispatched message so the sender isn't
+    // left dangling.
+    serve(&rt).await;
     let _ = tokio::time::timeout(TEST_TIMEOUT, rx.recv()).await;
 }
 
@@ -230,6 +242,17 @@ async fn exec_dispatch_sends_dispatched_message() {
     rt.exec_dispatch_agent(Box::new(task), models::DispatchMode::Dispatch)
         .await;
 
+    // The request is the claim, and it owns the Running write
+    // (`DispatchClaimExclusive` in docs/specs/dispatch.allium).
+    let claimed = db.get_task(id).await.unwrap();
+    assert_eq!(claimed.status, models::TaskStatus::Running);
+    assert!(
+        claimed.last_pre_tool_use_at.is_some(),
+        "the claim seeds the activity stamp"
+    );
+
+    serve(&rt).await;
+
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
@@ -241,17 +264,6 @@ async fn exec_dispatch_sends_dispatched_message() {
         ),
         "Expected Dispatched, got: {msg:?}"
     );
-
-    // The claim, not `handle_dispatched`'s Persist, owns the Running write — and
-    // nothing here runs that Persist, so the row can only have left Backlog via
-    // the claim `exec_dispatch_agent` takes before provisioning
-    // (`DispatchClaimExclusive` in docs/specs/dispatch.allium).
-    let claimed = db.get_task(id).await.unwrap();
-    assert_eq!(claimed.status, models::TaskStatus::Running);
-    assert!(
-        claimed.last_pre_tool_use_at.is_some(),
-        "the claim seeds the activity stamp"
-    );
 }
 
 /// Mode routing at the board's entry point. The `DispatchMode` match lives once
@@ -260,7 +272,7 @@ async fn exec_dispatch_sends_dispatched_message() {
 /// launch the research agent. Every launcher shares one permission mode
 /// (`EveryTaskAgentLaunchesInAutoMode`), so the prompt identifies the agent.
 /// Its twin at the seam is
-/// `service::tasks::tests::dispatch_seam::research_mode_launches_the_research_agent`.
+/// `service::tasks::tests::dispatch_requests::serve_launches_the_agent_the_row_names`.
 #[tokio::test]
 async fn exec_dispatch_agent_routes_research_mode_to_the_research_agent() {
     let dir = tempfile::tempdir().unwrap();
@@ -284,6 +296,7 @@ async fn exec_dispatch_agent_routes_research_mode_to_the_research_agent() {
     .unwrap();
     rt.exec_dispatch_agent(Box::new(task), models::DispatchMode::Research)
         .await;
+    serve(&rt).await;
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -305,9 +318,9 @@ async fn exec_dispatch_agent_routes_research_mode_to_the_research_agent() {
     );
 }
 
-/// A lost claim must stop the dispatch dead, before any provisioning command
-/// runs, and report the failure so the spinner drains (`LostClaimReported` in
-/// docs/specs/dispatch.allium).
+/// A refused request must stop the dispatch dead, before any provisioning
+/// command runs, and report the failure so the spinner drains
+/// (`LostClaimReported` in docs/specs/dispatch.allium).
 #[tokio::test]
 async fn exec_dispatch_agent_lost_claim_provisions_nothing() {
     let db = test_db().await;
@@ -329,7 +342,13 @@ async fn exec_dispatch_agent_lost_claim_provisions_nothing() {
     )
     .await
     .unwrap();
-    assert!(rt.task_svc.claim_backlog_task(task.id).await.unwrap());
+    assert!(matches!(
+        rt.task_svc
+            .request_dispatch(task.id, models::DispatchOrigin::Mcp, None)
+            .await
+            .unwrap(),
+        crate::store::RequestDispatchAnswer::Requested(_)
+    ));
 
     rt.exec_dispatch_agent(Box::new(task.clone()), models::DispatchMode::Dispatch)
         .await;
@@ -340,8 +359,8 @@ async fn exec_dispatch_agent_lost_claim_provisions_nothing() {
         .unwrap();
     assert!(
         matches!(msg1, Message::Task(crate::tui::messages::TaskMessage::DispatchAbandoned(id)) if id == task.id),
-        "a lost claim must report DispatchAbandoned, not DispatchFailed — the latter \
-         releases, and the claim we lost belongs to the winner. Got: {msg1:?}"
+        "a refused request must report DispatchAbandoned and release nothing — the \
+         claim belongs to the winner. Got: {msg1:?}"
     );
     let msg2 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -366,41 +385,21 @@ async fn exec_dispatch_agent_lost_claim_provisions_nothing() {
     assert!(after.worktree.is_none());
 }
 
-/// `ReleaseClaim` returns a claimed-but-unprovisioned task to Backlog. This is
-/// the command `DispatchFailed` emits.
+// `exec_release_claim_returns_the_task_to_backlog` pinned
+// `TaskCommand::ReleaseClaim`, retired by store-split M4: a failed request
+// releases the claim in the module (`ReleaseClaimOfFailedRequest`), which
+// `exec_dispatch_failure_fails_the_request_and_releases_the_claim` below pins
+// from the board's side.
+
+/// A provisioning failure fails the request with its reason, and the module
+/// releases the claim. The board learns of it from the row
+/// (`FailedRequestReported`), not from a message of the arm's own.
 #[tokio::test]
-async fn exec_release_claim_returns_the_task_to_backlog() {
+async fn exec_dispatch_failure_fails_the_request_and_releases_the_claim() {
+    use crate::store::DispatchRequestRead;
+
     let db = test_db().await;
     let (tx, _rx) = mpsc::unbounded_channel();
-    let rt = make_runtime(db.clone(), tx, Arc::new(MockProcessRunner::new(vec![]))).await;
-    let mut app = App::new(vec![]);
-    let task = create_task_returning(
-        &*db,
-        "Claimed Task",
-        "desc",
-        "/repo",
-        None,
-        models::TaskStatus::Backlog,
-    )
-    .await
-    .unwrap();
-    assert!(rt.task_svc.claim_backlog_task(task.id).await.unwrap());
-
-    rt.exec_release_claim(&mut app, task.id).await;
-
-    let released = db.get_task(task.id).await.unwrap();
-    assert_eq!(released.status, models::TaskStatus::Backlog);
-    assert!(
-        released.last_pre_tool_use_at.is_none(),
-        "the release clears the stamp the claim seeded"
-    );
-    assert!(app.error_popup().is_none());
-}
-
-#[tokio::test]
-async fn exec_dispatch_sends_error_on_failure() {
-    let db = test_db().await;
-    let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(),                                // git worktree prune
         MockProcessRunner::fail("fatal: not a git repository"), // git worktree add fails
@@ -419,26 +418,18 @@ async fn exec_dispatch_sends_error_on_failure() {
     .unwrap();
     rt.exec_dispatch_agent(Box::new(task.clone()), models::DispatchMode::Dispatch)
         .await;
+    serve(&rt).await;
 
-    let msg1 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+    let row = db
+        .latest_dispatch_request_for_task(task.id)
         .await
-        .unwrap()
-        .unwrap();
-    assert!(
-        matches!(msg1, Message::Task(crate::tui::messages::TaskMessage::DispatchFailed(id)) if id == task.id),
-        "Expected DispatchFailed, got: {msg1:?}"
-    );
-
-    let msg2 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(
-        matches!(
-            msg2,
-            Message::System(crate::tui::messages::SystemMessage::Error(_))
-        ),
-        "Expected Error, got: {msg2:?}"
+        .expect("the arm wrote a request");
+    assert_eq!(row.state, models::DispatchRequestState::Failed);
+    assert!(row.reason.is_some(), "the failure carries its reason");
+    assert_eq!(
+        db.get_task(task.id).await.unwrap().status,
+        models::TaskStatus::Backlog,
+        "the module released the claim"
     );
 }
 
@@ -1157,7 +1148,9 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
     // Repo path was saved
     assert!(app.repo_paths().contains(&repo.to_string()));
 
-    // Dispatch message arrives asynchronously
+    // The request is served by this host's reactor, and the Dispatched message
+    // arrives asynchronously.
+    serve(&rt).await;
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
@@ -1242,6 +1235,7 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
     // Task was created with epic linkage
     assert_eq!(app.tasks().len(), 1);
     assert_eq!(app.tasks()[0].epic_id, Some(epic.id));
+    serve(&rt).await;
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -1256,10 +1250,15 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
     );
 }
 
+/// `tasks.allium: CreateQuickTask` — "A request that fails leaves the created
+/// task in backlog, like any failed dispatch". Here provisioning cannot even
+/// start (no repository, and nothing scripted past the default-branch probe).
 #[tokio::test]
-async fn exec_quick_dispatch_sends_error_on_failure() {
+async fn exec_quick_dispatch_failure_leaves_the_created_task_in_backlog() {
+    use crate::store::DispatchRequestRead;
+
     let db = test_db().await;
-    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("not a git repo"), // detect_default_branch
     ]));
@@ -1267,7 +1266,6 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
     let tasks = db.list_all().await;
     let mut app = App::new(tasks);
 
-    // /nonexistent won't have .worktrees dir, so provision_worktree fails
     rt.exec_quick_dispatch(
         &mut app,
         tui::TaskDraft {
@@ -1279,65 +1277,19 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
         None,
     )
     .await;
-
-    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(
-        matches!(
-            msg,
-            Message::Task(crate::tui::messages::TaskMessage::DispatchFailed(_))
-                | Message::System(crate::tui::messages::SystemMessage::Error(_))
-        ),
-        "Expected DispatchFailed or Error, got: {msg:?}"
-    );
-}
-
-#[tokio::test]
-async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
-    let db = test_db().await;
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
-        "not a git repo",
-    )]));
-    let rt = make_runtime(db.clone(), tx, mock).await;
-    let tasks = db.list_all().await;
-    let mut app = App::new(tasks);
-
-    rt.exec_quick_dispatch(
-        &mut app,
-        tui::TaskDraft {
-            title: "Fail Task".into(),
-            description: String::new(),
-            repo_path: "/nonexistent".into(),
-            ..Default::default()
-        },
-        None,
-    )
-    .await;
-
-    // The task was created synchronously
+    // The task was created synchronously, and requested as a quick row.
     let created_id = app.tasks()[0].id;
+    serve(&rt).await;
 
-    let msg1 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+    let row = db
+        .latest_dispatch_request_for_task(created_id)
         .await
-        .unwrap()
-        .unwrap();
-    assert!(
-        matches!(msg1, Message::Task(crate::tui::messages::TaskMessage::DispatchFailed(id)) if id == created_id),
-        "Expected DispatchFailed, got: {msg1:?}"
-    );
-    let msg2 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(
-        matches!(
-            msg2,
-            Message::System(crate::tui::messages::SystemMessage::Error(_))
-        ),
-        "Expected Error, got: {msg2:?}"
+        .expect("quick dispatch requests its task");
+    assert_eq!(row.mode, models::DispatchMode::Quick);
+    assert_eq!(row.state, models::DispatchRequestState::Failed);
+    assert_eq!(
+        db.get_task(created_id).await.unwrap().status,
+        models::TaskStatus::Backlog
     );
 }
 

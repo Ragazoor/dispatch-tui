@@ -14,29 +14,32 @@ use super::outcome::{
 };
 use super::SpacetimeSdkConnector;
 use crate::models::{
-    EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource,
-    SubStatus, TaskId, WorkPackageId, WorkPackageItem,
+    DispatchRequestId, EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId,
+    RetrievalSource, SubStatus, TaskId, WorkPackageId, WorkPackageItem,
 };
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
     apply_learning_verdicts as _, archive_stale_learnings as _, batch_delete as _,
-    batch_patch_sub_status as _, claim_backlog_task as _, claim_poll_owner as _,
-    clear_setting as _, create_epic as _, create_learning as _, create_managed_role_epic as _,
-    create_repo_group_sub_epic as _, create_task as _, create_work_package as _, delete_epic as _,
-    delete_learning as _, delete_repo_path as _, delete_stale_subtree_feed_tasks as _,
-    delete_task as _, delete_work_package as _, drop_closed_retired_feed_items as _,
+    batch_patch_sub_status as _, claim_backlog_task as _, claim_dispatch_request as _,
+    claim_poll_owner as _, clear_setting as _, create_epic as _, create_learning as _,
+    create_managed_role_epic as _, create_repo_group_sub_epic as _, create_task as _,
+    create_work_package as _, delete_epic as _, delete_learning as _, delete_repo_path as _,
+    delete_stale_subtree_feed_tasks as _, delete_task as _, delete_work_package as _,
+    drop_closed_retired_feed_items as _, fail_interrupted_dispatch_requests as _,
     flatten_epic as _, ingest_feed as _, link_work_package_item as _,
     mark_pr_learnings_gate_shown as _, override_poll_owner as _, patch_epic as _,
     patch_learning as _, patch_task as _, patch_work_package as _, recalculate_epic_status as _,
     record_base_branch as _, record_learning_retrieval as _, record_notification as _,
     record_pre_tool_use as _, record_usage_event as _, record_user_prompt_submit as _,
-    register_host as _, regroup_epic as _, release_backlog_claim as _, rescope_epic_learnings as _,
+    register_host as _, regroup_epic as _, release_backlog_claim as _, report_dispatch_failed as _,
+    report_dispatch_provisioned as _, request_dispatch as _, rescope_epic_learnings as _,
     respawn_phoenix_successor as _, save_repo_path as _, save_setting as _, set_task_epic as _,
     set_verify_command as _, subagent_clear as _, subagent_clear_and_void_pending_stop as _,
     subagent_start as _, subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
     unlink_work_package_item as _, unsubscribe_from_epic as _, upsert_feed_tasks as _,
-    upsert_feed_tasks_additive as _, DbConnection, EpicsTableAccess as _,
-    LearningsTableAccess as _, TasksTableAccess as _, WorkPackagesTableAccess as _,
+    upsert_feed_tasks_additive as _, DbConnection, DispatchRequestsTableAccess as _,
+    EpicsTableAccess as _, LearningsTableAccess as _, TasksTableAccess as _,
+    WorkPackagesTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -907,6 +910,98 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "the host registration",
             register_host_then(id, label, owner)
+        )
+    }
+
+    /// The request's id is read back off the transaction: the open row this
+    /// call just wrote for `task` on `requester`'s host. At most one can be
+    /// open per task (`OneOpenDispatchRequestPerTask`), so the match is
+    /// exact; the subscription delivers it because a board only ever requests
+    /// as its own host (`sync.allium: SubscribeToThisHostsDispatchRequests`).
+    async fn request_dispatch(
+        &self,
+        task: TaskId,
+        requester: String,
+        origin: String,
+        mode: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        let connection = self.connection()?;
+        let host = requester.clone();
+        awaiting_answer("the dispatch request", move |tx| {
+            connection.reducers.request_dispatch_then(
+                task.0,
+                requester,
+                origin,
+                mode,
+                move |ctx, result| {
+                    fire(
+                        tx,
+                        outcome_with_ids(result, || {
+                            ctx.db
+                                .dispatch_requests()
+                                .iter()
+                                .filter(|r| {
+                                    r.task_id == task.0 && r.host == host && r.state == "requested"
+                                })
+                                .map(|r| r.id)
+                                .max()
+                                .into_iter()
+                                .collect()
+                        }),
+                    );
+                },
+            )
+        })
+        .await
+    }
+
+    async fn claim_dispatch_request(
+        &self,
+        id: DispatchRequestId,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the dispatch request claim",
+            claim_dispatch_request_then(id.0, host)
+        )
+    }
+
+    async fn report_dispatch_provisioned(
+        &self,
+        id: DispatchRequestId,
+        reporter: String,
+        worktree: String,
+        tmux_window: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the dispatched report",
+            report_dispatch_provisioned_then(id.0, reporter, worktree, tmux_window)
+        )
+    }
+
+    async fn report_dispatch_failed(
+        &self,
+        id: DispatchRequestId,
+        reporter: String,
+        reason: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the dispatch failure report",
+            report_dispatch_failed_then(id.0, reporter, reason)
+        )
+    }
+
+    async fn fail_interrupted_dispatch_requests(
+        &self,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the interrupted-dispatch sweep",
+            fail_interrupted_dispatch_requests_then(host)
         )
     }
 }

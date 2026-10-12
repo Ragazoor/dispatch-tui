@@ -1935,7 +1935,12 @@ async fn dispatch_task_recalculates_epic_status() {
     // shape — see `src/dispatch/mock_sequence.rs`.
     let runner: Arc<dyn ProcessRunner> =
         crate::dispatch::mock_sequence::DispatchScript::dispatch().shared_runner();
-    let (state, db) = test_state_with_overrides(runner, None, None).await;
+    let (mut state, db) = test_state_with_overrides(runner, None, None).await;
+    // The request is the claim, and the recalc follows it at once; nothing
+    // here serves the request, so do not wait for it to be provisioned.
+    Arc::get_mut(&mut state)
+        .expect("the fixture's state is not shared yet")
+        .dispatch_task_wait_cap = std::time::Duration::ZERO;
 
     let epic = db.create_epic("E", "", None).await.unwrap();
     let task_id = db

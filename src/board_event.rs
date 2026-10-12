@@ -25,32 +25,4 @@ pub enum BoardEvent {
     /// consumer still treats an empty path as "no repository" and measures
     /// nothing, so a future emitter that cannot resolve one has a safe encoding.
     BranchRebased { repo_path: String },
-    /// An agent was launched off-board — by the `dispatch_task` tool or by epic
-    /// auto-dispatch chaining — so the repository's worktree provisioning just
-    /// fetched `origin/<base>` and its drift measurement is out of date
-    /// (docs/specs/repo-sync.allium: rule RefreshRepoSyncStateAfterDispatch).
-    /// That rule's obligation is per-event, not per-surface: the board emits its
-    /// own refresh command directly, and these two paths owe the same refresh.
-    ///
-    /// Carries the repository rather than the task, for the same reason
-    /// [`BoardEvent::BranchRebased`] does: the emitter already holds the task that
-    /// names it, and no other key identifies a repository unambiguously. No mode
-    /// travels with it because neither emitter can produce the one mode the rule
-    /// excludes — `resume` provisions nothing and has no MCP entry point.
-    AgentLaunched { repo_path: String },
-    /// An epic's auto-dispatch chain claimed a subtask and then failed to
-    /// provision it, so the subtask was released back to backlog and the epic
-    /// stopped progressing (docs/specs/epics.allium: rule
-    /// `SurfaceAutoDispatchFailure`).
-    ///
-    /// Carries the subtask, its epic and the reason, because all three are
-    /// needed to say anything useful: the board marks the card, names the task
-    /// in a status message, and reports why. Only the two failure arms that
-    /// already hold a claimed subtask emit it — an unresolvable epic or an
-    /// errored claim fails before one is selected and stays log-only.
-    AutoDispatchFailed {
-        task_id: TaskId,
-        epic_id: EpicId,
-        reason: String,
-    },
 }

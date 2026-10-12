@@ -33,7 +33,7 @@ use crate::models::{
 };
 use crate::process::{MockProcessRunner, ProcessRunner};
 use crate::service::ServedDispatch;
-use crate::store::{DispatchRequestRead, RequestDispatchAnswer};
+use crate::store::RequestDispatchAnswer;
 use crate::sync::{MemoryReducerCaller, ReducerCaller, SettledIdentity, SharedRows};
 
 /// This board's host: the one the store handle is built with.

@@ -94,27 +94,6 @@ pub(crate) const STALE_CLEANUP_INTERVAL: Duration = Duration::from_secs(60 * 60)
 /// Max character width for task titles shown in confirmation popups and status messages.
 pub(in crate::tui) const TITLE_DISPLAY_LENGTH: usize = 30;
 
-/// Maximum time a task may remain in the `dispatching` set before the watchdog
-/// force-fails it. Defence-in-depth against a stuck dispatch worker.
-///
-/// Sized off `provision_worktree`'s real worst-case sequential subprocess
-/// time, not a 1:1 mirror of `SUBPROCESS_TIMEOUT` (`src/process.rs`) — that
-/// 1:1 relationship was itself the bug (#4201): `fetch_origin`'s retry budget
-/// under `FetchPolicy::Required` can issue up to `PROVISION_MAX_SUBPROCESS_CALLS`
-/// (`src/dispatch/worktree.rs`) sequential `SUBPROCESS_TIMEOUT`-bounded calls
-/// before a fresh dispatch succeeds or gives up, so a watchdog sized for one
-/// call could trip while the worker was still legitimately retrying within
-/// policy. At current values this is `120s * 7 = 840s` (14 minutes) — a
-/// deliberate trade-off, not incidental: it does not change worker behaviour
-/// (the dispatch worker runs on a detached thread the watchdog never cancels
-/// either way — see `DispatchingTimeout` in `docs/specs/dispatch.allium`),
-/// only how long a *genuinely* stuck worker sits silently before the user
-/// sees anything.
-pub(in crate::tui) const DISPATCH_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(
-    crate::process::SUBPROCESS_TIMEOUT.as_secs()
-        * crate::dispatch::PROVISION_MAX_SUBPROCESS_CALLS as u64,
-);
-
 /// Number of braille spinner frames for the per-card "dispatching…" indicator.
 /// Must match the length of `DISPATCHING_SPINNER` in `kanban.rs`.
 pub(in crate::tui) const DISPATCH_SPINNER_FRAMES: u8 = 10;
@@ -199,6 +178,24 @@ pub(in crate::tui) struct InteractionState {
 }
 
 // ---------------------------------------------------------------------------
+// DispatchRequestView — this host's dispatch request rows, as the App follows them
+// ---------------------------------------------------------------------------
+
+/// What the App keeps of this host's dispatch request rows (store-split M4),
+/// rebuilt from every `TaskMessage::DispatchRequestsRefreshed`.
+#[derive(Debug, Default)]
+pub(in crate::tui) struct DispatchRequestView {
+    /// The open request of each task that has one: DispatchingFeedback's open
+    /// membership.
+    pub(in crate::tui) open: HashMap<TaskId, crate::models::DispatchRequestId>,
+    /// Failed rows already reported, or already history at the baseline, so
+    /// a redelivered failure raises nothing twice.
+    pub(in crate::tui) reported: HashSet<crate::models::DispatchRequestId>,
+    /// Whether the first delivery — the baseline — has arrived.
+    pub(in crate::tui) baselined: bool,
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
@@ -218,9 +215,16 @@ pub struct App {
     /// Which flattened epic groups the user has folded. A persisted
     /// preference, independent of `folds` — see [`EpicFoldState`].
     pub(in crate::tui) epic_folds: EpicFoldState,
-    /// Task IDs with an in-flight dispatch, mapped to their start time.
-    /// Membership prevents duplicate dispatches; start times drive the 60-second watchdog.
+    /// DispatchingFeedback's PENDING part (`docs/specs/dispatch.allium`): tasks
+    /// this board has asked to dispatch whose request has not reached the App
+    /// as an open row yet, mapped to when they were asked. Lasts one reducer
+    /// round trip — an open row supersedes the entry, a refusal drains it. No
+    /// watchdog reads the time: the request row's own deadline ends a stuck
+    /// dispatch (`FailedRequestReported`).
     pub(in crate::tui) dispatching: HashMap<TaskId, Instant>,
+    /// DispatchingFeedback's OPEN part: this host's dispatch request rows as
+    /// the last board reload delivered them. See [`DispatchRequestView`].
+    pub(in crate::tui) dispatch_requests: DispatchRequestView,
     /// Spinner frame index (0..DISPATCH_SPINNER_FRAMES) for the per-card "dispatching…" indicator.
     /// Advanced by `Tick` only while `dispatching` is non-empty.
     pub(in crate::tui) spinner_tick: u8,
@@ -331,6 +335,7 @@ impl App {
             folds: SectionFoldState::default(),
             epic_folds: EpicFoldState::default(),
             dispatching: HashMap::new(),
+            dispatch_requests: DispatchRequestView::default(),
             spinner_tick: 0,
             budget: None,
             store_server: None,
@@ -366,25 +371,27 @@ impl App {
         self.local_host_id.as_deref()
     }
 
-    /// Returns true if the given task has an in-flight dispatch *started by
-    /// this TUI process*. Not the whole picture — see
+    /// Whether `id` is a DispatchingFeedback member: this board has asked and
+    /// the request has not reached it yet (pending), or this host's
+    /// subscription holds an open request for it — including the epic
+    /// chain's and MCP's requests, and requests that survived a board
+    /// restart. Not the whole "may be in flight" picture — see
     /// [`Self::dispatch_may_be_in_flight`].
     pub fn is_dispatching(&self, id: TaskId) -> bool {
-        self.dispatching.contains_key(&id)
+        self.dispatching.contains_key(&id) || self.dispatch_requests.open.contains_key(&id)
     }
 
     /// Whether an unprovisioned task is unprovisioned because a dispatch is
-    /// still running, rather than because one died.
+    /// still running, rather than because one died
+    /// (`dispatch.allium: UnprovisionedIndicator`).
     ///
-    /// `dispatching` only holds dispatches this TUI started. The epic
-    /// auto-dispatch chain claims its next subtask inside the MCP handler
-    /// (`auto_dispatch_next`) and never enters that map, and a TUI restart
-    /// mid-dispatch empties it — in both cases the row is `Running` with no
-    /// worktree while an agent is genuinely being provisioned. So fall back to
-    /// the row itself: every claim seeds `last_pre_tool_use_at`, and
-    /// [`DISPATCH_WATCHDOG_TIMEOUT`] is already the line this codebase draws
-    /// between "slow" and "dead" (see `DispatchingTimeout` in
-    /// `docs/specs/dispatch.allium`).
+    /// Membership first ([`Self::is_dispatching`]). A board sees only the
+    /// request rows naming its own host, so a teammate's request for a task
+    /// in a shared epic is invisible here; for that, fall back to the row
+    /// itself: every claim seeds `last_pre_tool_use_at`, and a stamp younger
+    /// than the request timeout (`DISPATCH_REQUEST_TIMEOUT`, the module's
+    /// `config.dispatch_request_timeout`) may still belong to an open request.
+    /// Past it, the module has failed that request and released the claim.
     ///
     /// A missing stamp counts as not-in-flight, so an unstamped row surfaces
     /// immediately rather than hiding for a minute.
@@ -398,7 +405,7 @@ impl App {
         task.last_pre_tool_use_at.is_some_and(|stamp| {
             now.signed_duration_since(stamp)
                 .to_std()
-                .is_ok_and(|elapsed| elapsed < DISPATCH_WATCHDOG_TIMEOUT)
+                .is_ok_and(|elapsed| elapsed < crate::dispatch::DISPATCH_REQUEST_TIMEOUT)
         })
     }
 
@@ -558,15 +565,25 @@ impl App {
         self.sync_board_selection();
     }
 
-    /// Compute the sticky status text for the current `dispatching` set.
-    /// Returns `None` when no dispatch is in flight.
+    /// Every DispatchingFeedback member: the pending asks and the open rows.
+    pub(in crate::tui) fn dispatch_members(&self) -> std::collections::BTreeSet<TaskId> {
+        self.dispatching
+            .keys()
+            .chain(self.dispatch_requests.open.keys())
+            .copied()
+            .collect()
+    }
+
+    /// Compute the sticky status text for the current DispatchingFeedback
+    /// members. Returns `None` when no dispatch is in flight.
     pub(in crate::tui) fn dispatching_status_text(&self) -> Option<String> {
-        let count = self.dispatching.len();
+        let members = self.dispatch_members();
+        let count = members.len();
         if count == 0 {
             return None;
         }
         if count == 1 {
-            let (&id, _) = self.dispatching.iter().next()?;
+            let id = *members.iter().next()?;
             let label = self
                 .board
                 .find_task(id)
@@ -622,7 +639,7 @@ impl App {
         self.refresh_dispatching_status();
     }
 
-    /// Recompute the sticky status text after `dispatching` has been mutated.
+    /// Recompute the sticky status text after the membership has changed.
     /// Clears the status if no dispatches remain.
     pub(in crate::tui) fn refresh_dispatching_status(&mut self) {
         match self.dispatching_status_text() {

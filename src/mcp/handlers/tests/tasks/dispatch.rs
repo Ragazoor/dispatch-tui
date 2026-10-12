@@ -34,6 +34,32 @@ async fn wait_for_task_changed(
     }
 }
 
+/// This board's host reactor, as the runtime runs it (`store-split.allium:
+/// HostClaimsDispatch`): serve every `requested` row naming this host, once,
+/// as the rows arrive. Since store-split M4 neither `dispatch_task` nor the
+/// chain provisions — they write requests — so a test that wants an agent
+/// launched runs this beside them, over the same service.
+fn spawn_host(state: &Arc<McpState>) -> tokio::task::JoinHandle<()> {
+    let state = state.clone();
+    tokio::spawn(async move {
+        let mut changes = state.db.dispatch_request_changes();
+        let mut observer = crate::dispatch::DispatchRequestObserver::new(state.db.host_id());
+        loop {
+            let rows = state.db.dispatch_requests().await;
+            for row in observer.observe(&rows) {
+                let svc = state.task_svc.clone();
+                let emb = state.embedding_service.clone();
+                tokio::spawn(async move {
+                    svc.serve_dispatch_request(row, emb).await;
+                });
+            }
+            if changes.changed().await.is_err() {
+                return;
+            }
+        }
+    })
+}
+
 // -- automatic epic chaining on exit_session ---------------------------------
 //
 // Epic chaining is a server-side side effect of closing a session, not a tool
@@ -60,6 +86,17 @@ struct ChainFixture {
     /// detached tmux teardown completes, so a test can await it deterministically
     /// instead of sleeping.
     bg_done_rx: Option<tokio::sync::mpsc::UnboundedReceiver<crate::mcp::BackgroundWrite>>,
+    /// The host reactor serving this fixture's dispatch requests
+    /// ([`spawn_host`]). Aborted with the fixture.
+    host: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for ChainFixture {
+    fn drop(&mut self) {
+        if let Some(host) = self.host.take() {
+            host.abort();
+        }
+    }
 }
 
 impl ChainFixture {
@@ -86,9 +123,10 @@ impl ChainFixture {
     }
 
     /// Like [`ChainFixture::new`], but with a `task_svc` whose
-    /// `claim_backlog_task` always loses, standing in for another entry point
-    /// having taken the task first. Every other method panics, so a caller that
-    /// dispatches without claiming is caught rather than silently passing.
+    /// `request_dispatch` is always refused, standing in for another entry
+    /// point having taken the task first. Every other method panics, so a
+    /// caller that dispatches without requesting is caught rather than
+    /// silently passing.
     async fn with_lost_claim() -> Self {
         let svc = Arc::new(LostClaimTaskService::default());
         let fx = Self::build(Some(svc.clone())).await;
@@ -117,6 +155,7 @@ impl ChainFixture {
             Some(bg_tx),
         )
         .await;
+        let host = Some(spawn_host(&state));
         Self {
             _dir: dir,
             repo_path,
@@ -125,6 +164,7 @@ impl ChainFixture {
             notify_rx,
             runner,
             bg_done_rx: Some(bg_rx),
+            host,
         }
     }
 
@@ -183,6 +223,7 @@ impl ChainFixture {
             task_svc_override,
         )
         .await;
+        let host = Some(spawn_host(&state));
         Self {
             _dir: dir,
             repo_path,
@@ -191,7 +232,30 @@ impl ChainFixture {
             notify_rx,
             bg_done_rx: None,
             runner,
+            host,
         }
+    }
+
+    /// Wait for `task`'s dispatch request to finish — dispatched or failed —
+    /// and return it. A deadline on a signal, not a wall-clock wait: it wakes
+    /// on every row change and returns the instant the row finishes.
+    async fn wait_for_dispatch(
+        &self,
+        task: crate::models::TaskId,
+    ) -> crate::models::DispatchRequest {
+        let mut changes = self.db.dispatch_request_changes();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Some(row) = self.db.latest_dispatch_request_for_task(task).await {
+                    if !row.is_open() {
+                        return row;
+                    }
+                }
+                changes.changed().await.expect("the rows outlive the test");
+            }
+        })
+        .await
+        .expect("the request must finish")
     }
 
     /// Every `tmux kill-window` the close path issued, in order.
@@ -424,6 +488,7 @@ async fn exit_session_dispatches_first_backlog_subtask() {
     assert!(resp.error.is_none(), "close must succeed: {:?}", resp.error);
 
     wait_for_task_changed(&mut fx.notify_rx, first).await;
+    fx.wait_for_dispatch(first).await;
 
     let dispatched = fx.db.get_task(first).await.unwrap();
     assert_eq!(dispatched.status, TaskStatus::Running);
@@ -612,12 +677,13 @@ async fn exit_session_chain_starts_only_after_the_closing_task_is_terminal() {
 
     fx.close(closing, WrapUpAction::Done).await;
     wait_for_task_changed(&mut fx.notify_rx, next).await;
+    fx.wait_for_dispatch(next).await;
 
     let successor = fx.db.get_task(next).await.unwrap();
     assert_eq!(successor.status, TaskStatus::Running);
     assert!(
         successor.worktree.is_some(),
-        "successor should be provisioned by the time TaskChanged fires"
+        "successor should be provisioned once its request is dispatched"
     );
 
     let predecessor = fx.db.get_task(closing).await.unwrap();
@@ -673,7 +739,8 @@ async fn assert_action_chains(action: WrapUpAction) {
 }
 
 /// A failed dispatch reverts the claim, leaving the subtask dispatchable
-/// exactly as it was before the chain fired.
+/// exactly as it was before the chain fired. Since store-split M4 the module
+/// reverts it when the request fails (`ReleaseClaimOfFailedRequest`).
 #[tokio::test]
 async fn exit_session_chain_reverts_claim_when_dispatch_fails() {
     let mut fx = ChainFixture::new().await;
@@ -698,6 +765,8 @@ async fn exit_session_chain_reverts_claim_when_dispatch_fails() {
     );
 
     wait_for_task_changed(&mut fx.notify_rx, next).await;
+    let request = fx.wait_for_dispatch(next).await;
+    assert_eq!(request.state, crate::models::DispatchRequestState::Failed);
 
     let reverted = fx.db.get_task(next).await.unwrap();
     assert_eq!(
@@ -718,16 +787,14 @@ async fn exit_session_chain_reverts_claim_when_dispatch_fails() {
 }
 
 /// A failed chained dispatch must be visible to the operator, not only to
-/// `app.log`. `SurfaceAutoDispatchFailure` (docs/specs/epics.allium) turns the
-/// failure into an `AutoDispatchFailed` event carrying the subtask, its epic and
-/// the reason; the board renders it from there.
-///
-/// The event is asserted ahead of `TaskChanged` for the same subtask: it is the
-/// fact the failure established, so a consumer that reloads the row first would
-/// paint the reverted card before it knows the card is stalled.
+/// `app.log`. Since store-split M4 the chain's request carries origin
+/// `epic_chain`, and the board raises AutoDispatchFailed from that row when it
+/// fails (`epics.allium: ReportChainedDispatchFailure`, pinned on the board in
+/// `src/tui/tests/dispatch_requests.rs`). What the chain owes is a row that
+/// says so: its origin, its failure and why.
 #[tokio::test]
-async fn exit_session_chain_reports_a_failed_dispatch_to_the_board() {
-    let mut fx = ChainFixture::new().await;
+async fn exit_session_chain_leaves_a_failed_epic_chain_row_for_the_board() {
+    let fx = ChainFixture::new().await;
     let epic_id = fx.epic(true).await;
     let closing = fx.closing_subtask(Some(epic_id)).await;
     let next = fx
@@ -740,37 +807,22 @@ async fn exit_session_chain_reports_a_failed_dispatch_to_the_board() {
         .await;
 
     fx.close(closing, WrapUpAction::Done).await;
+    let request = fx.wait_for_dispatch(next).await;
 
-    loop {
-        match fx.notify_rx.recv().await {
-            Some(crate::board_event::BoardEvent::AutoDispatchFailed {
-                task_id,
-                epic_id: eid,
-                reason,
-            }) => {
-                assert_eq!(task_id, next);
-                assert_eq!(eid, epic_id);
-                assert!(
-                    !reason.is_empty(),
-                    "the event must carry why the dispatch failed"
-                );
-                break;
-            }
-            Some(crate::board_event::BoardEvent::TaskChanged(id)) if id == next => {
-                panic!("TaskChanged for the reverted subtask arrived before AutoDispatchFailed")
-            }
-            Some(_) => continue,
-            None => panic!("notification channel closed before the failure was reported"),
-        }
-    }
+    assert_eq!(request.origin, crate::models::DispatchOrigin::EpicChain);
+    assert_eq!(request.state, crate::models::DispatchRequestState::Failed);
+    assert!(
+        request.reason.as_deref().is_some_and(|r| !r.is_empty()),
+        "the row must carry why the dispatch failed"
+    );
 }
 
-/// A chained dispatch that SUCCEEDS reports no failure. Guards against the
-/// event being emitted unconditionally, which would mark every chained subtask
-/// as stalled.
+/// A chained dispatch that SUCCEEDS leaves a dispatched row, which raises
+/// nothing on the board. Guards against every chained subtask reading as
+/// stalled.
 #[tokio::test]
 async fn exit_session_chain_reports_no_failure_when_dispatch_succeeds() {
-    let mut fx = ChainFixture::new().await;
+    let fx = ChainFixture::new().await;
     let epic_id = fx.epic(true).await;
     let closing = fx.closing_subtask(Some(epic_id)).await;
     let next = fx
@@ -778,19 +830,15 @@ async fn exit_session_chain_reports_no_failure_when_dispatch_succeeds() {
         .await;
 
     fx.close(closing, WrapUpAction::Done).await;
+    let request = fx.wait_for_dispatch(next).await;
 
-    // TaskChanged is sent after the outcome is decided, so anything the failure
-    // path would have emitted is already in the channel by the time it arrives.
-    loop {
-        match fx.notify_rx.recv().await {
-            Some(crate::board_event::BoardEvent::TaskChanged(id)) if id == next => break,
-            Some(crate::board_event::BoardEvent::AutoDispatchFailed { .. }) => {
-                panic!("a successful chained dispatch must report no failure")
-            }
-            Some(_) => continue,
-            None => panic!("notification channel closed before dispatch completed"),
-        }
-    }
+    assert_eq!(request.origin, crate::models::DispatchOrigin::EpicChain);
+    assert_eq!(
+        request.state,
+        crate::models::DispatchRequestState::Dispatched,
+        "a successful chained dispatch must not fail its row: {:?}",
+        request.reason
+    );
 }
 
 // -- a close whose terminal write does not take effect -----------------------
@@ -805,8 +853,8 @@ async fn exit_session_chain_reports_no_failure_when_dispatch_succeeds() {
 /// A task service whose `close_session` always fails, so `exit_session`'s
 /// terminal close patch cannot land. Every other method inherits the panicking
 /// default from `TaskServiceApiStub` — which is itself an assertion: if the
-/// chain ever fired on this path it would panic on `claim_next_backlog_task`
-/// rather than pass quietly.
+/// chain ever fired on this path it would panic on
+/// `request_next_backlog_subtask` rather than pass quietly.
 #[derive(Default)]
 struct FailingCloseTaskService {
     /// Bound by the fixture once its database exists; backs the real read the
@@ -839,18 +887,16 @@ impl crate::service::TaskServiceApiStub for FailingCloseTaskService {
 
 crate::task_service_api!(service_api_stub_bridge, FailingCloseTaskService);
 
-/// A task service whose dispatch seam always reports a lost claim, standing in
-/// for another dispatch entry point having taken the task a moment earlier.
+/// A task service whose dispatch request is always refused, standing in for
+/// another dispatch entry point having taken the task a moment earlier.
 ///
 /// Every other method keeps the panicking `TaskServiceApiStub` default on
 /// purpose: that is what makes `dispatch_task_lost_claim_provisions_nothing`
 /// discriminating. A handler that read the status and provisioned itself,
-/// rather than handing the whole sequence to the seam, would hit the unmocked
-/// `update_task`.
+/// rather than asking the module, would hit an unmocked method.
 ///
-/// That the *claim itself* is exclusive and provisions nothing when lost is
-/// asserted against the real seam in
-/// `service::tasks::tests::dispatch_seam::dispatch_reports_a_lost_claim_and_provisions_nothing`;
+/// That the request itself is exclusive is asserted against the real seam in
+/// `service::tasks::tests::dispatch_seam::two_concurrent_requests_write_exactly_one_row`;
 /// what is under test here is only the response the handler shapes from it.
 #[derive(Default)]
 struct LostClaimTaskService {
@@ -871,11 +917,15 @@ impl crate::service::TaskServiceApiStub for LostClaimTaskService {
         })
     }
 
-    async fn dispatch(
+    async fn request_dispatch(
         &self,
-        _request: crate::service::DispatchRequest,
-    ) -> crate::service::DispatchOutcome {
-        crate::service::DispatchOutcome::ClaimLost
+        task_id: crate::models::TaskId,
+        _origin: crate::models::DispatchOrigin,
+        _mode: Option<crate::models::DispatchMode>,
+    ) -> Result<crate::store::RequestDispatchAnswer, crate::service::ServiceError> {
+        Ok(crate::store::RequestDispatchAnswer::Refused(format!(
+            "task {task_id} already holds an open dispatch request"
+        )))
     }
 }
 
@@ -1449,102 +1499,18 @@ fn dispatch_task_success_text_names_a_created_worktree() {
     );
 }
 
-/// Drain `rx` and report whether an `AgentLaunched` naming `repo_path` is among
-/// the events already queued. Non-blocking: every emitter below has finished its
-/// notifications by the time the caller awaits it.
-fn saw_agent_launched(
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::board_event::BoardEvent>,
-    repo_path: &str,
-) -> bool {
-    let mut seen = false;
-    while let Ok(event) = rx.try_recv() {
-        if matches!(&event, crate::board_event::BoardEvent::AgentLaunched { repo_path: p } if p == repo_path)
-        {
-            seen = true;
-        }
-    }
-    seen
-}
-
-// rule-success.RefreshRepoSyncStateAfterDispatch, MCP surface: the obligation is
-// per-event, not per-surface, so `dispatch_task` owes the same refresh the board's
-// own dispatch does (docs/specs/repo-sync.allium).
-#[tokio::test]
-async fn dispatch_task_notifies_that_the_repo_needs_remeasuring() {
-    let mut fx = ChainFixture::with_runner(dispatch_runner_script()).await;
-    let task_id = fx.backlog_subtask(None, "Measured Task", None, None).await;
-
-    let resp = call_dispatch_task(&fx.state, task_id).await;
-    assert!(extract_response_text(&resp).contains("dispatched"));
-
-    let repo_path = fx.repo_path.clone();
-    assert!(
-        saw_agent_launched(&mut fx.notify_rx, &repo_path),
-        "an MCP dispatch must ask the runtime to remeasure {repo_path}"
-    );
-}
-
-// rule-failure.RefreshRepoSyncStateAfterDispatch: a dispatch that failed launched
-// no agent, so there is no AgentLaunched to follow and nothing to remeasure.
-#[tokio::test]
-async fn a_failed_dispatch_task_notifies_no_remeasure() {
-    let mut fx = ChainFixture::new().await;
-    let task_id = fx
-        .backlog_subtask(None, "Doomed", None, Some("/nonexistent/dispatch-mcp-repo"))
-        .await;
-
-    let resp = call_dispatch_task(&fx.state, task_id).await;
-    assert_error(&resp, "dispatch failed");
-
-    assert!(
-        !saw_agent_launched(&mut fx.notify_rx, "/nonexistent/dispatch-mcp-repo"),
-        "no agent launched, so nothing moved and nothing needs remeasuring"
-    );
-}
-
-// rule-success.RefreshRepoSyncStateAfterDispatch, epic-chain surface: auto-dispatch
-// chaining routes through the same DispatchTask rule, so it is not exempt either.
-#[tokio::test]
-async fn the_auto_dispatch_chain_notifies_that_the_repo_needs_remeasuring() {
-    let mut fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    let next = fx
-        .backlog_subtask(Some(epic_id), "Chained Task", Some(10), None)
-        .await;
-
-    let resp = fx.close(closing, WrapUpAction::Done).await;
-    assert!(resp.error.is_none(), "close must succeed: {:?}", resp.error);
-
-    // The chain dispatches on a spawned task, so wait for its notifications
-    // rather than draining what happens to have arrived. `TaskChanged(next)` is
-    // unique to the chain (the close notifies about the closing task and the
-    // shared epic) and follows the refresh notification, so it bounds the wait
-    // and fails fast instead of hanging when that notification is missing.
-    let repo_path = fx.repo_path.clone();
-    let mut launched = false;
-    loop {
-        match fx.notify_rx.recv().await {
-            Some(crate::board_event::BoardEvent::AgentLaunched { repo_path: p })
-                if p == repo_path =>
-            {
-                launched = true;
-            }
-            Some(crate::board_event::BoardEvent::TaskChanged(id)) if id == next => break,
-            Some(_) => continue,
-            None => panic!("notification channel closed before the chain finished"),
-        }
-    }
-    assert!(
-        launched,
-        "a chained dispatch must ask the runtime to remeasure {repo_path}"
-    );
-    assert_eq!(
-        fx.db.get_task(next).await.unwrap().status,
-        TaskStatus::Running,
-        "the chain really did launch an agent"
-    );
-}
+// The three `AgentLaunched` tests that stood here
+// (`dispatch_task_notifies_that_the_repo_needs_remeasuring`,
+// `a_failed_dispatch_task_notifies_no_remeasure`,
+// `the_auto_dispatch_chain_notifies_that_the_repo_needs_remeasuring`) pinned
+// RefreshRepoSyncStateAfterDispatch on the MCP and chain surfaces through
+// `BoardEvent::AgentLaunched`. Since store-split M4 neither surface launches:
+// every request is provisioned by the board's host reactor, which reports the
+// launch as `TaskMessage::Dispatched` whatever the origin
+// (`src/runtime/tests/misc.rs::an_off_board_request_reaches_the_board_as_dispatched`),
+// and that message's non-fetching refresh is pinned in
+// `src/tui/tests/repo_sync.rs`. A failed request launches nothing and sends no
+// `Dispatched`.
 
 #[tokio::test]
 async fn dispatch_task_returns_error_for_non_backlog_task() {
@@ -1574,29 +1540,37 @@ async fn dispatch_task_reports_the_status_a_lost_claim_left_behind() {
     let fx = ChainFixture::with_runner(dispatch_runner_script()).await;
     let task_id = fx.backlog_subtask(None, "Contended Task", None, None).await;
     assert!(
-        fx.state.task_svc.claim_backlog_task(task_id).await.unwrap(),
-        "another entry point claims it first"
+        matches!(
+            fx.state
+                .task_svc
+                .request_dispatch(task_id, crate::models::DispatchOrigin::User, None)
+                .await
+                .unwrap(),
+            crate::store::RequestDispatchAnswer::Requested(_)
+        ),
+        "another entry point requests it first"
     );
 
     let resp = call_dispatch_task(&fx.state, task_id).await;
 
     assert_error(&resp, "not in backlog");
     assert_error(&resp, "running");
-    let task = fx.db.get_task(task_id).await.unwrap();
-    assert!(
-        task.worktree.is_none(),
-        "a lost claim must provision nothing"
+    assert_eq!(
+        fx.db.dispatch_requests().await.len(),
+        1,
+        "the losing call must write no second request, so nothing provisions twice"
     );
 }
 
 /// A lost claim must gate provisioning, not merely be noticed afterwards.
 ///
 /// Discriminating by construction: `LostClaimTaskService` mocks only
-/// `claim_backlog_task`, and every other `TaskServiceApi` method panics. A
-/// handler that read the status instead of claiming would sail past the Backlog
-/// row, provision it, and then panic in the unmocked post-dispatch
-/// `update_task`. Reaching the assertions at all proves the claim was consulted;
-/// the empty runner log proves it was consulted *first*.
+/// `request_dispatch` (and the read), and every other `TaskServiceApi` method
+/// panics. A handler that read the status instead of requesting would sail past
+/// the Backlog row and reach an unmocked method. Reaching the assertions at all
+/// proves the request was consulted; the empty runner log proves nothing was
+/// provisioned. The refusal's own reason reaches the caller, because the task
+/// still reads Backlog.
 #[tokio::test]
 async fn dispatch_task_lost_claim_provisions_nothing() {
     let fx = ChainFixture::with_lost_claim().await;
@@ -1604,7 +1578,7 @@ async fn dispatch_task_lost_claim_provisions_nothing() {
 
     let resp = call_dispatch_task(&fx.state, task_id).await;
 
-    assert_error(&resp, "not in backlog");
+    assert_error(&resp, "already holds an open dispatch request");
     assert!(
         fx.runner.recorded_calls().is_empty(),
         "a lost claim must run no provisioning commands at all, got: {:?}",
@@ -1616,12 +1590,9 @@ async fn dispatch_task_lost_claim_provisions_nothing() {
 }
 
 /// A dispatch that fails after the claim must release it, leaving the task
-/// exactly as dispatchable as before the call.
-///
-/// The Backlog end-state is only reachable via the release, given
-/// `dispatch_task_lost_claim_provisions_nothing` establishes that the claim is
-/// taken before provisioning: the claim moved the row to Running, so something
-/// has to move it back.
+/// exactly as dispatchable as before the call. The module releases it when
+/// the request fails (`ReleaseClaimOfFailedRequest`); the call itself releases
+/// nothing, and answers with the row's reason.
 #[tokio::test]
 async fn dispatch_task_releases_the_claim_when_provisioning_fails() {
     let fx = ChainFixture::new().await;
@@ -1651,7 +1622,14 @@ async fn dispatch_task_releases_the_claim_when_provisioning_fails() {
     );
     assert!(task.worktree.is_none());
     assert!(
-        fx.state.task_svc.claim_backlog_task(task_id).await.unwrap(),
+        matches!(
+            fx.state
+                .task_svc
+                .request_dispatch(task_id, crate::models::DispatchOrigin::User, None)
+                .await
+                .unwrap(),
+            crate::store::RequestDispatchAnswer::Requested(_)
+        ),
         "the released task is dispatchable again"
     );
 }

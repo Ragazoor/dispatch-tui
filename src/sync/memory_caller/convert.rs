@@ -339,3 +339,23 @@ mirror!(
     module::WorkPackagePatch,
     bindings::WorkPackagePatch { title, description }
 );
+
+mirror!(
+    module::DispatchRequest,
+    bindings::DispatchRequest {
+        id,
+        task_id,
+        kind,
+        host,
+        mode,
+        origin,
+        state,
+        requested_at,
+        claimed_at,
+        finished_at,
+        reason,
+        worktree,
+        tmux_window,
+        deadline,
+    }
+);

@@ -517,8 +517,11 @@ fn dispatching_status_cleared_on_dispatched() {
     assert!(!app.status.message_sticky);
 }
 
+/// A refused request drains the pending entry and clears the sticky status
+/// (`dispatch.allium: LostClaimReported`, ClearedWhenEmpty). A FAILED request
+/// clears it through its row — `src/tui/tests/dispatch_requests.rs`.
 #[test]
-fn dispatching_status_cleared_on_dispatch_failed() {
+fn dispatching_status_cleared_on_dispatch_abandoned() {
     let mut app = make_app();
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
@@ -526,7 +529,7 @@ fn dispatching_status_cleared_on_dispatch_failed() {
     assert!(app.status.message.is_some());
 
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::DispatchFailed(TaskId(1)),
+        crate::tui::messages::TaskMessage::DispatchAbandoned(TaskId(1)),
     ));
 
     assert!(app.status.message.is_none());
@@ -665,7 +668,7 @@ mod property_tests {
                         }));
                     }
                     DispatchOp::Failed(id) => {
-                        app.update(Message::Task(crate::tui::messages::TaskMessage::DispatchFailed(TaskId(id))));
+                        app.update(Message::Task(crate::tui::messages::TaskMessage::DispatchAbandoned(TaskId(id))));
                     }
                 }
             }

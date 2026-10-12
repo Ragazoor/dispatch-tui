@@ -166,10 +166,6 @@ async fn dispatch_task(
             rt.exec_dispatch_agent(task, mode).await;
             vec![]
         }
-        ReleaseClaim(id) => {
-            rt.exec_release_claim(app, id).await;
-            vec![]
-        }
         TrustAndDispatch { task, mode } => rt.exec_trust_and_dispatch(app, task, mode).await,
         CheckTrustAndDispatch {
             id,

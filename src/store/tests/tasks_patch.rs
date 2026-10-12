@@ -524,7 +524,13 @@ async fn mark_pr_learnings_gate_shown_missing_task_is_false() {
         .unwrap());
 }
 
-// -- try_claim_next_backlog_task --------------------------------------------
+// -- The dispatch claim, on request rows (store-split M4) ---------------------
+//
+// Since M4 the claim IS the dispatch request (`store-split.allium:
+// RequestDispatch`): one module transaction that claims the task and writes
+// the row. These pin the claim's guarantees at the store, through
+// `request_dispatch`, and the epic chain's ordering through the service that
+// now picks its candidates (`TaskService::request_next_backlog_subtask`).
 
 /// Helper: a subtask of `epic_id` in `status`, with an explicit `sort_order`.
 async fn subtask(
@@ -544,109 +550,6 @@ async fn subtask(
     .unwrap()
 }
 
-#[tokio::test]
-async fn try_claim_next_backlog_task_claims_the_lowest_sort_order_subtask() {
-    let db = in_memory_db().await;
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    let third = subtask(&db, epic.id, "c", TaskStatus::Backlog, Some(30)).await;
-    let first = subtask(&db, epic.id, "a", TaskStatus::Backlog, Some(10)).await;
-    let second = subtask(&db, epic.id, "b", TaskStatus::Backlog, Some(20)).await;
-
-    let claimed = db.try_claim_next_backlog_task(epic.id).await.unwrap();
-
-    assert_eq!(claimed, Some(first));
-    for untouched in [second, third] {
-        assert_eq!(
-            db.get_task(untouched).await.unwrap().status,
-            TaskStatus::Backlog,
-            "only the selected row may be claimed"
-        );
-    }
-}
-
-/// The ordering key is `COALESCE(sort_order, id)` then `id` — the SQL
-/// equivalent of the `(sort_order.unwrap_or(id), id)` sort this statement
-/// replaced. A null-sort_order subtask sorts by its own id, so it loses to an
-/// explicitly lower sort_order and wins against a higher one, regardless of
-/// insertion order.
-#[tokio::test]
-async fn try_claim_next_backlog_task_falls_back_to_id_when_sort_order_is_null() {
-    let db = in_memory_db().await;
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    let unordered = subtask(&db, epic.id, "no sort_order", TaskStatus::Backlog, None).await;
-    let above = subtask(&db, epic.id, "sorts after", TaskStatus::Backlog, Some(500)).await;
-    let below = subtask(&db, epic.id, "sorts before", TaskStatus::Backlog, Some(0)).await;
-
-    assert_eq!(
-        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
-        Some(below),
-        "sort_order 0 must beat a null whose fallback key is its own id"
-    );
-    assert_eq!(
-        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
-        Some(unordered),
-        "the null-sort_order subtask beats sort_order 500 via its id fallback"
-    );
-    assert_eq!(
-        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
-        Some(above)
-    );
-}
-
-#[tokio::test]
-async fn try_claim_next_backlog_task_skips_non_backlog_subtasks() {
-    let db = in_memory_db().await;
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    subtask(&db, epic.id, "running", TaskStatus::Running, Some(1)).await;
-    subtask(&db, epic.id, "review", TaskStatus::Review, Some(2)).await;
-    subtask(&db, epic.id, "done", TaskStatus::Done, Some(3)).await;
-    let backlog = subtask(&db, epic.id, "backlog", TaskStatus::Backlog, Some(4)).await;
-
-    assert_eq!(
-        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
-        Some(backlog)
-    );
-}
-
-/// `PhoenixIsNeverChained` (docs/specs/epics.allium): the chain passes OVER a
-/// phoenix subtask and takes the next ordinary one behind it. Without the skip,
-/// a phoenix subtask would respawn on completion and be dispatched again
-/// immediately — an epic that never runs out of work.
-#[tokio::test]
-async fn try_claim_next_backlog_task_skips_phoenix_subtasks() {
-    let db = in_memory_db().await;
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    let recurring = phoenix_subtask(&db, epic.id, "recurring", Some(1)).await;
-    let ordinary = subtask(&db, epic.id, "ordinary", TaskStatus::Backlog, Some(2)).await;
-
-    assert_eq!(
-        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
-        Some(ordinary),
-        "the phoenix subtask sorts first but is not a candidate"
-    );
-    assert_eq!(
-        db.get_task(recurring).await.unwrap().status,
-        TaskStatus::Backlog,
-        "and it is left in backlog, unclaimed"
-    );
-}
-
-/// The fourth normal stopping condition: every backlog subtask left is a
-/// phoenix one, so the chain stops rather than looping.
-#[tokio::test]
-async fn try_claim_next_backlog_task_is_none_when_only_phoenix_subtasks_remain() {
-    let db = in_memory_db().await;
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    phoenix_subtask(&db, epic.id, "recurring", Some(1)).await;
-    phoenix_subtask(&db, epic.id, "also recurring", Some(2)).await;
-
-    assert!(db
-        .try_claim_next_backlog_task(epic.id)
-        .await
-        .unwrap()
-        .is_none());
-}
-
 /// Helper: a backlog subtask of `epic_id` carrying the phoenix flag.
 async fn phoenix_subtask(
     db: &Store,
@@ -664,98 +567,186 @@ async fn phoenix_subtask(
     .unwrap()
 }
 
-#[tokio::test]
-async fn try_claim_next_backlog_task_is_none_when_no_backlog_subtask_remains() {
-    let db = in_memory_db().await;
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    subtask(&db, epic.id, "running", TaskStatus::Running, Some(1)).await;
+/// A request from the TUI key, with its mode named.
+async fn request(db: &Store, id: TaskId) -> RequestDispatchAnswer {
+    db.request_dispatch(
+        id,
+        crate::models::DispatchOrigin::User,
+        Some(crate::models::DispatchMode::Dispatch),
+    )
+    .await
+    .unwrap()
+}
 
-    assert!(db
-        .try_claim_next_backlog_task(epic.id)
+fn applied(answer: &RequestDispatchAnswer) -> bool {
+    matches!(answer, RequestDispatchAnswer::Requested(_))
+}
+
+/// The service the epic chain claims through, over `db`.
+fn chain(db: &std::sync::Arc<Store>) -> crate::service::TaskService {
+    crate::service::TaskService::new(db.clone(), crate::process::MockProcessRunner::unused())
+}
+
+async fn next_in_chain(db: &std::sync::Arc<Store>, epic: EpicId) -> Option<TaskId> {
+    chain(db)
+        .request_next_backlog_subtask(epic)
         .await
         .unwrap()
-        .is_none());
+        .map(|(task, _)| task.id)
 }
 
 #[tokio::test]
-async fn try_claim_next_backlog_task_ignores_other_epics_subtasks() {
-    let db = in_memory_db().await;
+async fn the_chain_requests_the_lowest_sort_order_subtask() {
+    let db = std::sync::Arc::new(in_memory_db().await);
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    let third = subtask(&db, epic.id, "c", TaskStatus::Backlog, Some(30)).await;
+    let first = subtask(&db, epic.id, "a", TaskStatus::Backlog, Some(10)).await;
+    let second = subtask(&db, epic.id, "b", TaskStatus::Backlog, Some(20)).await;
+
+    assert_eq!(next_in_chain(&db, epic.id).await, Some(first));
+    for untouched in [second, third] {
+        assert_eq!(
+            db.get_task(untouched).await.unwrap().status,
+            TaskStatus::Backlog,
+            "only the selected row may be claimed"
+        );
+    }
+}
+
+/// The ordering key is `COALESCE(sort_order, id)` then `id`: a
+/// null-sort_order subtask sorts by its own id, so it loses to an explicitly
+/// lower sort_order and wins against a higher one, regardless of insertion
+/// order.
+#[tokio::test]
+async fn the_chain_falls_back_to_id_when_sort_order_is_null() {
+    let db = std::sync::Arc::new(in_memory_db().await);
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    let unordered = subtask(&db, epic.id, "no sort_order", TaskStatus::Backlog, None).await;
+    let above = subtask(&db, epic.id, "sorts after", TaskStatus::Backlog, Some(500)).await;
+    let below = subtask(&db, epic.id, "sorts before", TaskStatus::Backlog, Some(0)).await;
+
+    assert_eq!(
+        next_in_chain(&db, epic.id).await,
+        Some(below),
+        "sort_order 0 must beat a null whose fallback key is its own id"
+    );
+    assert_eq!(
+        next_in_chain(&db, epic.id).await,
+        Some(unordered),
+        "the null-sort_order subtask beats sort_order 500 via its id fallback"
+    );
+    assert_eq!(next_in_chain(&db, epic.id).await, Some(above));
+    assert_eq!(next_in_chain(&db, epic.id).await, None);
+}
+
+#[tokio::test]
+async fn the_chain_skips_non_backlog_subtasks() {
+    let db = std::sync::Arc::new(in_memory_db().await);
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    subtask(&db, epic.id, "running", TaskStatus::Running, Some(1)).await;
+    subtask(&db, epic.id, "review", TaskStatus::Review, Some(2)).await;
+    subtask(&db, epic.id, "done", TaskStatus::Done, Some(3)).await;
+    let backlog = subtask(&db, epic.id, "backlog", TaskStatus::Backlog, Some(4)).await;
+
+    assert_eq!(next_in_chain(&db, epic.id).await, Some(backlog));
+}
+
+/// `PhoenixIsNeverChained` (docs/specs/epics.allium): the chain passes OVER a
+/// phoenix subtask and takes the next ordinary one behind it — and stops when
+/// only phoenix ones remain, rather than looping.
+#[tokio::test]
+async fn the_chain_skips_phoenix_subtasks() {
+    let db = std::sync::Arc::new(in_memory_db().await);
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    let recurring = phoenix_subtask(&db, epic.id, "recurring", Some(1)).await;
+    let ordinary = subtask(&db, epic.id, "ordinary", TaskStatus::Backlog, Some(2)).await;
+
+    assert_eq!(
+        next_in_chain(&db, epic.id).await,
+        Some(ordinary),
+        "the phoenix subtask sorts first but is not a candidate"
+    );
+    assert_eq!(
+        db.get_task(recurring).await.unwrap().status,
+        TaskStatus::Backlog,
+        "and it is left in backlog, unclaimed"
+    );
+    assert_eq!(next_in_chain(&db, epic.id).await, None);
+}
+
+#[tokio::test]
+async fn the_chain_ignores_other_epics_subtasks() {
+    let db = std::sync::Arc::new(in_memory_db().await);
     let mine = db.create_epic("mine", "", None).await.unwrap();
     let other = db.create_epic("other", "", None).await.unwrap();
     let theirs = subtask(&db, other.id, "theirs", TaskStatus::Backlog, Some(1)).await;
 
-    assert!(db
-        .try_claim_next_backlog_task(mine.id)
-        .await
-        .unwrap()
-        .is_none());
+    assert_eq!(next_in_chain(&db, mine.id).await, None);
     assert_eq!(
         db.get_task(theirs).await.unwrap().status,
         TaskStatus::Backlog
     );
 }
 
+/// The module refuses a foreign-owned subtask, and the chain moves on to the
+/// next ordinary one behind it, leaving the foreign one untouched.
 #[tokio::test]
-async fn try_claim_next_backlog_task_applies_running_and_the_activity_stamp() {
-    let db = in_memory_db().await;
+async fn the_chain_moves_past_a_foreign_owned_subtask() {
+    let db = std::sync::Arc::new(in_memory_db().await);
     let epic = db.create_epic("E", "", None).await.unwrap();
-    let id = subtask(&db, epic.id, "t", TaskStatus::Backlog, Some(1)).await;
-    let before = db.get_task(id).await.unwrap().updated_at;
+    let foreign = subtask(&db, epic.id, "foreign", TaskStatus::Backlog, Some(10)).await;
+    db.patch_task(
+        foreign,
+        &TaskPatch::new()
+            .worktree(Some("/elsewhere/wt"))
+            .host(Some("some-other-machine")),
+    )
+    .await
+    .unwrap();
+    let next = subtask(&db, epic.id, "next", TaskStatus::Backlog, Some(20)).await;
 
-    let claimed = db.try_claim_next_backlog_task(epic.id).await.unwrap();
-
-    assert_eq!(claimed, Some(id));
-    let task = db.get_task(id).await.unwrap();
-    assert_eq!(task.status, TaskStatus::Running);
-    assert_eq!(task.sub_status, SubStatus::default_for(TaskStatus::Running));
-    assert!(
-        task.last_pre_tool_use_at.is_some(),
-        "the claim seeds the activity stamp so the tick classifier does not flicker the task to Stale"
+    assert_eq!(next_in_chain(&db, epic.id).await, Some(next));
+    assert_eq!(
+        db.get_task(foreign).await.unwrap().status,
+        TaskStatus::Backlog,
+        "the foreign-owned subtask is left untouched, not claimed"
     );
-    assert!(task.updated_at >= before);
 }
 
-/// Selection and claim are one statement, so repeated calls walk the epic's
-/// backlog and can never hand the same subtask out twice — the exclusivity
-/// `AutoDispatchNextSubtask` depends on, at the layer that provides it.
+/// THE RACE. Every candidate is refused — here, every one's worktree is on
+/// another machine — so the loop offers each once, runs out, and reports an
+/// empty backlog rather than claiming something it was refused.
 #[tokio::test]
-async fn try_claim_next_backlog_task_claims_each_subtask_at_most_once() {
-    let db = in_memory_db().await;
+async fn a_chain_refused_on_every_candidate_requests_nothing() {
+    let db = std::sync::Arc::new(in_memory_db().await);
     let epic = db.create_epic("E", "", None).await.unwrap();
-    let first = subtask(&db, epic.id, "a", TaskStatus::Backlog, Some(10)).await;
-    let second = subtask(&db, epic.id, "b", TaskStatus::Backlog, Some(20)).await;
-
-    assert_eq!(
-        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
-        Some(first)
-    );
-    assert_eq!(
-        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
-        Some(second)
-    );
-    assert!(db
-        .try_claim_next_backlog_task(epic.id)
+    for (title, order) in [("a", 1), ("b", 2)] {
+        let id = subtask(&db, epic.id, title, TaskStatus::Backlog, Some(order)).await;
+        db.patch_task(
+            id,
+            &TaskPatch::new()
+                .worktree(Some("/elsewhere/wt"))
+                .host(Some("some-other-machine")),
+        )
         .await
-        .unwrap()
-        .is_none());
-}
+        .unwrap();
+    }
 
-// -- try_claim_backlog_task (by id) ----------------------------------------
-//
-// The by-id twin of the claim above, backing every dispatch entry point that is
-// handed a specific task (DispatchClaimExclusive in docs/specs/dispatch.allium).
+    assert_eq!(next_in_chain(&db, epic.id).await, None);
+    assert!(db.dispatch_requests().await.is_empty());
+}
 
 /// The phoenix skip belongs to the CHAIN, not to dispatch. `PhoenixIsNeverChained`
-/// (docs/specs/epics.allium) stops an epic launching agents at a recurring task
-/// on its own; it does not stop a human doing it, which is the entire point of
-/// the flag. Pressing Space on a phoenix backlog card must dispatch it.
+/// stops an epic launching agents at a recurring task on its own; it does not
+/// stop a human doing it, which is the entire point of the flag. The request
+/// reducer accepts a phoenix task.
 #[tokio::test]
-async fn try_claim_backlog_task_claims_a_phoenix_task_the_chain_would_skip() {
+async fn a_phoenix_task_the_chain_would_skip_can_be_requested_by_hand() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = phoenix_subtask(&db, epic.id, "recurring", Some(1)).await;
 
-    assert!(db.try_claim_backlog_task(id).await.unwrap());
+    assert!(applied(&request(&db, id).await));
     assert_eq!(db.get_task(id).await.unwrap().status, TaskStatus::Running);
     assert!(
         db.get_task(id).await.unwrap().phoenix,
@@ -764,14 +755,15 @@ async fn try_claim_backlog_task_claims_a_phoenix_task_the_chain_would_skip() {
 }
 
 #[tokio::test]
-async fn try_claim_backlog_task_applies_the_full_claim() {
+async fn a_request_applies_the_full_claim_and_names_this_host() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = subtask(&db, epic.id, "target", TaskStatus::Backlog, Some(1)).await;
 
-    assert!(db.try_claim_backlog_task(id).await.unwrap());
+    let RequestDispatchAnswer::Requested(request_id) = request(&db, id).await else {
+        panic!("the request must apply");
+    };
 
-    // Same SET list as the by-epic claim — asserted here so the two cannot drift.
     let claimed = db.get_task(id).await.unwrap();
     assert_eq!(claimed.status, TaskStatus::Running);
     assert_eq!(
@@ -783,131 +775,118 @@ async fn try_claim_backlog_task_applies_the_full_claim() {
         claimed.worktree.is_none(),
         "the claim runs ahead of provisioning"
     );
+    let row = db.dispatch_request(request_id).await.unwrap();
+    assert_eq!(
+        row.host, MEMORY_HOST_ID,
+        "the requester is this handle's host"
+    );
 }
 
 #[tokio::test]
-async fn try_claim_backlog_task_is_false_for_a_task_out_of_backlog() {
+async fn a_request_for_a_task_out_of_backlog_writes_nothing() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = subtask(&db, epic.id, "running", TaskStatus::Running, Some(1)).await;
 
-    assert!(!db.try_claim_backlog_task(id).await.unwrap());
+    assert!(!applied(&request(&db, id).await));
     assert!(
         db.get_task(id)
             .await
             .unwrap()
             .last_pre_tool_use_at
             .is_none(),
-        "a lost claim writes nothing at all — one statement, so it cannot half-apply"
+        "a refused request writes nothing at all — one transaction, so it cannot half-apply"
     );
+    assert!(db.latest_dispatch_request_for_task(id).await.is_none());
 }
 
 #[tokio::test]
-async fn try_claim_backlog_task_is_false_for_a_missing_task() {
+async fn a_request_for_a_missing_task_is_refused() {
     let db = in_memory_db().await;
-    assert!(!db.try_claim_backlog_task(TaskId(999_999)).await.unwrap());
+    assert!(!applied(&request(&db, TaskId(999_999)).await));
 }
 
 #[tokio::test]
-async fn try_claim_backlog_task_claims_at_most_once() {
+async fn a_task_is_requested_at_most_once() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = subtask(&db, epic.id, "target", TaskStatus::Backlog, Some(1)).await;
 
-    assert!(db.try_claim_backlog_task(id).await.unwrap());
+    assert!(applied(&request(&db, id).await));
     assert!(
-        !db.try_claim_backlog_task(id).await.unwrap(),
-        "the row has left Backlog, so a second claim on it must lose"
+        !applied(&request(&db, id).await),
+        "the row has left Backlog, so a second request for it must be refused"
     );
 }
 
-// -- host gating on the claim (task #4812 distributed-dispatch foundations) --
+// -- host gating on the request (task #4812 distributed-dispatch foundations) --
 //
 // `DispatchTask`'s `requires: task.is_locally_owned` (docs/specs/dispatch.allium)
-// is folded into the claim's own WHERE clause rather than checked separately —
-// see the comment on `try_claim_backlog_task`/`try_claim_next_backlog_task`.
-// These tests exercise that SQL-level gate directly.
+// is the module's `RequestDispatch` check `task.host = null or task.host =
+// requester`.
 
 #[tokio::test]
-async fn try_claim_backlog_task_allows_a_task_with_no_host() {
+async fn a_task_with_no_host_can_be_requested() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = subtask(&db, epic.id, "target", TaskStatus::Backlog, Some(1)).await;
 
     // A never-dispatched task has `host = NULL`, so the gate is a no-op —
     // `is_locally_owned`'s first arm (core/Task in docs/specs/core.allium).
-    assert!(db.try_claim_backlog_task(id).await.unwrap());
+    assert!(applied(&request(&db, id).await));
 }
 
 #[tokio::test]
-async fn try_claim_backlog_task_refuses_a_foreign_owned_task() {
+async fn a_foreign_owned_task_is_refused() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = subtask(&db, epic.id, "target", TaskStatus::Backlog, Some(1)).await;
-    // Never call ensure_host_identity for this install — the foreign host id
-    // must differ from whatever this install would mint.
-    db.patch_task(id, &TaskPatch::new().host(Some("some-other-machine")))
-        .await
-        .unwrap();
+    db.patch_task(
+        id,
+        &TaskPatch::new()
+            .worktree(Some("/elsewhere/wt"))
+            .host(Some("some-other-machine")),
+    )
+    .await
+    .unwrap();
 
+    let answer = request(&db, id).await;
     assert!(
-        !db.try_claim_backlog_task(id).await.unwrap(),
-        "another machine holds this task's worktree; claiming it here would \
-         re-dispatch onto a directory that is not on this disk"
+        matches!(&answer, RequestDispatchAnswer::Refused(why) if why.contains("some-other-machine")),
+        "another machine holds this task's worktree; requesting it here would \
+         re-dispatch onto a directory that is not on this disk: {answer:?}"
     );
     let untouched = db.get_task(id).await.unwrap();
     assert_eq!(
         untouched.status,
         TaskStatus::Backlog,
-        "a refused claim writes nothing — one statement, so it cannot half-apply"
+        "a refused request writes nothing — one transaction, so it cannot half-apply"
     );
     assert_eq!(untouched.host.as_deref(), Some("some-other-machine"));
 }
 
-#[tokio::test]
-async fn try_claim_next_backlog_task_skips_a_foreign_owned_subtask_and_claims_the_next() {
-    let db = in_memory_db().await;
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    let foreign = subtask(&db, epic.id, "foreign", TaskStatus::Backlog, Some(10)).await;
-    db.patch_task(foreign, &TaskPatch::new().host(Some("some-other-machine")))
-        .await
-        .unwrap();
-    let next = subtask(&db, epic.id, "next", TaskStatus::Backlog, Some(20)).await;
+// -- ReleaseClaimOfFailedRequest -------------------------------------------------
+//
+// No client releases a claim any more; a FAILED request does, in the module,
+// conditionally. Pinned here through the host's failure report.
 
-    let claimed = db.try_claim_next_backlog_task(epic.id).await.unwrap();
-
-    assert_eq!(
-        claimed,
-        Some(next),
-        "the lowest-sort_order subtask is foreign-owned, so the chain passes \
-         over it and claims the next ordinary backlog subtask behind it"
-    );
-    assert_eq!(
-        db.get_task(foreign).await.unwrap().status,
-        TaskStatus::Backlog,
-        "the foreign-owned subtask is left untouched, not claimed"
-    );
-}
-
-// -- try_release_backlog_claim ----------------------------------------------
-
-/// Helper: a backlog subtask, claimed, ready to have its claim released.
-async fn claimed_task(db: &Store) -> TaskId {
+/// Helper: a backlog task, requested and claimed by this host, ready to fail.
+async fn provisioning_task(db: &Store) -> (TaskId, crate::models::DispatchRequestId) {
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = subtask(db, epic.id, "t", TaskStatus::Backlog, None).await;
-    assert_eq!(
-        db.try_claim_next_backlog_task(epic.id).await.unwrap(),
-        Some(id)
-    );
-    id
+    let RequestDispatchAnswer::Requested(request_id) = request(db, id).await else {
+        panic!("the request must apply");
+    };
+    assert!(db.claim_dispatch_request(request_id).await.unwrap());
+    (id, request_id)
 }
 
 #[tokio::test]
-async fn try_release_backlog_claim_undoes_an_unprovisioned_claim() {
+async fn a_failed_request_releases_an_unprovisioned_claim() {
     let db = in_memory_db().await;
-    let id = claimed_task(&db).await;
+    let (id, request_id) = provisioning_task(&db).await;
 
-    assert!(db.try_release_backlog_claim(id).await.unwrap());
+    assert!(db.report_dispatch_failed(request_id, "boom").await.unwrap());
     let released = db.get_task(id).await.unwrap();
     assert_eq!(released.status, TaskStatus::Backlog);
     assert_eq!(
@@ -915,43 +894,42 @@ async fn try_release_backlog_claim_undoes_an_unprovisioned_claim() {
         SubStatus::default_for(TaskStatus::Backlog)
     );
     // The stamp the claim seeded is cleared, or the task is not quite "as it
-    // was before the chain fired".
+    // was before the dispatch fired".
     assert!(released.last_pre_tool_use_at.is_none());
 }
 
 #[tokio::test]
-async fn try_release_backlog_claim_spares_a_provisioned_task() {
+async fn a_failed_request_spares_a_provisioned_task() {
     let db = in_memory_db().await;
-    let id = claimed_task(&db).await;
-    // Provisioning landed: the dispatch succeeded and recorded a worktree.
-    db.patch_task(id, &TaskPatch::new().worktree(Some("/tmp/wt")))
-        .await
-        .unwrap();
+    let (id, request_id) = provisioning_task(&db).await;
+    // A worktree landed on the task meanwhile.
+    db.patch_task(
+        id,
+        &TaskPatch::new()
+            .worktree(Some("/tmp/wt"))
+            .host(Some(MEMORY_HOST_ID)),
+    )
+    .await
+    .unwrap();
 
-    // The release must not stomp a task that is genuinely running.
-    assert!(!db.try_release_backlog_claim(id).await.unwrap());
+    db.report_dispatch_failed(request_id, "late").await.unwrap();
+
     let kept = db.get_task(id).await.unwrap();
     assert_eq!(kept.status, TaskStatus::Running);
     assert_eq!(kept.worktree.as_deref(), Some("/tmp/wt"));
 }
 
 #[tokio::test]
-async fn try_release_backlog_claim_spares_a_task_moved_out_of_running() {
+async fn a_failed_request_spares_a_task_moved_out_of_running() {
     let db = in_memory_db().await;
-    let id = claimed_task(&db).await;
+    let (id, request_id) = provisioning_task(&db).await;
     // A human moved it on while provisioning was still in flight.
     db.patch_task(id, &TaskPatch::new().status(TaskStatus::Review))
         .await
         .unwrap();
 
-    assert!(!db.try_release_backlog_claim(id).await.unwrap());
+    db.report_dispatch_failed(request_id, "late").await.unwrap();
     assert_eq!(db.get_task(id).await.unwrap().status, TaskStatus::Review);
-}
-
-#[tokio::test]
-async fn try_release_backlog_claim_is_false_for_missing_task() {
-    let db = in_memory_db().await;
-    assert!(!db.try_release_backlog_claim(TaskId(999_999)).await.unwrap());
 }
 
 #[tokio::test]

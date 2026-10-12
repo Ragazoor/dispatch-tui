@@ -596,6 +596,9 @@ pub fn run_agent_for_mode(
             dispatch_agent(task, runner, epic_ctx.as_ref(), &injections)
         }
         crate::models::DispatchMode::Research => research_agent(task, runner, epic_ctx.as_ref()),
+        crate::models::DispatchMode::Quick => {
+            quick_dispatch_agent(task, runner, epic_ctx.as_ref(), &injections)
+        }
     }
 }
 
@@ -603,10 +606,9 @@ pub fn run_agent_for_mode(
 /// build a prompt: the epic banner, and the learnings to inject (recording each
 /// retrieval as it goes).
 ///
-/// Grouped because all four launch sites — `dispatch_task` and the epic chain in
-/// `src/mcp/handlers/tasks/dispatch.rs`, and `exec_quick_dispatch` /
-/// `exec_dispatch_agent` in `src/runtime/tasks.rs` — ran the identical
-/// prologue inline, so a change to it meant editing four places.
+/// Since store-split M4 every launch path is a dispatch request row, and the one
+/// place that provisions — `TaskService::serve_dispatch_request` — runs this
+/// prologue for all of them.
 ///
 /// Deliberately carries no verify command — see `fetch_verify_command` below.
 pub struct DispatchInputs {

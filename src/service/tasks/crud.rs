@@ -146,7 +146,8 @@ pub struct ClosedSession {
 
 pub struct TaskService {
     /// The wide bundle, not the `TaskAndEpicStore` the CRUD methods alone would
-    /// need: [`dispatch`](Self::dispatch) runs the dispatch prologue, which
+    /// need: [`serve_dispatch_request`](Self::serve_dispatch_request) runs the
+    /// dispatch prologue, which
     /// reads the whole [`TaskReadStore`](store::TaskReadStore) surface (epic
     /// banner, learning injections and their retrieval records). `TaskStore` is
     /// the whole store plus that read bundle, so it is still the narrowest
@@ -154,8 +155,15 @@ pub struct TaskService {
     /// handle is what keeps the prologue's reads and the service's writes on
     /// the same database by construction.
     pub db: Arc<dyn store::TaskStore>,
-    clock: Arc<dyn crate::clock::Clock>,
+    pub(super) clock: Arc<dyn crate::clock::Clock>,
     pub(super) runner: Arc<dyn crate::process::ProcessRunner>,
+    /// Whether each dispatch request this board provisioned reused its
+    /// worktree — what `dispatch_task`'s success text names, and which only
+    /// provisioning can tell (`DispatchTaskViaMcp`). In memory on purpose: the
+    /// request row has no column for it. See
+    /// [`Self::dispatched_worktree_reused`].
+    pub(super) reused_worktrees:
+        std::sync::Mutex<std::collections::HashMap<crate::models::DispatchRequestId, bool>>,
     /// Handles for in-flight `ClosePrOnDone` closes (`spawn_close_attached_pr`),
     /// so a test can wait for a fire-and-forget close to actually finish —
     /// deterministically, rather than sleeping — before asserting on
@@ -182,6 +190,7 @@ impl TaskService {
             db,
             clock: Arc::new(crate::clock::SystemClock),
             runner,
+            reused_worktrees: std::sync::Mutex::new(std::collections::HashMap::new()),
             #[cfg(test)]
             background_pr_closes: std::sync::Mutex::new(Vec::new()),
         }
@@ -561,7 +570,7 @@ impl TaskService {
     }
 
     /// Recalculate the parent epic of the given task, if it has one.
-    async fn recalculate_epic_for_task(&self, task_id: TaskId) {
+    pub(super) async fn recalculate_epic_for_task(&self, task_id: TaskId) {
         if let Some(task) = self.db.get_task(task_id).await {
             if let Some(epic_id) = task.epic_id {
                 self.recalculate_epic(epic_id).await;
@@ -1106,89 +1115,57 @@ impl TaskService {
         Ok(self.db.mark_pr_learnings_gate_shown(id).await?)
     }
 
-    /// Select and atomically claim the epic's next backlog subtask.
+    /// `epics.allium: AutoDispatchNextSubtask`'s claim: offer the epic's
+    /// backlog subtasks to the module as dispatch requests (origin
+    /// `epic_chain`, no mode), one at a time in board order, until one is
+    /// accepted. Returns that subtask and its request, or `Ok(None)` when no
+    /// candidate is left.
     ///
-    /// Returns the claimed task with its `Running` status applied, or `Ok(None)`
-    /// when no backlog subtask remains. Selecting and claiming are a single
-    /// conditional write (`store::TaskStore::try_claim_next_backlog_task`), so
-    /// there is no window in which a concurrent caller can take the row this one
-    /// picked: two concurrent callers claim two *different* subtasks, never the
-    /// same one — the guarantee `AutoDispatchNextSubtask` in
-    /// `docs/specs/epics.allium` depends on. `Ok(None)` therefore means exactly
-    /// "no backlog subtask left", never "gave up under contention".
-    ///
-    /// Claiming moves the `Running` transition ahead of worktree provisioning,
-    /// so the returned task has `worktree = None` until the dispatch completes.
-    pub async fn claim_next_backlog_task(
+    /// A refused request is ORDINARY — another entry point or a concurrent
+    /// close got there first, or the subtask's worktree is on another machine
+    /// — and the chain moves on, so two sessions closing concurrently request
+    /// two DIFFERENT subtasks (`DispatchClaimExclusive` in
+    /// `docs/specs/dispatch.allium`). The candidates are read from the same
+    /// rows the board draws, so the chain takes the task the column shows as
+    /// next. `phoenix` rows are passed over (`PhoenixIsNeverChained`): the
+    /// request reducer does not exclude them, so the filter has to live here.
+    pub async fn request_next_backlog_subtask(
         &self,
         epic_id: EpicId,
-    ) -> Result<Option<Task>, ServiceError> {
-        // Read only to honour the NotFound contract — the claim itself needs no
-        // prior selection.
+    ) -> Result<Option<(Task, crate::models::DispatchRequestId)>, ServiceError> {
+        // Read only to honour the NotFound contract.
         self.db
             .get_epic(epic_id)
             .await
             .ok_or_else(|| ServiceError::NotFound(format!("Epic {} not found", epic_id.0)))?;
 
-        let Some(claimed_id) = self.db.try_claim_next_backlog_task(epic_id).await? else {
-            return Ok(None);
-        };
-        // No-drain: a claim moves the task *into* Running; draining a
-        // leftover count here would race that with a Review flip. Guards
-        // against subagent entries left over from a prior run of this task.
-        self.clear_subagents_no_drain(claimed_id).await?;
-        self.recalculate_epic(epic_id).await;
-        // Re-read rather than mirroring the claim's SET list here: the row is
-        // the truth, and hand-copying it silently drifts (the DB also stamps
-        // `updated_at`, which no in-memory copy would carry).
-        Ok(self.db.get_task(claimed_id).await)
-    }
-
-    /// Atomically claim one specific `Backlog` task for dispatch, moving it to
-    /// `Running` before any provisioning happens. Returns whether the claim was
-    /// won.
-    ///
-    /// The by-id twin of [`Self::claim_next_backlog_task`], and the guard every
-    /// dispatch entry point takes ahead of provisioning — that is what makes
-    /// `DispatchClaimExclusive` (`docs/specs/dispatch.allium`) hold across
-    /// entry points rather than only between epic chains. `Ok(false)` means
-    /// someone else got there first (or the task is gone); the caller must
-    /// provision nothing and launch no agent.
-    ///
-    /// One conditional write (`store::TaskStore::try_claim_backlog_task`), sharing
-    /// its SET list with the by-epic claim so "what a claim writes" has a single
-    /// definition. Being one statement is what keeps the caller's side simple:
-    /// the claim can never half-apply, so `Err` means nothing was written and
-    /// there is no partial state for the caller to unwind.
-    ///
-    /// No `completed_at` stamp is applied: this transition can neither reach
-    /// nor leave `Done`, so `completed_at_for_status_transition` would return
-    /// `None` regardless.
-    pub async fn claim_backlog_task(&self, task_id: TaskId) -> Result<bool, ServiceError> {
-        if !self.db.try_claim_backlog_task(task_id).await? {
-            return Ok(false);
+        // `list_tasks_for_epic` is already in `COALESCE(sort_order, id)` order —
+        // the order the board draws them in, and the order the chain takes.
+        let candidates: Vec<Task> = self
+            .db
+            .list_tasks_for_epic(epic_id)
+            .await
+            .into_iter()
+            .filter(|t| t.status == TaskStatus::Backlog && !t.phoenix)
+            .collect();
+        for task in candidates {
+            match self
+                .request_dispatch(task.id, crate::models::DispatchOrigin::EpicChain, None)
+                .await?
+            {
+                crate::store::RequestDispatchAnswer::Requested(id) => {
+                    let task = self.db.get_task(task.id).await.unwrap_or(task);
+                    return Ok(Some((task, id)));
+                }
+                crate::store::RequestDispatchAnswer::Refused(why) => {
+                    tracing::info!(
+                        task_id = task.id.0,
+                        "the epic chain's request was refused, trying the next subtask: {why}"
+                    );
+                }
+            }
         }
-        // No-drain: a claim moves the task *into* Running; draining a
-        // leftover count here would race that with a Review flip.
-        self.clear_subagents_no_drain(task_id).await?;
-        self.recalculate_epic_for_task(task_id).await;
-        Ok(true)
-    }
-
-    /// Undo a claim on a subtask that was never provisioned, returning it to
-    /// `Backlog` with the claim's activity stamp cleared.
-    ///
-    /// Conditional, mirroring [`Self::claim_next_backlog_task`]: it only fires
-    /// while the task is still `Running` with no worktree. Provisioning can take
-    /// a `git fetch`'s worth of wall time, so an unconditional revert would
-    /// drag a task a human moved in that window back to `Backlog`. Returns
-    /// whether the release applied.
-    pub async fn release_claim(&self, task_id: TaskId) -> Result<bool, ServiceError> {
-        let released = self.db.try_release_backlog_claim(task_id).await?;
-        if released {
-            self.recalculate_epic_for_task(task_id).await;
-        }
-        Ok(released)
+        Ok(None)
     }
 }
 

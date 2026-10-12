@@ -9,7 +9,6 @@ use crate::sync::{encode, ReducerOutcome};
 use super::super::{
     CreateTaskRequest, FeedIngestOutcome, RemovedFeedTask, Store, TaskCrud, TaskPatch,
 };
-use super::won;
 
 #[async_trait::async_trait]
 impl super::super::TaskRead for Store {
@@ -193,8 +192,7 @@ impl TaskCrud for Store {
     }
 
     /// `Applied`/`Refused` map straight onto `true`/`false` via
-    /// [`ReducerOutcome::won`] — the exact `try_claim_backlog_task` shape, no
-    /// read-back needed.
+    /// [`ReducerOutcome::won`] — no read-back needed.
     async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool> {
         Ok(self
             .caller
@@ -318,95 +316,6 @@ impl TaskCrud for Store {
                 UserPromptOutcome::Refreshed
             }),
         }
-    }
-
-    /// Offer the epic's backlog subtasks to the store, in order, until one is
-    /// won. `now` is dropped: the store stamps its own clock, so two hosts'
-    /// claims are ordered by one clock rather than by whose laptop is fast.
-    ///
-    /// # Why the candidate is chosen HERE and the claim is arbitrated THERE
-    ///
-    /// A reducer returns no value, so a store-side "pick the next one and claim
-    /// it" could not tell this caller WHICH task it got — and the caller is
-    /// about to provision that task's worktree. So the choosing happens here.
-    ///
-    /// That is safe, and it is worth being precise about why, because the
-    /// neighbouring decision went the other way. An epic's STATUS has to be
-    /// derived at the store because its children can be anywhere and no board
-    /// sees all of them. Its BACKLOG SUBTASKS are different: a subscription to
-    /// an epic is `WHERE epic_id = N`, which returns every subtask of it
-    /// regardless of owner, so a board that is chaining an epic can see the
-    /// whole candidate list. The ordering decision is made on complete
-    /// information — read from the same rows the board draws, so the chain
-    /// takes the task the column shows as next.
-    ///
-    /// Exclusivity is still the store's. Each offer is a real claim that the
-    /// store refuses if another host took it first, and the loop simply moves
-    /// on — so two boards racing down the same list end up on different tasks
-    /// rather than the same one (`dispatch.allium: DispatchClaimExclusive`).
-    ///
-    /// `phoenix` rows are passed over: `epics.allium: PhoenixIsNeverChained`. A
-    /// recurring subtask respawns on completion, so chaining its successor
-    /// would launch an agent at it immediately, forever.
-    async fn try_claim_next_backlog_task(&self, epic_id: EpicId) -> Result<Option<TaskId>> {
-        let candidates: Vec<TaskId> = self
-            .rows
-            .tasks_for_epic(epic_id)
-            .into_iter()
-            .filter(|t| {
-                t.status == TaskStatus::Backlog
-                    && !t.phoenix
-                    && t.is_locally_owned(Some(&self.host))
-            })
-            .map(|t| t.id)
-            .collect();
-        // `tasks_for_epic` already sorts by `sort_key`, which is
-        // `COALESCE(sort_order, id)` — the order the board draws them in, and
-        // the order the chain must take them in.
-
-        for id in candidates {
-            if self.try_claim_backlog_task(id).await? {
-                return Ok(Some(id));
-            }
-        }
-        // Nothing left is the ordinary end of a chain, not a failure. A store
-        // that was DOWN produced an `Err` from the first offer above.
-        Ok(None)
-    }
-
-    /// A REFUSAL HERE IS AN ANSWER, NOT A FAULT.
-    ///
-    /// `Ok(false)` means another host claimed it first, which is the ordinary
-    /// outcome of a race and the one the caller handles by provisioning
-    /// nothing. A store that is DOWN still produces `Err`, because the
-    /// transport failed rather than the reducer — see [`ReducerOutcome`] for
-    /// why the two are kept apart.
-    ///
-    /// The store stamps its own clock, so two hosts' claims are ordered by one
-    /// clock rather than by whose laptop is fast.
-    async fn try_claim_backlog_task(&self, id: TaskId) -> Result<bool> {
-        Ok(won(
-            self.caller
-                .claim_backlog_task(id, self.host.clone())
-                .await?,
-            "claim",
-            id,
-        ))
-    }
-
-    /// Moves Running -> Backlog without clearing `stop_pending`, and safely so:
-    /// the `worktree IS NULL` guard restricts it to a claim that never finished
-    /// provisioning, so no agent ever ran and no Stop hook can have fired for
-    /// this claim. The claim itself also cleared the bit on the way in (see
-    /// `DispatchTask` in `docs/specs/dispatch.allium`). Any relaxation of that
-    /// guard has to clear it — see `PendingStopOnlyWhileRunning`
-    /// (`docs/specs/core.allium`).
-    async fn try_release_backlog_claim(&self, id: TaskId) -> Result<bool> {
-        Ok(won(
-            self.caller.release_backlog_claim(id).await?,
-            "release",
-            id,
-        ))
     }
 
     async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()> {

@@ -652,39 +652,59 @@ mod repo_sync {
         );
     }
 
-    // rule-success.RefreshRepoSyncStateAfterDispatch: an agent launched off-board
-    // (the dispatch_task tool, or epic auto-dispatch chaining) refreshes the
-    // repository's drift too, without a fetch — provisioning already fetched
-    // origin/<base>.
+    // rule-success.RefreshRepoSyncStateAfterDispatch for a launch the board did
+    // not ask for (the dispatch_task tool, or epic auto-dispatch chaining).
+    // Since store-split M4 every request is provisioned by this host's
+    // reactor, so an off-board request reaches the board as the same
+    // `Dispatched` message a key press does — whose non-fetching refresh is
+    // pinned in `src/tui/tests/repo_sync.rs`.
     #[tokio::test]
-    async fn apply_loop_event_agent_launched_refreshes_the_repo() {
+    async fn an_off_board_request_reaches_the_board_as_dispatched() {
+        use crate::dispatch::mock_sequence::DispatchScript;
+        use crate::store::RequestDispatchAnswer;
+
         let db = test_db().await;
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"),
-            MockProcessRunner::ok_with_stdout(b"1\t0\n"),
-        ]));
-        let rt = make_runtime(db, tx, mock.clone()).await;
-        let mut app = App::new(vec![]);
+        let rt = make_runtime(db, tx, DispatchScript::dispatch().shared_runner()).await;
+        let task = create_task_returning(
+            &**rt.db_write(),
+            "Off board",
+            "desc",
+            "/placeholder",
+            None,
+            models::TaskStatus::Backlog,
+        )
+        .await
+        .unwrap();
+        let slug = format!("{}-{}", task.id.0, models::slugify(&task.title));
+        let (_repo, repo_path, _) = crate::dispatch::tests::make_test_repo_with_worktree(&slug);
+        rt.db_write()
+            .patch_task(task.id, &store::TaskPatch::new().repo_path(&repo_path))
+            .await
+            .unwrap();
+        assert!(matches!(
+            rt.task_svc
+                .request_dispatch(task.id, models::DispatchOrigin::Mcp, None)
+                .await
+                .unwrap(),
+            RequestDispatchAnswer::Requested(_)
+        ));
 
-        let cmds = apply_loop_event(
-            &mut app,
-            LoopEvent::Mcp(crate::board_event::BoardEvent::AgentLaunched {
-                repo_path: "/repo".to_string(),
-            }),
-            &rt,
-        );
+        for handle in rt.serve_dispatch_requests().await {
+            handle.await.unwrap();
+        }
 
-        assert!(cmds.is_empty(), "the refresh is spawned, not queued");
-        let m = expect_measurement(&mut rx).await;
-        assert_eq!(m.repo_path, "/repo");
-        assert!(
-            !mock
-                .recorded_calls()
-                .iter()
-                .any(|(_, a)| a.contains(&"fetch".to_string())),
-            "provisioning already fetched origin/<base>"
-        );
+        match tokio::time::timeout(TEST_TIMEOUT, rx.recv()).await {
+            Ok(Some(Message::Task(crate::tui::messages::TaskMessage::Dispatched {
+                id,
+                switch_focus,
+                ..
+            }))) => {
+                assert_eq!(id, task.id);
+                assert!(!switch_focus, "only quick dispatch jumps to the agent");
+            }
+            other => panic!("expected Dispatched, got {other:?}"),
+        }
     }
 
     // rule-failure.RefreshRepoSyncStateAfterRebase.1: no repository could be
@@ -711,33 +731,12 @@ mod repo_sync {
         );
     }
 
-    /// `SurfaceAutoDispatchFailure` (docs/specs/epics.allium): the chain's failure
-    /// event reaches the board as a message, so the marker, the status line and the
-    /// notification are all decided by the app rather than by the loop.
-    #[tokio::test]
-    async fn apply_loop_event_auto_dispatch_failed_marks_the_subtask() {
-        let (rt, mut app) = test_runtime().await;
-
-        let cmds = apply_loop_event(
-            &mut app,
-            LoopEvent::Mcp(crate::board_event::BoardEvent::AutoDispatchFailed {
-                task_id: TaskId(1),
-                epic_id: crate::models::EpicId(9),
-                reason: "no such repo".to_string(),
-            }),
-            &rt,
-        );
-
-        assert!(
-            app.auto_dispatch_failed(TaskId(1)),
-            "the failure must reach the board's marker, got commands: {cmds:?}"
-        );
-        let status = app.status_message().unwrap_or_default();
-        assert!(
-            status.contains("no such repo"),
-            "the reason must reach the status line, got: {status}"
-        );
-    }
+    // `apply_loop_event_auto_dispatch_failed_marks_the_subtask` pinned the
+    // `BoardEvent::AutoDispatchFailed` the MCP chain used to send. Since
+    // store-split M4 the chain's failure is raised from its failed
+    // `epic_chain` request row (`epics.allium: ReportChainedDispatchFailure`);
+    // the marker, status line and once-only rule are pinned in
+    // `src/tui/tests/dispatch_requests.rs`.
 }
 
 mod invalidate_feed_cache {

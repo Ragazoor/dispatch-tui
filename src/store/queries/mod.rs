@@ -3,6 +3,7 @@
 //! it as a reducer call. The helpers here are the parts several writes share.
 
 mod board;
+mod dispatch_requests;
 mod epics;
 mod learnings;
 mod settings;
@@ -16,34 +17,10 @@ use anyhow::Result;
 
 use crate::models::{EpicId, SubagentDrain, TaskId, TaskStatus};
 use crate::spacetime::bindings;
+use crate::sync::encode;
 use crate::sync::writes::DrainReadBack;
-use crate::sync::{encode, ReducerOutcome};
 
 use super::Store;
-
-/// Whether the store applied it — and if it did not, WHY, in the log.
-///
-/// The signature the claim needs is a bool: the caller's next move is the same
-/// whichever reason it lost for. But the reasons are not the same, and
-/// `sync.allium: StoreRejectsAnInvalidMutation` says a rejection carries one.
-/// `claim_backlog_task` refuses for three (the task is gone, it is no longer in
-/// backlog, its worktree is on another machine) and only the middle one is an
-/// ordinary lost race. Collapsing all three to `false` silently turned a
-/// misconfigured host into "somebody else was quicker".
-///
-/// So the bool is still the answer and the reason still goes somewhere a person
-/// can find it. Logged rather than surfaced because there is nothing for an
-/// operator to DO about a lost race, and the two cases that are worth acting on
-/// are rare enough to be worth reading a log for.
-fn won(outcome: ReducerOutcome, what: &str, id: TaskId) -> bool {
-    match outcome {
-        ReducerOutcome::Applied(_) => true,
-        ReducerOutcome::Refused(why) => {
-            tracing::info!("the shared store refused the {what} of task {id}: {why}");
-            false
-        }
-    }
-}
 
 impl Store {
     /// This board's clock, in the store's timestamp format.

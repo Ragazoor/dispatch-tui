@@ -212,9 +212,9 @@ async fn a_subscription_follows_the_person_across_their_machines() {
 /// Test 2's second half. One person owning two machines must not make a
 /// worktree on the other reachable from here.
 ///
-/// Asserted against the REAL gate rather than a synthetic comparison:
-/// `try_claim_backlog_task` folds `is_locally_owned` into its own WHERE clause
-/// (`docs/specs/dispatch.allium`: DispatchTask), so this is the check a
+/// Asserted against the REAL gate rather than a synthetic comparison: the
+/// dispatch request's claim checks `is_locally_owned` in the module
+/// (`docs/specs/store-split.allium`: RequestDispatch), so this is the check a
 /// dispatch actually passes through. It compares MACHINE against machine, and
 /// adding an owner to the machine changes nothing about it — no amount of
 /// shared ownership moves a directory.
@@ -238,12 +238,20 @@ async fn shared_ownership_does_not_make_another_machines_worktree_dispatchable()
         .await
         .unwrap();
 
+    use crate::store::{DispatchRequestStore, RequestDispatchAnswer};
+    let request = |id| db.request_dispatch(id, crate::models::DispatchOrigin::User, None);
     assert!(
-        db.try_claim_backlog_task(mine).await.unwrap(),
+        matches!(
+            request(mine).await.unwrap(),
+            RequestDispatchAnswer::Requested(_)
+        ),
         "a task whose worktree is on THIS disk stays dispatchable"
     );
     assert!(
-        !db.try_claim_backlog_task(theirs).await.unwrap(),
+        matches!(
+            request(theirs).await.unwrap(),
+            RequestDispatchAnswer::Refused(_)
+        ),
         "the other machine's task must stay the other machine's, however the two are owned"
     );
 }

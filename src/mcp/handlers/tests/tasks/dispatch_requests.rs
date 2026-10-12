@@ -20,7 +20,7 @@ use super::*;
 use std::time::Duration;
 
 use crate::models::{DispatchMode, DispatchOrigin, DispatchRequestState, TaskId, TmuxWindow};
-use crate::store::{DispatchRequestRead, DispatchRequestStore, RequestDispatchAnswer};
+use crate::store::RequestDispatchAnswer;
 
 /// Bound on awaiting a completion signal — a deadline on a signal, never a
 /// wall-clock wait for work to finish.

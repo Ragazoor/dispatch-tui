@@ -26,16 +26,19 @@
 
 use async_trait::async_trait;
 
-use super::{EpicRead, RepoConfigRead, TaskRead, WorkPackageRead};
+use super::{DispatchRequestRead, EpicRead, RepoConfigRead, TaskRead, WorkPackageRead};
 use crate::models::PollScopeId;
 
 /// The reads a board performs to draw itself.
 ///
 /// Read-only by construction: the supertraits are the read halves of the
-/// task, epic, work-package and repo-config domains, so a `dyn BoardReads` reaches no
-/// mutation.
+/// task, epic, work-package, repo-config and dispatch-request domains, so a
+/// `dyn BoardReads` reaches no mutation. The dispatch requests are drawn too:
+/// this host's rows drive `dispatch.allium: DispatchingFeedback`.
 #[async_trait]
-pub trait BoardReads: TaskRead + EpicRead + WorkPackageRead + RepoConfigRead {
+pub trait BoardReads:
+    TaskRead + EpicRead + WorkPackageRead + RepoConfigRead + DispatchRequestRead
+{
     /// The `Host.id` allowed to run recurring background polling for
     /// `target`, or `None` if unclaimed (`core.allium: PollOwner`). See
     /// `pr-workflow.allium: PollPrStatus` and `feeds.allium: FeedTick`, the two

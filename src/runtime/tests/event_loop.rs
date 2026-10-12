@@ -496,85 +496,77 @@ mod execute_commands {
     }
 }
 
-/// The three result arms
-mod run_blocking_dispatch {
+/// The host reactor's failure arm the old blocking-dispatch panic tests pinned:
+/// a provisioning that panics must not vanish. Since store-split M4 it
+/// fails the request row, which releases the claim and reaches the App as
+/// the row (`dispatch.allium: FailedRequestReported`).
+mod host_reactor {
     use super::*;
+    use crate::store::RequestDispatchAnswer;
 
-    /// Receive the next message or fail the test rather than hang forever.
-    #[tokio::test]
-    async fn run_blocking_dispatch_sends_dispatched_on_success() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        tasks::run_blocking_dispatch(models::TaskId(7), "Dispatch", true, tx, || {
-            Ok(models::DispatchResult {
-                worktree_path: "/wt".into(),
-                tmux_window: test_tmux_window("win"),
-                reused_worktree: false,
-            })
-        });
+    /// A runner whose every call unwinds, standing in for a provisioning
+    /// worker that panics.
+    struct PanickingRunner;
 
-        match recv_msg(&mut rx).await {
-            Message::Task(crate::tui::messages::TaskMessage::Dispatched {
-                id,
-                worktree,
-                tmux_window,
-                switch_focus,
-            }) => {
-                assert_eq!(id, models::TaskId(7));
-                assert_eq!(worktree, "/wt");
-                assert_eq!(tmux_window.as_str(), "win");
-                assert!(switch_focus);
-            }
-            other => panic!("expected Dispatched, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn run_blocking_dispatch_reports_panics_as_dispatch_failure() {
-        // The panic arm is unreachable from production code on demand: it only
-        // fires when the dispatch closure itself unwinds. Without this test the
-        // downcast-and-report logic is never executed.
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        tasks::run_blocking_dispatch(models::TaskId(9), "Dispatch", false, tx, || {
+    impl ProcessRunner for PanickingRunner {
+        fn run(&self, _program: &str, _args: &[&str]) -> anyhow::Result<std::process::Output> {
             panic!("worktree exploded")
-        });
-
-        match recv_msg(&mut rx).await {
-            Message::Task(crate::tui::messages::TaskMessage::DispatchFailed(id)) => {
-                assert_eq!(id, models::TaskId(9));
-            }
-            other => panic!("expected DispatchFailed, got {other:?}"),
         }
-        match recv_msg(&mut rx).await {
-            Message::System(crate::tui::messages::SystemMessage::Error(msg)) => {
-                assert!(
-                    msg.contains("panicked") && msg.contains("worktree exploded"),
-                    "the panic payload must be surfaced to the user, got {msg:?}"
-                );
-            }
-            other => panic!("expected a System error, got {other:?}"),
+
+        fn sccache_available(&self) -> bool {
+            false
         }
     }
 
     #[tokio::test]
-    async fn run_blocking_dispatch_reports_non_string_panic_payload_as_unknown() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        tasks::run_blocking_dispatch(models::TaskId(11), "Dispatch", false, tx, || {
-            std::panic::panic_any(42_u32)
-        });
+    async fn a_panicking_provisioning_fails_the_request_and_releases_the_claim() {
+        let db = test_db().await;
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let rt = make_runtime(db, tx, Arc::new(PanickingRunner)).await;
+        // A real directory, so provisioning gets as far as its first
+        // subprocess — where the runner unwinds.
+        let repo = tempfile::tempdir().unwrap();
+        let task = create_task_returning(
+            &**rt.db_write(),
+            "Exploding",
+            "desc",
+            repo.path().to_str().unwrap(),
+            None,
+            models::TaskStatus::Backlog,
+        )
+        .await
+        .unwrap();
+        let RequestDispatchAnswer::Requested(id) = rt
+            .task_svc
+            .request_dispatch(
+                task.id,
+                models::DispatchOrigin::User,
+                Some(models::DispatchMode::Dispatch),
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("the request must apply");
+        };
 
-        assert!(matches!(
-            recv_msg(&mut rx).await,
-            Message::Task(crate::tui::messages::TaskMessage::DispatchFailed(_))
-        ));
-        match recv_msg(&mut rx).await {
-            Message::System(crate::tui::messages::SystemMessage::Error(msg)) => {
-                assert!(
-                    msg.contains("unknown"),
-                    "an undowncastable payload must fall back to 'unknown', got {msg:?}"
-                );
-            }
-            other => panic!("expected a System error, got {other:?}"),
+        for handle in rt.serve_dispatch_requests().await {
+            handle.await.unwrap();
         }
+
+        let row = rt.database.dispatch_request(id).await.unwrap();
+        assert_eq!(row.state, models::DispatchRequestState::Failed);
+        assert!(
+            row.reason
+                .as_deref()
+                .is_some_and(|r| r.contains("dispatch worker died")),
+            "the panic must be reported, not swallowed: {:?}",
+            row.reason
+        );
+        assert_eq!(
+            rt.database.get_task(task.id).await.unwrap().status,
+            models::TaskStatus::Backlog,
+            "the claim is released"
+        );
     }
 
     #[tokio::test]

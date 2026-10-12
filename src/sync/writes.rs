@@ -30,8 +30,8 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::models::{
-    EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId, RetrievalSource,
-    SubStatus, TaskId, WorkPackageId, WorkPackageItem,
+    DispatchRequestId, EpicId, LearningId, LearningVerdict, NotificationWrite, PollScopeId,
+    RetrievalSource, SubStatus, TaskId, WorkPackageId, WorkPackageItem,
 };
 use crate::spacetime::bindings;
 
@@ -424,6 +424,48 @@ pub trait ReducerCaller: Send + Sync {
         label: String,
         owner: String,
     ) -> Result<ReducerOutcome>;
+
+    // -- Dispatch requests (store-split M4) ------------------------------------
+    //
+    // `store-split.allium`: `RequestDispatch` and the rules after it. Every
+    // refusal is an ordinary answer (`Refused`), not an error: a lost race,
+    // a late report and a redelivered claim all look like this.
+
+    /// `RequestDispatch`: claim `task` and write a `requested` row naming
+    /// `requester`. `mode` `""` lets the module derive it (D3). An applied
+    /// call reads the new request's id back as the outcome's one id.
+    async fn request_dispatch(
+        &self,
+        task: TaskId,
+        requester: String,
+        origin: String,
+        mode: String,
+    ) -> Result<ReducerOutcome>;
+    /// `HostClaimsDispatch`: requested -> provisioning, by the row's host only.
+    async fn claim_dispatch_request(
+        &self,
+        id: DispatchRequestId,
+        host: String,
+    ) -> Result<ReducerOutcome>;
+    /// `HostReportsDispatched`. Refused on a row that is no longer
+    /// provisioning — a late report after the backstop failed it.
+    async fn report_dispatch_provisioned(
+        &self,
+        id: DispatchRequestId,
+        reporter: String,
+        worktree: String,
+        tmux_window: String,
+    ) -> Result<ReducerOutcome>;
+    /// `HostReportsDispatchFailed`: the module fails the row and releases the
+    /// claim (`ReleaseClaimOfFailedRequest`).
+    async fn report_dispatch_failed(
+        &self,
+        id: DispatchRequestId,
+        reporter: String,
+        reason: String,
+    ) -> Result<ReducerOutcome>;
+    /// `HostRestartFailsInterrupted`: fail `host`'s provisioning rows.
+    async fn fail_interrupted_dispatch_requests(&self, host: String) -> Result<ReducerOutcome>;
 }
 
 /// Push this machine's current host row to the store, best-effort.

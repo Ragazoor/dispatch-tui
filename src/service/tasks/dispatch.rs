@@ -1,196 +1,284 @@
-//! The single dispatch orchestration seam.
+//! The dispatch seam: request rows (store-split M4, task #53257).
 //!
-//! `claim → prepare inputs → pick the agent for the mode → provision on the
-//! blocking pool → record where the agent landed → release the claim on
-//! failure` used to be written out once per entry point (the MCP
-//! `dispatch_task` handler, the epic auto-dispatch chain, and the TUI runtime),
-//! with the `DispatchMode` match duplicated on top of that. `DispatchClaimExclusive`
-//! (`docs/specs/dispatch.allium`) is the most safety-critical rule in the
-//! system and it is exactly the part those copies each re-asserted separately,
-//! so it lives here once.
+//! Two halves of one flow, and the only two ways the board takes part in a
+//! dispatch:
 //!
-//! Callers keep only what is genuinely theirs: how they came by the task, and
-//! how they report the outcome (a JSON-RPC response, a board message).
+//! - **Asking** — [`TaskService::request_dispatch`], the one call every launch
+//!   path makes (`store-split.allium: RequestDispatch`, D6): the TUI keys and
+//!   retry-fresh, quick dispatch, MCP `dispatch_task` and the epic chain. The
+//!   module claims the task and writes a `requested` row naming this host in
+//!   one transaction. Nothing is provisioned here, so `DispatchClaimExclusive`
+//!   (`docs/specs/dispatch.allium`) is the module's: a second request for a
+//!   claimed task is refused, whichever entry point sends it.
+//! - **Provisioning** — [`TaskService::serve_dispatch_request`], this host's
+//!   reaction to a `requested` row naming it (`store-split.allium:
+//!   HostClaimsDispatch`, `dispatch.allium: ProvisionDispatch`): claim the row,
+//!   provision with the row's mode under the row's deadline, and report
+//!   dispatched or failed. The module writes the task's worktree, window and
+//!   host, and releases the claim on any failure; the host releases nothing.
 
 use std::sync::Arc;
 
-use crate::dispatch;
-use crate::models::{DispatchMode, DispatchResult, Task};
-use crate::service::{FieldUpdate, ServiceError, TmuxWindowUpdate, UpdateTaskParams};
+use crate::dispatch::{self, DeadlineRunner, DEADLINE_PASSED};
+use crate::models::{
+    DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, DispatchResult, TaskId,
+};
+use crate::service::ServiceError;
+use crate::store::RequestDispatchAnswer;
 
 use super::crud::TaskService;
 
-/// How the caller came by the task it is asking to dispatch.
-///
-/// Not a bool: the two arms carry different obligations. `Take` means this call
-/// owns the claim and therefore owes the release if provisioning fails; `Held`
-/// means the caller already won it — the epic chain's
-/// [`claim_next_backlog_task`](TaskService::claim_next_backlog_task) both
-/// *selects* and claims, so the claim cannot be taken here without dispatching
-/// something the chain never chose.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DispatchClaim {
-    /// Take the pre-provisioning claim as the first step of this call.
-    Take,
-    /// The caller already holds the claim for this task.
-    Held,
-}
-
-/// What a caller brings to [`TaskService::dispatch`]: the row, how to launch
-/// it, who owns the claim, and the two collaborators the service does not hold.
-///
-/// No read handle: the prologue reads through `TaskService`'s own
-/// [`db`](TaskService::db), so *within this seam* the reads cannot be aimed at
-/// one database while the claim and the worktree write land in another. That
-/// scoping is literal — the TUI's `exec_dispatch_agent`/`exec_quick_dispatch`
-/// (`src/runtime/tasks.rs`) do not come through here and still run the prologue
-/// against their own `TaskReadStore`.
-///
-/// `emb_svc` does stay a per-call parameter: embeddings live with the learning
-/// service, and `EmbeddingService::new_noop` spawns an OS thread that a
-/// constructor argument would start in every fixture that never dispatches.
-pub struct DispatchRequest {
-    /// The task to provision. Must be the claimed row (`Held`) or a `Backlog`
-    /// row this call will claim (`Take`).
-    pub task: Task,
-    /// Which agent to launch. MCP callers derive it with
-    /// [`DispatchMode::for_task`]; the TUI carries the operator's choice.
-    pub mode: DispatchMode,
-    /// Embedding service backing the learning injections.
-    pub emb_svc: Arc<crate::embeddings::EmbeddingService>,
-    /// Pre-resolved epic banner, for a caller that already holds the epic row
-    /// (the chain reads it to check `auto_dispatch`). `None` means "read it
-    /// from the service's own handle" — which is also what a task with no epic
-    /// resolves to, so
-    /// leaving it unset is always correct, just one read slower.
-    pub epic_ctx: Option<dispatch::EpicContext>,
-    /// Whether this call takes the claim or the caller already holds it.
-    pub claim: DispatchClaim,
-}
-
-/// What a [`TaskService::dispatch`] attempt made of the task.
+/// What [`TaskService::serve_dispatch_request`] made of a row.
 #[derive(Debug)]
-pub enum DispatchOutcome {
-    /// The agent is running. `worktree`/`tmux_window` are already persisted.
-    Launched(DispatchResult),
-    /// The claim went to another entry point. Nothing was provisioned and
-    /// nothing is owed: the claim is a single conditional write, so a caller
-    /// that lost it holds nothing to unwind. Only reachable with
-    /// [`DispatchClaim::Take`].
-    ClaimLost,
-    /// The claim write itself errored, so it wrote nothing. As with
-    /// [`Self::ClaimLost`], there is nothing to release.
-    ClaimFailed(ServiceError),
-    /// Provisioning failed after the claim was won, and the claim has been
-    /// released (conditionally — see
-    /// [`release_claim`](TaskService::release_claim)). The string is the
-    /// failure, ready to be embedded in the caller's own error prose.
+pub enum ServedDispatch {
+    /// The row names another machine; it is not this board's to claim
+    /// (`HostClaimsDispatch`'s `requires: request.host = local_host()`).
+    NotThisHost,
+    /// The claim was refused — another board or an earlier delivery took the
+    /// row, or it already finished — or could not be sent. Nothing was
+    /// provisioned and nothing is owed (`OnlyTheClaimedRequestProvisions`).
+    ClaimRefused(String),
+    /// The agent is running and the module recorded the worktree and window.
+    Dispatched(DispatchResult),
+    /// The row ended failed: this host's provisioning failed or stopped at the
+    /// deadline (rolled back and reported), or the row failed under it (torn
+    /// down). The string is the reason the row records.
     Failed(String),
 }
 
 impl TaskService {
-    /// Provision `req.task` and launch its agent.
+    /// `RequestDispatch`: claim `task_id` and write a `requested` row naming
+    /// THIS host. `mode` `None` lets the module derive it (D3). Provisions
+    /// nothing.
     ///
-    /// Owns the whole sequence: claim (per [`DispatchClaim`]), the dispatch
-    /// prologue, the [`DispatchMode`] match, the blocking provision, the
-    /// worktree/tmux write on success, and the claim release on failure.
-    ///
-    /// Never returns `Err`: every failure mode is a [`DispatchOutcome`] the
-    /// caller must distinguish, and collapsing them into one error type is how
-    /// a lost claim gets mistaken for a failed dispatch — the difference
-    /// decides whether anyone owes a release.
-    pub async fn dispatch(&self, req: DispatchRequest) -> DispatchOutcome {
-        let DispatchRequest {
-            task,
-            mode,
-            emb_svc,
-            epic_ctx,
-            claim,
-        } = req;
-        let task_id = task.id;
+    /// A refusal is an ordinary [`RequestDispatchAnswer::Refused`], not an
+    /// error: it is how a caller learns another entry point got there first.
+    pub async fn request_dispatch(
+        &self,
+        task_id: TaskId,
+        origin: DispatchOrigin,
+        mode: Option<DispatchMode>,
+    ) -> Result<RequestDispatchAnswer, ServiceError> {
+        let answer = self.db.request_dispatch(task_id, origin, mode).await?;
+        if matches!(answer, RequestDispatchAnswer::Requested(_)) {
+            // The claim moved the task into Running; its epic's status may
+            // follow.
+            self.recalculate_epic_for_task(task_id).await;
+        }
+        Ok(answer)
+    }
 
-        if claim == DispatchClaim::Take {
-            match self.claim_backlog_task(task_id).await {
-                Ok(true) => {}
-                Ok(false) => return DispatchOutcome::ClaimLost,
-                Err(e) => return DispatchOutcome::ClaimFailed(e),
+    /// `HostRestartFailsInterrupted`: fail the rows this host left
+    /// `provisioning` when its previous board stopped, releasing their claims.
+    /// Run once, on the first connection, before any `requested` row is served
+    /// (D5).
+    pub async fn fail_interrupted_dispatch_requests(&self) -> Result<(), ServiceError> {
+        let interrupted: Vec<TaskId> = self
+            .db
+            .dispatch_requests()
+            .await
+            .into_iter()
+            .filter(|r| r.state == crate::models::DispatchRequestState::Provisioning)
+            .map(|r| r.task_id)
+            .collect();
+        self.db.fail_interrupted_dispatch_requests().await?;
+        for task in interrupted {
+            self.recalculate_epic_for_task(task).await;
+        }
+        Ok(())
+    }
+
+    /// Whether the worktree a request this board provisioned was reused rather
+    /// than created — what `dispatch_task`'s success text names. Only
+    /// provisioning can tell (the row has no column for it), so it is kept
+    /// here, in memory, for the requests this board served. `None` for any
+    /// other request.
+    pub async fn dispatched_worktree_reused(&self, id: DispatchRequestId) -> Option<bool> {
+        self.reused_worktrees
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&id)
+            .copied()
+    }
+
+    /// `HostClaimsDispatch` then `ProvisionDispatch` for one delivered row.
+    ///
+    /// Claims the row (exactly one board's claim is accepted), provisions with
+    /// the ROW's mode — never re-derived — under the ROW's deadline
+    /// ([`DeadlineRunner`]), and reports. Every failure is rolled back by the
+    /// provisioning itself and reported; the module releases the claim. A row
+    /// that failed under this host — the backstop, or the task's deletion — is
+    /// learnt from the refused report and torn down here, so no agent keeps
+    /// running for a task that is back in backlog or gone.
+    ///
+    /// Never `Err`: every outcome is a [`ServedDispatch`].
+    pub async fn serve_dispatch_request(
+        &self,
+        request: DispatchRequest,
+        emb_svc: Arc<crate::embeddings::EmbeddingService>,
+    ) -> ServedDispatch {
+        if request.host != self.db.host_id() {
+            return ServedDispatch::NotThisHost;
+        }
+        let id = request.id;
+        match self.db.claim_dispatch_request(id).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return ServedDispatch::ClaimRefused(format!(
+                    "dispatch request {} is no longer requested",
+                    id.0
+                ))
             }
+            Err(e) => return ServedDispatch::ClaimRefused(format!("{e:#}")),
         }
 
-        // The host the stamp below records: the one the store handle was
-        // built with, so it names the machine the claim just checked. Known
-        // before anything is provisioned, so `HostTracksWorktree` holds by
-        // construction (`dispatch.allium: DispatchTask`).
-        let local_host_id = self.db.host_id().to_string();
+        if self.deadline_passed(&request) {
+            return self.report_failure(&request, DEADLINE_PASSED).await;
+        }
+        let Some(task) = self.db.get_task(request.task_id).await else {
+            return self.report_failure(&request, "task deleted").await;
+        };
 
         // The prologue runs a local embedding inference and several writes, so
         // it happens before the task is handed to the blocking pool.
-        let inputs = match epic_ctx {
-            Some(ctx) => {
-                dispatch::prepare_inputs_with_epic_ctx(&*self.db, &task, &emb_svc, Some(ctx)).await
-            }
-            None => dispatch::prepare_inputs(&*self.db, &task, &emb_svc).await,
-        };
-
-        let runner = Arc::clone(&self.runner);
-        tracing::info!(task_id = task_id.0, label = mode.label(), "dispatching");
-        let result = tokio::task::spawn_blocking(move || {
-            dispatch::run_agent_for_mode(&task, mode, &*runner, inputs)
+        let inputs = dispatch::prepare_inputs(&*self.db, &task, &emb_svc).await;
+        let runner = DeadlineRunner::new(
+            Arc::clone(&self.runner),
+            Arc::clone(&self.clock),
+            request.deadline,
+        );
+        let mode = request.mode;
+        tracing::info!(
+            task_id = task.id.0,
+            request = id.0,
+            label = mode.label(),
+            "provisioning dispatch request"
+        );
+        let repo_path = task.repo_path.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            dispatch::run_agent_for_mode(&task, mode, &runner, inputs)
         })
         .await;
 
-        match result {
-            Ok(Ok(dr)) => {
-                // The claim already applied Running and seeded
-                // last_pre_tool_use_at, so this patch only records where the
-                // agent actually landed. `host` is written in the same patch
-                // as `worktree` — core/Task's `HostTracksWorktree` invariant
-                // (docs/specs/core.allium) pairs the two fields, and whichever
-                // write records the worktree owes the host (see `DispatchTask`
-                // / `DispatchResearchTask` in docs/specs/dispatch.allium).
-                let params = UpdateTaskParams::for_task(task_id)
-                    .worktree(FieldUpdate::Set(dr.worktree_path.clone()))
-                    .tmux_window(TmuxWindowUpdate::Set(dr.tmux_window.clone()))
-                    .host(FieldUpdate::Set(local_host_id));
-                if let Err(e) = self.update_task(params).await {
-                    tracing::warn!(
-                        task_id = task_id.0,
-                        "dispatch: failed to record worktree/tmux_window: {e}"
-                    );
-                }
-                DispatchOutcome::Launched(dr)
-            }
+        let provisioned = match outcome {
+            Ok(Ok(dr)) => dr,
             Ok(Err(e)) => {
-                let reason = format!("{e:#}");
-                tracing::warn!(task_id = task_id.0, "dispatch failed: {reason}");
-                self.release_claim_logged(task_id).await;
-                DispatchOutcome::Failed(reason)
+                // The provisioning rolled back what it made before returning.
+                let reason = if self.deadline_passed(&request) {
+                    DEADLINE_PASSED.to_string()
+                } else {
+                    format!("{e:#}")
+                };
+                return self.report_failure(&request, &reason).await;
             }
             Err(e) => {
-                let reason = format!("dispatch worker died: {e}");
-                tracing::warn!(task_id = task_id.0, "{reason}");
-                self.release_claim_logged(task_id).await;
-                DispatchOutcome::Failed(reason)
+                return self
+                    .report_failure(&request, &format!("dispatch worker died: {e}"))
+                    .await
+            }
+        };
+
+        // Checked once more after the last step: an attempt that finished past
+        // its deadline is not reported dispatched (ProvisioningStopsAtTheDeadline).
+        if self.deadline_passed(&request) {
+            self.tear_down(&repo_path, &provisioned).await;
+            return self.report_failure(&request, DEADLINE_PASSED).await;
+        }
+
+        match self
+            .db
+            .report_dispatch_provisioned(id, &provisioned.worktree_path, &provisioned.tmux_window)
+            .await
+        {
+            Ok(true) => {
+                self.reused_worktrees
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(id, provisioned.reused_worktree);
+                ServedDispatch::Dispatched(provisioned)
+            }
+            Ok(false) => {
+                // The row failed under this host and the report was refused:
+                // nothing was recorded on the task, so what this attempt made
+                // must go.
+                self.tear_down(&repo_path, &provisioned).await;
+                let reason = self.row_reason(id).await.unwrap_or_else(|| {
+                    "the dispatch request failed while it was being provisioned".to_string()
+                });
+                self.recalculate_epic_for_task(request.task_id).await;
+                ServedDispatch::Failed(reason)
+            }
+            Err(e) => {
+                // Unknown whether the store recorded it. Tear down rather than
+                // leave an agent running against a task whose request the
+                // backstop will fail and release.
+                self.tear_down(&repo_path, &provisioned).await;
+                self.report_failure(&request, &format!("could not report the dispatch: {e:#}"))
+                    .await
             }
         }
     }
 
-    /// Return a claimed-but-unprovisioned task to `Backlog` so a failed
-    /// dispatch leaves it dispatchable exactly as it was before the attempt.
+    fn deadline_passed(&self, request: &DispatchRequest) -> bool {
+        self.clock.now() >= request.deadline
+    }
+
+    /// Report `reason` and answer with the reason the row ends up recording —
+    /// the module's own when the row had already failed under this host.
+    async fn report_failure(&self, request: &DispatchRequest, reason: &str) -> ServedDispatch {
+        let id = request.id;
+        tracing::warn!(
+            request = id.0,
+            task_id = request.task_id.0,
+            "dispatch failed: {reason}"
+        );
+        let recorded = match self.db.report_dispatch_failed(id, reason).await {
+            Ok(true) => reason.to_string(),
+            Ok(false) => self
+                .row_reason(id)
+                .await
+                .unwrap_or_else(|| reason.to_string()),
+            Err(e) => {
+                tracing::warn!(request = id.0, "could not report the failure: {e:#}");
+                reason.to_string()
+            }
+        };
+        self.recalculate_epic_for_task(request.task_id).await;
+        ServedDispatch::Failed(recorded)
+    }
+
+    async fn row_reason(&self, id: DispatchRequestId) -> Option<String> {
+        self.db.dispatch_request(id).await.and_then(|r| r.reason)
+    }
+
+    /// The provisioning-failure rollback, after the fact: the window this
+    /// attempt opened and, only if this attempt created it, the worktree and
+    /// its branch. A reused worktree predates the attempt and is left alone.
     ///
-    /// `Ok(false)` is an expected outcome, not an error: the release is
-    /// conditional on the task still being claimed-and-unprovisioned, because
-    /// provisioning can take a `git fetch`'s worth of wall time and an
-    /// unconditional revert would stomp anything that touched the task
-    /// meanwhile.
-    async fn release_claim_logged(&self, task_id: crate::models::TaskId) {
-        match self.release_claim(task_id).await {
-            Ok(true) => {}
-            Ok(false) => tracing::info!(
-                task_id = task_id.0,
-                "release_claim: claim already released or task moved on; left as-is"
+    /// The window is killed without a presence check first: this attempt
+    /// opened it moments ago, and `kill_window` resolves it by its exact name,
+    /// so a window that is already gone fails the kill rather than reaching a
+    /// prefix-matched sibling. Then the worktree half of `TaskTeardown`.
+    async fn tear_down(&self, repo_path: &str, provisioned: &DispatchResult) {
+        let runner = Arc::clone(&self.runner);
+        let repo_path = crate::models::expand_tilde(repo_path);
+        let worktree = (!provisioned.reused_worktree).then(|| provisioned.worktree_path.clone());
+        let window = provisioned.tmux_window.clone();
+        let torn = tokio::task::spawn_blocking(move || {
+            if let Err(e) = crate::tmux::kill_window(&window, &*runner) {
+                tracing::warn!(%window, "could not kill the window of a failed dispatch: {e:#}");
+            }
+            dispatch::teardown_task(&repo_path, worktree.as_deref(), None, &*runner)
+                .map_err(|e| e.to_string())
+        })
+        .await;
+        match torn {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => tracing::warn!(
+                worktree = %provisioned.worktree_path,
+                "failed to tear down a dispatch whose request failed: {e}"
             ),
-            Err(e) => tracing::warn!(task_id = task_id.0, "release_claim: failed: {e}"),
+            Err(e) => tracing::warn!("the teardown of a failed dispatch died: {e}"),
         }
     }
 }
