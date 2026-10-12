@@ -314,3 +314,41 @@ fn dispatch_requests_are_asked_for_by_this_hosts_own_id_in_every_state() {
         asked[0]
     );
 }
+
+/// `sync.allium: SubscribeToThisHostsSessionRequests`, the sixth ask. Every
+/// session request row naming THIS machine, in every state, and no other
+/// machine's: the host does the rebase and the teardown its rows ask for
+/// (`store-split.allium: HostClaimsSessionRequest`) and reads the outcome the
+/// wrap_up tool waits on. Unfiltered by state on purpose — a row leaving a
+/// state-filtered query would arrive as a delete and its outcome would be
+/// lost.
+#[test]
+fn session_requests_are_asked_for_by_this_hosts_own_id_in_every_state() {
+    let queries = subscription_queries(&SubscriptionRequest::new(ID, vec![], HOST)).unwrap();
+
+    let asked: Vec<&String> = queries
+        .iter()
+        .filter(|q| q.contains("FROM session_requests"))
+        .collect();
+    assert_eq!(
+        asked.len(),
+        1,
+        "expected exactly one ask for session_requests, got: {queries:?}"
+    );
+    assert!(
+        asked[0].contains(&format!("host = '{HOST}'")),
+        "session requests must be filtered to this host's own id: {}",
+        asked[0]
+    );
+    assert!(
+        !asked[0].contains(OTHER_HOST) && !asked[0].contains("state"),
+        "the ask names only this host and filters on no state: {}",
+        asked[0]
+    );
+    assert!(
+        queries
+            .iter()
+            .all(|q| !q.contains("session_request_timeouts")),
+        "the backstop's schedule table is the module's and is never asked for"
+    );
+}

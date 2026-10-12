@@ -822,5 +822,6 @@ mod feeds;
 mod host_file_bootstrap;
 mod misc;
 mod refresh;
+mod session_requests;
 mod split_mode;
 mod task_exec;

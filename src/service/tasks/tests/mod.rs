@@ -76,5 +76,6 @@ mod crud;
 mod dispatch;
 mod dispatch_requests;
 mod property_tests;
+mod session_requests;
 mod validators;
 mod wrap_up;

@@ -436,6 +436,7 @@ mod finish_and_guards;
 mod pr_review;
 mod pr_status;
 mod process_runner;
+mod session_requests;
 
 // Helpers other test files (here and in `mock_sequence`) reach through this module.
 pub(in crate::dispatch) use finish_and_guards::run_finish;

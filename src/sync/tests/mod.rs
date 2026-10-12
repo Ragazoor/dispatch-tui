@@ -16,6 +16,7 @@ mod identity;
 mod offline_connector;
 mod queries;
 mod reconnect;
+mod session_requests;
 mod settings_store_only;
 mod startup_connect;
 mod subscriptions;
