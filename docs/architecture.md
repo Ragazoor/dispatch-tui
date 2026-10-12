@@ -62,10 +62,10 @@ Rule of thumb: use `ServiceError` for request validation and business rules, dom
 `Shift+D` creates and immediately dispatches a task without going through the task creation dialog. The flow:
 
 1. The `Shift+D` key handler (`src/tui/input/normal.rs`) emits `TaskMessage::QuickDispatch { repo_path, epic_id }`, whose `route` arm produces `Command::QuickDispatch { draft: TaskDraft { title: DEFAULT_QUICK_TASK_TITLE, repo_path, .. }, epic_id }` (`src/tui/commands/task.rs::QuickDispatch`)
-2. Runtime handles it in `exec_quick_dispatch()` (`src/runtime/tasks.rs`) — calls `create_task()` then immediately dispatches
+2. Runtime handles it in `exec_quick_dispatch()` (`src/runtime/tasks.rs`) — calls `create_task()` then writes a dispatch request with origin `quick` and mode `quick` (store-split M4; `tasks.allium: CreateQuickTask`). This host's reactor (`src/runtime/dispatch_host.rs`) provisions it like any other request, and jumps to the new agent because the row's origin is `quick`
 3. The created task gets title `"Quick task"` (`DEFAULT_QUICK_TASK_TITLE` in `src/models/tasks.rs`), no tag, no plan
 4. If the board has multiple repo paths, `Shift+D` first enters `InputMode::QuickDispatch` (repo picker), then emits `InputMessage::SelectQuickDispatchRepo(idx)` (`src/tui/messages/input.rs`) to resolve the repo before dispatching
 
-Quick dispatch is the same code path as normal dispatch — the difference is the task is created with defaults and skips the creation dialog entirely.
+Quick dispatch is the same code path as normal dispatch — a request row, provisioned by this host's reactor — the difference is the task is created with defaults, skips the creation dialog entirely, and names the quick prompt variant.
 
-**Command-level shortcut:** `Command::QuickDispatch` bypasses the normal `Command::DispatchAgent` → `Message::Dispatched` round-trip. `exec_quick_dispatch()` calls `create_task()` and immediately dispatches in a single step — there is no intermediate message back through `app.update()`.
+**Command-level shortcut:** `Command::QuickDispatch` skips the `TaskMessage::Dispatch` → `Command::DispatchAgent` hop: `exec_quick_dispatch()` creates the task and writes its request in one step. The outcome comes back like every dispatch's — `TaskMessage::Dispatched` from the reactor, or the failed request row.

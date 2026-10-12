@@ -123,7 +123,7 @@ This file is intentionally slim — it is loaded into every agent's context. Sea
 
 - **`FieldUpdate`/`TaskPatch`** nullable mutations — also read [docs/conventions.md](docs/conventions.md) before writing an update handler.
 - **Mutation boundary** — task/epic writes go through `TaskServiceApi`/`EpicServiceApi`, never `state.db`.
-- **Dispatch seam** — launching an agent is `TaskService::dispatch`; extend it, never re-derive it.
+- **Dispatch seam** — every launch path writes a request (`TaskService::request_dispatch`); only this host's reactor provisions (`TaskService::serve_dispatch_request`). Never provision anywhere else.
 - **Layout-cache coherence**, **board read source**, **one store, no routing layer**, **DB connection model** — the TUI and storage seams.
 - **Render-panic policy**, **unsafe policy**, **tag system**, **read-side layering**, **module layering**, **`#[cfg(test)]` gating**, **workhorse macros**, **timing constants**.
 - Bare `unwrap()`/`expect()` outside tests only hard-fail under `cargo clippy --all-targets -- -D warnings` (the pre-push hook).
