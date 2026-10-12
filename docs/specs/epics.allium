@@ -921,7 +921,7 @@ rule ToggleAutoDispatch {
 -- == Automatic Subtask Chaining ==
 
 rule AutoDispatchNextSubtask {
-    when: SessionClosed(task)
+    when: SessionClosed(task, close)
 
     -- Deliberately no requires. A chain that stops is a normal outcome, not a
     -- violated precondition, so every guard lives inside the ensures below:
@@ -938,18 +938,31 @@ rule AutoDispatchNextSubtask {
             -- PhoenixIsNeverChained below.
             let next = first_by_order(epic.subtasks where status = backlog and not phoenix)
             -- A request, as every launch path writes since store-split M4
-            -- (store-split.allium: RequestDispatch). No mode: the module
-            -- derives it from the subtask. A refused request moves the chain
-            -- to the next candidate (see the guidance).
+            -- (store-split.allium: RequestDispatch), naming the closed task's
+            -- host — the host of the exit_session row, whose board serves the
+            -- agent that closed. No mode: the module derives it from the
+            -- subtask. A refused request moves the chain to the next
+            -- candidate (see the guidance).
             if next != null:
-                DispatchRequested(task: next, requester: core/local_host(), origin: epic_chain)
+                DispatchRequested(task: next, requester: close.host, origin: epic_chain)
+                -- Recorded for exit_session's response, which names the
+                -- subtask (mcp-task-tools.allium: ExitSessionViaMcp).
+                close.chained_task = next
 
     @guidance
-        -- Server-side epic chaining. SessionClosed is emitted last by the MCP
-        -- session-close flow (see ExitSessionViaMcp in mcp-task-tools.allium
-        -- and ExitSession in pr-workflow.allium), so the next subtask's
-        -- worktree is always cut from a base_branch that already contains the
-        -- finished subtask's work.
+        -- Epic chaining IN THE MODULE since store-split M5
+        -- (store-split.allium, W6). SessionClosed is emitted by the session
+        -- close (ExitSession in pr-workflow.allium), which runs inside the
+        -- request_exit_session reducer's transaction (store-split.allium:
+        -- RequestExitSession), and this rule runs in that same transaction,
+        -- after the terminal write. So the next subtask's worktree is always
+        -- cut from a base_branch that already contains the finished subtask's
+        -- work. Before M5 the board ran this selection itself
+        -- (auto_dispatch_next, at the MCP exit_session handler's call site);
+        -- its behaviour is kept as below, and nothing of it stays on the
+        -- board except ReportChainedDispatchFailure, unchanged.
+        -- close is the exit_session request row the close wrote
+        -- (store-split.allium: SessionRequest).
         --
         -- exit_session is the ONLY emitter of SessionClosed, and that is the
         -- whole point. Reaching it requires a wrap_up first, and wrap_up is
@@ -966,10 +979,10 @@ rule AutoDispatchNextSubtask {
         -- session.
         --
         -- SessionClosed does not follow every attempted close, only the ones
-        -- that took effect. The close is a single write carrying the terminal
-        -- status and the cleared tmux_window; when that write fails, the
-        -- session-close rules deliberately withhold SessionClosed and this rule
-        -- never runs. That is intentional, not a gap: the closing subtask is
+        -- that took effect. The close is one module transaction carrying the
+        -- terminal status, the cleared tmux_window and this rule; when the
+        -- call is refused or fails, none of it lands, SessionClosed is never
+        -- emitted and this rule never runs. That is intentional, not a gap: the closing subtask is
         -- still sitting in its old status with its work unrecorded, and adding a
         -- freshly launched successor on top of that is strictly harder for a
         -- human to notice than the failed close on its own — the successor would
@@ -984,14 +997,17 @@ rule AutoDispatchNextSubtask {
         -- from a base that predated its own commits, which is the bug this rule
         -- exists to remove.
         --
-        -- Ordering guarantee. Every database write that determines the next
+        -- Ordering guarantee. Every write that determines the next
         -- subtask's starting base is complete before selection happens: the
-        -- rebase / fast-forward of base_branch (WrapUpRebase) and the closing
-        -- task's terminal status patch both precede this rule. The one thing
-        -- still in flight is the closing task's tmux window teardown, which is
-        -- detached and may overlap the new window's creation; window names are
-        -- keyed by task id, so the closing and opening windows cannot collide.
-        -- The guarantee is about database state, not OS-level teardown.
+        -- rebase / fast-forward of base_branch (WrapUpRebase) finished before
+        -- its wrap_up row was done, which the close requires, and the closing
+        -- task's terminal status is written earlier in the same transaction.
+        -- The one thing still in flight is the closing task's tmux window
+        -- teardown, which the host runs from the exit_session row after the
+        -- transaction (pr-workflow.allium: ExitSessionTeardown) and which may
+        -- overlap the new window's creation; window names are keyed by task
+        -- id, so the closing and opening windows cannot collide. The
+        -- guarantee is about store state, not OS-level teardown.
         --
         -- Five ways the chain stops, all normal outcomes: the task was closed
         -- by a route other than exit_session (see above); the closed task has
@@ -1058,7 +1074,9 @@ rule AutoDispatchNextSubtask {
         -- point writes (store-split.allium: RequestDispatch): it offers the
         -- candidates one at a time, in the order above, and the module
         -- accepts the first request whose task is still backlog with no open
-        -- request. A refused request is ORDINARY — another entry point or a
+        -- request. Since M5 the offers are made inside the close's own
+        -- transaction, so a refused candidate rolls back nothing but itself
+        -- and the chain moves on. A refused request is ORDINARY — another entry point or a
         -- concurrent close got there first — and the chain moves to the next
         -- candidate; it is not a failure and is not reported. Two sessions
         -- closing on the same epic in the same instant therefore launch two
@@ -1066,8 +1084,11 @@ rule AutoDispatchNextSubtask {
         -- condition three (no backlog subtask left), not a further one.
         -- Exclusivity is the module's: DispatchClaimExclusive (dispatch.allium)
         -- binds this chain, DispatchTaskViaMcp and the TUI keys alike.
-        -- The request names this board's host, so this board provisions the
-        -- subtask (dispatch.allium: ProvisionDispatch). The request carries no
+        -- The request names the closed task's host, which is the board the
+        -- closing agent's exit_session call came through, so that board
+        -- provisions the subtask (dispatch.allium: ProvisionDispatch). Its
+        -- requested_by is the close's caller, who passed the same owner check
+        -- (store-split.allium: RequestExitSession, D11). The request carries no
         -- mode, so the module derives it from the subtask: a plan-less
         -- research-tagged subtask gets the research agent.
         -- Consequence, on every path and not only this one: the claim applies
@@ -1093,23 +1114,27 @@ rule AutoDispatchNextSubtask {
         -- last_pre_tool_use_at cleared, unless it was provisioned or moved on
         -- meanwhile. The chain releases nothing itself.
         --
-        -- No chain failure can fail the close. By the time this rule runs the
-        -- closing task has already reached its terminal status and its session
-        -- has been torn down, so reporting an error here would tell the agent
-        -- its session failed to close when it did not. So the failure travels
+        -- No chain failure can fail the close. This rule runs in the close's
+        -- own transaction, after the closing task's terminal write, and the
+        -- host tears its session down once the transaction commits, so
+        -- failing here would roll back a close that should stand and tell the
+        -- agent its session failed to close. So the failure travels
         -- to the OPERATOR instead of to the closing agent: a failed dispatch
         -- emits AutoDispatchFailed, which SurfaceAutoDispatchFailure turns into
-        -- board-visible evidence. A missing epic and a request the store
-        -- could not be reached to write (a transport error, not a refusal) stay
-        -- log-only, because both fail before a subtask has been selected: there
-        -- is no card to mark and no id to name, and both are indistinguishable
-        -- from the normal stops above. A DB error while READING auto_dispatch is fail-CLOSED —
-        -- the chain simply stops, indistinguishable from the normal stops above.
-        -- Nothing requested this chain, so the conservative default is to launch
-        -- no agent: failing open would start an agent on an epic whose operator
-        -- may have turned chaining off. (The predecessor dispatch_next tool
-        -- failed open, which was right for an explicit agent request; that
-        -- reasoning does not transfer to an automatic trigger.)
+        -- board-visible evidence. A missing epic stops the chain like the
+        -- normal stops above. Inside the module the chain swallows every
+        -- other problem too: it never fails the transaction, because failing
+        -- it would roll the close back with it. Fail CLOSED: when the chain
+        -- cannot tell whether to run, it launches nothing. Nothing requested
+        -- this chain, so the conservative default is to launch no agent:
+        -- failing open would start an agent on an epic whose operator may have
+        -- turned chaining off. (The predecessor dispatch_next tool failed
+        -- open, which was right for an explicit agent request; that reasoning
+        -- does not transfer to an automatic trigger.) The board-side chain's
+        -- two log-only cases — a DB error reading auto_dispatch and a request
+        -- the store could not be reached to write — no longer exist apart from
+        -- the close: a store that cannot be reached fails the whole
+        -- exit_session call, close included (ExitSessionViaMcp).
 }
 
 rule ReportChainedDispatchFailure {
@@ -1188,10 +1213,11 @@ rule SurfaceAutoDispatchFailure {
         -- already closed and its close already succeeded; see the "No chain
         -- failure can fail the close" paragraph in AutoDispatchNextSubtask.
         --
-        -- The two log-only stops (unresolvable epic, unwritable request) do not reach
-        -- this rule, and that is a scope decision rather than an omission: both
-        -- fail before a subtask is selected, so neither can supply the task
-        -- this rule marks.
+        -- A chain that stops before a subtask is selected (an unresolvable
+        -- epic, or a store that cannot be reached, which since store-split M5
+        -- fails the whole exit_session call) does not reach this rule, and
+        -- that is a scope decision rather than an omission: neither can supply
+        -- the task this rule marks.
 }
 
 -- == Feed Task Identity Invariant ==

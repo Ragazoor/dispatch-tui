@@ -72,7 +72,15 @@ use "./core.allium" as core
 -- not domain. A restored open request would have no timer to fail it and
 -- would hold its task's claim forever, and a restored timer would fire against
 -- a store that never asked for it. Losing the request history on a restore is
--- accepted. They are the one exception to "every table it holds" below.
+-- accepted.
+--
+-- The session request tables, `session_requests` and
+-- `session_request_timeouts` (store-split.allium: SessionRequest, M5 W10), are
+-- left out for the same reason: a restored open row would have no timer, and
+-- would block its task's next wrap_up (one open session request per task). A
+-- restore also loses every unconsumed exit token, which lives in those rows;
+-- an agent mid-wrap-up calls wrap_up again. The two pairs are the only
+-- exceptions to "every table it holds" below.
 --
 -- What is NOT here is as load-bearing as what is, and it is shorter than an
 -- earlier revision of this note claimed: the knowledge base (`learnings`,

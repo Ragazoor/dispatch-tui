@@ -445,7 +445,9 @@ rule ConfirmDone {
         -- (prior, next) inside the task-update seam every status write passes
         -- through, so it fires without each rule naming it. The other routes
         -- in: PrMerged and ExitSession's non-pr branch (both in
-        -- pr-workflow.allium), close_session (mcp-task-tools.allium), the MCP
+        -- pr-workflow.allium; ExitSession stamps it from the store clock in
+        -- the module since store-split M5), close_session
+        -- (mcp-task-tools.allium), the MCP
         -- update_tasks tool, and a feed upsert whose item arrives with status
         -- done (feeds.allium). PrClosed (pr-workflow.allium) is NOT one of
         -- these — a closed PR no longer transitions the task into done.
@@ -552,13 +554,21 @@ rule PhoenixRespawn {
         --
         -- Where it hooks. core/Task.status has exactly two writing paths in the
         -- service layer, TaskService::update_task and TaskService::close_session
-        -- (src/service/tasks/crud.rs), and every route above reaches one of
-        -- them: the TUI persists through update_task, and exit_session closes
-        -- through close_session. Both already funnel their prior-status-derived
+        -- (src/service/tasks/crud.rs): the TUI persists through update_task,
+        -- and update_tasks' status="done" path closes through close_session.
+        -- Both already funnel their prior-status-derived
         -- writes through with_status_transition; the respawn is NOT one of those,
         -- because it is a row creation rather than a field on the patch, so it
         -- is a step after the status write rather than part of it. That ordering
-        -- is what DoneOutranksTheRespawn requires.
+        -- is what DoneOutranksTheRespawn requires. Since store-split M5
+        -- exit_session no longer closes through close_session: its close runs
+        -- in the module (pr-workflow.allium: ExitSession, inside
+        -- store-split.allium's RequestExitSession), which applies the respawn
+        -- after the Done write in the SAME transaction, so the successor and
+        -- the predecessor's flag clear land with the close (TheFlagIsTheReceipt
+        -- holds trivially there). The successor copies the predecessor's
+        -- stored repo_path and plan as they are; the board's path
+        -- normalisation ran when those were written.
         --
         -- FeedTasksAreExempt. A task carrying an external_id is owned by a feed
         -- epic, which recreates and reconciles its own rows on every poll (see
@@ -1848,10 +1858,11 @@ rule EditTask {
 --     mcp-task-tools.allium): a session caller, or a dispatched agent acting
 --     on a task OTHER than its own — never a dispatched agent closing
 --     itself, which must still go through the first path. No exit token;
---     reuses ExitSessionViaMcp's own terminal-write/teardown tail, but NOT
---     its epic chaining — only a close that went through exit_session (and
---     therefore had a wrap_up ahead of it) emits SessionClosed. See
---     AutoDispatchNextSubtask in epics.allium.
+--     applies the same terminal fields through the board's close_session
+--     (which exit_session also used before store-split M5), but NOT
+--     exit_session's epic chaining — only a close that went through
+--     exit_session (and therefore had a wrap_up ahead of it) emits
+--     SessionClosed. See AutoDispatchNextSubtask in epics.allium.
 -- Exception: PrMerged transitions are automatic because the PR merge on
 -- GitHub constitutes human confirmation via the code review process.
 

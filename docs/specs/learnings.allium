@@ -248,7 +248,8 @@ use "./core.allium" as core
 -- pr-typed url on a task that had no url) appends it when
 -- core/config.learning_reflection_enabled = true. See mcp-task-tools.allium:
 -- PrFinalisationReflectionNudge. Because the wrap_up → exit_session path mutates
--- status and url through the service layer rather than the update_tasks tool, that
+-- status and url through its own close (in the store's module since store-split
+-- M5, pr-workflow.allium: ExitSession) rather than the update_tasks tool, that
 -- nudge never appears in the normal wrap-up flow.
 
 ------------------------------------------------------------

@@ -374,9 +374,14 @@ config {
     -- rebuild, and a build version would need a stored minimum that somebody
     -- also has to bump. The rules version is the one number that changes
     -- exactly when the answer to "who enforces this?" changes.
-    -- 2 was M3 (feed routing); 3 is M4 (dispatch request rows and their
-    -- scheduled timeout, store-split.allium: DispatchRequest).
-    rules_version: Integer = 3
+    -- 2 was M3 (feed routing); 3 was M4 (dispatch request rows and their
+    -- scheduled timeout, store-split.allium: DispatchRequest); 4 is M5
+    -- (wrap-up and exit-session request rows, the conflict sub_status, the
+    -- close and the epic chain in the module, store-split.allium:
+    -- SessionRequest, W12). M5 is written spec first: the module crate and
+    -- the board still hold 3 until the M5 code lands, and both move to 4 in
+    -- that commit.
+    rules_version: Integer = 4
 }
 
 ------------------------------------------------------------
@@ -618,6 +623,40 @@ rule SubscribeToThisHostsDispatchRequests {
         -- including the initial rows a starting board receives) and the
         -- outcome of every request this host made, which DispatchingFeedback
         -- and dispatch_task read. Finished rows are included because a row
+        -- leaving a state-filtered query would arrive as a delete, and the
+        -- outcome would be lost.
+        --
+        -- It does not weaken SubscriptionsCoverOnlyTheOwnBoardAndItsEpics:
+        -- the rows are this machine's own. Re-asserted on every connection,
+        -- like the rest.
+}
+
+rule SubscribeToThisHostsSessionRequests {
+    when: UserIdentitySettled(identity)
+
+    let connection = the_board_connection()
+
+    requires: connection.status = connected
+
+    ensures:
+        SessionRequestSubscriptionAsserted(
+            connection: connection,
+            host: core/local_host()
+        )
+
+    @guidance
+        -- THE SIXTH ASK, scoped by machine like the fifth, asserted beside
+        -- it: every store-split.allium SessionRequest row (store-split M5)
+        -- whose host is this machine, in every state. A session request
+        -- names the host holding the task's worktree and window, which is the
+        -- machine whose board the task's agent talks to, so this delivers the
+        -- work this host must do (store-split.allium:
+        -- HostClaimsSessionRequest picks up requested rows, including the
+        -- initial rows a starting board receives), the outcome the wrap_up
+        -- MCP tool waits on, and the done wrap_up rows and exit_session rows
+        -- exit_session's token check and its no-answer settling read
+        -- (mcp-task-tools.allium: WrapUpViaMcp, ExitSessionViaMcp). Finished
+        -- rows are included for the same reason as the fifth ask: a row
         -- leaving a state-filtered query would arrive as a delete, and the
         -- outcome would be lost.
         --

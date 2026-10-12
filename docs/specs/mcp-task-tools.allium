@@ -417,10 +417,11 @@ rule MarkTaskDoneViaMcp {
     -- target statuses. A task with no live tmux_window (never dispatched, or
     -- already detached) closes with nothing to tear down.
 
-    -- The terminal write can fail to persist at the storage layer, exactly as
-    -- it can for ExitSession (pr-workflow.allium) — see that rule's
-    -- `close_persisted` discussion for the full rationale, which applies here
-    -- unchanged. Every mutation below is gated on this SAME write landing: a
+    -- The terminal write can fail to persist at the storage layer, as
+    -- exit_session's could before store-split M5 moved that close into the
+    -- module — see "The board-side close that remains" in ExitSession's
+    -- guidance (pr-workflow.allium) for the `close_persisted` rationale, which
+    -- applies here unchanged. Every mutation below is gated on this SAME write landing: a
     -- task whose close does not persist keeps its prior status, sub_status,
     -- completed_at and any live window untouched. (No SessionClosed is emitted
     -- on this path on either outcome — see the note after the ensures.)
@@ -452,9 +453,10 @@ rule MarkTaskDoneViaMcp {
                 task.tmux_window = null
                 not exists window
 
-    -- No SessionClosed, therefore no epic chain. This is the one place this
-    -- path deliberately diverges from ExitSession's tail: the terminal write,
-    -- the tmux teardown and the notifications are shared, the chain is not.
+    -- No SessionClosed, therefore no epic chain. This is where this path
+    -- deliberately diverges from ExitSession: the terminal fields and a tmux
+    -- teardown are common to both (applied by the module and the host for
+    -- exit_session since store-split M5, by the board here), the chain is not.
     --
     -- Why. SessionClosed is the signal AutoDispatchNextSubtask (epics.allium)
     -- keys on, and the chain's whole value is that the successor starts from a
@@ -487,29 +489,26 @@ rule MarkTaskDoneViaMcp {
         -- a `status="done", url=<x>` call with "url_type is required" instead
         -- of the close-only error this rule promises.
         --
-        -- From there, this path reuses the tail ExitSessionViaMcp uses:
-        -- TaskService::close_session (the same terminal-write helper, same
+        -- From there, this path runs the board-side close:
+        -- TaskService::close_session (the terminal-write helper, its
         -- CloseSessionOutcome::Done branch) and TaskService::kill_session_window
-        -- for the tmux teardown. The shared tail lives once, in a
-        -- `perform_close` helper (src/mcp/handlers/tasks/wrap_up.rs) that both
-        -- handlers call — this is deliberate: a second copy of ExitSession's
-        -- terminal-write / teardown sequence, however small the divergence, is
-        -- exactly the "second path to the terminal write" hazard this whole
-        -- feature exists to avoid re-deriving. Only the request validation
-        -- (the two requires above), the response text and the epic chain are
-        -- specific to the caller; the mechanics, including the close_persisted
-        -- gate, are not.
+        -- for the tmux teardown, through a `perform_close` helper
+        -- (src/mcp/handlers/tasks/wrap_up.rs). Before store-split M5
+        -- ExitSessionViaMcp shared that helper, so the two closes had one
+        -- terminal-write / teardown sequence. Since M5 exit_session closes in
+        -- the module (store-split.allium: RequestExitSession) and the helper
+        -- is this path's alone. The two now apply the same terminal fields by
+        -- two implementations — the "second path to the terminal write"
+        -- hazard the shared helper existed to avoid — until this path moves
+        -- too (an open question in store-split.allium). Only the request
+        -- validation (the two requires above), the response text and the
+        -- missing epic chain are specific to this path.
         --
-        -- The chain is simply not part of that shared tail. It is not
-        -- suppressed here by a flag; it lives at ExitSessionViaMcp's own call
-        -- site, one level above the helper, because after this rule stopped
-        -- chaining it has exactly one caller that wants it. Nothing shared is
-        -- duplicated by that, and "only exit_session chains" becomes true by
-        -- structure rather than by a parameter every future caller of the
-        -- helper would have to get right. The ordering the chain depends on
-        -- survives for free: the helper returns only once the terminal write
-        -- and both change notifications have landed. See the no-SessionClosed
-        -- note above for why this path must not chain at all.
+        -- The chain is not part of this path at all. It is not suppressed by
+        -- a flag: since M5 it runs inside the module's exit_session
+        -- transaction (epics.allium: AutoDispatchNextSubtask), which this
+        -- path never reaches. See the no-SessionClosed note above for why
+        -- this path must not chain.
         --
         -- No exit token is issued, checked, or consumed anywhere on this
         -- path — unlike exit_session, there is no wrap_up call first. That is
@@ -555,8 +554,8 @@ rule MarkTaskDoneViaMcp {
         --
         -- When the terminal write does NOT persist: this call reports the
         -- task could not be moved to done and invites a retry (worded
-        -- differently from ExitSessionViaMcp's failed-close text, which names
-        -- a live tmux session and says the close needs redoing by hand — this
+        -- differently from ExitSessionViaMcp's no-answer text, which names
+        -- a live tmux session and a still-valid token — this
         -- path may have no session at all to speak of); any live window is
         -- left alive (nothing tears it down) — the task is exactly as it was
         -- before the call. When it DOES persist: the window (if any) is killed
@@ -608,10 +607,11 @@ rule PrFinalisationReflectionNudge {
         -- IMPORTANT — this nudge does NOT fire on the normal wrap-up path.
         -- ExitSessionViaMcp (below) performs an equivalent mutation for
         -- action = pr (status -> review plus a pr-typed url, set
-        -- unconditionally regardless of any prior url), but handle_exit_session
-        -- (src/mcp/handlers/tasks/wrap_up.rs) calls
-        -- state.task_svc.update_task(...) directly at the service layer and
-        -- discards the returned was_pr_finalisation; it never calls
+        -- unconditionally regardless of any prior url), but that close is the
+        -- module's (pr-workflow.allium: ExitSession, run inside
+        -- store-split.allium's RequestExitSession since M5; before M5 the
+        -- board's close_session), which computes no was_pr_finalisation, and
+        -- handle_exit_session (src/mcp/handlers/tasks/wrap_up.rs) never calls
         -- reflection_nudge. So the nudge only appears when a caller invokes the
         -- update_tasks MCP tool directly to link a PR, bypassing
         -- wrap_up/exit_session entirely. The wrap_up response carries a
@@ -1068,7 +1068,7 @@ rule DispatchTaskViaMcp {
         -- explicit "dispatch this specific task" call, while epic chaining is
         -- automatic on a session close that takes effect
         -- (AutoDispatchNextSubtask in epics.allium, keyed on the SessionClosed
-        -- that ExitSessionViaMcp withholds when its terminal write fails).
+        -- that only a close which took effect emits).
         --
         -- == A request, then a capped wait (store-split M4) ==
         -- The call writes a dispatch request (store-split.allium:
@@ -1259,8 +1259,8 @@ rule WrapUpViaMcp {
     requires: task.tag != pr_review and task.tag != dependabot
     -- WrapUpRefusesUnfinishedWork, below: the worktree is committed and the
     -- repository's verify command, when it has one, exits 0 in the worktree.
-    -- Both are checked before the action runs, so a refusal has no side effect
-    -- and mints no token.
+    -- Both are checked before the action runs, and before any request is
+    -- written, so a refusal has no side effect and issues no token.
     -- Both are observations of the worktree made by running a subprocess, so
     -- they are named by the guarantee rather than modelled as fields:
     -- `worktree_is_committed` is "git status --porcelain prints nothing"
@@ -1271,42 +1271,78 @@ rule WrapUpViaMcp {
     requires: worktree_is_committed(task.worktree)
     requires: verify_passes(task)
 
+    -- For rebase, the worktree path names a branch (the rebase needs one).
+    -- Checked here, after the two checks above and before any request is
+    -- written, so an underivable branch is refused as a bad request
+    -- ("Cannot derive branch from worktree: <path>", INVALID_PARAMS) rather
+    -- than reported as a failed rebase. done and pr need no branch.
+    requires: action = rebase implies worktree_names_a_branch(task.worktree)
+
     -- All three actions leave task.status unchanged (still running/review) and
-    -- only issue an exit token that records which action was requested. The
-    -- terminal mutation (Done, or Review + pr-typed url) is deferred to the
-    -- single ExitSessionViaMcp call. pr_url is no longer a wrap_up param — it
-    -- travels with exit_session instead.
-    ensures:
-        if action = rebase:
-            -- repo_path travels on the event because its consumer
-            -- (RefreshRepoSyncStateAfterRebase in repo-sync.allium) needs the
-            -- repository whose base branch just moved, and a branch name alone
-            -- does not identify one.
-            BranchRebased(
-                branch: task.worktree.branch,
-                onto: task.base_branch,
-                repo_path: task.repo_path
-            )
-            issue_exit_token(task, rebase)
-        else if action = done:
-            issue_exit_token(task, done)
-        else if action = pr:
-            issue_exit_token(task, pr)
+    -- only issue an exit token whose request row records which action was
+    -- requested. The terminal mutation (Done, or Review + pr-typed url) is
+    -- deferred to the single ExitSessionViaMcp call. pr_url is no longer a
+    -- wrap_up param — it travels with exit_session instead.
+    --
+    -- Since store-split M5 the tool ASKS: one request_wrap_up call naming
+    -- this board's host (store-split.allium: RequestWrapUp). For rebase the
+    -- host's board then runs the rebase (pr-workflow.allium: WrapUpRebase,
+    -- which emits BranchRebased); for done and pr the module writes the row
+    -- already done.
+    ensures: WrapUpRequested(task: task, host: core/local_host(), action: action)
 
     @guidance
         -- wrap_up is the mandatory step before exit_session for ALL three
-        -- actions (rebase, done, pr). It records action on the exit token
-        -- (token.action) and returns that token in the response text; the
-        -- agent must pass it back to exit_session.
-        -- action="rebase" is the only action that does real synchronous work
-        -- here: it runs the rebase / fast-forward (BranchRebased) via
-        -- finish_task, which performs no session teardown, so the session
-        -- stays alive until exit_session. action="done" and action="pr" perform no task-status
+        -- actions (rebase, done, pr). The exit token is the id of the done
+        -- wrap_up request row (store-split.allium, W3), which records the
+        -- action; the response text carries it, and the agent must pass it
+        -- back to exit_session.
+        -- action="rebase" is the only action with host work: the rebase /
+        -- fast-forward (BranchRebased) via finish_task, which performs no
+        -- session teardown, so the session stays alive until exit_session.
+        -- action="done" and action="pr" perform no task-status
         -- or url mutation at wrap_up time — done no longer flips to Done, and
         -- pr no longer sets task.url or moves the task to review. Those
         -- mutations are applied later, atomically, by ExitSessionViaMcp. This
         -- removes the old asymmetry where done/pr mutated status inside
         -- wrap_up while rebase deferred to exit_session.
+        --
+        -- == The request, then a wait (store-split M5) ==
+        -- The tool checks the request first, in today's order: wrappable
+        -- (running or review, a worktree, ReviewTasksAreNotWrappedUp), then
+        -- WrapUpRefusesUnfinishedWork (commit, then verify), then for rebase
+        -- the branch. Only then does it call request_wrap_up. It subscribes to the request rows' changes BEFORE
+        -- writing, so no change to the row is missed, and answers:
+        --   - refused by the module (not running or review, no worktree, the
+        --     worktree on another machine, an open session request already
+        --     exists): an INVALID_PARAMS error carrying the module's reason;
+        --     nothing was written.
+        --   - done or pr: the row is written done in the same call, so the
+        --     tool answers at once with the success text below, carrying the
+        --     row's id as the token.
+        --   - rebase: the tool WAITS on the row, waking on the subscription's
+        --     change signal, until it finishes, for at most its deadline plus
+        --     the backstop grace (store-split.allium:
+        --     config.wrap_up_rebase_timeout,
+        --     config.session_request_backstop_grace), by which time the host
+        --     or the backstop has finished it. done: the rebase success text
+        --     with the row's id as the token. failed: an INTERNAL_ERROR
+        --     "wrap_up failed: <reason>" — a conflict's reason names the
+        --     conflicted files, and the module has set the conflict
+        --     sub_status; "timed out", "deadline passed", "host restarted"
+        --     and a host-side internal error (the rebase worker died) read
+        --     the same way, and the agent calls wrap_up again once the cause
+        --     is fixed. Still open when the wait ends (the
+        --     store unreachable): an INTERNAL_ERROR naming the request id
+        --     and saying no token was issued and to call wrap_up again; a
+        --     second request is refused while the first is still open.
+        -- The success texts are today's: the action, that the session is NOT
+        -- yet closed, the verified line, "Exit token: <id>" with the
+        -- exit_session instruction naming the action (and pr_url for pr),
+        -- the rate_learning nudge for pr (learnings.allium:
+        -- WrapUpRateLearningNudge), "No git operations performed." for done,
+        -- and for rebase the warning that without exit_session the window
+        -- stays alive.
         -- The /wrap-up skill runs the /retro skill before its commit step,
         -- ahead of wrap_up, so any agent-context fix retro makes is committed
         -- with the session's work rather than stranded after the rebase.
@@ -1446,147 +1482,106 @@ rule WrapUpViaMcp {
 }
 
 rule ExitSessionViaMcp {
-    when: McpExitSession(task, token, action, pr_url?)
+    when: McpExitSession(task, token?, action?, pr_url?)
 
-    requires: exit_token_exists_for(task)
-    requires: token = exit_token_value_for(task)
-    requires: action = exit_token_action_for(task)
-    requires: task.tmux_window != null
-    requires:
-        if action = pr: pr_url != null and pr_url != ""
+    -- Checked by the tool before any call: there is nothing to ask the module
+    -- without them.
+    requires: token != null
+    requires: action != null
 
-    -- The terminal write — status, sub_status, url and the cleared
-    -- tmux_window reference, applied as one patch — can fail at the
-    -- persistence layer. Whether it took effect gates the terminal mutation,
-    -- the tmux teardown and the SessionClosed emission below; only consuming
-    -- the exit token happens either way. Same condition as ExitSession in
-    -- pr-workflow.allium.
-    let close_persisted = terminal_close_persisted(task)
-
-    -- The window the teardown below names comes from the CLOSE OUTCOME — a
-    -- fresh read of task.tmux_window taken immediately before the terminal
-    -- patch, by the same call that applies it — not from task.tmux_window as
-    -- read at the top of this rule, which a concurrent writer has a much wider
-    -- window to have changed. The fresh read narrows that race to nothing but
-    -- is still a separate read from the patch, not atomic with it. Same
-    -- binding as ExitSession in pr-workflow.allium.
-    let window = closed_session_window(task)
-
-    ensures:
-        consume_exit_token(task)
-        -- The teardown is conditional on the same write as the terminal
-        -- mutation, so a task whose close did not persist keeps both its live
-        -- window and its tmux_window reference — the two can never disagree.
-        if close_persisted:
-            not exists window
-            task.tmux_window = null
-            if action = pr:
-                task.status = review
-                task.sub_status = core/SubStatus.default_for(review)
-                task.url = core/TaskUrl{url: pr_url, url_type: pr}
-            else:
-                task.status = done
-                task.sub_status = core/SubStatus.default_for(done)
-                task.completed_at = now
-            task.updated_at = now
-
-    -- Emitted after the terminal mutation and after the task/epic-changed
-    -- notifications have landed, so an epic chain keyed on it
-    -- (AutoDispatchNextSubtask in epics.allium) sees the closed task in its
-    -- terminal state. The tmux teardown is ISSUED before this point but is
-    -- fire-and-forget: nothing waits for it, so its completion is not ordered
-    -- against SessionClosed or against anything the chain then does.
-    -- Conditional on the same write: a close that did not take effect must not
-    -- chain.
-    ensures:
-        if close_persisted:
-            SessionClosed(task: task)
+    -- Since store-split M5 the tool ASKS: one request_exit_session call
+    -- (store-split.allium: RequestExitSession). The module checks the token
+    -- against the request rows, and in the same transaction applies the
+    -- close (pr-workflow.allium: ExitSession), consumes the token, runs the
+    -- epic chain (epics.allium: AutoDispatchNextSubtask) and writes the
+    -- exit_session row whose host tears the window down
+    -- (pr-workflow.allium: ExitSessionTeardown).
+    ensures: ExitSessionRequested(task: task, token: token, action: action, pr_url: pr_url)
 
     @guidance
         -- Single-call session close for all three wrap-up actions. The old
         -- two-phase behaviour (first call showed a reflection prompt and set
         -- token.reflected, second call closed) is gone: the mandatory
         -- reflection is now the /retro skill, which the /wrap-up skill runs
-        -- BEFORE exit_session is ever called. With /retro as the forcing
-        -- function, the in-handler reflected flag and first-call/second-call
-        -- branch are removed.
-        -- Validation, in the order the handler applies it (all mutate nothing
-        -- on failure):
-        --   • token must equal the token issued for this task, else "invalid
-        --     exit token"; a missing token → "no exit token — call wrap_up
-        --     first".
-        --   • the supplied action must equal the action recorded on the token
-        --     (exit_token_action_for). A missing action → "action is required".
-        --     A mismatch (e.g. token issued for wrap_up(rebase) but the agent
-        --     calls exit_session(action="pr")) is rejected with an error naming
-        --     both actions.
-        --   • task.tmux_window must be non-null. If already null, some other
-        --     path already tore the session down; the handler reports "task
-        --     #<id> has no active session" and the /wrap-up skill treats it as
-        --     success. (On a normal double-close the token has also been
-        --     consumed, so a retry hits the "call wrap_up first" branch above
-        --     first.)
-        --   • pr_url is required iff action = pr; it is rejected/ignored for
-        --     rebase and done.
-        -- Terminal mutation, applied atomically with clearing tmux_window and
-        -- consuming the token:
-        --   • rebase / done → task.status = done, task.completed_at = now
-        --                      (applied by close_session, the same completion
-        --                      stamp as tasks/ConfirmDone)
+        -- BEFORE exit_session is ever called.
+        --
+        -- Validation, in order (all mutate nothing on failure; every refusal
+        -- is an INVALID_PARAMS error):
+        --   • in the tool: a missing token → "no exit token — call wrap_up
+        --     first"; a missing action → "action is required — pass the same
+        --     action used in wrap_up".
+        --   • in the module (RequestExitSession), carrying its words: no done
+        --     wrap_up row for the task, or the token's row already consumed →
+        --     "no exit token — call wrap_up first"; a token naming another
+        --     row, or superseded by a newer wrap_up → "invalid exit token"; an
+        --     action that differs from the row's → an error naming both
+        --     actions; task.tmux_window already null → "task #<id> has no
+        --     active session", which the /wrap-up skill treats as success
+        --     (some other path already tore the session down; on a normal
+        --     double-close the token has also been consumed, so a retry hits
+        --     the "call wrap_up first" branch first); action pr without a
+        --     pr_url → "pr_url is required for action 'pr' — pass the URL
+        --     returned by `gh pr create`"; pr_url is ignored for rebase and
+        --     done.
+        --
+        -- Terminal mutation, applied by the module atomically with clearing
+        -- tmux_window and consuming the token (pr-workflow.allium:
+        -- ExitSession):
+        --   • rebase / done → task.status = done, task.completed_at = now from
+        --                      the store clock (the same completion stamp as
+        --                      tasks/ConfirmDone)
         --   • pr            → task.status = review, task.url = TaskUrl(pr_url,
         --                      url_type = pr) — this branch does not enter done,
         --                      so task.completed_at is untouched
-        -- task/epic-changed is notified for all three actions; the underlying
-        -- patch flow (src/service/tasks/crud.rs) triggers EpicStatusRecalculation
-        -- on the parent epic. Handled by handle_exit_session in
-        -- src/mcp/handlers/tasks/wrap_up.rs.
-        -- When that terminal patch FAILS (close_persisted = false), the call is
-        -- still a successful tools/call response, NOT a JSON-RPC error: the exit
-        -- token has already been consumed by this point, so an error would
-        -- strand the agent with no retry path. What changes is the response text
-        -- — instead of the session-closed message (with or without a
-        -- chained-subtask sentence) the response states that the task could not
-        -- be moved to its terminal status, that the tmux session is still alive,
-        -- names the task, and tells the agent the close needs redoing by hand.
-        -- It must NOT claim the session was torn down, because it was not: the
-        -- agent must not treat that response as a completed close. The same
-        -- text tells the agent to stop and hand back to the human rather than
-        -- retry exit_session or take a fresh token from wrap_up — both are
-        -- dead ends, the token having been consumed. That instruction lives in
-        -- the response because the response reaches every caller, with or
-        -- without the /wrap-up skill loaded; the tool description does not
-        -- carry it (TheNextCallIsNamedJustInTime).
-        -- Everything else on that path: the failure is logged at warn, no
-        -- kill-window is issued so the window survives and still hosts a live
-        -- agent the human can attach to, the task keeps its status, sub_status,
-        -- url and tmux_window (so it never satisfies is_detached and cannot
-        -- drift into the awaiting-merge rendering), and SessionClosed is not
-        -- emitted so no epic chain fires. ExitSession in pr-workflow.allium
-        -- carries the full rationale, including the signals that were considered
-        -- and rejected.
+        -- The module rolls up the parent epic chain in the same transaction;
+        -- boards redraw from their subscriptions. Handled by
+        -- handle_exit_session in src/mcp/handlers/tasks/wrap_up.rs.
+        --
+        -- == The response ==
+        -- Accepted: the close took effect. The response is "Session closed."
+        -- or, when the epic chain requested a subtask (the exit_session row's
+        -- chained_task), "Session closed. Dispatching next epic subtask #<id>
+        -- '<title>'." The tool does NOT wait for the window teardown: the
+        -- teardown kills this agent's own window, so a reply that waited for
+        -- it would never be read, and a failed teardown does not undo the
+        -- close anyway (store-split.allium, W5).
+        --
+        -- Refused: the error above. Nothing changed, the token is still
+        -- valid, and the agent fixes the cause and calls again — CHANGED in
+        -- M5: before, the token was consumed ahead of a terminal write that
+        -- could fail, so a failed close was reported as a success telling the
+        -- agent to stop and hand back to the human. That state no longer
+        -- exists (pr-workflow.allium: ExitSession, "A close that does not
+        -- take effect").
+        --
+        -- No answer from the store (a transport error): the call may or may
+        -- not have landed. The tool settles it from the rows: an exit_session
+        -- row that consumed this token means the close took effect, and the
+        -- response is the accepted one; no such row means it did not, and
+        -- the response is an error saying the close did not take effect, the
+        -- tmux session is still alive and the token is still valid, so call
+        -- exit_session again. Neither response claims a teardown that has
+        -- not happened. These reactions live in the response, which reaches
+        -- every caller with or without the /wrap-up skill loaded, and in the
+        -- skill's exit_session-errors reference file; the tool description
+        -- does not carry them (TheNextCallIsNamedJustInTime).
+        --
         -- Why the pr path closes the PR-merge race: a PR task never enters
-        -- review with a pr-typed url until the exact same call that also nulls
-        -- tmux_window, so PollPrStatus (which filters on status = review and
-        -- url.url_type = pr) can never observe it mid-session.
-        -- SessionClosed is emitted after the terminal patch and the
-        -- task/epic-changed notifications, and only when that patch took
-        -- effect. The kill-window teardown is issued just before it but is
-        -- never awaited, so the window's death is not ordered against
-        -- SessionClosed or the chain — it may land before or after. It is what
-        -- drives automatic epic
-        -- chaining (AutoDispatchNextSubtask in
-        -- epics.allium), and it is fire-and-forget: a chain that stops, or
-        -- fails, never turns a successful close into an error. All three
-        -- actions emit it — for action = pr the finished work sits on a PR
-        -- branch rather than base_branch, so the chained subtask still will not
-        -- see it, but that is inherent to choosing the PR path rather than
-        -- something this close does wrong. When a chain does fire, the response
-        -- text names the subtask it dispatched; otherwise it is the plain
-        -- session-closed message. There is no agent-facing tool to dispatch the
-        -- next subtask. The tool description states the positive fact — that
-        -- exit_session starts the epic's next backlog subtask when the epic
-        -- auto-dispatches — which is what an agent needs to not go looking for
-        -- one.
+        -- review with a pr-typed url until the exact same transaction that
+        -- also nulls tmux_window, so PollPrStatus (which filters on status =
+        -- review and url.url_type = pr) can never observe it mid-session.
+        --
+        -- The close emits SessionClosed, which drives automatic epic chaining
+        -- (AutoDispatchNextSubtask in epics.allium) in the same transaction.
+        -- A chain that stops, or fails, never turns a successful close into
+        -- an error. All three actions chain — for action = pr the finished
+        -- work sits on a PR branch rather than base_branch, so the chained
+        -- subtask still will not see it, but that is inherent to choosing the
+        -- PR path rather than something this close does wrong. There is no
+        -- agent-facing tool to dispatch the next subtask. The tool
+        -- description states the positive fact — that exit_session starts the
+        -- epic's next backlog subtask when the epic auto-dispatches — which is
+        -- what an agent needs to not go looking for one.
 }
 
 rule SetVerifyCommandViaMcp {
