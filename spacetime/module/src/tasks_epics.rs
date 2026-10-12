@@ -377,6 +377,8 @@ pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
     delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, task_id);
     // store-split.allium: DeletingATaskFailsItsOpenRequest (D8).
     fail_open_dispatch_requests_of(ctx, task_id);
+    // store-split.allium: DeletingATaskFailsItsOpenSessionRequest (W9).
+    fail_open_session_requests_of(ctx, task_id);
 }
 
 /// Move a task into an epic, out of one, or between two.

@@ -119,7 +119,7 @@ pub const DISPATCH_REASON_HOST_RESTARTED: &str = "host restarted";
 /// A deleted task's reason (`DeletingATaskFailsItsOpenRequest`).
 pub const DISPATCH_REASON_TASK_DELETED: &str = "task deleted";
 
-const MICROS_PER_SEC: i64 = 1_000_000;
+pub(crate) const MICROS_PER_SEC: i64 = 1_000_000;
 
 // -- Pure rules ---------------------------------------------------------------
 
@@ -440,7 +440,7 @@ pub fn interrupted_dispatch_requests(
 // -- Store helpers ------------------------------------------------------------
 
 /// [`validate_host_acting_for`] against the registry.
-fn require_acting_for(ctx: &ReducerContext, host_id: &str) -> Result<(), String> {
+pub(crate) fn require_acting_for(ctx: &ReducerContext, host_id: &str) -> Result<(), String> {
     let host = ctx.db.hosts().id().find(&host_id.to_string());
     validate_host_acting_for(host.as_ref(), host_id, &caller_identity(ctx))
 }
@@ -551,18 +551,35 @@ pub fn request_dispatch(
         .any(|r| dispatch_request_is_open(&r.state));
     validate_dispatch_request(&task, &requester, &origin, has_open)?;
     let mode = choose_dispatch_mode(&task, &mode)?;
+    create_dispatch_request(ctx, task, &requester, mode, &origin)
+}
 
+/// The writes of `RequestDispatch` once every `requires` has passed: claim the
+/// task, write the `requested` row and schedule its backstop timer. Shared by
+/// the reducer above and the epic chain inside `request_exit_session`
+/// (`session_request.rs`), so both write the identical request.
+///
+/// The one fallible step, the claim's [`write_task`], runs FIRST, so an `Err`
+/// has written nothing and the chain can move on to its next candidate.
+pub(crate) fn create_dispatch_request(
+    ctx: &ReducerContext,
+    task: Task,
+    requester: &str,
+    mode: &str,
+    origin: &str,
+) -> Result<(), String> {
     let stamp = now(ctx);
+    let task_id = task.id;
     let epic_id = task.epic_id;
-    delete_all_subagents(ctx, task_id);
     write_task(ctx, apply_dispatch_claim(task, &stamp))?;
+    delete_all_subagents(ctx, task_id);
     // The epic status rollup for the claimed task's epic chain, in this
     // reducer (`RequestDispatch`), like every later move of the request.
     recalculate_epic_chain(ctx, epic_id);
 
     let row = ctx.db.dispatch_requests().insert(DispatchRequest {
         requested_by: caller_identity(ctx),
-        ..new_dispatch_request(task_id, &requester, mode, &origin, &stamp)
+        ..new_dispatch_request(task_id, requester, mode, origin, &stamp)
     });
     let due = dispatch_request_backstop_due_micros(ctx.timestamp.to_micros_since_unix_epoch());
     ctx.db

@@ -210,3 +210,26 @@ pub fn blank_dispatch_request() -> DispatchRequest {
         reused_worktree: false,
     }
 }
+
+/// The one blank session request row: every optional column absent (`""`, or
+/// `0` for a row reference).
+pub fn blank_session_request() -> SessionRequest {
+    SessionRequest {
+        id: 0,
+        task_id: 0,
+        kind: String::new(),
+        action: String::new(),
+        host: String::new(),
+        requested_by: String::new(),
+        state: String::new(),
+        requested_at: String::new(),
+        claimed_at: String::new(),
+        finished_at: String::new(),
+        reason: String::new(),
+        pr_url: String::new(),
+        wrap_up_request: 0,
+        tmux_window: String::new(),
+        chained_task: 0,
+        deadline: String::new(),
+    }
+}

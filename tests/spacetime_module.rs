@@ -5769,6 +5769,10 @@ fn a_phoenix_task_respawns_with_a_done_close_but_not_a_pr_close() {
     }
     let instance = published_instance();
     register_own_hosts(&instance);
+    // The successor's id is generated, so the sequence is advanced past the
+    // seeded ids first, before any row is loaded (`burn_id_sequence`).
+    let burned = instance.call("burn_id_sequence", &["tasks", "10"]);
+    assert!(burned.status.success(), "{}", describe(&burned));
     let seeded = instance.call(
         "seed_epics",
         &[&serde_json::json!([epic_json(1, "E", "running", 0)]).to_string()],
@@ -5803,9 +5807,8 @@ fn a_phoenix_task_respawns_with_a_done_close_but_not_a_pr_close() {
     assert_eq!(task_column(&instance, "phoenix", 2), "true");
 
     let token = wrap_up_to_token(&instance, 1, "done");
-    assert!(request_exit_session(&instance, 1, &token, "done", "")
-        .status
-        .success());
+    let closed = request_exit_session(&instance, 1, &token, "done", "");
+    assert!(closed.status.success(), "{}", describe(&closed));
     assert_eq!(column(&instance, "SELECT COUNT(*) AS n FROM tasks"), "3");
     assert_eq!(task_column(&instance, "phoenix", 1), "false");
     assert_eq!(

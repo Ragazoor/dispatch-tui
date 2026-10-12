@@ -14,6 +14,7 @@ pub mod burn_id_sequence_reducer;
 pub mod claim_backlog_task_reducer;
 pub mod claim_dispatch_request_reducer;
 pub mod claim_poll_owner_reducer;
+pub mod claim_session_request_reducer;
 pub mod clear_setting_reducer;
 pub mod create_epic_reducer;
 pub mod create_learning_reducer;
@@ -36,6 +37,7 @@ pub mod epic_patch_type;
 pub mod epic_type;
 pub mod epics_table;
 pub mod fail_interrupted_dispatch_requests_reducer;
+pub mod fail_interrupted_session_requests_reducer;
 pub mod feed_ingest_item_type;
 pub mod feed_task_upsert_item_type;
 pub mod filter_preset_type;
@@ -76,7 +78,11 @@ pub mod repo_path_type;
 pub mod repo_paths_table;
 pub mod report_dispatch_failed_reducer;
 pub mod report_dispatch_provisioned_reducer;
+pub mod report_session_request_done_reducer;
+pub mod report_session_request_failed_reducer;
 pub mod request_dispatch_reducer;
+pub mod request_exit_session_reducer;
+pub mod request_wrap_up_reducer;
 pub mod rescope_epic_learnings_reducer;
 pub mod respawn_phoenix_successor_reducer;
 pub mod retired_feed_item_type;
@@ -106,6 +112,10 @@ pub mod seed_todos_reducer;
 pub mod seed_usage_events_reducer;
 pub mod seed_work_package_links_reducer;
 pub mod seed_work_packages_reducer;
+pub mod session_request_timeout_type;
+pub mod session_request_timeouts_table;
+pub mod session_request_type;
+pub mod session_requests_table;
 pub mod set_schema_version_reducer;
 pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
@@ -151,6 +161,7 @@ pub use burn_id_sequence_reducer::burn_id_sequence;
 pub use claim_backlog_task_reducer::claim_backlog_task;
 pub use claim_dispatch_request_reducer::claim_dispatch_request;
 pub use claim_poll_owner_reducer::claim_poll_owner;
+pub use claim_session_request_reducer::claim_session_request;
 pub use clear_setting_reducer::clear_setting;
 pub use create_epic_reducer::create_epic;
 pub use create_learning_reducer::create_learning;
@@ -173,6 +184,7 @@ pub use epic_patch_type::EpicPatch;
 pub use epic_type::Epic;
 pub use epics_table::*;
 pub use fail_interrupted_dispatch_requests_reducer::fail_interrupted_dispatch_requests;
+pub use fail_interrupted_session_requests_reducer::fail_interrupted_session_requests;
 pub use feed_ingest_item_type::FeedIngestItem;
 pub use feed_task_upsert_item_type::FeedTaskUpsertItem;
 pub use filter_preset_type::FilterPreset;
@@ -213,7 +225,11 @@ pub use repo_path_type::RepoPath;
 pub use repo_paths_table::*;
 pub use report_dispatch_failed_reducer::report_dispatch_failed;
 pub use report_dispatch_provisioned_reducer::report_dispatch_provisioned;
+pub use report_session_request_done_reducer::report_session_request_done;
+pub use report_session_request_failed_reducer::report_session_request_failed;
 pub use request_dispatch_reducer::request_dispatch;
+pub use request_exit_session_reducer::request_exit_session;
+pub use request_wrap_up_reducer::request_wrap_up;
 pub use rescope_epic_learnings_reducer::rescope_epic_learnings;
 pub use respawn_phoenix_successor_reducer::respawn_phoenix_successor;
 pub use retired_feed_item_type::RetiredFeedItem;
@@ -243,6 +259,10 @@ pub use seed_todos_reducer::seed_todos;
 pub use seed_usage_events_reducer::seed_usage_events;
 pub use seed_work_package_links_reducer::seed_work_package_links;
 pub use seed_work_packages_reducer::seed_work_packages;
+pub use session_request_timeout_type::SessionRequestTimeout;
+pub use session_request_timeouts_table::*;
+pub use session_request_type::SessionRequest;
+pub use session_requests_table::*;
 pub use set_schema_version_reducer::set_schema_version;
 pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
@@ -318,6 +338,10 @@ pub enum Reducer {
         scope_id: i64,
         host: String,
     },
+    ClaimSessionRequest {
+        request_id: i64,
+        host: String,
+    },
     ClearSetting {
         host: String,
         key: String,
@@ -371,6 +395,9 @@ pub enum Reducer {
         keep_external_ids: Vec<String>,
     },
     FailInterruptedDispatchRequests {
+        host: String,
+    },
+    FailInterruptedSessionRequests {
         host: String,
     },
     FlattenEpic {
@@ -468,11 +495,32 @@ pub enum Reducer {
         tmux_window: String,
         reused_worktree: bool,
     },
+    ReportSessionRequestDone {
+        request_id: i64,
+        reporter: String,
+    },
+    ReportSessionRequestFailed {
+        request_id: i64,
+        reporter: String,
+        reason: String,
+        conflict: bool,
+    },
     RequestDispatch {
         task_id: i64,
         requester: String,
         origin: String,
         mode: String,
+    },
+    RequestExitSession {
+        task_id: i64,
+        token: i64,
+        action: String,
+        pr_url: String,
+    },
+    RequestWrapUp {
+        task_id: i64,
+        host: String,
+        action: String,
     },
     RescopeEpicLearnings {
         from: i64,
@@ -621,6 +669,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::ClaimBacklogTask { .. } => "claim_backlog_task",
             Reducer::ClaimDispatchRequest { .. } => "claim_dispatch_request",
             Reducer::ClaimPollOwner { .. } => "claim_poll_owner",
+            Reducer::ClaimSessionRequest { .. } => "claim_session_request",
             Reducer::ClearSetting { .. } => "clear_setting",
             Reducer::CreateEpic { .. } => "create_epic",
             Reducer::CreateLearning { .. } => "create_learning",
@@ -636,6 +685,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteWorkPackage { .. } => "delete_work_package",
             Reducer::DropClosedRetiredFeedItems { .. } => "drop_closed_retired_feed_items",
             Reducer::FailInterruptedDispatchRequests { .. } => "fail_interrupted_dispatch_requests",
+            Reducer::FailInterruptedSessionRequests { .. } => "fail_interrupted_session_requests",
             Reducer::FlattenEpic { .. } => "flatten_epic",
             Reducer::IngestFeed { .. } => "ingest_feed",
             Reducer::LinkWorkPackageItem { .. } => "link_work_package_item",
@@ -658,7 +708,11 @@ impl __sdk::Reducer for Reducer {
             Reducer::ReleaseBacklogClaim { .. } => "release_backlog_claim",
             Reducer::ReportDispatchFailed { .. } => "report_dispatch_failed",
             Reducer::ReportDispatchProvisioned { .. } => "report_dispatch_provisioned",
+            Reducer::ReportSessionRequestDone { .. } => "report_session_request_done",
+            Reducer::ReportSessionRequestFailed { .. } => "report_session_request_failed",
             Reducer::RequestDispatch { .. } => "request_dispatch",
+            Reducer::RequestExitSession { .. } => "request_exit_session",
+            Reducer::RequestWrapUp { .. } => "request_wrap_up",
             Reducer::RescopeEpicLearnings { .. } => "rescope_epic_learnings",
             Reducer::RespawnPhoenixSuccessor { .. } => "respawn_phoenix_successor",
             Reducer::SaveRepoPath { .. } => "save_repo_path",
@@ -755,6 +809,13 @@ impl __sdk::Reducer for Reducer {
                 scope_id: scope_id.clone(),
                 host: host.clone(),
 }),
+            Reducer::ClaimSessionRequest{
+                request_id,
+                host,
+}             => __sats::bsatn::to_vec(&claim_session_request_reducer::ClaimSessionRequestArgs {
+                request_id: request_id.clone(),
+                host: host.clone(),
+}),
             Reducer::ClearSetting{
                 host,
                 key,
@@ -848,6 +909,11 @@ impl __sdk::Reducer for Reducer {
             Reducer::FailInterruptedDispatchRequests{
                 host,
 }             => __sats::bsatn::to_vec(&fail_interrupted_dispatch_requests_reducer::FailInterruptedDispatchRequestsArgs {
+                host: host.clone(),
+}),
+            Reducer::FailInterruptedSessionRequests{
+                host,
+}             => __sats::bsatn::to_vec(&fail_interrupted_session_requests_reducer::FailInterruptedSessionRequestsArgs {
                 host: host.clone(),
 }),
             Reducer::FlattenEpic{
@@ -1019,6 +1085,24 @@ Reducer::RecalculateEpicStatus{
                 tmux_window: tmux_window.clone(),
                 reused_worktree: reused_worktree.clone(),
 }),
+            Reducer::ReportSessionRequestDone{
+                request_id,
+                reporter,
+}             => __sats::bsatn::to_vec(&report_session_request_done_reducer::ReportSessionRequestDoneArgs {
+                request_id: request_id.clone(),
+                reporter: reporter.clone(),
+}),
+            Reducer::ReportSessionRequestFailed{
+                request_id,
+                reporter,
+                reason,
+                conflict,
+}             => __sats::bsatn::to_vec(&report_session_request_failed_reducer::ReportSessionRequestFailedArgs {
+                request_id: request_id.clone(),
+                reporter: reporter.clone(),
+                reason: reason.clone(),
+                conflict: conflict.clone(),
+}),
             Reducer::RequestDispatch{
                 task_id,
                 requester,
@@ -1029,6 +1113,26 @@ Reducer::RecalculateEpicStatus{
                 requester: requester.clone(),
                 origin: origin.clone(),
                 mode: mode.clone(),
+}),
+            Reducer::RequestExitSession{
+                task_id,
+                token,
+                action,
+                pr_url,
+}             => __sats::bsatn::to_vec(&request_exit_session_reducer::RequestExitSessionArgs {
+                task_id: task_id.clone(),
+                token: token.clone(),
+                action: action.clone(),
+                pr_url: pr_url.clone(),
+}),
+            Reducer::RequestWrapUp{
+                task_id,
+                host,
+                action,
+}             => __sats::bsatn::to_vec(&request_wrap_up_reducer::RequestWrapUpArgs {
+                task_id: task_id.clone(),
+                host: host.clone(),
+                action: action.clone(),
 }),
             Reducer::RescopeEpicLearnings{
                 from,
@@ -1276,6 +1380,8 @@ pub struct DbUpdate {
     retired_feed_items: __sdk::TableUpdate<RetiredFeedItem>,
     rules_version: __sdk::TableUpdate<RulesVersion>,
     schema_version: __sdk::TableUpdate<SchemaVersion>,
+    session_request_timeouts: __sdk::TableUpdate<SessionRequestTimeout>,
+    session_requests: __sdk::TableUpdate<SessionRequest>,
     settings: __sdk::TableUpdate<Setting>,
     subscriptions: __sdk::TableUpdate<Subscription>,
     task_shells: __sdk::TableUpdate<TaskShell>,
@@ -1333,6 +1439,12 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "schema_version" => db_update
                     .schema_version
                     .append(schema_version_table::parse_table_update(table_update)?),
+                "session_request_timeouts" => db_update.session_request_timeouts.append(
+                    session_request_timeouts_table::parse_table_update(table_update)?,
+                ),
+                "session_requests" => db_update
+                    .session_requests
+                    .append(session_requests_table::parse_table_update(table_update)?),
                 "settings" => db_update
                     .settings
                     .append(settings_table::parse_table_update(table_update)?),
@@ -1434,6 +1546,15 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.schema_version = cache
             .apply_diff_to_table::<SchemaVersion>("schema_version", &self.schema_version)
             .with_updates_by_pk(|row| &row.id);
+        diff.session_request_timeouts = cache
+            .apply_diff_to_table::<SessionRequestTimeout>(
+                "session_request_timeouts",
+                &self.session_request_timeouts,
+            )
+            .with_updates_by_pk(|row| &row.scheduled_id);
+        diff.session_requests = cache
+            .apply_diff_to_table::<SessionRequest>("session_requests", &self.session_requests)
+            .with_updates_by_pk(|row| &row.id);
         diff.settings = cache
             .apply_diff_to_table::<Setting>("settings", &self.settings)
             .with_updates_by_pk(|row| &row.id);
@@ -1506,6 +1627,12 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "schema_version" => db_update
                     .schema_version
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "session_request_timeouts" => db_update
+                    .session_request_timeouts
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "session_requests" => db_update
+                    .session_requests
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "settings" => db_update
                     .settings
@@ -1589,6 +1716,12 @@ impl __sdk::DbUpdate for DbUpdate {
                 "schema_version" => db_update
                     .schema_version
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "session_request_timeouts" => db_update
+                    .session_request_timeouts
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "session_requests" => db_update
+                    .session_requests
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "settings" => db_update
                     .settings
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1647,6 +1780,8 @@ pub struct AppliedDiff<'r> {
     retired_feed_items: __sdk::TableAppliedDiff<'r, RetiredFeedItem>,
     rules_version: __sdk::TableAppliedDiff<'r, RulesVersion>,
     schema_version: __sdk::TableAppliedDiff<'r, SchemaVersion>,
+    session_request_timeouts: __sdk::TableAppliedDiff<'r, SessionRequestTimeout>,
+    session_requests: __sdk::TableAppliedDiff<'r, SessionRequest>,
     settings: __sdk::TableAppliedDiff<'r, Setting>,
     subscriptions: __sdk::TableAppliedDiff<'r, Subscription>,
     task_shells: __sdk::TableAppliedDiff<'r, TaskShell>,
@@ -1713,6 +1848,16 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<SchemaVersion>(
             "schema_version",
             &self.schema_version,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<SessionRequestTimeout>(
+            "session_request_timeouts",
+            &self.session_request_timeouts,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<SessionRequest>(
+            "session_requests",
+            &self.session_requests,
             event,
         );
         callbacks.invoke_table_row_callbacks::<Setting>("settings", &self.settings, event);
@@ -2422,6 +2567,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         retired_feed_items_table::register_table(client_cache);
         rules_version_table::register_table(client_cache);
         schema_version_table::register_table(client_cache);
+        session_request_timeouts_table::register_table(client_cache);
+        session_requests_table::register_table(client_cache);
         settings_table::register_table(client_cache);
         subscriptions_table::register_table(client_cache);
         task_shells_table::register_table(client_cache);
@@ -2447,6 +2594,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "retired_feed_items",
         "rules_version",
         "schema_version",
+        "session_request_timeouts",
+        "session_requests",
         "settings",
         "subscriptions",
         "task_shells",
