@@ -476,6 +476,23 @@ async fn deleting_a_task_fails_its_open_request() {
     let (single, single_req) = provisioning_request(&caller).await;
     let batched = caller.create_task(blank_task()).await.unwrap();
     let batched_req = request_id(request(&caller, batched, HOST, "user", "dispatch").await);
+    // Only a done task may be deleted (`tasks.allium: DeleteTask`): both are
+    // moved to done by hand while their requests are still open.
+    for task in [single, batched] {
+        caller
+            .patch_task(
+                task,
+                bindings::TaskPatch {
+                    status: Some("done".into()),
+                    sub_status: Some("none".into()),
+                    ..blank_task_patch()
+                },
+            )
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+    }
 
     caller.delete_task(single).await.unwrap().applied().unwrap();
     caller

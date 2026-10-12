@@ -165,8 +165,8 @@ async fn dispatch_task_answers_with_the_rows_reason_when_it_fails() {
         .unwrap());
     let resp = answer(handle).await;
 
-    let err = resp.error.expect("a failed request is an error");
-    assert!(err.message.contains("deadline passed"), "{}", err.message);
+    // A tool failure is an `isError` result, not a protocol error.
+    assert_error(&resp, "deadline passed");
     let after = state.task_svc.get_task(task).await.unwrap();
     assert_eq!(after.status, TaskStatus::Backlog);
 }
@@ -228,12 +228,7 @@ async fn dispatch_task_reports_a_refused_request_as_not_in_backlog() {
     )
     .await;
 
-    let err = resp.error.expect("a refused request is an error");
-    assert!(
-        err.message.contains("not in backlog (current: running)"),
-        "{}",
-        err.message
-    );
+    assert_error(&resp, "not in backlog (current: running)");
 }
 
 /// A task whose worktree is on another machine is refused with that reason.
@@ -257,8 +252,7 @@ async fn dispatch_task_reports_a_foreign_owned_task_with_the_modules_reason() {
     )
     .await;
 
-    let err = resp.error.expect("a foreign-owned task is refused");
-    assert!(err.message.contains("another-machine"), "{}", err.message);
+    assert_error(&resp, "another-machine");
     assert!(db.latest_dispatch_request_for_task(task).await.is_none());
 }
 

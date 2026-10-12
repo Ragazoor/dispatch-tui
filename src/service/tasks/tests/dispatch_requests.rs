@@ -426,7 +426,7 @@ async fn serve_reports_a_provisioning_failure_and_the_module_releases_the_claim(
 // ===========================================================================
 
 fn is_fetch(args: &[&str]) -> bool {
-    args.first().is_some_and(|a| *a == "fetch")
+    args.contains(&"fetch")
 }
 
 /// A runner whose `git fetch` stalls: it never answers on its own, so the only
@@ -652,12 +652,15 @@ async fn a_row_timed_out_under_the_host_is_torn_down_not_recorded() {
     );
 
     let calls = runner.inner.flattened_calls();
+    // Kills target the pane id the window's name resolves to
+    // (`TmuxWindowTargetedExactly`), never the bare name.
     let window = format!("task-{}", task.id.0);
+    let pane = runner.inner.pane_id_of(&window);
     assert!(
         calls
             .iter()
-            .any(|c| c.contains("kill-window") && c.contains(&window)),
-        "the window this attempt opened must be killed: {calls:?}"
+            .any(|c| c.contains("kill-window") && c.ends_with(&format!("-t {pane}"))),
+        "the window this attempt opened ({window}, {pane}) must be killed: {calls:?}"
     );
     assert!(
         !calls.iter().any(|c| c.contains("worktree remove")),
@@ -686,11 +689,24 @@ async fn a_task_deleted_under_the_host_is_torn_down() {
             .unwrap(),
     );
     let caller = fx.caller.clone();
+    let db = fx.db.clone();
     let task_id = task.id;
     let runner = Arc::new(OnCall {
         inner: script_with_spare_teardown(),
         needle: "new-window",
         action: Mutex::new(Some(Box::new(move || {
+            // Only a done task may be deleted (`tasks.allium: DeleteTask`):
+            // the operator moves it to done, then deletes it, while its
+            // request is still open.
+            ready(
+                db.patch_task(
+                    task_id,
+                    &store::TaskPatch::new()
+                        .status(TaskStatus::Done)
+                        .sub_status(crate::models::SubStatus::default_for(TaskStatus::Done)),
+                ),
+            )
+            .unwrap();
             ready(caller.delete_task(task_id))
                 .unwrap()
                 .applied()
