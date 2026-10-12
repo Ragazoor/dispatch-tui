@@ -371,10 +371,10 @@ config {
     -- module fails a row still open then as a backstop
     -- (DispatchRequestTimesOut). A module config value, read by the host
     -- from the row's deadline rather than from a copy of its own. Shorter
-    -- than the host's worst-case subprocess budget (SUBPROCESS_TIMEOUT *
-    -- PROVISION_MAX_SUBPROCESS_CALLS) on purpose: the deadline bounds the
-    -- dispatch, and a subprocess still running at it is killed. Dispatch
-    -- only; M5's requests get their own.
+    -- than the host's worst-case subprocess budget (several sequential git
+    -- calls, each bounded by SUBPROCESS_TIMEOUT) on purpose: the deadline
+    -- bounds the dispatch, and a subprocess still running at it is killed.
+    -- Dispatch only; M5's requests get their own.
     dispatch_request_timeout: Duration = 60.seconds
 
     -- How long after the deadline the module's backstop timer waits before

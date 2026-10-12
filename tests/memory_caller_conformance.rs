@@ -261,7 +261,7 @@ fn learning_shape(l: &dispatch_tui::models::Learning) -> LearningShape {
 /// it is stamped by every write, from each side's own clock, so it would
 /// never agree bit-for-bit — and `completed_at`/`last_pre_tool_use_at` are
 /// each reduced to presence for the same reason, on the transitions this
-/// scenario actually stamps them (`claim_backlog_task` for the latter).
+/// scenario actually stamps them (`request_dispatch`'s claim for the latter).
 /// Every other field of `crate::models::Task` is compared exactly, per
 /// `ReducerConformance.SameEndState`'s "same resulting row state": including
 /// the ones nothing in this scenario writes on either side (`tmux_window`,
@@ -533,74 +533,6 @@ fn memory_caller_matches_the_real_reducers() {
         assert_eq!(task_id_real, task_id_mem, "generated task id");
         compare_task(task_id_real.0);
         compare_epic(epic_id_real);
-
-        // -- claim_backlog_task ---------------------------------------------------
-        let real_claim = real
-            .claim_backlog_task(task_id_real, "host-a".into())
-            .await
-            .unwrap();
-        wait_for!(rows_real
-            .task(task_id_real)
-            .is_some_and(|t| t.status == TaskStatus::Running));
-        let mem_claim = mem
-            .claim_backlog_task(task_id_mem, "host-a".into())
-            .await
-            .unwrap();
-        assert_eq!(real_claim.won(), mem_claim.won(), "claim outcome");
-        compare_task(task_id_real.0);
-
-        // -- release_backlog_claim refuses while a worktree is attached ------------
-        let attach_worktree = || bindings::TaskPatch {
-            worktree: Some("/tmp/conformance".into()),
-            ..blank_task_patch()
-        };
-        real.patch_task(task_id_real, attach_worktree())
-            .await
-            .unwrap();
-        wait_for!(rows_real
-            .task(task_id_real)
-            .is_some_and(|t| t.worktree.as_deref() == Some("/tmp/conformance")));
-        mem.patch_task(task_id_mem, attach_worktree())
-            .await
-            .unwrap();
-        compare_task(task_id_real.0);
-
-        let real_release = real.release_backlog_claim(task_id_real).await.unwrap();
-        let mem_release = mem.release_backlog_claim(task_id_mem).await.unwrap();
-        assert!(
-            !real_release.won(),
-            "real must refuse with a worktree attached"
-        );
-        assert!(
-            !mem_release.won(),
-            "mem must refuse with a worktree attached"
-        );
-        compare_task(task_id_real.0);
-
-        // Clear the worktree so release can actually apply, on both sides.
-        let clear_worktree = || bindings::TaskPatch {
-            worktree: Some(String::new()),
-            ..blank_task_patch()
-        };
-        real.patch_task(task_id_real, clear_worktree())
-            .await
-            .unwrap();
-        wait_for!(rows_real
-            .task(task_id_real)
-            .is_some_and(|t| t.worktree.is_none()));
-        mem.patch_task(task_id_mem, clear_worktree()).await.unwrap();
-        compare_task(task_id_real.0);
-
-        let real_release = real.release_backlog_claim(task_id_real).await.unwrap();
-        wait_for!(rows_real
-            .task(task_id_real)
-            .is_some_and(|t| t.status == TaskStatus::Backlog));
-        let mem_release = mem.release_backlog_claim(task_id_mem).await.unwrap();
-        assert!(
-            real_release.won() && mem_release.won(),
-            "release must apply now"
-        );
-        compare_task(task_id_real.0);
 
         // -- patch_epic -------------------------------------------------------------
         real.patch_epic(
@@ -1014,15 +946,16 @@ fn memory_caller_matches_the_real_reducers() {
         assert_eq!(missing_real.won(), missing_mem.won(), "double delete");
 
         // -- agent session state: subagents + hooks (agent_state) -------------------
-        real.claim_backlog_task(task_id_real, "host-a".into())
-            .await
-            .unwrap();
+        let run = || bindings::TaskPatch {
+            status: Some("running".into()),
+            sub_status: Some("active".into()),
+            ..blank_task_patch()
+        };
+        real.patch_task(task_id_real, run()).await.unwrap();
         wait_for!(rows_real
             .task(task_id_real)
             .is_some_and(|t| t.status == TaskStatus::Running));
-        mem.claim_backlog_task(task_id_mem, "host-a".into())
-            .await
-            .unwrap();
+        mem.patch_task(task_id_mem, run()).await.unwrap();
         compare_task(task_id_real.0);
 
         let real_live = real

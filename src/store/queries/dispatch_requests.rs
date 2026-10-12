@@ -11,13 +11,14 @@ use crate::sync::ReducerOutcome;
 
 use super::Store;
 
-/// Whether a host-side call applied — and if it did not, WHY, in the log.
+/// [`ReducerOutcome::won`] for a host-side call — and if it lost, WHY, in the
+/// log.
 ///
 /// The caller's next move is the same whichever reason it was refused for, but
 /// the reasons are not the same (`sync.allium: StoreRejectsAnInvalidMutation`
 /// says a rejection carries one): a redelivered claim is ordinary, a report
 /// refused because the backstop failed the row is worth reading about.
-fn applied(outcome: ReducerOutcome, what: &str, id: DispatchRequestId) -> bool {
+fn won_logged(outcome: ReducerOutcome, what: &str, id: DispatchRequestId) -> bool {
     match outcome {
         ReducerOutcome::Applied(_) => true,
         ReducerOutcome::Refused(why) => {
@@ -84,7 +85,7 @@ impl DispatchRequestStore for Store {
     }
 
     async fn claim_dispatch_request(&self, id: DispatchRequestId) -> Result<bool> {
-        Ok(applied(
+        Ok(won_logged(
             self.caller
                 .claim_dispatch_request(id, self.host.clone())
                 .await?,
@@ -99,7 +100,7 @@ impl DispatchRequestStore for Store {
         worktree: &str,
         tmux_window: &TmuxWindow,
     ) -> Result<bool> {
-        Ok(applied(
+        Ok(won_logged(
             self.caller
                 .report_dispatch_provisioned(
                     id,
@@ -114,7 +115,7 @@ impl DispatchRequestStore for Store {
     }
 
     async fn report_dispatch_failed(&self, id: DispatchRequestId, reason: &str) -> Result<bool> {
-        Ok(applied(
+        Ok(won_logged(
             self.caller
                 .report_dispatch_failed(id, self.host.clone(), reason.to_string())
                 .await?,

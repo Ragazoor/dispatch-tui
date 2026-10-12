@@ -645,8 +645,9 @@ mod rules {
 /// tests in `tests/spacetime_module.rs` ("store-split M4"). The backstop timer
 /// in particular cannot be time-travelled on a live store without a wall-clock
 /// wait, so what it does to a row whose deadline has passed is pinned HERE, on
-/// the body `expire_dispatch_request` runs
-/// ([`expire_dispatch_request_row`]).
+/// the pure pieces `expire_dispatch_request` composes
+/// ([`dispatch_request_is_open`] and [`failed_request_row`]), and end to end
+/// by the in-memory double's stand-in (`MemoryReducerCaller::expire_dispatch_request`).
 #[cfg(test)]
 mod dispatch_requests {
     use super::*;
@@ -1013,36 +1014,30 @@ mod dispatch_requests {
     // -- DispatchRequestTimesOut (the scheduled reducer's body) ----------
 
     /// The scheduled reducer fires only once its row is due (deadline +
-    /// grace), so its body is "fail the row if it is still open". Called here
-    /// directly on rows whose deadline has passed, in each state.
+    /// grace), so its body is "fail the row 'timed out' if it is still open";
+    /// a row the host already finished is left as it is (its own report won).
     #[test]
     fn the_backstop_fails_an_open_row_as_timed_out() {
         for state in ["requested", "provisioning"] {
-            let failed = expire_dispatch_request_row(request(state, HOST_A), LATER)
-                .unwrap_or_else(|| panic!("{state} is open and must be failed"));
+            let row = request(state, HOST_A);
+            assert!(dispatch_request_is_open(&row.state), "{state}");
+            let failed = failed_request_row(row, DISPATCH_REASON_TIMED_OUT, LATER);
             assert_eq!(failed.state, "failed");
             assert_eq!(failed.reason, "timed out");
             assert_eq!(failed.finished_at, LATER);
         }
-    }
-
-    /// A row the host already finished is left as it is: its own report won.
-    #[test]
-    fn the_backstop_leaves_a_finished_row_alone() {
         for state in ["dispatched", "failed"] {
-            assert!(
-                expire_dispatch_request_row(request(state, HOST_A), LATER).is_none(),
-                "{state}"
-            );
+            assert!(!dispatch_request_is_open(state), "{state}");
         }
     }
 
     // -- HostRestartFailsInterrupted -------------------------------------
 
-    /// Only THIS host's PROVISIONING rows: a requested row is picked up by the
-    /// starting board, and another host's rows are its own business.
+    /// Only the PROVISIONING rows of the host's own (the reducer reads them
+    /// by its `host` index): a requested row is picked up by the starting
+    /// board, and finished rows are history.
     #[test]
-    fn a_restart_interrupts_only_this_hosts_provisioning_rows() {
+    fn a_restart_interrupts_only_provisioning_rows() {
         let rows = vec![
             DispatchRequest {
                 id: 1,
@@ -1053,10 +1048,6 @@ mod dispatch_requests {
                 ..request("requested", HOST_A)
             },
             DispatchRequest {
-                id: 3,
-                ..request("provisioning", HOST_B)
-            },
-            DispatchRequest {
                 id: 4,
                 ..request("dispatched", HOST_A)
             },
@@ -1065,7 +1056,11 @@ mod dispatch_requests {
                 ..request("failed", HOST_A)
             },
         ];
-        assert_eq!(interrupted_dispatch_requests(&rows, HOST_A), vec![1]);
+        let ids: Vec<i64> = interrupted_dispatch_requests(rows)
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(ids, vec![1]);
     }
 
     #[test]

@@ -329,17 +329,6 @@ mod unconnected {
         let host = || "host-1".to_string();
 
         refused(
-            "claim_backlog_task",
-            caller
-                .claim_backlog_task(TaskId(1), host())
-                .await
-                .unwrap_err(),
-        );
-        refused(
-            "release_backlog_claim",
-            caller.release_backlog_claim(TaskId(1)).await.unwrap_err(),
-        );
-        refused(
             "create_epic",
             caller.create_epic(epic("e")).await.unwrap_err(),
         );

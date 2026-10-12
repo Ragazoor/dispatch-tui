@@ -233,7 +233,7 @@ impl App {
         // Drop dispatching IDs whose task has been deleted from the list.
         let live_ids: HashSet<TaskId> = self.board.tasks.iter().map(|t| t.id).collect();
         let before = self.dispatching.len();
-        self.dispatching.retain(|id, _| live_ids.contains(id));
+        self.dispatching.retain(|id| live_ids.contains(id));
         if self.dispatching.len() != before {
             self.refresh_dispatching_status();
         }
@@ -678,13 +678,12 @@ mod tick_tests {
         let task = make_task(60, TaskStatus::Backlog);
         let id = task.id;
         app.board.tasks.push(task);
-        app.dispatching
-            .insert(id, Instant::now() - Duration::from_secs(24 * 3600));
+        app.dispatching.insert(id);
 
         app.tick_dispatching();
 
         assert!(
-            app.dispatching.contains_key(&id),
+            app.dispatching.contains(&id),
             "the row's deadline, not the board, ends a stuck dispatch"
         );
         assert!(app.status.error_popup.is_none());

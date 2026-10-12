@@ -1118,8 +1118,9 @@ impl TaskService {
     /// `epics.allium: AutoDispatchNextSubtask`'s claim: offer the epic's
     /// backlog subtasks to the module as dispatch requests (origin
     /// `epic_chain`, no mode), one at a time in board order, until one is
-    /// accepted. Returns that subtask and its request, or `Ok(None)` when no
-    /// candidate is left.
+    /// accepted. Returns that subtask as the candidate read before the
+    /// request (its row now holds the claim), or `Ok(None)` when no candidate
+    /// is left.
     ///
     /// A refused request is ORDINARY — another entry point or a concurrent
     /// close got there first, or the subtask's worktree is on another machine
@@ -1132,7 +1133,7 @@ impl TaskService {
     pub async fn request_next_backlog_subtask(
         &self,
         epic_id: EpicId,
-    ) -> Result<Option<(Task, crate::models::DispatchRequestId)>, ServiceError> {
+    ) -> Result<Option<Task>, ServiceError> {
         // Read only to honour the NotFound contract.
         self.db
             .get_epic(epic_id)
@@ -1153,10 +1154,7 @@ impl TaskService {
                 .request_dispatch(task.id, crate::models::DispatchOrigin::EpicChain, None)
                 .await?
             {
-                crate::store::RequestDispatchAnswer::Requested(id) => {
-                    let task = self.db.get_task(task.id).await.unwrap_or(task);
-                    return Ok(Some((task, id)));
-                }
+                crate::store::RequestDispatchAnswer::Requested(_) => return Ok(Some(task)),
                 crate::store::RequestDispatchAnswer::Refused(why) => {
                     tracing::info!(
                         task_id = task.id.0,

@@ -39,7 +39,16 @@ impl DispatchHost {
     /// board with no settled identity serves nothing.
     pub(super) async fn serve(&self) -> Vec<tokio::task::JoinHandle<()>> {
         let rows = self.database.dispatch_requests().await;
-        let to_serve = self.observer().observe(&rows);
+        self.serve_rows(&rows).await
+    }
+
+    /// [`Self::serve`] over rows the caller already read — the row pump's
+    /// reload reads them once for the App and for this.
+    pub(super) async fn serve_rows(
+        &self,
+        rows: &[models::DispatchRequest],
+    ) -> Vec<tokio::task::JoinHandle<()>> {
+        let to_serve = self.observer().observe(rows);
         if to_serve.is_empty() {
             return Vec::new();
         }
@@ -117,7 +126,6 @@ impl DispatchHost {
                 );
                 self.observer().release(request);
             }
-            crate::service::ServedDispatch::NotThisHost => {}
         }
     }
 }

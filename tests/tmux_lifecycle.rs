@@ -210,6 +210,7 @@ impl Fixture {
         dispatch::dispatch_agent(
             &task(id, &self.repo),
             &self.server.runner(),
+            &self.server.runner(),
             None,
             &Default::default(),
         )
@@ -598,6 +599,7 @@ fn dispatch_refuses_to_create_a_second_window_under_a_live_name() {
 
     let err = dispatch::dispatch_agent(
         &task(TASK_ID, &fx.repo),
+        &fx.server.runner(),
         &fx.server.runner(),
         None,
         &Default::default(),

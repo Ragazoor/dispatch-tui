@@ -254,44 +254,6 @@ mod prepare_inputs {
         assert_eq!(rows.len(), 1);
         assert!(matches!(rows[0].source, RetrievalSource::PromptInjection));
     }
-
-    #[tokio::test]
-    async fn prepare_inputs_with_epic_ctx_uses_the_supplied_context() {
-        use crate::embeddings::EmbeddingService;
-
-        let (rt, _app) = test_runtime().await;
-        let db = rt.db_write().clone();
-        // Deliberately epic-less: a from_db read would yield None, so seeing the
-        // supplied context proves it was not re-read.
-        let task = create_task_returning(
-            &*db,
-            "title",
-            "desc",
-            "/repo/a",
-            None,
-            models::TaskStatus::Backlog,
-        )
-        .await
-        .unwrap();
-        let supplied = crate::dispatch::EpicContext {
-            epic_id: models::EpicId(7),
-            epic_title: "Already in hand".to_string(),
-            under_cve_feed: false,
-        };
-
-        let inputs = crate::dispatch::prepare_inputs_with_epic_ctx(
-            &*db,
-            &task,
-            &EmbeddingService::new_test(),
-            Some(supplied),
-        )
-        .await;
-
-        let epic_ctx = inputs.epic_ctx.expect("the supplied context is returned");
-        assert_eq!(epic_ctx.epic_id, models::EpicId(7));
-        assert_eq!(epic_ctx.epic_title, "Already in hand");
-        assert!(inputs.injected.is_empty());
-    }
 }
 
 mod backfill_embeddings {

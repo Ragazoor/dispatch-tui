@@ -20,26 +20,25 @@ use crate::models::{
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
     apply_learning_verdicts as _, archive_stale_learnings as _, batch_delete as _,
-    batch_patch_sub_status as _, claim_backlog_task as _, claim_dispatch_request as _,
-    claim_poll_owner as _, clear_setting as _, create_epic as _, create_learning as _,
-    create_managed_role_epic as _, create_repo_group_sub_epic as _, create_task as _,
-    create_work_package as _, delete_epic as _, delete_learning as _, delete_repo_path as _,
-    delete_stale_subtree_feed_tasks as _, delete_task as _, delete_work_package as _,
-    drop_closed_retired_feed_items as _, fail_interrupted_dispatch_requests as _,
-    flatten_epic as _, ingest_feed as _, link_work_package_item as _,
-    mark_pr_learnings_gate_shown as _, override_poll_owner as _, patch_epic as _,
-    patch_learning as _, patch_task as _, patch_work_package as _, recalculate_epic_status as _,
-    record_base_branch as _, record_learning_retrieval as _, record_notification as _,
-    record_pre_tool_use as _, record_usage_event as _, record_user_prompt_submit as _,
-    register_host as _, regroup_epic as _, release_backlog_claim as _, report_dispatch_failed as _,
-    report_dispatch_provisioned as _, request_dispatch as _, rescope_epic_learnings as _,
-    respawn_phoenix_successor as _, save_repo_path as _, save_setting as _, set_task_epic as _,
-    set_verify_command as _, subagent_clear as _, subagent_clear_and_void_pending_stop as _,
-    subagent_start as _, subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
-    unlink_work_package_item as _, unsubscribe_from_epic as _, upsert_feed_tasks as _,
-    upsert_feed_tasks_additive as _, DbConnection, DispatchRequestsTableAccess as _,
-    EpicsTableAccess as _, LearningsTableAccess as _, TasksTableAccess as _,
-    WorkPackagesTableAccess as _,
+    batch_patch_sub_status as _, claim_dispatch_request as _, claim_poll_owner as _,
+    clear_setting as _, create_epic as _, create_learning as _, create_managed_role_epic as _,
+    create_repo_group_sub_epic as _, create_task as _, create_work_package as _, delete_epic as _,
+    delete_learning as _, delete_repo_path as _, delete_stale_subtree_feed_tasks as _,
+    delete_task as _, delete_work_package as _, drop_closed_retired_feed_items as _,
+    fail_interrupted_dispatch_requests as _, flatten_epic as _, ingest_feed as _,
+    link_work_package_item as _, mark_pr_learnings_gate_shown as _, override_poll_owner as _,
+    patch_epic as _, patch_learning as _, patch_task as _, patch_work_package as _,
+    recalculate_epic_status as _, record_base_branch as _, record_learning_retrieval as _,
+    record_notification as _, record_pre_tool_use as _, record_usage_event as _,
+    record_user_prompt_submit as _, register_host as _, regroup_epic as _,
+    report_dispatch_failed as _, report_dispatch_provisioned as _, request_dispatch as _,
+    rescope_epic_learnings as _, respawn_phoenix_successor as _, save_repo_path as _,
+    save_setting as _, set_task_epic as _, set_verify_command as _, subagent_clear as _,
+    subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
+    subscribe_to_epic as _, try_record_stop as _, unlink_work_package_item as _,
+    unsubscribe_from_epic as _, upsert_feed_tasks as _, upsert_feed_tasks_additive as _,
+    DbConnection, DispatchRequestsTableAccess as _, EpicsTableAccess as _,
+    LearningsTableAccess as _, TasksTableAccess as _, WorkPackagesTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -202,14 +201,6 @@ impl ReducerCaller for SdkReducerCaller {
             "the epic move",
             set_task_epic_then(id.0, encode::epic_ref(epic_id), owner)
         )
-    }
-
-    async fn claim_backlog_task(&self, id: TaskId, host: String) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(self, "the claim", claim_backlog_task_then(id.0, host))
-    }
-
-    async fn release_backlog_claim(&self, id: TaskId) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(self, "the claim release", release_backlog_claim_then(id.0))
     }
 
     /// The epic twin of [`Self::create_task`], matched the same way.

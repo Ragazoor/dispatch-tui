@@ -376,6 +376,7 @@ fn launch_agent(
     provision: &super::worktree::ProvisionResult,
     full_prompt: &str,
     runner: &dyn ProcessRunner,
+    teardown: &dyn ProcessRunner,
 ) -> Result<()> {
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
     let claude = runner.agent_binaries().claude_quoted();
@@ -402,7 +403,7 @@ fn launch_agent(
             // Provisioning succeeded, so this attempt owns the window.
             Some(&provision.tmux_window),
             provision.reused_worktree,
-            runner,
+            teardown,
         );
         return Err(e);
     }
@@ -426,6 +427,7 @@ fn dispatch_with_prompt(
     task: &Task,
     make_prompt: impl FnOnce() -> String,
     runner: &dyn ProcessRunner,
+    teardown: &dyn ProcessRunner,
     base_branch: Option<&str>,
 ) -> Result<DispatchResult> {
     if task.repo_path.is_empty() {
@@ -459,7 +461,7 @@ fn dispatch_with_prompt(
         None => BaseRef::Branch(&resolved),
     };
 
-    let provision = provision_worktree(task, runner, Some(base_ref), SUBPROCESS_TIMEOUT)?;
+    let provision = provision_worktree(task, runner, teardown, Some(base_ref), SUBPROCESS_TIMEOUT)?;
 
     let preamble = select_preamble(
         pr_branch.as_deref(),
@@ -469,7 +471,7 @@ fn dispatch_with_prompt(
     let head = compose_prompt_head(&preamble, provision.fetch_warning.as_deref());
 
     let full_prompt = full_agent_prompt(&head, &make_prompt());
-    launch_agent(task, &repo_path, &provision, &full_prompt, runner)?;
+    launch_agent(task, &repo_path, &provision, &full_prompt, runner, teardown)?;
 
     spawn_agent_tree_pane(
         &provision.tmux_window,
@@ -496,6 +498,7 @@ fn dispatch_with_prompt(
 pub fn dispatch_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
+    teardown: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
     injections: &LearningInjections<'_>,
 ) -> Result<DispatchResult> {
@@ -531,6 +534,7 @@ pub fn dispatch_agent(
             )
         },
         runner,
+        teardown,
         Some(&task.base_branch),
     )
 }
@@ -538,6 +542,7 @@ pub fn dispatch_agent(
 pub fn research_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
+    teardown: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
 ) -> Result<DispatchResult> {
     dispatch_with_prompt(
@@ -552,6 +557,7 @@ pub fn research_agent(
             )
         },
         runner,
+        teardown,
         Some(&task.base_branch),
     )
 }
@@ -559,6 +565,7 @@ pub fn research_agent(
 pub fn quick_dispatch_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
+    teardown: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
     injections: &LearningInjections<'_>,
 ) -> Result<DispatchResult> {
@@ -573,6 +580,7 @@ pub fn quick_dispatch_agent(
             build_quick_dispatch_prompt(task.id, &task.title, &task.description, epic, &ctx)
         },
         runner,
+        teardown,
         Some(&task.base_branch),
     )
 }
@@ -587,17 +595,20 @@ pub fn run_agent_for_mode(
     task: &Task,
     mode: crate::models::DispatchMode,
     runner: &dyn ProcessRunner,
+    teardown: &dyn ProcessRunner,
     inputs: DispatchInputs,
 ) -> Result<DispatchResult> {
     let DispatchInputs { epic_ctx, injected } = inputs;
     let injections = LearningInjections::from(injected.as_slice());
     match mode {
         crate::models::DispatchMode::Dispatch => {
-            dispatch_agent(task, runner, epic_ctx.as_ref(), &injections)
+            dispatch_agent(task, runner, teardown, epic_ctx.as_ref(), &injections)
         }
-        crate::models::DispatchMode::Research => research_agent(task, runner, epic_ctx.as_ref()),
+        crate::models::DispatchMode::Research => {
+            research_agent(task, runner, teardown, epic_ctx.as_ref())
+        }
         crate::models::DispatchMode::Quick => {
-            quick_dispatch_agent(task, runner, epic_ctx.as_ref(), &injections)
+            quick_dispatch_agent(task, runner, teardown, epic_ctx.as_ref(), &injections)
         }
     }
 }
@@ -626,18 +637,6 @@ pub async fn prepare_inputs(
     emb_svc: &std::sync::Arc<crate::embeddings::EmbeddingService>,
 ) -> DispatchInputs {
     let epic_ctx = EpicContext::from_db(task, db).await;
-    prepare_inputs_with_epic_ctx(db, task, emb_svc, epic_ctx).await
-}
-
-/// [`prepare_inputs`] for a caller that already holds the epic row — the epic
-/// chain, which reads the epic to check `auto_dispatch` and would otherwise
-/// re-read it here.
-pub async fn prepare_inputs_with_epic_ctx(
-    db: &dyn crate::store::TaskReadStore,
-    task: &Task,
-    emb_svc: &std::sync::Arc<crate::embeddings::EmbeddingService>,
-    epic_ctx: Option<EpicContext>,
-) -> DispatchInputs {
     let injected = build_and_record_injections(db, task, emb_svc).await;
     DispatchInputs { epic_ctx, injected }
 }

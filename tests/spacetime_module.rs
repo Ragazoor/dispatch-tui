@@ -4476,7 +4476,7 @@ fn a_feed_ingest_that_deletes_a_stale_task_fails_its_open_request() {
 // it after the module moved its subtask. Observed through a STALE epic: one
 // seeded `done` over an unfinished subtask, which any rollup returns to
 // backlog. The backstop timer takes the same failure path
-// (`finish_failed_request`) but is not fired here — see the section header
+// (`fail_dispatch_request`) but is not fired here — see the section header
 // above.
 
 /// [`seed_dispatchable`]'s one task, under an epic left `done` by a rollup

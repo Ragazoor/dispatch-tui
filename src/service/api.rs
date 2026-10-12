@@ -314,10 +314,7 @@ macro_rules! task_service_api {
             async fn request_next_backlog_subtask(
                 &self,
                 epic_id: $crate::models::EpicId
-            ) -> Result<
-                Option<($crate::models::Task, $crate::models::DispatchRequestId)>,
-                $crate::service::ServiceError,
-            >;
+            ) -> Result<Option<$crate::models::Task>, $crate::service::ServiceError>;
 
             /// `HostClaimsDispatch` -> `ProvisionDispatch` for one delivered
             /// row: claim it, provision with the row's mode under the row's

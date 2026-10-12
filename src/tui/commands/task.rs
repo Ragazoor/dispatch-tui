@@ -97,8 +97,8 @@ pub enum DeleteGuard {
 ///
 /// Wrapped by [`crate::tui::types::Command::Task`] for runtime dispatch.
 ///
-/// Variants that genuinely consume a whole `Task` (`DispatchAgent`,
-/// `TrustAndDispatch`) box it — see the `assert_no_entity_inline` tests in
+/// A variant that genuinely consumes a whole `Task` (`TrustAndDispatch`)
+/// boxes it — see the `assert_no_entity_inline` tests in
 /// `crate::tui::types` for why nothing on this bus stores an entity inline.
 /// `Persist` and `Resume` carry only the handful of fields their runtime
 /// handler reads, so they need no box.
@@ -125,7 +125,7 @@ pub enum TaskCommand {
     /// (`store-split.allium` D3) — retry-fresh's case; the dispatch and
     /// research keys name theirs.
     DispatchAgent {
-        task: Box<Task>,
+        id: TaskId,
         mode: Option<DispatchMode>,
     },
     TrustAndDispatch {

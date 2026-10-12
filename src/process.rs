@@ -339,18 +339,6 @@ pub trait ProcessRunner: Send + Sync {
     fn sccache_available(&self) -> bool {
         sccache_on_path()
     }
-
-    /// The runner a provisioning-failure rollback tears down through, when it
-    /// is not this one.
-    ///
-    /// `None` — the default — means "this runner": nothing about it stops a
-    /// teardown. [`crate::dispatch::DeadlineRunner`] answers its inner runner:
-    /// it refuses to start anything past a dispatch request's deadline, and
-    /// what an attempt made before the deadline still has to be torn down
-    /// after it (`dispatch.allium: ProvisioningStopsAtTheDeadline`).
-    fn unbounded_for_teardown(&self) -> Option<&dyn ProcessRunner> {
-        None
-    }
 }
 
 /// Whether an executable named `sccache` exists in some `PATH` entry — the

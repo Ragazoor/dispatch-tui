@@ -41,8 +41,8 @@ mod worktree;
 
 pub use agents::{
     agent_tree_pane_id, companion_pane_ids, dispatch_agent, fetch_verify_command, prepare_inputs,
-    prepare_inputs_with_epic_ctx, quick_dispatch_agent, research_agent, resume_agent,
-    resync_agent_tree_pane, run_agent_for_mode, toggle_agent_tree_pane, DispatchInputs,
+    quick_dispatch_agent, research_agent, resume_agent, resync_agent_tree_pane, run_agent_for_mode,
+    toggle_agent_tree_pane, DispatchInputs,
 };
 pub use finish::{finish_task, FinishContext, FinishError};
 // Test-only re-export: `prompts` is private, and the routing tests in
@@ -56,6 +56,7 @@ pub use request_host::{
 };
 pub use split_panes::{join_task_window_into_pane, swap_task_window_into_pane};
 pub(crate) use trust::{is_trusted_at, trust_at};
+pub(crate) use worktree::rollback_failed_provisioning;
 pub use worktree::{branch_from_worktree, teardown_task, validate_repo_path, TeardownFailure};
 
 // ---------------------------------------------------------------------------

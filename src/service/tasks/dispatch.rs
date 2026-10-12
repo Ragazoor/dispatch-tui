@@ -32,9 +32,6 @@ use super::crud::TaskService;
 /// What [`TaskService::serve_dispatch_request`] made of a row.
 #[derive(Debug)]
 pub enum ServedDispatch {
-    /// The row names another machine; it is not this board's to claim
-    /// (`HostClaimsDispatch`'s `requires: request.host = local_host()`).
-    NotThisHost,
     /// The module refused the claim — another board or an earlier delivery
     /// took the row, or it already finished. Nothing was provisioned and
     /// nothing is owed (`OnlyTheClaimedRequestProvisions`).
@@ -116,15 +113,15 @@ impl TaskService {
     /// learnt from the refused report and torn down here, so no agent keeps
     /// running for a task that is back in backlog or gone.
     ///
-    /// Never `Err`: every outcome is a [`ServedDispatch`].
+    /// Never `Err`: every outcome is a [`ServedDispatch`]. Only this host's
+    /// rows reach here: [`dispatch::DispatchRequestObserver`] hands out no
+    /// other (`HostClaimsDispatch`'s `requires: request.host = local_host()`),
+    /// and the module refuses a claim from any other host.
     pub async fn serve_dispatch_request(
         &self,
         request: DispatchRequest,
         emb_svc: Arc<crate::embeddings::EmbeddingService>,
     ) -> ServedDispatch {
-        if request.host != self.db.host_id() {
-            return ServedDispatch::NotThisHost;
-        }
         let id = request.id;
         match self.db.claim_dispatch_request(id).await {
             Ok(true) => {}
@@ -152,6 +149,9 @@ impl TaskService {
             Arc::clone(&self.clock),
             request.deadline,
         );
+        // The rollback of a failed attempt runs unbounded: what it made
+        // before the deadline still goes after it.
+        let teardown = Arc::clone(&self.runner);
         let mode = request.mode;
         tracing::info!(
             task_id = task.id.0,
@@ -161,7 +161,7 @@ impl TaskService {
         );
         let repo_path = task.repo_path.clone();
         let outcome = tokio::task::spawn_blocking(move || {
-            dispatch::run_agent_for_mode(&task, mode, &runner, inputs)
+            dispatch::run_agent_for_mode(&task, mode, &runner, &*teardown, inputs)
         })
         .await;
 
@@ -317,32 +317,24 @@ impl TaskService {
 
     /// The provisioning-failure rollback, after the fact: the window this
     /// attempt opened and, only if this attempt created it, the worktree and
-    /// its branch. A reused worktree predates the attempt and is left alone.
-    ///
-    /// The window is killed without a presence check first: this attempt
-    /// opened it moments ago, and `kill_window` resolves it by its exact name,
-    /// so a window that is already gone fails the kill rather than reaching a
-    /// prefix-matched sibling. Then the worktree half of `TaskTeardown`.
+    /// its branch ([`dispatch::rollback_failed_provisioning`], which logs its
+    /// own failure). A reused worktree predates the attempt and is left alone.
     async fn tear_down(&self, repo_path: &str, provisioned: &DispatchResult) {
         let runner = Arc::clone(&self.runner);
         let repo_path = crate::models::expand_tilde(repo_path);
-        let worktree = (!provisioned.reused_worktree).then(|| provisioned.worktree_path.clone());
-        let window = provisioned.tmux_window.clone();
+        let provisioned = provisioned.clone();
         let torn = tokio::task::spawn_blocking(move || {
-            if let Err(e) = crate::tmux::kill_window(&window, &*runner) {
-                tracing::warn!(%window, "could not kill the window of a failed dispatch: {e:#}");
-            }
-            dispatch::teardown_task(&repo_path, worktree.as_deref(), None, &*runner)
-                .map_err(|e| e.to_string())
+            dispatch::rollback_failed_provisioning(
+                &repo_path,
+                &provisioned.worktree_path,
+                Some(&provisioned.tmux_window),
+                provisioned.reused_worktree,
+                &*runner,
+            );
         })
         .await;
-        match torn {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::warn!(
-                worktree = %provisioned.worktree_path,
-                "failed to tear down a dispatch whose request failed: {e}"
-            ),
-            Err(e) => tracing::warn!("the teardown of a failed dispatch died: {e}"),
+        if let Err(e) = torn {
+            tracing::warn!("the teardown of a failed dispatch died: {e}");
         }
     }
 }

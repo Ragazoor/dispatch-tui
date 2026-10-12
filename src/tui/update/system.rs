@@ -203,16 +203,12 @@ impl App {
 
         let baseline = !self.dispatch_requests.baselined;
         self.dispatch_requests.baselined = true;
-        let local_host = self.local_host_id().map(str::to_string);
 
+        // The subscription delivers only this host's rows
+        // (`sync.allium: SubscribeToThisHostsDispatchRequests`).
         let mut open = std::collections::HashMap::new();
         let mut newly_failed = Vec::new();
         for row in rows {
-            // The subscription delivers only this host's rows; this keeps a
-            // stray one from driving this board's feedback.
-            if local_host.as_deref().is_some_and(|h| h != row.host) {
-                continue;
-            }
             if row.is_open() {
                 open.insert(row.task_id, row.id);
                 continue;

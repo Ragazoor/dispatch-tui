@@ -162,8 +162,8 @@ async fn dispatch_task(
             rt.exec_batch_delete(task_ids, epic_ids).await;
             vec![]
         }
-        DispatchAgent { task, mode } => {
-            rt.exec_dispatch_agent(task, mode).await;
+        DispatchAgent { id, mode } => {
+            rt.exec_dispatch_agent(id, mode).await;
             vec![]
         }
         TrustAndDispatch { task, mode } => rt.exec_trust_and_dispatch(app, task, mode).await,

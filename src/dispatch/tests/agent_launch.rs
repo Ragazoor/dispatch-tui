@@ -10,7 +10,7 @@ fn dispatch_agent_includes_plugin_dir() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -56,7 +56,7 @@ fn dispatch_agent_sets_rustc_wrapper_when_sccache_available() {
     let mock = script.runner().with_sccache_available(true);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
@@ -76,7 +76,7 @@ fn dispatch_agent_omits_rustc_wrapper_when_sccache_unavailable() {
     let mock = script.runner(); // sccache_available defaults to false
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
@@ -116,7 +116,7 @@ fn dispatch_agent_names_the_session_after_the_task() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -174,7 +174,7 @@ fn dispatch_agent_launches_the_runners_claude_binary() {
     let mock = dispatch_mock().with_agent_binaries(AgentBinaries::stub());
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(
@@ -195,7 +195,7 @@ fn dispatch_agent_launches_the_runners_dispatch_binary_in_the_companion_pane() {
     let mock = dispatch_mock().with_agent_binaries(AgentBinaries::stub());
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     // The companion pane is spawned via `split-window --`, so the binary is a
     // plain argv element rather than part of a shell string.
@@ -235,7 +235,7 @@ fn agent_launchers_default_to_bare_binary_names() {
     let mock = dispatch_mock();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(
@@ -265,7 +265,7 @@ fn provision_worktree_nonexistent_repo_path_returns_error_without_creating_dir()
 
     let mock = MockProcessRunner::new(vec![]);
     let task = make_task(&nonexistent);
-    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT);
+    let result = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT);
 
     assert!(
         result.is_err(),
@@ -287,7 +287,7 @@ fn provision_worktree_git_add_fails_returns_error() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT);
+    let result = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT);
 
     assert!(result.is_err(), "git worktree add failure should propagate");
 }
@@ -306,7 +306,7 @@ fn provision_worktree_rolls_back_the_worktree_when_a_later_step_fails() {
         MockProcessRunner::ok(), // git branch -D (rollback)
     ]);
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT);
+    let result = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT);
     assert!(result.is_err(), "tmux failure must abort provisioning");
     let calls = mock.recorded_calls();
     assert!(
@@ -332,7 +332,7 @@ fn provision_worktree_refused_for_a_duplicate_name_does_not_kill_the_live_window
         MockProcessRunner::ok(), // git branch -D (rollback)
     ]);
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT);
+    let result = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT);
     assert!(
         result.is_err(),
         "a duplicate window name must abort a dispatch"
@@ -363,7 +363,7 @@ fn provision_worktree_does_not_remove_a_reused_worktree_on_failure() {
         MockProcessRunner::fail("no server running"), // tmux new-window
     ]);
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT);
+    let result = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT);
     assert!(result.is_err(), "tmux failure must abort provisioning");
     let calls = mock.recorded_calls();
     assert!(
@@ -795,7 +795,13 @@ fn provision_worktree_kills_git_fetch_on_timeout_and_aborts() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, Some(BaseRef::Branch("main")), short_timeout);
+    let result = provision_worktree(
+        &task,
+        &mock,
+        &mock,
+        Some(BaseRef::Branch("main")),
+        short_timeout,
+    );
     assert!(
         result.is_err(),
         "an unreachable origin must abort provisioning rather than fall back to local, got: {result:?}"
@@ -826,7 +832,7 @@ fn provision_worktree_kills_git_worktree_add_on_timeout() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None, short_timeout);
+    let result = provision_worktree(&task, &mock, &mock, None, short_timeout);
     assert!(
         result.is_err(),
         "expected error when git worktree add times out"
@@ -871,7 +877,7 @@ fn dispatch_agent_prompt_includes_worktree_confinement() {
     let script = DispatchScript::dispatch();
     let mock = script.runner();
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
     assert_worktree_confinement(&read_prompt(&worktree_dir));
 }
 
@@ -886,7 +892,7 @@ fn dispatch_agent_prompt_design_step_follows_the_repos_allium_specs() {
     // A bare repo with no docs/specs: brainstorming, and no allium line.
     let script = DispatchScript::dispatch();
     let mock = script.runner();
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
     let prompt = read_prompt(&worktree_dir);
     assert!(
         prompt.contains("superpowers:brainstorming"),
@@ -908,7 +914,7 @@ fn dispatch_agent_prompt_design_step_follows_the_repos_allium_specs() {
 
     let script = DispatchScript::dispatch();
     let mock = script.runner();
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
     let prompt = read_prompt(&worktree_dir);
     assert!(
         prompt.contains("allium:elicit"),
@@ -929,7 +935,7 @@ fn quick_dispatch_agent_prompt_design_step_follows_the_repos_allium_specs() {
     let mock = script.runner();
     let task = make_task(&repo_path);
 
-    quick_dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    quick_dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let prompt = read_prompt(&worktree_dir);
     assert!(
@@ -944,7 +950,7 @@ fn research_agent_prompt_is_correct() {
     let script = DispatchScript::dispatch();
     let mock = script.runner();
     let task = make_task(&repo_path);
-    research_agent(&task, &mock, None).unwrap();
+    research_agent(&task, &mock, &mock, None).unwrap();
     let prompt = read_prompt(&worktree_dir);
     assert_worktree_confinement(&prompt);
     assert!(
@@ -969,7 +975,7 @@ fn quick_dispatch_agent_prompt_includes_worktree_confinement() {
     let script = DispatchScript::dispatch();
     let mock = script.runner();
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    quick_dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
     assert_worktree_confinement(&read_prompt(&worktree_dir));
 }
 
@@ -989,7 +995,7 @@ fn dispatch_agent_opens_tmux_window_in_worktree_not_parent_repo() {
     let script = DispatchScript::dispatch();
     let mock = script.runner();
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     // `tmux new-window …`; its `-c <dir>` argument sets the window cwd.
@@ -1031,7 +1037,7 @@ fn dispatch_agent_propagates_tmux_new_window_failure() {
     responses.push((None, MockProcessRunner::ok()));
     let mock = MockProcessRunner::new_with_delays(responses);
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, None, &LearningInjections::default());
+    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
 
     assert!(
         result.is_err(),
@@ -1060,7 +1066,7 @@ fn dispatch_agent_propagates_send_keys_failure() {
     responses.push((None, MockProcessRunner::ok()));
     let mock = MockProcessRunner::new_with_delays(responses);
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, None, &LearningInjections::default());
+    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
 
     assert!(
         result.is_err(),
@@ -1089,7 +1095,7 @@ fn dispatch_agent_rolls_back_a_fresh_worktree_when_the_prompt_write_fails() {
     let (_dir, repo_path) = make_test_repo();
     let mock = DispatchScript::dispatch().fresh_worktree().runner();
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, None, &LearningInjections::default());
+    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
 
     assert!(
         result.is_err(),
@@ -1355,7 +1361,7 @@ fn all_spawn_sites_inject_the_statusline_settings_file() {
     let script = DispatchScript::dispatch();
     let mock = script.runner();
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
     assert_spawn_flags(
         "dispatch_agent",
         &find_call_arg(
@@ -1432,7 +1438,7 @@ fn dispatch_launches_claude_with_the_per_task_mcp_config() {
         .with_claude_json(claude_json_with_dispatch_entry(dir.path()));
     let task = make_task(&repo_path);
 
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -1484,7 +1490,7 @@ fn a_dispatch_that_cannot_write_the_config_launches_without_the_flag() {
     let mock = script.runner();
     let task = make_task(&repo_path);
 
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -1563,7 +1569,7 @@ fn the_dispatch_launch_command_separates_the_prompt_from_the_flags() {
     let mock = script.runner();
     let task = make_task(&repo_path);
 
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -1854,6 +1860,7 @@ fn provision_worktree_refuses_a_base_that_resolves_neither_remotely_nor_locally(
     let err = provision_worktree(
         &task,
         &mock,
+        &mock,
         Some(BaseRef::Branch("main")),
         SUBPROCESS_TIMEOUT,
     )
@@ -1904,6 +1911,7 @@ fn provision_worktree_does_not_probe_a_start_point_the_fetch_already_proved() {
     let task = make_task(&repo_path);
     provision_worktree(
         &task,
+        &mock,
         &mock,
         Some(BaseRef::Branch("main")),
         SUBPROCESS_TIMEOUT,

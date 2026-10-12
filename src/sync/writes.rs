@@ -135,9 +135,6 @@ pub trait ReducerCaller: Send + Sync {
         owner: String,
     ) -> Result<ReducerOutcome>;
 
-    async fn claim_backlog_task(&self, id: TaskId, host: String) -> Result<ReducerOutcome>;
-    async fn release_backlog_claim(&self, id: TaskId) -> Result<ReducerOutcome>;
-
     /// Insert an epic and answer with the id the store generated.
     async fn create_epic(&self, row: bindings::Epic) -> Result<EpicId>;
     async fn patch_epic(&self, id: EpicId, patch: bindings::EpicPatch) -> Result<ReducerOutcome>;

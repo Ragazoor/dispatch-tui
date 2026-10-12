@@ -217,11 +217,10 @@ pub struct App {
     pub(in crate::tui) epic_folds: EpicFoldState,
     /// DispatchingFeedback's PENDING part (`docs/specs/dispatch.allium`): tasks
     /// this board has asked to dispatch whose request has not reached the App
-    /// as an open row yet, mapped to when they were asked. Lasts one reducer
-    /// round trip — an open row supersedes the entry, a refusal drains it. No
-    /// watchdog reads the time: the request row's own deadline ends a stuck
-    /// dispatch (`FailedRequestReported`).
-    pub(in crate::tui) dispatching: HashMap<TaskId, Instant>,
+    /// as an open row yet. Lasts one reducer round trip — an open row
+    /// supersedes the entry, a refusal drains it. No watchdog: the request
+    /// row's own deadline ends a stuck dispatch (`FailedRequestReported`).
+    pub(in crate::tui) dispatching: HashSet<TaskId>,
     /// DispatchingFeedback's OPEN part: this host's dispatch request rows as
     /// the last board reload delivered them. See [`DispatchRequestView`].
     pub(in crate::tui) dispatch_requests: DispatchRequestView,
@@ -334,7 +333,7 @@ impl App {
             search: SearchState::default(),
             folds: SectionFoldState::default(),
             epic_folds: EpicFoldState::default(),
-            dispatching: HashMap::new(),
+            dispatching: HashSet::new(),
             dispatch_requests: DispatchRequestView::default(),
             spinner_tick: 0,
             budget: None,
@@ -378,7 +377,7 @@ impl App {
     /// restart. Not the whole "may be in flight" picture — see
     /// [`Self::dispatch_may_be_in_flight`].
     pub fn is_dispatching(&self, id: TaskId) -> bool {
-        self.dispatching.contains_key(&id) || self.dispatch_requests.open.contains_key(&id)
+        self.dispatching.contains(&id) || self.dispatch_requests.open.contains_key(&id)
     }
 
     /// Whether an unprovisioned task is unprovisioned because a dispatch is
@@ -568,7 +567,7 @@ impl App {
     /// Every DispatchingFeedback member: the pending asks and the open rows.
     pub(in crate::tui) fn dispatch_members(&self) -> std::collections::BTreeSet<TaskId> {
         self.dispatching
-            .keys()
+            .iter()
             .chain(self.dispatch_requests.open.keys())
             .copied()
             .collect()
@@ -622,7 +621,7 @@ impl App {
         if self.board.find_task(id).is_none() {
             return;
         }
-        self.dispatching.insert(id, Instant::now());
+        self.dispatching.insert(id);
         // A retry is the resolution to a stalled chain, so starting one clears
         // the failure marker (PersistsUntilRedispatched in
         // docs/specs/epics.allium) — and keeps a stale marker from masking the

@@ -29,12 +29,6 @@ pub struct FeedIngestItem {
     pub signals: Vec<String>,
 }
 
-/// The identity a creation is stamped with, in the spelling a board's
-/// own-creations subscription matches (see `grouping.rs`).
-fn creator(ctx: &ReducerContext) -> String {
-    ctx.sender().to_hex().to_string()
-}
-
 fn external_ids(items: &[FeedIngestItem]) -> HashSet<&str> {
     items.iter().map(|i| i.item.external_id.as_str()).collect()
 }
@@ -131,7 +125,7 @@ fn ingest_grouped(
         .collect();
     let dropped = retired_without_task(ctx, epic.id, &candidates);
 
-    let identity = creator(ctx);
+    let identity = caller_identity(ctx);
     for (name, group) in &groups {
         let existing = subs.iter().find(|s| s.title == *name).map(|s| s.id);
         let group: Vec<FeedTaskUpsertItem> = match existing {
@@ -241,7 +235,7 @@ fn ingest_role_routed(
     additive: bool,
     created_by: &str,
 ) -> Result<(), String> {
-    let identity = creator(ctx);
+    let identity = caller_identity(ctx);
     let my = ensure_role_sub_epic(ctx, parent.id, ROLE_MY_REVIEWS, "My Reviews", &identity);
     let team = ensure_role_sub_epic(ctx, parent.id, ROLE_TEAM_REVIEWS, "Team Reviews", &identity);
     let bots = ensure_role_sub_epic(ctx, parent.id, ROLE_BOTS, "Bots", &identity);

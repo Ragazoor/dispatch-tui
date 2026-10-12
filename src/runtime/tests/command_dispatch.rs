@@ -1363,7 +1363,7 @@ async fn dispatch_task_dispatch_agent_claims_then_provisions() {
     let id = task.id;
 
     h.dispatch(Command::Task(TaskCommand::DispatchAgent {
-        task: Box::new(task),
+        id: task.id,
         mode: Some(models::DispatchMode::Dispatch),
     }))
     .await;
@@ -1408,7 +1408,7 @@ async fn dispatch_task_dispatch_agent_carries_the_mode_to_the_launcher() {
     .unwrap();
 
     h.dispatch(Command::Task(TaskCommand::DispatchAgent {
-        task: Box::new(task),
+        id: task.id,
         mode: Some(models::DispatchMode::Research),
     }))
     .await;

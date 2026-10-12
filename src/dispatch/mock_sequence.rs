@@ -1448,6 +1448,7 @@ mod tests {
         let _ = crate::dispatch::worktree::provision_worktree(
             &make_task(repo_path),
             &mock,
+            &mock,
             base,
             SUBPROCESS_TIMEOUT,
         );
@@ -1466,7 +1467,14 @@ mod tests {
         let script = DispatchScript::dispatch();
         let mock = script.runner();
 
-        dispatch_agent(&make_task(&repo_path), &mock, None, &Default::default()).unwrap();
+        dispatch_agent(
+            &make_task(&repo_path),
+            &mock,
+            &mock,
+            None,
+            &Default::default(),
+        )
+        .unwrap();
 
         script.assert_matches(&mock.recorded_calls());
     }
@@ -1621,6 +1629,7 @@ mod tests {
 
         dispatch_agent(
             &pr_review_task(&repo_path),
+            &mock,
             &mock,
             None,
             &Default::default(),

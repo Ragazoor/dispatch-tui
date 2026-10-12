@@ -50,7 +50,7 @@ fn dispatch_pr_review_task_bases_worktree_on_pr_head_branch() {
     // git calls we assert on were recorded during provisioning beforehand. The
     // failure then rolls the fresh worktree back, hence the two trailing
     // responses above.
-    let _ = dispatch_agent(&task, &mock, None, &LearningInjections::default());
+    let _ = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
 
     let calls = mock.recorded_calls();
     assert_eq!(
@@ -91,7 +91,7 @@ fn dispatch_pr_review_task_never_measures_the_pr_head_branch() {
     // calls we assert on were recorded during provisioning beforehand. The
     // failure then rolls the fresh worktree back, hence the two trailing
     // responses above.
-    let _ = dispatch_agent(&task, &mock, None, &LearningInjections::default());
+    let _ = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
 
     let calls = mock.recorded_calls();
     assert!(
@@ -114,7 +114,7 @@ fn dispatch_pr_review_task_prompt_rebases_onto_pr_branch() {
         .runner();
 
     let task = pr_review_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let prompt =
         std::fs::read_to_string(format!("{repo_path}/.worktrees/42-fix-bug/.claude-prompt"))
@@ -147,7 +147,7 @@ fn dispatch_prompt_includes_fetch_warning_when_fetch_fails() {
     let mock = DispatchScript::dispatch().fetch_is_unreachable().runner();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let prompt =
         std::fs::read_to_string(format!("{repo_path}/.worktrees/42-fix-bug/.claude-prompt"))
@@ -172,7 +172,7 @@ fn dispatch_agent_carries_the_reuse_flag_into_its_result() {
     let mock = DispatchScript::dispatch().runner();
 
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     assert!(
         result.reused_worktree,
@@ -189,7 +189,7 @@ fn dispatch_prompt_has_no_warning_when_fetch_succeeds() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let prompt =
         std::fs::read_to_string(format!("{repo_path}/.worktrees/42-fix-bug/.claude-prompt"))
@@ -209,7 +209,7 @@ fn dispatch_non_review_task_skips_gh_and_bases_worktree_on_origin() {
 
     // make_task has tag None / url None — a plain implementation task.
     let task = make_task(&repo_path);
-    let _ = dispatch_agent(&task, &mock, None, &LearningInjections::default());
+    let _ = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
 
     let calls = mock.recorded_calls();
     assert!(
@@ -231,7 +231,7 @@ fn dispatch_review_task_pr_resolution_failure_falls_back_to_base() {
     let mock = script.runner();
 
     let task = pr_review_task(&repo_path);
-    let _ = dispatch_agent(&task, &mock, None, &LearningInjections::default());
+    let _ = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
 
     assert_eq!(
         worktree_add_start_point(&mock.recorded_calls()),
@@ -250,7 +250,7 @@ fn dispatch_review_task_fork_pr_falls_back_to_base() {
     let mock = script.runner();
 
     let task = pr_review_task(&repo_path);
-    let _ = dispatch_agent(&task, &mock, None, &LearningInjections::default());
+    let _ = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
 
     assert_eq!(
         worktree_add_start_point(&mock.recorded_calls()),
@@ -276,6 +276,7 @@ fn provision_worktree_never_measures_a_pr_head_branch() {
     let task = make_task(&repo_path);
     let result = provision_worktree(
         &task,
+        &mock,
         &mock,
         Some(BaseRef::PrHead("feature-x")),
         SUBPROCESS_TIMEOUT,
@@ -312,7 +313,7 @@ fn provision_worktree_creates_new_when_dir_missing() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
+    let result = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
 
     let calls = mock.recorded_calls();
     assert_eq!(calls[0].0, "git", "first call should be git worktree prune");
@@ -353,7 +354,7 @@ fn provision_worktree_path_is_unique_per_task_id_even_for_identical_titles() {
         let mut task = make_task(&repo_path);
         task.id = TaskId(id);
         task.title = "Same title".to_string();
-        provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT)
+        provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT)
             .unwrap()
             .worktree_path
     };
@@ -382,7 +383,7 @@ fn provision_worktree_skips_git_when_dir_exists() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
+    let result = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -410,7 +411,7 @@ fn provision_worktree_reports_reused_worktree_false_when_dir_missing() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
+    let result = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
 
     assert!(
         !result.reused_worktree,
@@ -430,7 +431,7 @@ fn provision_worktree_reports_reused_worktree_true_when_dir_exists() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
+    let result = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
 
     assert!(
         result.reused_worktree,
@@ -464,6 +465,7 @@ fn provision_worktree_prunes_stale_admin_records_immediately_before_creating_it(
     let task = make_task(&repo_path);
     provision_worktree(
         &task,
+        &mock,
         &mock,
         Some(BaseRef::Branch("main")),
         SUBPROCESS_TIMEOUT,
@@ -504,7 +506,7 @@ fn provision_worktree_continues_when_the_prune_fails() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
+    let result = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
 
     assert!(!result.reused_worktree);
     let calls = mock.recorded_calls();
@@ -544,7 +546,7 @@ fn provision_worktree_aborts_when_the_worktree_path_cannot_be_inspected() {
 
     let mock = MockProcessRunner::new(vec![]);
     let task = make_task(&repo_path);
-    let err = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap_err();
+    let err = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT).unwrap_err();
 
     std::fs::set_permissions(&worktrees_root, std::fs::Permissions::from_mode(0o755)).unwrap();
 
@@ -588,7 +590,7 @@ fn provision_worktree_aborts_on_a_dangling_symlink_at_the_path() {
 
     let mock = MockProcessRunner::new(vec![]);
     let task = make_task(&repo_path);
-    let err = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap_err();
+    let err = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT).unwrap_err();
     let rendered = format!("{err:#}");
 
     assert!(
@@ -625,7 +627,7 @@ fn provision_worktree_aborts_on_a_regular_file_at_the_worktree_path() {
 
     let mock = MockProcessRunner::new(vec![]);
     let task = make_task(&repo_path);
-    let err = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap_err();
+    let err = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT).unwrap_err();
 
     assert!(format!("{err:#}").contains("42-fix-bug"), "got: {err:#}");
     assert!(mock.recorded_calls().is_empty());
@@ -654,7 +656,7 @@ fn provision_worktree_reuses_a_symlink_that_resolves_to_a_directory() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
+    let result = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
 
     assert!(
         result.reused_worktree,
@@ -677,6 +679,7 @@ fn provision_worktree_with_base_branch_passes_start_point() {
     let task = make_task(&repo_path);
     let result = provision_worktree(
         &task,
+        &mock,
         &mock,
         Some(BaseRef::Branch("99-prev-task")),
         SUBPROCESS_TIMEOUT,
@@ -712,6 +715,7 @@ fn provision_worktree_fetches_origin_before_create() {
     let task = make_task(&repo_path);
     provision_worktree(
         &task,
+        &mock,
         &mock,
         Some(BaseRef::Branch("main")),
         SUBPROCESS_TIMEOUT,
@@ -758,6 +762,7 @@ fn provision_worktree_fetch_failure_falls_back_to_local_without_retry() {
     // Should NOT return an error — soft fail
     let result = provision_worktree(
         &task,
+        &mock,
         &mock,
         Some(BaseRef::Branch("main")),
         SUBPROCESS_TIMEOUT,
@@ -807,6 +812,7 @@ fn provision_worktree_pr_head_missing_from_origin_aborts_rather_than_using_local
     let err = provision_worktree(
         &task,
         &mock,
+        &mock,
         Some(BaseRef::PrHead("feature-x")),
         SUBPROCESS_TIMEOUT,
     )
@@ -845,6 +851,7 @@ fn provision_worktree_retries_fetch_before_falling_back() {
     let result = provision_worktree(
         &task,
         &mock,
+        &mock,
         Some(BaseRef::Branch("main")),
         SUBPROCESS_TIMEOUT,
     )
@@ -870,32 +877,6 @@ fn provision_worktree_retries_fetch_before_falling_back() {
     );
 }
 
-/// `PROVISION_MAX_SUBPROCESS_CALLS` (`src/dispatch/worktree.rs`) is the
-/// unbounded worst case the request deadline is deliberately shorter than
-/// (`store-split.allium: config.dispatch_request_timeout`). Pin it to the real
-/// worst-case shape (a fetch that only succeeds on its last allowed attempt)
-/// via `DispatchScript`'s own step-counting, rather than trusting a
-/// hand-maintained literal: if `fetch_origin`'s retry/classify logic ever
-/// grows another call, this fails.
-///
-/// `index_of(Step::WorktreeAdd) + 1` counts only up through the last
-/// `SUBPROCESS_TIMEOUT`-bounded call in the sequence — it says nothing about
-/// (and doesn't need to, since `PROVISION_MAX_SUBPROCESS_CALLS` doesn't cover
-/// them either) the unbounded tmux tail that follows worktree add.
-#[test]
-fn provision_max_subprocess_calls_matches_the_worst_case_shape() {
-    let script = DispatchScript::provision()
-        .fresh_worktree()
-        .fetch_succeeds_on_attempt(FETCH_MAX_ATTEMPTS);
-
-    assert_eq!(
-        script.index_of(Step::WorktreeAdd) + 1,
-        PROVISION_MAX_SUBPROCESS_CALLS as usize,
-        "PROVISION_MAX_SUBPROCESS_CALLS must match the real worst-case number \
-         of SUBPROCESS_TIMEOUT-bounded calls provision_worktree can issue"
-    );
-}
-
 #[test]
 fn provision_worktree_fetch_uses_custom_base_branch() {
     // Custom base_branch is used in both fetch and worktree add
@@ -907,6 +888,7 @@ fn provision_worktree_fetch_uses_custom_base_branch() {
     let task = make_task(&repo_path);
     provision_worktree(
         &task,
+        &mock,
         &mock,
         Some(BaseRef::Branch("develop")),
         SUBPROCESS_TIMEOUT,
@@ -939,6 +921,7 @@ fn provision_worktree_still_fetches_when_dir_exists() {
     let task = make_task(&repo_path);
     provision_worktree(
         &task,
+        &mock,
         &mock,
         Some(BaseRef::Branch("main")),
         SUBPROCESS_TIMEOUT,
@@ -988,6 +971,7 @@ fn provision_worktree_reuse_survives_an_unreachable_origin() {
     let task = make_task(&repo_path);
     let result = provision_worktree(
         &task,
+        &mock,
         &mock,
         Some(BaseRef::Branch("main")),
         SUBPROCESS_TIMEOUT,
@@ -1040,6 +1024,7 @@ fn provision_worktree_reuse_does_not_retry_or_probe_an_unreachable_origin() {
     provision_worktree(
         &task,
         &mock,
+        &mock,
         Some(BaseRef::Branch("main")),
         SUBPROCESS_TIMEOUT,
     )
@@ -1084,6 +1069,7 @@ fn provision_worktree_reuse_of_a_pr_head_keeps_the_remote_start_point() {
     let result = provision_worktree(
         &task,
         &mock,
+        &mock,
         Some(BaseRef::PrHead("feature-x")),
         SUBPROCESS_TIMEOUT,
     )
@@ -1121,6 +1107,7 @@ fn provision_worktree_fresh_still_spends_the_full_budget_before_aborting() {
     let task = make_task(&repo_path);
     let err = provision_worktree(
         &task,
+        &mock,
         &mock,
         Some(BaseRef::Branch("main")),
         SUBPROCESS_TIMEOUT,
@@ -1326,7 +1313,7 @@ fn dispatch_uses_task_base_branch_in_prompt() {
 
     let mut task = make_task(&repo_path);
     task.base_branch = "master".into();
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     // Verify the prompt uses task.base_branch directly — no symbolic-ref call needed
     let prompt_file = worktree_dir.join(".claude-prompt");
@@ -1353,7 +1340,7 @@ fn dispatch_fails_fast_if_git_fails() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, None, &LearningInjections::default());
+    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
     assert!(result.is_err());
     let calls = mock.recorded_calls();
     assert_eq!(
@@ -1372,7 +1359,7 @@ fn quick_dispatch_reuses_existing_worktree() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    quick_dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -1393,7 +1380,7 @@ fn quick_dispatch_sends_rename_prompt() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    quick_dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();

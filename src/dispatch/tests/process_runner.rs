@@ -12,7 +12,7 @@ fn dispatch_reuses_existing_worktree() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -40,7 +40,7 @@ fn dispatch_reused_worktree_prompt_carries_the_reuse_preamble() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let prompt = std::fs::read_to_string(worktree_dir.join(".claude-prompt")).unwrap();
     assert!(
@@ -59,7 +59,7 @@ fn dispatch_sends_claude_command() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     // The literal send-keys call carries the claude invocation
@@ -80,7 +80,7 @@ fn dispatch_agent_splits_agent_tree_companion_pane_after_send_keys() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
     // The split, not the last call: the role marker written on the pane it
@@ -114,7 +114,7 @@ fn dispatch_agent_succeeds_even_if_companion_pane_split_fails() {
         .runner();
 
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, None, &LearningInjections::default());
+    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
     assert!(
         result.is_ok(),
         "a failed companion-pane split must not fail dispatch: {result:?}"
@@ -152,17 +152,18 @@ fn no_task_agent_passes_a_permission_mode_flag() {
     let launchers: [LaunchCase; 4] = [
         ("dispatch_agent", || {
             dispatched_claude_cmd(|task, mock| {
-                dispatch_agent(task, mock, None, &LearningInjections::default()).unwrap();
+                dispatch_agent(task, mock, mock, None, &LearningInjections::default()).unwrap();
             })
         }),
         ("research_agent", || {
             dispatched_claude_cmd(|task, mock| {
-                research_agent(task, mock, None).unwrap();
+                research_agent(task, mock, mock, None).unwrap();
             })
         }),
         ("quick_dispatch_agent", || {
             dispatched_claude_cmd(|task, mock| {
-                quick_dispatch_agent(task, mock, None, &LearningInjections::default()).unwrap();
+                quick_dispatch_agent(task, mock, mock, None, &LearningInjections::default())
+                    .unwrap();
             })
         }),
         // Not a dispatch_with_prompt caller — resume_agent hand-builds its own

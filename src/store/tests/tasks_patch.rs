@@ -592,7 +592,7 @@ async fn next_in_chain(db: &std::sync::Arc<Store>, epic: EpicId) -> Option<TaskI
         .request_next_backlog_subtask(epic)
         .await
         .unwrap()
-        .map(|(task, _)| task.id)
+        .map(|task| task.id)
 }
 
 #[tokio::test]

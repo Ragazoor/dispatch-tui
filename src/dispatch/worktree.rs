@@ -19,36 +19,6 @@ use crate::process::{stderr_str, SUBPROCESS_TIMEOUT};
 /// wrong response count the moment this changes.
 pub(super) const FETCH_MAX_ATTEMPTS: u32 = 3;
 
-/// Worst-case number of subprocess calls `provision_worktree` can issue
-/// sequentially while provisioning a fresh, branch-based worktree, each
-/// independently bounded by `SUBPROCESS_TIMEOUT`. Worst case is a fetch that
-/// only succeeds on its last allowed attempt: `FETCH_MAX_ATTEMPTS` fetch
-/// attempts, + 2 for `classify_fetch_failure`'s probes (fired once, after the
-/// first failed attempt), + 1 for `select_start_point`'s ahead/behind
-/// measurement, + 1 for the best-effort `git worktree prune` that clears a
-/// stale admin record, + 1 for the final `git worktree add`. Exercised by
-/// `provision_max_subprocess_calls_matches_the_worst_case_shape`, which reads
-/// the add's index out of the scripted worst-case shape rather than mirroring
-/// it here.
-///
-/// The worst case a provisioning would spend WITHOUT a deadline. Since
-/// store-split M4 none runs without one: the request row's deadline
-/// (`store-split.allium: config.dispatch_request_timeout`, 60s) is shorter
-/// than `SUBPROCESS_TIMEOUT * PROVISION_MAX_SUBPROCESS_CALLS` on purpose, and
-/// the deadline wins (`crate::dispatch::DeadlineRunner`). Kept, and pinned by
-/// its test, as the measure that comparison is made against.
-///
-/// Deliberately stops at `git worktree add`: the three tmux calls that follow
-/// it in `provision_worktree`'s `post_add` step are unbounded today (they call
-/// `runner.run(...)`, not `run_with_timeout`), so they are out of scope for
-/// this count. If a future change (tracked separately) puts those calls behind
-/// `run_with_timeout` too, they become sequential `SUBPROCESS_TIMEOUT`-bounded
-/// calls *after* `WorktreeAdd`, and this constant must grow to cover them —
-/// nothing here or in the test that pins this value would catch that drift on
-/// its own.
-#[cfg(test)]
-pub(super) const PROVISION_MAX_SUBPROCESS_CALLS: u32 = FETCH_MAX_ATTEMPTS + 5;
-
 // Zero delay under `cfg(test)` so the retry tests below don't spend real
 // wall-clock time sleeping — flagged by adversarial review of this plan,
 // which pointed out a fixed 500ms delay would cost ~1s of real sleep per
@@ -643,9 +613,16 @@ fn add_worktree(
 /// `timeout` is passed to `run_with_timeout` for long-running git subprocesses
 /// (`git fetch`, `git worktree add`). Use [`crate::process::SUBPROCESS_TIMEOUT`]
 /// in production; pass a short duration in tests.
+///
+/// `teardown` is the runner a failed attempt's rollback runs through: the
+/// same as `runner` unless `runner` is bounded by a request's deadline, in
+/// which case it is the unbounded runner inside it — what an attempt made
+/// before the deadline still has to be torn down after it
+/// (`dispatch.allium: ProvisioningStopsAtTheDeadline`).
 pub(super) fn provision_worktree(
     task: &Task,
     runner: &dyn ProcessRunner,
+    teardown: &dyn ProcessRunner,
     base: Option<BaseRef<'_>>,
     timeout: Duration,
 ) -> Result<ProvisionResult> {
@@ -697,7 +674,7 @@ pub(super) fn provision_worktree(
     )
     .context("failed to create tmux window")
     {
-        rollback_failed_provisioning(&repo_path, &worktree_path, None, reused_worktree, runner);
+        rollback_failed_provisioning(&repo_path, &worktree_path, None, reused_worktree, teardown);
         return Err(e);
     }
     let post_add: Result<()> = (|| {
@@ -712,7 +689,7 @@ pub(super) fn provision_worktree(
             &worktree_path,
             Some(&tmux_window),
             reused_worktree,
-            runner,
+            teardown,
         );
         return Err(e);
     }
@@ -1016,7 +993,12 @@ fn lexical_path(path: &str) -> std::path::PathBuf {
 /// Teardown failure is logged, never propagated: the caller already has the
 /// real provisioning error to report, and a cleanup failure on top of that
 /// would only obscure it.
-pub(super) fn rollback_failed_provisioning(
+///
+/// `runner` must not be deadline-bounded: a rollback is exactly what still has
+/// to run once a request's deadline has passed
+/// (`dispatch.allium: ProvisioningStopsAtTheDeadline`). Callers pass the
+/// unbounded runner, never a [`super::DeadlineRunner`].
+pub(crate) fn rollback_failed_provisioning(
     repo_path: &str,
     worktree_path: &str,
     tmux_window: Option<&TmuxWindow>,
@@ -1024,10 +1006,6 @@ pub(super) fn rollback_failed_provisioning(
     runner: &dyn ProcessRunner,
 ) {
     let worktree_arg = (!reused_worktree).then_some(worktree_path);
-    // A deadline-bounded runner refuses to start anything once the request's
-    // deadline has passed, and a rollback is exactly what still has to run
-    // then (`ProvisioningStopsAtTheDeadline`).
-    let runner = runner.unbounded_for_teardown().unwrap_or(runner);
     if let Err(e) = teardown_task(repo_path, worktree_arg, tmux_window, runner) {
         tracing::warn!(
             worktree_path,

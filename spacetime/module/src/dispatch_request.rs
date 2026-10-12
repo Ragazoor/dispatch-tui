@@ -180,21 +180,12 @@ pub fn validate_dispatch_request(
     requester: &str,
     has_open_request: bool,
 ) -> Result<(), String> {
-    let id = task.id;
-    if task.status != BACKLOG {
-        return Err(format!(
-            "task {id} is {} rather than backlog, so it is already claimed",
-            task.status
-        ));
-    }
-    if !claimable_by(task, requester) {
-        return Err(format!(
-            "task {id}'s worktree is on {}, so {requester} cannot claim it",
-            task.host
-        ));
-    }
+    validate_claim_acceptance(task, requester)?;
     if has_open_request {
-        return Err(format!("task {id} already holds an open dispatch request"));
+        return Err(format!(
+            "task {} already holds an open dispatch request",
+            task.id
+        ));
     }
     Ok(())
 }
@@ -383,35 +374,25 @@ pub fn failed_request_row(row: DispatchRequest, reason: &str, now: &str) -> Disp
 /// is no longer the bare claim (it got a worktree, or it moved on) and must be
 /// left alone. `updated_at` is the caller's to stamp.
 pub fn release_claim_after_failure(task: Task) -> Option<Task> {
-    (task.status == RUNNING && task.worktree.is_empty()).then(|| released_task(task))
+    is_bare_claim(&task).then(|| released_task(task))
 }
 
-/// `DispatchRequestTimesOut`'s body: fail the row if it is still open, else
-/// `None` (its host's own report won).
-pub fn expire_dispatch_request_row(row: DispatchRequest, now: &str) -> Option<DispatchRequest> {
-    dispatch_request_is_open(&row.state)
-        .then(|| failed_request_row(row, DISPATCH_REASON_TIMED_OUT, now))
-}
-
-/// `HostRestartFailsInterrupted`'s selection: this host's provisioning rows.
-pub fn interrupted_dispatch_requests(rows: &[DispatchRequest], host: &str) -> Vec<i64> {
-    rows.iter()
-        .filter(|r| r.host == host && r.state == DISPATCH_PROVISIONING)
-        .map(|r| r.id)
+/// `HostRestartFailsInterrupted`'s selection, over rows already read by the
+/// restarting host's index: the provisioning ones.
+pub fn interrupted_dispatch_requests(
+    rows: impl IntoIterator<Item = DispatchRequest>,
+) -> Vec<DispatchRequest> {
+    rows.into_iter()
+        .filter(|r| r.state == DISPATCH_PROVISIONING)
         .collect()
 }
 
 // -- Store helpers ------------------------------------------------------------
 
-/// The calling client's identity, in the spelling `Host.owner` holds.
-fn caller(ctx: &ReducerContext) -> String {
-    ctx.sender().to_hex().to_string()
-}
-
 /// [`validate_host_acting_for`] against the registry.
 fn require_acting_for(ctx: &ReducerContext, host_id: &str) -> Result<(), String> {
     let host = ctx.db.hosts().id().find(&host_id.to_string());
-    validate_host_acting_for(host.as_ref(), host_id, &caller(ctx))
+    validate_host_acting_for(host.as_ref(), host_id, &caller_identity(ctx))
 }
 
 fn find_request(ctx: &ReducerContext, request_id: i64) -> Result<DispatchRequest, String> {
@@ -438,26 +419,18 @@ fn cancel_dispatch_request_timer(ctx: &ReducerContext, request_id: i64) {
     }
 }
 
-/// THE one failure path: fail the row, cancel its timer, and release the
-/// task's claim when it is still the bare claim
-/// (`ReleaseClaimOfFailedRequest`). A reported failure, the backstop, a host
-/// restart and a task delete all come through here.
+/// THE one failure path: fail the row, cancel its timer, release the task's
+/// claim when it is still the bare claim, and run the epic status rollup for
+/// the task's epic chain (`ReleaseClaimOfFailedRequest`), so no board has to
+/// recalculate after the module moved its subtask. A reported failure, the
+/// backstop, a host restart and a task delete all come through here. A task
+/// already deleted has no chain to roll up; its delete rolled it up.
 pub(crate) fn fail_dispatch_request(
     ctx: &ReducerContext,
     row: DispatchRequest,
     reason: &str,
 ) -> Result<(), String> {
     let failed = failed_request_row(row, reason, &now(ctx));
-    finish_failed_request(ctx, failed)
-}
-
-/// [`fail_dispatch_request`] for a row already failed by a pure rule
-/// ([`expire_dispatch_request_row`]): write it, cancel its timer, release, and
-/// run the epic status rollup for the task's epic chain
-/// (`ReleaseClaimOfFailedRequest`), so no board has to recalculate after the
-/// module moved its subtask. A task already deleted has no chain to roll up;
-/// its delete rolled it up.
-fn finish_failed_request(ctx: &ReducerContext, failed: DispatchRequest) -> Result<(), String> {
     let stamp = failed.finished_at.clone();
     let task_id = failed.task_id;
     let request_id = failed.id;
@@ -538,7 +511,7 @@ pub fn request_dispatch(
     recalculate_epic_chain(ctx, epic_id);
 
     let row = ctx.db.dispatch_requests().insert(DispatchRequest {
-        requested_by: caller(ctx),
+        requested_by: caller_identity(ctx),
         ..new_dispatch_request(task_id, &requester, mode, &origin, &stamp)
     });
     let due = dispatch_request_backstop_due_micros(ctx.timestamp.to_micros_since_unix_epoch());
@@ -624,9 +597,7 @@ pub fn fail_interrupted_dispatch_requests(
     host: String,
 ) -> Result<(), String> {
     require_acting_for(ctx, &host)?;
-    let rows: Vec<DispatchRequest> = ctx.db.dispatch_requests().host().filter(&host).collect();
-    for id in interrupted_dispatch_requests(&rows, &host) {
-        let row = find_request(ctx, id)?;
+    for row in interrupted_dispatch_requests(ctx.db.dispatch_requests().host().filter(&host)) {
         fail_dispatch_request(ctx, row, DISPATCH_REASON_HOST_RESTARTED)?;
     }
     Ok(())
@@ -645,11 +616,11 @@ pub fn expire_dispatch_request(
             "expire_dispatch_request is run by the module's scheduler, not by clients".into(),
         );
     }
-    let Some(row) = ctx.db.dispatch_requests().id().find(timer.request_id) else {
-        return Ok(());
-    };
-    match expire_dispatch_request_row(row, &now(ctx)) {
-        Some(failed) => finish_failed_request(ctx, failed),
-        None => Ok(()),
+    match ctx.db.dispatch_requests().id().find(timer.request_id) {
+        // Still open: its host never finished it. Otherwise its own report won.
+        Some(row) if dispatch_request_is_open(&row.state) => {
+            fail_dispatch_request(ctx, row, DISPATCH_REASON_TIMED_OUT)
+        }
+        _ => Ok(()),
     }
 }

@@ -52,7 +52,7 @@ pub(in crate::mcp::handlers) async fn auto_dispatch_next(
 
     // The request is the claim, and the chain offers the subtasks one at a
     // time: a concurrent close on the same epic can never win the same one.
-    let (next_task, _request) = match state.task_svc.request_next_backlog_subtask(epic_id).await {
+    let next_task = match state.task_svc.request_next_backlog_subtask(epic_id).await {
         Ok(Some(next)) => next,
         Ok(None) => return None,
         Err(e) => {

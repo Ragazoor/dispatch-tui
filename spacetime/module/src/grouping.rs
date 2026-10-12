@@ -13,12 +13,6 @@
 
 use super::*;
 
-/// The identity string a creation is stamped with, in the spelling a board's
-/// own-creations subscription (`WHERE created_by = {identity}`) matches.
-fn caller_identity(ctx: &ReducerContext) -> String {
-    ctx.sender().to_hex().to_string()
-}
-
 fn auto_groups(epic: &Epic) -> bool {
     can_auto_group(epic.group_by_repo, &epic.feed_command)
 }

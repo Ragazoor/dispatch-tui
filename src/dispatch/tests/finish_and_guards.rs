@@ -99,7 +99,7 @@ fn dispatch_agent_fails_fast_with_empty_repo_path() {
     let mock = MockProcessRunner::new(vec![]);
     let mut task = make_task("/some/repo");
     task.repo_path = "".to_string();
-    let result = dispatch_agent(&task, &mock, None, &LearningInjections::default());
+    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(
@@ -198,7 +198,7 @@ fn dispatch_agent_uses_task_base_branch_in_prompt() {
 
     let mut task = make_task(&repo_path);
     task.base_branch = "develop".into();
-    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();

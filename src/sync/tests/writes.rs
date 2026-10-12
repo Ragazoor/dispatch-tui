@@ -48,8 +48,6 @@ enum Sent {
     PatchTask(TaskId, Box<bindings::TaskPatch>),
     DeleteTask(TaskId),
     SetTaskEpic(TaskId, i64, String),
-    Claim(TaskId, String),
-    Release(TaskId),
     CreateEpic(Box<bindings::Epic>),
     PatchEpic(i64),
     DeleteEpic(i64),
@@ -265,14 +263,6 @@ impl ReducerCaller for RecordingCaller {
     ) -> anyhow::Result<ReducerOutcome> {
         let epic_id = encode::epic_ref(epic_id);
         self.answer(Sent::SetTaskEpic(id, epic_id, owner))
-    }
-
-    async fn claim_backlog_task(&self, id: TaskId, host: String) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Claim(id, host))
-    }
-
-    async fn release_backlog_claim(&self, id: TaskId) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Release(id))
     }
 
     async fn create_epic(&self, row: bindings::Epic) -> anyhow::Result<EpicId> {

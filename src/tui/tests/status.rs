@@ -604,7 +604,7 @@ fn dispatching_status_skips_deleted_task() {
     app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
     assert!(
-        !app.dispatching.contains_key(&TaskId(1)),
+        !app.dispatching.contains(&TaskId(1)),
         "Tick should drop dispatching IDs that no longer exist in tasks"
     );
     assert!(
@@ -623,7 +623,7 @@ fn mark_dispatching_for_unknown_task_id_is_noop() {
     // Unknown ID should not pollute the dispatching set with a phantom entry
     // that the next Tick would have to clean up.
     assert!(
-        !app.dispatching.contains_key(&TaskId(9999)),
+        !app.dispatching.contains(&TaskId(9999)),
         "MarkDispatching for unknown task should be a no-op"
     );
     assert!(app.status.message.is_none());

@@ -10,7 +10,7 @@ use crate::spacetime::bindings;
 
 use super::super::encode;
 use super::super::writes::{ReducerOutcome, StoreRefusal};
-use super::{MemoryReducerCaller, Tables, BACKLOG, DONE, MAX_EPIC_DEPTH};
+use super::{MemoryReducerCaller, Tables, DONE, MAX_EPIC_DEPTH};
 
 impl MemoryReducerCaller {
     /// Mirrors the module's `write_task`: validates ownership, stamps
@@ -306,79 +306,6 @@ impl MemoryReducerCaller {
         self.recalculate_epic_chain(&mut tables, was_in);
         self.recalculate_epic_chain(&mut tables, epic_id);
         Ok(ReducerOutcome::Applied(vec![]))
-    }
-
-    pub(super) fn apply_claim_backlog_task(
-        &self,
-        id: TaskId,
-        host: String,
-    ) -> Result<ReducerOutcome> {
-        let mut tables = self.lock();
-        let Some(task) = tables.tasks.get(&id.0).cloned() else {
-            return Ok(ReducerOutcome::Refused(format!(
-                "task {} no longer exists",
-                id.0
-            )));
-        };
-        if task.status != BACKLOG {
-            return Ok(ReducerOutcome::Refused(format!(
-                "task {} is {} rather than backlog, so it is already claimed",
-                id.0, task.status
-            )));
-        }
-        if !module::claimable_by(&task, &host) {
-            return Ok(ReducerOutcome::Refused(format!(
-                "task {}'s worktree is on {}, so {host} cannot claim it",
-                id.0, task.host
-            )));
-        }
-        let now = self.now();
-        let row = module::Task {
-            status: "running".into(),
-            sub_status: "active".into(),
-            last_pre_tool_use_at: now.clone(),
-            updated_at: now,
-            ..task
-        };
-        match self.write_task(&mut tables, row) {
-            Ok(()) => Ok(ReducerOutcome::Applied(vec![])),
-            Err(why) => Ok(ReducerOutcome::Refused(why)),
-        }
-    }
-
-    pub(super) fn apply_release_backlog_claim(&self, id: TaskId) -> Result<ReducerOutcome> {
-        let mut tables = self.lock();
-        let Some(task) = tables.tasks.get(&id.0).cloned() else {
-            return Ok(ReducerOutcome::Refused(format!(
-                "task {} no longer exists",
-                id.0
-            )));
-        };
-        if task.status != "running" {
-            return Ok(ReducerOutcome::Refused(format!(
-                "task {} is not claimed",
-                id.0
-            )));
-        }
-        if !task.worktree.is_empty() {
-            return Ok(ReducerOutcome::Refused(format!(
-                "task {} already has a worktree, so releasing it would put a running \
-                 agent's task back in the backlog",
-                id.0
-            )));
-        }
-        let updated_at = self.now();
-        let row = module::Task {
-            status: BACKLOG.into(),
-            sub_status: "none".into(),
-            last_pre_tool_use_at: String::new(),
-            updated_at,
-            ..task
-        };
-        match self.write_task(&mut tables, row) {
-            Ok(()) => Ok(ReducerOutcome::Applied(vec![])),
-            Err(why) => Ok(ReducerOutcome::Refused(why)),
-        }
     }
 
     pub(super) fn apply_create_epic(&self, row: bindings::Epic) -> Result<EpicId> {

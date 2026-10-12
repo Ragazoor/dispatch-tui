@@ -332,7 +332,8 @@ async fn serve_launches_the_quick_agent_for_a_quick_row() {
 }
 
 /// `requires: request.host = local_host()` — another machine's row is not
-/// this board's to claim or provision.
+/// this board's to claim or provision. The observer hands out no such row;
+/// one that reaches the service anyway is refused at the module's claim.
 #[tokio::test]
 async fn serve_ignores_a_row_for_another_host() {
     let fx = fx();
@@ -357,8 +358,8 @@ async fn serve_ignores_a_row_for_another_host() {
     let outcome = svc.serve_dispatch_request(fx.row(id).await, emb()).await;
 
     assert!(
-        matches!(outcome, ServedDispatch::NotThisHost),
-        "expected NotThisHost, got {outcome:?}"
+        matches!(outcome, ServedDispatch::ClaimRefused(_)),
+        "expected ClaimRefused, got {outcome:?}"
     );
     assert_eq!(fx.row(id).await.state, DispatchRequestState::Requested);
     assert!(runner.recorded_calls().is_empty());
@@ -628,10 +629,12 @@ impl ProcessRunner for OnCall {
     }
 }
 
-/// The dispatch script, plus spare successes for whatever teardown the host
-/// runs once it learns its row failed.
+/// The dispatch script, plus the teardown the host runs once it learns its
+/// row failed: the rollback's presence check finds the window this attempt
+/// opened (`task-1`, the fixture's first task), then spare successes.
 fn script_with_spare_teardown() -> MockProcessRunner {
     let mut responses = DispatchScript::dispatch().responses();
+    responses.push((None, MockProcessRunner::ok_with_stdout(b"task-1\n")));
     responses.extend((0..8).map(|_| (None, MockProcessRunner::ok())));
     MockProcessRunner::new_with_delays(responses)
 }

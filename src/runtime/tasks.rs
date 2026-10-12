@@ -60,7 +60,7 @@ impl TuiRuntime {
 
         match trust_result {
             Ok(()) => {
-                self.exec_dispatch_agent(task, Some(mode)).await;
+                self.exec_dispatch_agent(id, Some(mode)).await;
             }
             Err(e) => {
                 // Abandoned, not failed: the trust grant runs *upstream* of
@@ -494,16 +494,12 @@ impl TuiRuntime {
     /// can be stale by the time this runs, and the module refuses a request
     /// for a task another entry point claimed first
     /// (`DispatchClaimExclusive` in `docs/specs/dispatch.allium`).
-    pub(super) async fn exec_dispatch_agent(
-        &self,
-        task: Box<models::Task>,
-        mode: Option<models::DispatchMode>,
-    ) {
-        self.request_for_dispatch(task.id, models::DispatchOrigin::User, mode)
+    pub(super) async fn exec_dispatch_agent(&self, id: TaskId, mode: Option<models::DispatchMode>) {
+        self.request_for_dispatch(id, models::DispatchOrigin::User, mode)
             .await;
     }
 
-    /// Write a dispatch request for `id`. Returns whether it was written.
+    /// Write a dispatch request for `id`.
     ///
     /// A refused or errored request drains the pending DispatchingFeedback
     /// entry with a message (`LostClaimReported`): it wrote nothing and holds
@@ -515,9 +511,9 @@ impl TuiRuntime {
         id: TaskId,
         origin: models::DispatchOrigin,
         mode: Option<models::DispatchMode>,
-    ) -> bool {
+    ) {
         let reason = match self.task_svc.request_dispatch(id, origin, mode).await {
-            Ok(crate::store::RequestDispatchAnswer::Requested(_)) => return true,
+            Ok(crate::store::RequestDispatchAnswer::Requested(_)) => return,
             Ok(crate::store::RequestDispatchAnswer::Refused(why)) => {
                 format!("Task #{} was not dispatched: {why}", id.0)
             }
@@ -527,7 +523,6 @@ impl TuiRuntime {
             crate::tui::messages::TaskMessage::DispatchAbandoned(id),
         ));
         self.send_system_error(reason);
-        false
     }
 
     pub(super) fn exec_check_window(
@@ -656,7 +651,9 @@ impl TuiRuntime {
     pub(super) fn spawn_refresh_from_db(&self) -> tokio::task::JoinHandle<()> {
         let db = Arc::clone(&self.board_reads);
         let tx = self.msg_tx.clone();
-        tokio::spawn(TuiRuntime::reload_board(db, tx))
+        tokio::spawn(async move {
+            TuiRuntime::reload_board(db, tx).await;
+        })
     }
 
     /// Bring the shared-store connection up and keep it up.
@@ -773,7 +770,7 @@ impl TuiRuntime {
             // `SharedRows::changed`), and a reader that reconstructed one would
             // be a second copy of the store's own bookkeeping, free to drift.
             while changed.changed().await.is_ok() {
-                TuiRuntime::reload_board(Arc::clone(&reads), tx.clone()).await;
+                let requests = TuiRuntime::reload_board(Arc::clone(&reads), tx.clone()).await;
                 // Recorded so the 2s tick's guard sees this work as already
                 // done. Without it the tick reads a revision the pump moved but
                 // never claimed, and repeats the whole read — a doubled refresh
@@ -783,8 +780,8 @@ impl TuiRuntime {
                 // A pushed row may be a dispatch request this host must
                 // provision (store-split.allium: HostClaimsDispatch). After the
                 // reload, so the App has seen the row open before it is
-                // claimed.
-                drop(dispatch_host.serve().await);
+                // claimed, and from the reload's own read of the rows.
+                drop(dispatch_host.serve_rows(&requests).await);
             }
         })
     }
@@ -803,10 +800,13 @@ impl TuiRuntime {
     /// definitions of "the board" is drift waiting to be paid for, and the
     /// guard against the extra reads already exists one level up, in
     /// `exec_refresh_from_db`'s revision check.
+    ///
+    /// Answers with the dispatch requests it read, so the row pump serves the
+    /// same read rather than reading the rows a second time.
     async fn reload_board(
         db: Arc<dyn crate::store::BoardReads>,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
-    ) {
+    ) -> Vec<crate::models::DispatchRequest> {
         let tasks = db.list_all().await;
         let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Refresh(
             tasks,
@@ -835,8 +835,9 @@ impl TuiRuntime {
         // DispatchingFeedback follows the row (dispatch.allium).
         let requests = db.dispatch_requests().await;
         let _ = tx.send(Message::Task(
-            crate::tui::messages::TaskMessage::DispatchRequestsRefreshed(requests),
+            crate::tui::messages::TaskMessage::DispatchRequestsRefreshed(requests.clone()),
         ));
+        requests
     }
 
     /// Spawn a single-task reload. Sends `TaskMessage::Updated` on success.
@@ -869,7 +870,8 @@ impl TuiRuntime {
         epic_id: crate::models::EpicId,
     ) {
         let Some(epic) = db.get_epic(epic_id).await else {
-            return TuiRuntime::reload_board(db, tx).await;
+            TuiRuntime::reload_board(db, tx).await;
+            return;
         };
         let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Updated(
             epic,

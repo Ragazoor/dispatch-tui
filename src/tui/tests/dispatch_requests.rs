@@ -21,7 +21,6 @@ use crate::models::{
     TaskId, TaskStatus,
 };
 use crate::tui::messages::{SystemMessage, TaskMessage};
-use std::time::{Duration, Instant};
 
 const HOST: &str = "test-host";
 
@@ -257,8 +256,6 @@ fn rows_already_failed_in_the_first_delivery_are_history() {
 fn a_tick_never_force_fails_a_dispatch() {
     let mut app = app();
     app.update(Message::Task(TaskMessage::MarkDispatching(TaskId(1))));
-    app.dispatching
-        .insert(TaskId(1), Instant::now() - Duration::from_secs(3600));
 
     app.update(Message::System(SystemMessage::Tick));
 

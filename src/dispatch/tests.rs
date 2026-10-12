@@ -7,9 +7,7 @@ use super::prompts::{
     reused_rebase_preamble, spec_first_instruction, task_block, tdd_instruction,
     wrap_up_instruction, EpicContext, LearningInjections, PromptContext,
 };
-use super::worktree::{
-    provision_worktree, BaseRef, StartPoint, FETCH_MAX_ATTEMPTS, PROVISION_MAX_SUBPROCESS_CALLS,
-};
+use super::worktree::{provision_worktree, BaseRef, StartPoint, FETCH_MAX_ATTEMPTS};
 use super::*;
 use crate::models::test_tmux_window;
 use crate::models::TaskBuilder;

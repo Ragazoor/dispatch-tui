@@ -62,7 +62,7 @@ pub fn register_host(
         return Err("a host id must not be empty".to_string());
     }
     let existing = ctx.db.hosts().id().find(&id);
-    validate_host_registration(existing.as_ref(), &owner, &ctx.sender().to_hex().to_string())
+    validate_host_registration(existing.as_ref(), &owner, &caller_identity(ctx))
         .map_err(|why| format!("host {id}: {why}"))?;
     match existing {
         Some(existing) => {

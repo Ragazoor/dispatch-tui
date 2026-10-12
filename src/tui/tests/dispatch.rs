@@ -1569,7 +1569,7 @@ fn dispatching_start_time_recorded_on_mark() {
     let mut app = make_app();
     app.update(Message::Task(TaskMessage::MarkDispatching(TaskId(1))));
     assert!(
-        app.dispatching.contains_key(&TaskId(1)),
+        app.dispatching.contains(&TaskId(1)),
         "mark_dispatching should record the start time for the watchdog"
     );
 }
@@ -1578,7 +1578,7 @@ fn dispatching_start_time_recorded_on_mark() {
 fn dispatching_start_time_cleared_on_dispatched() {
     let mut app = make_app();
     app.update(Message::Task(TaskMessage::MarkDispatching(TaskId(1))));
-    assert!(app.dispatching.contains_key(&TaskId(1)));
+    assert!(app.dispatching.contains(&TaskId(1)));
 
     app.update(Message::Task(TaskMessage::Dispatched {
         id: TaskId(1),
@@ -1588,7 +1588,7 @@ fn dispatching_start_time_cleared_on_dispatched() {
     }));
 
     assert!(
-        !app.dispatching.contains_key(&TaskId(1)),
+        !app.dispatching.contains(&TaskId(1)),
         "Dispatched should remove the task from the dispatching map"
     );
 }

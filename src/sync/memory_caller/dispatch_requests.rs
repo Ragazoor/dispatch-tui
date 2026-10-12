@@ -3,8 +3,10 @@
 //!
 //! Every decision is the module's own pure function, called directly; what is
 //! reimplemented here is only the row storage and the order the module's
-//! reducers apply them in. The module's scheduled backstop has no scheduler
-//! here: [`MemoryReducerCaller::expire_dispatch_request`] is its stand-in, an
+//! reducers apply them in. Each reducer body is written as the module's is —
+//! a `Result<_, String>` with `?` — and mapped to a [`ReducerOutcome`] once, at
+//! the boundary. The module's scheduled backstop has no scheduler here:
+//! [`MemoryReducerCaller::expire_dispatch_request`] is its stand-in, an
 //! inherent method a test calls where the module's timer would fire.
 
 use anyhow::Result;
@@ -15,6 +17,23 @@ use crate::models::{DispatchRequestId, TaskId};
 
 use super::super::writes::ReducerOutcome;
 use super::{MemoryReducerCaller, Tables};
+
+/// The one map from a reducer body's answer to the caller's outcome.
+fn outcome(result: Result<Vec<i64>, String>) -> Result<ReducerOutcome> {
+    Ok(match result {
+        Ok(ids) => ReducerOutcome::Applied(ids),
+        Err(why) => ReducerOutcome::Refused(why),
+    })
+}
+
+/// Mirrors the module's `find_request`.
+fn find_request(tables: &Tables, id: i64) -> Result<module::DispatchRequest, String> {
+    tables
+        .dispatch_requests
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| format!("dispatch request {id} does not exist"))
+}
 
 impl MemoryReducerCaller {
     /// Mirrors the module's `require_acting_for` (D11): only `host`'s
@@ -31,15 +50,17 @@ impl MemoryReducerCaller {
         id
     }
 
-    /// Mirrors the module's `finish_failed_request`: write the failed row,
-    /// release the task's claim when it is still the bare claim and roll up
-    /// its epic chain (`ReleaseClaimOfFailedRequest`). There is no timer row to
-    /// cancel here.
-    fn finish_failed_request(
+    /// Mirrors the module's `fail_dispatch_request`, the one failure path:
+    /// write the failed row, release the task's claim when it is still the
+    /// bare claim and roll up its epic chain (`ReleaseClaimOfFailedRequest`).
+    /// There is no timer row to cancel here.
+    fn fail_dispatch_request(
         &self,
         tables: &mut Tables,
-        failed: module::DispatchRequest,
+        row: module::DispatchRequest,
+        reason: &str,
     ) -> Result<(), String> {
+        let failed = module::failed_request_row(row, reason, &self.now());
         let stamp = failed.finished_at.clone();
         let task_id = failed.task_id;
         self.write_dispatch_request(tables, failed);
@@ -57,17 +78,6 @@ impl MemoryReducerCaller {
             self.recalculate_epic_chain(tables, epic_id);
         }
         Ok(())
-    }
-
-    /// Mirrors the module's `fail_dispatch_request`, the one failure path.
-    fn fail_dispatch_request(
-        &self,
-        tables: &mut Tables,
-        row: module::DispatchRequest,
-        reason: &str,
-    ) -> Result<(), String> {
-        let failed = module::failed_request_row(row, reason, &self.now());
-        self.finish_failed_request(tables, failed)
     }
 
     /// Mirrors the module's `fail_open_dispatch_requests_of`
@@ -92,51 +102,45 @@ impl MemoryReducerCaller {
         origin: String,
         mode: String,
     ) -> Result<ReducerOutcome> {
+        outcome(self.request_dispatch_body(task.0, &requester, &origin, &mode))
+    }
+
+    fn request_dispatch_body(
+        &self,
+        task_id: i64,
+        requester: &str,
+        origin: &str,
+        mode: &str,
+    ) -> Result<Vec<i64>, String> {
         if requester.is_empty() {
-            return Ok(ReducerOutcome::Refused(
-                "a dispatch request must name the requesting host".into(),
-            ));
+            return Err("a dispatch request must name the requesting host".into());
         }
         let mut tables = self.lock();
-        if let Err(why) = self.acting_for(&tables, &requester) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
-        if let Err(why) = module::validate_dispatch_origin(&origin) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
-        let Some(row) = tables.tasks.get(&task.0).cloned() else {
-            return Ok(ReducerOutcome::Refused(format!(
-                "task {} no longer exists",
-                task.0
-            )));
+        self.acting_for(&tables, requester)?;
+        module::validate_dispatch_origin(origin)?;
+        let Some(row) = tables.tasks.get(&task_id).cloned() else {
+            return Err(format!("task {task_id} no longer exists"));
         };
         let has_open = tables
             .dispatch_requests
             .values()
-            .any(|r| r.task_id == task.0 && module::dispatch_request_is_open(&r.state));
-        if let Err(why) = module::validate_dispatch_request(&row, &requester, has_open) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
-        let mode = match module::choose_dispatch_mode(&row, &mode) {
-            Ok(mode) => mode,
-            Err(why) => return Ok(ReducerOutcome::Refused(why)),
-        };
+            .any(|r| r.task_id == task_id && module::dispatch_request_is_open(&r.state));
+        module::validate_dispatch_request(&row, requester, has_open)?;
+        let mode = module::choose_dispatch_mode(&row, mode)?;
 
         let stamp = self.now();
         let epic_id = row.epic_id;
-        tables.task_subagents.retain(|s| s.task_id != task.0);
-        if let Err(why) = self.write_task(&mut tables, module::apply_dispatch_claim(row, &stamp)) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
+        Self::delete_all_subagents(&mut tables, task_id);
+        self.write_task(&mut tables, module::apply_dispatch_claim(row, &stamp))?;
         self.recalculate_epic_chain(&mut tables, epic_id);
         let id = self.write_dispatch_request(
             &mut tables,
             module::DispatchRequest {
                 requested_by: self.sender.clone(),
-                ..module::new_dispatch_request(task.0, &requester, mode, &origin, &stamp)
+                ..module::new_dispatch_request(task_id, requester, mode, origin, &stamp)
             },
         );
-        Ok(ReducerOutcome::Applied(vec![id]))
+        Ok(vec![id])
     }
 
     pub(super) fn apply_claim_dispatch_request(
@@ -144,22 +148,17 @@ impl MemoryReducerCaller {
         id: DispatchRequestId,
         host: String,
     ) -> Result<ReducerOutcome> {
+        outcome(self.claim_dispatch_request_body(id.0, &host))
+    }
+
+    fn claim_dispatch_request_body(&self, id: i64, host: &str) -> Result<Vec<i64>, String> {
         let mut tables = self.lock();
-        let Some(row) = tables.dispatch_requests.get(&id.0).cloned() else {
-            return Ok(ReducerOutcome::Refused(format!(
-                "dispatch request {} does not exist",
-                id.0
-            )));
-        };
-        if let Err(why) = module::validate_dispatch_request_claim(&row, &host) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
-        if let Err(why) = self.acting_for(&tables, &host) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
+        let row = find_request(&tables, id)?;
+        module::validate_dispatch_request_claim(&row, host)?;
+        self.acting_for(&tables, host)?;
         let now = self.now();
         self.write_dispatch_request(&mut tables, module::claim_dispatch_request_row(row, &now));
-        Ok(ReducerOutcome::Applied(vec![]))
+        Ok(vec![])
     }
 
     pub(super) fn apply_report_dispatch_provisioned(
@@ -169,40 +168,34 @@ impl MemoryReducerCaller {
         worktree: String,
         tmux_window: String,
     ) -> Result<ReducerOutcome> {
+        outcome(self.report_dispatch_provisioned_body(id.0, &reporter, &worktree, &tmux_window))
+    }
+
+    fn report_dispatch_provisioned_body(
+        &self,
+        id: i64,
+        reporter: &str,
+        worktree: &str,
+        tmux_window: &str,
+    ) -> Result<Vec<i64>, String> {
         let mut tables = self.lock();
-        let Some(row) = tables.dispatch_requests.get(&id.0).cloned() else {
-            return Ok(ReducerOutcome::Refused(format!(
-                "dispatch request {} does not exist",
-                id.0
-            )));
-        };
-        if let Err(why) = module::validate_dispatch_report(&row, &reporter) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
-        if let Err(why) = self.acting_for(&tables, &reporter) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
+        let row = find_request(&tables, id)?;
+        module::validate_dispatch_report(&row, reporter)?;
+        self.acting_for(&tables, reporter)?;
         if worktree.is_empty() {
-            return Ok(ReducerOutcome::Refused(format!(
-                "dispatch request {}: a dispatched report must name the worktree",
-                id.0
-            )));
+            return Err(format!(
+                "dispatch request {id}: a dispatched report must name the worktree"
+            ));
         }
         let Some(task) = tables.tasks.get(&row.task_id).cloned() else {
-            return Ok(ReducerOutcome::Refused(format!(
-                "task {} no longer exists",
-                row.task_id
-            )));
+            return Err(format!("task {} no longer exists", row.task_id));
         };
-        let row = module::dispatched_request_row(row, &worktree, &tmux_window, &self.now());
+        let row = module::dispatched_request_row(row, worktree, tmux_window, &self.now());
         let epic_id = task.epic_id;
-        if let Err(why) = self.write_task(&mut tables, module::apply_dispatched_to_task(task, &row))
-        {
-            return Ok(ReducerOutcome::Refused(why));
-        }
+        self.write_task(&mut tables, module::apply_dispatched_to_task(task, &row))?;
         self.recalculate_epic_chain(&mut tables, epic_id);
         self.write_dispatch_request(&mut tables, row);
-        Ok(ReducerOutcome::Applied(vec![]))
+        Ok(vec![])
     }
 
     pub(super) fn apply_report_dispatch_failed(
@@ -211,50 +204,43 @@ impl MemoryReducerCaller {
         reporter: String,
         reason: String,
     ) -> Result<ReducerOutcome> {
+        outcome(self.report_dispatch_failed_body(id.0, &reporter, &reason))
+    }
+
+    fn report_dispatch_failed_body(
+        &self,
+        id: i64,
+        reporter: &str,
+        reason: &str,
+    ) -> Result<Vec<i64>, String> {
         let mut tables = self.lock();
-        let Some(row) = tables.dispatch_requests.get(&id.0).cloned() else {
-            return Ok(ReducerOutcome::Refused(format!(
-                "dispatch request {} does not exist",
-                id.0
-            )));
-        };
-        if let Err(why) = module::validate_dispatch_report(&row, &reporter) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
-        if let Err(why) = self.acting_for(&tables, &reporter) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
-        match self.fail_dispatch_request(&mut tables, row, &reason) {
-            Ok(()) => Ok(ReducerOutcome::Applied(vec![])),
-            Err(why) => Ok(ReducerOutcome::Refused(why)),
-        }
+        let row = find_request(&tables, id)?;
+        module::validate_dispatch_report(&row, reporter)?;
+        self.acting_for(&tables, reporter)?;
+        self.fail_dispatch_request(&mut tables, row, reason)?;
+        Ok(vec![])
     }
 
     pub(super) fn apply_fail_interrupted_dispatch_requests(
         &self,
         host: String,
     ) -> Result<ReducerOutcome> {
+        outcome(self.fail_interrupted_dispatch_requests_body(&host))
+    }
+
+    fn fail_interrupted_dispatch_requests_body(&self, host: &str) -> Result<Vec<i64>, String> {
         let mut tables = self.lock();
-        if let Err(why) = self.acting_for(&tables, &host) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
+        self.acting_for(&tables, host)?;
         let rows: Vec<module::DispatchRequest> = tables
             .dispatch_requests
             .values()
             .filter(|r| r.host == host)
             .cloned()
             .collect();
-        for id in module::interrupted_dispatch_requests(&rows, &host) {
-            let Some(row) = tables.dispatch_requests.get(&id).cloned() else {
-                continue;
-            };
-            if let Err(why) =
-                self.fail_dispatch_request(&mut tables, row, module::DISPATCH_REASON_HOST_RESTARTED)
-            {
-                return Ok(ReducerOutcome::Refused(why));
-            }
+        for row in module::interrupted_dispatch_requests(rows) {
+            self.fail_dispatch_request(&mut tables, row, module::DISPATCH_REASON_HOST_RESTARTED)?;
         }
-        Ok(ReducerOutcome::Applied(vec![]))
+        Ok(vec![])
     }
 
     /// The stand-in for the module's scheduled `expire_dispatch_request`
@@ -268,14 +254,15 @@ impl MemoryReducerCaller {
         let Some(row) = tables.dispatch_requests.get(&id.0).cloned() else {
             return ReducerOutcome::Applied(vec![]);
         };
-        match module::expire_dispatch_request_row(row, &self.now()) {
-            Some(failed) => match self.finish_failed_request(&mut tables, failed) {
-                Ok(()) => ReducerOutcome::Applied(vec![]),
-                Err(why) => ReducerOutcome::Refused(why),
-            },
-            None => {
-                ReducerOutcome::Refused(format!("dispatch request {} has already finished", id.0))
-            }
+        if !module::dispatch_request_is_open(&row.state) {
+            return ReducerOutcome::Refused(format!(
+                "dispatch request {} has already finished",
+                id.0
+            ));
+        }
+        match self.fail_dispatch_request(&mut tables, row, module::DISPATCH_REASON_TIMED_OUT) {
+            Ok(()) => ReducerOutcome::Applied(vec![]),
+            Err(why) => ReducerOutcome::Refused(why),
         }
     }
 }

@@ -116,7 +116,6 @@ impl App {
             // a deferred Stop: a crashed task is still Running.
             Self::set_local_status(task, TaskStatus::Backlog);
             let fields = crate::tui::commands::PersistFields::from_task(task);
-            let task_clone = Box::new(task.clone());
             self.sync_board_selection();
 
             let mut cmds = Vec::new();
@@ -132,10 +131,7 @@ impl App {
             // (DispatchResearchTask) and every other one to DispatchTask —
             // the same agent the task would get from a fresh dispatch.
             cmds.push(Command::Task(
-                crate::tui::commands::TaskCommand::DispatchAgent {
-                    task: task_clone,
-                    mode: None,
-                },
+                crate::tui::commands::TaskCommand::DispatchAgent { id, mode: None },
             ));
             cmds
         } else {

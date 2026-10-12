@@ -908,6 +908,34 @@ pub fn claimable_by(task: &Task, host: &str) -> bool {
     task.host.is_empty() || task.host == host
 }
 
+/// Which rows a claim accepts, shared by [`claim_backlog_task`] and
+/// `RequestDispatch` (`validate_dispatch_request`): a backlog task that
+/// [`claimable_by`] `host`.
+pub fn validate_claim_acceptance(task: &Task, host: &str) -> Result<(), String> {
+    let id = task.id;
+    if task.status != BACKLOG {
+        return Err(format!(
+            "task {id} is {} rather than backlog, so it is already claimed",
+            task.status
+        ));
+    }
+    if !claimable_by(task, host) {
+        return Err(format!(
+            "task {id}'s worktree is on {}, so {host} cannot claim it",
+            task.host
+        ));
+    }
+    Ok(())
+}
+
+/// Whether a task is still the bare claim: running with no worktree yet. Only
+/// such a claim may be released ([`release_backlog_claim`],
+/// `ReleaseClaimOfFailedRequest`); one that got as far as a worktree is a
+/// dispatch in progress.
+pub(crate) fn is_bare_claim(task: &Task) -> bool {
+    task.status == RUNNING && task.worktree.is_empty()
+}
+
 // THERE IS NO `claim_next_backlog_task`, AND THAT IS DELIBERATE.
 //
 // The obvious design is a reducer that picks the next candidate and claims it
@@ -947,18 +975,7 @@ pub fn claim_backlog_task(ctx: &ReducerContext, id: i64, host: String) -> Result
     let Some(task) = ctx.db.tasks().id().find(id) else {
         return Err(format!("task {id} no longer exists"));
     };
-    if task.status != BACKLOG {
-        return Err(format!(
-            "task {id} is {} rather than backlog, so it is already claimed",
-            task.status
-        ));
-    }
-    if !claimable_by(&task, &host) {
-        return Err(format!(
-            "task {id}'s worktree is on {}, so {host} cannot claim it",
-            task.host
-        ));
-    }
+    validate_claim_acceptance(&task, &host)?;
     // THROUGH `write_task`, not around it. Neither this nor the release below
     // touches `epic_id` or `owner`, so nothing is broken by a direct update
     // today — but `write_task`'s whole claim is that it is the only path, and a
@@ -977,14 +994,15 @@ pub fn release_backlog_claim(ctx: &ReducerContext, id: i64) -> Result<(), String
     let Some(task) = ctx.db.tasks().id().find(id) else {
         return Err(format!("task {id} no longer exists"));
     };
-    if task.status != RUNNING {
-        return Err(format!("task {id} is not claimed"));
-    }
-    if !task.worktree.is_empty() {
-        return Err(format!(
-            "task {id} already has a worktree, so releasing it would put a running \
-             agent's task back in the backlog"
-        ));
+    if !is_bare_claim(&task) {
+        return Err(if task.status != RUNNING {
+            format!("task {id} is not claimed")
+        } else {
+            format!(
+                "task {id} already has a worktree, so releasing it would put a running \
+                 agent's task back in the backlog"
+            )
+        });
     }
     write_task(
         ctx,

@@ -32,6 +32,14 @@ pub(crate) fn now(ctx: &ReducerContext) -> String {
     format_timestamp_micros(ctx.timestamp.to_micros_since_unix_epoch())
 }
 
+/// The calling client's identity, in the spelling `Host.owner`,
+/// `DispatchRequest.requested_by` and a creation's `created_by` hold — the one
+/// a board's own-creations subscription (`WHERE created_by = {identity}`)
+/// matches.
+pub(crate) fn caller_identity(ctx: &ReducerContext) -> String {
+    ctx.sender().to_hex().to_string()
+}
+
 // Epic status derivation
 
 /// The statuses an epic or a task can hold, in the store's spelling.

@@ -154,15 +154,16 @@ async fn the_chain_requests_its_first_subtask_and_marks_it_running() {
     let svc = task_svc(&db);
     let (epic_id, ids) = epic_with_backlog_subtasks(&db, 2).await;
 
-    let (claimed, request) = svc
+    let candidate = svc
         .request_next_backlog_subtask(epic_id)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(
-        claimed.id, ids[0],
+        candidate.id, ids[0],
         "requests the first subtask by sort_order"
     );
+    let claimed = db.get_task(ids[0]).await.unwrap();
     assert_eq!(claimed.status, TaskStatus::Running);
     assert_eq!(
         claimed.sub_status,
@@ -172,7 +173,7 @@ async fn the_chain_requests_its_first_subtask_and_marks_it_running() {
         claimed.last_pre_tool_use_at.is_some(),
         "the claim seeds last_pre_tool_use_at so the tick classifier keeps the task Active"
     );
-    let row = db.dispatch_request(request).await.unwrap();
+    let row = db.latest_dispatch_request_for_task(ids[0]).await.unwrap();
     assert_eq!(row.origin, crate::models::DispatchOrigin::EpicChain);
     assert!(
         db.get_task(ids[0]).await.unwrap().worktree.is_none(),
@@ -214,8 +215,8 @@ async fn the_chain_is_exclusive_under_concurrency() {
         let svc = svc.clone();
         tokio::spawn(async move { svc.request_next_backlog_subtask(epic_id).await })
     };
-    let (first, _) = a.await.unwrap().unwrap().expect("first request");
-    let (second, _) = b.await.unwrap().unwrap().expect("second request");
+    let first = a.await.unwrap().unwrap().expect("first request");
+    let second = b.await.unwrap().unwrap().expect("second request");
 
     assert_ne!(
         first.id, second.id,
@@ -239,7 +240,7 @@ async fn the_chain_passes_over_a_phoenix_subtask() {
         .await
         .unwrap();
 
-    let (claimed, _) = svc
+    let claimed = svc
         .request_next_backlog_subtask(epic_id)
         .await
         .unwrap()

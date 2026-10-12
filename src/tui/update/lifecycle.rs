@@ -173,7 +173,7 @@ impl App {
         };
         vec![Command::Task(
             crate::tui::commands::TaskCommand::DispatchAgent {
-                task,
+                id: task.id,
                 mode: Some(mode),
             },
         )]

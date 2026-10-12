@@ -67,14 +67,13 @@ mod tests;
 // The store's own vocabulary
 // ---------------------------------------------------------------------------
 //
-// Mirrors of the module's own private `DONE`/`BACKLOG` string constants
+// Mirrors of the module's own private `DONE` string constant and friends
 // (spacetime/module/src/lib.rs). Not reusable directly — they are private to
 // that crate — so they are restated here, character for character, rather
 // than invented independently. There is no `archived` any more — task #4971
 // removed the status from the module, and this store must not resurrect it.
 
 const DONE: &str = "done";
-const BACKLOG: &str = "backlog";
 const RUNNING: &str = "running";
 const REVIEW: &str = "review";
 const ACTIVE: &str = "active";
@@ -309,14 +308,6 @@ impl ReducerCaller for MemoryReducerCaller {
         owner: String,
     ) -> Result<ReducerOutcome> {
         self.apply_set_task_epic(id, epic_id, owner)
-    }
-
-    async fn claim_backlog_task(&self, id: TaskId, host: String) -> Result<ReducerOutcome> {
-        self.apply_claim_backlog_task(id, host)
-    }
-
-    async fn release_backlog_claim(&self, id: TaskId) -> Result<ReducerOutcome> {
-        self.apply_release_backlog_claim(id)
     }
 
     async fn create_epic(&self, row: bindings::Epic) -> Result<EpicId> {

@@ -152,7 +152,7 @@ async fn the_dispatch_key_requests_and_provisions_nothing_inline() {
     .unwrap();
 
     r.dispatch(Command::Task(TaskCommand::DispatchAgent {
-        task: Box::new(task.clone()),
+        id: task.id,
         mode: Some(DispatchMode::Dispatch),
     }))
     .await;
@@ -190,7 +190,7 @@ async fn the_research_key_requests_research_mode() {
     .unwrap();
 
     r.dispatch(Command::Task(TaskCommand::DispatchAgent {
-        task: Box::new(task.clone()),
+        id: task.id,
         mode: Some(DispatchMode::Research),
     }))
     .await;
@@ -224,7 +224,7 @@ async fn a_dispatch_without_a_mode_lets_the_module_derive_research() {
     .unwrap();
 
     r.dispatch(Command::Task(TaskCommand::DispatchAgent {
-        task: Box::new(task.clone()),
+        id: task.id,
         mode: None,
     }))
     .await;
@@ -258,7 +258,7 @@ async fn a_refused_request_is_reported_as_abandoned() {
     );
 
     r.dispatch(Command::Task(TaskCommand::DispatchAgent {
-        task: Box::new(task.clone()),
+        id: task.id,
         mode: Some(DispatchMode::Dispatch),
     }))
     .await;

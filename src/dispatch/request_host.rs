@@ -85,8 +85,8 @@ impl DispatchRequestObserver {
 /// at the next step. A plain [`ProcessRunner::run`] is bounded too; nothing a
 /// provisioning runs may outlive the deadline.
 ///
-/// The provisioning-failure rollback is exempt: it reaches the unwrapped
-/// runner through [`ProcessRunner::unbounded_for_teardown`], because what an
+/// The provisioning-failure rollback is exempt: its caller hands it the
+/// unwrapped runner (`run_agent_for_mode`'s `teardown`), because what an
 /// attempt made past the deadline still has to be torn down.
 pub struct DeadlineRunner {
     inner: Arc<dyn ProcessRunner>,
@@ -138,9 +138,5 @@ impl ProcessRunner for DeadlineRunner {
 
     fn sccache_available(&self) -> bool {
         self.inner.sccache_available()
-    }
-
-    fn unbounded_for_teardown(&self) -> Option<&dyn ProcessRunner> {
-        Some(&*self.inner)
     }
 }
