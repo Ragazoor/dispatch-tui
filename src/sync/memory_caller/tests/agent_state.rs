@@ -2,6 +2,13 @@ use super::*;
 
 // -- Unfollow releases the unfollower's poll claims (task #8196) ----------
 
+/// The fixture, with calls sent as "alice", so she may register her own hosts
+/// (`core.allium: LocalHostOwnerIsWrittenOnce`, enforced by `register_host`).
+fn alices_caller() -> (MemoryReducerCaller, Arc<SharedRows>) {
+    let (caller, rows) = caller();
+    (caller.with_sender("alice"), rows)
+}
+
 async fn child_epic(caller: &MemoryReducerCaller, parent: EpicId) -> EpicId {
     let mut child = blank_epic();
     child.parent_epic_id = parent.0;
@@ -10,7 +17,7 @@ async fn child_epic(caller: &MemoryReducerCaller, parent: EpicId) -> EpicId {
 
 #[tokio::test]
 async fn unfollow_releases_a_claim_held_by_the_unfollowers_host() {
-    let (caller, rows) = caller();
+    let (caller, rows) = alices_caller();
     caller
         .register_host("laptop".into(), "l".into(), "alice".into())
         .await
@@ -33,7 +40,7 @@ async fn unfollow_releases_a_claim_held_by_the_unfollowers_host() {
 
 #[tokio::test]
 async fn unfollow_releases_claims_across_the_subtree_and_every_owned_host() {
-    let (caller, rows) = caller();
+    let (caller, rows) = alices_caller();
     for host in ["laptop", "desktop"] {
         caller
             .register_host(host.into(), host.into(), "alice".into())
@@ -64,11 +71,9 @@ async fn unfollow_releases_claims_across_the_subtree_and_every_owned_host() {
 
 #[tokio::test]
 async fn unfollow_keeps_another_persons_claim() {
-    let (caller, rows) = caller();
-    caller
-        .register_host("bobs".into(), "b".into(), "bob".into())
-        .await
-        .unwrap();
+    let (caller, rows) = alices_caller();
+    // Bob's machine, registered by Bob: Alice's calls may not name him owner.
+    let caller = caller.with_registered_host("bobs", "bob");
     let epic = caller.create_epic(blank_epic()).await.unwrap();
     caller
         .subscribe_to_epic("alice".into(), epic)
@@ -90,7 +95,7 @@ async fn unfollow_keeps_another_persons_claim() {
 
 #[tokio::test]
 async fn unfollow_keeps_a_claim_on_an_epic_still_covered_by_another_follow() {
-    let (caller, rows) = caller();
+    let (caller, rows) = alices_caller();
     caller
         .register_host("laptop".into(), "l".into(), "alice".into())
         .await
@@ -434,7 +439,7 @@ async fn register_host_upserts_by_id() {
     // `SharedRows` deliberately exposes no `hosts` reader yet (see its
     // own comment), so this only exercises that a second registration of
     // the same id is accepted rather than refused as a duplicate.
-    let (caller, _rows) = caller();
+    let (caller, _rows) = alices_caller();
     let first = caller
         .register_host("host-a".into(), "laptop".into(), "alice".into())
         .await
@@ -445,6 +450,43 @@ async fn register_host_upserts_by_id() {
         .await
         .unwrap();
     assert!(second.won());
+}
+
+/// `core.allium: LocalHostOwnerIsWrittenOnce`, enforced: nobody names
+/// another identity as owner, and an owned host's owner never changes.
+#[tokio::test]
+async fn register_host_keeps_an_owner_written_once() {
+    let (caller, _rows) = alices_caller();
+    assert!(caller
+        .register_host("host-a".into(), "laptop".into(), "alice".into())
+        .await
+        .unwrap()
+        .won());
+
+    assert!(
+        !caller
+            .register_host("host-b".into(), "".into(), "bob".into())
+            .await
+            .unwrap()
+            .won(),
+        "alice may not register a host as bob's"
+    );
+    assert!(
+        !caller
+            .register_host("host-a".into(), "laptop".into(), String::new())
+            .await
+            .unwrap()
+            .won(),
+        "an owned host cannot be disowned"
+    );
+    let bob = caller.with_sender("bob");
+    assert!(
+        !bob.register_host("host-a".into(), "mine".into(), "bob".into())
+            .await
+            .unwrap()
+            .won(),
+        "bob cannot take over alice's host"
+    );
 }
 
 #[tokio::test]

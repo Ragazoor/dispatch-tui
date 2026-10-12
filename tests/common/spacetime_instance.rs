@@ -252,7 +252,43 @@ impl Instance {
     /// names the CLI's current identity; valid once anything has been
     /// published or called, since that is when the CLI logs in.
     pub fn identity(&self) -> String {
-        let shown = run(None, &[&self.config_arg(), "login", "show"]);
+        self.identity_with(&self.config_arg())
+    }
+
+    /// The `--config-path` argument of a SECOND CLI identity, `who`, on this
+    /// instance — another person, for a test of what one identity may do to
+    /// another's rows (`store-split.allium`, D11).
+    fn other_config_arg(&self, who: &str) -> String {
+        format!(
+            "--config-path={}",
+            self.dir.path().join(format!("{who}.toml")).display()
+        )
+    }
+
+    /// [`Self::call`], as the second identity `who`.
+    pub fn call_as(&self, who: &str, reducer: &str, args: &[&str]) -> std::process::Output {
+        let config = self.other_config_arg(who);
+        let mut argv = vec![
+            config,
+            "call".into(),
+            "-s".into(),
+            self.host(),
+            "-y".into(),
+            self.database().to_string(),
+            reducer.into(),
+        ];
+        argv.extend(args.iter().map(|a| (*a).to_string()));
+        run(None, &argv.iter().map(String::as_str).collect::<Vec<_>>())
+    }
+
+    /// [`Self::identity`] of the second identity `who`; valid once it has
+    /// made a call.
+    pub fn identity_as(&self, who: &str) -> String {
+        self.identity_with(&self.other_config_arg(who))
+    }
+
+    fn identity_with(&self, config_arg: &str) -> String {
+        let shown = run(None, &[config_arg, "login", "show"]);
         let text = format!(
             "{}{}",
             String::from_utf8_lossy(&shown.stdout),

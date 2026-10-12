@@ -570,7 +570,7 @@ impl TaskService {
     }
 
     /// Recalculate the parent epic of the given task, if it has one.
-    pub(super) async fn recalculate_epic_for_task(&self, task_id: TaskId) {
+    async fn recalculate_epic_for_task(&self, task_id: TaskId) {
         if let Some(task) = self.db.get_task(task_id).await {
             if let Some(epic_id) = task.epic_id {
                 self.recalculate_epic(epic_id).await;

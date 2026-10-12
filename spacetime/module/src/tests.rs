@@ -1119,6 +1119,42 @@ mod dispatch_requests {
         assert!(why.contains("no owner"), "{why}");
     }
 
+    // -- LocalHostOwnerIsWrittenOnce, enforced by register_host -------------
+
+    /// A caller may register a host as its own, and re-register it (a label
+    /// change) as often as it likes.
+    #[test]
+    fn a_caller_may_register_and_re_register_its_own_host() {
+        assert_eq!(validate_host_registration(None, "c0ffee", "c0ffee"), Ok(()));
+        assert_eq!(
+            validate_host_registration(Some(&host("c0ffee")), "c0ffee", "c0ffee"),
+            Ok(())
+        );
+    }
+
+    /// A host may be registered before its owner is known.
+    #[test]
+    fn an_ownerless_registration_is_accepted_while_the_owner_is_unknown() {
+        assert_eq!(validate_host_registration(None, "", "c0ffee"), Ok(()));
+        assert_eq!(validate_host_registration(Some(&host("")), "", "c0ffee"), Ok(()));
+    }
+
+    /// Nobody may name another identity as a host's owner.
+    #[test]
+    fn a_caller_may_not_name_another_identity_as_owner() {
+        let why = validate_host_registration(None, "beef", "c0ffee").unwrap_err();
+        assert!(why.contains("beef") && why.contains("c0ffee"), "{why}");
+    }
+
+    /// An owned host's owner never changes — not to the caller, not to empty.
+    #[test]
+    fn an_owned_hosts_owner_is_never_rewritten() {
+        let why = validate_host_registration(Some(&host("beef")), "c0ffee", "c0ffee").unwrap_err();
+        assert!(why.contains("beef"), "{why}");
+        let why = validate_host_registration(Some(&host("c0ffee")), "", "c0ffee").unwrap_err();
+        assert!(why.contains("c0ffee"), "{why}");
+    }
+
     /// A host missing from the registry is refused.
     #[test]
     fn nobody_may_act_for_an_unregistered_host() {

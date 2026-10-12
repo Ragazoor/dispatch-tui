@@ -123,10 +123,12 @@ impl MemoryReducerCaller {
         };
 
         let stamp = self.now();
+        let epic_id = row.epic_id;
         tables.task_subagents.retain(|s| s.task_id != task.0);
         if let Err(why) = self.write_task(&mut tables, module::apply_dispatch_claim(row, &stamp)) {
             return Ok(ReducerOutcome::Refused(why));
         }
+        self.recalculate_epic_chain(&mut tables, epic_id);
         let id = self.write_dispatch_request(
             &mut tables,
             module::DispatchRequest {

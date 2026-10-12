@@ -513,6 +513,13 @@ impl MemoryReducerCaller {
             ));
         }
         let mut tables = self.lock();
+        // Mirrors the module's `register_host` guard
+        // (`core.allium: LocalHostOwnerIsWrittenOnce`, enforced).
+        if let Err(why) =
+            module::validate_host_registration(tables.hosts.get(&id), &owner, &self.sender)
+        {
+            return Ok(ReducerOutcome::Refused(format!("host {id}: {why}")));
+        }
         let row = module::Host {
             id: id.clone(),
             label,

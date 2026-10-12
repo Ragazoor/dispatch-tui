@@ -223,12 +223,15 @@
 --             board serves only rows requested_by its own owner, as a second
 --             line behind the module's check (dispatch.allium:
 --             ProvisionDispatch). The scheduled backstop is the module's own
---             call and keeps its own check. LIMIT, by decision: one person's
---             machines share an owner, so one of their machines can still
---             name another of theirs; a teammate cannot. The older reducers
---             that take a host argument (the backlog claim, poll ownership,
---             the host registry's own write) do not check it yet; that gap
---             is tracked separately.
+--             call and keeps its own check. The owner is a fact these checks
+--             can rest on because the host registry's own write enforces
+--             core.allium's LocalHostOwnerIsWrittenOnce: a caller may name
+--             only itself as a host's owner, and an owned host's owner is
+--             never rewritten. LIMIT, by decision: one person's machines
+--             share an owner, so one of their machines can still name
+--             another of theirs; a teammate cannot. The older reducers that
+--             take a host argument (the backlog claim, poll ownership,
+--             settings) do not check it yet; that gap is tracked separately.
 --           - Deferred, out of M4's scope: how long finished rows are kept,
 --             and whether a board sees other hosts' open requests.
 --       M5  Wrap-up and exit-session become request rows.
@@ -385,6 +388,11 @@ rule RequestDispatch {
             not exists entry
     ensures: task.live_subagents = 0
     ensures: task.stop_pending = false
+    -- The epic status rollup for the claimed task's epic chain, in the same
+    -- transaction, as every later move of the request does.
+    ensures:
+        if task.epic != null:
+            RecalculateEpicStatus(task.epic)
     ensures: DispatchRequest.created(
         task: task,
         kind: dispatch,

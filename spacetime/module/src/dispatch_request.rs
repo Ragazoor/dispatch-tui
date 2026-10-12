@@ -229,6 +229,31 @@ pub fn apply_dispatch_claim(task: Task, now: &str) -> Task {
     }
 }
 
+/// `core.allium: LocalHostOwnerIsWrittenOnce`, as `register_host` enforces
+/// it: `owner` may name only the caller itself (or nobody yet), and an owned
+/// host's owner is never rewritten — not to another identity, not to empty.
+/// A re-register with the same owner (a rename) passes.
+pub fn validate_host_registration(
+    existing: Option<&Host>,
+    owner: &str,
+    caller: &str,
+) -> Result<(), String> {
+    if !owner.is_empty() && owner != caller {
+        return Err(format!(
+            "{caller} may not register a host as owned by {owner}; only as its own"
+        ));
+    }
+    if let Some(existing) = existing {
+        if !existing.owner.is_empty() && existing.owner != owner {
+            return Err(format!(
+                "the host is owned by {}, and a host's owner is written once",
+                existing.owner
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// D11: whether `caller` may act for `host_id` — name it as a request's
 /// requester, claim its rows, report on them, sweep them. Only the host's
 /// registered owner may; a host with no owner yet, or none registered, is
@@ -493,8 +518,12 @@ pub fn request_dispatch(
     let mode = choose_dispatch_mode(&task, &mode)?;
 
     let stamp = now(ctx);
+    let epic_id = task.epic_id;
     delete_all_subagents(ctx, task_id);
     write_task(ctx, apply_dispatch_claim(task, &stamp))?;
+    // The epic status rollup for the claimed task's epic chain, in this
+    // reducer (`RequestDispatch`), like every later move of the request.
+    recalculate_epic_chain(ctx, epic_id);
 
     let row = ctx.db.dispatch_requests().insert(DispatchRequest {
         requested_by: caller(ctx),

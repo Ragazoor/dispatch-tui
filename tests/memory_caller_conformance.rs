@@ -2376,7 +2376,9 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
         };
 
         // -- D11: both sides refuse a host the caller does not own ----------------
-        // host-a is this connection's own; their-host is somebody else's.
+        // host-a is this connection's own; their-host has no owner, so nobody
+        // may act for it. (Naming another identity as owner is itself refused:
+        // `core.allium: LocalHostOwnerIsWrittenOnce`, checked below.)
         for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
             caller
                 .register_host("host-a".into(), String::new(), identity.clone())
@@ -2385,12 +2387,30 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
                 .applied()
                 .unwrap();
             caller
-                .register_host("their-host".into(), String::new(), "beef".into())
+                .register_host("their-host".into(), String::new(), String::new())
                 .await
                 .unwrap()
                 .applied()
                 .unwrap();
         }
+        // LocalHostOwnerIsWrittenOnce: neither side lets a caller name another
+        // identity as owner, nor disown its own host.
+        both_refuse(
+            real.register_host("gift".into(), String::new(), "beef".into())
+                .await
+                .unwrap(),
+            mem.register_host("gift".into(), String::new(), "beef".into())
+                .await
+                .unwrap(),
+        );
+        both_refuse(
+            real.register_host("host-a".into(), String::new(), String::new())
+                .await
+                .unwrap(),
+            mem.register_host("host-a".into(), String::new(), String::new())
+                .await
+                .unwrap(),
+        );
         let theirs = create(mine("")).await;
         wait_for!(rows_real.task(theirs).is_some());
         both_refuse(

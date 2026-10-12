@@ -3097,10 +3097,11 @@ fn register_host_upserts_by_id() {
         return;
     }
     let instance = published_instance();
+    let me = instance.identity();
 
-    let first = instance.call("register_host", &["host-1", "first-label", "user-a"]);
+    let first = instance.call("register_host", &["host-1", "first-label", &me]);
     assert!(first.status.success(), "{}", describe(&first));
-    let second = instance.call("register_host", &["host-1", "second-label", "user-a"]);
+    let second = instance.call("register_host", &["host-1", "second-label", &me]);
     assert!(second.status.success(), "{}", describe(&second));
 
     assert_eq!(column(&instance, "SELECT count(*) AS c FROM hosts"), "1");
@@ -3803,6 +3804,19 @@ fn register_host(instance: &Instance, host: &str, owner: &str) {
     assert!(registered.status.success(), "{}", describe(&registered));
 }
 
+/// A host owned by a SECOND identity, "teammate" — somebody else's machine.
+/// Registered by the teammate, ownerless first so their identity is known,
+/// then claimed as theirs (`core.allium: LocalHostOwnerIsWrittenOnce` lets
+/// an owner go "" -> identity once). Returns the teammate's identity.
+fn register_teammates_host(instance: &Instance, host: &str) -> String {
+    let unowned = instance.call_as("teammate", "register_host", &[host, "", ""]);
+    assert!(unowned.status.success(), "{}", describe(&unowned));
+    let them = instance.identity_as("teammate");
+    let owned = instance.call_as("teammate", "register_host", &[host, "", &them]);
+    assert!(owned.status.success(), "{}", describe(&owned));
+    them
+}
+
 /// `host-a` and `host-b`, both owned by the identity this instance calls as,
 /// so the calls below may act for either (`store-split.allium`, D11).
 fn register_own_hosts(instance: &Instance) {
@@ -4481,21 +4495,51 @@ fn seed_under_a_stale_done_epic(instance: &Instance) {
     assert!(seeded.status.success(), "{}", describe(&seeded));
 }
 
-/// A requested and claimed row for task 1 on `host-a`, under the stale epic.
-/// Returns the request id. The request itself does not roll the epic up.
+/// A requested and claimed row for task 1 on `host-a`, under an epic made
+/// stale AFTER the request — the request rolls the chain up itself, so the
+/// stale epic is seeded once the row is provisioning. Returns the request id.
 fn provisioning_under_a_stale_done_epic(instance: &Instance) -> String {
-    seed_under_a_stale_done_epic(instance);
+    register_own_hosts(instance);
+    let seeded = instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([task_json(1, "t", "backlog", 1, "")]).to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
     let requested = request_dispatch(instance, 1, "host-a", "user", "");
     assert!(requested.status.success(), "{}", describe(&requested));
     let id = request_column(instance, "id", 1);
     let claimed = instance.call("claim_dispatch_request", &[&id, "host-a"]);
     assert!(claimed.status.success(), "{}", describe(&claimed));
+    let seeded = instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "done", 0)]).to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
     assert_eq!(
         column(instance, "SELECT status FROM epics WHERE id = 1"),
         "done",
         "the fixture's epic must still be stale when the outcome lands"
     );
     id
+}
+
+/// `RequestDispatch` rolls up the claimed task's epic chain in the same
+/// reducer.
+#[test]
+fn a_request_rolls_up_the_claimed_subtasks_epic() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    seed_under_a_stale_done_epic(&instance);
+
+    let requested = request_dispatch(&instance, 1, "host-a", "user", "");
+    assert!(requested.status.success(), "{}", describe(&requested));
+
+    assert_eq!(
+        column(&instance, "SELECT status FROM epics WHERE id = 1"),
+        "backlog"
+    );
 }
 
 #[test]
@@ -4586,7 +4630,7 @@ fn a_request_naming_another_persons_host_is_refused() {
     }
     let instance = published_instance();
     seed_dispatchable(&instance, &[(1, "", "", "")]);
-    register_host(&instance, "their-host", "beef");
+    register_teammates_host(&instance, "their-host");
 
     let refused = request_dispatch(&instance, 1, "their-host", "user", "");
 
@@ -4630,8 +4674,8 @@ fn a_request_naming_an_ownerless_or_unregistered_host_is_refused() {
     assert_eq!(request_count(&instance), "0");
 }
 
-/// The claim, both reports and the restart sweep name the host too, so each
-/// is refused once the host's owner is no longer the caller.
+/// The claim, both reports and the restart sweep name the host too, so a
+/// teammate can do none of them to this host's rows.
 #[test]
 fn claims_reports_and_the_sweep_are_refused_for_another_persons_host() {
     if !spacetime_available_or_skip() {
@@ -4646,28 +4690,26 @@ fn claims_reports_and_the_sweep_are_refused_for_another_persons_host() {
     let claimed = instance.call("claim_dispatch_request", &[&provisioning, "host-a"]);
     assert!(claimed.status.success(), "{}", describe(&claimed));
 
-    // host-a now belongs to somebody else.
-    register_host(&instance, "host-a", "beef");
-
-    let claim = instance.call("claim_dispatch_request", &[&requested, "host-a"]);
+    let teammate = |reducer: &str, args: &[&str]| instance.call_as("teammate", reducer, args);
+    let claim = teammate("claim_dispatch_request", &[&requested, "host-a"]);
     assert!(!claim.status.success(), "{}", describe(&claim));
-    let dispatched = instance.call(
+    let dispatched = teammate(
         "report_dispatch_provisioned",
         &[&provisioning, "host-a", "/wt/2-t", "task-2"],
     );
     assert!(!dispatched.status.success(), "{}", describe(&dispatched));
-    let failed = instance.call("report_dispatch_failed", &[&provisioning, "host-a", "x"]);
+    let failed = teammate("report_dispatch_failed", &[&provisioning, "host-a", "x"]);
     assert!(!failed.status.success(), "{}", describe(&failed));
-    let swept = instance.call("fail_interrupted_dispatch_requests", &["host-a"]);
+    let swept = teammate("fail_interrupted_dispatch_requests", &["host-a"]);
     assert!(!swept.status.success(), "{}", describe(&swept));
 
     assert_eq!(request_column(&instance, "state", 1), "requested");
     assert_eq!(request_column(&instance, "state", 2), "provisioning");
 }
 
-/// ...and an ownerless host's rows cannot be acted on either.
+/// ...and nobody may sweep or claim for an ownerless host.
 #[test]
-fn claims_reports_and_the_sweep_are_refused_for_an_ownerless_host() {
+fn the_sweep_and_a_claim_are_refused_for_an_ownerless_host() {
     if !spacetime_available_or_skip() {
         return;
     }
@@ -4675,11 +4717,84 @@ fn claims_reports_and_the_sweep_are_refused_for_an_ownerless_host() {
     seed_dispatchable(&instance, &[(1, "", "", "")]);
     request_dispatch(&instance, 1, "host-a", "user", "");
     let id = request_column(&instance, "id", 1);
-    register_host(&instance, "host-a", "");
+    register_host(&instance, "fresh-host", "");
 
-    let claim = instance.call("claim_dispatch_request", &[&id, "host-a"]);
-    assert!(!claim.status.success(), "{}", describe(&claim));
-    let swept = instance.call("fail_interrupted_dispatch_requests", &["host-a"]);
+    let swept = instance.call("fail_interrupted_dispatch_requests", &["fresh-host"]);
     assert!(!swept.status.success(), "{}", describe(&swept));
+    assert!(
+        describe(&swept).contains("no owner"),
+        "{}",
+        describe(&swept)
+    );
+    let claim = instance.call("claim_dispatch_request", &[&id, "fresh-host"]);
+    assert!(!claim.status.success(), "{}", describe(&claim));
     assert_eq!(request_column(&instance, "state", 1), "requested");
+}
+
+// -- LocalHostOwnerIsWrittenOnce, enforced by register_host ---------------------
+
+/// A teammate can neither take over this host nor relabel it.
+#[test]
+fn a_teammate_cannot_overwrite_another_persons_host() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    let me = instance.identity();
+    register_host(&instance, "host-a", &me);
+    instance.call_as("teammate", "register_host", &["scratch", "", ""]);
+    let them = instance.identity_as("teammate");
+
+    let takeover = instance.call_as("teammate", "register_host", &["host-a", "", &them]);
+    assert!(!takeover.status.success(), "{}", describe(&takeover));
+    let relabel = instance.call_as("teammate", "register_host", &["host-a", "mine now", &me]);
+    assert!(!relabel.status.success(), "{}", describe(&relabel));
+
+    assert_eq!(
+        column(&instance, "SELECT owner FROM hosts WHERE id = 'host-a'"),
+        me
+    );
+}
+
+/// Nobody may name another identity as a host's owner, new host or not.
+#[test]
+fn a_host_cannot_be_registered_to_someone_elses_identity() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    let them = register_teammates_host(&instance, "their-host");
+
+    let gifted = instance.call("register_host", &["new-host", "", &them]);
+    assert!(!gifted.status.success(), "{}", describe(&gifted));
+    assert!(no_rows(
+        &instance,
+        "SELECT id FROM hosts WHERE id = 'new-host'"
+    ));
+}
+
+/// The owner's own re-register — a rename — still works, and an owned host's
+/// owner cannot be cleared.
+#[test]
+fn the_owner_may_relabel_but_not_disown_its_host() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    let me = instance.identity();
+    register_host(&instance, "host-a", &me);
+
+    let renamed = instance.call("register_host", &["host-a", "laptop", &me]);
+    assert!(renamed.status.success(), "{}", describe(&renamed));
+    let disowned = instance.call("register_host", &["host-a", "laptop", ""]);
+    assert!(!disowned.status.success(), "{}", describe(&disowned));
+
+    assert_eq!(
+        column(&instance, "SELECT label FROM hosts WHERE id = 'host-a'"),
+        "laptop"
+    );
+    assert_eq!(
+        column(&instance, "SELECT owner FROM hosts WHERE id = 'host-a'"),
+        me
+    );
 }

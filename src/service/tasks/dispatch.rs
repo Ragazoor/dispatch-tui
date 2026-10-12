@@ -59,13 +59,9 @@ impl TaskService {
         origin: DispatchOrigin,
         mode: Option<DispatchMode>,
     ) -> Result<RequestDispatchAnswer, ServiceError> {
-        let answer = self.db.request_dispatch(task_id, origin, mode).await?;
-        if matches!(answer, RequestDispatchAnswer::Requested(_)) {
-            // The claim moved the task into Running; its epic's status may
-            // follow.
-            self.recalculate_epic_for_task(task_id).await;
-        }
-        Ok(answer)
+        // The module rolls up the claimed task's epic chain in the same
+        // transaction (`RequestDispatch`), so nothing is recalculated here.
+        Ok(self.db.request_dispatch(task_id, origin, mode).await?)
     }
 
     /// `HostRestartFailsInterrupted`: fail the rows this host left

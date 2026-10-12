@@ -44,10 +44,13 @@ pub(crate) fn delete_agent_state_for(ctx: &ReducerContext, task_id: i64) {
 /// for when it fires and why re-sending an unchanged row on every reconnect
 /// is correct rather than wasteful.
 ///
-/// Plain upsert-by-id: `id` and `owner` are set once each and never change
-/// again for a given host (`core.allium: LocalHostOwnerIsWrittenOnce`), so
-/// overwriting them here on every call is harmless — there is nothing to lose
-/// by not special-casing "first register" vs. "later register".
+/// Upsert-by-id, with `core.allium: LocalHostOwnerIsWrittenOnce` ENFORCED
+/// rather than trusted ([`validate_host_registration`]): a caller may only
+/// name ITSELF as owner, and an owned host's owner never changes. That is
+/// what makes the owner a fact the dispatch requests can check against
+/// (`store-split.allium`, D11) — a writable owner would let anyone take over
+/// another person's machine and then pass every check. The owner's own
+/// re-register (a rename, a reconnect) is unaffected.
 #[spacetimedb::reducer]
 pub fn register_host(
     ctx: &ReducerContext,
@@ -58,7 +61,10 @@ pub fn register_host(
     if id.trim().is_empty() {
         return Err("a host id must not be empty".to_string());
     }
-    match ctx.db.hosts().id().find(&id) {
+    let existing = ctx.db.hosts().id().find(&id);
+    validate_host_registration(existing.as_ref(), &owner, &ctx.sender().to_hex().to_string())
+        .map_err(|why| format!("host {id}: {why}"))?;
+    match existing {
         Some(existing) => {
             ctx.db.hosts().id().update(Host {
                 label,
