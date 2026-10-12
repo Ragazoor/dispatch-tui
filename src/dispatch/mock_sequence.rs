@@ -530,11 +530,12 @@ impl Finish {
                 steps.push(Step::ConflictStatus);
                 steps.push(Step::RebaseAbort);
             }
-            // A rebase that ran and exited non-zero is aborted; one that never
-            // ran — could not be spawned, or was killed by the bound — leaves
-            // nothing to abort.
-            RebaseOutcome::Plain(CallOutcome::Fails) => steps.push(Step::RebaseAbort),
-            RebaseOutcome::Plain(CallOutcome::CannotRun | CallOutcome::TimesOut(_)) => {}
+            // A rebase that ran and exited non-zero is aborted, and so is one
+            // that could not finish — a spawn failure or a kill at the bound
+            // may have left the worktree mid-rebase.
+            RebaseOutcome::Plain(
+                CallOutcome::Fails | CallOutcome::CannotRun | CallOutcome::TimesOut(_),
+            ) => steps.push(Step::RebaseAbort),
         }
         steps
     }
@@ -833,7 +834,7 @@ impl DispatchScript {
         self
     }
 
-    /// The rebase's subprocess cannot be spawned, so there is nothing to abort.
+    /// The rebase's subprocess cannot be spawned; the abort is still attempted.
     pub(crate) fn rebase_cannot_run(mut self) -> Self {
         self.finish_mut().rebase = RebaseOutcome::Plain(CallOutcome::CannotRun);
         self
@@ -1751,8 +1752,8 @@ mod tests {
         );
     }
 
-    /// A rebase that never ran leaves nothing to abort, so the sequence ends at
-    /// the rebase itself.
+    /// A rebase that could not be spawned is still aborted, in case it left the
+    /// worktree mid-rebase.
     #[test]
     fn finish_script_matches_a_rebase_that_could_not_be_spawned() {
         let script = DispatchScript::finish().rebase_cannot_run();
@@ -1761,7 +1762,7 @@ mod tests {
             matches!(err, FinishError::Other(ref m) if m.contains("Failed to run git rebase")),
             "a rebase that could not run must say so, got: {err}"
         );
-        assert_eq!(*script.steps().last().unwrap(), Step::Rebase);
+        assert_eq!(*script.steps().last().unwrap(), Step::RebaseAbort);
     }
 
     #[test]

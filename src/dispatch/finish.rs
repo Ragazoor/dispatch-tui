@@ -84,6 +84,19 @@ pub fn finish_task(
     ctx: &FinishContext,
     runner: &dyn ProcessRunner,
 ) -> std::result::Result<(), FinishError> {
+    finish_task_with_abort_runner(ctx, runner, runner)
+}
+
+/// [`finish_task`] with the rebase abort run through `abort_runner` instead of
+/// `runner`. A caller that bounds the git steps by a deadline hands the
+/// deadline-bound runner as `runner` and the inner one here: the abort runs
+/// under its own `ctx.timeout`, so a deadline cannot leave the worktree
+/// mid-rebase (`WrapUpRebase` in `docs/specs/pr-workflow.allium`).
+pub fn finish_task_with_abort_runner(
+    ctx: &FinishContext,
+    runner: &dyn ProcessRunner,
+    abort_runner: &dyn ProcessRunner,
+) -> std::result::Result<(), FinishError> {
     let FinishContext {
         repo_path,
         worktree,
@@ -96,7 +109,7 @@ pub fn finish_task(
 
     check_primary_worktree(repo_path, base_branch, runner)?;
     pull_base(repo_path, base_branch, runner, timeout)?;
-    rebase_branch(worktree, branch, base_branch, runner, timeout)?;
+    rebase_branch(worktree, branch, base_branch, runner, abort_runner, timeout)?;
     fast_forward_base(repo_path, branch, base_branch, runner, timeout)
 }
 
@@ -161,18 +174,22 @@ fn pull_base(
 }
 
 /// Step 4: rebase `branch` onto `base_branch` (from the worktree, where the
-/// branch is checked out). A failed rebase is aborted.
+/// branch is checked out). A failed rebase is aborted, through `abort_runner`;
+/// so is one that could not finish (killed at a timeout), which may have left
+/// the worktree mid-rebase.
 fn rebase_branch(
     worktree: &str,
     branch: &str,
     base_branch: &str,
     runner: &dyn ProcessRunner,
+    abort_runner: &dyn ProcessRunner,
     timeout: Duration,
 ) -> FinishResult {
     let output = match git_checked(runner, worktree, &["rebase", base_branch], timeout) {
         Ok(_) => return Ok(()),
         Err(GitFailure::Spawn(e)) => {
-            return Err(FinishError::Other(format!("Failed to run git rebase: {e}")))
+            abort(abort_runner, worktree, "rebase", timeout);
+            return Err(FinishError::Other(format!("Failed to run git rebase: {e}")));
         }
         Err(GitFailure::Exit(output)) => output,
     };
@@ -183,12 +200,12 @@ fn rebase_branch(
     // A conflict's files are read before the abort clears them
     // (`ConflictFilesCapturedBeforeAbort`); any other failure just aborts.
     if !is_conflict {
-        abort(runner, worktree, "rebase", timeout);
+        abort(abort_runner, worktree, "rebase", timeout);
         return Err(FinishError::Other(format!("Rebase failed: {}", stderr)));
     }
     Err(FinishError::RebaseConflict {
         branch: branch.to_string(),
-        files: abort_after_conflict(runner, worktree, "rebase", timeout),
+        files: abort_after_conflict(abort_runner, worktree, "rebase", timeout),
     })
 }
 

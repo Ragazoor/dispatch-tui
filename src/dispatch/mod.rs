@@ -44,7 +44,7 @@ pub use agents::{
     quick_dispatch_agent, research_agent, resume_agent, resync_agent_tree_pane, run_agent_for_mode,
     toggle_agent_tree_pane, DispatchInputs,
 };
-pub use finish::{finish_task, FinishContext, FinishError};
+pub use finish::{finish_task, finish_task_with_abort_runner, FinishContext, FinishError};
 // Test-only re-export: `prompts` is private, and the routing tests in
 // `src/runtime/tests/` and `src/service/tasks/tests/` assert on this marker to
 // prove `DispatchMode::Research` reached `build_research_prompt`.

@@ -198,13 +198,16 @@ impl TaskService {
             Arc::clone(&self.clock),
             self.session_deadline(request),
         );
+        // The rebase abort is exempt from the deadline: it runs through the
+        // inner runner under its own SUBPROCESS_TIMEOUT.
+        let abort_runner = Arc::clone(&self.runner);
         let repo_path = task.repo_path.clone();
         let base_branch = task.base_branch.clone();
         let task_id = task.id;
         tracing::info!(task_id = task_id.0, %branch, request = request.id.0, "wrap_up rebase starting");
         let rebase_repo = repo_path.clone();
         let joined = tokio::task::spawn_blocking(move || {
-            dispatch::finish_task(
+            dispatch::finish_task_with_abort_runner(
                 &dispatch::FinishContext {
                     repo_path: &rebase_repo,
                     worktree: &worktree,
@@ -213,6 +216,7 @@ impl TaskService {
                     timeout: crate::process::SUBPROCESS_TIMEOUT,
                 },
                 &runner,
+                &*abort_runner,
             )
         })
         .await;

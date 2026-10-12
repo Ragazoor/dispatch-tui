@@ -217,7 +217,7 @@ pub fn validate_wrap_up_request(
             "Task {id} is tagged `{}`, so it is not wrapped up. A review task ends when its PR \
              merges — the feed that created it deletes the card on the next poll — or when you \
              hand it back to the user. If it became real code work, retag it \
-             (update_task(task_id={id}, tag=\"chore\")) and call wrap_up again.",
+             (update_tasks(task_id={id}, tag=\"chore\")) and call wrap_up again.",
             task.tag
         ));
     }

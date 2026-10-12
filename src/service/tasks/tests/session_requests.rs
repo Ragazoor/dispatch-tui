@@ -701,6 +701,65 @@ async fn a_stalled_rebase_fails_at_the_rows_deadline() {
     );
 }
 
+/// THE ROW'S DEADLINE BOUNDS THE REBASE, but the abort runs under its own
+/// bound: a rebase killed at the deadline is still aborted, so the worktree is
+/// not left mid-rebase.
+#[tokio::test]
+async fn a_rebase_killed_at_the_deadline_is_still_aborted() {
+    let fx = fx();
+    let task = fx.running_task().await;
+    let runner = Arc::new(SpendsTime::new(
+        DispatchScript::finish().no_remote().runner(),
+        &fx.clock,
+        "rebase",
+        chrono::Duration::seconds(30),
+        true,
+    ));
+    let svc = fx.svc(runner.clone());
+    let id = asked(svc.request_wrap_up(task, WrapUpMode::Rebase).await.unwrap());
+    fx.clock.advance(chrono::Duration::seconds(100));
+
+    let served = svc.serve_session_request(fx.row(id).await).await;
+
+    assert!(
+        matches!(&served.outcome, SessionOutcome::Failed(r) if r == crate::dispatch::DEADLINE_PASSED),
+        "{served:?}"
+    );
+    let seen = runner.seen.lock().unwrap().clone();
+    assert!(
+        seen.iter().any(|c| c.contains("rebase --abort")),
+        "the killed rebase must be aborted: {seen:?}"
+    );
+}
+
+/// A rebase that conflicts after the deadline passed is still aborted: the
+/// abort is not refused by the deadline runner.
+#[tokio::test]
+async fn a_conflicted_rebase_past_the_deadline_is_still_aborted() {
+    let fx = fx();
+    let task = fx.running_task().await;
+    let runner = Arc::new(SpendsTime::new(
+        DispatchScript::finish()
+            .no_remote()
+            .rebase_conflicts_in_stderr(&["foo.rs"])
+            .runner(),
+        &fx.clock,
+        "rebase",
+        chrono::Duration::seconds(130),
+        false,
+    ));
+    let svc = fx.svc(runner.clone());
+    let id = asked(svc.request_wrap_up(task, WrapUpMode::Rebase).await.unwrap());
+
+    let _ = svc.serve_session_request(fx.row(id).await).await;
+
+    let seen = runner.seen.lock().unwrap().clone();
+    assert!(
+        seen.iter().any(|c| c.contains("rebase --abort")),
+        "the abort must run past the deadline: {seen:?}"
+    );
+}
+
 /// A rebase that FINISHES after the deadline has still moved the base branch
 /// (BranchRebased is reported), but the module refuses its late done report;
 /// the host then reports failed "deadline passed" so the row does not wait for

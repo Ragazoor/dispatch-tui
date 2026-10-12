@@ -244,10 +244,11 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
 /// session caller or a dispatched agent acting on a task other than its own;
 /// never for a dispatched agent closing itself (that stays wrap_up +
 /// exit_session), and never combined with any other field in the same call.
-/// Reuses `exit_session`'s own terminal-write/teardown tail (`perform_close`
-/// in `wrap_up.rs`) rather than re-deriving it. It does NOT chain the epic's
-/// next subtask: that lives at `exit_session`'s own call site, because only a
-/// close with a `wrap_up` behind it can say the work reached `base_branch`.
+/// Since store-split M5 `perform_close` (in `wrap_up.rs`) belongs to this call
+/// alone: `exit_session` is a request row whose close runs in the module. It
+/// does NOT chain the epic's next subtask: that chain runs in the module, on
+/// an exit_session close, because only a close with a `wrap_up` behind it can
+/// say the work reached `base_branch`.
 /// See `MarkTaskDoneViaMcp` in `docs/specs/mcp-task-tools.allium`.
 async fn handle_mark_task_done(
     state: &McpState,
