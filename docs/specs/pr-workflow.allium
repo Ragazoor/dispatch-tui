@@ -850,8 +850,9 @@ rule ExitSession {
         -- W3). Validation and its error texts are RequestExitSession's (in
         -- the module) and ExitSessionViaMcp's (a missing token or action,
         -- refused in the tool before any call), in this order:
-        --   • a missing token, no done wrap_up row for the task, or an
-        --     already-consumed one → "no exit token — call wrap_up first";
+        --   • a missing token, no unconsumed done wrap_up row for the task
+        --     (whatever the token names), or an already-consumed token →
+        --     "no exit token — call wrap_up first";
         --     a token that names another row, one superseded by a newer
         --     wrap_up, or one voided by a later dispatch of the task (its row
         --     finished before the task's latest dispatched request did;

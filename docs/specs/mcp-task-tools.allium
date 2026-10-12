@@ -1517,8 +1517,9 @@ rule ExitSessionViaMcp {
         --   • in the tool: a missing token → "no exit token — call wrap_up
         --     first"; a missing action → "action is required — pass the same
         --     action used in wrap_up".
-        --   • in the module (RequestExitSession), carrying its words: no done
-        --     wrap_up row for the task, or the token's row already consumed →
+        --   • in the module (RequestExitSession), carrying its words: no
+        --     unconsumed done wrap_up row for the task (whatever the token
+        --     names), or the token's row already consumed →
         --     "no exit token — call wrap_up first"; a token naming another
         --     row, superseded by a newer wrap_up, or voided by a dispatch of
         --     the task that finished after the token's row did

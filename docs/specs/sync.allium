@@ -651,9 +651,11 @@ rule SubscribeToThisHostsSessionRequests {
         -- work this host must do (store-split.allium:
         -- HostClaimsSessionRequest picks up requested rows, including the
         -- initial rows a starting board receives), the outcome the wrap_up
-        -- MCP tool waits on, and the done wrap_up rows and exit_session rows
-        -- exit_session's token check and its no-answer settling read
-        -- (mcp-task-tools.allium: WrapUpViaMcp, ExitSessionViaMcp). Finished
+        -- MCP tool waits on, the chained_task exit_session's response names,
+        -- and the exit_session rows exit_session's no-answer settling reads
+        -- (mcp-task-tools.allium: WrapUpViaMcp, ExitSessionViaMcp). The
+        -- token check itself is the module's, over its own table
+        -- (store-split.allium: RequestExitSession), not over these rows. Finished
         -- rows are included for the same reason as the fifth ask: a row
         -- leaving a state-filtered query would arrive as a delete, and the
         -- outcome would be lost.

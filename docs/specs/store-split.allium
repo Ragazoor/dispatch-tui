@@ -1018,7 +1018,8 @@ rule RequestWrapUp {
     -- mcp-task-tools.allium's ReviewTasksAreNotWrappedUp, in the module by
     -- decision (W2): a review-tagged task has no wrap-up to perform. The
     -- refusal carries that guarantee's wording (the tag, that a review task
-    -- ends at its PR, and the retag way out).
+    -- ends at its PR, and the retag way out). pr_review is core/TaskTag's
+    -- value; the store spells it "pr-review", as every tag column does.
     requires: task.tag != pr_review and task.tag != dependabot
     -- The rebase runs where the worktree is, so the row names the task's own
     -- host, and only that host may ask (the MCP endpoint an agent reaches is
@@ -1268,8 +1269,9 @@ rule RequestExitSession {
         --
         -- Refusals, which the tool returns as INVALID_PARAMS errors carrying
         -- the module's words, in the order the module checks them:
-        --   - no done wrap_up row for the task, or the token's row was
-        --     already consumed: "no exit token — call wrap_up first";
+        --   - no unconsumed done wrap_up row for the task (whatever the token
+        --     names), or the token's row was already consumed: "no exit
+        --     token — call wrap_up first";
         --   - the token names some other row, a done wrap_up row newer
         --     than it exists, or the task was dispatched again after the
         --     token's row finished (a dispatched request of the task whose
@@ -1409,6 +1411,6 @@ open question "M5 window left alive (W5, W7, W8): an exit_session row the backst
 
 open question "M7 and the update_tasks status='done' path (mcp-task-tools.allium: MarkTaskDoneViaMcp): by decision it keeps its board-side close (close_session, with its close_persisted gate) and teardown (kill_session_window) through M5 and until M7, so the terminal fields of a close are applied by two implementations meanwhile. In M7, should it become a module close with an exit_session-style teardown row (without a token and without the epic chain), or something else?"
 
-open question "M5 and ClosePrOnDone (pr-workflow.allium): a close through exit_session with action rebase or done that takes a task carrying a pr-typed url into Done must still run gh pr close, which only a host can. The spec has the exit_session row's host do it while serving the teardown (W5), reading the url from the task. Is that the intended owner, or should it wait for M6 (PR state in the module)?"
+open question "M5 and ClosePrOnDone (pr-workflow.allium): a close through exit_session with action rebase or done that takes a task carrying a pr-typed url into Done must still run gh pr close, which only a host can. The spec has the exit_session row's host do it while serving the teardown (W5), reading the url from the task. Is that the intended owner, or should it wait for M6 (PR state in the module)? As built, a close whose exit_session row fails before its host serves it (the backstop, the restart sweep, the task's deletion) never runs gh pr close: KillWindowOfFailedExitSession kills the window only. Is a PR left open in that case acceptable?"
 
 open question "Seeing other machines' requests (deferred, outside M4): a board's subscription delivers only request rows naming its own host. A teammate's board that shows the same task in a shared epic cannot see the request, so its UnprovisionedIndicator falls back to the claim stamp. Should boards also receive the open requests of every task they can see?"
