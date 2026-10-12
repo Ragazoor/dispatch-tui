@@ -38,6 +38,7 @@ fn row(
         id: DispatchRequestId(id),
         task_id: TaskId(task),
         host: host.to_string(),
+        requested_by: "owner".to_string(),
         mode: DispatchMode::Dispatch,
         origin,
         state,

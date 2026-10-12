@@ -58,10 +58,14 @@ fn fx() -> Fx {
             .with_ymd_and_hms(2026, 10, 11, 12, 0, 0)
             .unwrap(),
     );
-    let caller = Arc::new(MemoryReducerCaller::new(
-        rows.clone(),
-        Arc::new(clock.clone()),
-    ));
+    // Calls are sent as "test-user", who owns this host and the other one a
+    // test seeds a request for (`store-split.allium`, D11).
+    let caller = Arc::new(
+        MemoryReducerCaller::new(rows.clone(), Arc::new(clock.clone()))
+            .with_sender("test-user")
+            .with_registered_host(HOST, "test-user")
+            .with_registered_host("another-host", "test-user"),
+    );
     let identity = Arc::new(SettledIdentity::default());
     identity.settle("test-user");
     let host_dir = tempfile::tempdir().unwrap();

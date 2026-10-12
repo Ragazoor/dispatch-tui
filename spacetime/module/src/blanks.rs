@@ -206,5 +206,6 @@ pub fn blank_dispatch_request() -> DispatchRequest {
         worktree: String::new(),
         tmux_window: String::new(),
         deadline: String::new(),
+        requested_by: String::new(),
     }
 }

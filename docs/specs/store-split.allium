@@ -213,6 +213,22 @@
 --             in-flight state and are not in any snapshot
 --             (spacetime-seed.allium: SharedTable); a restore loses request
 --             history, by decision.
+--           - D11, who may act for a host. A request makes its host's board
+--             run git, tmux and claude, so a client may name a host — as the
+--             requester, the claimer or a reporter — only when that host's
+--             registry row exists with an owner and the owner is the
+--             caller's own identity (caller(), the store's view of who sent
+--             the call). A host with no owner yet is refused. The module
+--             records the caller on the row as requested_by, and a host's
+--             board serves only rows requested_by its own owner, as a second
+--             line behind the module's check (dispatch.allium:
+--             ProvisionDispatch). The scheduled backstop is the module's own
+--             call and keeps its own check. LIMIT, by decision: one person's
+--             machines share an owner, so one of their machines can still
+--             name another of theirs; a teammate cannot. The older reducers
+--             that take a host argument (the backlog claim, poll ownership,
+--             the host registry's own write) do not check it yet; that gap
+--             is tracked separately.
 --           - Deferred, out of M4's scope: how long finished rows are kept,
 --             and whether a board sees other hosts' open requests.
 --       M5  Wrap-up and exit-session become request rows.
@@ -261,6 +277,10 @@ entity DispatchRequest {
     -- that asked for it (D2). Its board's subscription delivers the row
     -- (sync.allium: SubscribeToThisHostsDispatchRequests).
     host: core/Host
+    -- The identity of the client whose call wrote the request (D11),
+    -- written by the module from the call, never by the client. Always
+    -- host.owner when the request was written.
+    requested_by: core/UserIdentity
     mode: DispatchRequestMode
     origin: DispatchRequestOrigin
     state: DispatchRequestState
@@ -346,6 +366,8 @@ rule RequestDispatch {
     -- not otherwise: a manual move back to backlog during provisioning leaves
     -- the old request open, and a second one beside it would race it.
     requires: not DispatchRequests.any(r => r.task = task and r.is_open)
+    -- D11: only the requester's own owner may name it.
+    requires: requester.owner != null and requester.owner = caller()
 
     -- D3: the caller's mode when it names one, else today's derivation.
     let chosen_mode =
@@ -367,6 +389,7 @@ rule RequestDispatch {
         task: task,
         kind: dispatch,
         host: requester,
+        requested_by: caller(),
         mode: chosen_mode,
         origin: origin,
         state: requested,
@@ -398,6 +421,8 @@ rule HostClaimsDispatch {
 
     requires: request.host = core/local_host()
     requires: request.state = requested
+    -- D11: the claim names this host, so only its owner may send it.
+    requires: request.host.owner != null and request.host.owner = caller()
 
     ensures: request.state = provisioning
     ensures: request.claimed_at = now
@@ -422,6 +447,8 @@ rule HostReportsDispatched {
 
     requires: reporter = request.host
     requires: request.state = provisioning
+    -- D11.
+    requires: reporter.owner != null and reporter.owner = caller()
 
     ensures: request.state = dispatched
     ensures: request.finished_at = now
@@ -454,6 +481,8 @@ rule HostReportsDispatchFailed {
 
     requires: reporter = request.host
     requires: request.state = provisioning
+    -- D11.
+    requires: reporter.owner != null and reporter.owner = caller()
 
     ensures: request.state = failed
     ensures: request.finished_at = now
@@ -498,6 +527,9 @@ rule DispatchRequestTimesOut {
 
 rule HostRestartFailsInterrupted {
     when: StoreReachedAtStartup(_)
+
+    -- D11: the sweep names this host, so only its owner may run it.
+    requires: core/local_host().owner != null and core/local_host().owner = caller()
 
     for request in DispatchRequests where host = core/local_host() and state = provisioning:
         ensures: DispatchProvisioningFailed(

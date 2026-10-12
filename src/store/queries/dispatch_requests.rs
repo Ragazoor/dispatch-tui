@@ -44,6 +44,10 @@ impl DispatchRequestRead for Store {
     fn dispatch_request_changes(&self) -> tokio::sync::watch::Receiver<u64> {
         self.rows.changed()
     }
+
+    async fn own_identity(&self) -> Option<String> {
+        self.identity.user().await.ok().flatten()
+    }
 }
 
 #[async_trait::async_trait]

@@ -17,6 +17,12 @@ use super::super::writes::ReducerOutcome;
 use super::{MemoryReducerCaller, Tables};
 
 impl MemoryReducerCaller {
+    /// Mirrors the module's `require_acting_for` (D11): only `host`'s
+    /// registered owner — this caller's sender — may act for it.
+    fn acting_for(&self, tables: &Tables, host: &str) -> Result<(), String> {
+        module::validate_host_acting_for(tables.hosts.get(host), host, &self.sender)
+    }
+
     fn write_dispatch_request(&self, tables: &mut Tables, mut row: module::DispatchRequest) -> i64 {
         let id = Self::assign_id(row.id, &mut tables.next_dispatch_request_id);
         row.id = id;
@@ -91,10 +97,13 @@ impl MemoryReducerCaller {
                 "a dispatch request must name the requesting host".into(),
             ));
         }
+        let mut tables = self.lock();
+        if let Err(why) = self.acting_for(&tables, &requester) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         if let Err(why) = module::validate_dispatch_origin(&origin) {
             return Ok(ReducerOutcome::Refused(why));
         }
-        let mut tables = self.lock();
         let Some(row) = tables.tasks.get(&task.0).cloned() else {
             return Ok(ReducerOutcome::Refused(format!(
                 "task {} no longer exists",
@@ -120,7 +129,10 @@ impl MemoryReducerCaller {
         }
         let id = self.write_dispatch_request(
             &mut tables,
-            module::new_dispatch_request(task.0, &requester, mode, &origin, &stamp),
+            module::DispatchRequest {
+                requested_by: self.sender.clone(),
+                ..module::new_dispatch_request(task.0, &requester, mode, &origin, &stamp)
+            },
         );
         Ok(ReducerOutcome::Applied(vec![id]))
     }
@@ -138,6 +150,9 @@ impl MemoryReducerCaller {
             )));
         };
         if let Err(why) = module::validate_dispatch_request_claim(&row, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        if let Err(why) = self.acting_for(&tables, &host) {
             return Ok(ReducerOutcome::Refused(why));
         }
         let now = self.now();
@@ -160,6 +175,9 @@ impl MemoryReducerCaller {
             )));
         };
         if let Err(why) = module::validate_dispatch_report(&row, &reporter) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        if let Err(why) = self.acting_for(&tables, &reporter) {
             return Ok(ReducerOutcome::Refused(why));
         }
         if worktree.is_empty() {
@@ -201,6 +219,9 @@ impl MemoryReducerCaller {
         if let Err(why) = module::validate_dispatch_report(&row, &reporter) {
             return Ok(ReducerOutcome::Refused(why));
         }
+        if let Err(why) = self.acting_for(&tables, &reporter) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         match self.fail_dispatch_request(&mut tables, row, &reason) {
             Ok(()) => Ok(ReducerOutcome::Applied(vec![])),
             Err(why) => Ok(ReducerOutcome::Refused(why)),
@@ -212,6 +233,9 @@ impl MemoryReducerCaller {
         host: String,
     ) -> Result<ReducerOutcome> {
         let mut tables = self.lock();
+        if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let rows: Vec<module::DispatchRequest> = tables
             .dispatch_requests
             .values()

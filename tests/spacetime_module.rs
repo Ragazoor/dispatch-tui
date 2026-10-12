@@ -3797,8 +3797,24 @@ fn a_board_connecting_to_an_upgraded_store_passes_the_version_gate() {
 // to go away when the request finishes; what it does when it fires is the
 // module unit test `the_backstop_fails_an_open_row_as_timed_out`.
 
-/// One backlog task per `(id, tag, plan_path, host)`, all in epic 1.
+/// Register `host` in the host registry with `owner` (`""` for none).
+fn register_host(instance: &Instance, host: &str, owner: &str) {
+    let registered = instance.call("register_host", &[host, "", owner]);
+    assert!(registered.status.success(), "{}", describe(&registered));
+}
+
+/// `host-a` and `host-b`, both owned by the identity this instance calls as,
+/// so the calls below may act for either (`store-split.allium`, D11).
+fn register_own_hosts(instance: &Instance) {
+    let me = instance.identity();
+    register_host(instance, "host-a", &me);
+    register_host(instance, "host-b", &me);
+}
+
+/// One backlog task per `(id, tag, plan_path, host)`, all in epic 1, with
+/// `host-a` and `host-b` registered to this instance's own identity.
 fn seed_dispatchable(instance: &Instance, tasks: &[(i64, &str, &str, &str)]) {
+    register_own_hosts(instance);
     let seeded = instance.call(
         "seed_epics",
         &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
@@ -4400,6 +4416,7 @@ fn a_feed_ingest_that_deletes_a_stale_task_fails_its_open_request() {
         return;
     }
     let instance = published_instance();
+    register_own_hosts(&instance);
     let mut epic = epic_json(1, "Feed", "backlog", 0);
     epic["feed_command"] = serde_json::json!("echo []");
     let seeded = instance.call("seed_epics", &[&serde_json::json!([epic]).to_string()]);
@@ -4451,6 +4468,7 @@ fn a_feed_ingest_that_deletes_a_stale_task_fails_its_open_request() {
 /// [`seed_dispatchable`]'s one task, under an epic left `done` by a rollup
 /// that never ran.
 fn seed_under_a_stale_done_epic(instance: &Instance) {
+    register_own_hosts(instance);
     let seeded = instance.call(
         "seed_epics",
         &[&serde_json::json!([epic_json(1, "E", "done", 0)]).to_string()],
@@ -4532,4 +4550,136 @@ fn a_dispatched_report_rolls_up_the_subtasks_epic() {
         column(&instance, "SELECT status FROM epics WHERE id = 1"),
         "backlog"
     );
+}
+
+// -- D11: only a host's owner may act for it ------------------------------------
+//
+// `store-split.allium`, D11: request_dispatch, claim_dispatch_request, both
+// reports and the restart sweep refuse unless the host they name is
+// registered with an owner and that owner is the caller. Each refusal writes
+// nothing.
+
+/// A request records who made it, from the call.
+#[test]
+fn a_request_records_its_caller_as_requested_by() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    seed_dispatchable(&instance, &[(1, "", "", "")]);
+
+    let requested = request_dispatch(&instance, 1, "host-a", "user", "");
+    assert!(requested.status.success(), "{}", describe(&requested));
+
+    assert_eq!(
+        request_column(&instance, "requested_by", 1),
+        instance.identity()
+    );
+}
+
+/// A request naming a host somebody else owns is refused, and writes nothing:
+/// no claim, no row.
+#[test]
+fn a_request_naming_another_persons_host_is_refused() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    seed_dispatchable(&instance, &[(1, "", "", "")]);
+    register_host(&instance, "their-host", "beef");
+
+    let refused = request_dispatch(&instance, 1, "their-host", "user", "");
+
+    assert!(!refused.status.success(), "{}", describe(&refused));
+    assert!(
+        describe(&refused).contains("their-host"),
+        "{}",
+        describe(&refused)
+    );
+    assert_eq!(request_count(&instance), "0");
+    assert_eq!(
+        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
+        "backlog"
+    );
+}
+
+/// A host with no owner yet, or none registered at all, cannot be named.
+#[test]
+fn a_request_naming_an_ownerless_or_unregistered_host_is_refused() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    seed_dispatchable(&instance, &[(1, "", "", "")]);
+    register_host(&instance, "fresh-host", "");
+
+    let ownerless = request_dispatch(&instance, 1, "fresh-host", "user", "");
+    assert!(!ownerless.status.success(), "{}", describe(&ownerless));
+    assert!(
+        describe(&ownerless).contains("no owner"),
+        "{}",
+        describe(&ownerless)
+    );
+
+    let unregistered = request_dispatch(&instance, 1, "nowhere", "user", "");
+    assert!(
+        !unregistered.status.success(),
+        "{}",
+        describe(&unregistered)
+    );
+    assert_eq!(request_count(&instance), "0");
+}
+
+/// The claim, both reports and the restart sweep name the host too, so each
+/// is refused once the host's owner is no longer the caller.
+#[test]
+fn claims_reports_and_the_sweep_are_refused_for_another_persons_host() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    seed_dispatchable(&instance, &[(1, "", "", ""), (2, "", "", "")]);
+    request_dispatch(&instance, 1, "host-a", "user", "");
+    request_dispatch(&instance, 2, "host-a", "user", "");
+    let requested = request_column(&instance, "id", 1);
+    let provisioning = request_column(&instance, "id", 2);
+    let claimed = instance.call("claim_dispatch_request", &[&provisioning, "host-a"]);
+    assert!(claimed.status.success(), "{}", describe(&claimed));
+
+    // host-a now belongs to somebody else.
+    register_host(&instance, "host-a", "beef");
+
+    let claim = instance.call("claim_dispatch_request", &[&requested, "host-a"]);
+    assert!(!claim.status.success(), "{}", describe(&claim));
+    let dispatched = instance.call(
+        "report_dispatch_provisioned",
+        &[&provisioning, "host-a", "/wt/2-t", "task-2"],
+    );
+    assert!(!dispatched.status.success(), "{}", describe(&dispatched));
+    let failed = instance.call("report_dispatch_failed", &[&provisioning, "host-a", "x"]);
+    assert!(!failed.status.success(), "{}", describe(&failed));
+    let swept = instance.call("fail_interrupted_dispatch_requests", &["host-a"]);
+    assert!(!swept.status.success(), "{}", describe(&swept));
+
+    assert_eq!(request_column(&instance, "state", 1), "requested");
+    assert_eq!(request_column(&instance, "state", 2), "provisioning");
+}
+
+/// ...and an ownerless host's rows cannot be acted on either.
+#[test]
+fn claims_reports_and_the_sweep_are_refused_for_an_ownerless_host() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    seed_dispatchable(&instance, &[(1, "", "", "")]);
+    request_dispatch(&instance, 1, "host-a", "user", "");
+    let id = request_column(&instance, "id", 1);
+    register_host(&instance, "host-a", "");
+
+    let claim = instance.call("claim_dispatch_request", &[&id, "host-a"]);
+    assert!(!claim.status.success(), "{}", describe(&claim));
+    let swept = instance.call("fail_interrupted_dispatch_requests", &["host-a"]);
+    assert!(!swept.status.success(), "{}", describe(&swept));
+    assert_eq!(request_column(&instance, "state", 1), "requested");
 }

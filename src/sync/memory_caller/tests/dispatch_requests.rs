@@ -20,6 +20,20 @@ use crate::models::{
 
 const HOST: &str = "host-a";
 const OTHER_HOST: &str = "host-b";
+/// The identity this double's calls are sent as, and the owner of both hosts
+/// above, so its calls may act for either (`store-split.allium`, D11).
+const ME: &str = "c0ffee";
+
+/// The shared fixture, with both hosts registered to [`ME`] and the calls
+/// sent as [`ME`].
+fn caller() -> (MemoryReducerCaller, Arc<SharedRows>) {
+    let (caller, rows) = super::caller();
+    let caller = caller
+        .with_sender(ME)
+        .with_registered_host(HOST, ME)
+        .with_registered_host(OTHER_HOST, ME);
+    (caller, rows)
+}
 
 /// The request id an applied `request_dispatch` reads back.
 fn request_id(outcome: ReducerOutcome) -> DispatchRequestId {
@@ -529,4 +543,77 @@ async fn request_rows_are_pushed_into_shared_rows_for_the_board() {
     let all = rows.dispatch_requests();
     assert_eq!(all.len(), 1);
     assert_eq!(all[0].mode, DispatchMode::Research);
+}
+
+// -- D11: only a host's owner may act for it ------------------------------------
+
+/// A request records who made it.
+#[tokio::test]
+async fn a_request_records_its_caller_as_requested_by() {
+    let (caller, rows) = caller();
+    let task = caller.create_task(blank_task()).await.unwrap();
+
+    let id = request_id(request(&caller, task, HOST, "user", "dispatch").await);
+
+    assert_eq!(rows.dispatch_request(id).unwrap().requested_by, ME);
+}
+
+/// Naming a host somebody else owns, an ownerless host or an unregistered one
+/// is refused, and writes nothing.
+#[tokio::test]
+async fn a_request_for_a_host_the_caller_does_not_own_is_refused() {
+    let (caller, rows) = caller();
+    let caller = caller
+        .with_registered_host("their-host", "beef")
+        .with_registered_host("fresh-host", "");
+    let task = caller.create_task(blank_task()).await.unwrap();
+
+    for host in ["their-host", "fresh-host", "nowhere"] {
+        match request(&caller, task, host, "user", "dispatch").await {
+            ReducerOutcome::Refused(why) => assert!(why.contains(host), "{why}"),
+            other => panic!("{host} must be refused, got {other:?}"),
+        }
+    }
+    assert!(rows.dispatch_requests().is_empty());
+    assert_eq!(rows.task(task).unwrap().status, TaskStatus::Backlog);
+}
+
+/// The claim, both reports and the sweep are refused once the host belongs to
+/// somebody else.
+#[tokio::test]
+async fn claims_reports_and_the_sweep_are_refused_for_a_host_the_caller_does_not_own() {
+    let (caller, rows) = caller();
+    let (_task, provisioning) = provisioning_request(&caller).await;
+    let waiting_task = caller.create_task(blank_task()).await.unwrap();
+    let waiting = request_id(request(&caller, waiting_task, HOST, "user", "dispatch").await);
+    let caller = caller.with_registered_host(HOST, "beef");
+
+    assert!(!caller
+        .claim_dispatch_request(waiting, HOST.into())
+        .await
+        .unwrap()
+        .won());
+    assert!(!caller
+        .report_dispatch_provisioned(provisioning, HOST.into(), "/w".into(), "task-1".into())
+        .await
+        .unwrap()
+        .won());
+    assert!(!caller
+        .report_dispatch_failed(provisioning, HOST.into(), "x".into())
+        .await
+        .unwrap()
+        .won());
+    assert!(!caller
+        .fail_interrupted_dispatch_requests(HOST.into())
+        .await
+        .unwrap()
+        .won());
+    assert_eq!(
+        rows.dispatch_request(waiting).unwrap().state,
+        DispatchRequestState::Requested
+    );
+    assert_eq!(
+        rows.dispatch_request(provisioning).unwrap().state,
+        DispatchRequestState::Provisioning
+    );
 }

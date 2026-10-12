@@ -245,6 +245,25 @@ impl Instance {
         )
     }
 
+    /// The identity [`Self::call`] sends reducer calls as, in the hex spelling
+    /// the module stamps (`ctx.sender().to_hex()`) — what a `Host.owner` must
+    /// hold for this instance's calls to act for that host
+    /// (`store-split.allium`, D11). Read off `spacetime login show`, which
+    /// names the CLI's current identity; valid once anything has been
+    /// published or called, since that is when the CLI logs in.
+    pub fn identity(&self) -> String {
+        let shown = run(None, &[&self.config_arg(), "login", "show"]);
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&shown.stdout),
+            String::from_utf8_lossy(&shown.stderr)
+        );
+        text.split(|c: char| !c.is_ascii_hexdigit())
+            .find(|word| word.len() == 64)
+            .unwrap_or_else(|| panic!("no identity in `spacetime login show`: {text}"))
+            .to_lowercase()
+    }
+
     pub fn call(&self, reducer: &str, args: &[&str]) -> std::process::Output {
         let mut argv = vec![
             self.config_arg(),

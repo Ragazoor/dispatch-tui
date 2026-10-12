@@ -35,6 +35,7 @@ fn row(id: i64, task: i64, state: DispatchRequestState) -> DispatchRequest {
         id: DispatchRequestId(id),
         task_id: TaskId(task),
         host: HOST.to_string(),
+        requested_by: "owner".to_string(),
         mode: DispatchMode::Dispatch,
         origin: DispatchOrigin::User,
         state,

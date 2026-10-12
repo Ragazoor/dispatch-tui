@@ -36,6 +36,7 @@ fn requested_row(id: i64) -> bindings::DispatchRequest {
         worktree: String::new(),
         tmux_window: String::new(),
         deadline: "2026-10-11 12:01:00.000".into(),
+        requested_by: "c0ffee".into(),
     }
 }
 
@@ -53,6 +54,10 @@ fn a_requested_row_decodes_with_its_sentinels_absent() {
     assert_eq!(row.id, DispatchRequestId(3));
     assert_eq!(row.task_id, TaskId(7));
     assert_eq!(row.host, "host-a");
+    assert_eq!(
+        row.requested_by, "c0ffee",
+        "D11: who asked, as the module stamped it"
+    );
     assert_eq!(row.mode, DispatchMode::Research);
     assert_eq!(row.origin, DispatchOrigin::EpicChain);
     assert_eq!(row.state, DispatchRequestState::Requested);

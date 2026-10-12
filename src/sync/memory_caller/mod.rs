@@ -190,6 +190,21 @@ impl MemoryReducerCaller {
         self
     }
 
+    /// Register `id` in the host registry, owned by `owner` — a fixture's
+    /// way to give a host the owner the D11 checks compare its calls
+    /// against (`store-split.allium`). Pair it with [`Self::with_sender`].
+    pub fn with_registered_host(self, id: impl Into<String>, owner: impl Into<String>) -> Self {
+        let id = id.into();
+        let row = module::Host {
+            id: id.clone(),
+            label: String::new(),
+            owner: owner.into(),
+        };
+        self.lock().hosts.insert(id, row.clone());
+        self.rows.upsert_host(&row.into());
+        self
+    }
+
     fn now(&self) -> String {
         stamp(self.clock.now())
     }

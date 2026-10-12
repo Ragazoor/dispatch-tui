@@ -492,6 +492,7 @@ pub fn dispatch_request(row: &bindings::DispatchRequest) -> Decoded<DispatchRequ
         id: DispatchRequestId(row.id),
         task_id: TaskId(row.task_id),
         host: row.host.clone(),
+        requested_by: row.requested_by.clone(),
         mode,
         origin,
         state,

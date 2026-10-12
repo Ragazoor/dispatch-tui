@@ -85,6 +85,7 @@ async fn dispatching_status_visible_across_lifecycle_failure() {
         id: DispatchRequestId(1),
         task_id: TaskId(8),
         host: "this-host".into(),
+        requested_by: "me".into(),
         mode: DispatchMode::Dispatch,
         origin: DispatchOrigin::User,
         state,

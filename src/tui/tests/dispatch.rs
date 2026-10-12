@@ -2236,6 +2236,7 @@ fn request_row(
         id: crate::models::DispatchRequestId(id),
         task_id: TaskId(task),
         host: "this-machine".to_string(),
+        requested_by: "owner".to_string(),
         mode: DispatchMode::Dispatch,
         origin: crate::models::DispatchOrigin::User,
         state,

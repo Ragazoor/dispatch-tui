@@ -58,6 +58,12 @@ pub struct DispatchRequest {
     /// when the row is written and stored so the HOST reads the deadline it
     /// enforces off the row rather than from a copy of the config (D4).
     pub deadline: String,
+    /// The identity whose call wrote the request (D11), stamped by the module
+    /// from `ctx.sender()`, never sent by the client. A host's board serves
+    /// only rows its own owner requested. Appended last, with a default, so
+    /// the table migrates in place.
+    #[default("")]
+    pub requested_by: String,
 }
 
 /// The backstop timer: one scheduled row per open request
@@ -223,6 +229,35 @@ pub fn apply_dispatch_claim(task: Task, now: &str) -> Task {
     }
 }
 
+/// D11: whether `caller` may act for `host_id` — name it as a request's
+/// requester, claim its rows, report on them, sweep them. Only the host's
+/// registered owner may; a host with no owner yet, or none registered, is
+/// refused for everyone. The scheduled backstop is the module's own call and
+/// does not come through here.
+pub fn validate_host_acting_for(
+    host: Option<&Host>,
+    host_id: &str,
+    caller: &str,
+) -> Result<(), String> {
+    let Some(host) = host else {
+        return Err(format!(
+            "host {host_id} is not registered, so no one may act for it"
+        ));
+    };
+    if host.owner.is_empty() {
+        return Err(format!(
+            "host {host_id} has no owner yet, so no one may act for it"
+        ));
+    }
+    if host.owner != caller {
+        return Err(format!(
+            "host {host_id} belongs to {}, so {caller} may not act for it",
+            host.owner
+        ));
+    }
+    Ok(())
+}
+
 /// `HostClaimsDispatch`'s `requires`.
 pub fn validate_dispatch_request_claim(row: &DispatchRequest, host: &str) -> Result<(), String> {
     let id = row.id;
@@ -331,6 +366,17 @@ pub fn interrupted_dispatch_requests(rows: &[DispatchRequest], host: &str) -> Ve
 
 // -- Store helpers ------------------------------------------------------------
 
+/// The calling client's identity, in the spelling `Host.owner` holds.
+fn caller(ctx: &ReducerContext) -> String {
+    ctx.sender().to_hex().to_string()
+}
+
+/// [`validate_host_acting_for`] against the registry.
+fn require_acting_for(ctx: &ReducerContext, host_id: &str) -> Result<(), String> {
+    let host = ctx.db.hosts().id().find(&host_id.to_string());
+    validate_host_acting_for(host.as_ref(), host_id, &caller(ctx))
+}
+
 fn find_request(ctx: &ReducerContext, request_id: i64) -> Result<DispatchRequest, String> {
     ctx.db
         .dispatch_requests()
@@ -432,6 +478,7 @@ pub fn request_dispatch(
     if requester.is_empty() {
         return Err("a dispatch request must name the requesting host".into());
     }
+    require_acting_for(ctx, &requester)?;
     validate_dispatch_origin(&origin)?;
     let Some(task) = ctx.db.tasks().id().find(task_id) else {
         return Err(format!("task {task_id} no longer exists"));
@@ -449,9 +496,10 @@ pub fn request_dispatch(
     delete_all_subagents(ctx, task_id);
     write_task(ctx, apply_dispatch_claim(task, &stamp))?;
 
-    let row = ctx.db.dispatch_requests().insert(new_dispatch_request(
-        task_id, &requester, mode, &origin, &stamp,
-    ));
+    let row = ctx.db.dispatch_requests().insert(DispatchRequest {
+        requested_by: caller(ctx),
+        ..new_dispatch_request(task_id, &requester, mode, &origin, &stamp)
+    });
     let due = dispatch_request_backstop_due_micros(ctx.timestamp.to_micros_since_unix_epoch());
     ctx.db
         .dispatch_request_timeouts()
@@ -473,6 +521,7 @@ pub fn claim_dispatch_request(
 ) -> Result<(), String> {
     let row = find_request(ctx, request_id)?;
     validate_dispatch_request_claim(&row, &host)?;
+    require_acting_for(ctx, &host)?;
     ctx.db
         .dispatch_requests()
         .id()
@@ -492,6 +541,7 @@ pub fn report_dispatch_provisioned(
 ) -> Result<(), String> {
     let row = find_request(ctx, request_id)?;
     validate_dispatch_report(&row, &reporter)?;
+    require_acting_for(ctx, &reporter)?;
     if worktree.is_empty() {
         return Err(format!(
             "dispatch request {request_id}: a dispatched report must name the worktree"
@@ -521,6 +571,7 @@ pub fn report_dispatch_failed(
 ) -> Result<(), String> {
     let row = find_request(ctx, request_id)?;
     validate_dispatch_report(&row, &reporter)?;
+    require_acting_for(ctx, &reporter)?;
     fail_dispatch_request(ctx, row, &reason)
 }
 
@@ -531,6 +582,7 @@ pub fn fail_interrupted_dispatch_requests(
     ctx: &ReducerContext,
     host: String,
 ) -> Result<(), String> {
+    require_acting_for(ctx, &host)?;
     let rows: Vec<DispatchRequest> = ctx.db.dispatch_requests().host().filter(&host).collect();
     for id in interrupted_dispatch_requests(&rows, &host) {
         let row = find_request(ctx, id)?;

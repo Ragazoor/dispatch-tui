@@ -37,7 +37,14 @@ struct Rig {
 async fn rig(runner: Arc<dyn ProcessRunner>) -> Rig {
     let rows = Arc::new(SharedRows::new());
     let clock: Arc<dyn crate::clock::Clock> = Arc::new(crate::clock::SystemClock);
-    let caller = Arc::new(MemoryReducerCaller::new(rows.clone(), clock.clone()));
+    // Calls are sent as "test-user", who owns this host and the other one a
+    // test seeds a request for (`store-split.allium`, D11).
+    let caller = Arc::new(
+        MemoryReducerCaller::new(rows.clone(), clock.clone())
+            .with_sender("test-user")
+            .with_registered_host(crate::store::MEMORY_HOST_ID, "test-user")
+            .with_registered_host("other-host", "test-user"),
+    );
     let identity = Arc::new(SettledIdentity::default());
     identity.settle("test-user");
     let host_dir = tempfile::tempdir().unwrap();
@@ -329,6 +336,48 @@ async fn the_host_serves_its_own_requested_rows_and_ignores_others() {
     );
 }
 
+/// D11's second line (`dispatch.allium: ProvisionDispatch`): a row naming
+/// this host that its owner did not request is ignored — not claimed, not
+/// provisioned — whatever let it in.
+#[tokio::test]
+async fn the_host_ignores_a_row_its_owner_did_not_request() {
+    let runner = Arc::new(MockProcessRunner::new(vec![]));
+    let r = rig(runner.clone()).await;
+    r.rows
+        .upsert_dispatch_request(&crate::spacetime::bindings::DispatchRequest {
+            id: 99,
+            task_id: 1,
+            kind: "dispatch".into(),
+            host: crate::store::MEMORY_HOST_ID.into(),
+            mode: "dispatch".into(),
+            origin: "user".into(),
+            state: "requested".into(),
+            requested_at: "2026-10-11 12:00:00.000".into(),
+            claimed_at: String::new(),
+            finished_at: String::new(),
+            reason: String::new(),
+            worktree: String::new(),
+            tmux_window: String::new(),
+            deadline: "2099-01-01 00:00:00.000".into(),
+            requested_by: "beef".into(),
+        });
+
+    let served = r.rt.serve_dispatch_requests().await;
+
+    assert!(
+        served.is_empty(),
+        "a foreign requester's row must not be served"
+    );
+    assert!(runner.recorded_calls().is_empty());
+    assert_eq!(
+        r.db.dispatch_request(DispatchRequestId(99))
+            .await
+            .unwrap()
+            .state,
+        DispatchRequestState::Requested
+    );
+}
+
 /// `HostRestartFailsInterrupted` then D5 catch-up: at startup the board first
 /// fails the rows a previous board left `provisioning` ("host restarted",
 /// releasing their claims), then serves the rows still `requested`.
@@ -467,10 +516,13 @@ mod bootstrap {
         use crate::sync as sy;
         let rows = Arc::new(sy::SharedRows::new());
         let clock: Arc<dyn crate::clock::Clock> = Arc::new(crate::clock::SystemClock);
-        let caller = Arc::new(sy::memory_caller::MemoryReducerCaller::new(
-            rows.clone(),
-            clock.clone(),
-        ));
+        // The calls are sent as the identity the connector settles, which
+        // owns this host (`store-split.allium`, D11).
+        let caller = Arc::new(
+            sy::memory_caller::MemoryReducerCaller::new(rows.clone(), clock.clone())
+                .with_sender("c0ffee")
+                .with_registered_host(host, "c0ffee"),
+        );
         let task = ready(caller.create_task(stamped_task("Interrupted"))).unwrap();
         ready(caller.request_dispatch(task, host.into(), "epic_chain".into(), String::new()))
             .unwrap()

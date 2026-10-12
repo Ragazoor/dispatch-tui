@@ -66,6 +66,10 @@ pub struct DispatchRequest {
     pub task_id: TaskId,
     /// The machine that provisions it, which is always the one that asked.
     pub host: String,
+    /// The identity whose call wrote the request, stamped by the module
+    /// (`store-split.allium`, D11). A host's board serves only rows its own
+    /// owner requested.
+    pub requested_by: String,
     pub mode: DispatchMode,
     pub origin: DispatchOrigin,
     pub state: DispatchRequestState,

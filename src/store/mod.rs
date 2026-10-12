@@ -529,6 +529,11 @@ pub trait DispatchRequestRead: Send + Sync {
     /// never a poll. Subscribe before reading the row, then re-read on each
     /// wake.
     fn dispatch_request_changes(&self) -> tokio::sync::watch::Receiver<u64>;
+    /// The identity this connection writes as — what the store stamps as
+    /// `requested_by` on this board's own requests, and so the only
+    /// requester whose rows this host serves (`store-split.allium`, D11).
+    /// `None` before an identity has settled.
+    async fn own_identity(&self) -> Option<String>;
 }
 
 /// The dispatch request reducers (`store-split.allium`: `RequestDispatch` and
@@ -1323,6 +1328,11 @@ pub struct Store {
 #[cfg(any(test, feature = "test-support"))]
 pub const MEMORY_HOST_ID: &str = "test-host";
 
+/// The user identity an in-memory handle writes as, and the owner its host is
+/// registered to (`store-split.allium`, D11).
+#[cfg(any(test, feature = "test-support"))]
+pub const MEMORY_USER_ID: &str = "test-user";
+
 impl Store {
     /// A handle over `rows`, writing through `caller`, with this install's
     /// identity in `<data_dir>/host.json`.
@@ -1389,10 +1399,12 @@ impl Store {
         let rows = Arc::new(s::SharedRows::new());
         let clock: Arc<dyn crate::clock::Clock> = Arc::new(crate::clock::SystemClock);
         let caller: Arc<dyn s::ReducerCaller> = Arc::new(
-            s::memory_caller::MemoryReducerCaller::new(rows.clone(), clock.clone()),
+            s::memory_caller::MemoryReducerCaller::new(rows.clone(), clock.clone())
+                .with_sender(MEMORY_USER_ID)
+                .with_registered_host(MEMORY_HOST_ID, MEMORY_USER_ID),
         );
         let identity = Arc::new(s::SettledIdentity::default());
-        identity.settle("test-user");
+        identity.settle(MEMORY_USER_ID);
         Self::new(
             rows,
             caller,

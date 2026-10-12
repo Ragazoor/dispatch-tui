@@ -1084,4 +1084,45 @@ mod dispatch_requests {
     fn the_rules_version_is_three_for_m4() {
         assert_eq!(RULES_VERSION, 3);
     }
+
+    // -- D11: who may act for a host --------------------------------------
+
+    fn host(owner: &str) -> Host {
+        Host {
+            id: HOST_A.into(),
+            label: String::new(),
+            owner: owner.into(),
+        }
+    }
+
+    /// The host's own owner may name it.
+    #[test]
+    fn the_hosts_owner_may_act_for_it() {
+        assert_eq!(
+            validate_host_acting_for(Some(&host("c0ffee")), HOST_A, "c0ffee"),
+            Ok(())
+        );
+    }
+
+    /// Another identity may not, and the refusal says whose host it is.
+    #[test]
+    fn another_identity_may_not_act_for_a_host() {
+        let why = validate_host_acting_for(Some(&host("c0ffee")), HOST_A, "beef").unwrap_err();
+        assert!(why.contains(HOST_A) && why.contains("beef"), "{why}");
+    }
+
+    /// A host with no owner yet is refused for everyone: there is no one it
+    /// is known to belong to.
+    #[test]
+    fn nobody_may_act_for_an_ownerless_host() {
+        let why = validate_host_acting_for(Some(&host("")), HOST_A, "c0ffee").unwrap_err();
+        assert!(why.contains("no owner"), "{why}");
+    }
+
+    /// A host missing from the registry is refused.
+    #[test]
+    fn nobody_may_act_for_an_unregistered_host() {
+        let why = validate_host_acting_for(None, HOST_B, "c0ffee").unwrap_err();
+        assert!(why.contains(HOST_B) && why.contains("not registered"), "{why}");
+    }
 }

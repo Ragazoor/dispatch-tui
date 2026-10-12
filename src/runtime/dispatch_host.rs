@@ -29,6 +29,14 @@ impl DispatchHost {
     /// Serve every `requested` row naming this host that has not been served
     /// yet, each on its own task. The handles are for tests; production drops
     /// them.
+    ///
+    /// Only rows this host's own owner requested are served
+    /// (`dispatch.allium: ProvisionDispatch`, D11's second line behind the
+    /// module's check): a row naming this host but requested by anyone else
+    /// is ignored and logged, never provisioned. The owner is the identity
+    /// this board's own connection settled as — what the module stamps on
+    /// this board's requests — not the shared registry a client can write; a
+    /// board with no settled identity serves nothing.
     pub(super) async fn serve(&self) -> Vec<tokio::task::JoinHandle<()>> {
         let rows = self.database.dispatch_requests().await;
         let to_serve = self
@@ -36,8 +44,27 @@ impl DispatchHost {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .observe(&rows);
+        if to_serve.is_empty() {
+            return Vec::new();
+        }
+        let Some(owner) = self.database.own_identity().await else {
+            tracing::warn!("this board has no settled identity yet; serving no dispatch requests");
+            return Vec::new();
+        };
         to_serve
             .into_iter()
+            .filter(|row| {
+                let ours = row.requested_by == owner;
+                if !ours {
+                    tracing::warn!(
+                        request = row.id.0,
+                        task_id = row.task_id.0,
+                        requested_by = %row.requested_by,
+                        "ignoring a dispatch request this host's owner did not make"
+                    );
+                }
+                ours
+            })
             .map(|row| {
                 let host = self.clone();
                 tokio::spawn(async move { host.serve_one(row).await })

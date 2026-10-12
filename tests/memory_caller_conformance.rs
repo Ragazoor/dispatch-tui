@@ -2244,6 +2244,7 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
 struct RequestShape {
     task_id: TaskId,
     host: String,
+    requested_by: String,
     mode: dispatch_tui::models::DispatchMode,
     origin: dispatch_tui::models::DispatchOrigin,
     state: dispatch_tui::models::DispatchRequestState,
@@ -2258,6 +2259,7 @@ fn request_shape(r: &dispatch_tui::models::DispatchRequest) -> RequestShape {
     RequestShape {
         task_id: r.task_id,
         host: r.host.clone(),
+        requested_by: r.requested_by.clone(),
         mode: r.mode,
         origin: r.origin,
         state: r.state,
@@ -2372,6 +2374,33 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
                 r
             }
         };
+
+        // -- D11: both sides refuse a host the caller does not own ----------------
+        // host-a is this connection's own; their-host is somebody else's.
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .register_host("host-a".into(), String::new(), identity.clone())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+            caller
+                .register_host("their-host".into(), String::new(), "beef".into())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        let theirs = create(mine("")).await;
+        wait_for!(rows_real.task(theirs).is_some());
+        both_refuse(
+            real.request_dispatch(theirs, "their-host".into(), "user".into(), String::new())
+                .await
+                .unwrap(),
+            mem.request_dispatch(theirs, "their-host".into(), "user".into(), String::new())
+                .await
+                .unwrap(),
+        );
 
         // -- RequestDispatch: claim + row, derived mode --------------------------
         let research = create(mine("research")).await;

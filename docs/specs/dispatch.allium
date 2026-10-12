@@ -218,6 +218,11 @@ rule ProvisionDispatch {
     -- Only the board whose claim of the row was accepted gets here, and the
     -- row names its own host (store-split.allium: HostClaimsDispatch).
     requires: request.host = local_host()
+    -- D11's second line: the board serves only a request its own owner made.
+    -- The module already refuses a request naming a host the caller does not
+    -- own; a row that somehow carries another requester is ignored and
+    -- logged, never provisioned.
+    requires: request.requested_by = local_host().owner
 
     ensures:
         let worktree = core/Worktree.created(
