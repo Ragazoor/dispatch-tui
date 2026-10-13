@@ -853,6 +853,7 @@ rule ExitSession {
         -- There is no board-side close left. MarkTaskDoneViaMcp
         -- (mcp-task-tools.allium) — update_tasks' dedicated status="done"
         -- path — closed in the board until store-split M7, through
+        -- allow-phantom-symbol: removed in M7, history
         -- close_session and kill_session_window via a `perform_close` helper
         -- that exit_session shared before M5. Since M7 it closes in the
         -- module too (store-split.allium: RequestCloseTask, X1): the same

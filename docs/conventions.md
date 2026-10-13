@@ -150,8 +150,8 @@ most call sites (`TaskPatch::new().status(s)` needs no annotation) but it blocks
 way to share patch-building between two branches: a closure `|p: TaskPatch| -> TaskPatch`
 cannot name the higher-ranked lifetime and fails to compile with "lifetime may not live long
 enough". Either build one patch up front and add the branch-specific fields conditionally, or
-use a free function with an explicit `<'a>` — as `with_status_transition` in
-`src/service/tasks/crud.rs` does.
+use a free function with an explicit `<'a>` — as `build_task_patch` in
+`src/service/tasks/validators.rs` does.
 
 ### updated_field_names — same pattern, same reason
 
@@ -232,8 +232,8 @@ against every task in an epic's whole subtree — no subscription's `WHERE`
 clause can do either, so both run over the rows a standing subscription
 already holds (`SharedRows::usage_summary`, `SharedRows::retired_without_task`).
 `usage_events` has no spec: it is append-only telemetry with no
-user-observable rule beyond "recorded". `drop_closed_retired_feed_items` is a
-plain single-table write, a reducer call like any other.
+user-observable rule beyond "recorded". `ingest_feed` drops closed retired items
+itself; the per-step reducers it replaced are gone.
 <!-- allow-phantom-symbol: removed reducer, named here only as history -->
 (A `create_retired_feed_item` reducer once existed as a second, direct-call
 write path, but every real retirement goes through `delete_task`/`delete_epic`/
@@ -348,7 +348,7 @@ Tests seed fixtures via the `#[cfg(test)]` write accessors `McpState::db_write()
 
 Any code that changes a task's **status** or its **epic linkage** (`epic_id`) must recalculate the affected epic(s). An epic's status is derived from its subtasks' statuses, so a task change that doesn't trigger a recalc leaves the parent epic showing a stale rollup.
 
-The canonical implementation is in `TaskService` (`src/service/tasks/crud.rs` — `recalculate_epic` / `recalculate_epic_for_task`, which call `db.recalculate_epic_status(epic_id)`). Task mutations that go through the service layer get this for free; this is the main reason mutations should not bypass the service (see the mutation-boundary section above). When a task moves between epics, both the old and the new parent must be recalculated.
+Since store-split M7 the SpacetimeDB module does this itself: `patch_task`, `patch_epic`, `create_epic`, the hook-event reducers, `close_task` and every request reducer recalculate the affected epic chain in their own transaction, so the board calls nothing. A new module reducer that changes a task's status or epic linkage must recalculate in the same transaction, and when a task moves between epics both the old and the new parent.
 
 ## Allium: expressing "on leaving state X"
 
