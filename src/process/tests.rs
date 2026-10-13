@@ -264,6 +264,68 @@ fn real_run_with_timeout_missing_binary_returns_error() {
 // does the statusline decorator's chained command (`src/cli/statusline.rs`),
 // which is why the stdin-writing hazards below live here rather than there.
 
+/// Set by [`run_bounded_without_a_payload_never_hands_the_child_our_stdin`]
+/// when it re-runs this test binary to host the probe below.
+const STDIN_PROBE_ENV: &str = "DISPATCH_RUN_BOUNDED_STDIN_PROBE";
+
+/// The probe, run in a re-exec of this test binary whose stdin is a pipe.
+/// Prints what `run_bounded`'s child sees as its fd 0. A no-op in an ordinary
+/// test run.
+#[test]
+fn run_bounded_stdin_probe() {
+    if std::env::var_os(STDIN_PROBE_ENV).is_none() {
+        return;
+    }
+    let out = run_bounded(
+        "readlink",
+        &["/proc/self/fd/0"],
+        None,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    println!(
+        "CHILD_STDIN={}",
+        String::from_utf8_lossy(&out.stdout).trim()
+    );
+}
+
+/// A bounded child with no payload gets `/dev/null` as stdin, never the
+/// caller's. The board is the caller, so its stdin is the operator's terminal:
+/// a verify run that inherited it had a test block reading the tty and steal
+/// the board's keystrokes (mcp-task-tools.allium: WrapUpRefusesUnfinishedWork,
+/// step 2).
+///
+/// The probe runs in a re-exec of this binary with a *pipe* as stdin, so the
+/// assertion does not depend on what stdin `cargo test` itself was given — an
+/// inherited `/dev/null` would otherwise pass for the wrong reason.
+#[test]
+fn run_bounded_without_a_payload_never_hands_the_child_our_stdin() {
+    let exe = std::env::current_exe().unwrap();
+    let mut probe = std::process::Command::new(exe)
+        .args([
+            "--exact",
+            "process::tests::run_bounded_stdin_probe",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(STDIN_PROBE_ENV, "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    // Hold the write end open until the probe exits, so an inherited pipe
+    // would read as a pipe rather than as EOF.
+    let _stdin = probe.stdin.take();
+    let out = probe.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let seen = stdout
+        .lines()
+        .find_map(|l| l.split_once("CHILD_STDIN=").map(|(_, v)| v.trim()))
+        .unwrap_or_else(|| panic!("probe printed no CHILD_STDIN line: {stdout}"));
+    assert_eq!(seen, "/dev/null", "the child must not inherit our stdin");
+}
+
 #[test]
 fn run_bounded_writes_stdin_and_returns_stdout() {
     let out = run_bounded("cat", &[], Some("payload"), Duration::from_secs(5)).unwrap();

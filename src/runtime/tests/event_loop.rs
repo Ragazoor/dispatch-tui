@@ -83,15 +83,38 @@ async fn next_loop_event_drains_messages_in_order() {
 
     let mut seen = Vec::new();
     for _ in 0..2 {
-        match next_loop_event(&mut key_rx, &mut msg_rx, &mut mcp_rx, &mut tick).await {
-            LoopEvent::Message(Message::System(
+        match next_loop_event(&mut key_rx, &mut msg_rx, &mut mcp_rx, &mut tick, None).await {
+            Some(LoopEvent::Message(Message::System(
                 crate::tui::messages::SystemMessage::StatusInfo(s),
-            )) => seen.push(s),
+            ))) => seen.push(s),
             other => panic!("expected a StatusInfo message, got something else: {other:?}"),
         }
     }
 
     assert_eq!(seen, vec!["first".to_string(), "second".to_string()]);
+}
+
+/// A draw skipped because the frame interval had not elapsed must wake the
+/// loop when it has, even if no event arrives — otherwise the change waits
+/// for the 2 s tick.
+#[tokio::test]
+async fn next_loop_event_wakes_when_a_skipped_frame_becomes_due() {
+    let (_key_tx, mut key_rx) = mpsc::unbounded_channel::<KeyEvent>();
+    let (_msg_tx, mut msg_rx) = mpsc::unbounded_channel::<Message>();
+    let (_mcp_tx, mut mcp_rx) = mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
+    let mut tick = quiet_tick();
+
+    let wait = frame_wait(Duration::from_millis(4), true);
+    assert_eq!(wait, Some(MIN_FRAME_INTERVAL - Duration::from_millis(4)));
+    let event = next_loop_event(&mut key_rx, &mut msg_rx, &mut mcp_rx, &mut tick, wait).await;
+    assert!(event.is_none(), "the frame wake yields no event");
+}
+
+#[test]
+fn frame_wait_is_none_unless_a_draw_was_skipped() {
+    assert_eq!(frame_wait(Duration::from_millis(4), false), None);
+    assert_eq!(frame_wait(MIN_FRAME_INTERVAL, true), None);
+    assert!(frame_wait(Duration::ZERO, true).is_some());
 }
 
 /// A `Message` loop event is applied to the app and marks it dirty so the next

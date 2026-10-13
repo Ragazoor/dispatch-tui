@@ -2329,3 +2329,83 @@ async fn wrap_up_refusal_names_at_most_ten_paths() {
     );
     assert!(msg.contains("and 3 more"), "got: {msg}");
 }
+
+/// Answers every call with success, except the verify run (`sh`), which
+/// reports that it started and then blocks until the test releases it.
+struct GatedVerifyRunner {
+    started: std::sync::Mutex<std::sync::mpsc::Sender<()>>,
+    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    verify_runs: std::sync::atomic::AtomicUsize,
+}
+
+impl ProcessRunner for GatedVerifyRunner {
+    fn run(&self, program: &str, _args: &[&str]) -> anyhow::Result<std::process::Output> {
+        if program == "sh" {
+            self.verify_runs
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = self.started.lock().unwrap().send(());
+            let _ = self.release.lock().unwrap().recv();
+        }
+        MockProcessRunner::ok()
+    }
+}
+
+/// mcp-task-tools.allium: WrapUpRefusesUnfinishedWork, "One verify run per
+/// task at a time". A wrap_up retried while an earlier call's verify is still
+/// running is refused at once rather than stacking a second run; once the
+/// first run ends, the next call verifies afresh.
+#[tokio::test]
+async fn wrap_up_refuses_while_an_earlier_verify_for_the_task_is_still_running() {
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let runner = Arc::new(GatedVerifyRunner {
+        started: std::sync::Mutex::new(started_tx),
+        release: std::sync::Mutex::new(release_rx),
+        verify_runs: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let (state, db) = make_state_with_runner(runner.clone()).await;
+    let task_id = create_wrappable_task(&db).await;
+    db.save_repo_path("/repo").await.unwrap();
+    db.set_verify_command("/repo", Some("cargo test"))
+        .await
+        .unwrap();
+
+    let first = tokio::spawn({
+        let state = state.clone();
+        async move { wrap_up_call(&state, task_id, "done").await }
+    });
+    let started_rx = tokio::task::spawn_blocking(move || {
+        started_rx.recv().unwrap();
+        started_rx
+    })
+    .await
+    .unwrap();
+
+    let second = wrap_up_call(&state, task_id, "done").await;
+    assert!(is_error(&second), "the retry must be refused");
+    let msg = error_message(&second);
+    assert!(
+        msg.contains("still in progress"),
+        "the refusal must say a verify is running; got: {msg}"
+    );
+    assert_no_token(&state, task_id).await;
+    assert_eq!(
+        runner.verify_runs.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the retry must not start a second verify run"
+    );
+
+    release_tx.send(()).unwrap();
+    let first = first.await.unwrap();
+    assert!(!is_error(&first), "got: {}", error_message(&first));
+
+    // The first run has ended, so the next call verifies again.
+    release_tx.send(()).unwrap();
+    let _third = wrap_up_call(&state, task_id, "done").await;
+    drop(started_rx);
+    assert_eq!(
+        runner.verify_runs.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "a call after the first run ended must verify afresh"
+    );
+}

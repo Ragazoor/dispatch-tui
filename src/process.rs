@@ -195,8 +195,9 @@ fn abandon(child: &mut std::process::Child, program: &str, timeout: Duration) ->
 ///    when the write finishes. A child that never reads stdin merely gives that
 ///    thread an ignored `EPIPE`.
 ///
-/// With `stdin` absent the child's stdin is **inherited**, unchanged from what
-/// every git caller here has always had.
+/// With `stdin` absent the child's stdin is `/dev/null`, never inherited: the
+/// board's own stdin is the operator's terminal, and a child that reads it
+/// competes with the board for keystrokes (a verify run's test once did).
 pub(crate) fn run_bounded(
     program: &str,
     args: &[&str],
@@ -210,9 +211,14 @@ pub(crate) fn run_bounded(
         .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    if stdin.is_some() {
-        command.stdin(std::process::Stdio::piped());
-    }
+    // Never the caller's stdin: the board's is the operator's terminal, and a
+    // child that reads it (a test reaching an interactive prompt) blocks and
+    // takes keystrokes from the board.
+    command.stdin(if stdin.is_some() {
+        std::process::Stdio::piped()
+    } else {
+        std::process::Stdio::null()
+    });
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to spawn {program}"))?;
@@ -423,8 +429,8 @@ impl ProcessRunner for RealProcessRunner {
     }
 
     fn run_with_timeout(&self, program: &str, args: &[&str], timeout: Duration) -> Result<Output> {
-        // No stdin payload: git and tmux subprocesses keep the inherited stdin
-        // they have always had. See [`run_bounded`] for the hazards handled.
+        // No stdin payload: the child's stdin is /dev/null, not the board's
+        // terminal. See [`run_bounded`] for the hazards handled.
         run_bounded(program, args, None, timeout)
     }
 }

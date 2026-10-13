@@ -1392,6 +1392,27 @@ rule WrapUpViaMcp {
         --    commits, and calls wrap_up again. No verify command: this step is a
         --    no-op, exactly as before.
         --
+        --    The verify command runs with its standard input closed (/dev/null),
+        --    never the board's terminal. The board runs it, so an inherited
+        --    stdin is the board's own tty: anything in the verify run that
+        --    reads it (a test that reaches an interactive prompt) blocks until
+        --    the timeout and takes the operator's keystrokes from the board
+        --    while it waits. The same holds for every bounded child the board
+        --    spawns without a payload to write (git, tmux): none is ever handed
+        --    the board's terminal.
+        --
+        --    One verify run per task at a time. A wrap_up for a task whose
+        --    verify, started by an earlier wrap_up on this board, is still
+        --    running is refused at once ("A verify run for this task is still
+        --    in progress …"), before the commit check, with no token. The
+        --    earlier run carries on; its outcome is lost to the caller that
+        --    gave up on it, so the agent calls wrap_up again once it has
+        --    finished. The retry is not joined to the running verify: the
+        --    agent may have committed since that run started, and a result for
+        --    an older tree must not pass a newer one. Without this, each retry
+        --    of a timed-out call stacked another full verify run beside the
+        --    ones still going.
+        --
         -- Order: the commit check runs first (a dirty tree makes a verify result
         -- meaningless, and it is cheap), then verify, then the action. Applies
         -- to all three actions, so a pr or done wrap-up is verified too — the

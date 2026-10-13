@@ -39,6 +39,21 @@ fn output_tail(output: &std::process::Output) -> String {
     lines[lines.len().saturating_sub(VERIFY_TAIL_LINES)..].join("\n")
 }
 
+/// Marks a task's verify run as in flight; dropping it clears the mark.
+/// Moved into the blocking worker, so it outlives a caller that gave up.
+struct VerifyGuard {
+    set: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<crate::models::TaskId>>>,
+    id: crate::models::TaskId,
+}
+
+impl Drop for VerifyGuard {
+    fn drop(&mut self) {
+        if let Ok(mut set) = self.set.lock() {
+            set.remove(&self.id);
+        }
+    }
+}
+
 impl TaskService {
     /// Refuse a wrap-up whose worktree has uncommitted changes or whose repo's
     /// verify command does not pass — `WrapUpRefusesUnfinishedWork` in
@@ -53,10 +68,27 @@ impl TaskService {
                 "check_wrap_up_ready: task has no worktree"
             )));
         };
+        // One verify run per task: a retry of a timed-out call must not stack
+        // another run beside the one still going.
+        let guard = {
+            let mut set = self.verifying.lock().unwrap_or_else(|e| e.into_inner());
+            if !set.insert(task.id) {
+                return Err(ServiceError::Validation(
+                    "A verify run for this task is still in progress. Wait for it to finish, \
+                     then call wrap_up again."
+                        .to_string(),
+                ));
+            }
+            VerifyGuard {
+                set: self.verifying.clone(),
+                id: task.id,
+            }
+        };
         let verify = dispatch::fetch_verify_command(&*self.db, &task.repo_path).await;
         let runner = self.runner.clone();
 
         let joined = tokio::task::spawn_blocking(move || {
+            let _guard = guard;
             let status = crate::git::git_in(
                 &*runner,
                 &worktree,

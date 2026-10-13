@@ -40,13 +40,25 @@ pub(super) enum LoopEvent {
 /// Await the next event from any input source. The tick arm is always enabled,
 /// so this never resolves on an all-channels-closed condition — the loop exits
 /// via `App::should_quit`, not channel closure.
+///
+/// `frame_wait` is how long until a skipped draw may happen (see
+/// [`frame_wait`]). When it elapses first this returns `None`, so the loop
+/// draws instead of leaving a change off-screen until the next tick.
 pub(super) async fn next_loop_event(
     key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
     msg_rx: &mut mpsc::UnboundedReceiver<Message>,
     mcp_notify_rx: &mut mpsc::UnboundedReceiver<crate::board_event::BoardEvent>,
     tick_interval: &mut tokio::time::Interval,
-) -> LoopEvent {
-    tokio::select! {
+    frame_wait: Option<Duration>,
+) -> Option<LoopEvent> {
+    let frame_due = async {
+        match frame_wait {
+            Some(wait) => tokio::time::sleep(wait).await,
+            None => std::future::pending().await,
+        }
+    };
+    let event = tokio::select! {
+        _ = frame_due => return None,
         // Key events from the blocking poll thread.
         Some(key) = key_rx.recv() => LoopEvent::Key(key),
         // Async messages (e.g., from dispatch results).
@@ -55,7 +67,8 @@ pub(super) async fn next_loop_event(
         Some(event) = mcp_notify_rx.recv() => LoopEvent::Mcp(event),
         // Periodic tick for tmux capture and feed polling.
         _ = tick_interval.tick() => LoopEvent::Tick,
-    }
+    };
+    Some(event)
 }
 
 /// Apply one loop event to `app`, returning the commands it produced. Mirrors
@@ -160,7 +173,11 @@ pub(super) async fn run_loop<B: Backend>(
             break;
         }
 
-        let event = next_loop_event(key_rx, msg_rx, mcp_notify_rx, tick_interval).await;
+        let wait = frame_wait(last_render.elapsed(), app.dirty);
+        let Some(event) = next_loop_event(key_rx, msg_rx, mcp_notify_rx, tick_interval, wait).await
+        else {
+            continue;
+        };
         let commands = apply_loop_event(app, event, rt);
 
         execute_commands(app, commands, rt, terminal, key_rx).await?;
@@ -228,4 +245,13 @@ pub(super) async fn execute_commands<B: Backend>(
 /// single keypresses.
 pub(super) fn frame_ready(elapsed_since_render: Duration, dirty: bool) -> bool {
     dirty && elapsed_since_render >= MIN_FRAME_INTERVAL
+}
+
+/// How long until a draw skipped by [`frame_ready`] may happen: `Some` only when
+/// the app is dirty but the frame interval has not yet elapsed. Without waking
+/// for it, a change that lands inside the interval stays off-screen until the
+/// next event, which on an idle board is the 2 s tick.
+pub(super) fn frame_wait(elapsed_since_render: Duration, dirty: bool) -> Option<Duration> {
+    (dirty && elapsed_since_render < MIN_FRAME_INTERVAL)
+        .then(|| MIN_FRAME_INTERVAL - elapsed_since_render)
 }

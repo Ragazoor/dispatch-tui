@@ -741,8 +741,8 @@ mod work_packages;
 
 #[cfg(test)]
 use event_loop::{
-    apply_loop_event, execute_commands, frame_ready, next_loop_event, startup_commands, LoopEvent,
-    MIN_FRAME_INTERVAL,
+    apply_loop_event, execute_commands, frame_ready, frame_wait, next_loop_event, startup_commands,
+    LoopEvent, MIN_FRAME_INTERVAL,
 };
 use event_loop::{await_split_restores, run_loop};
 #[cfg(test)]
@@ -1148,7 +1148,9 @@ async fn claim_agent_port(port: u16) -> Result<tokio::net::TcpListener> {
 /// argument) only to discard both.
 async fn name_the_host(label: Option<String>, database: &store::Store) -> Result<()> {
     let resolved = if label.is_none() {
-        let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
+        // Tests never prompt: under `cargo test` in a terminal, stdin is the
+        // developer's tty, and a verify run once inherited it and hung.
+        let interactive = !cfg!(test) && std::io::IsTerminal::is_terminal(&std::io::stdin());
         tokio::task::spawn_blocking(move || {
             crate::startup::resolve_host_label_interactively(label, interactive)
         })
