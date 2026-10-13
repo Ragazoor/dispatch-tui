@@ -110,7 +110,7 @@ mcp_args! {
     #[serde(default)]
     optional tag: Option<TaskTag> = [set(tag, |t| Some(Some(t)))] {
         "type": "string",
-        "description": "Task tag: bug, feature, chore, pr-review, research, fix, or dependabot. Controls dispatch behavior.",
+        "description": "Task tag: bug, feature, chore, pr-review, research, fix, dependabot, or release-please. Controls dispatch behavior.",
         "enum": super::dispatch::task_tag_enum_values()
     };
 

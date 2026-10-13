@@ -379,8 +379,18 @@ at a time, so list every bot you want on the board. `fetch-dependabot.sh` runs
 one `gh pr list` pass per entry and falls back to `app/kognic-renovate` when the
 array is absent or empty.
 
+**Release bots go in `RELEASE_BOT_AUTHORS`, in the same file** (shipped empty;
+`app/kognic-gha-release-bot` is the documented example). `fetch-reviews.sh`'s
+bot-author pass queries both lists, and a PR authored by a release bot gets tag
+`release-please`, never derived from the `[bot]` suffix. The agent for that tag
+reads the changelog, checks live CI and approves and merges only on green CI;
+a major bump or breaking-change entry stops it for the user. A bot on both lists
+is a fatal configuration error in both readers (every overlap named on stderr,
+non-zero exit, nothing emitted); `fetch-dependabot.sh` reads
+`RELEASE_BOT_AUTHORS` for that check alone.
+
 **The app form is enforced, and a bad entry stops the script.** Both readers
-validate every `BOT_AUTHORS` entry against `^app/[A-Za-z0-9._-]+$` right after
+validate every `BOT_AUTHORS` entry (`fetch-reviews.sh` also `RELEASE_BOT_AUTHORS`) against `^app/[A-Za-z0-9._-]+$` right after
 sourcing `bots.conf`; anything else — `dependabot[bot]` is the natural wrong
 guess — names itself on stderr and exits non-zero, emitting nothing. It used to
 be misread silently, and the symptom was indistinguishable from "this bot has no

@@ -1533,3 +1533,54 @@ fn every_argument_carries_a_description() {
         }
     }
 }
+
+/// core.allium: release_please is a TaskTag (task 53281). Every tool that
+/// takes a `tag` advertises it, by wire string, in both the enum and the
+/// description, so a caller can set it.
+#[test]
+fn every_tag_argument_advertises_release_please() {
+    let defs = tool_definitions();
+    let mut seen = Vec::new();
+    for tool in defs["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        let tag = &tool["inputSchema"]["properties"]["tag"];
+        if tag.is_null() {
+            continue;
+        }
+        seen.push(name.to_string());
+        let values: Vec<&str> = tag["enum"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{name}.tag must carry an enum"))
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(
+            values.contains(&"release-please"),
+            "{name}.tag's enum must offer release-please, got: {values:?}"
+        );
+        let d = tag["description"].as_str().unwrap_or("");
+        assert!(
+            d.contains("release-please"),
+            "{name}.tag's description must name release-please, got: {d}"
+        );
+    }
+    for expected in ["create_task", "update_tasks"] {
+        assert!(
+            seen.iter().any(|n| n == expected),
+            "{expected} must take a tag argument, saw: {seen:?}"
+        );
+    }
+}
+
+/// ReviewTasksAreNotWrappedUp: the wrap_up description says in passing which
+/// tags are refused, and release-please is one of them.
+#[test]
+fn wrap_up_description_names_release_please_among_the_refused_tags() {
+    let desc = tool_description("wrap_up");
+    for tag in ["pr-review", "dependabot", "release-please"] {
+        assert!(
+            desc.contains(tag),
+            "wrap_up's description must name {tag} among the refused review tags, got: {desc}"
+        );
+    }
+}

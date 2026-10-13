@@ -664,7 +664,7 @@ pub(super) fn build_prompt(
     epic: Option<&EpicContext>,
     ctx: &PromptContext<'_>,
 ) -> String {
-    // Dependabot and PR-review tasks are review-only: they skip the plan /
+    // Dependabot, PR-review and release-please tasks are review-only: they skip the plan /
     // implementation flow and use a trimmed trailing block.
     let is_review = ctx.tag.is_some_and(|t| t.is_review());
     let is_cve = is_cve_task(ctx.tag, epic);
@@ -673,6 +673,9 @@ pub(super) fn build_prompt(
             dependabot_review_addendum(task_id, title, description, ctx.pr_url, ctx.from_feed)
         }
         (Some(TaskTag::PrReview), _) => pr_review_addendum().to_string(),
+        (Some(TaskTag::ReleasePlease), _) => {
+            release_please_addendum(task_id, ctx.pr_url, ctx.from_feed)
+        }
         // A CVE task names no design step: the runbook takes the addendum the
         // design step would have had, and only that one. `is_cve` is read from
         // the epic context because answering it needs the epic's ancestry.
@@ -811,7 +814,7 @@ fn cve_runbook() -> &'static str {
 /// relies on that is a guard resting on a property nothing checks.
 ///
 /// The three excluded tags are `NameTheDesignStep`'s own list, and deliberately
-/// the same list. `Dependabot` and `PrReview` review someone else's PR, which
+/// the same list. `Dependabot`, `PrReview` and `ReleasePlease` review someone else's PR, which
 /// is different work from remediating the alert. `Research` is normally
 /// diverted to `build_research_prompt` before any addendum is selected — but
 /// only while it has no plan, since `DispatchMode::for_task` routes ANY planned
@@ -906,6 +909,51 @@ update_tasks(task_ids=[{task_id_str}], url=<URL>, url_type=\"pr\") before going 
             ("AUTHOR", &author),
             ("DECISION", decision.trim_end()),
             ("MERGE", &merge),
+        ],
+    )
+}
+
+/// Release-PR runbook, from `prompts/release-please.md`. The PR is stated from
+/// the task's pr-typed url when it has one; otherwise the agent finds it.
+/// See `RenderReleasePrRunbook` in `docs/specs/dispatch-prompt.allium`.
+fn release_please_addendum(task_id: TaskId, pr_url: Option<&str>, from_feed: bool) -> String {
+    const AUTHOR: &str = include_str!("prompts/release-please/author.md");
+    const AUTHOR_CHECK: &str = include_str!("prompts/release-please/author-check.md");
+    let task_id_str = task_id.0.to_string();
+    // The runbook approves and merges, so a PR nothing vouched for must have
+    // its author checked. The "do not re-check" bullet is true only when a feed
+    // listed PRs by release-bot author AND the task names such a PR; either
+    // alone is not enough (`update_tasks` takes a url and the tag together, and
+    // other feeds set external_id too). Otherwise it is omitted and the author
+    // check step takes its place. Same gate as `dependabot_review_addendum`.
+    let (pr, author, author_check) = match pr_url {
+        Some(url) => {
+            let pr = format!(
+                "PR: {url}\n   Pass this URL to every `gh` command below — it identifies the \
+repo too, so none of them need `--repo`."
+            );
+            if from_feed {
+                (pr, format!("\n{}", AUTHOR.trim_end()), String::new())
+            } else {
+                (pr, String::new(), format!("{}\n", AUTHOR_CHECK.trim_end()))
+            }
+        }
+        None => (
+            format!(
+                "PR: not recorded on this task. Find its URL in the task description, then call \
+update_tasks(task_ids=[{task_id_str}], url=<URL>, url_type=\"pr\") before going on."
+            ),
+            String::new(),
+            format!("{}\n", AUTHOR_CHECK.trim_end()),
+        ),
+    };
+    render_template(
+        include_str!("prompts/release-please.md"),
+        &[
+            ("TASK_ID", &task_id_str),
+            ("PR", &pr),
+            ("AUTHOR", &author),
+            ("AUTHOR_CHECK", &author_check),
         ],
     )
 }

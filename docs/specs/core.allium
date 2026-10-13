@@ -68,7 +68,28 @@ external entity UserIdentity {
 -- Enumerations
 ------------------------------------------------------------
 
-enum TaskTag { bug | feature | chore | pr_review | research | fix | dependabot }
+-- TaskTag selects the dispatch prompt and marks review work. Each literal is
+-- stored and sent on the wire in kebab case (pr_review -> "pr-review",
+-- release_please -> "release-please") and rendered on the card by a short
+-- label: bug "bug", feature "feat", chore "chore", pr_review "pr-rev",
+-- research "research", fix "fix", dependabot "dep", release_please "rel".
+--
+-- THE REVIEW SET is {pr_review, dependabot, release_please} (the code's
+-- TaskTag::is_review).
+-- A review tag means the task reviews a PR someone else authored: it routes
+-- to a review runbook (dispatch-prompt.allium), bases its worktree on the
+-- PR's head branch (dispatch.allium), is never wrapped up
+-- (mcp-task-tools.allium: ReviewTasksAreNotWrappedUp), sorts a review
+-- decision into the by-me sections (board-layout.allium: section_of), and,
+-- on a feed item, must name a PR (feeds.allium:
+-- AReviewTaggedFeedItemNamesItsPr). Every reader of the set reads all of
+-- those meanings at once, so a tag joins it only when all of them are true.
+--
+-- release_please is a release PR opened by a configured release bot
+-- (feed-scripts.allium: "Release bots get their own tag"). Its agent reads
+-- the changelog, checks CI, merges only on a green CI and never authors the
+-- PR (dispatch-prompt.allium: RenderReleasePrRunbook).
+enum TaskTag { bug | feature | chore | pr_review | research | fix | dependabot | release_please }
 
 -- UrlType classifies the single URL attached to a Task (see TaskUrl).
 -- The type is stored explicitly rather than guessed from the URL string at
@@ -204,7 +225,7 @@ enum ColumnSection {
 --                             dominates any decision recorded without one.
 --
 --   changes_requested_by_me   sub_status = changes_requested and
---                             tag in {pr_review, dependabot}
+--                             tag in {pr_review, dependabot, release_please}
 --
 --                             Those tags mean the task reviews someone else's PR
 --                             rather than authoring one, so the changes were
@@ -212,7 +233,7 @@ enum ColumnSection {
 --                             other author.
 --
 --   approved_by_me            sub_status = approved and
---                             tag in {pr_review, dependabot}
+--                             tag in {pr_review, dependabot, release_please}
 --
 --                             The same tags, the same direction: the user
 --                             approved someone else's PR. Unlike an approval on

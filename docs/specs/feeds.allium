@@ -327,7 +327,8 @@ value FeedItem {
                               -- FeedRunner.
                               --
                               -- A REVIEW tag (core/TaskTag.is_review — today
-                              -- dependabot and pr_review) additionally
+                              -- dependabot, pr_review and release_please)
+                              -- additionally
                               -- REQUIRES `url` to name a pull request: see
                               -- AReviewTaggedFeedItemNamesItsPr in the
                               -- FeedItemParse block below. Nothing else

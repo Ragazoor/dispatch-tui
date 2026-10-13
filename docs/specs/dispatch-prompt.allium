@@ -2,9 +2,10 @@
 -- dispatch-prompt.allium
 --
 -- Scope: What text reaches a dispatched agent. The prompt skeleton every
---        launch fills in, the design step a no-plan prompt names, and the two
---        review runbooks — dependency bump and PR review — together with the
---        classifier that picks the one branch a bump runbook renders.
+--        launch fills in, the design step a no-plan prompt names, and the
+--        three review runbooks — dependency bump, PR review and release PR —
+--        together with the classifier that picks the one branch a bump
+--        runbook renders.
 -- Excludes: The claim, provisioning and the launch command that carries the
 --           prompt (see dispatch.allium: DispatchTask); the launch flags,
 --           permission mode and caller identity (see dispatch.allium:
@@ -459,11 +460,11 @@ rule NameTheDesignStep {
     when: AgentLaunched(task, mode)
 
     -- Only the two prompts that ask for a design step reach this rule.
-    -- build_research_prompt names none, and the two review runbooks below
+    -- build_research_prompt names none, and the three review runbooks below
     -- replace the addendum outright whatever the plan state.
     requires: mode in {standard, quick}
     requires: task.has_plan = false
-    requires: task.tag not in {research, dependabot, pr_review}
+    requires: task.tag not in {research, dependabot, pr_review, release_please}
 
     -- A CVE task names no design step either: RenderCveRunbook below claims
     -- the addendum, and its runbook rules the spec-first sequence out by name.
@@ -561,7 +562,8 @@ rule NameTheDesignStep {
         -- The branch reaches only the prompts that ask for a design step or
         -- emit the full trailing block: build_prompt and
         -- build_quick_dispatch_prompt. DispatchResearchTask and the
-        -- dependabot / pr_review addenda already emit a trimmed trailing
+        -- dependabot / pr_review / release_please addenda already emit a
+        -- trimmed trailing
         -- block with no {allium_instruction} and name no design step, so
         -- they are unaffected and need no branch.
         --
@@ -698,10 +700,10 @@ rule NameTheDesignStep {
         --     research-tagged task to build_research_prompt before
         --     build_prompt's addendum is ever selected (see
         --     dispatch.allium: DispatchResearchTask, whose own preconditions
-        --     claim that task first), and Dependabot/PrReview are
-        --     overridden with their own review addenda regardless of plan
-        --     state (see RenderDependencyBumpRunbook and
-        --     RenderPrReviewRunbook below).
+        --     claim that task first), and Dependabot/PrReview/ReleasePlease
+        --     are overridden with their own review addenda regardless of
+        --     plan state (see RenderDependencyBumpRunbook,
+        --     RenderPrReviewRunbook and RenderReleasePrRunbook below).
         --     This closes a gap where a bug/feature/chore-tagged agent read
         --     "write and attach a plan" plus the (then-universal) wrap-up
         --     wording as license to stop at a plan-only state instead of
@@ -714,8 +716,9 @@ rule RenderCveRunbook {
     when: AgentLaunched(task, mode)
 
     -- The same two prompts NameTheDesignStep serves, and deliberately the same
-    -- exclusion list. The two review tags carry their own runbook — a CVE-epic
-    -- task retagged pr_review or dependabot reviews someone else's PR, which is
+    -- exclusion list. The review tags carry their own runbook — a CVE-epic
+    -- task retagged pr_review, dependabot or release_please reviews someone
+    -- else's PR, which is
     -- different work from remediating the alert, so the review runbook wins.
     --
     -- research is named rather than left to the divert that usually handles it.
@@ -725,7 +728,7 @@ rule RenderCveRunbook {
     -- research task under the CVE root does reach this rule, and a research
     -- task is not remediating anything.
     requires: mode in {standard, quick}
-    requires: task.tag not in {research, dependabot, pr_review}
+    requires: task.tag not in {research, dependabot, pr_review, release_please}
 
     -- Structural, not textual: the task hangs under the managed CVE feed root
     -- (see under_cve_feed above).
@@ -798,7 +801,7 @@ rule RenderCveRunbook {
         -- one it was already dropped for want of a directory to name. That is
         -- why is_cve collapses holds_specs rather than multiplying by it.
         --
-        -- Unlike the two review runbooks, this one does NOT trim the trailing
+        -- Unlike the three review runbooks, this one does NOT trim the trailing
         -- block to {learning_tools_instruction} alone. A CVE task authors its
         -- own PR and finishes through /wrap-up, so {wrap_up_instruction} is
         -- owed to it; the review tags are the ones wrap_up refuses outright
@@ -814,9 +817,10 @@ rule RenderCveRunbook {
 -- already carries, the harness computes it and renders one branch.
 -- The agent is never handed a decision table and asked to walk it.
 
--- Neither runbook prohibits /wrap-up. Both used to open with the
--- prohibition, and their terminal branches used to repeat it — three
--- times in one and twice in the other. The repeats went first,
+-- No review runbook prohibits /wrap-up. The dependency-bump and PR-review
+-- runbooks both used to open with the prohibition, and their terminal
+-- branches used to repeat it — three times in one and twice in the other;
+-- the release-PR runbook was written after the refusal and never carried it. The repeats went first,
 -- replaced by positive statements of the end state that makes
 -- wrap-up unnecessary ("the task is auto-cleaned on merge", "stop
 -- and wait for the user's reply"), which the runbooks still carry.
@@ -1264,6 +1268,164 @@ rule RenderPrReviewRunbook {
         -- presents findings and waits for the user's instructions.
 }
 
-------------------------------------------------------------
--- Open Questions
-------------------------------------------------------------
+rule RenderReleasePrRunbook {
+    when: AgentLaunched(task, mode)
+
+    requires: task.tag = release_please
+
+    ensures: ReleasePrRunbookRendered(task: task)
+
+    @guarantee AReleasePrMergesOnlyOnGreenCi
+        -- Release PR. The task is a release PR a configured release bot opened
+        -- ("chore(master): release 8.21.10"; feed-scripts.allium: "Release
+        -- bots get their own tag"). The runbook has two steps and three
+        -- terminals, preceded on one variant by a precondition check
+        -- (TheAuthorIsCheckedUnlessAFeedFilteredIt below): where no PR feed
+        -- vetted the author, a step 0 confirms it before step 1, and a failed
+        -- check is another route into the existing stop-and-report terminal,
+        -- not a fourth terminal:
+        --
+        --   1. Read the changelog the PR carries (release-please writes it
+        --      into the PR body and the changelog file the PR edits) and
+        --      summarise what the release ships. If the release is a major
+        --      version bump or the changelog carries a breaking-change entry,
+        --      stop here (ABreakingReleaseIsNeverMerged below); CI is not
+        --      consulted.
+        --   2. Check the PR's CI.
+        --
+        --   - CI is green — the state the feed's "ci:pass" label names (the
+        --     head commit's check rollup succeeded): approve the PR and merge
+        --     it. The approval may cite the changelog summary. The task is
+        --     then auto-cleaned when its PR merges, like every feed-created
+        --     review task.
+        --   - CI failed, is still pending, or has no checks at all (the three
+        --     states the feed renders as "ci:fail", "ci:pending" and no label):
+        --     do NOT approve and do NOT merge. Stop and report to the user:
+        --     the CI state, the failing or pending checks where there are any,
+        --     and the changelog summary. Set sub_status = needs_input so the
+        --     card shows it is waiting on the user. Waiting for a pending run
+        --     to finish is not a route; the user decides.
+        --   - A breaking release: the third terminal, below.
+        --   - A merge the host refuses after the approval (branch protection,
+        --     a conflict): not a fourth route. The agent does not retry or
+        --     work around it and stops and reports as on the red-CI terminal;
+        --     the approval it already gave stands.
+        --
+        -- Green is the only CI state that merges. "No checks" is not green, for
+        -- the same reason the feed never collapses it into "ci:pass"
+        -- (feed-scripts.allium: "CI status label"): the one outcome that must
+        -- never be guessed is a green verdict on a PR nothing checked.
+        --
+        -- CI is the PR's LIVE state, read by the agent when it decides. The
+        -- "ci:pass" label on the card is neither required nor consulted: it was
+        -- computed at the feed's last poll and CI moves between the poll and
+        -- the dispatch — the reason the dependency runbook leaves its CI check
+        -- with the agent too
+        -- (OnlyStepsWhoseInputsTheTaskAlreadyCarriesMoveToTheHarness). A card
+        -- still showing "ci:pending" or no label does not stop a merge whose
+        -- live CI is green, and a card showing "ci:pass" does not license one
+        -- whose live CI is not.
+        --
+        -- CI is the only gate the merge needs. The kognic-github-app verdict
+        -- that gates a dependency merge (TheAppsVerdictGatesTheMerge) is not
+        -- part of this runbook: no APPROVED review from the app is required,
+        -- and its absence or a non-approving verdict does not stop a release
+        -- merge. The agent's own approval is the one the merge carries.
+
+    @guarantee TheAuthorIsCheckedUnlessAFeedFilteredIt
+        -- The release runbook APPROVES AND MERGES, so it must never merge a PR
+        -- whose author nothing has vetted. Whether the author was vetted is
+        -- decided by the same gate the dependency runbook uses for its
+        -- author-check omission
+        -- (TheRunbookStatesThePrItWasHandedRatherThanAskingForIt): the task
+        -- carries an external_id (a feed created it) AND names a pr-typed url.
+        -- BOTH HALVES ARE REQUIRED, for the same reasons given there, and ONE
+        -- match decides both variants below — the `PR:` line and the author
+        -- variant come from the same arm, so they cannot disagree.
+        --
+        -- Both hold — a PR feed created the task, and a PR feed lists PRs by
+        -- bot author: STOP AND REPORT's list carries a bullet saying "Do not
+        -- re-check the PR author", and the runbook has NO author-check step.
+        -- Re-deriving the author would cost a `gh` call that can only agree.
+        -- (Fragment: src/dispatch/prompts/release-please/author.md.)
+        --
+        -- Otherwise — a hand-created task, one retagged release_please over
+        -- MCP (`update_tasks` can retag any task release_please), a task from
+        -- another feed, or a task with no pr-typed url: the prohibition is
+        -- NOT rendered, because nothing filtered and the sentence would be
+        -- false. In its place the runbook carries a numbered step 0, before
+        -- the changelog is read: `gh pr view <PR> --json author` (with the
+        -- title), and confirm the PR is a release bot's release PR — the
+        -- author login ends in `[bot]` and the title reads like
+        -- "chore(<branch>): release X.Y.Z". If the author is not a bot, or the
+        -- PR is not a release PR, the agent goes to STOP AND REPORT without
+        -- approving or merging, and sets sub_status = needs_input as on every
+        -- other stop route. This is a precondition stop: another route into
+        -- the existing stop-and-report terminal, not a new terminal.
+        --
+        -- This is where the release runbook PARTS from the dependency one.
+        -- There, dropping the prohibition replaces it with nothing, because
+        -- the dependency runbook never merges on the author's say-so alone.
+        -- Here a dropped prohibition with no check in its place would leave an
+        -- unvetted PR one green CI run from being merged, so the check is
+        -- rendered instead.
+        --
+        -- RESIDUAL, ACCEPTED — the same one the dependency runbook records.
+        -- The gate proves a feed created the task and a PR is named; it cannot
+        -- prove that feed filtered by author. A user-authored feed emitting
+        -- pr-typed items with tag release_please and no author filter would
+        -- still be told one ran, and its PR would reach the merge with no
+        -- author check. Closing that needs the feed to DECLARE the filtering,
+        -- a schema change for a case no shipped script produces; the shipped
+        -- release-PR producer filters by bot author (RELEASE_BOT_AUTHORS).
+
+    @guarantee ABreakingReleaseIsNeverMerged
+        -- A release whose version is a MAJOR bump over the release before it,
+        -- or whose changelog carries a breaking-change entry, is never
+        -- approved or merged by the agent, whatever its CI state. The agent
+        -- stops and reports to the user: why it stopped (the major bump, the
+        -- breaking-change entries, or both), the changelog summary, and the
+        -- CI state if it has read it. It sets sub_status = needs_input, as on
+        -- the red-CI terminal. The user decides whether the release ships.
+        --
+        -- A major bump or a breaking change is the one release whose effects
+        -- reach past this repository — every consumer pinned to the previous
+        -- major has to act — so green CI, which proves only that this
+        -- repository still builds and passes, is not evidence it is safe to
+        -- ship. This is the changelog's only effect on the route: anything
+        -- else in it is summarised, not judged.
+        --
+        -- Where the agent cannot tell whether the release is a major bump or
+        -- carries a breaking change, it stops the same way: like a green
+        -- verdict on an unchecked PR, a non-breaking verdict is never guessed.
+
+    @guarantee TheReleaseAgentNeverAuthorsThePr
+        -- The agent reviews and merges the bot's PR; it never authors it. It
+        -- pushes no commit to the PR's branch, edits neither its title, its
+        -- body nor its changelog, and opens no PR of its own. A release PR
+        -- whose CI is red, or whose changelog looks wrong, is reported to the
+        -- user rather than fixed: the release bot regenerates the PR from the
+        -- commits on the base branch, so a hand edit is overwritten on the
+        -- bot's next run, and a fix belongs in a commit to the base branch
+        -- that the user, not this task, decides on.
+        --
+        -- This is what keeps release_please inside the review set
+        -- (core.allium: "THE REVIEW SET"): every review tag reviews a PR
+        -- someone else authored, which is what the by-me sections, the
+        -- PR-branch worktree and the wrap-up refusal all assume.
+
+    @guidance
+        -- ReleasePlease exception: when task.tag = release_please,
+        -- build_prompt replaces the addendum with the release-PR runbook
+        -- above, regardless of plan state. The PR is stated from the task's
+        -- pr-typed url when it carries one, as the dependency runbook does
+        -- (TheRunbookStatesThePrItWasHandedRatherThanAskingForIt); otherwise
+        -- the agent is told to find it. The same match picks the author
+        -- variant: the "Do not re-check the PR author" bullet, or the step-0
+        -- author check (TheAuthorIsCheckedUnlessAFeedFilteredIt). The
+        -- trailing block is reduced to
+        -- {learning_tools_instruction} alone, as for the other two review
+        -- runbooks: the task ends when its PR merges or the user takes it
+        -- over, never through /wrap-up (ReviewTasksAreNotWrappedUp in
+        -- mcp-task-tools.allium).
+}

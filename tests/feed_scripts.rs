@@ -138,3 +138,88 @@ fn log_warning_feed_script_defaults_wrap_up_mode_to_rebase() {
          so a triage card wraps up by landing on its base branch"
     );
 }
+
+/// feed-scripts.allium "Release bots get their own tag": bots.conf carries a
+/// second list, RELEASE_BOT_AUTHORS, documenting `app/kognic-gha-release-bot`
+/// as the example and shipping the list EMPTY. The example lives only in
+/// prose: an uncommented entry would arm the release runbook on every fresh
+/// install.
+#[test]
+fn bots_conf_documents_release_bot_authors_and_ships_it_empty() {
+    let conf = repo_file("scripts/bots.conf");
+    assert!(
+        conf.contains("RELEASE_BOT_AUTHORS"),
+        "bots.conf must document the RELEASE_BOT_AUTHORS list"
+    );
+    assert!(
+        conf.contains("app/kognic-gha-release-bot"),
+        "bots.conf must give app/kognic-gha-release-bot as the release-bot example"
+    );
+
+    let code = feed_script_code("scripts/bots.conf");
+    assert!(
+        code.lines().any(|l| l.trim() == "RELEASE_BOT_AUTHORS=()"),
+        "bots.conf must ship RELEASE_BOT_AUTHORS empty, got code:\n{code}"
+    );
+    assert!(
+        !code.contains("kognic-gha-release-bot"),
+        "the release-bot example must stay in a comment, never a shipped entry, got code:\n{code}"
+    );
+    assert!(
+        code.lines().any(|l| l.trim() == "BOT_AUTHORS=()"),
+        "BOT_AUTHORS still ships empty, got code:\n{code}"
+    );
+}
+
+/// An existing bots.conf is never rewritten (InstallShippedFeedConfigs), so an
+/// old conf has no RELEASE_BOT_AUTHORS. Both readers pre-declare it empty
+/// BEFORE sourcing the conf, as they do BOT_AUTHORS, so an old conf reads as
+/// an empty list rather than tripping `set -u`.
+#[test]
+fn both_readers_pre_declare_release_bot_authors_before_sourcing_bots_conf() {
+    for reader in ["scripts/fetch-reviews.sh", "scripts/fetch-dependabot.sh"] {
+        let code = feed_script_code(reader);
+        let declare = code
+            .find("RELEASE_BOT_AUTHORS=()")
+            .unwrap_or_else(|| panic!("{reader} must pre-declare RELEASE_BOT_AUTHORS=()"));
+        let source = code
+            .find("source \"$SCRIPT_DIR/bots.conf\"")
+            .unwrap_or_else(|| panic!("{reader} must source bots.conf"));
+        assert!(
+            declare < source,
+            "{reader} must declare RELEASE_BOT_AUTHORS=() before sourcing bots.conf"
+        );
+    }
+}
+
+/// feed-scripts.allium: "THE TAG COMES FROM THE AUTHOR CONFIG, NEVER FROM THE
+/// "[bot]" SUFFIX". fetch-reviews.sh emits the release-please tag, and the
+/// emitted tag must be the wire string the board parses.
+#[test]
+fn fetch_reviews_emits_the_release_please_wire_tag() {
+    let code = feed_script_code("scripts/fetch-reviews.sh");
+    assert!(
+        code.contains("\"release-please\""),
+        "fetch-reviews.sh must emit tag \"release-please\" for a RELEASE_BOT_AUTHORS PR"
+    );
+    assert!(
+        code.contains("RELEASE_BOT_AUTHORS"),
+        "fetch-reviews.sh must read RELEASE_BOT_AUTHORS from bots.conf"
+    );
+}
+
+/// fetch-dependabot.sh reads RELEASE_BOT_AUTHORS for the overlap check alone
+/// ("A bot on both lists is fatal"): it never lists PRs by it and never emits
+/// the release-please tag.
+#[test]
+fn fetch_dependabot_reads_release_bot_authors_only_for_the_overlap_check() {
+    let code = feed_script_code("scripts/fetch-dependabot.sh");
+    assert!(
+        code.contains("RELEASE_BOT_AUTHORS"),
+        "fetch-dependabot.sh must read RELEASE_BOT_AUTHORS for the overlap check"
+    );
+    assert!(
+        !code.contains("release-please"),
+        "fetch-dependabot.sh must never emit the release-please tag"
+    );
+}

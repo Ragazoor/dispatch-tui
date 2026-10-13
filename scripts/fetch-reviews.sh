@@ -91,10 +91,13 @@
 #   (unioned) — the dedup groups by URL and unions the signal arrays.
 #
 #   Bot-authored PRs are INCLUDED (Renovate/Dependabot are no longer excluded).
-#   A PR authored by one of bots.conf's BOT_AUTHORS gets tag "dependabot";
-#   every other PR gets tag "pr-review", INCLUDING one authored by a bot that
-#   is not on that list — a release bot's PR is not a dependency update and
-#   must not get the dependency runbook. Draft PRs are INCLUDED, with a "draft"
+#   A PR authored by one of bots.conf's RELEASE_BOT_AUTHORS gets tag
+#   "release-please" (checked first); one authored by one of BOT_AUTHORS gets
+#   tag "dependabot"; every other PR gets tag "pr-review", INCLUDING one
+#   authored by a bot that is on neither list — an unlisted release bot's PR is
+#   not a dependency update and must not get the dependency runbook, and
+#   "release-please" is only ever earned by being named, never derived from
+#   the "[bot]" suffix. Draft PRs are INCLUDED, with a "draft"
 #   label appended so the TUI card shows it.
 #
 # Output format (FeedItem):
@@ -123,6 +126,10 @@ ORGS=()
 # treats an empty one differently (it falls back to app/kognic-renovate), so a
 # change here is not local to this script.
 BOT_AUTHORS=()
+
+# Release bot logins (bots.conf's RELEASE_BOT_AUTHORS, same app form). Their
+# open PRs join the bot-author pass and earn tag "release-please".
+RELEASE_BOT_AUTHORS=()
 
 # Node ids per batched CI-status query. GraphQL `nodes(ids: [...])` caps at 100;
 # 50 leaves headroom and keeps the argument list well inside any command-line
@@ -171,6 +178,29 @@ if [[ ${#BOT_AUTHORS[@]} -gt 0 ]]; then
     fi
   done
 fi
+# RELEASE_BOT_AUTHORS is validated the same way; every offender in both lists
+# is reported before the exit.
+if [[ ${#RELEASE_BOT_AUTHORS[@]} -gt 0 ]]; then
+  for author in "${RELEASE_BOT_AUTHORS[@]}"; do
+    if [[ ! "$author" =~ ^app/[A-Za-z0-9._-]+$ ]]; then
+      echo "fetch-reviews: bots.conf - RELEASE_BOT_AUTHORS entry \"$author\" is not in gh's app form (\"app/<slug>\"), so it matches no PR author and no gh query. Write it as \"app/<slug>\", e.g. \"app/kognic-gha-release-bot\"." >&2
+      bad_bot_authors=1
+    fi
+  done
+fi
+# A bot on both lists is fatal: the two lists claim opposite things about it.
+# Compared case-insensitively, as an author is matched. See "A bot on both
+# lists is fatal" in docs/specs/feed-scripts.allium.
+if [[ ${#BOT_AUTHORS[@]} -gt 0 && ${#RELEASE_BOT_AUTHORS[@]} -gt 0 ]]; then
+  for author in "${BOT_AUTHORS[@]}"; do
+    for rel in "${RELEASE_BOT_AUTHORS[@]}"; do
+      if [[ "${author,,}" == "${rel,,}" ]]; then
+        echo "fetch-reviews: bots.conf - \"$author\" is listed in both BOT_AUTHORS and RELEASE_BOT_AUTHORS (as \"$rel\"); a bot opens either dependency bumps or releases. Remove it from one list." >&2
+        bad_bot_authors=1
+      fi
+    done
+  done
+fi
 if [[ $bad_bot_authors -ne 0 ]]; then
   exit 1
 fi
@@ -191,6 +221,15 @@ if [[ ${#BOT_AUTHORS[@]} -gt 0 ]]; then
   DEP_BOT_LOGINS="$(jq -nc \
     '[$ARGS.positional[] | sub("^app/"; "") + "[bot]" | ascii_downcase]' \
     --args "${BOT_AUTHORS[@]}")"
+fi
+
+# The author logins that earn tag "release-please", derived the same way. Never
+# falls back to the "[bot]" suffix: the tag is earned by being named.
+REL_BOT_LOGINS='[]'
+if [[ ${#RELEASE_BOT_AUTHORS[@]} -gt 0 ]]; then
+  REL_BOT_LOGINS="$(jq -nc \
+    '[$ARGS.positional[] | sub("^app/"; "") + "[bot]" | ascii_downcase]' \
+    --args "${RELEASE_BOT_AUTHORS[@]}")"
 fi
 
 repo_flags=()
@@ -263,7 +302,7 @@ search_prs() {
 to_feed_items() {
   local signal="$1"
 
-  jq --arg signal "$signal" --arg me_lc "$ME_LC" --argjson dep_bots "$DEP_BOT_LOGINS" '[
+  jq --arg signal "$signal" --arg me_lc "$ME_LC" --argjson dep_bots "$DEP_BOT_LOGINS" --argjson rel_bots "$REL_BOT_LOGINS" '[
     .[] |
     (.author.login // "") as $login |
     ($login | test("\\[bot\\]$")) as $is_bot |
@@ -273,6 +312,10 @@ to_feed_items() {
      then $is_bot
      else (($dep_bots | index($login | ascii_downcase)) != null)
      end) as $is_dep_bot |
+    # A release bot is named by RELEASE_BOT_AUTHORS and nothing else; checked
+    # before the dependency test so the empty-BOT_AUTHORS suffix fallback never
+    # hands a listed release bot the dependency runbook.
+    (($rel_bots | index($login | ascii_downcase)) != null) as $is_rel_bot |
     {
       # Transient: the GraphQL node id of this PR, used to key the batched
       # CI-status lookup and STRIPPED before the array is emitted.
@@ -285,7 +328,7 @@ to_feed_items() {
       description: ((.body // "") | .[0:500]),
       url: .url,
       status: "backlog",
-      tag: (if $is_dep_bot then "dependabot" else "pr-review" end),
+      tag: (if $is_rel_bot then "release-please" elif $is_dep_bot then "dependabot" else "pr-review" end),
       labels: (
         (if $login != "" then ["@\($login)"] else [] end)
         + [.repository.name]
@@ -302,7 +345,8 @@ to_feed_items() {
   ]'
 }
 
-# Bot-author pass: emit every open PR authored by one of BOT_AUTHORS in one of
+# Bot-author pass: emit every open PR authored by one of BOT_AUTHORS or
+# RELEASE_BOT_AUTHORS in one of
 # REPOS, whether or not you are involved in reviewing it. Signal is
 # "author-bot", which dispatch's router maps to the Bots sub-epic.
 #
@@ -314,13 +358,14 @@ to_feed_items() {
 search_bot_prs() {
   local repo author raw
 
-  if [[ ${#BOT_AUTHORS[@]} -eq 0 || ${#REPOS[@]} -eq 0 ]]; then
+  local all_authors=(${BOT_AUTHORS[@]+"${BOT_AUTHORS[@]}"} ${RELEASE_BOT_AUTHORS[@]+"${RELEASE_BOT_AUTHORS[@]}"})
+  if [[ ${#all_authors[@]} -eq 0 || ${#REPOS[@]} -eq 0 ]]; then
     echo "[]"
     return 0
   fi
 
   for repo in "${REPOS[@]}"; do
-    for author in "${BOT_AUTHORS[@]}"; do
+    for author in "${all_authors[@]}"; do
       # `author:<login>` goes after `--` for the same reason the review
       # qualifiers do. Quoted here: it is always a single term.
       if ! raw=$(gh search prs \

@@ -4818,6 +4818,7 @@ fn a_refused_wrap_up_request_writes_nothing() {
             (3, "running", "dependabot"),
             (4, "running", ""),
             (5, "done", ""),
+            (6, "running", "release-please"),
         ],
     );
 
@@ -4825,6 +4826,7 @@ fn a_refused_wrap_up_request_writes_nothing() {
         (1, "host-a", "cannot be wrapped up"),
         (2, "host-a", "retag"),
         (3, "host-a", "retag"),
+        (6, "host-a", "retag"),
         (4, "host-b", "host-a"),
         (5, "host-a", "cannot be wrapped up"),
         (99, "host-a", "99"),

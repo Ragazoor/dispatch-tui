@@ -17,6 +17,7 @@ const TASK_TAGS: &[TaskTag] = &[
     TaskTag::Research,
     TaskTag::Fix,
     TaskTag::Dependabot,
+    TaskTag::ReleasePlease,
 ];
 
 /// A tag option spanning every `TaskTag` variant plus the untagged case —
@@ -58,6 +59,42 @@ proptest! {
     fn tasktag_parse_roundtrip(tag in task_tag_strategy()) {
         let parsed = TaskTag::parse(tag.as_str());
         prop_assert_eq!(parsed, Some(tag));
+    }
+
+    /// The serde wire string and `as_str` agree for every tag, so the feed
+    /// wire format and the MCP schema spell `release-please` the same way.
+    #[test]
+    fn tasktag_serde_wire_matches_as_str(tag in task_tag_strategy()) {
+        let json = serde_json::to_string(&tag).unwrap();
+        prop_assert_eq!(json, format!("\"{}\"", tag.as_str()));
+        let back: TaskTag = serde_json::from_str(&format!("\"{}\"", tag.as_str())).unwrap();
+        prop_assert_eq!(back, tag);
+    }
+
+    /// core.allium "THE REVIEW SET": exactly {pr_review, dependabot,
+    /// release_please}, and every review-tagged task refuses wrap-up with
+    /// `ReviewTag`, whatever its status or worktree.
+    #[test]
+    fn review_set_is_exactly_the_three_review_tags_and_blocks_wrap_up(
+        tag in task_tag_strategy(),
+        status in task_status_strategy(),
+        has_worktree in any::<bool>(),
+    ) {
+        let expected = matches!(
+            tag,
+            TaskTag::PrReview | TaskTag::Dependabot | TaskTag::ReleasePlease
+        );
+        prop_assert_eq!(tag.is_review(), expected, "tag={:?}", tag);
+        let task = Task {
+            status,
+            worktree: has_worktree.then(|| "/tmp/wt".to_string()),
+            ..make_task_with(None, Some(tag))
+        };
+        if expected {
+            prop_assert_eq!(task.wrap_up_block(), Some(WrapUpBlock::ReviewTag(tag)));
+        } else {
+            prop_assert_ne!(task.wrap_up_block(), Some(WrapUpBlock::ReviewTag(tag)));
+        }
     }
 
     #[test]

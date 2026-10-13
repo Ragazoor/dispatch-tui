@@ -227,7 +227,7 @@ usually the right answer.",
                 },
                 "tag": {
                     "type": "string",
-                    "description": "Task tag: bug, feature, chore, pr-review, research, fix, or dependabot. Controls dispatch behavior.",
+                    "description": "Task tag: bug, feature, chore, pr-review, research, fix, dependabot, or release-please. Controls dispatch behavior.",
                     "enum": task_tag_enum_values()
                 },
                 "base_branch": {
@@ -417,7 +417,7 @@ exit token for exit_session; the task stays running until then. \
 'rebase' rebases onto base_branch and fast-forwards it (blocks until complete). \
 'done' and 'pr' perform no git operations — for 'pr' you run git push and gh pr create yourself \
 and pass the resulting URL to exit_session. \
-A task tagged pr-review or dependabot is refused.",
+A task tagged pr-review, dependabot or release-please is refused.",
         {
             "type": "object",
             "properties": {

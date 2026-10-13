@@ -34,6 +34,8 @@ fi
 # app/kognic-renovate rather than emitting nothing — an existing copy of this
 # script predates bots.conf and must keep emitting what it emitted before.
 BOT_AUTHORS=()
+# Read for the overlap check below and nothing else.
+RELEASE_BOT_AUTHORS=()
 if [[ -f "$SCRIPT_DIR/bots.conf" ]]; then
   # shellcheck source=bots.conf
   source "$SCRIPT_DIR/bots.conf"
@@ -65,6 +67,24 @@ fi
 if [[ $bad_bot_authors -ne 0 ]]; then
   exit 1
 fi
+# A bot on both lists is fatal: the two lists claim opposite things about it.
+# Compared as configured (before the fallback below), case-insensitively. See
+# "A bot on both lists is fatal" in docs/specs/feed-scripts.allium.
+bad_overlap=0
+if [[ ${#BOT_AUTHORS[@]} -gt 0 && ${#RELEASE_BOT_AUTHORS[@]} -gt 0 ]]; then
+  for author in "${BOT_AUTHORS[@]}"; do
+    for rel in "${RELEASE_BOT_AUTHORS[@]}"; do
+      if [[ "${author,,}" == "${rel,,}" ]]; then
+        echo "fetch-dependabot: bots.conf - \"$author\" is listed in both BOT_AUTHORS and RELEASE_BOT_AUTHORS (as \"$rel\"); a bot opens either dependency bumps or releases. Remove it from one list." >&2
+        bad_overlap=1
+      fi
+    done
+  done
+fi
+if [[ $bad_overlap -ne 0 ]]; then
+  exit 1
+fi
+
 if [[ ${#BOT_AUTHORS[@]} -eq 0 ]]; then
   BOT_AUTHORS=("app/kognic-renovate")
 fi

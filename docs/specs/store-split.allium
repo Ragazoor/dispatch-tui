@@ -353,7 +353,8 @@
 --             and issues no token. Then it calls request_wrap_up(task, host,
 --             action), host being this board's own. The module checks D11,
 --             that the task is running or review with a worktree on that
---             host, that it is not review-tagged (pr_review or dependabot:
+--             host, that it is not review-tagged (pr_review, dependabot or
+--             release_please:
 --             mcp-task-tools.allium's ReviewTasksAreNotWrappedUp, decided
 --             with the user to be the module's; the tool may keep the same
 --             check as an early refusal with the same wording), and that the
@@ -1163,9 +1164,11 @@ rule RequestWrapUp {
     -- mcp-task-tools.allium's ReviewTasksAreNotWrappedUp, in the module by
     -- decision (W2): a review-tagged task has no wrap-up to perform. The
     -- refusal carries that guarantee's wording (the tag, that a review task
-    -- ends at its PR, and the retag way out). pr_review is core/TaskTag's
-    -- value; the store spells it "pr-review", as every tag column does.
-    requires: task.tag != pr_review and task.tag != dependabot
+    -- ends at its PR, and the retag way out). pr_review and release_please
+    -- are core/TaskTag's values; the store spells them "pr-review" and
+    -- "release-please", as every tag column does. The module keeps its own
+    -- copy of the review set, so a new review tag is added there too.
+    requires: task.tag not in {pr_review, dependabot, release_please}
     -- The rebase runs where the worktree is, so the row names the task's own
     -- host, and only that host may ask (the MCP endpoint an agent reaches is
     -- its own machine's board).

@@ -174,3 +174,25 @@ fn snapshot_dispatch_prompt_pr_review() {
     );
     insta::assert_snapshot!(prompt);
 }
+
+#[test]
+fn snapshot_dispatch_prompt_release_please() {
+    // The production shape: only fetch-reviews.sh creates a release-please
+    // task, and it sets a pr url on every one (AReviewTaggedFeedItemNamesItsPr).
+    // See RenderReleasePrRunbook in docs/specs/dispatch-prompt.allium.
+    let ctx = PromptContext {
+        tag: Some(TaskTag::ReleasePlease),
+        pr_url: Some("https://github.com/example/repo/pull/77"),
+        from_feed: true,
+        ..PromptContext::default()
+    };
+    let prompt = build_prompt(
+        TaskId(42),
+        "chore(master): release 8.21.10",
+        "https://github.com/example/repo/pull/77",
+        None,
+        None,
+        &ctx,
+    );
+    insta::assert_snapshot!(prompt);
+}

@@ -399,7 +399,11 @@ mod column_section_for_task_tests {
     #[test]
     fn a_review_tagged_decision_is_by_me() {
         for (ss, section, label) in BY_ME {
-            for tag in [TaskTag::PrReview, TaskTag::Dependabot] {
+            for tag in [
+                TaskTag::PrReview,
+                TaskTag::Dependabot,
+                TaskTag::ReleasePlease,
+            ] {
                 let t = with_pr(ss, Some(tag));
                 assert_eq!(ColumnSection::for_task(&t), Some(section), "{ss:?}/{tag:?}");
                 assert_eq!(task_header_label(&t), label, "{ss:?}/{tag:?}");

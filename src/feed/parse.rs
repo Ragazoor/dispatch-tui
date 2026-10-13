@@ -156,7 +156,7 @@ mod tests {
     /// either — a new variant, or an existing one promoted into the review
     /// set — flows through this rule's coverage instead of quietly falling
     /// outside it. `task_tag_all_has_every_variant` and
-    /// `task_tag_is_review_only_for_pr_review_and_dependabot` pin both inputs.
+    /// `task_tag_is_review_only_for_the_three_review_tags` pin both inputs.
     fn review_tag_wire_names() -> Vec<&'static str> {
         use crate::models::TaskTag;
         TaskTag::ALL
@@ -185,6 +185,38 @@ mod tests {
         let json = br#"[{"external_id":"1","title":"T","description":"","url":"https://github.com/o/r/pull/42","status":"backlog","tag":"dependabot"}]"#;
         let items = parse_feed_items(json).expect("a pr url satisfies the rule");
         assert_eq!(items.len(), 1);
+    }
+
+    /// release-please is a review tag (task 53281), so fetch-reviews.sh's
+    /// release-bot PRs parse with the tag they carry.
+    #[test]
+    fn a_release_please_item_with_a_pr_url_parses_with_its_tag() {
+        use crate::models::TaskTag;
+        let json = br#"[{"external_id":"pr:o/r#7","title":"chore(master): release 8.21.10","description":"","url":"https://github.com/o/r/pull/7","status":"backlog","tag":"release-please","signals":["author-bot"]}]"#;
+        let items = parse_feed_items(json).expect("a release-please item with a pr url parses");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].tag, TaskTag::ReleasePlease);
+    }
+
+    /// AReviewTaggedFeedItemNamesItsPr covers release-please explicitly, not
+    /// only through `review_tag_wire_names`.
+    #[test]
+    fn review_tag_wire_names_include_release_please() {
+        assert!(
+            review_tag_wire_names().contains(&"release-please"),
+            "release-please must be in the review set the PR rule covers"
+        );
+    }
+
+    #[test]
+    fn a_release_please_item_without_a_pr_url_rejects_the_emission_naming_it() {
+        let json = br#"[{"external_id":"pr:o/r#8","title":"T","description":"","url":"https://github.com/o/r/issues/8","status":"backlog","tag":"release-please"}]"#;
+        let err = parse_feed_items(json).expect_err("must reject").to_string();
+        assert!(err.contains("pr:o/r#8"), "must name the item, got: {err}");
+        assert!(
+            err.contains("release-please"),
+            "must name the tag, got: {err}"
+        );
     }
 
     /// An issue url is not a PR. The rule is about naming a pull request, not

@@ -680,12 +680,12 @@ Use whichever of these fits the thing you're waiting on:
 
 ## Tag system
 
-Tags (`src/models/tasks.rs::TaskTag`): `Bug`, `Feature`, `Chore`, `PrReview`, `Research`, `Fix`, `Dependabot`. Most are **kanban labels only**.
+Tags (`src/models/tasks.rs::TaskTag`): `Bug`, `Feature`, `Chore`, `PrReview`, `Research`, `Fix`, `Dependabot`, `ReleasePlease`. Most are **kanban labels only**.
 
 Three mechanisms read the tag. Two of them select what a task becomes:
 
 - `src/models/tasks.rs::DispatchMode::for_task` — `Research`, and only `Research`, and only when the task has no plan, routes to the dedicated research agent (`build_research_prompt`), whose prompt tells it to make no code changes. That is prompt wording only — research launches in auto mode like every other agent, with no `--permission-mode` flag. Everything else, plan or no plan, routes to `Dispatch`. There are only two `DispatchMode` variants.
-- `src/models/tasks.rs::TaskTag::is_review` — true for `PrReview | Dependabot`. Inside the unified `src/dispatch/prompts.rs::build_prompt` this swaps in a review addendum from `src/dispatch/prompts/pr-review.md` or `dependabot.md`, skips the plan/implement instructions in favour of a trimmed trailing block, and — when the task carries a PR URL — bases the worktree on the PR's head branch instead of the repo's base branch, soft-falling back to the base branch if that can't be resolved (`src/dispatch/agents.rs::pr_head_branch`). It has a second, rendering-side caller: `src/models/columns.rs::ColumnSection::for_task` reads it as "this task reviews someone else's PR", which is what turns a `changes_requested`/`approved` sub-status into the `changes requested by me`/`approved by me` sections. A tag added to `is_review` that routes to the review agent but authors its own PR would mislabel both.
+- `src/models/tasks.rs::TaskTag::is_review` — true for `PrReview | Dependabot | ReleasePlease`. Inside the unified `src/dispatch/prompts.rs::build_prompt` this swaps in a review addendum from `src/dispatch/prompts/pr-review.md` or `dependabot.md` or `release-please.md`, skips the plan/implement instructions in favour of a trimmed trailing block, and — when the task carries a PR URL — bases the worktree on the PR's head branch instead of the repo's base branch, soft-falling back to the base branch if that can't be resolved (`src/dispatch/agents.rs::pr_head_branch`). It has a second, rendering-side caller: `src/models/columns.rs::ColumnSection::for_task` reads it as "this task reviews someone else's PR", which is what turns a `changes_requested`/`approved` sub-status into the `changes requested by me`/`approved by me` sections. A tag added to `is_review` that routes to the review agent but authors its own PR would mislabel both.
 
 `Bug`, `Feature`, `Chore`, and `Fix` change nothing but the card badge.
 

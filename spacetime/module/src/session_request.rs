@@ -201,7 +201,7 @@ pub fn validate_wrap_up_action(action: &str) -> Result<(), String> {
 
 /// The task's review tags, which are never wrapped up
 /// (`mcp-task-tools.allium: ReviewTasksAreNotWrappedUp`).
-const REVIEW_TAGS: [&str; 2] = ["pr-review", "dependabot"];
+const REVIEW_TAGS: [&str; 3] = ["pr-review", "dependabot", "release-please"];
 
 /// `RequestWrapUp`'s task `requires`, in the order a caller is best told about
 /// them, with the wording the tool gave before the rule moved here.

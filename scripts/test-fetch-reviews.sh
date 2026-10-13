@@ -23,6 +23,12 @@
 #   - the bot-author pass is capped PER REPO: one query per (repo x author),
 #     with --limit 20 --sort created --order desc
 #   - the bot-author pass is skipped entirely when bots.conf is absent
+#   - the bot-author pass queries BOT_AUTHORS plus RELEASE_BOT_AUTHORS; a PR
+#     by a RELEASE_BOT_AUTHORS bot gets tag "release-please" and author-bot,
+#     matched case-insensitively (task 53281)
+#   - release-please is never derived from the "[bot]" suffix: an unlisted
+#     release bot stays pr-review, and a listed one is not handed dependabot
+#     by the empty-BOT_AUTHORS suffix fallback
 #   - the batched request also resolves review state: a PR whose latest
 #     opinionated review by the user is an approval carries "approved"; a
 #     changes-requested review, or no review at all, carries nothing
@@ -134,6 +140,15 @@ if [[ "$args" == *"author:app/"* ]]; then
     cat <<'JSON'
 [
   {"id":"PR_9","number":9,"title":"Bump unrelated dep","body":"","url":"https://github.com/testorg/repo/pull/9","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"testbot[bot]"}}
+]
+JSON
+  elif [[ "$args" == *"author:app/kognic-gha-release-bot"* ]]; then
+    # A release bot listed in RELEASE_BOT_AUTHORS (task 53281). PR11 is
+    # matched by NO review query, so it reaches the board only through the
+    # bot-author pass querying the release list.
+    cat <<'JSON'
+[
+  {"id":"PR_11","number":11,"title":"chore(master): release 9.0.1","body":"","url":"https://github.com/testorg/repo/pull/11","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"kognic-gha-release-bot[bot]"}}
 ]
 JSON
   elif [[ "$args" == *"author:app/dependabot"* ]]; then
@@ -503,5 +518,122 @@ assert "without bots.conf, the release bot falls back too" \
 if grep -q 'author:app/' "$WORKDIR/gh-args.log"; then
   fail "bot-author pass ran without bots.conf"
 fi
+
+# ===========================================================================
+# RELEASE_BOT_AUTHORS (task 53281): "Release bots get their own tag" in
+# docs/specs/feed-scripts.allium.
+# ===========================================================================
+
+run_with_conf() {
+  printf '%s\n' "$1" >"$WORKDIR/bots.conf"
+  : >"$WORKDIR/gh-args.log"
+  output="$(PATH="$WORKDIR:$PATH" bash "$WORKDIR/fetch-reviews.sh")"
+}
+
+# --- A listed release bot's PRs get tag release-please ----------------------
+
+run_with_conf 'BOT_AUTHORS=("app/testbot" "app/dependabot" "app/kognic-renovate")
+RELEASE_BOT_AUTHORS=("app/kognic-gha-release-bot")'
+
+# The bot-author pass queries BOTH lists: one call per (repo x author, either
+# list), each capped per repo and newest-first.
+bot_calls="$(grep -c 'author:app/' "$WORKDIR/gh-args.log" || true)"
+[[ "$bot_calls" == "4" ]] ||
+  fail "expected 4 bot-author calls (1 repo x (3 dependency + 1 release) authors), got $bot_calls"
+grep -q 'author:app/kognic-gha-release-bot' "$WORKDIR/gh-args.log" ||
+  fail "the bot-author pass did not query the RELEASE_BOT_AUTHORS bot"
+while read -r line; do
+  [[ "$line" == *"--limit 20"* && "$line" == *"--sort created"* && "$line" == *"--order desc"* ]] ||
+    fail "release bot-author call is not capped per repo newest-first: $line"
+  repo_count="$(grep -o -- '--repo' <<<"$line" | wc -l)"
+  [[ "$repo_count" == "1" ]] ||
+    fail "release bot-author call must scope ONE repo, got $repo_count: $line"
+done < <(grep 'author:app/kognic-gha-release-bot' "$WORKDIR/gh-args.log")
+
+# PR11 reaches the board through the bot-author pass alone.
+assert "with a release list, 9 items (PR11 added by the release pass)" 'length == 9'
+assert "release-only PR11 included once" \
+  '[.[] | select(.url | endswith("/pull/11"))] | length == 1'
+assert "release-only PR11 tagged release-please" \
+  'map(select(.url | endswith("/pull/11"))) | .[0].tag == "release-please"'
+assert "release-only PR11 carries author-bot and nothing else, so it routes to Bots" \
+  'map(select(.url | endswith("/pull/11"))) | .[0].signals == ["author-bot"]'
+
+# PR10 is the same bot's PR, reached through a review query.
+assert "listed release-bot PR10 tagged release-please" \
+  'map(select(.url | endswith("/pull/10"))) | .[0].tag == "release-please"'
+assert "listed release-bot PR10 still carries author-bot" \
+  'map(select(.url | endswith("/pull/10"))) | .[0].signals | index("author-bot")'
+
+# The dependency tag logic is unchanged.
+assert "with a release list, renovate PR2 stays dependabot" \
+  'map(select(.url | endswith("/pull/2"))) | .[0].tag == "dependabot"'
+assert "with a release list, dependabot PR3 stays dependabot" \
+  'map(select(.url | endswith("/pull/3"))) | .[0].tag == "dependabot"'
+assert "with a release list, testbot PR9 stays dependabot" \
+  'map(select(.url | endswith("/pull/9"))) | .[0].tag == "dependabot"'
+assert "with a release list, human PR1 stays pr-review" \
+  'map(select(.url | endswith("/pull/1"))) | .[0].tag == "pr-review"'
+assert "only the release bot's PRs are tagged release-please" \
+  '[.[] | select(.tag == "release-please") | .url | split("/") | last] | sort == ["10","11"]'
+
+# --- The tag is matched case-insensitively, as an author is ----------------
+
+run_with_conf 'BOT_AUTHORS=("app/testbot" "app/dependabot" "app/kognic-renovate")
+RELEASE_BOT_AUTHORS=("app/Kognic-GHA-Release-Bot")'
+assert "a mixed-case release entry still tags PR10 release-please" \
+  'map(select(.url | endswith("/pull/10"))) | .[0].tag == "release-please"'
+
+# --- An unlisted release bot stays pr-review --------------------------------
+# The tag is earned only by being named; the "[bot]" suffix never earns it.
+
+run_with_conf 'BOT_AUTHORS=("app/testbot" "app/dependabot" "app/kognic-renovate")
+RELEASE_BOT_AUTHORS=("app/some-other-release-bot")'
+assert "an unlisted release bot's PR10 stays pr-review" \
+  'map(select(.url | endswith("/pull/10"))) | .[0].tag == "pr-review"'
+assert "no item is tagged release-please when its author is not listed" \
+  'all(.tag != "release-please")'
+grep -q 'author:app/some-other-release-bot' "$WORKDIR/gh-args.log" ||
+  fail "the bot-author pass did not query the configured release bot"
+
+# And with NO release list, nothing is ever tagged release-please, even though
+# PR10's author login ends in "[bot]".
+run_with_conf 'BOT_AUTHORS=("app/testbot" "app/dependabot" "app/kognic-renovate")'
+assert "without RELEASE_BOT_AUTHORS, no item is tagged release-please" \
+  'all(.tag != "release-please")'
+assert "without RELEASE_BOT_AUTHORS, PR10 stays pr-review" \
+  'map(select(.url | endswith("/pull/10"))) | .[0].tag == "pr-review"'
+
+run_with_conf 'BOT_AUTHORS=()
+RELEASE_BOT_AUTHORS=()'
+assert "with both lists empty, no item is tagged release-please" \
+  'all(.tag != "release-please")'
+if grep -q 'author:app/' "$WORKDIR/gh-args.log"; then
+  fail "bot-author pass ran with both lists empty"
+fi
+
+# --- A listed release bot is not handed dependabot by the suffix fallback --
+# With BOT_AUTHORS empty the dependabot tag falls back to the "[bot]" suffix,
+# but the release list is checked FIRST.
+
+run_with_conf 'BOT_AUTHORS=()
+RELEASE_BOT_AUTHORS=("app/kognic-gha-release-bot")'
+bot_calls="$(grep -c 'author:app/' "$WORKDIR/gh-args.log" || true)"
+[[ "$bot_calls" == "1" ]] ||
+  fail "with only a release list, expected 1 bot-author call, got $bot_calls"
+grep -q 'author:app/kognic-gha-release-bot' "$WORKDIR/gh-args.log" ||
+  fail "with BOT_AUTHORS empty, the pass must still query RELEASE_BOT_AUTHORS"
+assert "with only a release list, 8 items (7 review-query PRs + release-only PR11)" \
+  'length == 8'
+assert "with BOT_AUTHORS empty, listed release bot PR10 is release-please, not dependabot" \
+  'map(select(.url | endswith("/pull/10"))) | .[0].tag == "release-please"'
+assert "with BOT_AUTHORS empty, release-only PR11 is release-please" \
+  'map(select(.url | endswith("/pull/11"))) | .[0].tag == "release-please"'
+assert "with BOT_AUTHORS empty, PR3 still falls back to dependabot" \
+  'map(select(.url | endswith("/pull/3"))) | .[0].tag == "dependabot"'
+assert "with BOT_AUTHORS empty, PR2 still falls back to dependabot" \
+  'map(select(.url | endswith("/pull/2"))) | .[0].tag == "dependabot"'
+assert "with BOT_AUTHORS empty, testbot PR9 is not swept in (not on either list)" \
+  '[.[] | select(.url | endswith("/pull/9"))] | length == 0'
 
 echo "test-fetch-reviews: all assertions passed"

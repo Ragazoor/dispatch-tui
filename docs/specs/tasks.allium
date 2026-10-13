@@ -62,6 +62,10 @@ rule CreateTask {
         -- x -> Fix, and p -> arm the phoenix flag (see PhoenixArming
         -- below). Enter means "no explicit pick"; Esc cancels creation. Any
         -- other key is silently ignored and the picker stays open.
+        -- Dependabot and ReleasePlease have no key: both are set by feed
+        -- scripts from a PR's author (feed-scripts.allium), and a hand-made
+        -- task reaches either only through the MCP tools' tag parameter
+        -- (create_task, update_tasks), whose enum is every core/TaskTag.
         --
         -- EveryKeyInItsName. Each key is a letter of the label it selects, so
         -- the hint reads b -> "[b]ug", v -> "pr-re[v]iew", x -> "fi[x]". The

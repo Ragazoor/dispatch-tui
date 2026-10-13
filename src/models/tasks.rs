@@ -816,6 +816,8 @@ pub enum TaskTag {
     Research,
     Fix,
     Dependabot,
+    #[serde(rename = "release-please")]
+    ReleasePlease,
 }
 
 impl TaskTag {
@@ -824,7 +826,7 @@ impl TaskTag {
     /// Derive a SUBSET from this — `ALL.iter().copied().filter(..)` — rather
     /// than writing the variants out again. A hand-written list lets a new
     /// variant slip past by being absent from it, which no compiler error
-    /// catches: `task_tag_is_review_only_for_pr_review_and_dependabot` and the
+    /// catches: `task_tag_is_review_only_for_the_three_review_tags` and the
     /// review-tag coverage in `crate::feed::parse_feed_items`'s tests both
     /// depend on that.
     ///
@@ -840,6 +842,7 @@ impl TaskTag {
         TaskTag::Research,
         TaskTag::Fix,
         TaskTag::Dependabot,
+        TaskTag::ReleasePlease,
     ];
 
     pub fn short_label(&self) -> &'static str {
@@ -851,11 +854,12 @@ impl TaskTag {
             TaskTag::Research => "research",
             TaskTag::Fix => "fix",
             TaskTag::Dependabot => "dep",
+            TaskTag::ReleasePlease => "rel",
         }
     }
 
-    /// Whether this tag routes to a PR-review agent (PR review or
-    /// Dependabot). Review tasks skip the plan/implement flow and, when they
+    /// Whether this tag routes to a PR-review agent (PR review,
+    /// Dependabot or release-please). Review tasks skip the plan/implement flow and, when they
     /// carry a PR URL, base their worktree on the PR's branch.
     ///
     /// Also read by `ColumnSection::for_task` to mean "this task reviews
@@ -863,7 +867,10 @@ impl TaskTag {
     /// user's own. A tag added here that routes to the review agent but
     /// authors its own PR would mislabel both by-me sections.
     pub fn is_review(&self) -> bool {
-        matches!(self, TaskTag::PrReview | TaskTag::Dependabot)
+        matches!(
+            self,
+            TaskTag::PrReview | TaskTag::Dependabot | TaskTag::ReleasePlease
+        )
     }
 
     // A third reader of `tag` lives outside this type, and is a VETO rather
@@ -885,6 +892,7 @@ define_str_enum!(TaskTag, "tag" {
     Research => "research",
     Fix => "fix",
     Dependabot => "dependabot",
+    ReleasePlease => "release-please",
 });
 
 // ---------------------------------------------------------------------------

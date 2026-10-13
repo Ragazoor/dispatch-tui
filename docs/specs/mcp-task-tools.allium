@@ -1253,12 +1253,11 @@ rule WrapUpViaMcp {
     requires: task.worktree != null
     -- A review task does not end by being wrapped up (ReviewTasksAreNotWrappedUp).
     -- The code gates on the core/TaskTag::is_review predicate rather than on
-    -- these two literals, so the clause below is the narrower statement. What
-    -- keeps them in step is a test, not this comment:
-    -- task_tag_is_review_only_for_pr_review_and_dependabot derives the review
-    -- set from TaskTag::ALL, so a third review tag fails there and sends
-    -- whoever added it here.
-    requires: task.tag != pr_review and task.tag != dependabot
+    -- these three literals, so the clause below is the narrower statement.
+    -- What keeps them in step is a test, not this comment: the TaskTag model
+    -- test that derives the review set from TaskTag::ALL fails on a new review
+    -- tag and sends whoever added it here (core.allium: "THE REVIEW SET").
+    requires: task.tag not in {pr_review, dependabot, release_please}
     -- WrapUpRefusesUnfinishedWork, below: the worktree is committed and the
     -- repository's verify command, when it has one, exits 0 in the worktree.
     -- Both are checked before the action runs, and before any request is
@@ -1497,8 +1496,9 @@ rule WrapUpViaMcp {
         -- findings, exactly as build_prompt's review runbooks describe.
         --
         -- Since store-split M5 the refusal is the MODULE's, by decision with
-        -- the user: request_wrap_up refuses a pr_review or dependabot task
-        -- (store-split.allium: RequestWrapUp, W2), so no client can wrap one
+        -- the user: request_wrap_up refuses a review-tagged task (pr_review,
+        -- dependabot or release_please; store-split.allium: RequestWrapUp,
+        -- W2), so no client can wrap one
         -- up. The tool may still check it first, as an early refusal before
         -- the commit and verify checks, with the same wording.
         --

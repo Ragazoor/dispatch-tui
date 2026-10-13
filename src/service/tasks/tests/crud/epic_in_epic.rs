@@ -1360,7 +1360,11 @@ async fn validate_wrap_up_backlog_task_fails() {
 // the guard is on TaskTag::is_review, not on either literal.
 #[tokio::test]
 async fn validate_wrap_up_refuses_a_review_tagged_task() {
-    for tag in [TaskTag::PrReview, TaskTag::Dependabot] {
+    for tag in [
+        TaskTag::PrReview,
+        TaskTag::Dependabot,
+        TaskTag::ReleasePlease,
+    ] {
         let db = test_db().await;
         let svc = task_svc(&db);
         let id = svc.create_task(make_task_params("/repo")).await.unwrap();

@@ -1465,7 +1465,7 @@ mod session_requests {
     /// out.
     #[test]
     fn a_review_tagged_task_is_refused_with_the_retag_way_out() {
-        for tag in ["pr-review", "dependabot"] {
+        for tag in ["pr-review", "dependabot", "release-please"] {
             let task = Task {
                 tag: tag.into(),
                 ..running_task()

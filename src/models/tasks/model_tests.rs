@@ -646,15 +646,21 @@ fn task_tag_parse_roundtrip_new_tags() {
 /// silently under-advertise it.
 #[test]
 fn task_tag_all_has_every_variant() {
-    assert_eq!(TaskTag::ALL.len(), 7);
+    assert_eq!(TaskTag::ALL.len(), 8);
 }
 
 #[test]
-fn task_tag_is_review_only_for_pr_review_and_dependabot() {
+fn task_tag_all_lists_release_please_last() {
+    // Kanban tag-picker order: the new review tag goes after dependabot.
+    assert_eq!(TaskTag::ALL.last(), Some(&TaskTag::ReleasePlease));
+}
+
+#[test]
+fn task_tag_is_review_only_for_the_three_review_tags() {
     // Derived from ALL rather than listed, so an eighth tag cannot slip
     // past by being absent from both halves of a hand-written pair of
     // lists. `WrapUpViaMcp` in docs/specs/mcp-task-tools.allium spells
-    // these two literals in its guard clause; a change here means a change
+    // these literals in its guard clause; a change here means a change
     // there.
     let review: Vec<TaskTag> = TaskTag::ALL
         .iter()
@@ -663,7 +669,11 @@ fn task_tag_is_review_only_for_pr_review_and_dependabot() {
         .collect();
     assert_eq!(
         review,
-        vec![TaskTag::PrReview, TaskTag::Dependabot],
+        vec![
+            TaskTag::PrReview,
+            TaskTag::Dependabot,
+            TaskTag::ReleasePlease
+        ],
         "the review set changed — update WrapUpViaMcp's guard in \
 docs/specs/mcp-task-tools.allium to match"
     );
@@ -679,6 +689,7 @@ fn dispatch_mode_without_plan_routes_only_research() {
         Some(TaskTag::PrReview),
         Some(TaskTag::Fix),
         Some(TaskTag::Dependabot),
+        Some(TaskTag::ReleasePlease),
     ] {
         assert_eq!(
             DispatchMode::for_task(&make_task_with(None, tag)),
@@ -706,6 +717,54 @@ fn task_tag_dependabot_parse_and_labels() {
     assert_eq!(TaskTag::parse("dependabot"), Some(TaskTag::Dependabot));
     assert_eq!(TaskTag::Dependabot.as_str(), "dependabot");
     assert_eq!(TaskTag::Dependabot.short_label(), "dep");
+}
+
+/// core.allium: release_please's wire string is "release-please" (kebab, like
+/// pr-review), not the serde-lowercase default "releaseplease".
+#[test]
+fn task_tag_release_please_serde_roundtrip() {
+    let tag = TaskTag::ReleasePlease;
+    let s = serde_json::to_string(&tag).unwrap();
+    assert_eq!(s, "\"release-please\"");
+    let back: TaskTag = serde_json::from_str(&s).unwrap();
+    assert_eq!(back, TaskTag::ReleasePlease);
+}
+
+#[test]
+fn task_tag_release_please_parse_and_labels() {
+    assert_eq!(
+        TaskTag::parse("release-please"),
+        Some(TaskTag::ReleasePlease)
+    );
+    assert_eq!(TaskTag::ReleasePlease.as_str(), "release-please");
+    assert_eq!(TaskTag::ReleasePlease.short_label(), "rel");
+    assert_eq!(TaskTag::ReleasePlease.to_string(), "release-please");
+}
+
+#[test]
+fn task_tag_release_please_rejects_non_wire_spellings() {
+    // The wire string is the only spelling; the Rust-ish and snake forms are
+    // not accepted, as with pr-review.
+    assert_eq!(TaskTag::parse("release_please"), None);
+    assert_eq!(TaskTag::parse("releaseplease"), None);
+    assert!(serde_json::from_str::<TaskTag>("\"releaseplease\"").is_err());
+}
+
+#[test]
+fn task_tag_release_please_is_review() {
+    assert!(TaskTag::ReleasePlease.is_review());
+}
+
+/// A release-please task ends at its PR, never at wrap-up
+/// (`ReviewTasksAreNotWrappedUp` in docs/specs/mcp-task-tools.allium).
+#[test]
+fn release_please_task_wrap_up_block_is_review_tag() {
+    let task = make_task_with(None, Some(TaskTag::ReleasePlease));
+    assert_eq!(
+        task.wrap_up_block(),
+        Some(WrapUpBlock::ReviewTag(TaskTag::ReleasePlease))
+    );
+    assert!(!task.is_wrappable());
 }
 
 #[test]

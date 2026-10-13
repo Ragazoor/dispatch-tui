@@ -1393,3 +1393,79 @@ fn quick_dispatch_sends_rename_prompt() {
         "prompt should mention update_tasks for rename"
     );
 }
+
+// --- release-please: a review tag, so the same PR-head worktree (task 53281) ---
+
+fn release_please_task(repo_path: &str) -> Task {
+    let mut task = pr_review_task(repo_path);
+    task.tag = Some(crate::models::TaskTag::ReleasePlease);
+    task.title = "chore(master): release 8.21.10".to_string();
+    task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/77",
+        crate::models::UrlType::Pr,
+    ));
+    task
+}
+
+#[test]
+fn dispatch_release_please_task_bases_worktree_on_pr_head_branch() {
+    let (_dir, repo_path) = make_test_repo();
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"release-please--branches--master\nfalse\n"), // gh pr view
+        MockProcessRunner::ok(), // git fetch origin <head>
+        MockProcessRunner::ok(), // git worktree prune
+        MockProcessRunner::ok(), // git worktree add origin/<head>
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux list-windows (rollback's window-kill check)
+        MockProcessRunner::ok(), // git worktree remove --force (fresh-worktree rollback)
+        MockProcessRunner::ok(), // git branch -D (fresh-worktree rollback)
+    ]);
+
+    let task = release_please_task(&repo_path);
+    let _ = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
+
+    let calls = mock.recorded_calls();
+    assert_eq!(
+        calls[0].0, "gh",
+        "a release-please task resolves the PR head branch first"
+    );
+    assert_eq!(
+        worktree_add_start_point(&calls),
+        "origin/release-please--branches--master",
+        "a release-please worktree starts from the release PR's head branch"
+    );
+}
+
+#[test]
+fn dispatch_release_please_task_prompt_carries_the_release_runbook_and_pr_url() {
+    let (_dir, repo_path, _worktree_dir) =
+        make_test_repo_with_worktree("42-chore-master-release-8-21-10");
+
+    let mock = DispatchScript::dispatch()
+        .pr_head(PrHead::Branch("release-please--branches--master"))
+        .runner();
+
+    let task = release_please_task(&repo_path);
+    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+
+    let prompt = std::fs::read_to_string(format!(
+        "{repo_path}/.worktrees/42-chore-master-release-8-21-10/.claude-prompt"
+    ))
+    .expect("prompt file written");
+    assert!(
+        prompt.contains("git rebase origin/release-please--branches--master"),
+        "prompt should rebase onto the release PR's branch, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("PR: https://github.com/org/repo/pull/77"),
+        "the pr-typed url reaches the release runbook, got: {prompt}"
+    );
+    assert!(
+        prompt.to_lowercase().contains("release pr"),
+        "the release runbook is rendered, got: {prompt}"
+    );
+}

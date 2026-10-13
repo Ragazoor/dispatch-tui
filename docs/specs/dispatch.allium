@@ -7,7 +7,7 @@
 --        flags, retry flows, and the surfaces the user sees while a dispatch
 --        is in flight.
 -- Excludes: What the launched agent reads — the prompt skeleton, the design
---           step, the two review runbooks and the bump classifier (see
+--           step, the three review runbooks and the bump classifier (see
 --           dispatch-prompt.allium); task creation and lifecycle (see
 --           tasks.allium); PR/wrap-up flows (see pr-workflow.allium);
 --           split-pane behaviour (see split-pane.allium); MCP dispatch tools
@@ -285,7 +285,7 @@ rule ProvisionDispatch {
     -- WHAT THE LAUNCHED AGENT READS IS NOT SPECIFIED HERE. The prompt skeleton,
     -- the design step a no-plan prompt names and the rule that no trailing line
     -- restates it, the rule that a prompt names no MCP tool merely to say it
-    -- exists, the two review runbooks, the classifier that picks the one branch
+    -- exists, the three review runbooks, the classifier that picks the one branch
     -- a dependency-bump runbook renders, and the dep-only path allowlist that
     -- runbook checks against are all in dispatch-prompt.allium. Its rules fire
     -- on the AgentLaunched event this rule emits, so every guarantee there is
@@ -916,7 +916,8 @@ rule ProvisionDispatch {
         -- be reached and that its worktree was reused, so nothing needed the
         -- network.
         --
-        -- Review tasks (tag pr-review or dependabot) that carry a PR URL are
+        -- Review tasks (tag pr-review, dependabot or release-please — the
+        -- review set, core.allium: "THE REVIEW SET") that carry a PR URL are
         -- an explicit carve-out from all of the above: their worktree is
         -- always based on the PR's head branch instead of <base_branch>, so
         -- the agent sees the PR's code, and the ahead/behind comparison is
@@ -977,7 +978,7 @@ rule ProvisionDispatch {
         -- == The prompt itself ==
         -- What text the launched agent reads — the skeleton every variant
         -- fills in, the design step, the deliberately absent verify command,
-        -- and the two review runbooks — is specified in
+        -- and the three review runbooks — is specified in
         -- dispatch-prompt.allium. Every rule there fires on the same
         -- AgentLaunched event this rule emits.
 }
