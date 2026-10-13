@@ -10,9 +10,7 @@ mod session;
 mod validators;
 mod wrap_up;
 
-pub use crud::{
-    wrap_up_block_message, CloseSessionOutcome, ClosedSession, TaskService, UpdateTaskResult,
-};
+pub use crud::{wrap_up_block_message, TaskService, UpdateTaskResult};
 pub use dispatch::ServedDispatch;
 pub use params::{CreateTaskParams, ListTasksFilter, UpdateTaskParams};
 pub use session::{ServedSession, SessionOutcome};

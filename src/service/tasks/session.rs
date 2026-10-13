@@ -1,18 +1,20 @@
-//! The session seam: wrap-up and exit-session request rows (store-split M5,
-//! task #53258).
+//! The session seam: wrap-up, exit-session and close request rows (store-split
+//! M5, task #53258; the close row M7, task #53260).
 //!
 //! Two halves of one flow, and the only two ways the board takes part in a
 //! wrap-up or a close:
 //!
-//! - **Asking** — [`TaskService::request_wrap_up`] and
-//!   [`TaskService::request_exit_session`] (`store-split.allium: RequestWrapUp`,
-//!   `RequestExitSession`). Thin reducer calls. The module checks them, sets the
+//! - **Asking** — [`TaskService::request_wrap_up`],
+//!   [`TaskService::request_exit_session`] and [`TaskService::close_task`]
+//!   (`store-split.allium: RequestWrapUp`, `RequestExitSession`,
+//!   `RequestCloseTask`). Thin reducer calls. The module checks them, sets the
 //!   Conflict sub_status, applies the close (terminal write, epic rollup,
 //!   phoenix respawn), runs the epic chain and records the exit token as the
 //!   row; nothing is rebased or killed here.
 //! - **Serving** — [`TaskService::serve_session_request`], this host's reaction
 //!   to a `requested` row naming it (`HostClaimsSessionRequest` ->
-//!   `pr-workflow.allium: WrapUpRebase` / `ExitSessionTeardown`): claim the row,
+//!   `pr-workflow.allium: WrapUpRebase` / `ExitSessionTeardown`, which an
+//!   exit_session and a close row are both served by): claim the row,
 //!   do the host work under the row's deadline, report done or failed. The host
 //!   writes no task field.
 
@@ -100,6 +102,18 @@ impl TaskService {
             .await?)
     }
 
+    /// `RequestCloseTask`: `update_tasks`' done path. One module transaction
+    /// applies the Done close (terminal write, epic rollup, phoenix respawn,
+    /// the task's open session request failed "task closed") and, when the task
+    /// had a window or a pr-typed url on this host, writes a `close` row that
+    /// [`serve_session_request`](Self::serve_session_request) tears down. The
+    /// close is whole or absent: `Err` means it is not known to have landed,
+    /// and nothing is torn down here either way.
+    pub async fn close_task(&self, task_id: TaskId) -> Result<(), ServiceError> {
+        self.db.close_task(task_id).await?;
+        Ok(())
+    }
+
     /// `HostRestartFailsInterruptedSessionRequests`: fail the rows this host
     /// left `running` when its previous board stopped. Run once, on the first
     /// connection, before any `requested` row is served (W8).
@@ -129,7 +143,9 @@ impl TaskService {
         }
         match request.kind {
             SessionRequestKind::WrapUp => self.serve_rebase(&request).await,
-            SessionRequestKind::ExitSession => self.serve_teardown(&request).await,
+            SessionRequestKind::ExitSession | SessionRequestKind::Close => {
+                self.serve_teardown(&request).await
+            }
         }
     }
 
@@ -139,7 +155,7 @@ impl TaskService {
     /// the window from the task and nothing else would ever kill it. Best
     /// effort, nothing reported: the row is already finished.
     pub async fn tear_down_failed_exit_window(&self, request: &SessionRequest) {
-        if request.kind != SessionRequestKind::ExitSession {
+        if !request.kind.is_teardown() {
             return;
         }
         if let Some(window) = request.tmux_window.clone() {
@@ -155,7 +171,9 @@ impl TaskService {
         request.deadline.unwrap_or_else(|| {
             let budget = match request.kind {
                 SessionRequestKind::WrapUp => dispatch::WRAP_UP_REBASE_TIMEOUT,
-                SessionRequestKind::ExitSession => dispatch::EXIT_SESSION_TEARDOWN_TIMEOUT,
+                SessionRequestKind::ExitSession | SessionRequestKind::Close => {
+                    dispatch::EXIT_SESSION_TEARDOWN_TIMEOUT
+                }
             };
             request.requested_at
                 + chrono::Duration::from_std(budget).unwrap_or_else(|_| chrono::Duration::zero())
@@ -278,15 +296,41 @@ impl TaskService {
 
     // -- ExitSessionTeardown ----------------------------------------------------
 
-    /// Kill the window the claimed exit_session row names and report. A window
-    /// that is already gone counts as torn down. A failed teardown does NOT
-    /// revert the close: it is recorded on the row and logged.
+    /// Kill the window the claimed exit_session or close row names and report.
+    /// A window that is already gone counts as torn down. A failed teardown
+    /// does NOT revert the close: it is recorded on the row and logged.
+    ///
+    /// A `close` row may name no window (a task carrying only a PR url): then
+    /// there is nothing to kill and only `gh pr close` is left. An exit_session
+    /// row always has one.
     async fn serve_teardown(&self, request: &SessionRequest) -> ServedSession {
-        let Some(window) = request.tmux_window.clone() else {
-            return self
-                .report_session_failure(request, "the row names no window to tear down", false)
-                .await;
+        let failure = match request.tmux_window.clone() {
+            Some(window) => self.kill_row_window(request, window).await,
+            None if request.kind == SessionRequestKind::Close => None,
+            None => {
+                return self
+                    .report_session_failure(request, "the row names no window to tear down", false)
+                    .await
+            }
         };
+
+        // ClosePrOnDone, on this route: the module closed the task into Done and
+        // only a host can run `gh pr close`. Alongside the kill, best effort.
+        self.close_pr_of_exit(request).await;
+
+        match failure {
+            None => self.report_session_done(request).await,
+            Some(reason) => self.report_session_failure(request, &reason, false).await,
+        }
+    }
+
+    /// Kill `window` under the row's deadline: `None` when it is gone, the
+    /// failure reason otherwise.
+    async fn kill_row_window(
+        &self,
+        request: &SessionRequest,
+        window: crate::models::TmuxWindow,
+    ) -> Option<String> {
         let runner = DeadlineRunner::new(
             Arc::clone(&self.runner),
             Arc::clone(&self.clock),
@@ -294,7 +338,7 @@ impl TaskService {
         );
         let killed =
             tokio::task::spawn_blocking(move || crate::tmux::kill_window(&window, &runner)).await;
-        let failure = match killed {
+        match killed {
             Ok(Ok(())) => None,
             // By the time a session closes its window is usually already gone,
             // which is the state the kill asks for — debug, not warn.
@@ -311,15 +355,6 @@ impl TaskService {
                 format!("{e:#}")
             }),
             Err(e) => Some(format!("teardown worker died: {e}")),
-        };
-
-        // ClosePrOnDone, on this route: the module closed the task into Done and
-        // only a host can run `gh pr close`. Alongside the kill, best effort.
-        self.close_pr_of_exit(request).await;
-
-        match failure {
-            None => self.report_session_done(request).await,
-            Some(reason) => self.report_session_failure(request, &reason, false).await,
         }
     }
 

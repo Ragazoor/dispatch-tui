@@ -1,7 +1,7 @@
 //! A session request row (store-split M5).
 //!
 //! Spec: `docs/specs/store-split.allium`'s `SessionRequest`. One wrap_up or
-//! exit_session request for one task, from the moment the module accepts it
+//! exit_session or close request for one task, from the moment the module accepts it
 //! until it is done or failed, kept afterwards as history. The module owns the
 //! row; the board reads it through its subscription
 //! (`sync.allium: SubscribeToThisHostsSessionRequests`), which delivers only the
@@ -16,17 +16,30 @@ use crate::define_str_enum;
 
 define_id_newtype!(SessionRequestId, session_request_id_tests);
 
-/// What a session request asks for: a wrap-up, or the close that follows it.
+/// What a session request asks for: a wrap-up, the close that follows it, or
+/// (M7) the teardown of `update_tasks`' done-path close, which has no wrap-up
+/// behind it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SessionRequestKind {
     WrapUp,
     ExitSession,
+    Close,
 }
 
 define_str_enum!(SessionRequestKind, "session request kind" {
     WrapUp => "wrap_up",
     ExitSession => "exit_session",
+    Close => "close",
 });
+
+impl SessionRequestKind {
+    /// Whether the row is a window teardown: an `exit_session` or a `close`
+    /// (`pr-workflow.allium: ExitSessionTeardown`, which a close row is held
+    /// to as well).
+    pub fn is_teardown(self) -> bool {
+        matches!(self, Self::ExitSession | Self::Close)
+    }
+}
 
 /// Where a request is in its life. `Requested` and `Running` are open; `Done`
 /// and `Failed` are terminal.
@@ -79,7 +92,7 @@ pub struct SessionRequest {
     /// On an exit_session row: the wrap_up row whose id was the token, which
     /// this row consumed.
     pub wrap_up_request: Option<SessionRequestId>,
-    /// On an exit_session row: the window the close cleared from the task,
+    /// On an exit_session or close row: the window the close cleared from the task,
     /// which the host tears down.
     pub tmux_window: Option<TmuxWindow>,
     /// On an exit_session row: the subtask the epic chain requested in the
@@ -102,6 +115,6 @@ impl SessionRequest {
     /// anything. A wrap_up with action done or pr is written already done and
     /// never does.
     pub fn has_host_work(&self) -> bool {
-        self.kind == SessionRequestKind::ExitSession || self.action == WrapUpMode::Rebase
+        self.kind.is_teardown() || self.action == WrapUpMode::Rebase
     }
 }

@@ -574,6 +574,21 @@ impl ReducerCaller for MemoryReducerCaller {
         )
     }
 
+    async fn ensure_managed_epics(
+        &self,
+        reviews_command: String,
+        reviews_interval_secs: i64,
+        cve_command: String,
+        cve_interval_secs: i64,
+    ) -> Result<ReducerOutcome> {
+        self.apply_ensure_managed_epics(
+            reviews_command,
+            reviews_interval_secs,
+            cve_command,
+            cve_interval_secs,
+        )
+    }
+
     async fn create_work_package(&self, row: bindings::WorkPackage) -> Result<WorkPackageId> {
         self.apply_create_work_package(row)
     }
@@ -770,6 +785,10 @@ impl ReducerCaller for MemoryReducerCaller {
         self.faulted("request_exit_session", || {
             self.apply_request_exit_session(task, token, action, pr_url)
         })
+    }
+
+    async fn close_task(&self, task: TaskId, host: String) -> Result<ReducerOutcome> {
+        self.faulted("close_task", || self.apply_close_task(task, host))
     }
 
     async fn fail_interrupted_session_requests(&self, host: String) -> Result<ReducerOutcome> {

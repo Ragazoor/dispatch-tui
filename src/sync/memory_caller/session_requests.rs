@@ -274,6 +274,53 @@ impl MemoryReducerCaller {
         Ok(vec![id])
     }
 
+    pub(super) fn apply_close_task(&self, task: TaskId, host: String) -> Result<ReducerOutcome> {
+        outcome(self.close_task_body(task.0, &host))
+    }
+
+    /// Mirrors the module's `close_task` (`RequestCloseTask`): fail the open
+    /// session request, apply the Done close, respawn a phoenix task, roll the
+    /// epic up and write the close row when there is host work and its host is
+    /// the caller's own. One transaction, which the held lock stands for.
+    fn close_task_body(&self, task_id: i64, host: &str) -> Result<Vec<i64>, String> {
+        let mut tables = self.lock();
+        let Some(task) = tables.tasks.get(&task_id).cloned() else {
+            return Err(format!("task {task_id} no longer exists"));
+        };
+        let stamp = self.now();
+        let open: Vec<module::SessionRequest> = tables
+            .session_requests
+            .values()
+            .filter(|r| r.task_id == task_id && module::session_request_is_open(&r.state))
+            .cloned()
+            .collect();
+        for row in open {
+            self.fail_session_request(&mut tables, row, module::SESSION_REASON_TASK_CLOSED);
+        }
+
+        let epic_id = task.epic_id;
+        let mut closed = module::apply_done_close(task.clone(), &stamp);
+        if module::should_respawn_phoenix(&task.status, &closed)
+            && self.respawn_phoenix_successor_of(&mut tables, &closed, &stamp)
+        {
+            closed.phoenix = false;
+        }
+        self.write_task(&mut tables, closed)?;
+        self.recalculate_epic_chain(&mut tables, epic_id);
+
+        let row = module::new_close_request(&task, host, &stamp);
+        if module::close_has_host_work(&task) && self.acting_for(&tables, &row.host).is_ok() {
+            self.write_session_request(
+                &mut tables,
+                module::SessionRequest {
+                    requested_by: self.sender.clone(),
+                    ..row
+                },
+            );
+        }
+        Ok(vec![])
+    }
+
     /// Mirrors the module's `respawn_phoenix_successor_of`: the successor row,
     /// and whether it landed. A failure is swallowed: Done outranks the respawn.
     pub(super) fn respawn_phoenix_successor_of(

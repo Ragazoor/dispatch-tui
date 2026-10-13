@@ -26,7 +26,7 @@ use chrono::{DateTime, Utc};
 use crate::clock::Clock;
 use crate::models::{
     DispatchRequest, DispatchRequestId, DispatchRequestState, SessionRequest, SessionRequestId,
-    SessionRequestKind, SessionRequestState,
+    SessionRequestState,
 };
 use crate::process::{AgentBinaries, ProcessRunner};
 
@@ -202,7 +202,7 @@ impl SessionRequestObserver {
 
     fn remember_open_exits(&mut self, rows: &[SessionRequest]) {
         for r in rows {
-            if r.host == self.host && r.kind == SessionRequestKind::ExitSession && r.is_open() {
+            if r.host == self.host && r.kind.is_teardown() && r.is_open() {
                 self.open_exits.insert(r.id);
             }
         }
@@ -222,7 +222,7 @@ impl SessionRequestObserver {
             .iter()
             .filter(|r| {
                 r.host == self.host
-                    && r.kind == SessionRequestKind::ExitSession
+                    && r.kind.is_teardown()
                     && r.state == SessionRequestState::Failed
                     && r.tmux_window.is_some()
                     && self.open_exits.remove(&r.id)

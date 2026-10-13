@@ -91,6 +91,8 @@ enum Sent {
     ReportPrStatus(i64, String, String, String),
     ReportPrUnreadable(i64, String, String),
     RequestExitSession(TaskId, i64, String, String),
+    CloseTask(TaskId, String),
+    EnsureManagedEpics(String, i64, String, i64),
     FailInterruptedSessionRequests(String),
     SaveSetting(String, String, String),
     ClearSetting(String, String),
@@ -593,6 +595,21 @@ impl ReducerCaller for RecordingCaller {
         Ok(EpicId(8))
     }
 
+    async fn ensure_managed_epics(
+        &self,
+        reviews_command: String,
+        reviews_interval_secs: i64,
+        cve_command: String,
+        cve_interval_secs: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::EnsureManagedEpics(
+            reviews_command,
+            reviews_interval_secs,
+            cve_command,
+            cve_interval_secs,
+        ))
+    }
+
     async fn create_managed_role_epic(
         &self,
         title: String,
@@ -822,6 +839,10 @@ impl ReducerCaller for RecordingCaller {
         pr_url: String,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::RequestExitSession(task, token.0, action, pr_url))
+    }
+
+    async fn close_task(&self, task: TaskId, host: String) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::CloseTask(task, host))
     }
 
     async fn fail_interrupted_session_requests(
@@ -1407,6 +1428,7 @@ async fn session_requests_name_the_machine_and_speak_the_modules_vocabulary() {
         .report_session_request_failed(SessionRequestId(8), "boom", true)
         .await
         .unwrap());
+    writer.close_task(TaskId(5)).await.unwrap();
     writer.fail_interrupted_session_requests().await.unwrap();
 
     assert_eq!(
@@ -1423,6 +1445,7 @@ async fn session_requests_name_the_machine_and_speak_the_modules_vocabulary() {
             Sent::ClaimSessionRequest(7, "host-me".into()),
             Sent::ReportSessionRequestDone(7, "host-me".into()),
             Sent::ReportSessionRequestFailed(8, "host-me".into(), "boom".into(), true),
+            Sent::CloseTask(TaskId(5), "host-me".into()),
             Sent::FailInterruptedSessionRequests("host-me".into()),
         ]
     );
@@ -1439,9 +1462,44 @@ async fn session_requests_name_the_machine_and_speak_the_modules_vocabulary() {
         .claim_session_request(SessionRequestId(1))
         .await
         .unwrap());
+    assert!(
+        loser.close_task(TaskId(1)).await.is_err(),
+        "a refused close is an error: nothing is known to have landed"
+    );
     let (offline, _) = writer_with(RecordingCaller::refusing("store unreachable"));
     assert!(offline
         .request_exit_session(TaskId(1), SessionRequestId(1), WrapUpMode::Done, None)
+        .await
+        .is_err());
+}
+
+/// `epics.allium: ProvisionManagedEpics` (store-split M7, X4) is one reducer
+/// call: a disabled feed is `""`, no interval is `0`, and the identity is the
+/// module's to stamp, so nothing but the four settings is sent.
+#[tokio::test]
+async fn ensure_managed_epics_sends_the_four_settings_in_the_modules_spelling() {
+    use crate::store::EpicCrud;
+    let (writer, caller) = writer_with(RecordingCaller::returning(&[]));
+
+    writer
+        .ensure_managed_epics(Some("reviews.sh"), Some(600), None, None)
+        .await
+        .unwrap();
+    writer
+        .ensure_managed_epics(None, None, Some("cve.sh"), Some(900))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        caller.sent(),
+        vec![
+            Sent::EnsureManagedEpics("reviews.sh".into(), 600, "".into(), 0),
+            Sent::EnsureManagedEpics("".into(), 0, "cve.sh".into(), 900),
+        ]
+    );
+    let (loser, _) = writer_with(RecordingCaller::rejecting());
+    assert!(loser
+        .ensure_managed_epics(Some("reviews.sh"), None, None, None)
         .await
         .is_err());
 }
@@ -2334,6 +2392,7 @@ async fn every_store_mutation_reaches_the_transport() {
         let _ = db
             .request_exit_session(TaskId(1), request, WrapUpMode::Done, None)
             .await;
+        db.close_task(TaskId(1)).await.unwrap();
         db.fail_interrupted_session_requests().await.unwrap();
     }
 
@@ -2404,6 +2463,9 @@ async fn every_store_mutation_reaches_the_transport() {
     )
     .await
     .unwrap();
+    db.ensure_managed_epics(Some("reviews.sh"), None, None, None)
+        .await
+        .unwrap();
 
     db.batch_patch_sub_status(&[(TaskId(1), SubStatus::Active)])
         .await
@@ -2499,6 +2561,7 @@ async fn every_store_mutation_reaches_the_transport() {
             "ReportSessionRequestDone",
             "ReportSessionRequestFailed",
             "RequestExitSession",
+            "CloseTask",
             "FailInterruptedSessionRequests",
             "CreateEpic",
             "PatchEpic",
@@ -2529,6 +2592,7 @@ async fn every_store_mutation_reaches_the_transport() {
             "IngestFeed",
             "CreateRepoGroupSubEpic",
             "CreateManagedRoleEpic",
+            "EnsureManagedEpics",
             "BatchPatchSubStatus",
             "RespawnPhoenixSuccessor",
             "ClaimPollOwner",

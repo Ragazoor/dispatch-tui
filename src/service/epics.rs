@@ -191,15 +191,15 @@ impl EpicService {
         &self,
         settings: crate::service::ManagedFeedSettings,
     ) -> Result<(), ServiceError> {
-        crate::service::ensure_managed_epics(
-            &*self.db,
-            settings.reviews_command.as_deref(),
-            settings.reviews_interval_secs,
-            settings.cve_command.as_deref(),
-            settings.cve_interval_secs,
-        )
-        .await
-        .map_err(ServiceError::from)
+        self.db
+            .ensure_managed_epics(
+                settings.reviews_command.as_deref(),
+                settings.reviews_interval_secs,
+                settings.cve_command.as_deref(),
+                settings.cve_interval_secs,
+            )
+            .await
+            .map_err(ServiceError::from)
     }
 
     pub async fn create_epic(&self, params: CreateEpicParams) -> Result<Epic, ServiceError> {
@@ -219,12 +219,9 @@ impl EpicService {
             .create_epic(&params.title, &params.description, params.parent_epic_id)
             .await?;
 
-        // A new sub-epic changes the parent's active_sub_epics set, so the
-        // parent must be recalculated immediately (e.g. a Done parent with a
-        // freshly-attached Backlog child regresses right away).
-        if let Some(parent_id) = params.parent_epic_id {
-            self.recalculate_epic(parent_id).await;
-        }
+        // The module's `create_epic` recalculates the parent in the same
+        // transaction (a Done parent with a freshly-attached Backlog child
+        // regresses right away; store-split.allium X3).
 
         // The insert above only carries title/description/parent, so anything
         // else the caller supplied needs a follow-up write.
@@ -422,10 +419,10 @@ impl EpicService {
         // wrote to completed_at (including the Done-transition stamp above)
         // without a second DB round-trip. See `UpdateEpicResult`.
         let completed_at_after_write = patch.completed_at;
+        // `patch_epic` recalculates the epic and its ancestors, and the parent
+        // it left, in the same transaction (store-split.allium X3).
         self.db.patch_epic(epic_id, &patch).await?;
 
-        self.recalculate_parents_after_update(existing, &params)
-            .await;
         Ok(UpdateEpicResult {
             epic_id,
             completed_at_after_write,
@@ -469,43 +466,6 @@ impl EpicService {
             patch = patch.group_by_repo(gbr);
         }
         patch
-    }
-
-    /// Recalculate the parents whose rollup this update changed.
-    async fn recalculate_parents_after_update(
-        &self,
-        existing: Option<Epic>,
-        params: &UpdateEpicParams,
-    ) {
-        // recalculate_epic_status must run whenever a sub-epic's status
-        // changes or its parent membership changes, since either mutates a
-        // parent's active_sub_epics rollup. Recalculate the *parent*, not
-        // this epic itself — self-recalc would fight an explicit status
-        // write with the children-derived target.
-        if let Some(existing) = existing {
-            if let Some(new_parent) = params.parent_epic_id {
-                if let Some(old_parent) = existing.parent_epic_id {
-                    self.recalculate_epic(old_parent).await;
-                }
-                if let Some(new_parent) = new_parent {
-                    self.recalculate_epic(new_parent).await;
-                }
-            } else if params.status.is_some() {
-                if let Some(parent) = existing.parent_epic_id {
-                    self.recalculate_epic(parent).await;
-                }
-            }
-        }
-    }
-
-    /// Recalculate the given epic, logging any database error.
-    async fn recalculate_epic(&self, epic_id: EpicId) {
-        if let Err(err) = self.db.recalculate_epic_status(epic_id).await {
-            tracing::warn!(
-                "failed to recalculate epic status for epic {}: {err}",
-                epic_id.0
-            );
-        }
     }
 
     pub async fn regroup_epic(&self, root: EpicId) -> Result<(), ServiceError> {

@@ -964,13 +964,12 @@ async fn send_system_error_sends_error_message() {
 // `exec_close_session` no longer exist — the TUI wrap-up entry point (`W`)
 // that used to dispatch them is gone. Wrap-up rebase/merge and session close
 // are now exclusively the MCP `wrap_up`/`exit_session` tools' job (see
-// src/mcp/handlers/tasks/wrap_up.rs), which drive `dispatch::finish_task` and
-// `TaskService::close_session` directly rather than through a runtime
-// command. The ExitSession ordering invariant — the tmux teardown follows the
-// terminal write and is gated on it, so a task whose write failed keeps BOTH
-// its live window and its `tmux_window` reference — is covered at that layer
-// by `exit_session_failed_close_leaves_the_task_unchanged` and
-// `exit_session_failed_close_issues_no_kill_window` in
+// src/mcp/handlers/tasks/wrap_up.rs), which write request rows
+// (`TaskService::request_wrap_up`, `request_exit_session`) that this host
+// serves, rather than going through a runtime command. The ExitSession
+// invariant — a close is whole or absent, and the teardown is the host's, from
+// the row the same transaction wrote — is covered at that layer by
+// `a_refused_exit_session_changes_nothing_kills_nothing_and_does_not_chain` in
 // src/mcp/handlers/tests/tasks/dispatch.rs.
 
 #[tokio::test]

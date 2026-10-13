@@ -1,10 +1,10 @@
 //! Wrap-up business logic the board still owns: the host-local pre-checks
 //! `WrapUpRefusesUnfinishedWork` makes before `wrap_up` writes a request, and
-//! the window kill the session seam and `update_tasks`' board-side close share.
+//! the best-effort window kill a failed teardown row still owes.
 //!
 //! Since store-split M5 the rebase and the exit_session teardown are request
 //! rows served by this host (`session.rs`), and the Conflict sub_status is the
-//! module's.
+//! module's. Since M7 so is `update_tasks`' close (a `close` row).
 
 use std::time::Duration;
 
@@ -168,7 +168,8 @@ impl TaskService {
         }
     }
 
-    /// Kill the tmux window a closed session left behind.
+    /// Kill the tmux window a failed teardown row left behind
+    /// (`KillWindowOfFailedExitSession`).
     ///
     /// Blocking (it shells out to tmux), so it runs on the blocking pool. A
     /// failed kill is swallowed: the close already persisted, and there is no

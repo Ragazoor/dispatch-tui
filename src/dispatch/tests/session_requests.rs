@@ -29,7 +29,7 @@ fn row(
     state: SessionRequestState,
 ) -> SessionRequest {
     let requested_at = Utc.with_ymd_and_hms(2026, 10, 12, 12, 0, 0).unwrap();
-    let has_host_work = kind == SessionRequestKind::ExitSession || action == WrapUpMode::Rebase;
+    let has_host_work = kind.is_teardown() || action == WrapUpMode::Rebase;
     SessionRequest {
         id: SessionRequestId(id),
         task_id: TaskId(id * 10),
@@ -44,7 +44,8 @@ fn row(
         reason: None,
         pr_url: None,
         wrap_up_request: None,
-        tmux_window: (kind == SessionRequestKind::ExitSession)
+        tmux_window: kind
+            .is_teardown()
             .then(|| TmuxWindow::parse(&format!("task-{}", id * 10)).unwrap()),
         chained_task: None,
         deadline: has_host_work.then(|| requested_at + chrono::Duration::seconds(30)),
@@ -63,6 +64,12 @@ fn exit(id: i64, host: &str, state: SessionRequestState) -> SessionRequest {
         WrapUpMode::Done,
         state,
     )
+}
+
+/// The row `update_tasks`' done-path close writes (store-split M7, X1): a
+/// teardown like an exit_session, with no wrap_up behind it.
+fn close(id: i64, host: &str, state: SessionRequestState) -> SessionRequest {
+    row(id, host, SessionRequestKind::Close, WrapUpMode::Done, state)
 }
 
 fn ids(rows: &[SessionRequest]) -> Vec<i64> {
@@ -107,6 +114,23 @@ fn only_this_hosts_requested_rows_with_host_work_are_served() {
     assert!(work.tear_down.is_empty());
 }
 
+/// A close row is a teardown like an exit_session: this host's requested one is
+/// served, another host's is not.
+#[test]
+fn a_close_row_is_served_like_an_exit_session_row() {
+    let mut observer = SessionRequestObserver::new(HOST);
+    let rows = vec![
+        close(1, HOST, SessionRequestState::Requested),
+        close(2, OTHER_HOST, SessionRequestState::Requested),
+        close(3, HOST, SessionRequestState::Running),
+    ];
+
+    let work = observer.observe(&rows);
+
+    assert_eq!(ids(&work.serve), vec![1]);
+    assert!(work.tear_down.is_empty());
+}
+
 /// Each row is handed out once, however often the set is redelivered; a row
 /// the reactor released (its claim never reached the module) is handed out
 /// again.
@@ -125,6 +149,27 @@ fn a_row_is_handed_out_once_unless_released() {
 
     observer.release(SessionRequestId(1));
     assert_eq!(observer.observe(&rows).serve.len(), 1);
+}
+
+/// A close row seen open and then failed owes its window a kill too
+/// (`KillWindowOfFailedExitSession` covers it): once, and not when it arrives
+/// already failed.
+#[test]
+fn a_close_row_seen_to_fail_is_torn_down_once() {
+    let mut observer = SessionRequestObserver::new(HOST);
+    observer.observe(&[close(1, HOST, SessionRequestState::Running)]);
+
+    let failed = [close(1, HOST, SessionRequestState::Failed)];
+    assert_eq!(ids(&observer.observe(&failed).tear_down), vec![1]);
+    assert!(observer.observe(&failed).tear_down.is_empty());
+
+    let mut late = SessionRequestObserver::new(HOST);
+    assert!(
+        late.observe(&[close(2, HOST, SessionRequestState::Failed)])
+            .tear_down
+            .is_empty(),
+        "a row that arrives already failed is history"
+    );
 }
 
 /// An exit_session row seen open and then failed owes its window a kill: the

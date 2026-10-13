@@ -1,27 +1,19 @@
 use super::*;
 
-// -- close_session ---------------------------------------------------------
+// -- close_task ------------------------------------------------------------
 //
-// The one purpose-built terminal write. Callers gate the tmux teardown and the
-// epic chain on its Result, so `Err` must mean "the write did not land" and
-// nothing else — see ExitSession in docs/specs/pr-workflow.allium.
+// `update_tasks`' done-path close is the module's (`RequestCloseTask`); the
+// row it writes and the host's teardown are in `session_requests.rs`. What is
+// pinned here is the close itself, through the service.
 
 #[tokio::test]
-async fn close_session_done_moves_task_to_done_and_clears_the_window() {
+async fn close_task_done_moves_task_to_done_and_clears_the_window() {
     let db = test_db().await;
     let svc = task_svc(&db);
-    let (id, window) = running_task_with_window(&db, None).await;
+    let (id, _window) = running_task_with_window(&db, None).await;
 
-    let closed = svc
-        .close_session(id, crate::service::CloseSessionOutcome::Done)
-        .await
-        .unwrap();
+    svc.close_task(id).await.unwrap();
 
-    assert_eq!(
-        closed.window,
-        Some(window),
-        "the caller tears down the window this close cleared"
-    );
     let task = db.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     assert_eq!(task.sub_status, SubStatus::default_for(TaskStatus::Done));
@@ -38,61 +30,14 @@ async fn close_session_done_moves_task_to_done_and_clears_the_window() {
 }
 
 #[tokio::test]
-async fn close_session_pr_moves_task_to_review_and_records_the_url() {
+async fn close_task_missing_task_is_an_error() {
     let db = test_db().await;
     let svc = task_svc(&db);
-    let (id, window) = running_task_with_window(&db, None).await;
-
-    let closed = svc
-        .close_session(
-            id,
-            crate::service::CloseSessionOutcome::Review {
-                pr_url: crate::models::TaskUrl::new(
-                    "https://github.com/acme/repo/pull/7".to_string(),
-                    crate::models::UrlType::Pr,
-                ),
-            },
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(closed.window, Some(window));
-    let task = db.get_task(id).await.unwrap();
-    assert_eq!(task.status, TaskStatus::Review);
-    assert_eq!(task.sub_status, SubStatus::default_for(TaskStatus::Review));
-    assert!(task.tmux_window.is_none());
-    let url = task.url.expect("pr url recorded");
-    assert_eq!(url.url, "https://github.com/acme/repo/pull/7");
-    assert!(url.is_pr());
+    assert!(svc.close_task(TaskId(999_999)).await.is_err());
 }
 
 #[tokio::test]
-async fn close_session_reports_a_missing_window_as_none() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
-
-    let closed = svc
-        .close_session(id, crate::service::CloseSessionOutcome::Done)
-        .await
-        .unwrap();
-
-    assert!(closed.window.is_none(), "nothing to tear down");
-}
-
-#[tokio::test]
-async fn close_session_missing_task_is_not_found() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-    let err = svc
-        .close_session(TaskId(999_999), crate::service::CloseSessionOutcome::Done)
-        .await
-        .unwrap_err();
-    assert!(matches!(err, ServiceError::NotFound(_)));
-}
-
-#[tokio::test]
-async fn close_session_recalculates_the_parent_epic() {
+async fn close_task_recalculates_the_parent_epic() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
@@ -102,9 +47,7 @@ async fn close_session_recalculates_the_parent_epic() {
         .unwrap();
     let (id, _) = running_task_with_window(&db, Some(epic.id)).await;
 
-    svc.close_session(id, crate::service::CloseSessionOutcome::Done)
-        .await
-        .unwrap();
+    svc.close_task(id).await.unwrap();
 
     let after = db.get_epic(epic.id).await.unwrap();
     assert_eq!(

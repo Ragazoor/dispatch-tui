@@ -1,158 +1,25 @@
-//! Idempotent provisioning of the managed feed-epic tree (WP5).
+//! Managed feed-epic provisioning (WP5): settings in, one reducer call out.
 //!
-//! Materialises the epics that the PR-review feed routing depends on, matched
-//! by [`FeedRole`] (never by title, so user renames survive):
+//! The managed epics are the ones the PR-review feed routing depends on,
+//! matched by feed role (never by title, so user renames survive): a
+//! `reviews_parent` root carrying the reviews `feed_command` with
+//! `my_reviews` / `team_reviews` / `bots` sub-epics that carry none, and a
+//! `cve` root carrying the CVE `feed_command`. Each subtree exists only while
+//! its command is configured; clearing the command is the opt-out. See the
+//! `ProvisionManagedEpics` rule in `docs/specs/epics.allium`.
 //!
-//! - a `reviews_parent` root epic carrying the reviews `feed_command`, with
-//!   `my_reviews` / `team_reviews` / `bots` sub-epics that carry **no**
-//!   `feed_command` (so the `FeedRunner` never polls them independently — the
-//!   B3 concurrency guard; they are reconciled only via the parent's role
-//!   router in `run_role_routed_feed_sync`);
-//! - a `cve` root epic carrying the CVE `feed_command`.
-//!
-//! Each subtree is provisioned only when its command is configured. Running
-//! this repeatedly converges on the same tree without duplicates. Deleting a
-//! managed epic is the only way it goes away (task #4971); the next `ensure`
-//! re-provisions it while its command is still configured, and clearing the
-//! command is the opt-out. See the `ProvisionManagedEpics` rule and the
-//! `config` block in `docs/specs/epics.allium` for the authoritative
-//! semantics.
-//!
-//! This lives in the service layer and provisions brand-new, childless epics,
-//! so it goes through [`EpicCrud`] directly rather than
-//! [`crate::service::EpicService`] (which does not expose `feed_role`); no
-//! epic-status recalculation is needed because freshly-created epics have no
-//! children.
+//! The provisioning itself is the module's `ensure_managed_epics` reducer
+//! (`epics.allium: ProvisionManagedEpics`, store-split M7 X4): the whole tree
+//! in one transaction, so two boards starting together cannot create
+//! duplicates. What stays here is request shape: reading and writing the four
+//! settings, and the feed-interval floor on the two intervals.
 
 use anyhow::Result;
 
-use crate::models::{Epic, EpicId, FeedRole};
 use crate::service::ServiceError;
-use crate::store::{EpicCrud, EpicPatch};
-
-/// Default display title for a freshly-created managed epic. Consulted only on
-/// creation — once an epic exists its title is owned by the user. The sub-epic
-/// titles mirror `ensure_role_sub_epic`'s titles in the module's `feed_ingest.rs` so lazy (reconcile-time)
-/// and eager (provisioning-time) creation agree.
-fn managed_role_title(role: FeedRole) -> &'static str {
-    match role {
-        FeedRole::ReviewsParent => "PR Reviews",
-        FeedRole::MyReviews => "My Reviews",
-        FeedRole::TeamReviews => "Team Reviews",
-        FeedRole::Bots => "Bots",
-        FeedRole::Cve => "CVE",
-        // Not a managed role; never passed here.
-        FeedRole::None => "Reviews",
-    }
-}
-
-/// Ensure the managed feed-epic tree exists, idempotently.
-///
-/// `*_command` is the configured feed script for each subtree; `None` skips
-/// that subtree entirely (provisioning is opt-in). `*_interval_secs` is the
-/// poll cadence for the command-carrying root; `None` lets the runtime fall
-/// back to the default feed interval.
-pub async fn ensure_managed_epics(
-    db: &dyn EpicCrud,
-    reviews_command: Option<&str>,
-    reviews_interval_secs: Option<i64>,
-    cve_command: Option<&str>,
-    cve_interval_secs: Option<i64>,
-) -> Result<()> {
-    // Snapshot once: role lookups read from this list. Creating one role never
-    // affects the lookup of another (roles are distinct), and within a single
-    // call we never create the same role twice.
-    let epics = db.list_epics().await;
-
-    if let Some(cmd) = reviews_command {
-        let parent_id = ensure_role_epic(
-            db,
-            &epics,
-            FeedRole::ReviewsParent,
-            None,
-            Some(cmd),
-            reviews_interval_secs,
-        )
-        .await?;
-        for role in [FeedRole::MyReviews, FeedRole::TeamReviews, FeedRole::Bots] {
-            ensure_role_epic(db, &epics, role, Some(parent_id), None, None).await?;
-        }
-    }
-
-    if let Some(cmd) = cve_command {
-        ensure_role_epic(
-            db,
-            &epics,
-            FeedRole::Cve,
-            None,
-            Some(cmd),
-            cve_interval_secs,
-        )
-        .await?;
-    }
-
-    Ok(())
-}
-
-/// Ensure a single managed epic with `role` (under `parent`) exists.
-///
-/// - Present: keep it (title untouched, preserving any user rename); for
-///   command-carrying roles, reconcile `feed_command`/interval if the
-///   configured value differs. Returns its id.
-/// - Absent (never created yet, or deleted by the user — task #4971 made
-///   delete the only way a managed epic goes away, and a re-provision on the
-///   next ensure while its command is still configured is the intended
-///   outcome; clearing the command is the opt-out): create it and stamp
-///   `feed_role` (+ command/interval for command-carrying roles). Returns the
-///   new id.
-async fn ensure_role_epic(
-    db: &dyn EpicCrud,
-    existing: &[Epic],
-    role: FeedRole,
-    parent: Option<EpicId>,
-    command: Option<&str>,
-    interval_secs: Option<i64>,
-) -> Result<EpicId> {
-    if let Some(epic) = existing
-        .iter()
-        .find(|e| e.feed_role == role && e.parent_epic_id == parent)
-    {
-        // Never touch the title. Reconcile only the feed command /
-        // interval, and only for the command-carrying roles.
-        if let Some(cmd) = command {
-            let mut patch = EpicPatch::new();
-            if epic.feed_command.as_deref() != Some(cmd) {
-                patch = patch.feed_command(Some(cmd));
-            }
-            if epic.feed_interval_secs != interval_secs {
-                patch = patch.feed_interval_secs(interval_secs);
-            }
-            // patch_epic short-circuits an empty patch, so calling it
-            // unconditionally is a no-op when nothing differs.
-            db.patch_epic(epic.id, &patch).await?;
-        }
-        return Ok(epic.id);
-    }
-
-    // Single insert with feed_role set from the start: two instances racing
-    // to provision the same (parent, role) collide on the partial unique
-    // index, and the loser's insert re-selects the winner's row rather than
-    // leaving a `feed_role = 'none'` orphan behind (see
-    // EpicCrud::create_managed_role_epic).
-    let id = db
-        .create_managed_role_epic(
-            managed_role_title(role),
-            parent,
-            role,
-            command,
-            interval_secs,
-        )
-        .await?;
-    Ok(id)
-}
 
 /// The four managed-feed settings, read from the settings table and fed to
-/// [`ensure_managed_epics`]. A named struct (rather than a 4-tuple) so the two
+/// `EpicCrud::ensure_managed_epics`. A named struct (rather than a 4-tuple) so the two
 /// `(command, interval)` pairs can't be transposed at a call site.
 #[derive(Debug, Clone, Default)]
 pub struct ManagedFeedSettings {
@@ -228,12 +95,11 @@ pub async fn write_managed_feed_settings(
 /// tests. A no-op when neither command is configured.
 // Takes the umbrella `&dyn TaskStore` so a concrete `&Store` (startup, tests)
 // coerces in. Non-service consumers go through
-// `EpicServiceApi::provision_managed_feeds` instead. The inner
-// `ensure_managed_epics` call upcasts the trait object to `&dyn EpicCrud`.
+// `EpicServiceApi::provision_managed_feeds` instead. The `ensure_managed_epics`
+// call upcasts the trait object to `&dyn EpicCrud`.
 pub async fn provision_managed_feeds_from_settings(db: &dyn crate::store::TaskStore) -> Result<()> {
     let s = read_managed_feed_settings(db).await?;
-    ensure_managed_epics(
-        db,
+    db.ensure_managed_epics(
         s.reviews_command.as_deref(),
         s.reviews_interval_secs,
         s.cve_command.as_deref(),
@@ -245,14 +111,14 @@ pub async fn provision_managed_feeds_from_settings(db: &dyn crate::store::TaskSt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::MIN_FEED_INTERVAL_SECS;
-    use crate::store::{EpicRead, SettingsStore, Store};
+    use crate::models::{Epic, FeedRole, MIN_FEED_INTERVAL_SECS};
+    use crate::store::{EpicCrud, EpicPatch, EpicRead, SettingsStore, Store};
 
     const REVIEWS: &str = "/scripts/fetch-reviews.sh";
     const CVE: &str = "/scripts/fetch-cve.sh";
 
     async fn ensure(db: &Store) {
-        ensure_managed_epics(db, Some(REVIEWS), Some(300), Some(CVE), Some(900))
+        db.ensure_managed_epics(Some(REVIEWS), Some(300), Some(CVE), Some(900))
             .await
             .unwrap();
     }

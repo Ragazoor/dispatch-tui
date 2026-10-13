@@ -103,6 +103,24 @@ impl super::super::EpicCrud for Store {
             .await
     }
 
+    async fn ensure_managed_epics(
+        &self,
+        reviews_command: Option<&str>,
+        reviews_interval_secs: Option<i64>,
+        cve_command: Option<&str>,
+        cve_interval_secs: Option<i64>,
+    ) -> Result<()> {
+        self.caller
+            .ensure_managed_epics(
+                reviews_command.unwrap_or_default().to_string(),
+                reviews_interval_secs.unwrap_or(0),
+                cve_command.unwrap_or_default().to_string(),
+                cve_interval_secs.unwrap_or(0),
+            )
+            .await?
+            .applied()
+    }
+
     async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()> {
         if !patch.has_changes() {
             return Ok(());

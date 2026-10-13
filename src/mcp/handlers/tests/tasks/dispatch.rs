@@ -38,11 +38,6 @@ struct ChainFixture {
     /// The same runner the state holds, kept concrete so a test can inspect
     /// which commands the close path actually issued.
     runner: Arc<MockProcessRunner>,
-    /// Only set by [`ChainFixture::with_bg_done`]: fires with
-    /// [`crate::mcp::BackgroundWrite::KillWindow`] after `exit_session`'s
-    /// detached tmux teardown completes, so a test can await it deterministically
-    /// instead of sleeping.
-    bg_done_rx: Option<tokio::sync::mpsc::UnboundedReceiver<crate::mcp::BackgroundWrite>>,
     /// The host reactor serving this fixture's dispatch requests
     /// ([`spawn_host`]). Aborted with the fixture.
     host: Option<tokio::task::JoinHandle<()>>,
@@ -68,10 +63,9 @@ impl ChainFixture {
         Self::build_with(runner, None).await
     }
 
-    /// Like [`ChainFixture::new`], but with a `task_svc` whose `update_task`
-    /// always fails, so `exit_session`'s terminal close patch cannot land. This
-    /// is the `close_persisted = false` branch of `ExitSession` /
-    /// `ExitSessionViaMcp`.
+    /// Like [`ChainFixture::new`], but with a `task_svc` whose `close_task`
+    /// always fails, so `update_tasks(status="done")`'s close does not take
+    /// effect (`MarkTaskDoneViaMcp`).
     async fn with_failing_close() -> Self {
         let svc = Arc::new(FailingCloseTaskService::default());
         let fx = Self::build(Some(svc.clone())).await;
@@ -89,69 +83,6 @@ impl ChainFixture {
         let fx = Self::build(Some(svc.clone())).await;
         let _ = svc.db.set(fx.db.clone());
         fx
-    }
-
-    /// Like [`ChainFixture::new`], but wires a completion signal for
-    /// `exit_session`'s detached tmux teardown, so a test can await it via
-    /// [`ChainFixture::wait_for_kill_window_done`] instead of sleeping.
-    async fn with_bg_done() -> Self {
-        let runner = Arc::new(MockProcessRunner::new(
-            (0..24).map(|_| MockProcessRunner::ok()).collect(),
-        ));
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
-
-        let (notify_tx, notify_rx) =
-            tokio::sync::mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
-        let (bg_tx, bg_rx) = tokio::sync::mpsc::unbounded_channel::<crate::mcp::BackgroundWrite>();
-        let (state, db) = test_state_with_overrides_and_bg_done(
-            runner.clone() as Arc<dyn ProcessRunner>,
-            Some(notify_tx),
-            None,
-            Some(bg_tx),
-        )
-        .await;
-        let host = Some(spawn_host(&state));
-        Self {
-            _dir: dir,
-            repo_path,
-            db,
-            state,
-            notify_rx,
-            runner,
-            bg_done_rx: Some(bg_rx),
-            host,
-        }
-    }
-
-    /// Await the completion signal for `exit_session`'s detached tmux teardown.
-    /// Only valid on a fixture built via [`ChainFixture::with_bg_done`].
-    ///
-    /// Bounded, like the `bg_done.recv()` in `src/mcp/handlers/tests/usage.rs`: a
-    /// teardown that never signals is a real regression, and an unbounded await
-    /// would hang the whole suite instead of reporting it. This is a deadline on
-    /// a completion signal, not a wall-clock wait for work to finish — the loop
-    /// still returns the instant `KillWindow` arrives.
-    async fn wait_for_kill_window_done(&mut self) {
-        let rx = self
-            .bg_done_rx
-            .as_mut()
-            .expect("wait_for_kill_window_done requires ChainFixture::with_bg_done");
-        let wait = async {
-            loop {
-                match rx.recv().await {
-                    Some(crate::mcp::BackgroundWrite::KillWindow) => break,
-                    Some(_) => continue,
-                    None => {
-                        panic!("bg-done channel closed before the kill-window teardown completed")
-                    }
-                }
-            }
-        };
-        tokio::time::timeout(std::time::Duration::from_secs(5), wait)
-            .await
-            .expect("timed out waiting for the kill-window teardown to signal completion");
     }
 
     async fn build(task_svc_override: Option<Arc<dyn crate::service::TaskServiceApi>>) -> Self {
@@ -187,7 +118,6 @@ impl ChainFixture {
             db,
             state,
             notify_rx,
-            bg_done_rx: None,
             runner,
             host,
         }
@@ -215,18 +145,19 @@ impl ChainFixture {
         .expect("the request must finish")
     }
 
-    /// Wait for `task`'s exit_session row to finish — the host's teardown ran
+    /// Wait for `task`'s exit_session or close row to finish — the host's teardown ran
     /// and reported. A deadline on a signal, not a wall-clock wait: it wakes on
     /// every row change and returns the instant the row finishes.
     async fn wait_for_teardown(&self, task: crate::models::TaskId) {
         let mut changes = self.db.session_request_changes();
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                let finished = self.db.session_requests().await.into_iter().any(|r| {
-                    r.task_id == task
-                        && r.kind == crate::models::SessionRequestKind::ExitSession
-                        && !r.is_open()
-                });
+                let finished = self
+                    .db
+                    .session_requests()
+                    .await
+                    .into_iter()
+                    .any(|r| r.task_id == task && r.kind.is_teardown() && !r.is_open());
                 if finished {
                     return;
                 }
@@ -333,13 +264,12 @@ impl ChainFixture {
 
 // -- update_task(status="done") closes but never chains ----------------------
 //
-// MarkTaskDoneViaMcp (mcp-task-tools.allium) is the one close still made in the
-// board (until M7, store-split.allium: W13): `close_session` plus
-// `kill_session_window` through the `perform_close` helper in wrap_up.rs, with
-// no token and no chain. The chain is the module's, inside
-// `request_exit_session`'s transaction, and only a close with a wrap_up behind
-// it can say the closed work reached base_branch. These are the teardown
-// checks plus that one divergence.
+// MarkTaskDoneViaMcp (mcp-task-tools.allium) closes in the module since M7
+// (`close_task`, store-split.allium: RequestCloseTask), with no token and no
+// chain; the window is torn down by the host serving the `close` row. The chain
+// is the module's, inside `request_exit_session`'s transaction, and only a
+// close with a wrap_up behind it can say the closed work reached base_branch.
+// These are the teardown checks plus that one divergence.
 
 /// update_task(status="done") leaves the epic's next backlog subtask in
 /// backlog — the divergence from `exit_session_dispatches_first_backlog_subtask`.
@@ -393,30 +323,43 @@ async fn update_task_done_response_never_names_a_chained_subtask() {
 
 /// Closing a task with a live tmux window via update_task(status="done")
 /// tears the window down, the same as exit_session does — parity with
-/// `exit_session_successful_close_kills_the_tmux_window`. Uses
-/// `ChainFixture::with_bg_done` to await the detached teardown
-/// deterministically instead of sleeping — see the "No `tokio::time::sleep`
-/// in tests" section of `docs/conventions.md`.
+/// `exit_session_successful_close_kills_the_tmux_window`. The module writes a
+/// `close` row naming the window and this host's reactor serves it; the test
+/// awaits that row finishing on the subscription's change signal rather than
+/// sleeping — see the "No `tokio::time::sleep` in tests" section of
+/// `docs/conventions.md`.
 #[tokio::test]
 async fn update_task_done_kills_the_tmux_window() {
-    let mut fx = ChainFixture::with_bg_done().await;
+    let fx = ChainFixture::new().await;
     let closing = fx.closing_subtask(None).await;
 
     let resp = fx.close_via_update_task(closing).await;
     assert!(resp.error.is_none(), "close must succeed: {:?}", resp.error);
 
-    fx.wait_for_kill_window_done().await;
+    fx.wait_for_teardown(closing).await;
 
-    assert!(
-        !fx.kill_window_calls().is_empty(),
-        "expected a tmux kill-window call"
+    assert_eq!(
+        fx.kill_window_calls().len(),
+        1,
+        "expected exactly one tmux kill-window call: {:?}",
+        fx.kill_window_calls()
     );
     assert!(fx.db.get_task(closing).await.unwrap().tmux_window.is_none());
+    let close_rows: Vec<_> = fx
+        .db
+        .session_requests()
+        .await
+        .into_iter()
+        .filter(|r| r.task_id == closing && r.kind == crate::models::SessionRequestKind::Close)
+        .collect();
+    assert_eq!(close_rows.len(), 1, "one close row: {close_rows:?}");
+    assert!(close_rows[0].wrap_up_request.is_none(), "no exit token");
 }
 
-/// A terminal write that does not persist must leave the task exactly as it
-/// was — no status change, no cleared window, no chain. (`exit_session`'s own
-/// close is the module's, whole or absent: `a_refused_exit_session_changes_nothing_kills_nothing_and_does_not_chain`.)
+/// A close that does not take effect must leave the task exactly as it was —
+/// no status change, no cleared window, no chain — and say so in the response.
+/// (The module's close is whole or absent, as `exit_session`'s is:
+/// `a_refused_exit_session_changes_nothing_kills_nothing_and_does_not_chain`.)
 #[tokio::test]
 async fn update_task_done_failed_close_leaves_the_task_unchanged() {
     let fx = ChainFixture::with_failing_close().await;
@@ -819,13 +762,14 @@ async fn exit_session_chain_reports_no_failure_when_dispatch_succeeds() {
 //
 // Since store-split M5 `exit_session`'s close is the module's, in ONE
 // transaction with the token, the epic rollup and the chain
-// (`pr-workflow.allium: ExitSession`): it took effect whole or not at all. The
-// board-side `close_persisted` gate survives only on `update_tasks`
-// status="done" (`MarkTaskDoneViaMcp`, until M7), whose tests drive it below.
+// (`pr-workflow.allium: ExitSession`), and since M7 so is `update_tasks`
+// status="done" (`close_task`): either took effect whole or not at all. The
+// board no longer gates a teardown on a close; the one test below drives a
+// close call that gets no effect.
 
-/// A task service whose `close_session` always fails, so `update_tasks`'
-/// board-side close patch cannot land. Every other method inherits the
-/// panicking default from `TaskServiceApiStub` — which is itself an assertion.
+/// A task service whose `close_task` always fails, so `update_tasks`' close
+/// does not take effect. Every other method inherits the panicking default from
+/// `TaskServiceApiStub` — which is itself an assertion.
 #[derive(Default)]
 struct FailingCloseTaskService {
     /// Bound by the fixture once its database exists; backs the real read the
@@ -845,11 +789,10 @@ impl crate::service::TaskServiceApiStub for FailingCloseTaskService {
         })
     }
 
-    async fn close_session(
+    async fn close_task(
         &self,
         _task_id: crate::models::TaskId,
-        _outcome: crate::service::CloseSessionOutcome,
-    ) -> Result<crate::service::ClosedSession, crate::service::ServiceError> {
+    ) -> Result<(), crate::service::ServiceError> {
         Err(crate::service::ServiceError::Internal(anyhow::anyhow!(
             "simulated persistence failure"
         )))

@@ -244,11 +244,13 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
 /// session caller or a dispatched agent acting on a task other than its own;
 /// never for a dispatched agent closing itself (that stays wrap_up +
 /// exit_session), and never combined with any other field in the same call.
-/// Since store-split M5 `perform_close` (in `wrap_up.rs`) belongs to this call
-/// alone: `exit_session` is a request row whose close runs in the module. It
-/// does NOT chain the epic's next subtask: that chain runs in the module, on
-/// an exit_session close, because only a close with a `wrap_up` behind it can
-/// say the work reached `base_branch`.
+/// The close is the module's: one `close_task` reducer call
+/// (`store-split.allium: RequestCloseTask`) applies the Done write, rolls the
+/// epic up and, when there is a window or a PR to deal with, writes a `close`
+/// row this board's host then serves. It does NOT chain the epic's next
+/// subtask: that chain runs in the module, on an exit_session close, because
+/// only a close with a `wrap_up` behind it can say the work reached
+/// `base_branch`.
 /// See `MarkTaskDoneViaMcp` in `docs/specs/mcp-task-tools.allium`.
 async fn handle_mark_task_done(
     state: &McpState,
@@ -280,28 +282,33 @@ async fn handle_mark_task_done(
         );
     }
 
+    // The existence read is the not-found answer: the module refuses a missing
+    // task too, but with a message of its own.
     let task = match state.task_svc.get_task(task_id).await {
         Ok(t) => t,
         Err(e) => return service_err_to_response(id, e),
     };
 
-    let text = match super::wrap_up::perform_close(
-        state,
-        &task,
-        crate::service::CloseSessionOutcome::Done,
-    )
-    .await
-    {
-        super::wrap_up::ClosePathOutcome::NotPersisted => format!(
-            "Task #{} could NOT be moved to done — the close did not take effect. \
-             The task is still in its previous status; try again.",
-            task_id.0
-        ),
+    let closed = state.task_svc.close_task(task_id).await;
+    state.notify_task_changed(task_id);
+    if let Some(epic_id) = task.epic_id {
+        state.notify_epic_changed(epic_id);
+    }
+    let text = match closed {
+        Err(e) => {
+            tracing::warn!(
+                task_id = task_id.0,
+                "update_tasks done: the close failed: {e}"
+            );
+            format!(
+                "Task #{} could NOT be moved to done — the close did not take effect. \
+                 The task is still in its previous status; try again.",
+                task_id.0
+            )
+        }
         // No chain runs on this path, so unlike exit_session's, this response
         // never names a next subtask.
-        super::wrap_up::ClosePathOutcome::Persisted => {
-            format!("Task #{} marked done.", task_id.0)
-        }
+        Ok(()) => format!("Task #{} marked done.", task_id.0),
     };
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }

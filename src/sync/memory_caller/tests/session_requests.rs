@@ -1075,3 +1075,351 @@ async fn an_injected_fault_on_a_session_reducer_is_honoured() {
         "applied, but the reply never came back"
     );
 }
+
+// -- RequestCloseTask (store-split M7, X1) ---------------------------------------------
+
+async fn close(caller: &MemoryReducerCaller, task: TaskId) -> ReducerOutcome {
+    caller.close_task(task, HOST.into()).await.unwrap()
+}
+
+fn close_rows(rows: &SharedRows, task: TaskId) -> Vec<crate::models::SessionRequest> {
+    rows.session_requests()
+        .into_iter()
+        .filter(|r| r.task_id == task && r.kind == SessionRequestKind::Close)
+        .collect()
+}
+
+/// A running task with a window closes whole in one call: Done, window cleared,
+/// completed, `stop_pending` cleared, and ONE close row naming the window the
+/// close cleared, with no token (`wrap_up_request`) and no chain.
+#[tokio::test]
+async fn close_task_applies_the_done_close_and_writes_a_close_row() {
+    let (caller, rows) = caller();
+    let task = dispatched_task(&caller).await;
+    caller
+        .patch_task(
+            task,
+            bindings::TaskPatch {
+                stop_pending: Some(true),
+                ..blank_task_patch()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(close(&caller, task).await.won());
+
+    let t = rows.task(task).unwrap();
+    assert_eq!(t.status, TaskStatus::Done);
+    assert_eq!(t.sub_status, SubStatus::default_for(TaskStatus::Done));
+    assert!(t.tmux_window.is_none());
+    assert!(t.completed_at.is_some());
+    assert!(!t.stop_pending, "leaving running clears a deferred Stop");
+
+    let [row] = close_rows(&rows, task).try_into().expect("one close row");
+    assert_eq!(row.action, WrapUpMode::Done);
+    assert_eq!(row.host, HOST);
+    assert_eq!(row.requested_by, ME);
+    assert_eq!(row.state, SessionRequestState::Requested);
+    assert_eq!(
+        row.tmux_window.as_ref().map(|w| w.as_str()),
+        Some(format!("task-{}", task.0).as_str())
+    );
+    assert!(row.wrap_up_request.is_none(), "no token is consumed");
+    assert!(row.chained_task.is_none(), "no epic chain runs");
+    assert_eq!(
+        row.deadline.unwrap() - row.requested_at,
+        chrono::Duration::seconds(30),
+        "config.exit_session_teardown_timeout"
+    );
+}
+
+/// No window and no pr-typed url means no host work, so no row.
+#[tokio::test]
+async fn close_task_without_host_work_writes_no_row() {
+    let (caller, rows) = caller();
+    let task = caller.create_task(blank_task()).await.unwrap();
+
+    assert!(close(&caller, task).await.won());
+
+    assert_eq!(rows.task(task).unwrap().status, TaskStatus::Done);
+    assert!(close_rows(&rows, task).is_empty());
+}
+
+/// A pr-typed url alone is host work (`gh pr close`); with no host on the task
+/// the row names the caller's host and carries no window.
+#[tokio::test]
+async fn close_task_with_a_pr_url_and_no_host_writes_a_row_on_the_argument_host() {
+    let (caller, rows) = caller();
+    let task = caller.create_task(blank_task()).await.unwrap();
+    caller
+        .patch_task(
+            task,
+            bindings::TaskPatch {
+                url: Some("https://github.com/o/r/pull/9".into()),
+                url_type: Some("pr".into()),
+                ..blank_task_patch()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(close(&caller, task).await.won());
+
+    let [row] = close_rows(&rows, task).try_into().expect("one close row");
+    assert_eq!(row.host, HOST);
+    assert!(row.tmux_window.is_none());
+}
+
+/// D11: a row naming a teammate's host is never written, but the task closes.
+#[tokio::test]
+async fn close_task_writes_no_row_for_a_host_the_caller_does_not_own() {
+    let (caller, rows) = caller();
+    let caller = caller.with_registered_host("host-teammate", "someone-else");
+    let task = dispatched_task(&caller).await;
+    caller
+        .patch_task(
+            task,
+            bindings::TaskPatch {
+                host: Some("host-teammate".into()),
+                ..blank_task_patch()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(close(&caller, task).await.won());
+
+    assert_eq!(rows.task(task).unwrap().status, TaskStatus::Done);
+    assert!(close_rows(&rows, task).is_empty());
+}
+
+/// A stuck wrap_up rebase is failed "task closed" rather than blocking the
+/// close, and W1's one open row still holds: the close row is the only open one.
+#[tokio::test]
+async fn close_task_fails_an_open_session_request_instead_of_refusing() {
+    let (caller, rows) = caller();
+    let task = dispatched_task(&caller).await;
+    let stuck = applied_id(wrap_up(&caller, task, "rebase").await);
+
+    assert!(close(&caller, task).await.won());
+
+    let stuck = rows.session_request(stuck).unwrap();
+    assert_eq!(stuck.state, SessionRequestState::Failed);
+    assert_eq!(stuck.reason.as_deref(), Some("task closed"));
+    let open: Vec<_> = rows
+        .session_requests()
+        .into_iter()
+        .filter(|r| r.task_id == task && r.is_open())
+        .collect();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].kind, SessionRequestKind::Close);
+}
+
+/// A re-close of a done task is no transition: it keeps `completed_at` and
+/// respawns nothing.
+#[tokio::test]
+async fn close_task_on_a_done_task_keeps_its_completion() {
+    let (caller, rows, clock) = caller_with_clock();
+    let task = dispatched_task(&caller).await;
+    assert!(close(&caller, task).await.won());
+    let first = rows.task(task).unwrap().completed_at;
+    clock.advance(chrono::Duration::seconds(60));
+
+    assert!(close(&caller, task).await.won());
+
+    assert_eq!(rows.task(task).unwrap().completed_at, first);
+}
+
+/// The close rolls the epic up in the same transaction.
+#[tokio::test]
+async fn close_task_rolls_up_the_epic() {
+    let (caller, rows) = caller();
+    let epic = caller.create_epic(blank_epic()).await.unwrap();
+    let task = dispatched_task_in(
+        &caller,
+        bindings::Task {
+            epic_id: epic.0,
+            owner: String::new(),
+            ..blank_task()
+        },
+    )
+    .await;
+
+    assert!(close(&caller, task).await.won());
+
+    assert_eq!(rows.epic(epic).unwrap().status, TaskStatus::Done);
+}
+
+/// A phoenix task that enters Done is respawned in the same transaction, and
+/// the flag moves to the successor.
+#[tokio::test]
+async fn close_task_respawns_a_phoenix_task() {
+    let (caller, rows) = caller();
+    let task = dispatched_task_in(
+        &caller,
+        bindings::Task {
+            phoenix: true,
+            ..blank_task()
+        },
+    )
+    .await;
+
+    assert!(close(&caller, task).await.won());
+
+    assert!(!rows.task(task).unwrap().phoenix, "the flag moved");
+    let successor = rows
+        .tasks()
+        .into_iter()
+        .find(|t| t.id != task && t.status == TaskStatus::Backlog)
+        .expect("a backlog successor");
+    assert!(successor.phoenix);
+}
+
+#[tokio::test]
+async fn close_task_on_a_missing_task_is_refused() {
+    let (caller, _rows) = caller();
+    assert!(!close(&caller, TaskId(999)).await.won());
+}
+
+// -- patch_task's transition rules (store-split M7, X2) ---------------------------------
+
+/// Moving a task out of running clears a deferred Stop in the same write,
+/// unless the patch names `stop_pending` itself.
+#[tokio::test]
+async fn patch_task_out_of_running_clears_a_deferred_stop() {
+    let (caller, rows) = caller();
+    let task = dispatched_task(&caller).await;
+    caller
+        .patch_task(
+            task,
+            bindings::TaskPatch {
+                stop_pending: Some(true),
+                ..blank_task_patch()
+            },
+        )
+        .await
+        .unwrap();
+
+    caller
+        .patch_task(
+            task,
+            bindings::TaskPatch {
+                status: Some("review".into()),
+                sub_status: Some("awaiting_review".into()),
+                ..blank_task_patch()
+            },
+        )
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
+
+    assert!(!rows.task(task).unwrap().stop_pending);
+}
+
+/// Moving a phoenix task into Done respawns it in the same transaction, and
+/// the flag is the receipt: a repeat patch does not respawn twice.
+#[tokio::test]
+async fn patch_task_into_done_respawns_a_phoenix_task_once() {
+    let (caller, rows) = caller();
+    let task = dispatched_task_in(
+        &caller,
+        bindings::Task {
+            phoenix: true,
+            ..blank_task()
+        },
+    )
+    .await;
+    let to_done = || bindings::TaskPatch {
+        status: Some("done".into()),
+        sub_status: Some("none".into()),
+        ..blank_task_patch()
+    };
+
+    caller.patch_task(task, to_done()).await.unwrap();
+    caller.patch_task(task, to_done()).await.unwrap();
+
+    let backlog: Vec<_> = rows
+        .tasks()
+        .into_iter()
+        .filter(|t| t.status == TaskStatus::Backlog)
+        .collect();
+    assert_eq!(backlog.len(), 1, "one successor");
+    assert!(backlog[0].phoenix);
+    assert!(!rows.task(task).unwrap().phoenix);
+}
+
+// -- ensure_managed_epics (store-split M7, X4) -------------------------------------------
+
+#[tokio::test]
+async fn ensure_managed_epics_creates_the_tree_once_and_skips_disabled_feeds() {
+    let (caller, rows) = caller();
+
+    for _ in 0..2 {
+        assert!(caller
+            .ensure_managed_epics("reviews.sh".into(), 600, "".into(), 0)
+            .await
+            .unwrap()
+            .won());
+    }
+
+    let epics = rows.epics();
+    assert_eq!(epics.len(), 4, "reviews parent and three sub-epics, no cve");
+    let parent = epics
+        .iter()
+        .find(|e| e.feed_role == crate::models::FeedRole::ReviewsParent)
+        .unwrap();
+    assert_eq!(parent.feed_command.as_deref(), Some("reviews.sh"));
+    assert_eq!(parent.feed_interval_secs, Some(600));
+    for role in [
+        crate::models::FeedRole::MyReviews,
+        crate::models::FeedRole::TeamReviews,
+        crate::models::FeedRole::Bots,
+    ] {
+        let sub = epics.iter().find(|e| e.feed_role == role).unwrap();
+        assert_eq!(sub.parent_epic_id, Some(parent.id));
+        assert!(sub.feed_command.is_none());
+    }
+}
+
+/// A found epic keeps its title and has only its command and interval
+/// reconciled.
+#[tokio::test]
+async fn ensure_managed_epics_keeps_a_rename_and_reconciles_the_command() {
+    let (caller, rows) = caller();
+    caller
+        .ensure_managed_epics("".into(), 0, "cve.sh".into(), 900)
+        .await
+        .unwrap();
+    let cve = rows
+        .epics()
+        .into_iter()
+        .find(|e| e.feed_role == crate::models::FeedRole::Cve)
+        .unwrap();
+    caller
+        .patch_epic(
+            cve.id,
+            bindings::EpicPatch {
+                title: Some("Vulns".into()),
+                ..blank_epic_patch()
+            },
+        )
+        .await
+        .unwrap();
+
+    caller
+        .ensure_managed_epics("".into(), 0, "cve2.sh".into(), 1200)
+        .await
+        .unwrap();
+
+    let cves: Vec<_> = rows
+        .epics()
+        .into_iter()
+        .filter(|e| e.feed_role == crate::models::FeedRole::Cve)
+        .collect();
+    assert_eq!(cves.len(), 1);
+    assert_eq!(cves[0].title, "Vulns");
+    assert_eq!(cves[0].feed_command.as_deref(), Some("cve2.sh"));
+    assert_eq!(cves[0].feed_interval_secs, Some(1200));
+}

@@ -282,9 +282,9 @@ async fn update_task_done_marks_task_done_for_session_caller() {
 }
 
 /// Re-closing an already-done task is a no-op for its completion time:
-/// `completed_at_for_status_transition` treats done -> done as a no-op for
-/// every caller of `TaskService::close_session`, this path included. A task
-/// that was already finished did not finish again.
+/// the module's `close_task` treats done -> done as no transition
+/// (`RequestCloseTask`), so the first completion stands. A task that was
+/// already finished did not finish again.
 #[tokio::test]
 async fn update_task_done_reclose_keeps_existing_completed_at() {
     let state = test_state().await;

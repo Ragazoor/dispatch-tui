@@ -1162,3 +1162,184 @@ async fn a_teardown_that_stalls_past_its_deadline_is_reported_deadline_passed() 
     );
     assert_eq!(svc.get_task(task).await.unwrap().status, TaskStatus::Done);
 }
+
+// ===========================================================================
+// update_tasks' done-path close: RequestCloseTask (store-split M7, X1)
+// ===========================================================================
+
+impl Fx {
+    /// The one `close` row of `task`.
+    async fn close_row(&self, task: TaskId) -> SessionRequest {
+        let mut rows: Vec<_> = self
+            .db
+            .session_requests()
+            .await
+            .into_iter()
+            .filter(|r| r.task_id == task && r.kind == SessionRequestKind::Close)
+            .collect();
+        assert_eq!(rows.len(), 1, "exactly one close row: {rows:?}");
+        rows.remove(0)
+    }
+}
+
+/// The close is the module's: Done, the window cleared and a `close` row naming
+/// it, all from the one call. Nothing is killed or closed here.
+#[tokio::test]
+async fn close_task_closes_through_the_module_and_kills_nothing() {
+    let fx = fx();
+    let task = fx.running_task().await;
+    let runner = Arc::new(MockProcessRunner::new(vec![]));
+    let svc = fx.svc(runner.clone());
+
+    svc.close_task(task).await.unwrap();
+
+    let stored = svc.get_task(task).await.unwrap();
+    assert_eq!(stored.status, TaskStatus::Done);
+    assert!(stored.tmux_window.is_none());
+    assert!(stored.completed_at.is_some());
+    let row = fx.close_row(task).await;
+    assert_eq!(row.host, HOST);
+    assert_eq!(row.state, SessionRequestState::Requested);
+    assert!(row.tmux_window.is_some());
+    assert!(row.wrap_up_request.is_none(), "no token");
+    assert!(
+        runner.recorded_calls().is_empty(),
+        "the teardown is the host's, from the row"
+    );
+}
+
+/// A task with neither a window nor a PR has no host work: no row.
+#[tokio::test]
+async fn close_task_without_host_work_writes_no_row() {
+    let fx = fx();
+    let svc = fx.svc(MockProcessRunner::unused());
+    let task = svc
+        .create_task(make_task_params_on_branch(REPO, "main"))
+        .await
+        .unwrap();
+
+    svc.close_task(task).await.unwrap();
+
+    assert_eq!(svc.get_task(task).await.unwrap().status, TaskStatus::Done);
+    assert!(fx.rows.session_requests().is_empty());
+}
+
+/// The module refuses a close of a task that is gone, and the call says so.
+#[tokio::test]
+async fn close_task_of_a_missing_task_is_an_error() {
+    let fx = fx();
+    let svc = fx.svc(MockProcessRunner::unused());
+    assert!(svc.close_task(TaskId(999_999)).await.is_err());
+}
+
+/// A close row is served as an exit_session teardown: claim, kill the window
+/// the row names, run `gh pr close` for the task's PR, report done.
+#[tokio::test]
+async fn serve_tears_down_a_close_row_and_closes_the_pr() {
+    let fx = fx();
+    let task = fx.running_task().await;
+    let url = TaskUrl::new("https://github.com/o/r/pull/9".to_string(), UrlType::Pr);
+    fx.db
+        .patch_task(task, &store::TaskPatch::new().url(Some(&url)))
+        .await
+        .unwrap();
+    fx.svc(MockProcessRunner::unused())
+        .close_task(task)
+        .await
+        .unwrap();
+    let runner = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),
+        MockProcessRunner::ok(),
+    ]));
+    let svc = fx.svc(runner.clone());
+    let row = fx.close_row(task).await;
+
+    let served = svc.serve_session_request(row.clone()).await;
+    svc.wait_for_background_pr_closes().await;
+
+    assert!(matches!(served.outcome, SessionOutcome::Done), "{served:?}");
+    let calls = runner.flattened_calls();
+    assert!(calls.iter().any(|c| c.contains("kill-window")), "{calls:?}");
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.contains("gh pr close https://github.com/o/r/pull/9")),
+        "{calls:?}"
+    );
+    assert_eq!(fx.row(row.id).await.state, SessionRequestState::Done);
+    assert_eq!(svc.get_task(task).await.unwrap().status, TaskStatus::Done);
+}
+
+/// A close row with no window (a task that carries only a PR) has nothing to
+/// kill: no tmux call, `gh pr close` runs, the row is done. An exit_session row
+/// never lacks a window; a close row may.
+#[tokio::test]
+async fn serve_a_close_row_without_a_window_only_closes_the_pr() {
+    let fx = fx();
+    let svc = fx.svc(MockProcessRunner::unused());
+    let task = svc
+        .create_task(make_task_params_on_branch(REPO, "main"))
+        .await
+        .unwrap();
+    let url = TaskUrl::new("https://github.com/o/r/pull/9".to_string(), UrlType::Pr);
+    fx.db
+        .patch_task(task, &store::TaskPatch::new().url(Some(&url)))
+        .await
+        .unwrap();
+    // No host of its own: the row names the caller's host, which is this one.
+    svc.close_task(task).await.unwrap();
+    let row = fx.close_row(task).await;
+    assert!(row.tmux_window.is_none());
+    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
+    let svc = fx.svc(runner.clone());
+
+    let served = svc.serve_session_request(row.clone()).await;
+    svc.wait_for_background_pr_closes().await;
+
+    assert!(matches!(served.outcome, SessionOutcome::Done), "{served:?}");
+    let calls = runner.flattened_calls();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(calls[0].contains("gh pr close"), "{calls:?}");
+    assert_eq!(fx.row(row.id).await.state, SessionRequestState::Done);
+}
+
+/// KillWindowOfFailedExitSession covers a close row too: the close cleared the
+/// window from the task, so a row that failed before its teardown ran still
+/// owes the kill. The PR is left open (best effort ends at the window).
+#[tokio::test]
+async fn a_failed_close_row_has_its_window_killed() {
+    let fx = fx();
+    let task = fx.running_task().await;
+    fx.svc(MockProcessRunner::unused())
+        .close_task(task)
+        .await
+        .unwrap();
+    let row = fx.close_row(task).await;
+    fx.caller.expire_session_request(row.id);
+    let row = fx.row(row.id).await;
+    assert_eq!(row.state, SessionRequestState::Failed);
+    let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
+    let svc = fx.svc(runner.clone());
+
+    svc.tear_down_failed_exit_window(&row).await;
+
+    let calls = runner.flattened_calls();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(calls[0].contains("kill-window"), "{calls:?}");
+}
+
+/// A stuck wrap_up rebase does not block the close: the module fails it "task
+/// closed", and the host's later report is refused.
+#[tokio::test]
+async fn close_task_fails_a_stuck_wrap_up_instead_of_refusing() {
+    let fx = fx();
+    let task = fx.running_task().await;
+    let svc = fx.svc(MockProcessRunner::unused());
+    let stuck = asked(svc.request_wrap_up(task, WrapUpMode::Rebase).await.unwrap());
+
+    svc.close_task(task).await.unwrap();
+
+    let stuck = fx.row(stuck).await;
+    assert_eq!(stuck.state, SessionRequestState::Failed);
+    assert_eq!(stuck.reason.as_deref(), Some("task closed"));
+}

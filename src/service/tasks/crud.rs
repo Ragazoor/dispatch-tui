@@ -7,9 +7,8 @@
 use std::sync::Arc;
 
 use crate::models::{
-    classify_agent_activity, clears_pending_stop, completed_at_for_status_transition, EpicId,
-    HookEventKind, NotificationWrite, StopOutcome, SubStatus, SubagentEvent, Task, TaskId,
-    TaskStatus, TaskUrl, UserPromptOutcome, WrapUpBlock, DEFAULT_BASE_BRANCH,
+    classify_agent_activity, EpicId, HookEventKind, NotificationWrite, SubagentEvent, Task, TaskId,
+    TaskStatus, TaskUrl, WrapUpBlock, DEFAULT_BASE_BRANCH,
 };
 use crate::service::ServiceError;
 use crate::store::{self, CreateTaskRequest, TaskPatch};
@@ -18,44 +17,9 @@ use super::params::{CreateTaskParams, ListTasksFilter, UpdateTaskParams};
 use super::validators::build_task_patch;
 use crate::service::UrlUpdate;
 
-/// Add every field a status transition derives from the task's PRIOR status to
-/// `patch`, so the derived writes land in the same `UPDATE` as the status.
-///
-/// Two rules live here, and they are the complete set — a new status-writing
-/// service method gets both by calling this instead of remembering each:
-///
-/// - `completed_at`: stamped on entering Done, and on nothing else
-///   (`completed_at_for_status_transition`). There is no matching clear —
-///   the field records the last completion, not the current status.
-/// - `stop_pending`: cleared on leaving Running (`clears_pending_stop`), which
-///   is what keeps `PendingStopOnlyWhileRunning` (`docs/specs/core.allium`)
-///   true and stops the tick reconciler flipping a re-Running card back out.
-///
-/// Deliberately NOT pushed down into `patch_task`'s SQL, which would make the
-/// clear unbypassable for every caller: the invariant is spec'd per rule
-/// (tasks.allium, mcp-task-tools.allium, pr-workflow.allium) and the service
-/// layer is where this codebase keeps rules that read prior state. A generic
-/// patch primitive silently rewriting a column the caller did not name is also
-/// the wrong shape for a rule that only some transitions carry.
-fn with_status_transition(
-    patch: TaskPatch,
-    prior: TaskStatus,
-    next: TaskStatus,
-    now: chrono::DateTime<chrono::Utc>,
-) -> TaskPatch {
-    let mut patch = patch;
-    if let Some(at) = completed_at_for_status_transition(prior, next, now) {
-        patch = patch.completed_at(Some(at));
-    }
-    if clears_pending_stop(prior, next) {
-        patch = patch.stop_pending(false);
-    }
-    patch
-}
-
 /// `ClosePrOnDone` (`docs/specs/pr-workflow.allium`): the PR url to close,
-/// exactly when `prior`/`next` is a genuine transition into Done — the same
-/// pair `with_status_transition` reads — and `url` is pr-typed.
+/// exactly when `prior`/`next` is a genuine transition into Done and `url` is
+/// pr-typed.
 ///
 /// Deliberately fires for every route into Done, including `PrMerged`: there
 /// is no cheap signal here distinguishing "entered Done because this task's
@@ -120,30 +84,6 @@ pub struct UpdateTaskResult {
     pub completed_at_after_write: Option<Option<chrono::DateTime<chrono::Utc>>>,
 }
 
-/// What a session close makes of the task — the terminal status half of
-/// `ExitSession` (`docs/specs/pr-workflow.allium`).
-#[derive(Debug, Clone)]
-pub enum CloseSessionOutcome {
-    /// `rebase` / `done`: the task is finished.
-    Done,
-    /// `pr`: the task moves to Review carrying the PR url.
-    Review { pr_url: crate::models::TaskUrl },
-}
-
-/// Result of [`TaskService::close_session`].
-#[derive(Debug, Clone)]
-pub struct ClosedSession {
-    /// The tmux window the close cleared, or `None` if the task had none. The
-    /// caller tears this window down — and only ever reaches it by holding an
-    /// `Ok`, which is the point of the call.
-    ///
-    /// No `completed_at_after_write` twin of [`UpdateTaskResult`]'s: the sole
-    /// caller is the MCP `exit_session` handler, which holds no in-memory copy
-    /// of the task to write back to. It notifies task-changed and the board
-    /// re-reads the row.
-    pub window: Option<crate::models::TmuxWindow>,
-}
-
 pub struct TaskService {
     /// The wide bundle, not the `TaskAndEpicStore` the CRUD methods alone would
     /// need: [`serve_dispatch_request`](Self::serve_dispatch_request) runs the
@@ -158,7 +98,7 @@ pub struct TaskService {
     pub(super) clock: Arc<dyn crate::clock::Clock>,
     pub(super) runner: Arc<dyn crate::process::ProcessRunner>,
     /// Tasks whose wrap_up verify run is in flight. See
-    /// `wrap_up.rs::check_wrap_up_ready`.
+    /// `src/service/tasks/wrap_up.rs::check_wrap_up_ready`.
     pub(super) verifying: Arc<std::sync::Mutex<std::collections::HashSet<crate::models::TaskId>>>,
     /// Handles for in-flight `ClosePrOnDone` closes (`spawn_close_attached_pr`),
     /// so a test can wait for a fire-and-forget close to actually finish —
@@ -250,8 +190,8 @@ impl TaskService {
         let mut patch = build_task_patch(&params, expanded_repo_path.as_deref(), params.sub_status);
 
         // Snapshot the task before the patch, whenever `status` changes: the
-        // PR-finalisation check, the completion-stamp rule and ClosePrOnDone
-        // all read the prior row. Nothing else here needs it.
+        // PR-finalisation check, ClosePrOnDone and the Done-transition echo
+        // below all read the prior row. Nothing else here needs it.
         let is_pr_url_set = matches!(
             params.url.as_ref(),
             Some(UrlUpdate::Set(u)) if u.is_pr()
@@ -265,30 +205,21 @@ impl TaskService {
             && is_pr_url_set
             && prior.as_ref().is_some_and(|t| t.url.is_none());
 
-        // The Done-transition stamp must win over anything the caller's
-        // params already set for completed_at — exec_persist_task
-        // (src/runtime/tasks.rs) forwards whatever is sitting on the
-        // in-memory Task struct alongside a status change, and a stale
-        // snapshot must not overwrite a fresh completion. Applied after
-        // `build_task_patch` for that reason.
-        // The (prior, next) pair every status-derived rule in this method reads:
-        // `Some` exactly when this call moves the status and the prior row was
-        // readable. Bound once because the rules that consume it sit on both
-        // sides of the write — `with_status_transition` before it, the phoenix
-        // respawn after — and re-deriving it at each would let the two drift on
-        // what counts as a status change.
-        let status_transition = params
-            .status
-            .zip(prior.as_ref().map(|p| p.status))
-            .map(|(next, prior)| (prior, next));
-        if let Some((prior_status, new_status)) = status_transition {
-            patch = with_status_transition(patch, prior_status, new_status, self.clock.now());
+        // A transition into Done is stamped by the module's `patch_task`
+        // (`completed_at`, and the transition rules that go with it,
+        // store-split.allium X2), not here. The stamp must win over anything the
+        // caller's params already set for completed_at —
+        // exec_persist_task (src/runtime/tasks.rs) forwards whatever is
+        // sitting on the in-memory Task struct alongside a status change, and a
+        // stale snapshot must not overwrite a fresh completion — and the module
+        // lets a completion the patch names win, so the caller's is dropped
+        // from the patch rather than overwritten. Not a computation of the
+        // stamp: the module still decides it.
+        let entering_done = params.status == Some(TaskStatus::Done)
+            && prior.as_ref().is_some_and(|p| p.status != TaskStatus::Done);
+        if entering_done {
+            patch.completed_at = None;
         }
-
-        // Captured before the write so the caller can learn what this call
-        // wrote to completed_at (including the Done-transition stamp just
-        // above) without a second DB round-trip. See `UpdateTaskResult`.
-        let completed_at_after_write = patch.completed_at;
 
         // ORDER OF THE WRITES (mcp-task-tools.allium: UpdateTaskViaMcp). An
         // explicit relink goes BEFORE the patch when the call also changes the
@@ -323,90 +254,23 @@ impl TaskService {
         };
         self.close_pr_on_done(task_id, prior.as_ref(), params.status, final_url);
 
-        // No epic recalculation here: `patch_task` and `set_task_epic`
-        // recalculate every epic they touched, in their own transactions.
+        // No epic recalculation, no stop_pending clear and no phoenix respawn
+        // here: `patch_task` and `set_task_epic` do all three in their own
+        // transactions (store-split.allium X2, X3).
 
-        // PhoenixRespawn (tasks.allium). After the status write, never as part
-        // of it — see `respawn_phoenix`.
-        if let Some((prior_status, new_status)) = status_transition {
-            self.respawn_phoenix(task_id, prior_status, new_status)
-                .await;
-        }
+        // What this call wrote to completed_at. A stamp the module chose is
+        // read back rather than computed, so the TUI's in-memory copy agrees
+        // with the store. See `UpdateTaskResult`.
+        let completed_at_after_write = if entering_done {
+            self.db.get_task(task_id).await.map(|t| t.completed_at)
+        } else {
+            patch.completed_at
+        };
 
         Ok(UpdateTaskResult {
             task_id,
             was_pr_finalisation,
             completed_at_after_write,
-        })
-    }
-
-    /// Apply a session close: the terminal status, its default sub-status, the
-    /// PR url when there is one, and the cleared `tmux_window`, as one patch.
-    ///
-    /// Purpose-built rather than expressed through [`Self::update_task`], and
-    /// deliberately so. Callers gate the tmux teardown (and, for the MCP path,
-    /// the epic chain) on this `Result`, which is only sound if `Err` means
-    /// exactly "the terminal write did not land". `update_task` cannot promise
-    /// that: its fallible follow-up steps (epic re-linking, repo rerouting) run
-    /// *after* the patch, so an `Err` from it can mean "patch landed, follow-up
-    /// failed" — and a caller reading that as a failed close would leave a live
-    /// window on a task that is already done. Here the patch is the only
-    /// fallible step, so the two can never disagree. See the `close_persisted`
-    /// discussion in `ExitSession` (`docs/specs/pr-workflow.allium`).
-    ///
-    /// Returns the window the close cleared, for the caller to tear down.
-    pub async fn close_session(
-        &self,
-        task_id: TaskId,
-        outcome: CloseSessionOutcome,
-    ) -> Result<ClosedSession, ServiceError> {
-        let prior = self
-            .db
-            .get_task(task_id)
-            .await
-            .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", task_id.0)))?;
-
-        // `pr_url` is bound out here rather than inside the builder because
-        // `TaskPatch` borrows it.
-        let (status, pr_url) = match &outcome {
-            CloseSessionOutcome::Done => (TaskStatus::Done, None),
-            CloseSessionOutcome::Review { pr_url } => (TaskStatus::Review, Some(pr_url)),
-        };
-
-        let mut patch = store::TaskPatch::new()
-            .status(status)
-            .sub_status(SubStatus::default_for(status))
-            .tmux_window(None);
-        if let Some(url) = pr_url {
-            patch = patch.url(Some(url));
-        }
-        // The same prior-status rules `update_task` applies: the
-        // completion stamp on entering Done, and the deferred-Stop clear
-        // — both outcomes here leave Running. What this close does NOT clear is
-        // the task's subagent rows or `live_subagents`; see the ExitSession
-        // guidance in `docs/specs/pr-workflow.allium`.
-        patch = with_status_transition(patch, prior.status, status, self.clock.now());
-
-        self.db.patch_task(task_id, &patch).await?;
-
-        // ClosePrOnDone (docs/specs/pr-workflow.allium). Neither outcome here
-        // sets a NEW url — `CloseSessionOutcome::Review`'s pr_url is the
-        // exception, and that outcome never lands in Done — so the prior
-        // row's url is the one that would still be attached.
-        self.close_pr_on_done(task_id, Some(&prior), Some(status), prior.url.as_ref());
-
-        // Everything past the write is infallible on purpose — see the doc
-        // comment.
-        self.recalculate_epic_for_task(task_id).await;
-        // PhoenixRespawn (tasks.allium), on the same terms: the rebase/done
-        // branch lands in Done and respawns, the pr branch lands in Review and
-        // does not. `respawn_phoenix` swallows its own failures, which is what
-        // keeps this method's `Err` meaning exactly "the terminal write did not
-        // land" — the property the caller gates its tmux teardown on.
-        self.respawn_phoenix(task_id, prior.status, status).await;
-
-        Ok(ClosedSession {
-            window: prior.tmux_window,
         })
     }
 
@@ -437,7 +301,7 @@ impl TaskService {
     /// pr-typed url, detached from the caller.
     ///
     /// Called only after the Done write has already persisted, and never
-    /// awaited by the caller — deliberately: `update_task`/`close_session` run
+    /// awaited by the caller — deliberately: `update_task` and a served close run
     /// on the TUI's synchronous command-drain loop
     /// (`src/runtime/event_loop.rs::run_loop`), which does not redraw or read input
     /// again until every queued command's future resolves. Awaiting an actual
@@ -538,10 +402,8 @@ impl TaskService {
         Ok(())
     }
 
-    /// Expand `~` in a repo path and canonicalise a plan path, the same
-    /// operator-supplied-path pre-processing every task creation does — shared
-    /// by `create_task_returning` and `respawn_phoenix` so a future change to
-    /// path handling can't update one call site and silently skip the other.
+    /// Expand `~` in a repo path and canonicalise a plan path, the
+    /// operator-supplied-path pre-processing every task creation does.
     fn normalize_repo_and_plan(
         repo_path: &str,
         plan_path: Option<&str>,
@@ -553,25 +415,6 @@ impl TaskService {
                 .unwrap_or_else(|_| p.to_string())
         });
         (repo_path, plan)
-    }
-
-    /// Recalculate the given epic, logging any database error.
-    async fn recalculate_epic(&self, epic_id: EpicId) {
-        if let Err(err) = self.db.recalculate_epic_status(epic_id).await {
-            tracing::warn!(
-                "failed to recalculate epic status for epic {}: {err}",
-                epic_id.0
-            );
-        }
-    }
-
-    /// Recalculate the parent epic of the given task, if it has one.
-    async fn recalculate_epic_for_task(&self, task_id: TaskId) {
-        if let Some(task) = self.db.get_task(task_id).await {
-            if let Some(epic_id) = task.epic_id {
-                self.recalculate_epic(epic_id).await;
-            }
-        }
     }
 
     /// Attach a plan file (by absolute path) to a task. Used by the `plan`
@@ -663,90 +506,6 @@ impl TaskService {
             .await?;
 
         self.get_task(task_id).await
-    }
-
-    /// `PhoenixRespawn` (`docs/specs/tasks.allium`): a phoenix task entering
-    /// Done creates a fresh Backlog copy of itself, and the flag MOVES to that
-    /// copy.
-    ///
-    /// Called after — never as part of — the status write, by both of this
-    /// service's status-writing paths ([`update_task`](Self::update_task) and
-    /// [`close_session`](Self::close_session)). That ordering is
-    /// `DoneOutranksTheRespawn`: the completion is what the operator asked for
-    /// and the respawn is a follow-on, so a failure here must not roll the
-    /// transition back — and, for `close_session` specifically, must not turn
-    /// into an `Err` its caller would read as "the terminal write did not
-    /// land". Hence the return type: every failure is logged at ERROR and
-    /// swallowed.
-    ///
-    /// It reads the task back rather than taking the pre-patch snapshot,
-    /// because the same call that completes a task may also have changed what
-    /// the successor should inherit — `phoenix` itself included, which is what
-    /// lets a single editor save turn the flag on and complete the task.
-    ///
-    /// `TheFlagIsTheReceipt`: the predecessor's flag is cleared only once the
-    /// successor row exists. So a surviving flag in Done means the copy did not
-    /// land (`Task::respawn_failed`), re-entering Done retries, and a
-    /// Done -> Review -> Done round-trip cannot duplicate.
-    async fn respawn_phoenix(&self, task_id: TaskId, prior: TaskStatus, next: TaskStatus) {
-        // `transitions_to done`: an actual change of value, so a no-op patch
-        // rewriting Done over Done never re-fires.
-        if next != TaskStatus::Done || prior == TaskStatus::Done {
-            return;
-        }
-
-        let Some(task) = self.db.get_task(task_id).await else {
-            return;
-        };
-        // `FeedTasksAreExempt`: a feed epic reconciles its own rows, so a copy
-        // would either duplicate the row the feed is about to re-ingest or be
-        // deleted as stale by that same reconciliation.
-        if !task.phoenix || task.external_id.is_some() {
-            return;
-        }
-
-        // Mirrors `create_task_returning`'s own pre-processing (repo-group
-        // routing, and path normalisation via the same shared helper), but
-        // the actual writes go through `respawn_phoenix_successor` instead of
-        // `create_task` so the successor's creation and the predecessor's
-        // flag clear land in one transaction — see that method's doc comment
-        // for why: `TheFlagIsTheReceipt` needs to be literally atomic, not
-        // just usually true, or a failure between the two steps leaves a
-        // landed successor with the flag still set, and re-entering Done
-        // creates a second one.
-        let (repo_path, plan) =
-            Self::normalize_repo_and_plan(&task.repo_path, task.plan_path.as_deref());
-        let successor_id = self
-            .db
-            .respawn_phoenix_successor(
-                task_id,
-                CreateTaskRequest {
-                    title: &task.title,
-                    description: &task.description,
-                    repo_path: &repo_path,
-                    plan: plan.as_deref(),
-                    status: TaskStatus::Backlog,
-                    base_branch: &task.base_branch,
-                    epic_id: task.epic_id,
-                    // Left unset so the copy sorts by its own id, at the
-                    // bottom of backlog, rather than inheriting a position in
-                    // a column the predecessor has left.
-                    sort_order: None,
-                    tag: task.tag,
-                    wrap_up_mode: task.wrap_up_mode,
-                    auto_run_plan: task.auto_run_plan,
-                    phoenix: true,
-                },
-                &task.labels,
-            )
-            .await;
-        if let Err(e) = successor_id {
-            tracing::error!(
-                task_id = task_id.0,
-                error = %e,
-                "phoenix respawn failed; the task stays Done and keeps its flag"
-            );
-        }
     }
 
     /// The delete pre-check (`DeleteTask`, tasks.allium): the store's TRUE row
@@ -904,18 +663,10 @@ impl TaskService {
         // agent-health.allium.
         match kind {
             HookEventKind::Stop => {
-                if self.db.try_record_stop(id, now).await? == StopOutcome::Flipped {
-                    self.recalculate_epic_for_task(id).await;
-                }
+                self.db.try_record_stop(id, now).await?;
             }
             HookEventKind::UserPromptSubmit => {
-                // Recalculate only for the arm that moved status — Review ->
-                // Running. A refresh of an already-Running task is a plain
-                // activity signal and must not pay for a recalculation on this
-                // hot path.
-                if self.db.record_user_prompt_submit(id, now).await? == UserPromptOutcome::Resumed {
-                    self.recalculate_epic_for_task(id).await;
-                }
+                self.db.record_user_prompt_submit(id, now).await?;
             }
             HookEventKind::Notification(notification_kind) => {
                 self.db
@@ -945,8 +696,9 @@ impl TaskService {
                     .await?;
             }
         }
-        // Only Stop and UserPromptSubmit move task.status, and both recalculate
-        // their epic above.
+        // Only Stop and UserPromptSubmit move task.status, and the module
+        // recalculates their epic in the same transaction (store-split.allium
+        // X3).
         Ok(())
     }
 
@@ -1037,8 +789,9 @@ impl TaskService {
         // Whether a deferred Stop applied is decided inside the same
         // transaction that recomputes the count, so there is nothing to check
         // out here — and no window in which the count has reached zero but the
-        // flip has not landed.
-        let applied_pending_stop = match event {
+        // flip has not landed. The flip recalculates its epic there too
+        // (store-split.allium X3).
+        match event {
             SubagentEvent::Start {
                 agent_id,
                 session_id,
@@ -1047,22 +800,16 @@ impl TaskService {
                 self.db
                     .subagent_start(id, &agent_id, &session_id, self.clock.now())
                     .await?;
-                false
             }
             SubagentEvent::Stop {
                 agent_id,
                 session_id,
             } => {
-                self.db
-                    .subagent_stop(id, &agent_id, &session_id)
-                    .await?
-                    .applied_pending_stop
+                self.db.subagent_stop(id, &agent_id, &session_id).await?;
             }
-            SubagentEvent::Clear => self.db.subagent_clear(id).await?.applied_pending_stop,
-        };
-
-        if applied_pending_stop {
-            self.recalculate_epic_for_task(id).await;
+            SubagentEvent::Clear => {
+                self.db.subagent_clear(id).await?;
+            }
         }
         Ok(())
     }

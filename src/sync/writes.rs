@@ -342,6 +342,16 @@ pub trait ReducerCaller: Send + Sync {
         feed_interval_secs: i64,
         created_by: String,
     ) -> Result<EpicId>;
+    /// `ProvisionManagedEpics` (M7, X4): the whole managed feed-epic tree in
+    /// one transaction. `""` is a disabled feed (nothing created, nothing
+    /// removed) and `0` no interval.
+    async fn ensure_managed_epics(
+        &self,
+        reviews_command: String,
+        reviews_interval_secs: i64,
+        cve_command: String,
+        cve_interval_secs: i64,
+    ) -> Result<ReducerOutcome>;
 
     // -- Work packages (`work-packages.allium`) ----------------------------------
     /// Insert a work package and answer with the id the store generated.
@@ -512,6 +522,12 @@ pub trait ReducerCaller: Send + Sync {
         action: String,
         pr_url: String,
     ) -> Result<ReducerOutcome>;
+    /// `RequestCloseTask` (`update_tasks`' done path): fail the task's open
+    /// session request, apply the Done close, respawn a phoenix task, roll the
+    /// epic up and, when there is host work and `host` (the caller's own) is
+    /// where it is, write a `close` row; all in one transaction. No token, no
+    /// epic chain.
+    async fn close_task(&self, task: TaskId, host: String) -> Result<ReducerOutcome>;
     /// `HostRestartFailsInterruptedSessionRequests`: fail `host`'s running rows.
     async fn fail_interrupted_session_requests(&self, host: String) -> Result<ReducerOutcome>;
 }

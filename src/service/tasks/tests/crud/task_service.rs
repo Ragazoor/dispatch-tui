@@ -389,7 +389,7 @@ async fn update_task_with_epic_linkage() {
 
 #[tokio::test]
 async fn update_task_status_recalculates_parent_epic() {
-    // recalculate_epic_for_task: epic with running task stays in backlog
+    // The module's epic rollup: epic with running task stays in backlog
     // (running and review tasks do not auto-advance epic status)
     let db = test_db().await;
     let task_svc = task_svc(&db);
@@ -419,7 +419,7 @@ async fn update_task_status_recalculates_parent_epic() {
 
 #[tokio::test]
 async fn update_task_relink_recalculates_old_and_new_epic() {
-    // Linkage-change branch of recalculate_epic_for_task: moving a Running
+    // Linkage-change branch of the module's epic rollup: moving a Running
     // task between two epics. Both epics stay in Backlog because running
     // tasks do not auto-advance epic status.
     let db = test_db().await;
@@ -467,4 +467,43 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
         epic_svc.get_epic(epic_b.id).await.unwrap().status,
         TaskStatus::Backlog
     );
+}
+
+/// Entering Done is stamped by the module, not the service; the result echoes
+/// what the module wrote so the board's in-memory copy agrees with the store
+/// (the stale-snapshot case is `update_task_entering_done_overrides_a_stale_caller_completed_at`).
+#[tokio::test]
+async fn update_task_into_done_echoes_the_modules_stamp() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    let result = svc
+        .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
+        .await
+        .unwrap();
+
+    let stored = svc.get_task(id).await.unwrap().completed_at;
+    assert!(stored.is_some());
+    assert_eq!(result.completed_at_after_write, Some(stored));
+}
+
+/// A patch that is not a transition into Done writes only what it names.
+#[tokio::test]
+async fn update_task_echoes_a_named_completion_when_not_entering_done() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+    svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
+        .await
+        .unwrap();
+    let named = chrono::DateTime::from_timestamp(1_900_000_000, 0).unwrap();
+
+    let result = svc
+        .update_task(UpdateTaskParams::for_task(id).completed_at(Some(named)))
+        .await
+        .unwrap();
+
+    assert_eq!(result.completed_at_after_write, Some(Some(named)));
+    assert_eq!(svc.get_task(id).await.unwrap().completed_at, Some(named));
 }

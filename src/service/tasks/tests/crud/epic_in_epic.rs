@@ -1008,28 +1008,12 @@ async fn update_task_to_done_clears_stop_pending() {
 }
 
 #[tokio::test]
-async fn close_session_clears_stop_pending() {
+async fn close_task_clears_stop_pending() {
     let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = running_task_with_a_deferred_stop(&svc).await;
-    svc.close_session(id, crate::service::CloseSessionOutcome::Done)
-        .await
-        .unwrap();
-    assert!(!svc.get_task(id).await.unwrap().stop_pending);
-
-    let id = running_task_with_a_deferred_stop(&svc).await;
-    svc.close_session(
-        id,
-        crate::service::CloseSessionOutcome::Review {
-            pr_url: crate::models::TaskUrl::new(
-                "https://github.com/acme/repo/pull/1".to_string(),
-                crate::models::UrlType::Pr,
-            ),
-        },
-    )
-    .await
-    .unwrap();
+    svc.close_task(id).await.unwrap();
     assert!(!svc.get_task(id).await.unwrap().stop_pending);
 }
 
@@ -1931,7 +1915,7 @@ async fn a_feed_owned_task_does_not_respawn() {
 }
 
 #[tokio::test]
-async fn close_session_done_respawns_a_phoenix_task() {
+async fn close_task_respawns_a_phoenix_task() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = phoenix_task(&db, None).await;
@@ -1939,58 +1923,19 @@ async fn close_session_done_respawns_a_phoenix_task() {
         .await
         .unwrap();
 
-    svc.close_session(id, crate::service::CloseSessionOutcome::Done)
-        .await
-        .unwrap();
+    svc.close_task(id).await.unwrap();
 
     let successor = successor_of(&db, id)
         .await
-        .expect("the rebase/done branch of ExitSession lands in Done");
+        .expect("the done close lands in Done and respawns, in the module");
     assert!(successor.phoenix);
     assert!(!svc.get_task(id).await.unwrap().phoenix);
 }
 
-/// The `pr` branch lands in Review, not Done. The respawn waits for the PR to
-/// merge or for a human to complete the task.
-#[tokio::test]
-async fn close_session_pr_does_not_respawn() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-    let id = phoenix_task(&db, None).await;
-    svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
-        .await
-        .unwrap();
-
-    svc.close_session(
-        id,
-        crate::service::CloseSessionOutcome::Review {
-            pr_url: crate::models::TaskUrl::new(
-                "https://github.com/o/r/pull/1".to_string(),
-                crate::models::UrlType::Pr,
-            ),
-        },
-    )
-    .await
-    .unwrap();
-
-    assert!(successor_of(&db, id).await.is_none());
-    assert!(
-        svc.get_task(id).await.unwrap().phoenix,
-        "the recurrence survives into Review"
-    );
-}
-
-/// `DoneOutranksTheRespawn`. The half that is enforced by construction:
-/// `respawn_phoenix` returns `()`, so no respawn outcome can reach the caller's
-/// `Result` — which is what keeps `close_session`'s `Err` meaning exactly "the
-/// terminal write did not land", the property its caller gates the tmux
-/// teardown on.
-///
-/// The half this test observes: a close whose respawn is skipped still reports
-/// success and still moves the task, so the completion never waits on the
-/// recurrence. Feed ownership is the skip used here because it is the one the
-/// spec makes reachable without a fault-injecting store — a genuine create
-/// failure takes the same `return`, one branch further down.
+/// `DoneOutranksTheRespawn`: a close whose respawn is skipped still succeeds
+/// and still moves the task, so the completion never waits on the recurrence.
+/// Feed ownership is the skip used here because it is the one the spec makes
+/// reachable without a fault-injecting store.
 #[tokio::test]
 async fn a_skipped_respawn_does_not_contaminate_the_close_result() {
     let db = test_db().await;
@@ -2009,12 +1954,10 @@ async fn a_skipped_respawn_does_not_contaminate_the_close_result() {
     .await
     .unwrap();
 
-    let closed = svc
-        .close_session(id, crate::service::CloseSessionOutcome::Done)
+    svc.close_task(id)
         .await
         .expect("the close succeeded; the respawn is a follow-on, not part of it");
 
-    assert_eq!(closed.window.as_ref().map(|w| w.as_str()), Some("task-x"));
     let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Done, "the completion sticks");
     assert!(
@@ -2108,8 +2051,9 @@ async fn create_task_with_no_repo_path_does_not_probe_and_defaults_to_main() {
 // -- ClosePrOnDone (docs/specs/pr-workflow.allium) -------------------------
 //
 // Fires on any transition of task.status into Done while the task carries a
-// pr-typed url: `gh pr close <url>` runs best-effort, through both writers
-// that funnel a Done transition (`update_task` and `close_session`).
+// pr-typed url: `gh pr close <url>` runs best-effort, on the host. `update_task`
+// does it here; a module-side close (`close_task`, `request_exit_session`)
+// leaves a row whose host does it (see `session_requests.rs`).
 
 const PR_URL: &str = "https://github.com/acme/repo/pull/42";
 
@@ -2151,35 +2095,6 @@ async fn update_task_closes_the_pr_on_entering_done() {
     // see `TaskService::spawn_close_attached_pr`), so wait for it to actually
     // run before asserting on the mock, deterministically rather than
     // sleeping.
-    svc.wait_for_background_pr_closes().await;
-
-    assert_eq!(
-        runner.recorded_calls(),
-        vec![(
-            "gh".to_string(),
-            vec!["pr".to_string(), "close".to_string(), PR_URL.to_string()]
-        )]
-    );
-    assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Done);
-}
-
-#[tokio::test]
-async fn close_session_closes_the_pr_on_entering_done() {
-    let db = test_db().await;
-    let runner = Arc::new(crate::process::MockProcessRunner::new(vec![
-        crate::process::MockProcessRunner::ok(),
-    ]));
-    let svc = task_svc_with_runner(&db, runner.clone());
-    let (id, _window) = running_task_with_window(&db, None).await;
-    svc.update_task(
-        UpdateTaskParams::for_task(id).url(crate::service::UrlUpdate::Set(pr_task_url())),
-    )
-    .await
-    .unwrap();
-
-    svc.close_session(id, crate::service::CloseSessionOutcome::Done)
-        .await
-        .unwrap();
     svc.wait_for_background_pr_closes().await;
 
     assert_eq!(
@@ -2306,37 +2221,6 @@ async fn update_task_persists_done_even_when_the_pr_close_fails() {
     assert!(
         result.is_ok(),
         "a failed gh pr close must not fail the Done transition: {result:?}"
-    );
-    assert_eq!(
-        runner.recorded_calls().len(),
-        1,
-        "the close must actually have been attempted, not skipped"
-    );
-    assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Done);
-}
-
-#[tokio::test]
-async fn close_session_persists_done_even_when_the_pr_close_fails() {
-    let db = test_db().await;
-    let runner = Arc::new(crate::process::MockProcessRunner::new(vec![
-        crate::process::MockProcessRunner::fail("HTTP 401: Bad credentials"),
-    ]));
-    let svc = task_svc_with_runner(&db, runner.clone());
-    let (id, _window) = running_task_with_window(&db, None).await;
-    svc.update_task(
-        UpdateTaskParams::for_task(id).url(crate::service::UrlUpdate::Set(pr_task_url())),
-    )
-    .await
-    .unwrap();
-
-    let result = svc
-        .close_session(id, crate::service::CloseSessionOutcome::Done)
-        .await;
-    svc.wait_for_background_pr_closes().await;
-
-    assert!(
-        result.is_ok(),
-        "a failed gh pr close must not fail session close: {result:?}"
     );
     assert_eq!(
         runner.recorded_calls().len(),

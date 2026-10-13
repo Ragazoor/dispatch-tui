@@ -420,6 +420,20 @@ mod unconnected {
                 .unwrap_err(),
         );
         refused(
+            "ensure_managed_epics",
+            caller
+                .ensure_managed_epics("cmd".into(), 60, "".into(), 0)
+                .await
+                .unwrap_err(),
+        );
+        refused(
+            "close_task",
+            caller
+                .close_task(TaskId(1), "host".into())
+                .await
+                .unwrap_err(),
+        );
+        refused(
             "respawn_phoenix_successor",
             caller
                 .respawn_phoenix_successor(TaskId(1), task("t"))

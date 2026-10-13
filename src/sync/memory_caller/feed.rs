@@ -709,4 +709,103 @@ impl MemoryReducerCaller {
             },
         )))
     }
+
+    pub(super) fn apply_ensure_managed_epics(
+        &self,
+        reviews_command: String,
+        reviews_interval_secs: i64,
+        cve_command: String,
+        cve_interval_secs: i64,
+    ) -> Result<ReducerOutcome> {
+        let mut tables = self.lock();
+        if !reviews_command.is_empty() {
+            let parent = self.ensure_role_epic(
+                &mut tables,
+                module::ROLE_REVIEWS_PARENT,
+                0,
+                Some((&reviews_command, reviews_interval_secs)),
+            );
+            for role in [
+                module::ROLE_MY_REVIEWS,
+                module::ROLE_TEAM_REVIEWS,
+                module::ROLE_BOTS,
+            ] {
+                self.ensure_role_epic(&mut tables, role, parent, None);
+            }
+        }
+        if !cve_command.is_empty() {
+            self.ensure_role_epic(
+                &mut tables,
+                module::ROLE_CVE,
+                0,
+                Some((&cve_command, cve_interval_secs)),
+            );
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
+    }
+
+    /// Mirrors the module's `ensure_role_epic`: found by `(role, parent)` and
+    /// left alone but for the command and interval of a command-carrying role,
+    /// else created. Its id.
+    fn ensure_role_epic(
+        &self,
+        tables: &mut Tables,
+        role: &str,
+        parent_epic_id: i64,
+        command: Option<(&str, i64)>,
+    ) -> i64 {
+        let existing = tables
+            .epics
+            .values()
+            .find(|e| e.parent_epic_id == parent_epic_id && e.feed_role == role)
+            .cloned();
+        if let Some(epic) = existing {
+            if let Some((cmd, interval)) = command {
+                if epic.feed_command != cmd || epic.feed_interval_secs != interval {
+                    let id = epic.id;
+                    self.write_epic(
+                        tables,
+                        module::Epic {
+                            feed_command: cmd.to_string(),
+                            feed_interval_secs: interval,
+                            updated_at: self.now(),
+                            ..epic
+                        },
+                    );
+                    return id;
+                }
+            }
+            return epic.id;
+        }
+        let (feed_command, feed_interval_secs) =
+            command.map(|(c, i)| (c.to_string(), i)).unwrap_or_default();
+        let now = self.now();
+        self.write_epic(
+            tables,
+            module::Epic {
+                title: managed_role_title(role).to_string(),
+                parent_epic_id,
+                feed_role: role.to_string(),
+                feed_command,
+                feed_interval_secs,
+                created_by: self.sender.clone(),
+                created_at: now.clone(),
+                updated_at: now,
+                ..module::blank_epic()
+            },
+        )
+    }
+}
+
+/// The module's `managed_role_title` (private there): the default title of a
+/// freshly created managed epic.
+fn managed_role_title(role: &str) -> &'static str {
+    match role {
+        module::ROLE_REVIEWS_PARENT => "PR Reviews",
+        module::ROLE_MY_REVIEWS => "My Reviews",
+        module::ROLE_TEAM_REVIEWS => "Team Reviews",
+        module::ROLE_BOTS => "Bots",
+        module::ROLE_CVE => "CVE",
+        _ => "Reviews",
+    }
 }

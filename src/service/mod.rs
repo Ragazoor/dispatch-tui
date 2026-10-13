@@ -17,15 +17,14 @@ pub use epics::{
 };
 pub use learnings::{CreateLearningParams, LearningService, QueryLearningsParams};
 pub use managed_feeds::{
-    ensure_managed_epics, provision_managed_feeds_from_settings, read_managed_feed_settings,
-    write_managed_feed_settings, ManagedFeedSettings, ManagedFeedSettingsPatch,
+    provision_managed_feeds_from_settings, read_managed_feed_settings, write_managed_feed_settings,
+    ManagedFeedSettings, ManagedFeedSettingsPatch,
 };
 pub use services::Services;
 pub use tasks::wrap_up_block_message;
 pub use tasks::{
-    CloseSessionOutcome, ClosedSession, CreateTaskParams, ListTasksFilter, ServedDispatch,
-    ServedSession, SessionOutcome, TaskService, UpdateTaskParams, UpdateTaskResult, WrapUpChecks,
-    WRAP_UP_VERIFY_TIMEOUT,
+    CreateTaskParams, ListTasksFilter, ServedDispatch, ServedSession, SessionOutcome, TaskService,
+    UpdateTaskParams, UpdateTaskResult, WrapUpChecks, WRAP_UP_VERIFY_TIMEOUT,
 };
 pub use usage::record_usage_event_logged;
 pub use work_packages::{

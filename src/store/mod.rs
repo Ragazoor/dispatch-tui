@@ -583,6 +583,12 @@ pub trait SessionRequestStore: SessionRequestRead {
         action: WrapUpMode,
         pr_url: Option<&str>,
     ) -> Result<SessionRequestAnswer>;
+    /// `RequestCloseTask` (`update_tasks`' done path): the module applies the
+    /// Done close in one transaction and, when there is host work on this
+    /// host, writes a `close` row for the board to serve. A refusal is an
+    /// `Err`, as is a call that got no answer; either way nothing is known to
+    /// have landed.
+    async fn close_task(&self, task: TaskId) -> Result<()>;
     /// `HostClaimsSessionRequest`. `false` is a refused claim — another board,
     /// a redelivery or the deadline got there first — and the caller does
     /// nothing.
@@ -691,6 +697,16 @@ pub trait EpicCrud: EpicRead {
         feed_command: Option<&str>,
         feed_interval_secs: Option<i64>,
     ) -> Result<EpicId>;
+    /// `epics.allium: ProvisionManagedEpics`, decided in the module in one
+    /// transaction (store-split M7, X4). `None` is a disabled feed: nothing is
+    /// created or removed for it. An interval of `None` is no interval.
+    async fn ensure_managed_epics(
+        &self,
+        reviews_command: Option<&str>,
+        reviews_interval_secs: Option<i64>,
+        cve_command: Option<&str>,
+        cve_interval_secs: Option<i64>,
+    ) -> Result<()>;
     async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
     async fn delete_epic(&self, id: EpicId) -> Result<()>;
     async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()>;

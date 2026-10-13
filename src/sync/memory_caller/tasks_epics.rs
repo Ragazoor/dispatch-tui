@@ -219,6 +219,7 @@ impl MemoryReducerCaller {
         let was_in_epic = row.epic_id;
         let prior_status = row.status.clone();
         let caller_named_a_completion = patch.completed_at.is_some();
+        let caller_named_stop_pending = patch.stop_pending.is_some();
         let moved_to_epic = patch.epic_id;
         let repo_changed_in_place = patch.epic_id.is_none()
             && patch
@@ -232,6 +233,14 @@ impl MemoryReducerCaller {
             row.completed_at = self.now();
         }
         row.updated_at = self.now();
+        // store-split.allium X2: the module's two transition rules on a patch.
+        module::apply_patch_status_rules(&prior_status, caller_named_stop_pending, &mut row);
+        let stamp = self.now();
+        if module::should_respawn_phoenix(&prior_status, &row)
+            && self.respawn_phoenix_successor_of(&mut tables, &row, &stamp)
+        {
+            row.phoenix = false;
+        }
 
         let now_in_epic = moved_to_epic.unwrap_or(was_in_epic);
         let status_changed = prior_status != row.status;

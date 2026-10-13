@@ -87,6 +87,13 @@ impl SessionRequestStore for Store {
         requested(outcome, task, "exit-session request")
     }
 
+    async fn close_task(&self, task: TaskId) -> Result<()> {
+        self.caller
+            .close_task(task, self.host.clone())
+            .await?
+            .applied()
+    }
+
     async fn claim_session_request(&self, id: SessionRequestId) -> Result<bool> {
         Ok(won_logged(
             self.caller

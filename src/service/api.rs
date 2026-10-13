@@ -231,16 +231,15 @@ macro_rules! task_service_api {
                 task_id: $crate::models::TaskId
             ) -> Result<$crate::models::Task, $crate::service::ServiceError>;
 
-            /// Apply a session close as one patch and return the tmux window it
-            /// cleared. `Err` means exactly "the terminal write did not land",
-            /// which is what makes it safe to gate the teardown and the epic
-            /// chain on — see `ExitSession` in `docs/specs/pr-workflow.allium`.
-            /// Do not replace call sites with a generic `update_task`.
-            async fn close_session(
+            /// `store-split.allium: RequestCloseTask`: `update_tasks`' done
+            /// path, one module transaction (the Done write, the epic rollup,
+            /// the phoenix respawn and, when there is host work, a `close` row
+            /// this host serves). `Err` means the close is not known to have
+            /// landed.
+            async fn close_task(
                 &self,
-                task_id: $crate::models::TaskId,
-                outcome: $crate::service::CloseSessionOutcome
-            ) -> Result<$crate::service::ClosedSession, $crate::service::ServiceError>;
+                task_id: $crate::models::TaskId
+            ) -> Result<(), $crate::service::ServiceError>;
 
             async fn record_hook_event(
                 &self,

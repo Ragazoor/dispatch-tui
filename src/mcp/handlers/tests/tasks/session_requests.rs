@@ -617,12 +617,13 @@ async fn an_unsent_exit_session_is_an_error_saying_the_token_is_still_valid() {
     assert_eq!(extract_response_text(&retry), "Session closed.");
 }
 
-// -- What stays on the board -----------------------------------------------------------------------
+// -- update_tasks status="done" -----------------------------------------------------------------------
 
-/// `update_tasks` status="done" keeps its board-side close and teardown until
-/// M7 (`MarkTaskDoneViaMcp`): no token, no session row, no chain.
+/// `update_tasks` status="done" closes in the module (`MarkTaskDoneViaMcp`,
+/// `RequestCloseTask`): the Done write and ONE `close` row for the host's
+/// teardown, with no token (no wrap_up or exit_session row) and no chain.
 #[tokio::test]
-async fn update_tasks_done_keeps_its_board_side_close_and_writes_no_session_row() {
+async fn update_tasks_done_closes_in_the_module_and_writes_a_close_row_without_a_token() {
     let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().unwrap());
     let runner = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
     let (state, db) = {
@@ -655,7 +656,14 @@ async fn update_tasks_done_keeps_its_board_side_close_and_writes_no_session_row(
         extract_response_text(&resp),
         format!("Task #{} marked done.", task.0)
     );
-    assert!(db.session_requests().await.is_empty());
+    let rows = db.session_requests().await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].kind, SessionRequestKind::Close);
+    assert!(rows[0].wrap_up_request.is_none(), "no exit token");
+    assert!(
+        rows[0].tmux_window.is_some(),
+        "the window the close cleared"
+    );
     assert_eq!(db.get_task(task).await.unwrap().status, TaskStatus::Done);
 }
 
