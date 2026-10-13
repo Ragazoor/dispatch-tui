@@ -430,11 +430,6 @@ macro_rules! epic_service_api {
                 epic_id: $crate::models::EpicId
             ) -> Result<$crate::models::Epic, $crate::service::ServiceError>;
 
-            async fn get_epic_with_subtasks(
-                &self,
-                epic_id: $crate::models::EpicId
-            ) -> Result<($crate::models::Epic, Vec<$crate::models::Task>), $crate::service::ServiceError>;
-
             async fn get_epic_with_progress(
                 &self,
                 epic_id: $crate::models::EpicId
@@ -443,19 +438,6 @@ macro_rules! epic_service_api {
             async fn list_epics(
                 &self
             ) -> Result<Vec<$crate::models::Epic>, $crate::service::ServiceError>;
-
-            async fn list_root_epics(
-                &self
-            ) -> Result<Vec<$crate::models::Epic>, $crate::service::ServiceError>;
-
-            async fn list_sub_epics(
-                &self,
-                parent_id: $crate::models::EpicId
-            ) -> Result<Vec<$crate::models::Epic>, $crate::service::ServiceError>;
-
-            async fn list_epics_with_progress(
-                &self
-            ) -> Result<Vec<($crate::models::Epic, usize, usize)>, $crate::service::ServiceError>;
 
             async fn list_epics_with_progress_under(
                 &self,

@@ -16,10 +16,6 @@ impl super::super::EpicRead for Store {
         self.rows.epics()
     }
 
-    async fn list_root_epics(&self) -> Vec<Epic> {
-        self.rows.epics_with_parent(None)
-    }
-
     async fn list_sub_epics(&self, parent_id: EpicId) -> Vec<Epic> {
         self.rows.epics_with_parent(Some(parent_id))
     }

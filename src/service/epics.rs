@@ -251,17 +251,8 @@ impl EpicService {
             .ok_or_else(|| ServiceError::NotFound(format!("Epic {} not found", epic_id.0)))
     }
 
-    pub async fn get_epic_with_subtasks(
-        &self,
-        epic_id: EpicId,
-    ) -> Result<(Epic, Vec<Task>), ServiceError> {
-        let epic = self.get_epic(epic_id).await?;
-        let subtasks = self.db.list_tasks_for_epic(epic.id).await;
-        Ok((epic, subtasks))
-    }
-
     /// Progress for a single epic, rolled up the same way as
-    /// [`list_epics_with_progress`](Self::list_epics_with_progress): a
+    /// [`list_epics_with_progress_under`](Self::list_epics_with_progress_under): a
     /// `group_by_repo` epic's counts include its descendant sub-epics, not
     /// just its direct subtasks. Used by `list_epics` with `epic_id` so it
     /// agrees with the list rows and the board instead of undercounting to 0/0.
@@ -328,21 +319,7 @@ impl EpicService {
         Ok(self.db.list_epics().await)
     }
 
-    pub async fn list_root_epics(&self) -> Result<Vec<Epic>, ServiceError> {
-        Ok(self.db.list_root_epics().await)
-    }
-
-    pub async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>, ServiceError> {
-        Ok(self.db.list_sub_epics(parent_id).await)
-    }
-
-    pub async fn list_epics_with_progress(
-        &self,
-    ) -> Result<Vec<(Epic, usize, usize)>, ServiceError> {
-        self.list_epics_with_progress_under(None, false).await
-    }
-
-    /// [`list_epics_with_progress`](Self::list_epics_with_progress) narrowed
+    /// [`list_epics_with_progress_under`](Self::list_epics_with_progress_under) narrowed
     /// to `parent`'s direct children, or with `recursive` to its whole subtree
     /// (never `parent` itself). `parent = None` lists every epic, and
     /// `recursive` without a parent is a validation error: the full list is

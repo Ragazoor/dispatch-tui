@@ -843,19 +843,6 @@ async fn root_epic_has_no_parent() {
 }
 
 #[tokio::test]
-async fn list_root_epics_excludes_sub_epics() {
-    let db = in_memory_db().await;
-    let parent = db.create_epic("Parent", "desc", None).await.unwrap();
-    db.create_epic("Child", "desc", Some(parent.id))
-        .await
-        .unwrap();
-
-    let roots = db.list_root_epics().await;
-    assert_eq!(roots.len(), 1);
-    assert_eq!(roots[0].id, parent.id);
-}
-
-#[tokio::test]
 async fn list_sub_epics_returns_children() {
     let db = in_memory_db().await;
     let parent = db.create_epic("Parent", "desc", None).await.unwrap();

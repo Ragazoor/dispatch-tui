@@ -28,49 +28,6 @@ async fn create_sub_epic_links_parent() {
     assert_eq!(fetched.parent_epic_id, Some(parent.id));
 }
 
-#[tokio::test]
-async fn list_root_epics_service() {
-    let db = test_db().await;
-    let svc = epic_svc(&db);
-
-    let parent = svc
-        .create_epic(CreateEpicParams::fixture("Root"))
-        .await
-        .unwrap();
-    svc.create_epic(CreateEpicParams {
-        parent_epic_id: Some(parent.id),
-        ..CreateEpicParams::fixture("Sub")
-    })
-    .await
-    .unwrap();
-
-    let roots = svc.list_root_epics().await.unwrap();
-    assert_eq!(roots.len(), 1);
-    assert_eq!(roots[0].id, parent.id);
-}
-
-#[tokio::test]
-async fn list_sub_epics_service() {
-    let db = test_db().await;
-    let svc = epic_svc(&db);
-
-    let parent = svc
-        .create_epic(CreateEpicParams::fixture("Parent"))
-        .await
-        .unwrap();
-    let child = svc
-        .create_epic(CreateEpicParams {
-            parent_epic_id: Some(parent.id),
-            ..CreateEpicParams::fixture("Child")
-        })
-        .await
-        .unwrap();
-
-    let subs = svc.list_sub_epics(parent.id).await.unwrap();
-    assert_eq!(subs.len(), 1);
-    assert_eq!(subs[0].id, child.id);
-}
-
 // -- TOCTOU regression -----------------------------------------------------
 //
 // `validate_sub_status` in `crud.rs` reads the current task status before

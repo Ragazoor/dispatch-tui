@@ -799,7 +799,10 @@ async fn progress_aggregates_descendants_for_grouped_epic() {
     .await
     .unwrap();
 
-    let rows = svc.list_epics_with_progress().await.unwrap();
+    let rows = svc
+        .list_epics_with_progress_under(None, false)
+        .await
+        .unwrap();
     let (_, _done, total) = rows.iter().find(|(e, _, _)| e.id == root.id).unwrap();
     assert_eq!(*total, 1, "grouped root aggregates descendant task counts");
 }

@@ -231,7 +231,10 @@ async fn list_epics_with_progress() {
         .await
         .unwrap();
 
-    let list = epic_svc.list_epics_with_progress().await.unwrap();
+    let list = epic_svc
+        .list_epics_with_progress_under(None, false)
+        .await
+        .unwrap();
     assert_eq!(list.len(), 1);
     let (_, done, total) = &list[0];
     assert_eq!(*done, 0);
@@ -283,7 +286,10 @@ async fn list_epics_with_progress_multiple_epics() {
         .await
         .unwrap();
 
-    let list = epic_svc.list_epics_with_progress().await.unwrap();
+    let list = epic_svc
+        .list_epics_with_progress_under(None, false)
+        .await
+        .unwrap();
     assert_eq!(list.len(), 2);
     let e1_progress = list.iter().find(|(e, _, _)| e.id == e1.id).unwrap();
     assert_eq!(e1_progress.1, 1); // 1 done
@@ -319,28 +325,4 @@ async fn update_task_status_recalculates_epic() {
 
     let updated_epic = epic_svc.get_epic(epic.id).await.unwrap();
     assert_eq!(updated_epic.status, TaskStatus::Done);
-}
-
-#[tokio::test]
-async fn get_epic_with_subtasks() {
-    let db = test_db().await;
-    let task_svc = task_svc(&db);
-    let epic_svc = epic_svc(&db);
-
-    let epic = epic_svc
-        .create_epic(CreateEpicParams::fixture("E"))
-        .await
-        .unwrap();
-
-    task_svc
-        .create_task(CreateTaskParams {
-            epic_id: Some(epic.id),
-            ..CreateTaskParams::fixture("Sub", "/repo")
-        })
-        .await
-        .unwrap();
-
-    let (e, subtasks) = epic_svc.get_epic_with_subtasks(epic.id).await.unwrap();
-    assert_eq!(e.title, "E");
-    assert_eq!(subtasks.len(), 1);
 }

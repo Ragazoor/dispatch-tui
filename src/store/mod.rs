@@ -646,8 +646,6 @@ pub trait PollOwnershipStore: Send + Sync {
 pub trait EpicRead: Send + Sync {
     async fn get_epic(&self, id: EpicId) -> Option<Epic>;
     async fn list_epics(&self) -> Vec<Epic>;
-    /// List only root epics (no parent). Used for the main board view.
-    async fn list_root_epics(&self) -> Vec<Epic>;
     /// List direct children of the given epic.
     async fn list_sub_epics(&self, parent_id: EpicId) -> Vec<Epic>;
     async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Vec<Task>;
