@@ -115,27 +115,6 @@ async fn upsert_feed_tasks_inserts_no_task_for_a_retired_external_id() {
     );
 }
 
-/// The additive path (AppendOnlyFeed, DegradedNonEmptyEmission) inserts
-/// through the same UpsertFeedTasks clause, so it refuses a retired id too.
-#[tokio::test]
-async fn upsert_feed_tasks_additive_inserts_no_task_for_a_retired_external_id() {
-    let db = in_memory_db().await;
-    let epic = feed_epic(&db, "Append-only").await;
-    let items = vec![make_feed_item("ext-1", "One")];
-
-    upsert(&db, epic.id, &items).await;
-    complete_and_delete(&db, epic.id, "ext-1").await;
-
-    db.upsert_feed_tasks_additive(epic.id, &items, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
-
-    assert!(
-        db.list_tasks_for_epic(epic.id).await.is_empty(),
-        "the additive upsert must refuse a retired id exactly like the reconcile one"
-    );
-}
-
 /// Retirement suppresses insertion only. A new id in the same emission is
 /// inserted as usual beside the refused one.
 #[tokio::test]

@@ -127,7 +127,7 @@ impl TaskCrud for Store {
         repo_paths: &[String],
         base_branches: &[String],
     ) -> Result<Vec<RemovedFeedTask>> {
-        self.upsert_feed_tasks_inner(epic_id, items, repo_paths, base_branches, true)
+        self.upsert_feed_tasks_inner(epic_id, items, repo_paths, base_branches)
             .await
     }
 
@@ -141,54 +141,6 @@ impl TaskCrud for Store {
     ) -> Result<FeedIngestOutcome> {
         self.ingest_feed_inner(epic_id, items, repo_paths, base_branches, additive)
             .await
-    }
-
-    async fn upsert_feed_tasks_additive(
-        &self,
-        epic_id: EpicId,
-        items: &[FeedItem],
-        repo_paths: &[String],
-        base_branches: &[String],
-    ) -> Result<Vec<RemovedFeedTask>> {
-        self.upsert_feed_tasks_inner(epic_id, items, repo_paths, base_branches, false)
-            .await
-    }
-
-    /// Predicts nothing: unlike the two upserts, this delete has no items to
-    /// compute a keep-set from — `keep_external_ids` IS the keep-set.
-    ///
-    /// One scan of every task, not one `tasks_for_epic` call per child: the
-    /// rows have no per-epic index, so asking once per child epic would scan
-    /// every task in the board's view once per child — O(children × tasks)
-    /// instead of O(tasks). A single scan filtered by the child-epic id set
-    /// stays O(tasks) regardless of subtree fan-out.
-    async fn delete_stale_subtree_feed_tasks(
-        &self,
-        parent_id: EpicId,
-        keep_external_ids: &[String],
-    ) -> Result<Vec<RemovedFeedTask>> {
-        let children: std::collections::HashSet<EpicId> = self
-            .rows
-            .epics_with_parent(Some(parent_id))
-            .into_iter()
-            .map(|e| e.id)
-            .collect();
-        let keep: std::collections::HashSet<&str> =
-            keep_external_ids.iter().map(String::as_str).collect();
-        let candidates: Vec<Task> = self
-            .rows
-            .tasks()
-            .into_iter()
-            .filter(|t| t.epic_id.is_some_and(|e| children.contains(&e)))
-            .filter(|t| matches!(&t.external_id, Some(e) if !keep.contains(e.as_str())))
-            .collect();
-
-        self.caller
-            .delete_stale_subtree_feed_tasks(parent_id, keep_external_ids.to_vec())
-            .await?
-            .applied()?;
-
-        Ok(self.confirm_removed(candidates))
     }
 
     /// `Applied`/`Refused` map straight onto `true`/`false` via
@@ -335,17 +287,6 @@ impl TaskCrud for Store {
         external_ids: &[String],
     ) -> Result<Vec<String>> {
         Ok(self.rows.retired_without_task(feed_epic_id, external_ids))
-    }
-
-    async fn drop_closed_retired_feed_items(
-        &self,
-        feed_epic_id: EpicId,
-        keep_external_ids: &[String],
-    ) -> Result<()> {
-        self.caller
-            .drop_closed_retired_feed_items(feed_epic_id, keep_external_ids.to_vec())
-            .await?
-            .applied()
     }
 }
 

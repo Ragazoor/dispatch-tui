@@ -50,26 +50,6 @@ async fn upsert_feed_tasks_inserts_updates_and_removes_stale_items() {
 }
 
 #[tokio::test]
-async fn upsert_feed_tasks_additive_leaves_absent_items_alone() {
-    let (caller, rows) = caller();
-    let epic_id = caller.create_epic(blank_epic()).await.unwrap();
-    caller
-        .upsert_feed_tasks(
-            epic_id,
-            vec![feed_item("a"), feed_item("b")],
-            "tester".into(),
-        )
-        .await
-        .unwrap();
-
-    caller
-        .upsert_feed_tasks_additive(epic_id, vec![feed_item("a")], "tester".into())
-        .await
-        .unwrap();
-    assert_eq!(rows.tasks_for_epic(epic_id).len(), 2);
-}
-
-#[tokio::test]
 async fn upsert_feed_tasks_refuses_an_unknown_epic() {
     let (caller, _rows) = caller();
     let outcome = caller
@@ -77,80 +57,6 @@ async fn upsert_feed_tasks_refuses_an_unknown_epic() {
         .await
         .unwrap();
     assert!(!outcome.won());
-}
-
-#[tokio::test]
-async fn delete_stale_subtree_feed_tasks_removes_stale_items_across_child_epics() {
-    let (caller, rows) = caller();
-    let parent_id = caller.create_epic(blank_epic()).await.unwrap();
-    let child_id = caller
-        .create_epic(bindings::Epic {
-            parent_epic_id: parent_id.0,
-            ..blank_epic()
-        })
-        .await
-        .unwrap();
-    caller
-        .upsert_feed_tasks_additive(
-            child_id,
-            vec![feed_item("a"), feed_item("b")],
-            "tester".into(),
-        )
-        .await
-        .unwrap();
-
-    caller
-        .delete_stale_subtree_feed_tasks(parent_id, vec!["a".into()])
-        .await
-        .unwrap();
-    let remaining = rows.tasks_for_epic(child_id);
-    assert_eq!(remaining.len(), 1);
-    assert_eq!(remaining[0].external_id.as_deref(), Some("a"));
-}
-
-#[tokio::test]
-async fn drop_closed_retired_feed_items_removes_only_absent_ids() {
-    let (caller, rows) = caller();
-    let epic_id = caller.create_epic(blank_epic()).await.unwrap();
-    let feed_epic_id = caller
-        .create_epic(bindings::Epic {
-            feed_command: "some-command".into(),
-            parent_epic_id: epic_id.0,
-            ..blank_epic()
-        })
-        .await
-        .unwrap();
-    // Populate the task under the feed epic, finish it, then delete it
-    // through the guarded `delete_task` reducer — the retirement clause
-    // only fires there (and on `delete_epic`/`batch_delete`), never on
-    // the feed's own stale-reconciliation delete.
-    caller
-        .upsert_feed_tasks(feed_epic_id, vec![feed_item("a")], "tester".into())
-        .await
-        .unwrap();
-    let task_id = rows.tasks_for_epic(feed_epic_id)[0].id;
-    caller
-        .patch_task(
-            task_id,
-            bindings::TaskPatch {
-                status: Some(DONE.into()),
-                ..blank_task_patch()
-            },
-        )
-        .await
-        .unwrap();
-    caller.delete_task(task_id).await.unwrap();
-    assert!(rows
-        .retired_without_task(feed_epic_id, &["a".to_string()])
-        .contains(&"a".to_string()));
-
-    caller
-        .drop_closed_retired_feed_items(feed_epic_id, vec![])
-        .await
-        .unwrap();
-    assert!(rows
-        .retired_without_task(feed_epic_id, &["a".to_string()])
-        .is_empty());
 }
 
 #[tokio::test]

@@ -24,8 +24,7 @@ use crate::spacetime::bindings::{
     claim_session_request as _, clear_setting as _, create_epic as _, create_learning as _,
     create_managed_role_epic as _, create_repo_group_sub_epic as _, create_task as _,
     create_work_package as _, delete_epic as _, delete_learning as _, delete_repo_path as _,
-    delete_stale_subtree_feed_tasks as _, delete_task as _, delete_work_package as _,
-    drop_closed_retired_feed_items as _, fail_interrupted_dispatch_requests as _,
+    delete_task as _, delete_work_package as _, fail_interrupted_dispatch_requests as _,
     fail_interrupted_session_requests as _, flatten_epic as _, ingest_feed as _,
     link_work_package_item as _, mark_pr_learnings_gate_shown as _, override_poll_owner as _,
     patch_epic as _, patch_learning as _, patch_task as _, patch_work_package as _,
@@ -40,9 +39,9 @@ use crate::spacetime::bindings::{
     subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
     subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
     unlink_work_package_item as _, unsubscribe_from_epic as _, upsert_feed_tasks as _,
-    upsert_feed_tasks_additive as _, DbConnection, DispatchRequestsTableAccess as _,
-    EpicsTableAccess as _, LearningsTableAccess as _, SessionRequestsTableAccess as _,
-    TasksTableAccess as _, WorkPackagesTableAccess as _,
+    DbConnection, DispatchRequestsTableAccess as _, EpicsTableAccess as _,
+    LearningsTableAccess as _, SessionRequestsTableAccess as _, TasksTableAccess as _,
+    WorkPackagesTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -658,19 +657,6 @@ impl ReducerCaller for SdkReducerCaller {
         )
     }
 
-    async fn upsert_feed_tasks_additive(
-        &self,
-        epic_id: EpicId,
-        items: Vec<bindings::FeedTaskUpsertItem>,
-        created_by: String,
-    ) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(
-            self,
-            "the additive feed upsert",
-            upsert_feed_tasks_additive_then(epic_id.0, items, created_by)
-        )
-    }
-
     async fn ingest_feed(
         &self,
         epic_id: EpicId,
@@ -682,30 +668,6 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "the feed ingest",
             ingest_feed_then(epic_id.0, items, additive, created_by)
-        )
-    }
-
-    async fn delete_stale_subtree_feed_tasks(
-        &self,
-        parent_id: EpicId,
-        keep_external_ids: Vec<String>,
-    ) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(
-            self,
-            "the stale feed task cleanup",
-            delete_stale_subtree_feed_tasks_then(parent_id.0, keep_external_ids)
-        )
-    }
-
-    async fn drop_closed_retired_feed_items(
-        &self,
-        feed_epic_id: EpicId,
-        keep_external_ids: Vec<String>,
-    ) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(
-            self,
-            "the closed-retirement cleanup",
-            drop_closed_retired_feed_items_then(feed_epic_id.0, keep_external_ids)
         )
     }
 

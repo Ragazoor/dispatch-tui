@@ -536,15 +536,6 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_upsert_feed_tasks(epic_id, items, created_by)
     }
 
-    async fn upsert_feed_tasks_additive(
-        &self,
-        epic_id: EpicId,
-        items: Vec<bindings::FeedTaskUpsertItem>,
-        created_by: String,
-    ) -> Result<ReducerOutcome> {
-        self.apply_upsert_feed_tasks_additive(epic_id, items, created_by)
-    }
-
     async fn ingest_feed(
         &self,
         epic_id: EpicId,
@@ -553,22 +544,6 @@ impl ReducerCaller for MemoryReducerCaller {
         created_by: String,
     ) -> Result<ReducerOutcome> {
         self.apply_ingest_feed(epic_id, items, additive, created_by)
-    }
-
-    async fn delete_stale_subtree_feed_tasks(
-        &self,
-        parent_id: EpicId,
-        keep_external_ids: Vec<String>,
-    ) -> Result<ReducerOutcome> {
-        self.apply_delete_stale_subtree_feed_tasks(parent_id, keep_external_ids)
-    }
-
-    async fn drop_closed_retired_feed_items(
-        &self,
-        feed_epic_id: EpicId,
-        keep_external_ids: Vec<String>,
-    ) -> Result<ReducerOutcome> {
-        self.apply_drop_closed_retired_feed_items(feed_epic_id, keep_external_ids)
     }
 
     async fn create_repo_group_sub_epic(

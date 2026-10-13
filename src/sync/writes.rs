@@ -300,24 +300,13 @@ pub trait ReducerCaller: Send + Sync {
     // No id read-back and no reported removals here — that decoding lives in
     // the `Store`, which predicts candidates from its own already-
     // subscribed view before the call and confirms them absent afterward
-    // (see this task's plan doc, decision 1). These three are plain
+    // (see this task's plan doc, decision 1). These are plain
     // applied-or-refused calls.
     async fn upsert_feed_tasks(
         &self,
         epic_id: EpicId,
         items: Vec<bindings::FeedTaskUpsertItem>,
         created_by: String,
-    ) -> Result<ReducerOutcome>;
-    async fn upsert_feed_tasks_additive(
-        &self,
-        epic_id: EpicId,
-        items: Vec<bindings::FeedTaskUpsertItem>,
-        created_by: String,
-    ) -> Result<ReducerOutcome>;
-    async fn delete_stale_subtree_feed_tasks(
-        &self,
-        parent_id: EpicId,
-        keep_external_ids: Vec<String>,
     ) -> Result<ReducerOutcome>;
 
     /// Apply one parsed feed emission to a feed epic (store-split M3,
@@ -330,19 +319,6 @@ pub trait ReducerCaller: Send + Sync {
         items: Vec<bindings::FeedIngestItem>,
         additive: bool,
         created_by: String,
-    ) -> Result<ReducerOutcome>;
-
-    // -- Retired feed items (task #4971) --------------------------------------
-    //
-    // A plain applied-or-refused call, like the three feed-ingestion ones
-    // above: nothing here needs an id read back. There is no
-    // `create_retired_feed_item` counterpart — every real retirement writes
-    // the row inline from `delete_task`/`delete_epic` or the migration,
-    // never through a standalone call.
-    async fn drop_closed_retired_feed_items(
-        &self,
-        feed_epic_id: EpicId,
-        keep_external_ids: Vec<String>,
     ) -> Result<ReducerOutcome>;
 
     /// Find-or-create; answers with the epic's id either way. Matched by the

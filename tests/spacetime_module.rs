@@ -1953,176 +1953,14 @@ fn feed_upsert_stamps_created_by_on_insert_only() {
     );
 }
 
-/// The reconciling variant deletes what the emission omits; the additive
-/// variant never does, even given the identical inputs.
-#[test]
-fn feed_upsert_reconciles_but_additive_never_deletes() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    instance.call(
-        "seed_epics",
-        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
-    );
-    instance.call(
-        "upsert_feed_tasks",
-        &[
-            "1",
-            &serde_json::json!([
-                feed_item_json("ext-1", "one", "backlog"),
-                feed_item_json("ext-2", "two", "backlog"),
-            ])
-            .to_string(),
-            "test-creator",
-        ],
-    );
-
-    // ext-2 is now absent from the emission.
-    let additive = instance.call(
-        "upsert_feed_tasks_additive",
-        &[
-            "1",
-            &serde_json::json!([feed_item_json("ext-1", "one", "backlog")]).to_string(),
-            "test-creator",
-        ],
-    );
-    assert!(additive.status.success(), "{}", describe(&additive));
-    assert_eq!(
-        column(
-            &instance,
-            "SELECT count(*) AS c FROM tasks WHERE epic_id = 1"
-        ),
-        "2",
-        "additive must not delete an item merely absent from the emission"
-    );
-
-    let reconciling = instance.call(
-        "upsert_feed_tasks",
-        &[
-            "1",
-            &serde_json::json!([feed_item_json("ext-1", "one", "backlog")]).to_string(),
-            "test-creator",
-        ],
-    );
-    assert!(reconciling.status.success(), "{}", describe(&reconciling));
-    assert_eq!(
-        column(
-            &instance,
-            "SELECT count(*) AS c FROM tasks WHERE epic_id = 1"
-        ),
-        "1",
-        "the reconciling variant must delete what the emission omits"
-    );
-}
-
-/// The subtree-scoped delete reaches every direct child epic of `parent_id`,
-/// preserves manual tasks (`external_id` empty) unconditionally, and leaves a
-/// kept `external_id` alone.
-#[test]
-fn delete_stale_subtree_feed_tasks_scopes_to_children_and_keeps_manual_tasks() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    instance.call(
-        "seed_epics",
-        &[&serde_json::json!([
-            epic_json(1, "parent", "backlog", 0),
-            epic_json(2, "child-a", "backlog", 1),
-            epic_json(3, "child-b", "backlog", 1),
-        ])
-        .to_string()],
-    );
-    let mut stale = task_json(2, "stale", "backlog", 3, "");
-    stale["external_id"] = serde_json::json!("stale");
-    let mut kept = task_json(1, "keep", "backlog", 2, "");
-    kept["external_id"] = serde_json::json!("keep");
-    let mut manual = task_json(3, "manual", "backlog", 2, "");
-    manual["external_id"] = serde_json::json!("");
-    instance.call(
-        "seed_tasks",
-        &[&serde_json::json!([kept, stale, manual]).to_string()],
-    );
-
-    let deleted = instance.call(
-        "delete_stale_subtree_feed_tasks",
-        &["1", &serde_json::json!(["keep"]).to_string()],
-    );
-    assert!(deleted.status.success(), "{}", describe(&deleted));
-
-    assert!(
-        !no_rows(&instance, "SELECT id FROM tasks WHERE id = 1"),
-        "the kept external_id must survive"
-    );
-    assert!(
-        no_rows(&instance, "SELECT id FROM tasks WHERE id = 2"),
-        "a stale task in a CHILD epic must be removed"
-    );
-    assert!(
-        !no_rows(&instance, "SELECT id FROM tasks WHERE id = 3"),
-        "a manual task (no external_id) must always survive"
-    );
-}
-
-/// The same learning-detachment `deleting_a_task_detaches_its_learnings_and_cascades_their_retrievals`
-/// covers for `delete_task`, missing for the same reason `delete_task_side_effects`
-/// exists: each path that removes task rows must reproduce it.
-#[test]
-fn delete_stale_subtree_feed_tasks_detaches_the_removed_tasks_learnings() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    instance.call(
-        "seed_epics",
-        &[&serde_json::json!([
-            epic_json(1, "parent", "backlog", 0),
-            epic_json(2, "child", "backlog", 1),
-        ])
-        .to_string()],
-    );
-    let mut stale = task_json(1, "stale", "backlog", 2, "");
-    stale["external_id"] = serde_json::json!("stale");
-    instance.call("seed_tasks", &[&serde_json::json!([stale]).to_string()]);
-    let seeded = instance.call(
-        "seed_learnings",
-        &[&serde_json::json!([seeded_learning_json(1, "A learning", Some(1))]).to_string()],
-    );
-    assert!(seeded.status.success(), "{}", describe(&seeded));
-
-    let some_1 = column(
-        &instance,
-        "SELECT source_task_id FROM learnings WHERE id = 1",
-    );
-
-    let deleted = instance.call(
-        "delete_stale_subtree_feed_tasks",
-        &["1", &serde_json::json!([]).to_string()],
-    );
-    assert!(deleted.status.success(), "{}", describe(&deleted));
-
-    let after_delete = column(
-        &instance,
-        "SELECT source_task_id FROM learnings WHERE id = 1",
-    );
-    assert_ne!(
-        after_delete, some_1,
-        "source_task_id must change — the delete is a no-op if this still reads Some(1)"
-    );
-    assert_eq!(
-        after_delete, "[1,[]]",
-        "the learning survives, detached from the removed stale task"
-    );
-}
-
 // ---------------------------------------------------------------------------
 // Retired feed items — delete means "I am done with this item"
 // ---------------------------------------------------------------------------
 //
 // `core.allium: RetiredFeedItem`, written by `tasks.allium: DeleteTask` and
 // `epics.allium: DeleteEpic`, read by `feeds.allium:
-// IngestSkipsRetiredFeedItems` and dropped by `DropClosedRetiredFeedItems`.
+// IngestSkipsRetiredFeedItems` and dropped by `DropClosedRetiredFeedItems`
+// (inside `ingest_feed`).
 // Every retirement is keyed on the FEED EPIC — the nearest epic in the chain
 // carrying a `feed_command` — never on the sub-epic the task sat in.
 
@@ -2313,7 +2151,7 @@ fn retiring_the_same_feed_item_twice_writes_one_record() {
     );
 }
 
-/// `feeds.allium: IngestSkipsRetiredFeedItems`, reconcile and additive alike:
+/// `feeds.allium: IngestSkipsRetiredFeedItems`, via the reconciling reducer:
 /// an item whose id is retired under the upsert epic's nearest feed epic, with
 /// no surviving task, is never inserted — while a non-retired item in the same
 /// batch is. The record is restored through `seed_retired_feed_items`, so this
@@ -2338,43 +2176,34 @@ fn feed_upsert_refuses_to_insert_a_retired_external_id() {
     );
     assert!(seeded.status.success(), "{}", describe(&seeded));
 
-    for (reducer, epic) in [
-        ("upsert_feed_tasks", "1"),
-        ("upsert_feed_tasks_additive", "2"),
-    ] {
-        let upserted = instance.call(
-            reducer,
-            &[
-                epic,
-                &serde_json::json!([
-                    feed_item_json("ext-retired", "back again", "backlog"),
-                    feed_item_json(&format!("ext-new-{epic}"), "fresh", "backlog"),
-                ])
-                .to_string(),
-                "test-creator",
-            ],
-        );
-        assert!(
-            upserted.status.success(),
-            "{reducer}: {}",
-            describe(&upserted)
-        );
-        assert!(
-            no_rows(
-                &instance,
-                "SELECT id FROM tasks WHERE external_id = 'ext-retired'"
-            ),
-            "{reducer} into epic {epic} must not insert a retired id"
-        );
-        assert_eq!(
-            column(
-                &instance,
-                &format!("SELECT count(*) AS c FROM tasks WHERE external_id = 'ext-new-{epic}'")
-            ),
+    let upserted = instance.call(
+        "upsert_feed_tasks",
+        &[
             "1",
-            "{reducer} must still insert the batch's non-retired item"
-        );
-    }
+            &serde_json::json!([
+                feed_item_json("ext-retired", "back again", "backlog"),
+                feed_item_json("ext-new-1", "fresh", "backlog"),
+            ])
+            .to_string(),
+            "test-creator",
+        ],
+    );
+    assert!(upserted.status.success(), "{}", describe(&upserted));
+    assert!(
+        no_rows(
+            &instance,
+            "SELECT id FROM tasks WHERE external_id = 'ext-retired'"
+        ),
+        "upsert_feed_tasks must not insert a retired id"
+    );
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT count(*) AS c FROM tasks WHERE external_id = 'ext-new-1'"
+        ),
+        "1",
+        "upsert_feed_tasks must still insert the batch's non-retired item"
+    );
 }
 
 /// Suppression covers insertion only. A task still on the board with a
@@ -2807,100 +2636,6 @@ fn deleting_a_feed_epic_retires_nothing_and_drops_its_records() {
         retired_count(&instance, "feed_epic_id > 0"),
         "1",
         "only the surviving feed's record may remain"
-    );
-}
-
-/// `feeds.allium: DropClosedRetiredFeedItems`: every record under the feed
-/// epic whose id the trusted emission no longer carries is dropped; one still
-/// in the keep-set stays, and another feed epic's records are out of scope.
-/// A dropped id then comes back as a fresh task on the next cycle — the
-/// reopen case the rule exists for.
-#[test]
-fn drop_closed_retired_feed_items_drops_what_the_keep_set_omits() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    instance.call(
-        "seed_epics",
-        &[&serde_json::json!([
-            feed_epic_json(1, "feed", 0),
-            feed_epic_json(2, "other feed", 0),
-        ])
-        .to_string()],
-    );
-    let seeded = instance.call(
-        "seed_retired_feed_items",
-        &[&serde_json::json!([
-            retired_json(101, 1, "ext-1"),
-            retired_json(102, 1, "ext-2"),
-            retired_json(103, 1, "ext-3"),
-            retired_json(104, 2, "ext-1"),
-        ])
-        .to_string()],
-    );
-    assert!(seeded.status.success(), "{}", describe(&seeded));
-
-    let dropped = instance.call(
-        "drop_closed_retired_feed_items",
-        &["1", &serde_json::json!(["ext-2"]).to_string()],
-    );
-    assert!(dropped.status.success(), "{}", describe(&dropped));
-
-    assert_eq!(
-        column(
-            &instance,
-            "SELECT external_id FROM retired_feed_items WHERE feed_epic_id = 1"
-        ),
-        "ext-2",
-        "only the id still in the keep-set may stay retired"
-    );
-    assert_eq!(
-        retired_count(&instance, "feed_epic_id = 2 AND external_id = 'ext-1'"),
-        "1",
-        "another feed epic's record with the same id must be untouched"
-    );
-
-    let reopened = instance.call(
-        "upsert_feed_tasks",
-        &[
-            "1",
-            &serde_json::json!([
-                feed_item_json("ext-1", "reopened", "backlog"),
-                feed_item_json("ext-2", "still retired", "backlog"),
-            ])
-            .to_string(),
-            "test-creator",
-        ],
-    );
-    assert!(reopened.status.success(), "{}", describe(&reopened));
-    assert_eq!(
-        column(
-            &instance,
-            "SELECT title FROM tasks WHERE external_id = 'ext-1'"
-        ),
-        "reopened",
-        "a dropped record must let a reopened item back in"
-    );
-    assert!(
-        no_rows(
-            &instance,
-            "SELECT id FROM tasks WHERE external_id = 'ext-2'"
-        ),
-        "a kept record must still suppress its id"
-    );
-
-    let emptied = instance.call(
-        "drop_closed_retired_feed_items",
-        &["1", &serde_json::json!([]).to_string()],
-    );
-    assert!(emptied.status.success(), "{}", describe(&emptied));
-    assert!(
-        no_rows(
-            &instance,
-            "SELECT id FROM retired_feed_items WHERE feed_epic_id = 1"
-        ),
-        "an empty keep-set drops every record under the feed epic"
     );
 }
 

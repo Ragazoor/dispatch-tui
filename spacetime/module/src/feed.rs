@@ -209,7 +209,7 @@ pub(crate) fn upsert_feed_item(
 
 /// Delete every task in `epic_id` whose `external_id` is set and not in
 /// `keep`. Shared by [`upsert_feed_tasks_inner`]'s single-epic pass and
-/// [`delete_stale_subtree_feed_tasks`]'s per-child-epic loop.
+/// [`delete_stale_in_children`]'s per-child-epic loop.
 ///
 /// Owes each removed row [`delete_task_side_effects`] the same as any other
 /// task removal — see that function's doc comment.
@@ -232,7 +232,7 @@ pub(crate) fn delete_stale_feed_tasks_in_epic(
     }
 }
 
-/// Shared body of [`upsert_feed_tasks`] and [`upsert_feed_tasks_additive`].
+/// Shared body of [`upsert_feed_tasks`] and `ingest_feed`.
 /// `delete_absent` selects the stale-delete pass the same way
 /// `src/db/queries/tasks.rs::upsert_feed_tasks_inner` does.
 pub(crate) fn upsert_feed_tasks_inner(
@@ -278,37 +278,9 @@ pub fn upsert_feed_tasks(
     upsert_feed_tasks_inner(ctx, epic_id, items, &created_by, true)
 }
 
-/// The insert/update half of [`upsert_feed_tasks`] WITHOUT its stale-delete
-/// pass — items absent from `items` are left alone. For a partially degraded
-/// emission whose omissions are not trustworthy evidence a task is gone
-/// (`feeds.allium: DegradedNonEmptyEmission`). `created_by` as
-/// [`upsert_feed_tasks`] documents.
-#[spacetimedb::reducer]
-pub fn upsert_feed_tasks_additive(
-    ctx: &ReducerContext,
-    epic_id: i64,
-    items: Vec<FeedTaskUpsertItem>,
-    created_by: String,
-) -> Result<(), String> {
-    upsert_feed_tasks_inner(ctx, epic_id, items, &created_by, false)
-}
-
 /// Delete stale feed tasks across the WHOLE subtree of `parent_id` (every
-/// direct child epic), keeping only `keep_external_ids`. Manual tasks
-/// (`external_id` empty) are always preserved.
-#[spacetimedb::reducer]
-pub fn delete_stale_subtree_feed_tasks(
-    ctx: &ReducerContext,
-    parent_id: i64,
-    keep_external_ids: Vec<String>,
-) -> Result<(), String> {
-    let keep: std::collections::HashSet<&str> =
-        keep_external_ids.iter().map(String::as_str).collect();
-    delete_stale_in_children(ctx, parent_id, &keep);
-    Ok(())
-}
-
-/// [`delete_stale_subtree_feed_tasks`]'s body, shared with `ingest_feed`.
+/// direct child epic), keeping only `keep`. Manual tasks (`external_id`
+/// empty) are always preserved. Used by `ingest_feed`.
 pub(crate) fn delete_stale_in_children(
     ctx: &ReducerContext,
     parent_id: i64,
@@ -327,23 +299,10 @@ pub(crate) fn delete_stale_in_children(
 }
 
 /// feeds.allium: `DropClosedRetiredFeedItems`. Drop every `retired_feed_items`
-/// row keyed on `feed_epic_id` whose `external_id` is absent from
-/// `keep_external_ids` — called only after a TRUSTED (mirroring, non-additive)
-/// cycle whose parsed emission no longer carries the id, so the upstream item
+/// row keyed on `feed_epic_id` whose `external_id` is absent from `keep` —
+/// run by `ingest_feed` only after a TRUSTED (mirroring, non-additive) cycle
+/// whose parsed emission no longer carries the id, so the upstream item
 /// closed and a later reopen shows up as new.
-#[spacetimedb::reducer]
-pub fn drop_closed_retired_feed_items(
-    ctx: &ReducerContext,
-    feed_epic_id: i64,
-    keep_external_ids: Vec<String>,
-) -> Result<(), String> {
-    let keep: std::collections::HashSet<&str> =
-        keep_external_ids.iter().map(String::as_str).collect();
-    drop_closed_retired(ctx, feed_epic_id, &keep);
-    Ok(())
-}
-
-/// [`drop_closed_retired_feed_items`]'s body, shared with `ingest_feed`.
 pub(crate) fn drop_closed_retired(
     ctx: &ReducerContext,
     feed_epic_id: i64,

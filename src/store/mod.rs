@@ -153,8 +153,7 @@ pub struct CreateTaskRequest<'a> {
 
 /// A task row that a feed stale-delete removed and which still owns on-disk or
 /// in-tmux state, so the caller has something to tear down. Returned by
-/// [`TaskCrud::upsert_feed_tasks`] and
-/// [`TaskCrud::delete_stale_subtree_feed_tasks`].
+/// [`TaskCrud::upsert_feed_tasks`] and [`TaskCrud::ingest_feed`].
 ///
 /// Rows with neither a worktree nor a tmux window are deleted just the same but
 /// are not reported — there is nothing to clean up for a plain card.
@@ -403,30 +402,6 @@ pub trait TaskCrud: TaskRead {
         repo_paths: &[String],
         base_branches: &[String],
     ) -> Result<Vec<RemovedFeedTask>>;
-    /// The insert/update half of [`TaskCrud::upsert_feed_tasks`] WITHOUT its
-    /// stale-delete pass: items present in `items` are inserted or refreshed
-    /// exactly as they would be, and feed tasks absent from `items` are left
-    /// alone rather than deleted.
-    ///
-    /// For a partially degraded emission — a feed command that wrote to stderr
-    /// while still emitting items — whose omissions are not trustworthy
-    /// evidence that the tasks are gone (feeds.allium:
-    /// `DegradedNonEmptyEmission`). An empty `items` is therefore a no-op here,
-    /// not the "clear the epic" that [`TaskCrud::upsert_feed_tasks`] treats it
-    /// as.
-    ///
-    /// Always returns an EMPTY [`RemovedFeedTask`] list, because it removes
-    /// nothing — there is, by construction, nothing for the caller to tear
-    /// down. The return type matches [`TaskCrud::upsert_feed_tasks`] on purpose:
-    /// callers pick between the two by mode and then share one success/failure
-    /// tail, rather than forking into two arms that each restate it.
-    async fn upsert_feed_tasks_additive(
-        &self,
-        epic_id: EpicId,
-        items: &[FeedItem],
-        repo_paths: &[String],
-        base_branches: &[String],
-    ) -> Result<Vec<RemovedFeedTask>>;
     /// Post one parsed feed emission to the store (store-split M3,
     /// `feeds.allium: IngestFeedEmission`). The three slices are co-indexed.
     /// The module alone decides what the items do: the strategy from the epic's
@@ -444,30 +419,14 @@ pub trait TaskCrud: TaskRead {
         base_branches: &[String],
         additive: bool,
     ) -> Result<FeedIngestOutcome>;
-    /// Delete stale feed tasks across the WHOLE subtree of `parent_id` (all its
-    /// direct child epics), keeping only those whose `external_id` is in
-    /// `keep_external_ids`. Unlike [`TaskCrud::upsert_feed_tasks`]'s per-epic
-    /// delete pass, this is subtree-scoped with a global keep-set, so a task
-    /// that was just *moved* between role sub-epics (absent from its losing
-    /// epic's group) is not deleted. Manual tasks (`external_id IS NULL`) are
-    /// always preserved. Used by the role-routed reviews reconciler.
-    ///
-    /// Returns the removed rows that still own a worktree or tmux window — see
-    /// [`RemovedFeedTask`]. The delete predicate is unchanged: every stale feed
-    /// task in the subtree is removed whether or not it is reported.
-    async fn delete_stale_subtree_feed_tasks(
-        &self,
-        parent_id: EpicId,
-        keep_external_ids: &[String],
-    ) -> Result<Vec<RemovedFeedTask>>;
     /// Atomically update `sub_status` for multiple tasks in a single transaction.
     /// Used by the tick to batch all per-task reclassifications into one DB round-trip.
     async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()>;
 
     // Retired feed items (`docs/specs/core.allium`: `RetiredFeedItem`).
     //
-    // The write is a reducer call (`drop_closed_retired_feed_items`); the read
-    // (`retired_without_task`) is a join a subscription's `WHERE` clause cannot
+    // The closed-retirement drop is part of the module's `ingest_feed`; the
+    // read (`retired_without_task`) is a join a subscription's `WHERE` clause cannot
     // express, so it runs in Rust over the store's rows, the same as
     // `query_usage` and the learning reads. There is no
     // `create_retired_feed_item` here — every real retirement writes the row
@@ -482,15 +441,6 @@ pub trait TaskCrud: TaskRead {
         feed_epic_id: EpicId,
         external_ids: &[String],
     ) -> Result<Vec<String>>;
-    /// `DropClosedRetiredFeedItems` (`docs/specs/feeds.allium`): drop every
-    /// `retired_feed_items` row keyed on `feed_epic_id` whose `external_id` is
-    /// absent from `keep_external_ids`. Called only after a TRUSTED (mirroring,
-    /// non-additive) cycle — an additive cycle must not call this.
-    async fn drop_closed_retired_feed_items(
-        &self,
-        feed_epic_id: EpicId,
-        keep_external_ids: &[String],
-    ) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------

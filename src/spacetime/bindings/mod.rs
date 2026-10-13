@@ -25,14 +25,12 @@ pub mod create_work_package_reducer;
 pub mod delete_epic_reducer;
 pub mod delete_learning_reducer;
 pub mod delete_repo_path_reducer;
-pub mod delete_stale_subtree_feed_tasks_reducer;
 pub mod delete_task_reducer;
 pub mod delete_work_package_reducer;
 pub mod dispatch_request_timeout_type;
 pub mod dispatch_request_timeouts_table;
 pub mod dispatch_request_type;
 pub mod dispatch_requests_table;
-pub mod drop_closed_retired_feed_items_reducer;
 pub mod epic_patch_type;
 pub mod epic_type;
 pub mod epics_table;
@@ -145,7 +143,6 @@ pub mod todos_table;
 pub mod try_record_stop_reducer;
 pub mod unlink_work_package_item_reducer;
 pub mod unsubscribe_from_epic_reducer;
-pub mod upsert_feed_tasks_additive_reducer;
 pub mod upsert_feed_tasks_reducer;
 pub mod usage_event_type;
 pub mod usage_events_table;
@@ -174,14 +171,12 @@ pub use create_work_package_reducer::create_work_package;
 pub use delete_epic_reducer::delete_epic;
 pub use delete_learning_reducer::delete_learning;
 pub use delete_repo_path_reducer::delete_repo_path;
-pub use delete_stale_subtree_feed_tasks_reducer::delete_stale_subtree_feed_tasks;
 pub use delete_task_reducer::delete_task;
 pub use delete_work_package_reducer::delete_work_package;
 pub use dispatch_request_timeout_type::DispatchRequestTimeout;
 pub use dispatch_request_timeouts_table::*;
 pub use dispatch_request_type::DispatchRequest;
 pub use dispatch_requests_table::*;
-pub use drop_closed_retired_feed_items_reducer::drop_closed_retired_feed_items;
 pub use epic_patch_type::EpicPatch;
 pub use epic_type::Epic;
 pub use epics_table::*;
@@ -294,7 +289,6 @@ pub use todos_table::*;
 pub use try_record_stop_reducer::try_record_stop;
 pub use unlink_work_package_item_reducer::unlink_work_package_item;
 pub use unsubscribe_from_epic_reducer::unsubscribe_from_epic;
-pub use upsert_feed_tasks_additive_reducer::upsert_feed_tasks_additive;
 pub use upsert_feed_tasks_reducer::upsert_feed_tasks;
 pub use usage_event_type::UsageEvent;
 pub use usage_events_table::*;
@@ -384,19 +378,11 @@ pub enum Reducer {
     DeleteRepoPath {
         path: String,
     },
-    DeleteStaleSubtreeFeedTasks {
-        parent_id: i64,
-        keep_external_ids: Vec<String>,
-    },
     DeleteTask {
         id: i64,
     },
     DeleteWorkPackage {
         id: i64,
-    },
-    DropClosedRetiredFeedItems {
-        feed_epic_id: i64,
-        keep_external_ids: Vec<String>,
     },
     FailInterruptedDispatchRequests {
         host: String,
@@ -662,11 +648,6 @@ pub enum Reducer {
         items: Vec<FeedTaskUpsertItem>,
         created_by: String,
     },
-    UpsertFeedTasksAdditive {
-        epic_id: i64,
-        items: Vec<FeedTaskUpsertItem>,
-        created_by: String,
-    },
 }
 
 impl __sdk::InModule for Reducer {
@@ -695,10 +676,8 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteEpic { .. } => "delete_epic",
             Reducer::DeleteLearning { .. } => "delete_learning",
             Reducer::DeleteRepoPath { .. } => "delete_repo_path",
-            Reducer::DeleteStaleSubtreeFeedTasks { .. } => "delete_stale_subtree_feed_tasks",
             Reducer::DeleteTask { .. } => "delete_task",
             Reducer::DeleteWorkPackage { .. } => "delete_work_package",
-            Reducer::DropClosedRetiredFeedItems { .. } => "drop_closed_retired_feed_items",
             Reducer::FailInterruptedDispatchRequests { .. } => "fail_interrupted_dispatch_requests",
             Reducer::FailInterruptedSessionRequests { .. } => "fail_interrupted_session_requests",
             Reducer::FlattenEpic { .. } => "flatten_epic",
@@ -767,7 +746,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::UnlinkWorkPackageItem { .. } => "unlink_work_package_item",
             Reducer::UnsubscribeFromEpic { .. } => "unsubscribe_from_epic",
             Reducer::UpsertFeedTasks { .. } => "upsert_feed_tasks",
-            Reducer::UpsertFeedTasksAdditive { .. } => "upsert_feed_tasks_additive",
             _ => unreachable!(),
         }
     }
@@ -899,13 +877,6 @@ impl __sdk::Reducer for Reducer {
 }             => __sats::bsatn::to_vec(&delete_repo_path_reducer::DeleteRepoPathArgs {
                 path: path.clone(),
 }),
-            Reducer::DeleteStaleSubtreeFeedTasks{
-                parent_id,
-                keep_external_ids,
-}             => __sats::bsatn::to_vec(&delete_stale_subtree_feed_tasks_reducer::DeleteStaleSubtreeFeedTasksArgs {
-                parent_id: parent_id.clone(),
-                keep_external_ids: keep_external_ids.clone(),
-}),
             Reducer::DeleteTask{
                 id,
 }             => __sats::bsatn::to_vec(&delete_task_reducer::DeleteTaskArgs {
@@ -915,13 +886,6 @@ impl __sdk::Reducer for Reducer {
                 id,
 }             => __sats::bsatn::to_vec(&delete_work_package_reducer::DeleteWorkPackageArgs {
                 id: id.clone(),
-}),
-            Reducer::DropClosedRetiredFeedItems{
-                feed_epic_id,
-                keep_external_ids,
-}             => __sats::bsatn::to_vec(&drop_closed_retired_feed_items_reducer::DropClosedRetiredFeedItemsArgs {
-                feed_epic_id: feed_epic_id.clone(),
-                keep_external_ids: keep_external_ids.clone(),
 }),
             Reducer::FailInterruptedDispatchRequests{
                 host,
@@ -1382,15 +1346,6 @@ Reducer::RecalculateEpicStatus{
                 items,
                 created_by,
 }             => __sats::bsatn::to_vec(&upsert_feed_tasks_reducer::UpsertFeedTasksArgs {
-                epic_id: epic_id.clone(),
-                items: items.clone(),
-                created_by: created_by.clone(),
-}),
-            Reducer::UpsertFeedTasksAdditive{
-                epic_id,
-                items,
-                created_by,
-}             => __sats::bsatn::to_vec(&upsert_feed_tasks_additive_reducer::UpsertFeedTasksAdditiveArgs {
                 epic_id: epic_id.clone(),
                 items: items.clone(),
                 created_by: created_by.clone(),

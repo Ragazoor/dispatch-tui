@@ -13,8 +13,9 @@ use super::{MemoryReducerCaller, Tables, MAX_EPIC_DEPTH};
 
 impl MemoryReducerCaller {
     /// The `retired_feed_items` delete helper — shared by
-    /// `drop_retired_feed_items_for_epics` and `drop_closed_retired_feed_items`,
-    /// which otherwise repeated this identical remove-and-notify loop.
+    /// `drop_retired_feed_items_for_epics` and the closed-retirement drop in
+    /// `ingest_feed`, which otherwise repeated this identical remove-and-notify
+    /// loop.
     pub(super) fn remove_retired_feed_item_rows(&self, tables: &mut Tables, ids: Vec<i64>) {
         for id in ids {
             if tables.retired_feed_items.remove(&id).is_some() {
@@ -656,76 +657,6 @@ impl MemoryReducerCaller {
             .map(module::FeedTaskUpsertItem::from)
             .collect();
         Ok(self.upsert_feed_tasks_inner(&mut tables, epic_id, items, &created_by, true))
-    }
-
-    pub(super) fn apply_upsert_feed_tasks_additive(
-        &self,
-        epic_id: EpicId,
-        items: Vec<bindings::FeedTaskUpsertItem>,
-        created_by: String,
-    ) -> Result<ReducerOutcome> {
-        let epic_id = epic_id.0;
-        let mut tables = self.lock();
-        let items = items
-            .into_iter()
-            .map(module::FeedTaskUpsertItem::from)
-            .collect();
-        Ok(self.upsert_feed_tasks_inner(&mut tables, epic_id, items, &created_by, false))
-    }
-
-    pub(super) fn apply_delete_stale_subtree_feed_tasks(
-        &self,
-        parent_id: EpicId,
-        keep_external_ids: Vec<String>,
-    ) -> Result<ReducerOutcome> {
-        let parent_id = parent_id.0;
-        let mut tables = self.lock();
-        let keep: std::collections::HashSet<&str> =
-            keep_external_ids.iter().map(String::as_str).collect();
-        let child_epics: std::collections::HashSet<i64> = tables
-            .epics
-            .values()
-            .filter(|e| e.parent_epic_id == parent_id)
-            .map(|e| e.id)
-            .collect();
-        // One pass over every task, not one pass per child epic — see
-        // `retire_feed_tasks_before_epic_delete`'s matching note on why an
-        // unindexed store has to merge what a real, per-epic-indexed
-        // reducer gets for free.
-        let stale: Vec<i64> = tables
-            .tasks
-            .values()
-            .filter(|t| {
-                child_epics.contains(&t.epic_id)
-                    && !t.external_id.is_empty()
-                    && !keep.contains(t.external_id.as_str())
-            })
-            .map(|t| t.id)
-            .collect();
-        for id in stale {
-            self.delete_task_row(&mut tables, id);
-            self.delete_task_side_effects(&mut tables, id);
-        }
-        Ok(ReducerOutcome::Applied(vec![]))
-    }
-
-    pub(super) fn apply_drop_closed_retired_feed_items(
-        &self,
-        feed_epic_id: EpicId,
-        keep_external_ids: Vec<String>,
-    ) -> Result<ReducerOutcome> {
-        let feed_epic_id = feed_epic_id.0;
-        let mut tables = self.lock();
-        let keep: std::collections::HashSet<&str> =
-            keep_external_ids.iter().map(String::as_str).collect();
-        let stale: Vec<i64> = tables
-            .retired_feed_items
-            .values()
-            .filter(|r| r.feed_epic_id == feed_epic_id && !keep.contains(r.external_id.as_str()))
-            .map(|r| r.id)
-            .collect();
-        self.remove_retired_feed_item_rows(&mut tables, stale);
-        Ok(ReducerOutcome::Applied(vec![]))
     }
 
     pub(super) fn apply_create_repo_group_sub_epic(

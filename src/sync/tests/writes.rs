@@ -71,12 +71,9 @@ enum Sent {
     RecordUserPromptSubmit(i64, String, String),
     MarkPrLearningsGateShown(i64, String),
     UpsertFeedTasks(i64, usize, String),
-    UpsertFeedTasksAdditive(i64, usize, String),
     IngestFeed(i64, usize, bool, String),
     ClaimPollOwner(String, i64, String),
     OverridePollOwner(String, i64, String),
-    DeleteStaleSubtreeFeedTasks(i64, Vec<String>),
-    DropClosedRetiredFeedItems(i64, Vec<String>),
     CreateRepoGroupSubEpic(i64, String, String),
     CreateManagedRoleEpic(String, i64, String, String, i64, String),
     BatchPatchSubStatus(usize),
@@ -583,52 +580,6 @@ impl ReducerCaller for RecordingCaller {
             self.simulate_feed_removal();
         }
         Ok(outcome)
-    }
-
-    async fn upsert_feed_tasks_additive(
-        &self,
-        epic_id: EpicId,
-        items: Vec<bindings::FeedTaskUpsertItem>,
-        created_by: String,
-    ) -> anyhow::Result<ReducerOutcome> {
-        let epic_id = epic_id.0;
-        let outcome = self.answer(Sent::UpsertFeedTasksAdditive(
-            epic_id,
-            items.len(),
-            created_by,
-        ))?;
-        if matches!(outcome, ReducerOutcome::Applied(_)) {
-            self.simulate_feed_removal();
-        }
-        Ok(outcome)
-    }
-
-    async fn delete_stale_subtree_feed_tasks(
-        &self,
-        parent_id: EpicId,
-        keep_external_ids: Vec<String>,
-    ) -> anyhow::Result<ReducerOutcome> {
-        let parent_id = parent_id.0;
-        let outcome = self.answer(Sent::DeleteStaleSubtreeFeedTasks(
-            parent_id,
-            keep_external_ids,
-        ))?;
-        if matches!(outcome, ReducerOutcome::Applied(_)) {
-            self.simulate_feed_removal();
-        }
-        Ok(outcome)
-    }
-
-    async fn drop_closed_retired_feed_items(
-        &self,
-        feed_epic_id: EpicId,
-        keep_external_ids: Vec<String>,
-    ) -> anyhow::Result<ReducerOutcome> {
-        let feed_epic_id = feed_epic_id.0;
-        self.answer(Sent::DropClosedRetiredFeedItems(
-            feed_epic_id,
-            keep_external_ids,
-        ))
     }
 
     async fn create_repo_group_sub_epic(
@@ -1969,27 +1920,6 @@ async fn a_confirmed_removal_is_reported_but_a_raced_survivor_is_not() {
     );
 }
 
-/// The additive variant never predicts or reports a removal — it has no
-/// stale-delete pass to predict candidates for.
-#[tokio::test]
-async fn additive_upsert_never_reports_a_removal() {
-    let rows = Arc::new(crate::sync::SharedRows::new());
-    rows.upsert_task(&feed_task_row(1, 1, "absent-from-emission"));
-    let caller = RecordingCaller::removing_on_feed_write(rows.clone(), &[1]);
-    let (writer, sent) = writer_over(rows, caller);
-
-    let removed = writer
-        .upsert_feed_tasks_additive(EpicId(1), &[], &[], &[])
-        .await
-        .unwrap();
-
-    assert!(removed.is_empty());
-    assert_eq!(
-        sent.sent(),
-        vec![Sent::UpsertFeedTasksAdditive(1, 0, "user-me".to_string())]
-    );
-}
-
 /// `ingest_feed` is one reducer call carrying the additive flag and the
 /// caller's identity; a reconciling call reports the rows the module removed
 /// that this board predicted, an additive one reports none.
@@ -2036,40 +1966,6 @@ async fn feed_upsert_with_no_settled_identity_still_applies_with_an_empty_create
         sent.sent(),
         vec![Sent::UpsertFeedTasks(1, 1, String::new())],
         "no settled identity stamps an empty created_by, not a refusal"
-    );
-}
-
-/// The subtree-scoped delete reads candidates from every direct CHILD epic of
-/// `parent_id`, not from the parent itself.
-#[tokio::test]
-async fn delete_stale_subtree_scopes_candidates_to_child_epics() {
-    let rows = Arc::new(crate::sync::SharedRows::new());
-    let mut parent = crate::sync::encode::create_epic_row("parent", "", None, "user-me", AT_STORED);
-    parent.id = 1;
-    rows.upsert_epic(&parent);
-    let mut child =
-        crate::sync::encode::create_epic_row("child", "", Some(EpicId(1)), "user-me", AT_STORED);
-    child.id = 2;
-    rows.upsert_epic(&child);
-    rows.upsert_task(&feed_task_row(10, 2, "stale"));
-    let caller = RecordingCaller::removing_on_feed_write(rows.clone(), &[10]);
-    let (writer, sent) = writer_over(rows, caller);
-
-    let removed = writer
-        .delete_stale_subtree_feed_tasks(EpicId(1), &["keep".to_string()])
-        .await
-        .unwrap();
-
-    assert_eq!(
-        removed.iter().map(|r| r.id).collect::<Vec<_>>(),
-        vec![TaskId(10)]
-    );
-    assert_eq!(
-        sent.sent(),
-        vec![Sent::DeleteStaleSubtreeFeedTasks(
-            1,
-            vec!["keep".to_string()]
-        )]
     );
 }
 
@@ -2493,15 +2389,6 @@ async fn every_store_mutation_reaches_the_transport() {
     db.upsert_feed_tasks(EpicId(1), &items, &repo_paths, &base_branches)
         .await
         .unwrap();
-    db.upsert_feed_tasks_additive(EpicId(1), &items, &repo_paths, &base_branches)
-        .await
-        .unwrap();
-    db.delete_stale_subtree_feed_tasks(EpicId(1), &["ext-1".to_string()])
-        .await
-        .unwrap();
-    db.drop_closed_retired_feed_items(EpicId(1), &["ext-1".to_string()])
-        .await
-        .unwrap();
     db.ingest_feed(EpicId(1), &[], &[], &[], false)
         .await
         .unwrap();
@@ -2639,9 +2526,6 @@ async fn every_store_mutation_reaches_the_transport() {
             "RecordUserPromptSubmit",
             "MarkPrLearningsGateShown",
             "UpsertFeedTasks",
-            "UpsertFeedTasksAdditive",
-            "DeleteStaleSubtreeFeedTasks",
-            "DropClosedRetiredFeedItems",
             "IngestFeed",
             "CreateRepoGroupSubEpic",
             "CreateManagedRoleEpic",

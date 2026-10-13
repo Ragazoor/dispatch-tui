@@ -1339,10 +1339,9 @@ fn memory_caller_matches_the_real_reducers() {
         // pre-declared coverage — `own_creations`
         // (`SELECT * FROM epics WHERE created_by = '{owner}'`) is what makes
         // it visible for the id read-back at all.
-        // A child of `epic_id_real`, not top-level: `delete_stale_subtree_feed_tasks`
-        // below walks `epic_id_real`'s DIRECT CHILD epics, and nesting it here
-        // also means its own child tasks fall under the followed-epic subtree
-        // subscription, not just `own_creations`.
+        // A child of `epic_id_real`, not top-level: nesting it here means its
+        // own child tasks fall under the followed-epic subtree subscription,
+        // not just `own_creations`.
         let feed_epic = |parent_epic_id: i64| bindings::Epic {
             title: "feed epic".into(),
             feed_command: "some-command".into(),
@@ -1396,27 +1395,6 @@ fn memory_caller_matches_the_real_reducers() {
             "feed task count after first upsert"
         );
 
-        // Additive: an absent item is left alone.
-        real.upsert_feed_tasks_additive(
-            EpicId(feed_epic_id_real),
-            vec![feed_item("feed-a")],
-            accepted.identity.clone(),
-        )
-        .await
-        .unwrap();
-        mem.upsert_feed_tasks_additive(
-            EpicId(feed_epic_id_mem),
-            vec![feed_item("feed-a")],
-            "conformance".into(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            rows_real.tasks_for_epic(EpicId(feed_epic_id_real)).len(),
-            2,
-            "additive upsert must not remove feed-b"
-        );
-
         // Non-additive: absent items are removed.
         real.upsert_feed_tasks(
             EpicId(feed_epic_id_real),
@@ -1439,13 +1417,14 @@ fn memory_caller_matches_the_real_reducers() {
             "feed task count after stale-delete"
         );
 
-        real.delete_stale_subtree_feed_tasks(EpicId(epic_id_real), vec![])
+        // An empty emission reconciles the feed epic down to nothing.
+        real.upsert_feed_tasks(EpicId(feed_epic_id_real), vec![], accepted.identity.clone())
             .await
             .unwrap();
         wait_for!(rows_real
             .tasks_for_epic(EpicId(feed_epic_id_real))
             .is_empty());
-        mem.delete_stale_subtree_feed_tasks(EpicId(epic_id_mem), vec![])
+        mem.upsert_feed_tasks(EpicId(feed_epic_id_mem), vec![], "conformance".into())
             .await
             .unwrap();
         assert!(rows_mem.tasks_for_epic(EpicId(feed_epic_id_mem)).is_empty());
@@ -1527,7 +1506,7 @@ fn memory_caller_matches_the_real_reducers() {
         assert_eq!(real_managed, mem_managed, "managed-role epic id");
         compare_epic_ignoring_created_at(real_managed.0);
 
-        // -- drop_closed_retired_feed_items (agent_state) ------------------------
+        // -- retirement on delete_task (agent_state) -----------------------------
         // Retirement only fires from the guarded `delete_task`, never from a
         // feed's own stale-reconciliation delete — see the module's own
         // `delete_stale_feed_tasks_in_epic` vs. `delete_task_side_effects`.
@@ -1563,21 +1542,8 @@ fn memory_caller_matches_the_real_reducers() {
         assert_eq!(
             rows_real.retired_without_task(EpicId(feed_epic_id_real), &["retire-me".to_string()]),
             rows_mem.retired_without_task(EpicId(feed_epic_id_mem), &["retire-me".to_string()]),
-            "retired_without_task before drop"
+            "retired_without_task after delete_task"
         );
-
-        real.drop_closed_retired_feed_items(EpicId(feed_epic_id_real), vec![])
-            .await
-            .unwrap();
-        wait_for!(rows_real
-            .retired_without_task(EpicId(feed_epic_id_real), &["retire-me".to_string()])
-            .is_empty());
-        mem.drop_closed_retired_feed_items(EpicId(feed_epic_id_mem), vec![])
-            .await
-            .unwrap();
-        assert!(rows_mem
-            .retired_without_task(EpicId(feed_epic_id_mem), &["retire-me".to_string()])
-            .is_empty());
 
         // -- respawn_phoenix_successor (agent_state) -----------------------------
         // Each of these three tasks needs its own distinct `title`: both

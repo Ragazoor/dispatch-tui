@@ -87,8 +87,7 @@ impl Store {
         }
     }
 
-    /// Shared body of `upsert_feed_tasks`/`upsert_feed_tasks_additive`.
-    /// `delete_absent` selects the stale-delete pass.
+    /// Body of `upsert_feed_tasks`: upsert, then the stale-delete pass.
     ///
     /// The predict-then-verify shape (this task's plan doc, decision 1): a
     /// reducer cannot report which rows it deleted, and a deleted row is gone
@@ -107,7 +106,6 @@ impl Store {
         items: &[crate::models::FeedItem],
         repo_paths: &[String],
         base_branches: &[String],
-        delete_absent: bool,
     ) -> Result<Vec<crate::store::RemovedFeedTask>> {
         if items.len() != repo_paths.len() || items.len() != base_branches.len() {
             anyhow::bail!(
@@ -126,13 +124,9 @@ impl Store {
             })
             .collect();
 
-        let candidates = if delete_absent {
-            let keep: std::collections::HashSet<&str> =
-                items.iter().map(|i| i.external_id.as_str()).collect();
-            self.feed_removal_candidates(epic_id, &keep)
-        } else {
-            Vec::new()
-        };
+        let keep: std::collections::HashSet<&str> =
+            items.iter().map(|i| i.external_id.as_str()).collect();
+        let candidates = self.feed_removal_candidates(epic_id, &keep);
 
         // Best-effort, unlike `require_identity`: a feed sync must not fail
         // just because this install has never connected before (no identity
@@ -147,17 +141,10 @@ impl Store {
             .flatten()
             .unwrap_or_default();
 
-        if delete_absent {
-            self.caller
-                .upsert_feed_tasks(epic_id, wire_items, created_by)
-                .await?
-                .applied()?;
-        } else {
-            self.caller
-                .upsert_feed_tasks_additive(epic_id, wire_items, created_by)
-                .await?
-                .applied()?;
-        }
+        self.caller
+            .upsert_feed_tasks(epic_id, wire_items, created_by)
+            .await?
+            .applied()?;
 
         Ok(self.confirm_removed(candidates))
     }
