@@ -442,13 +442,17 @@ rule ConfirmDone {
         --
         -- The stamp is not a per-rule opt-in. ANY status write that brings a
         -- task INTO done sets task.completed_at = now, computed once from
-        -- (prior, next) inside the task-update seam every status write passes
-        -- through, so it fires without each rule naming it. The other routes
+        -- (prior, next) by the store's module as part of the write — the
+        -- patch_task reducer every board status write goes through — so it
+        -- fires without each rule naming it. Since store-split M7 the board
+        -- stamps nothing itself (store-split.allium, X2); a board that needs
+        -- the stamp re-reads the task. The other routes
         -- in: PrMerged and ExitSession's non-pr branch (both in
         -- pr-workflow.allium; ExitSession stamps it from the store clock in
-        -- the module since store-split M5), close_session
-        -- (mcp-task-tools.allium), the MCP
-        -- update_tasks tool, and a feed upsert whose item arrives with status
+        -- the module since store-split M5), update_tasks' status="done" path
+        -- (mcp-task-tools.allium: MarkTaskDoneViaMcp, through the module's
+        -- close_task since M7; store-split.allium: RequestCloseTask), and a
+        -- feed upsert whose item arrives with status
         -- done (feeds.allium). PrClosed (pr-workflow.allium) is NOT one of
         -- these — a closed PR no longer transitions the task into done.
         --
@@ -547,27 +551,29 @@ rule PhoenixRespawn {
         -- EveryRouteIntoDone. The trigger is the status transition itself, not
         -- any one operator action, so all five routes respawn: ConfirmDone (the
         -- 'x' key and a forward move out of review), the STATUS section of
-        -- EditTask, ExitSession's rebase and done branches, and PrMerged (both
-        -- in pr-workflow.allium). transitions_to fires only on an actual change
+        -- EditTask, update_tasks' status="done" path (mcp-task-tools.allium:
+        -- MarkTaskDoneViaMcp), ExitSession's rebase and done branches, and
+        -- PrMerged (both in pr-workflow.allium). transitions_to fires only on an actual change
         -- of value, so a no-op patch that rewrites done over done never
         -- re-fires.
         --
-        -- Where it hooks. core/Task.status has exactly two writing paths in the
-        -- service layer, TaskService::update_task and TaskService::close_session
-        -- (src/service/tasks/crud.rs): the TUI persists through update_task,
-        -- and update_tasks' status="done" path closes through close_session.
-        -- Both already funnel their prior-status-derived
-        -- writes through with_status_transition; the respawn is NOT one of those,
-        -- because it is a row creation rather than a field on the patch, so it
-        -- is a step after the status write rather than part of it. That ordering
-        -- is what DoneOutranksTheRespawn requires. Since store-split M5
-        -- exit_session no longer closes through close_session: its close runs
-        -- in the module (pr-workflow.allium: ExitSession, inside
-        -- store-split.allium's RequestExitSession), which applies the respawn
-        -- after the Done write in the SAME transaction, so the successor and
-        -- the predecessor's flag clear land with the close (TheFlagIsTheReceipt
-        -- holds trivially there). The successor copies the predecessor's
-        -- stored repo_path and plan as they are; the board's path
+        -- Where it hooks. Since store-split M7 every route in runs the
+        -- respawn IN THE MODULE, after the Done write and in the SAME
+        -- transaction, so the successor and the predecessor's flag clear land
+        -- with the status write (TheFlagIsTheReceipt holds trivially there):
+        -- the patch_task reducer, which the TUI's status writes (ConfirmDone,
+        -- EditTask) go through, when a patch moves a task into Done from
+        -- another status (store-split.allium, X2); the close_task reducer of
+        -- update_tasks' status="done" path (store-split.allium:
+        -- RequestCloseTask, X1); exit_session's close (pr-workflow.allium:
+        -- ExitSession, inside store-split.allium's RequestExitSession, since
+        -- M5); and PrMerged's write (store-split.allium: ReportPrStatus, since
+        -- M6). The board respawns nothing itself: before M7 its service layer
+        -- (TaskService::update_task and close_session) ran the respawn as a
+        -- separate step after the status write. The ordering still matters,
+        -- as DoneOutranksTheRespawn requires: the respawn is a row creation
+        -- after the status write, not a field on it. The successor copies the
+        -- predecessor's stored repo_path and plan as they are; the board's path
         -- normalisation ran when those were written.
         --
         -- FeedTasksAreExempt. A task carrying an external_id is owned by a feed
@@ -575,10 +581,10 @@ rule PhoenixRespawn {
         -- feeds.allium). A phoenix copy would either duplicate the row the feed
         -- is about to re-ingest, or be deleted as stale by the same
         -- reconciliation — so the flag is ignored on those rows rather than
-        -- fighting the feed. This costs nothing in practice: FeedRunner writes
-        -- status through its own sanctioned DB handle, bypassing the two service
-        -- funnels entirely, so a feed-driven auto-completion would not reach
-        -- this rule even without the precondition. The precondition is what
+        -- fighting the feed. This costs nothing in practice: a feed writes
+        -- status inside the module's ingest_feed (feeds.allium), not through
+        -- patch_task or a close, so a feed-driven auto-completion would not
+        -- reach this rule even without the precondition. The precondition is what
         -- makes the exemption a decision instead of an accident, and it also
         -- covers a feed row completed by hand from the TUI, which DOES reach
         -- here.
@@ -1765,15 +1771,17 @@ rule EditTask {
             -- Entering done via the STATUS field carries the same
             -- completion stamp as ConfirmDone, and UpdateEpicViaMcp's mirror
             -- of it on the epic side (epics.allium): the editor is a freeform
-            -- status setter, but it still routes through update_task, which
-            -- does not special-case "how" the status changed. Leaving done
+            -- status setter, but it still writes through the module's
+            -- patch_task, which does not special-case "how" the status
+            -- changed. Leaving done
             -- writes nothing — see ConfirmDone's guidance for why there is no
             -- matching clear.
             if edited.status = done and prior != done:
                 task.completed_at = now
             -- And the same leaving-running clear, for the same reason: the
-            -- editor routes through update_task, which applies every rule a
-            -- transition derives from the prior status. See core/Task's
+            -- editor writes through patch_task, which since store-split M7
+            -- applies every rule a transition derives from the prior status
+            -- (store-split.allium, X2). See core/Task's
             -- PendingStopOnlyWhileRunning invariant.
             if prior = running and edited.status != running:
                 task.stop_pending = false
@@ -1814,8 +1822,9 @@ rule EditTask {
         -- the editor is invoked.
         -- Setting STATUS to done on a phoenix task respawns it, exactly as
         -- the 'x' key would: PhoenixRespawn triggers on the transition, not
-        -- on the operator action, and the editor routes through update_task
-        -- like every other path. The PHOENIX value the same save writes is
+        -- on the operator action, and the editor writes through patch_task,
+        -- which runs the respawn in the module (store-split.allium, X2). The
+        -- PHOENIX value the same save writes is
         -- the one the respawn reads, so turning the flag ON and completing
         -- the task in a single edit does spawn the successor.
         --
@@ -1830,11 +1839,11 @@ rule EditTask {
         --
         -- The completed_at side effect mirrors ConfirmDone's entering-done
         -- stamp (this file) and UpdateEpicViaMcp's entering-done clause in
-        -- epics.allium. It is computed once from (prior, next) inside
-        -- TaskService::update_task, the seam every status write passes
+        -- epics.allium. It is computed once from (prior, next) by the
+        -- module's patch_task, the reducer every board status write passes
         -- through, so the editor gets it without asking; see
         -- update_task_done_to_backlog_is_unaffected_by_done_rule in
-        -- src/service/tasks/tests/crud.rs.
+        -- src/service/tasks/tests/crud/task_service.rs.
 }
 
 ------------------------------------------------------------
@@ -1858,8 +1867,9 @@ rule EditTask {
 --     mcp-task-tools.allium): a session caller, or a dispatched agent acting
 --     on a task OTHER than its own — never a dispatched agent closing
 --     itself, which must still go through the first path. No exit token;
---     applies the same terminal fields through the board's close_session
---     (which exit_session also used before store-split M5), but NOT
+--     applies the same terminal fields in the module, through the close_task
+--     reducer (store-split.allium: RequestCloseTask, since store-split M7;
+--     before it, the board's close_session), but NOT
 --     exit_session's epic chaining — only a close that went through
 --     exit_session (and therefore had a wrap_up ahead of it) emits
 --     SessionClosed. See AutoDispatchNextSubtask in epics.allium.

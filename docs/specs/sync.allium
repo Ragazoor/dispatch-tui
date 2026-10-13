@@ -172,8 +172,9 @@ entity BoardConnection {
     -- THE COST IS NOT JUST A SKIPPED INSERT. An id `retired_without_task`
     -- wrongly calls survivor-less is dropped from the batch's keep-set before
     -- routing (`feeds.allium`'s "Retired feed items"), and a trusted,
-    -- mirroring cycle then passes that thinner keep-set to the module's
-    -- `delete_stale_subtree_feed_tasks` reducer — which runs SERVER-SIDE, over
+    -- mirroring cycle then passes that thinner keep-set to the stale-subtree
+    -- delete inside the module's `ingest_feed` (once a separate reducer of
+    -- its own, deleted in store-split M7) — which runs SERVER-SIDE, over
     -- every row the store holds, not over this connection's view. The
     -- survivor the poll owner could not see is not merely left retired; it is
     -- deleted, by a reducer that had the row in front of it the whole time.
@@ -378,8 +379,13 @@ config {
     -- scheduled timeout, store-split.allium: DispatchRequest); 4 is M5
     -- (wrap-up and exit-session request rows, the conflict sub_status, the
     -- close and the epic chain in the module, store-split.allium:
-    -- SessionRequest, W12). The module crate and the board both hold it.
-    rules_version: Integer = 5
+    -- SessionRequest, W12); 5 was M6 (PR state derived in the module from
+    -- the raw gh status, store-split.allium: ReportPrStatus, P5); 6 is M7
+    -- (update_tasks' done-path close and its close row, patch_task's
+    -- transition rules, managed-epic provisioning in the module,
+    -- store-split.allium: RequestCloseTask, X6). The module crate and the
+    -- board both hold it.
+    rules_version: Integer = 6
 }
 
 ------------------------------------------------------------
@@ -653,7 +659,10 @@ rule SubscribeToThisHostsSessionRequests {
         -- initial rows a starting board receives), the outcome the wrap_up
         -- MCP tool waits on, the chained_task exit_session's response names,
         -- and the exit_session rows exit_session's no-answer settling reads
-        -- (mcp-task-tools.allium: WrapUpViaMcp, ExitSessionViaMcp). The
+        -- (mcp-task-tools.allium: WrapUpViaMcp, ExitSessionViaMcp). Since
+        -- store-split M7 it also delivers the close rows of update_tasks'
+        -- done path (store-split.allium: RequestCloseTask), which this host
+        -- tears down like an exit_session row. The
         -- token check itself is the module's, over its own table
         -- (store-split.allium: RequestExitSession), not over these rows. Finished
         -- rows are included for the same reason as the fifth ask: a row

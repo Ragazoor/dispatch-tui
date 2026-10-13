@@ -10,7 +10,10 @@
 --           exit token, the conflict sub_status writes and their timeouts,
 --           which the store's module owns since store-split M5 (see
 --           store-split.allium: SessionRequest, RequestWrapUp,
---           RequestExitSession and the rules after them).
+--           RequestExitSession and the rules after them); update_tasks'
+--           done-path close, which the module owns since store-split M7
+--           (store-split.allium: RequestCloseTask). The host's teardown of
+--           that close's row is here (ExitSessionTeardown).
 
 use "./core.allium" as core
 use "./store-split.allium" as split
@@ -418,12 +421,18 @@ rule ClosePrOnDone {
         -- is the status transition itself, not any one operator action.
         -- transitions_to reaches all five routes — see PhoenixRespawn's
         -- guidance for the full list (ConfirmDone, EditTask's STATUS
-        -- section, ExitSession's rebase and done branches, and PrMerged).
-        -- The gh call needs a host. Four routes write through the board's
-        -- service layer (TaskService::update_task and close_session,
-        -- src/service/tasks/crud.rs), which spawns it. Since store-split M5
-        -- ExitSession's branches write in the module instead, and the host
-        -- serving the close's exit_session row runs it (ExitSessionTeardown).
+        -- section, update_tasks' status="done" path, ExitSession's rebase
+        -- and done branches, and PrMerged).
+        -- The gh call needs a host. ConfirmDone and EditTask write through
+        -- the board's TaskService::update_task (src/service/tasks/crud.rs),
+        -- which spawns it once the module's patch has landed. ExitSession's
+        -- branches (since store-split M5) and update_tasks' done path
+        -- (store-split.allium: RequestCloseTask, since M7) write in the
+        -- module instead, and the host serving the close's exit_session or
+        -- close row runs it (ExitSessionTeardown). That owner was confirmed
+        -- as a decision in M7 (store-split.allium, "ClosePrOnDone's owner"):
+        -- a row that fails before its host serves it leaves the PR open,
+        -- accepted as built and flagged for user review.
         --
         -- Fired for PrMerged deliberately, not by oversight. Closing a PR
         -- that just merged is a no-op `gh` itself refuses, and there is no
@@ -840,24 +849,23 @@ rule ExitSession {
         -- review outright (the Stop hook can move a task to review through no
         -- fault of the agent, which would then be unable to close at all).
         --
-        -- == The board-side close that remains ==
-        -- MarkTaskDoneViaMcp (mcp-task-tools.allium) — update_tasks'
-        -- dedicated status="done" path — still closes in the board, through
-        -- close_session and kill_session_window via the `perform_close`
-        -- helper (src/mcp/handlers/tasks/wrap_up.rs), with no token and no
-        -- chain. Before M5 exit_session shared that helper; since M5 it is
-        -- that path's alone (by decision until M7; how it moves then is an open question in
-        -- store-split.allium).
-        -- Its close_persisted gate keeps the rationale it had here:
-        -- close_persisted is the outcome of ONE purpose-built persistence call
-        -- that does nothing but apply the terminal patch and recalculate the
-        -- parent epic. If the close were expressed as a general task update, a
-        -- failure in some unrelated follow-up step of that update
-        -- (re-parenting, repo rerouting) would report failure after the patch
-        -- had already landed, and the teardown gated on it would then be
-        -- withheld from a task that IS closed — leaving a live window on a
-        -- done task. Keep that close a dedicated call; do not fold it back
-        -- into the generic update path.
+        -- == The other close: update_tasks' done path ==
+        -- There is no board-side close left. MarkTaskDoneViaMcp
+        -- (mcp-task-tools.allium) — update_tasks' dedicated status="done"
+        -- path — closed in the board until store-split M7, through
+        -- close_session and kill_session_window via a `perform_close` helper
+        -- that exit_session shared before M5. Since M7 it closes in the
+        -- module too (store-split.allium: RequestCloseTask, X1): the same
+        -- terminal fields as this rule's done branch, in one transaction,
+        -- with no token and no chain, and a close row for the host's
+        -- teardown when there is a window to kill or a PR to close
+        -- (ExitSessionTeardown). close_session, perform_close and the
+        -- close_persisted gate are gone. The gate's reason — a teardown must
+        -- not be withheld from a task that IS closed because some unrelated
+        -- follow-up step of a general update failed — still holds, and the
+        -- module's single transaction satisfies it: the close row is written
+        -- by the same write that closes the task, or neither lands. Keep the
+        -- close a dedicated reducer; do not fold it into patch_task.
         --
         -- The chain does NOT apply there. This rule is the sole emitter of
         -- SessionClosed, so AutoDispatchNextSubtask (epics.allium) fires only
@@ -956,15 +964,18 @@ rule ExitSessionTeardown {
     when: SessionRequestClaimed(request)
 
     -- The host work of a close (store-split.allium, W5): this host's claim of
-    -- the exit_session row was accepted (HostClaimsSessionRequest).
-    requires: request.kind = exit_session
+    -- the exit_session row, or since M7 of update_tasks' done-path close row
+    -- (store-split.allium: RequestCloseTask, X1), was accepted
+    -- (HostClaimsSessionRequest). Both kinds are served alike.
+    requires: request.kind in {exit_session, close}
     requires: request.host = core/local_host()
     -- D11's second line (store-split.allium, W11).
     requires: request.requested_by = core/local_host().owner
 
     -- The outcome of killing the window the row names, bounded by the row's
     -- deadline. A window that is already gone counts as torn down: that is
-    -- the state the kill asks for.
+    -- the state the kill asks for. So does a close row that names no window
+    -- (written only for its PR url): there is nothing to kill.
     let outcome = kill_window_outcome(request.tmux_window, request.deadline)
 
     ensures:
@@ -993,22 +1004,29 @@ rule ExitSessionTeardown {
         -- never reports; the close stands either way.
         --
         -- ClosePrOnDone's gh call (above) is also this host's, on this route:
-        -- when the close took the task into Done (action rebase or done) and
-        -- the task carries a pr-typed url, the host serving this row runs
-        -- `gh pr close <url>` best-effort, alongside the kill, exactly as
+        -- when the close took the task into Done (action rebase or done; a
+        -- close row is always done) and the task carries a pr-typed url, the
+        -- host serving this row runs `gh pr close <url>` best-effort,
+        -- alongside the kill, reading the url from the task, exactly as
         -- close_session spawned it before M5. Its outcome is logged and does
-        -- not affect the row's report. (Confirmation of this owner is an open
-        -- question in store-split.allium.)
+        -- not affect the row's report. This owner was confirmed as a decision
+        -- in M7 (store-split.allium, "ClosePrOnDone's owner"); a row that
+        -- fails before it is served leaves the PR open, accepted as built
+        -- and flagged for user review.
         --
-        -- The kill targets this agent's own window, so it ends the session
-        -- that called exit_session. The MCP response does not wait for it
-        -- (mcp-task-tools.allium: ExitSessionViaMcp).
+        -- On an exit_session row the kill targets this agent's own window,
+        -- so it ends the session that called exit_session. The MCP response
+        -- does not wait for it (mcp-task-tools.allium: ExitSessionViaMcp). A
+        -- close row's window belongs to some other task's agent, or to none:
+        -- update_tasks never closes the caller's own task
+        -- (mcp-task-tools.allium: MarkTaskDoneViaMcp), and does not wait
+        -- for the teardown either.
 }
 
 rule KillWindowOfFailedExitSession {
     when: request: split/SessionRequest.state transitions_to failed
 
-    requires: request.kind = exit_session
+    requires: request.kind in {exit_session, close}
     requires: request.host = core/local_host()
     requires: request.requested_by = core/local_host().owner
     requires: request.tmux_window != null
@@ -1017,19 +1035,23 @@ rule KillWindowOfFailedExitSession {
 
     @guidance
         -- Best effort, nothing reported: the row is already finished. Covers
-        -- an exit_session row this host sees fail before its teardown landed:
+        -- an exit_session row, or since M7 a close row (store-split.allium:
+        -- RequestCloseTask), this host sees fail before its teardown landed:
         -- the task's deletion (store-split.allium:
         -- DeletingATaskFailsItsOpenSessionRequest), this board's own restart
         -- sweep (HostRestartFailsInterruptedSessionRequests), the backstop
-        -- while this board was hung, or a teardown that itself failed (one
-        -- more attempt). The close already cleared the window from the task,
-        -- so nothing else would ever kill it.
+        -- while this board was hung, a later close of the same task that
+        -- failed the row ("task closed"), or a teardown that itself failed
+        -- (one more attempt). The close already cleared the window from the
+        -- task, so nothing else would ever kill it. It kills the window only:
+        -- ClosePrOnDone's gh call is not retried here, so such a row leaves
+        -- the PR open (store-split.allium, "ClosePrOnDone's owner").
         --
         -- Only transitions this board SEES. A row the backstop failed while
         -- no board ran on this host is already failed in the starting board's
         -- first look at the rows, which is history, as in store-split.allium's
         -- D12; whether such a window should be killed too is an open question
-        -- in store-split.allium.
+        -- in store-split.allium, deferred past M7.
 }
 
 -- == Rebase Conflict ==

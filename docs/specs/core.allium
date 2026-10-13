@@ -707,8 +707,12 @@ entity Task {
     -- running; every status write that leaves running clears it in the
     -- same write (MoveTaskForward / MoveTaskBackward / ConfirmDone in
     -- tasks.allium, UpdateTaskViaMcp in
-    -- mcp-task-tools.allium, ExitSession in pr-workflow.allium, and the
-    -- drain points in agent-health.allium). So the bit cannot outlive the
+    -- mcp-task-tools.allium, ExitSession in pr-workflow.allium,
+    -- update_tasks' done-path close in store-split.allium's RequestCloseTask,
+    -- and the drain points in agent-health.allium). Since store-split M7 the
+    -- clear is the store module's, applied by patch_task to every patch that
+    -- leaves running and by both closes, never added by the board
+    -- (store-split.allium, X2). So the bit cannot outlive the
     -- status it was recorded under, and cannot be waiting for a task that
     -- a later move puts back into running — where the next drain would
     -- otherwise flip it straight back out of a status a human just chose.

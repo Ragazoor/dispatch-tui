@@ -248,7 +248,9 @@ rule UpdateTaskViaMcp {
         -- moves in tasks.allium do. Without this an agent that moves its own
         -- task out of running and later back in would carry a Stop from the
         -- earlier turn, which the next drain would apply against the new one.
-        -- See core/Task's PendingStopOnlyWhileRunning invariant.
+        -- See core/Task's PendingStopOnlyWhileRunning invariant. Since
+        -- store-split M7 the module's patch_task applies this clear in the
+        -- same write (store-split.allium, X2); the board adds nothing.
         if status != null and status != running and prior_status = running:
             task.stop_pending = false
     ensures:
@@ -275,9 +277,10 @@ rule UpdateTaskViaMcp {
         -- call through THIS rule can only arm or disarm the recurrence, never
         -- trigger it. MarkTaskDoneViaMcp below is a different matter: it CAN
         -- reach done (on a task other than the calling agent's own), and
-        -- because it does so via the same close_session TaskService method
-        -- exit_session uses, a phoenix-armed task closed that way respawns —
-        -- see that rule's own guidance.
+        -- because the module's close (store-split.allium: RequestCloseTask)
+        -- runs the respawn on entering Done as exit_session's close does, a
+        -- phoenix-armed task closed that way respawns — see that rule's own
+        -- guidance.
         if phoenix != null: task.phoenix = phoenix
     ensures: task.updated_at = now
 
@@ -337,12 +340,12 @@ rule UpdateTaskViaMcp {
         -- same call is no longer overridden by the status param: the two write
         -- different fields. The entering-done stamp is not reachable from this
         -- rule at all — `requires: status != done` rules it out — and is
-        -- applied by the other callers of TaskService::close_session:
-        -- tasks/ConfirmDone (the TUI path) and MarkTaskDoneViaMcp below (the
-        -- MCP path). It lives in TaskService::update_task
-        -- (src/service/tasks/crud.rs), which reads the pre-write status and
-        -- applies the stamp on top of the patch built from the caller's
-        -- params.
+        -- applied on the other routes into done: tasks/ConfirmDone (the TUI
+        -- path, through the module's patch_task, which stamps completed_at on
+        -- entering Done) and MarkTaskDoneViaMcp below (the MCP path, through
+        -- the module's close_task; store-split.allium: RequestCloseTask).
+        -- Since store-split M7 the board stamps nothing itself (X2): a board
+        -- that needs the stamp re-reads the task.
         -- The `status` argument's description lists the statuses and nothing
         -- more. It used to carry the resume-a-crashed-task story and an aside
         -- that no MCP path deletes a task; the first is dispatch_task's
@@ -417,46 +420,26 @@ rule MarkTaskDoneViaMcp {
     -- target statuses. A task with no live tmux_window (never dispatched, or
     -- already detached) closes with nothing to tear down.
 
-    -- The terminal write can fail to persist at the storage layer, as
-    -- exit_session's could before store-split M5 moved that close into the
-    -- module — see "The board-side close that remains" in ExitSession's
-    -- guidance (pr-workflow.allium) for the `close_persisted` rationale, which
-    -- applies here unchanged. Every mutation below is gated on this SAME write landing: a
-    -- task whose close does not persist keeps its prior status, sub_status,
-    -- completed_at and any live window untouched. (No SessionClosed is emitted
-    -- on this path on either outcome — see the note after the ensures.)
-    let close_persisted = terminal_close_persisted(task)
-    let window = closed_session_window(task)
-    let had_window = window != null
-    let was_running = task.status = running
-    let was_already_done = task.status = done
-
-    ensures:
-        if close_persisted:
-            task.status = done
-            task.sub_status = core/SubStatus.default_for(done)
-            task.updated_at = now
-            -- Re-closing an already-done task leaves its existing
-            -- completion time untouched: a done -> done write is not a
-            -- completion, the same for every other caller of
-            -- TaskService::close_session. Every OTHER prior status DOES get
-            -- the fresh stamp.
-            if not was_already_done:
-                task.completed_at = now
-            -- Mirrors ExitSession's own clear: leaving running voids any
-            -- deferred Stop, so a task closed while running can't carry a
-            -- stale stop_pending into whatever status a later re-open lands
-            -- it in. See core/Task's PendingStopOnlyWhileRunning invariant.
-            if was_running:
-                task.stop_pending = false
-            if had_window:
-                task.tmux_window = null
-                not exists window
+    -- Since store-split M7 the tool ASKS and the module closes: one
+    -- close_task call naming this board's host (store-split.allium:
+    -- RequestCloseTask, X1). In one transaction the module writes Done (a
+    -- done -> done re-close keeps the task's completed_at; every other prior
+    -- status gets the fresh stamp), clears stop_pending when the task was
+    -- running and clears its tmux_window, rolls up the epic chain, respawns a
+    -- phoenix task entering Done, fails any open session request on the task
+    -- ("task closed"), and writes a close row for the host's teardown when
+    -- the task had a window or carries a pr-typed url. The close either
+    -- landed whole or not at all: a task whose close did not land keeps its
+    -- prior status, sub_status, completed_at and any live window. (No
+    -- SessionClosed is emitted on this path on either outcome — see the note
+    -- after the ensures.)
+    ensures: CloseTaskRequested(task: task, host: core/local_host())
 
     -- No SessionClosed, therefore no epic chain. This is where this path
     -- deliberately diverges from ExitSession: the terminal fields and a tmux
-    -- teardown are common to both (applied by the module and the host for
-    -- exit_session since store-split M5, by the board here), the chain is not.
+    -- teardown are common to both (applied by the module and torn down by the
+    -- host on both routes, for exit_session since store-split M5 and for this
+    -- path since M7), the chain is not.
     --
     -- Why. SessionClosed is the signal AutoDispatchNextSubtask (epics.allium)
     -- keys on, and the chain's whole value is that the successor starts from a
@@ -489,20 +472,19 @@ rule MarkTaskDoneViaMcp {
         -- a `status="done", url=<x>` call with "url_type is required" instead
         -- of the close-only error this rule promises.
         --
-        -- From there, this path runs the board-side close:
-        -- TaskService::close_session (the terminal-write helper, its
-        -- CloseSessionOutcome::Done branch) and TaskService::kill_session_window
-        -- for the tmux teardown, through a `perform_close` helper
-        -- (src/mcp/handlers/tasks/wrap_up.rs). Before store-split M5
-        -- ExitSessionViaMcp shared that helper, so the two closes had one
-        -- terminal-write / teardown sequence. Since M5 exit_session closes in
-        -- the module (store-split.allium: RequestExitSession) and the helper
-        -- is this path's alone. The two now apply the same terminal fields by
-        -- two implementations — the "second path to the terminal write"
-        -- hazard the shared helper existed to avoid — until this path moves, in
-        -- M7 by decision (how is an open question in store-split.allium). Only the request
-        -- validation (the two requires above), the response text and the
-        -- missing epic chain are specific to this path.
+        -- From there, this path calls the close_task reducer
+        -- (store-split.allium: RequestCloseTask) and nothing else. Until
+        -- store-split M7 it closed in the board instead, through
+        -- close_session and kill_session_window via a `perform_close` helper
+        -- that exit_session shared before M5; between M5 and M7 the two
+        -- closes applied the same terminal fields by two implementations.
+        -- M7 removed that board-side close (close_session, perform_close and
+        -- its close_persisted gate): both closes are now module
+        -- transactions, and both teardowns are the host's, from a session
+        -- request row (pr-workflow.allium: ExitSessionTeardown). Only the
+        -- request validation (the two requires above), the response text,
+        -- the missing token and the missing epic chain are specific to this
+        -- path.
         --
         -- The chain is not part of this path at all. It is not suppressed by
         -- a flag: since M5 it runs inside the module's exit_session
@@ -543,25 +525,32 @@ rule MarkTaskDoneViaMcp {
         -- that error names the field-combination problem regardless of who
         -- is calling.
         --
-        -- close_session has no precondition on prior status or on
-        -- tmux_window being present — it is called unconditionally once
-        -- validation passes, so a backlog task with no window closes exactly
-        -- as cleanly as a running task with a live one. It also unconditionally
-        -- applies respawn_phoenix on a persisted Done transition — the same
-        -- PhoenixRespawn (tasks.allium) any other route into Done triggers;
-        -- this path earns that for free by reusing close_session rather than
-        -- re-deriving it.
+        -- close_task has no precondition on prior status or on tmux_window
+        -- being present — it is called unconditionally once validation
+        -- passes, so a backlog task with no window closes exactly as cleanly
+        -- as a running task with a live one. A task that enters Done through
+        -- it respawns if it is a phoenix task — the same PhoenixRespawn
+        -- (tasks.allium) any other route into Done triggers, applied in the
+        -- close's own transaction. An open session request on the task (a
+        -- wrap_up rebase still running, say) does not block the close: the
+        -- module fails it "task closed" in the same transaction.
         --
-        -- When the terminal write does NOT persist: this call reports the
-        -- task could not be moved to done and invites a retry (worded
-        -- differently from ExitSessionViaMcp's no-answer text, which names
-        -- a live tmux session and a still-valid token — this
-        -- path may have no session at all to speak of); any live window is
-        -- left alive (nothing tears it down) — the task is exactly as it was
-        -- before the call. When it DOES persist: the window (if any) is killed
-        -- in the background and task/epic-changed notifications fire. No epic
-        -- auto-dispatch chain runs on either outcome, so the response text
-        -- never names a chained subtask — unlike exit_session's, which does.
+        -- When the close does NOT land (the call is refused or the store
+        -- fails it): this call reports the task could not be moved to done
+        -- and invites a retry (worded differently from ExitSessionViaMcp's
+        -- no-answer text, which names a live tmux session and a still-valid
+        -- token — this path may have no session at all to speak of); nothing
+        -- was written, no close row exists, and any live window is left
+        -- alive — the task is exactly as it was before the call. When it DOES
+        -- land: the host serving the close row kills the window (if any) and
+        -- closes a pr-typed url's PR, best effort, after the call has
+        -- returned; the tool waits for neither. Where the window is on a
+        -- machine this caller does not own, no row is written and the window
+        -- is left to its own machine (store-split.allium, X1). Boards learn of
+        -- the close through their subscriptions. The response text is
+        -- unchanged by M7. No epic auto-dispatch chain runs on either
+        -- outcome, so the response text never names a chained subtask —
+        -- unlike exit_session's, which does.
         --
         -- MCP_UPDATABLE (src/models/tasks.rs) now includes Done: the
         -- schema's advertised status enum is backlog | running | review |

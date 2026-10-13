@@ -189,7 +189,9 @@ rule CreateEpic {
         --
         -- CreateEpicViaMcp (below) is not a second implementation: both rules
         -- witness the one service entry point, which is where the
-        -- parent-existence check and the parent recalculation live. The two
+        -- parent-existence check lives. The parent recalculation is the
+        -- module's own, inside create_epic: since store-split M7 the service
+        -- no longer asks for a second one (store-split.allium, X3). The two
         -- rules differ only in which parameters the surface exposes.
         --
         -- Known implementation limitation (not design intent): the current
@@ -197,7 +199,9 @@ rule CreateEpic {
         -- feed_interval_secs, so the service writes them in a follow-up
         -- patch and re-reads. That patch's failure is an error of the whole
         -- creation. The two-write shape is not atomic — a failure between
-        -- them leaves a half-populated epic — and it is not a pattern to
+        -- them leaves a half-populated epic; making it atomic was decided
+        -- NOT IN M7 and deferred to a follow-up (store-split.allium, X5) —
+        -- and it is not a pattern to
         -- extend: a fourth such field wants a single-insert create request
         -- (mirroring core/CreateTaskRequest) rather than another patch line.
         --
@@ -829,7 +833,9 @@ rule ManagedFeedConfigViaMcp {
         -- This is the only configuration path: persist the settings, then fire
         -- ProvisionManagedEpics and refresh the board. Feed commands are not
         -- newline-validated (they are shell scripts run via sh -c, matching
-        -- feed_command on epics).
+        -- feed_command on epics). The interval floor above stays here, at the
+        -- request boundary; the provisioning itself is the module's
+        -- ensure_managed_epics reducer since store-split M7 (X4).
         --
         -- Annotations. The tool's MCP hints can say only one thing, and the
         -- no-argument call is a read while any other call is a write. The
@@ -1508,6 +1514,15 @@ rule ProvisionManagedEpics {
                 )
 
     @guidance
+        -- Where it runs. Since store-split M7 the whole provisioning run is
+        -- ONE module reducer, ensure_managed_epics(reviews_command,
+        -- reviews_interval_secs, cve_command, cve_interval_secs), so every
+        -- lookup and create above lands in one transaction (store-split.allium,
+        -- X4). The board still reads and writes the four settings, applies the
+        -- feed-interval floor to them (request shape; ManagedFeedConfigViaMcp),
+        -- and calls the reducer with the values it read. Before M7 the board
+        -- ran the lookups and creates itself, as separate store calls.
+        --
         -- No feed_command on sub-epics — the B3 concurrency guard.
         -- The my_reviews / team_reviews / bots sub-epics deliberately
         -- carry feed_command = null. Because FeedTick (feeds.allium)
@@ -1547,12 +1562,16 @@ rule ProvisionManagedEpics {
         -- index on (parent, feed_role) WHERE feed_role != none, keyed as
         -- COALESCE(parent, -1) so root-level roles collide too — see that
         -- invariant in core.allium for why) makes a duplicate AT THAT SAME
-        -- PARENT physically impossible. Two instances starting up
-        -- concurrently therefore cannot both insert the same role sub-epic:
-        -- `EpicCrud::create_managed_role_epic` inserts feed_role in the same
-        -- statement as the row itself, and the second insert loses to the
-        -- unique index and re-selects the winner rather than creating a
-        -- duplicate. The one exception is a database that already held
+        -- PARENT physically impossible. Two boards starting up concurrently
+        -- therefore cannot both insert the same managed epic: since
+        -- store-split M7 each board's run is one ensure_managed_epics
+        -- transaction, the store runs the two one after the other, and the
+        -- second finds every epic the first created and creates no second
+        -- one (X4). Before M7 the guard was per row — the store's
+        -- create_managed_role_epic inserted feed_role in the same write as
+        -- the row itself, and a second insert re-selected the winner — and
+        -- the board's run as a whole was not one transaction. The one
+        -- exception is a database that already held
         -- duplicate managed epics before the index was fixed to be
         -- NULL-safe — that index was never built for it, so its
         -- provisioning stays unprotected until the duplicates are resolved
@@ -1848,7 +1867,12 @@ rule ExitAllEpics {
     -- part of the same all-or-nothing change (sync.allium:
     -- EveryMutationIsAtomicAndAnswered). The new status therefore arrives at
     -- every subscribed board the same way any other row does, rather than being
-    -- computed again on each of them.
+    -- computed again on each of them. Nor does a board ask for a SEPARATE
+    -- recalculation after a mutation: the board-side recalculation calls that
+    -- repeated the module's own rollup (after hook events, after patch_epic
+    -- and create_epic, after a close) were removed in store-split M7
+    -- (store-split.allium, X3), and the module is the only place that
+    -- recalculates.
     -- It moves both forward and backward to always reflect child reality.
     -- "Children" means core/Epic.children: the union of subtasks (Task) and
     -- sub_epics (Epic). Each child contributes its .status value. Every child
