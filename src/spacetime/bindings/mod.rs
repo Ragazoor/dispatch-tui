@@ -78,6 +78,8 @@ pub mod repo_path_type;
 pub mod repo_paths_table;
 pub mod report_dispatch_failed_reducer;
 pub mod report_dispatch_provisioned_reducer;
+pub mod report_pr_status_reducer;
+pub mod report_pr_unreadable_reducer;
 pub mod report_session_request_done_reducer;
 pub mod report_session_request_failed_reducer;
 pub mod request_dispatch_reducer;
@@ -225,6 +227,8 @@ pub use repo_path_type::RepoPath;
 pub use repo_paths_table::*;
 pub use report_dispatch_failed_reducer::report_dispatch_failed;
 pub use report_dispatch_provisioned_reducer::report_dispatch_provisioned;
+pub use report_pr_status_reducer::report_pr_status;
+pub use report_pr_unreadable_reducer::report_pr_unreadable;
 pub use report_session_request_done_reducer::report_session_request_done;
 pub use report_session_request_failed_reducer::report_session_request_failed;
 pub use request_dispatch_reducer::request_dispatch;
@@ -495,6 +499,17 @@ pub enum Reducer {
         tmux_window: String,
         reused_worktree: bool,
     },
+    ReportPrStatus {
+        task_id: i64,
+        host: String,
+        state: String,
+        review_decision: String,
+    },
+    ReportPrUnreadable {
+        task_id: i64,
+        host: String,
+        reason: String,
+    },
     ReportSessionRequestDone {
         request_id: i64,
         reporter: String,
@@ -708,6 +723,8 @@ impl __sdk::Reducer for Reducer {
             Reducer::ReleaseBacklogClaim { .. } => "release_backlog_claim",
             Reducer::ReportDispatchFailed { .. } => "report_dispatch_failed",
             Reducer::ReportDispatchProvisioned { .. } => "report_dispatch_provisioned",
+            Reducer::ReportPrStatus { .. } => "report_pr_status",
+            Reducer::ReportPrUnreadable { .. } => "report_pr_unreadable",
             Reducer::ReportSessionRequestDone { .. } => "report_session_request_done",
             Reducer::ReportSessionRequestFailed { .. } => "report_session_request_failed",
             Reducer::RequestDispatch { .. } => "request_dispatch",
@@ -1084,6 +1101,26 @@ Reducer::RecalculateEpicStatus{
                 worktree: worktree.clone(),
                 tmux_window: tmux_window.clone(),
                 reused_worktree: reused_worktree.clone(),
+}),
+            Reducer::ReportPrStatus{
+                task_id,
+                host,
+                state,
+                review_decision,
+}             => __sats::bsatn::to_vec(&report_pr_status_reducer::ReportPrStatusArgs {
+                task_id: task_id.clone(),
+                host: host.clone(),
+                state: state.clone(),
+                review_decision: review_decision.clone(),
+}),
+            Reducer::ReportPrUnreadable{
+                task_id,
+                host,
+                reason,
+}             => __sats::bsatn::to_vec(&report_pr_unreadable_reducer::ReportPrUnreadableArgs {
+                task_id: task_id.clone(),
+                host: host.clone(),
+                reason: reason.clone(),
 }),
             Reducer::ReportSessionRequestDone{
                 request_id,

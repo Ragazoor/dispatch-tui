@@ -687,8 +687,11 @@ fn dispatch_is_noop_when_on_select_all() {
     assert!(cmds.is_empty());
 }
 
+/// The module has already moved the task to Done (`ReportPrStatus`); what is
+/// left for the board is host work: kill the window read before the report,
+/// notify and leave the worktree alone. The board writes no task field.
 #[test]
-fn pr_merged_moves_to_done_and_detaches() {
+fn pr_merged_kills_the_window_and_notifies_without_writing_the_task() {
     let mut task = make_task(1, TaskStatus::Review);
     task.url = Some(crate::models::TaskUrl::new(
         "https://github.com/org/repo/pull/42",
@@ -697,19 +700,53 @@ fn pr_merged_moves_to_done_and_detaches() {
     let mut app = App::new(vec![task]);
     app.set_notifications_enabled(true);
 
-    let cmds = app.update(Message::Pr(PrMessage::Merged(TaskId(1))));
+    let cmds = app.update(Message::Pr(PrMessage::Merged {
+        id: TaskId(1),
+        window: Some(test_tmux_window("task-1")),
+    }));
 
-    let task = app.board.find_task(TaskId(1)).unwrap();
-    assert_eq!(task.status, TaskStatus::Done);
-    assert!(task.tmux_window.is_none(), "tmux window should be cleared");
-    assert!(task.worktree.is_some(), "worktree should be preserved");
-    assert!(task.url.is_some(), "url should be preserved");
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::Task(TaskCommand::Persist(_)))));
+        .any(|c| matches!(c, Command::Task(TaskCommand::KillTmuxWindow { .. }))));
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::System(SystemCommand::SendNotification { .. }))));
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Task(TaskCommand::Persist(_)))),
+        "the module owns the task write, got: {cmds:?}"
+    );
+    let task = app.board.find_task(TaskId(1)).unwrap();
+    assert!(task.worktree.is_some(), "worktree should be preserved");
+    assert!(!app.status_message().unwrap_or_default().is_empty());
+}
+
+/// The store's Done row can reach the board before the message does.
+#[test]
+fn pr_merged_still_acts_when_the_store_row_arrived_first() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Done)]);
+
+    let cmds = app.update(Message::Pr(PrMessage::Merged {
+        id: TaskId(1),
+        window: Some(test_tmux_window("task-1")),
+    }));
+
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::Task(TaskCommand::KillTmuxWindow { .. }))));
+}
+
+#[test]
+fn pr_merged_ignores_a_task_still_running() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Running)]);
+
+    let cmds = app.update(Message::Pr(PrMessage::Merged {
+        id: TaskId(1),
+        window: None,
+    }));
+
+    assert!(cmds.is_empty());
 }
 
 #[test]
@@ -721,7 +758,10 @@ fn pr_merged_preserves_worktree() {
     ));
     let mut app = App::new(vec![task]);
 
-    let cmds = app.update(Message::Pr(PrMessage::Merged(TaskId(1))));
+    let cmds = app.update(Message::Pr(PrMessage::Merged {
+        id: TaskId(1),
+        window: None,
+    }));
 
     // Should NOT emit a Cleanup command
     assert!(!cmds
@@ -730,7 +770,7 @@ fn pr_merged_preserves_worktree() {
 }
 
 #[test]
-fn pr_closed_stays_in_review_and_marks_sub_status() {
+fn pr_closed_notifies_and_leaves_the_task_to_the_module() {
     let mut task = make_task(1, TaskStatus::Review);
     task.url = Some(crate::models::TaskUrl::new(
         "https://github.com/org/repo/pull/42",
@@ -747,7 +787,6 @@ fn pr_closed_stays_in_review_and_marks_sub_status() {
         TaskStatus::Review,
         "task should stay in review"
     );
-    assert_eq!(task.sub_status, SubStatus::PrClosed);
     assert_eq!(
         task.tmux_window.as_ref().map(|w| w.as_str()),
         Some("task-1"),
@@ -755,9 +794,12 @@ fn pr_closed_stays_in_review_and_marks_sub_status() {
     );
     assert!(task.worktree.is_some(), "worktree should be preserved");
     assert!(task.url.is_some(), "url should be preserved");
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Task(TaskCommand::Persist(_)))));
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Task(TaskCommand::Persist(_)))),
+        "the module sets pr_closed, the board writes nothing"
+    );
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::System(SystemCommand::SendNotification { .. }))));
@@ -769,39 +811,20 @@ fn pr_closed_stays_in_review_and_marks_sub_status() {
     );
 }
 
+/// The store's `pr_closed` row can reach the board before the message does;
+/// the notice must not be lost to it.
 #[test]
-fn pr_closed_overrides_conflict_sub_status() {
-    let mut task = make_task(1, TaskStatus::Review);
-    task.sub_status = SubStatus::Conflict;
-    task.url = Some(crate::models::TaskUrl::new(
-        "https://github.com/org/repo/pull/42",
-        crate::models::UrlType::Pr,
-    ));
-    let mut app = App::new(vec![task]);
-
-    app.update(Message::Pr(PrMessage::Closed(TaskId(1))));
-
-    let task = app.board.find_task(TaskId(1)).unwrap();
-    assert_eq!(task.sub_status, SubStatus::PrClosed);
-}
-
-#[test]
-fn pr_closed_is_idempotent_once_already_marked() {
+fn pr_closed_still_notifies_when_the_store_row_arrived_first() {
     let mut task = make_task(1, TaskStatus::Review);
     task.sub_status = SubStatus::PrClosed;
-    task.url = Some(crate::models::TaskUrl::new(
-        "https://github.com/org/repo/pull/42",
-        crate::models::UrlType::Pr,
-    ));
     let mut app = App::new(vec![task]);
     app.set_notifications_enabled(true);
 
     let cmds = app.update(Message::Pr(PrMessage::Closed(TaskId(1))));
 
-    assert!(
-        cmds.is_empty(),
-        "a repeat Closed event on an already-pr_closed task should not re-persist or re-notify"
-    );
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::System(SystemCommand::SendNotification { .. }))));
 }
 
 #[test]
@@ -1058,85 +1081,29 @@ fn crashed_notification_not_sent_when_disabled() {
         .any(|c| matches!(c, Command::System(SystemCommand::SendNotification { .. }))));
 }
 
+/// An open PR: the module sets the review sub-status
+/// (`ReportPrStatus`), so the board does nothing but retire the failures.
 #[test]
-fn pr_review_state_updates_substatus() {
+fn pr_review_state_writes_nothing_and_retires_failures() {
     let mut app = make_app();
     let id = TaskId(3);
     app.find_task_mut(id).unwrap().status = TaskStatus::Review;
-    app.find_task_mut(id).unwrap().sub_status = SubStatus::AwaitingReview;
-    let cmds = app.update(Message::Pr(PrMessage::ReviewState {
-        id,
-        review_decision: Some(ReviewDecision::Approved),
-    }));
-    let task = app.board.find_task(id).unwrap();
-    assert_eq!(task.sub_status, SubStatus::Approved);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Task(TaskCommand::Persist(_)))));
-}
+    app.agents
+        .pr_poll
+        .entry(id)
+        .or_default()
+        .consecutive_transient_failures = 2;
 
-#[test]
-fn pr_review_state_noop_when_unchanged() {
-    let mut app = make_app();
-    let id = TaskId(3);
-    app.find_task_mut(id).unwrap().status = TaskStatus::Review;
-    app.find_task_mut(id).unwrap().sub_status = SubStatus::AwaitingReview;
-    let cmds = app.update(Message::Pr(PrMessage::ReviewState {
-        id,
-        review_decision: None, // maps to AwaitingReview
-    }));
-    assert!(cmds.is_empty()); // no change, no persist
-}
+    let cmds = app.update(Message::Pr(PrMessage::ReviewState(id)));
 
-#[test]
-fn pr_review_state_changes_requested() {
-    let mut app = make_app();
-    let id = TaskId(3);
-    app.find_task_mut(id).unwrap().status = TaskStatus::Review;
-    app.find_task_mut(id).unwrap().sub_status = SubStatus::AwaitingReview;
-    let cmds = app.update(Message::Pr(PrMessage::ReviewState {
-        id,
-        review_decision: Some(ReviewDecision::ChangesRequested),
-    }));
-    let task = app.board.find_task(id).unwrap();
-    assert_eq!(task.sub_status, SubStatus::ChangesRequested);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Task(TaskCommand::Persist(_)))));
-}
-
-#[test]
-fn pr_review_state_ignores_non_review_task() {
-    let mut app = make_app();
-    let id = TaskId(3);
-    // Task 3 is Running by default in make_app
-    assert_eq!(app.board.find_task(id).unwrap().status, TaskStatus::Running);
-    let cmds = app.update(Message::Pr(PrMessage::ReviewState {
-        id,
-        review_decision: Some(ReviewDecision::Approved),
-    }));
-    assert!(cmds.is_empty());
-    // sub_status should not have changed
-    assert_ne!(
-        app.board.find_task(id).unwrap().sub_status,
-        SubStatus::Approved
-    );
-}
-
-#[test]
-fn pr_review_state_preserves_conflict_substatus() {
-    let mut app = make_app();
-    let id = TaskId(3);
-    app.find_task_mut(id).unwrap().status = TaskStatus::Review;
-    app.find_task_mut(id).unwrap().sub_status = SubStatus::Conflict;
-    let cmds = app.update(Message::Pr(PrMessage::ReviewState {
-        id,
-        review_decision: Some(ReviewDecision::Approved),
-    }));
     assert!(cmds.is_empty());
     assert_eq!(
-        app.board.find_task(id).unwrap().sub_status,
-        SubStatus::Conflict
+        app.agents
+            .pr_poll
+            .get(&id)
+            .unwrap()
+            .consecutive_transient_failures,
+        0
     );
 }
 
@@ -2544,7 +2511,7 @@ fn a_permanent_failure_below_the_threshold_does_not_give_up() {
 
 /// At the threshold, polling gives up and the board says so.
 #[test]
-fn the_threshold_permanent_failure_gives_up_and_marks_pr_unreachable() {
+fn the_threshold_permanent_failure_gives_up_and_reports_the_pr_unreadable() {
     let mut app = App::new(vec![review_task_with_pr(1)]);
 
     let mut cmds = Vec::new();
@@ -2558,15 +2525,18 @@ fn the_threshold_permanent_failure_gives_up_and_marks_pr_unreachable() {
 
     let state = app.agents.pr_poll.get(&TaskId(1)).expect("state recorded");
     assert!(state.gave_up(), "the threshold failure must give up");
-    assert_eq!(
-        app.board.find_task(TaskId(1)).unwrap().sub_status,
-        SubStatus::PrUnreachable,
-        "giving up must mark the task pr_unreachable"
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Pr(PrCommand::ReportUnreadable { id: TaskId(1), .. })
+        )),
+        "giving up must tell the store, which marks the task pr_unreachable, got: {cmds:?}"
     );
     assert!(
-        cmds.iter()
+        !cmds
+            .iter()
             .any(|c| matches!(c, Command::Task(TaskCommand::Persist(_)))),
-        "the new sub_status must be persisted, got: {cmds:?}"
+        "the module owns the task write, got: {cmds:?}"
     );
 }
 
@@ -2632,10 +2602,7 @@ fn a_successful_poll_clears_give_up_state() {
     state.consecutive_permanent_failures = 9;
     state.next_poll_at = Some(Instant::now() + Duration::from_secs(600));
 
-    app.update(Message::Pr(PrMessage::ReviewState {
-        id: TaskId(1),
-        review_decision: Some(crate::models::ReviewDecision::Approved),
-    }));
+    app.update(Message::Pr(PrMessage::ReviewState(TaskId(1))));
 
     let state = app.agents.pr_poll.get(&TaskId(1)).expect("state kept");
     assert!(!state.gave_up(), "a successful poll must clear the give-up");

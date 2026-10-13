@@ -295,6 +295,7 @@ fn dispatch_pr(rt: &super::TuiRuntime, cmd: crate::tui::commands::PrCommand) {
     use crate::tui::commands::PrCommand::*;
     match cmd {
         CheckStatus { id, url } => drop(rt.exec_check_pr_status(id, url)),
+        ReportUnreadable { id, reason } => drop(rt.exec_report_pr_unreadable(id, reason)),
         CheckStatusIfOwned { id, url } => drop(rt.exec_check_status_if_owned(id, url)),
     }
 }

@@ -16,4 +16,7 @@ pub enum PrCommand {
     /// `core.allium: PollOwner` decides whether this machine may act.
     /// `pr-workflow.allium: PollPrStatus`.
     CheckStatusIfOwned { id: TaskId, url: String },
+    /// The poll gave up on this task's PR: tell the store, which marks the task
+    /// `pr_unreachable` (`store-split.allium: ReportPrUnreadable`).
+    ReportUnreadable { id: TaskId, reason: String },
 }

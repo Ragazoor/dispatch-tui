@@ -674,7 +674,11 @@ pub(crate) fn fail_open_session_requests_of(ctx: &ReducerContext, task_id: i64) 
 
 /// `PhoenixRespawn` inside the close: the successor row, and whether it landed
 /// (`TheFlagIsTheReceipt`). A failure is swallowed: Done outranks the respawn.
-fn respawn_phoenix_successor_of(ctx: &ReducerContext, closed: &Task, stamp: &str) -> bool {
+pub(crate) fn respawn_phoenix_successor_of(
+    ctx: &ReducerContext,
+    closed: &Task,
+    stamp: &str,
+) -> bool {
     let epic_id = route_to_repo_group(ctx, closed.epic_id, &closed.repo_path);
     let successor = phoenix_successor(closed, epic_id, stamp, &caller_identity(ctx));
     write_task(ctx, successor).is_ok()

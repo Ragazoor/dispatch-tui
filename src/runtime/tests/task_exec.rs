@@ -1032,64 +1032,82 @@ async fn exec_persist_setting_writes_to_db() {
     );
 }
 
+/// A review task with a pr-typed url, a window and the given sub-status, in the
+/// store the runtime reports to.
+async fn review_task_with_pr(rt: &TuiRuntime, sub_status: models::SubStatus) -> TaskId {
+    let mut app = App::new(vec![]);
+    rt.exec_insert_task(
+        &mut app,
+        tui::TaskDraft {
+            title: "PR Task".into(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    let id = app.tasks()[0].id;
+    let url = models::TaskUrl::new("https://github.com/org/repo/pull/42", models::UrlType::Pr);
+    rt.db_write()
+        .patch_task(
+            id,
+            &store::TaskPatch::new()
+                .status(models::TaskStatus::Review)
+                .sub_status(sub_status)
+                .tmux_window(Some(&models::TmuxWindow::for_task(id)))
+                .url(Some(&url)),
+        )
+        .await
+        .unwrap();
+    id
+}
+
+/// `ReportPrStatus`: the runtime posts what `gh` printed and the MODULE writes
+/// the task; the message only picks the host's own effects. The window is read
+/// before the post, because a merge clears it in the store.
 #[tokio::test]
-async fn exec_check_pr_status_sends_merged() {
+async fn exec_check_pr_status_posts_merged_and_the_module_moves_the_task_to_done() {
     let db = test_db().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"MERGED\n"), // gh pr view (no review decision line)
     ]));
-    let rt = make_runtime(db, tx, mock).await;
+    let rt = make_runtime(db.clone(), tx, mock).await;
+    let id = review_task_with_pr(&rt, models::SubStatus::AwaitingReview).await;
 
-    rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
-
-    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(matches!(
-        msg,
-        Message::Pr(crate::tui::messages::PrMessage::Merged(TaskId(1)))
-    ));
-}
-
-#[tokio::test]
-async fn exec_check_pr_status_open_sends_review_state() {
-    let db = test_db().await;
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(b"OPEN\nAPPROVED\n"), // gh pr view
-    ]));
-    let rt = make_runtime(db, tx, mock).await;
-
-    rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
+    rt.exec_check_pr_status(id, "https://github.com/org/repo/pull/42".to_string());
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
     match msg {
-        Message::Pr(crate::tui::messages::PrMessage::ReviewState {
-            id,
-            review_decision,
-        }) => {
-            assert_eq!(id, TaskId(1));
-            assert_eq!(review_decision, Some(models::ReviewDecision::Approved));
+        Message::Pr(crate::tui::messages::PrMessage::Merged { id: got, window }) => {
+            assert_eq!(got, id);
+            assert_eq!(
+                window.as_ref().map(|w| w.as_str()),
+                Some(format!("task-{}", id.0).as_str())
+            );
         }
-        other => panic!("Expected PrReviewState, got {:?}", other),
+        other => panic!("expected Merged, got {other:?}"),
     }
+    let stored = db.get_task(id).await.unwrap();
+    assert_eq!(stored.status, models::TaskStatus::Done);
+    assert!(stored.tmux_window.is_none(), "the module clears the window");
+    assert!(stored.completed_at.is_some());
 }
 
 #[tokio::test]
-async fn exec_check_pr_status_sends_closed() {
+async fn exec_check_pr_status_open_posts_the_decision_and_the_module_sets_the_sub_status() {
     let db = test_db().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(b"CLOSED\n"), // gh pr view (no review decision line)
+        MockProcessRunner::ok_with_stdout(b"OPEN\nAPPROVED\n"), // gh pr view
     ]));
-    let rt = make_runtime(db, tx, mock).await;
+    let rt = make_runtime(db.clone(), tx, mock).await;
+    let id = review_task_with_pr(&rt, models::SubStatus::AwaitingReview).await;
 
-    rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
+    rt.exec_check_pr_status(id, "https://github.com/org/repo/pull/42".to_string());
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -1097,8 +1115,113 @@ async fn exec_check_pr_status_sends_closed() {
         .unwrap();
     assert!(matches!(
         msg,
-        Message::Pr(crate::tui::messages::PrMessage::Closed(TaskId(1)))
+        Message::Pr(crate::tui::messages::PrMessage::ReviewState(got)) if got == id
     ));
+    assert_eq!(
+        db.get_task(id).await.unwrap().sub_status,
+        models::SubStatus::Approved
+    );
+}
+
+#[tokio::test]
+async fn exec_check_pr_status_closed_posts_and_the_module_marks_pr_closed() {
+    let db = test_db().await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"CLOSED\n"), // gh pr view (no review decision line)
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+    let id = review_task_with_pr(&rt, models::SubStatus::Conflict).await;
+
+    rt.exec_check_pr_status(id, "https://github.com/org/repo/pull/42".to_string());
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        msg,
+        Message::Pr(crate::tui::messages::PrMessage::Closed(got)) if got == id
+    ));
+    assert_eq!(
+        db.get_task(id).await.unwrap().sub_status,
+        models::SubStatus::PrClosed
+    );
+}
+
+/// A report that changes nothing (the task already shows `pr_closed`) sends no
+/// `Closed`, so a polled-every-tick closed PR notifies once.
+#[tokio::test]
+async fn exec_check_pr_status_a_repeat_closed_report_sends_no_second_closed() {
+    let db = test_db().await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"CLOSED\n"),
+    ]));
+    let rt = make_runtime(db, tx, mock).await;
+    let id = review_task_with_pr(&rt, models::SubStatus::PrClosed).await;
+
+    rt.exec_check_pr_status(id, "https://github.com/org/repo/pull/42".to_string());
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        msg,
+        Message::Pr(crate::tui::messages::PrMessage::ReviewState(got)) if got == id
+    ));
+}
+
+/// A state the module does not know is refused, which stays true however often
+/// it is retried: a permanent failure, and the task is left alone.
+#[tokio::test]
+async fn exec_check_pr_status_a_state_the_module_refuses_is_a_permanent_failure() {
+    let db = test_db().await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"FUNKY_NEW_STATE\n"),
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+    let id = review_task_with_pr(&rt, models::SubStatus::AwaitingReview).await;
+
+    rt.exec_check_pr_status(id, "https://github.com/org/repo/pull/42".to_string());
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    match msg {
+        Message::Pr(crate::tui::messages::PrMessage::CheckFailed {
+            permanent, error, ..
+        }) => {
+            assert!(permanent);
+            assert!(error.contains("FUNKY_NEW_STATE"), "{error}");
+        }
+        other => panic!("expected CheckFailed, got {other:?}"),
+    }
+    assert_eq!(
+        db.get_task(id).await.unwrap().sub_status,
+        models::SubStatus::AwaitingReview
+    );
+}
+
+/// `ReportPrUnreadable`: giving up is reported and the module marks the task.
+#[tokio::test]
+async fn exec_report_pr_unreadable_marks_the_task_pr_unreachable() {
+    let db = test_db().await;
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let rt = make_runtime(db.clone(), tx, Arc::new(MockProcessRunner::new(vec![]))).await;
+    let id = review_task_with_pr(&rt, models::SubStatus::AwaitingReview).await;
+
+    rt.exec_report_pr_unreadable(id, "no access".into())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        db.get_task(id).await.unwrap().sub_status,
+        models::SubStatus::PrUnreachable
+    );
 }
 
 #[tokio::test]

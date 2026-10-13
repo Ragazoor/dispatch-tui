@@ -110,51 +110,34 @@ fn dispatch_agent_fails_fast_with_empty_repo_path() {
 
 // --- check_pr_status tests ---
 
-#[test]
-fn check_pr_status_open() {
-    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
-        b"OPEN\nREVIEW_REQUIRED\n",
-    )]);
-    let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
-    assert_eq!(result.state, PrState::Open);
-    assert_eq!(result.review_decision, Some(ReviewDecision::ReviewRequired));
+fn raw(state: &str, review_decision: &str) -> RawPrStatus {
+    RawPrStatus {
+        state: state.into(),
+        review_decision: review_decision.into(),
+    }
 }
 
 #[test]
-fn check_pr_status_merged() {
-    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"MERGED\n")]);
-    let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
-    assert_eq!(result.state, PrState::Merged);
-    assert_eq!(result.review_decision, None);
-}
-
-#[test]
-fn check_pr_status_closed() {
-    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"CLOSED\n")]);
-    let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
-    assert_eq!(result.state, PrState::Closed);
-    assert_eq!(result.review_decision, None);
-}
-
-#[test]
-fn check_pr_status_open_approved() {
-    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"OPEN\nAPPROVED\n")]);
-    let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
-    assert_eq!(result.state, PrState::Open);
-    assert_eq!(result.review_decision, Some(ReviewDecision::Approved));
-}
-
-#[test]
-fn check_pr_status_open_changes_requested() {
-    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
-        b"OPEN\nCHANGES_REQUESTED\n",
-    )]);
-    let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
-    assert_eq!(result.state, PrState::Open);
-    assert_eq!(
-        result.review_decision,
-        Some(ReviewDecision::ChangesRequested)
-    );
+fn check_pr_status_returns_gh_output_raw() {
+    for (stdout, expected) in [
+        (
+            &b"OPEN\nREVIEW_REQUIRED\n"[..],
+            raw("OPEN", "REVIEW_REQUIRED"),
+        ),
+        (b"MERGED\n", raw("MERGED", "")),
+        (b"CLOSED\n", raw("CLOSED", "")),
+        (b"OPEN\nAPPROVED\n", raw("OPEN", "APPROVED")),
+        (
+            b"OPEN\nCHANGES_REQUESTED\n",
+            raw("OPEN", "CHANGES_REQUESTED"),
+        ),
+        // Not interpreted here: the module decides what a state means.
+        (b"draft\n", raw("draft", "")),
+    ] {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(stdout)]);
+        let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
+        assert_eq!(result, expected);
+    }
 }
 
 #[test]

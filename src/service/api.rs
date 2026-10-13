@@ -370,6 +370,24 @@ macro_rules! task_service_api {
                 &self
             ) -> Result<(), $crate::service::ServiceError>;
 
+            /// `store-split.allium: ReportPrStatus`: post what `gh pr view`
+            /// printed, raw; the module writes the task. `false` is a refusal
+            /// of a string the module does not know.
+            async fn report_pr_status(
+                &self,
+                task_id: $crate::models::TaskId,
+                state: String,
+                review_decision: String
+            ) -> Result<bool, $crate::service::ServiceError>;
+
+            /// `store-split.allium: ReportPrUnreadable`: the host gave up
+            /// reading the task's PR.
+            async fn report_pr_unreadable(
+                &self,
+                task_id: $crate::models::TaskId,
+                reason: String
+            ) -> Result<bool, $crate::service::ServiceError>;
+
             /// The checks `wrap_up` makes before it acts: the worktree is
             /// committed and the repo's verify command, if any, passes in it.
             /// `Err(Validation)` is the refusal message.

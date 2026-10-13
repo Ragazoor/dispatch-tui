@@ -278,6 +278,16 @@ rule PollPrStatus {
         -- wins) and is not a correctness problem — it costs one extra `gh`
         -- call, the same order of cost this rule's own transient-failure
         -- tolerance already accepts.
+        --
+        -- M6 (store-split.allium: ReportPrStatus, ReportPrUnreadable): the
+        -- host runs `gh pr view` and posts the raw state and reviewDecision
+        -- strings through the report_pr_status reducer; the MODULE parses
+        -- them and writes the task. The host keeps only the local work: the
+        -- gh call, the failure counters and backoff (session-scoped, P3),
+        -- and the effects named in PrMerged below. "Reaching GitHub" in the
+        -- succeeded branch means the module ACCEPTED the report: only then
+        -- are the failure counters cleared. A refused report counts as a
+        -- permanent failure, a failed reducer call as a transient one.
 }
 
 rule PrPollGaveUp {
@@ -314,6 +324,11 @@ rule PrPollGaveUp {
         -- Not terminal: the task stays in review. See core/PrPollState for why
         -- an app restart retries, and PollPrStatus's succeeded branch for the
         -- clearing path.
+        --
+        -- M6: the host counts the failures and, at the threshold, posts
+        -- report_pr_unreadable; the module writes sub_status = pr_unreachable
+        -- (store-split.allium: ReportPrUnreadable). The UserInformed and the
+        -- log line stay with the host.
 }
 
 rule PrMerged {
@@ -335,16 +350,23 @@ rule PrMerged {
         -- It bypasses the ConfirmDone human confirmation because the PR
         -- merge itself is the human confirmation (via GitHub review process).
         -- The Review Board UI has been removed; no board cleanup side effect fires.
-        -- Like other status-changing rules, the underlying patch flow
-        -- (src/service/tasks/crud.rs) triggers EpicStatusRecalculation on
-        -- the parent epic when the task belongs to one.
+        -- The write that moves the task to done also runs
+        -- EpicStatusRecalculation on the parent epic when the task belongs
+        -- to one.
         -- task.completed_at = now is the same completion stamp applied by
         -- ConfirmDone (tasks.allium): the Done column reads it descending, so
         -- more-recently-completed tasks sort first.
         -- A merged PR on a phoenix task respawns it (tasks.allium:
         -- PhoenixRespawn), on the same terms as any other route into done: the
-        -- trigger is the status transition, and this one reaches it through the
-        -- same service write path as the rest.
+        -- trigger is the status transition, and the same reducer write that
+        -- makes it spawns the successor.
+        --
+        -- M6: the module writes the Done transition, window clear and
+        -- completed_at (store-split.allium: ReportPrStatus), including the
+        -- epic rollup and the phoenix successor. The host, after its report
+        -- is accepted, kills the tmux window it read BEFORE posting (the
+        -- module cleared it), sends the DesktopNotification and respawns the
+        -- split pane. The task keeps its worktree.
 }
 
 rule PrClosed {
@@ -377,6 +399,10 @@ rule PrClosed {
         -- Notification: title "PR closed", body "<PR label> closed: <task
         -- title>". Status bar shows '<PR label> closed — task #<id> marked
         -- "PR closed"'.
+        --
+        -- M6: the module writes the sub_status (store-split.allium:
+        -- ReportPrStatus); the host sends the notification and sets the
+        -- status line when the report changed the task.
 }
 
 rule ClosePrOnDone {

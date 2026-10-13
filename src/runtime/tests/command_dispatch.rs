@@ -1068,12 +1068,8 @@ async fn dispatch_pr_check_status_reports_the_state_gh_returned() {
     .await;
 
     match h.next_msg().await {
-        Message::Pr(crate::tui::messages::PrMessage::ReviewState {
-            id,
-            review_decision,
-        }) => {
+        Message::Pr(crate::tui::messages::PrMessage::ReviewState(id)) => {
             assert_eq!(id, TaskId(1));
-            assert_eq!(review_decision, Some(models::ReviewDecision::Approved));
         }
         other => panic!("expected a PR review state, got {other:?}"),
     }
@@ -1100,12 +1096,8 @@ async fn dispatch_pr_check_status_if_owned_polls_when_unclaimed() {
     .await;
 
     match h.next_msg().await {
-        Message::Pr(crate::tui::messages::PrMessage::ReviewState {
-            id,
-            review_decision,
-        }) => {
+        Message::Pr(crate::tui::messages::PrMessage::ReviewState(id)) => {
             assert_eq!(id, TaskId(1));
-            assert_eq!(review_decision, Some(models::ReviewDecision::Approved));
         }
         other => panic!("expected a PR review state, got {other:?}"),
     }

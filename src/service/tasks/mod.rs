@@ -5,6 +5,7 @@
 mod crud;
 mod dispatch;
 mod params;
+mod pr_status;
 mod session;
 mod validators;
 mod wrap_up;

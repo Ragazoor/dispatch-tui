@@ -2240,13 +2240,116 @@ mod session_requests {
         .is_ok());
     }
 
+    // -- PR state (store-split.allium: ReportPrStatus, ReportPrUnreadable) ----
+
+    fn pr_task(sub_status: &str) -> Task {
+        Task {
+            id: 1,
+            status: "review".into(),
+            sub_status: sub_status.into(),
+            url: "https://github.com/acme/repo/pull/7".into(),
+            url_type: "pr".into(),
+            tmux_window: "task-1".into(),
+            epic_id: 5,
+            ..blank_task()
+        }
+    }
+
+    #[test]
+    fn a_merged_pr_takes_the_task_to_done() {
+        let done = apply_pr_status(pr_task("approved"), "MERGED", "APPROVED", LATER).unwrap();
+        assert_eq!(done.status, "done");
+        assert_eq!(done.sub_status, "none");
+        assert_eq!(done.tmux_window, "");
+        assert_eq!(done.completed_at, LATER);
+        assert_eq!(done.updated_at, LATER);
+    }
+
+    #[test]
+    fn gh_letter_case_does_not_matter() {
+        assert!(validate_pr_status_report("merged", "approved").is_ok());
+        assert_eq!(
+            apply_pr_status(pr_task("approved"), "merged", "", LATER)
+                .unwrap()
+                .status,
+            "done"
+        );
+    }
+
+    #[test]
+    fn a_closed_pr_marks_pr_closed_and_overrides_conflict() {
+        for from in ["awaiting_review", "conflict"] {
+            let closed = apply_pr_status(pr_task(from), "CLOSED", "", LATER).unwrap();
+            assert_eq!(closed.status, "review", "{from}");
+            assert_eq!(closed.sub_status, "pr_closed", "{from}");
+            assert_eq!(closed.updated_at, LATER);
+        }
+        assert!(apply_pr_status(pr_task("pr_closed"), "CLOSED", "", LATER).is_none());
+    }
+
+    #[test]
+    fn an_open_pr_follows_the_review_decision() {
+        for (decision, expected) in [
+            ("APPROVED", "approved"),
+            ("CHANGES_REQUESTED", "changes_requested"),
+            ("REVIEW_REQUIRED", "awaiting_review"),
+            ("", "awaiting_review"),
+        ] {
+            let got = apply_pr_status(pr_task("pr_unreachable"), "OPEN", decision, LATER).unwrap();
+            assert_eq!(got.sub_status, expected, "{decision:?}");
+        }
+        assert!(apply_pr_status(pr_task("approved"), "OPEN", "APPROVED", LATER).is_none());
+    }
+
+    #[test]
+    fn an_open_pr_never_overwrites_conflict() {
+        assert!(apply_pr_status(pr_task("conflict"), "OPEN", "APPROVED", LATER).is_none());
+    }
+
+    #[test]
+    fn a_report_for_a_task_outside_review_or_without_a_pr_changes_nothing() {
+        let running = Task {
+            status: "running".into(),
+            sub_status: "active".into(),
+            ..pr_task("")
+        };
+        assert!(apply_pr_status(running, "MERGED", "", LATER).is_none());
+        let issue = Task {
+            url_type: "issue".into(),
+            ..pr_task("awaiting_review")
+        };
+        assert!(apply_pr_status(issue, "MERGED", "", LATER).is_none());
+    }
+
+    #[test]
+    fn unknown_raw_strings_are_refused() {
+        assert!(validate_pr_status_report("DRAFT", "").is_err());
+        assert!(validate_pr_status_report("", "").is_err());
+        assert!(validate_pr_status_report("OPEN", "MAYBE").is_err());
+        assert!(validate_pr_status_report("OPEN", "").is_ok());
+    }
+
+    #[test]
+    fn an_unreadable_pr_marks_pr_unreachable_once() {
+        let got = apply_pr_unreadable(pr_task("awaiting_review"), LATER).unwrap();
+        assert_eq!(got.sub_status, "pr_unreachable");
+        assert_eq!(got.updated_at, LATER);
+        assert!(apply_pr_unreadable(pr_task("pr_unreachable"), LATER).is_none());
+        let backlog = Task {
+            status: "done".into(),
+            sub_status: "none".into(),
+            ..pr_task("")
+        };
+        assert!(apply_pr_unreadable(backlog, LATER).is_none());
+    }
+
     // -- the rules version (sync.allium: config.rules_version) ----------------
 
     /// W12: M5 moves the close and the wrap-up request rules into the module,
     /// so the version is 4. The board's own copy is pinned equal to this one
     /// by `src/sync/rules_gate.rs`'s test.
     #[test]
-    fn the_rules_version_is_four_for_m5() {
-        assert_eq!(RULES_VERSION, 4);
+    fn the_rules_version_is_five_for_m6() {
+        assert_eq!(RULES_VERSION, 5);
     }
 }

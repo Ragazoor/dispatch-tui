@@ -276,7 +276,7 @@ impl MemoryReducerCaller {
 
     /// Mirrors the module's `respawn_phoenix_successor_of`: the successor row,
     /// and whether it landed. A failure is swallowed: Done outranks the respawn.
-    fn respawn_phoenix_successor_of(
+    pub(super) fn respawn_phoenix_successor_of(
         &self,
         tables: &mut Tables,
         closed: &module::Task,

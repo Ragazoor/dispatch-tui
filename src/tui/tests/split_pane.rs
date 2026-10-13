@@ -592,9 +592,10 @@ fn pr_merged_respawns_split_pane() {
     app.board.split.right_pane_id = Some("%5".to_string());
     app.board.split.pinned_task_id = Some(TaskId(1));
 
-    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::Merged(
-        TaskId(1),
-    )));
+    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::Merged {
+        id: TaskId(1),
+        window: None,
+    }));
 
     assert!(
         cmds.iter()

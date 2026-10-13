@@ -654,6 +654,23 @@ pub trait SessionRequestStore: SessionRequestRead {
     async fn fail_interrupted_session_requests(&self) -> Result<()>;
 }
 
+/// PR state (store-split M6: `ReportPrStatus`, `ReportPrUnreadable`). The host
+/// runs `gh` and posts what it read; the module writes the task. Every call
+/// names THIS host. A task write, so reachable from the service layer only.
+#[async_trait::async_trait]
+pub trait PrStatusStore: Send + Sync {
+    /// `ReportPrStatus`: the raw `state` and `reviewDecision` strings. `false`
+    /// is a refusal (a string the module does not know), logged.
+    async fn report_pr_status(
+        &self,
+        task: TaskId,
+        state: &str,
+        review_decision: &str,
+    ) -> Result<bool>;
+    /// `ReportPrUnreadable`: the host gave up on the task's PR.
+    async fn report_pr_unreadable(&self, task: TaskId, reason: &str) -> Result<bool>;
+}
+
 /// Poll ownership (Phase 7): `core.allium: PollOwner`.
 ///
 /// **Deliberately not on [`TaskCrud`].** Claiming or reassigning a
@@ -1260,6 +1277,7 @@ pub trait TaskStore:
     + UsageStore
     + DispatchRequestStore
     + SessionRequestStore
+    + PrStatusStore
     + TaskReadStore
 {
 }
@@ -1277,6 +1295,7 @@ impl<
             + UsageStore
             + DispatchRequestStore
             + SessionRequestStore
+            + PrStatusStore
             + TaskReadStore,
     > TaskStore for T
 {

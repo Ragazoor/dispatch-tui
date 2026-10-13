@@ -1,6 +1,6 @@
 //! PR-related message handlers: review state polling.
 
-use crate::models::{ReviewDecision, SubStatus, TaskId, TaskStatus};
+use crate::models::{SubStatus, TaskId, TaskStatus, TmuxWindow};
 
 use super::super::types::*;
 use super::super::App;
@@ -22,53 +22,48 @@ fn transient_backoff(consecutive_transient_failures: u32) -> Duration {
 }
 
 impl App {
-    /// Builds the `Persist` command, plus a `SendNotification` when
-    /// notifications are enabled, for a PR-status task update. Shared by
-    /// `handle_pr_merged` and `handle_pr_closed` — they differ in what they
-    /// change on the task, not in how the resulting write/notification pair
-    /// is emitted.
-    fn persist_and_notify(
-        &self,
-        fields: crate::tui::commands::PersistFields,
-        title: String,
-        body: String,
-    ) -> Vec<Command> {
-        let mut cmds = vec![Command::Task(crate::tui::commands::TaskCommand::Persist(
-            fields,
-        ))];
-        if self.notifications_enabled {
-            cmds.push(Command::System(
-                crate::tui::commands::SystemCommand::SendNotification {
-                    title,
-                    body,
-                    urgent: false,
-                },
-            ));
-        }
-        cmds
+    /// The desktop notification, when notifications are enabled, for a PR event
+    /// the module has just recorded. The task write itself is the module's
+    /// (`store-split.allium: ReportPrStatus`); the board's in-memory task moves
+    /// when the store's row arrives, so nothing here mutates it.
+    fn pr_notification(&self, title: &str, body: String) -> Option<Command> {
+        self.notifications_enabled.then(|| {
+            Command::System(crate::tui::commands::SystemCommand::SendNotification {
+                title: title.to_string(),
+                body,
+                urgent: false,
+            })
+        })
     }
 
-    pub(in crate::tui) fn handle_pr_merged(&mut self, id: TaskId) -> Vec<Command> {
+    /// The module accepted a merged PR and moved the task to Done. What is left
+    /// is host work: kill the window the task had (read before the report, since
+    /// the module cleared it), tell the user and free the split pane. The task
+    /// keeps its worktree.
+    ///
+    /// Acts on a Review task, or a Done one: the store's row can reach the board
+    /// before this message does.
+    pub(in crate::tui) fn handle_pr_merged(
+        &mut self,
+        id: TaskId,
+        window: Option<TmuxWindow>,
+    ) -> Vec<Command> {
         let mut cmds = Vec::new();
         self.clear_pr_poll_failures(id);
 
         if let Some(task) = self.find_task_mut(id) {
-            if task.status != TaskStatus::Review {
+            if !matches!(task.status, TaskStatus::Review | TaskStatus::Done) {
                 return cmds;
             }
 
             let pr_label = task.url.as_ref().map_or("PR".to_string(), |u| u.label());
             let task_title = task.title.clone();
 
-            // Detach: kill tmux window but preserve worktree
-            if let Some(window) = task.tmux_window.take() {
+            if let Some(window) = window {
                 cmds.push(Command::Task(
                     crate::tui::commands::TaskCommand::KillTmuxWindow { window },
                 ));
             }
-            task.status = TaskStatus::Done;
-            task.sub_status = SubStatus::default_for(TaskStatus::Done);
-            let fields = crate::tui::commands::PersistFields::from_task(task);
 
             self.clear_agent_tracking(id);
             self.sync_board_selection();
@@ -76,11 +71,9 @@ impl App {
                 "{pr_label} merged \u{2014} task #{id} moved to Done"
             ));
 
-            cmds.extend(self.persist_and_notify(
-                fields,
-                "PR merged".to_string(),
-                format!("{pr_label} merged: {task_title}"),
-            ));
+            cmds.extend(
+                self.pr_notification("PR merged", format!("{pr_label} merged: {task_title}")),
+            );
         }
 
         cmds.extend(self.maybe_respawn_split_pane(id));
@@ -88,47 +81,43 @@ impl App {
         cmds
     }
 
-    /// A closed-without-merge PR is NOT a terminal event: the task stays in
-    /// review — only `sub_status` changes, to `pr_closed`, so the user
-    /// notices and decides what to do (reopen the PR, push a new one, move it
-    /// to Done and delete it). No tmux/worktree teardown, unlike `PrMerged`.
+    /// A closed-without-merge PR is NOT a terminal event: the module only
+    /// sets `sub_status` to `pr_closed`, so the user notices and decides what
+    /// to do (reopen the PR, push a new one, move it to Done and delete it).
+    /// No tmux/worktree teardown, unlike `PrMerged`.
     ///
-    /// `PollPrStatus` re-fires this event every tick the PR stays closed, so
-    /// this is guarded on `sub_status != PrClosed` to avoid re-persisting and
-    /// re-notifying on every tick. Overrides `sub_status = Conflict`
-    /// unconditionally — a closed PR is a stronger, more definitive GitHub
-    /// signal than a local rebase conflict.
+    /// `PollPrStatus` re-reports this every tick the PR stays closed; the runtime
+    /// sends this message only for the report that changed the task (it read the
+    /// sub-status before posting), so no guard on the board's own copy, which the
+    /// store's row may already have moved.
     pub(in crate::tui) fn handle_pr_closed(&mut self, id: TaskId) -> Vec<Command> {
-        let mut cmds = Vec::new();
         self.clear_pr_poll_failures(id);
 
-        if let Some(task) = self.find_task_mut(id) {
-            if task.status != TaskStatus::Review || task.sub_status == SubStatus::PrClosed {
-                return cmds;
-            }
-
-            let pr_label = task.url.as_ref().map_or("PR".to_string(), |u| u.label());
-            let task_title = task.title.clone();
-
-            task.sub_status = SubStatus::PrClosed;
-            let fields = crate::tui::commands::PersistFields::from_task(task);
-
-            self.status.set(format!(
-                "{pr_label} closed \u{2014} task #{id} marked \"PR closed\""
-            ));
-
-            cmds = self.persist_and_notify(
-                fields,
-                "PR closed".to_string(),
-                format!("{pr_label} closed: {task_title}"),
-            );
+        let Some(task) = self.find_task_mut(id) else {
+            return vec![];
+        };
+        if task.status != TaskStatus::Review {
+            return vec![];
         }
+        let pr_label = task.url.as_ref().map_or("PR".to_string(), |u| u.label());
+        let task_title = task.title.clone();
 
-        cmds
+        self.status.set(format!(
+            "{pr_label} closed \u{2014} task #{id} marked \"PR closed\""
+        ));
+
+        self.pr_notification("PR closed", format!("{pr_label} closed: {task_title}"))
+            .into_iter()
+            .collect()
     }
 
     /// Record a failed PR read, and give up on the task once permanent failures
     /// reach the threshold.
+    ///
+    /// The counting is host pacing (`store-split.allium`, P3): this machine's
+    /// own `gh` calls and its backoff, session-scoped on purpose. Giving up
+    /// posts a `ReportUnreadable` and the module marks the task
+    /// `pr_unreachable`.
     ///
     /// The log line is the point of the split. Before this, every failed attempt
     /// warned, so five PRs the `gh` account could not read produced 63,000
@@ -190,18 +179,19 @@ impl App {
         }
         let pr_label = task.url.as_ref().map_or("PR".to_string(), |u| u.label());
         let task_title = task.title.clone();
-        task.sub_status = SubStatus::PrUnreachable;
-        let fields = crate::tui::commands::PersistFields::from_task(task);
 
         self.status.set(format!(
             "{pr_label} unreadable \u{2014} task #{id} marked \"PR unreachable\""
         ));
 
-        self.persist_and_notify(
-            fields,
-            "PR unreachable".to_string(),
+        let mut cmds = vec![Command::Pr(
+            crate::tui::commands::PrCommand::ReportUnreadable { id, reason: error },
+        )];
+        cmds.extend(self.pr_notification(
+            "PR unreachable",
             format!("{pr_label} could not be read: {task_title}"),
-        )
+        ));
+        cmds
     }
 
     /// Clear every failure record for a task whose PR was just read
@@ -212,33 +202,10 @@ impl App {
         }
     }
 
-    pub(in crate::tui) fn handle_pr_review_state(
-        &mut self,
-        id: TaskId,
-        review_decision: Option<ReviewDecision>,
-    ) -> Vec<Command> {
+    /// An open PR was read and the module set the review sub-status
+    /// (`ReportPrStatus`). Nothing is decided or written here.
+    pub(in crate::tui) fn handle_pr_review_state(&mut self, id: TaskId) -> Vec<Command> {
         self.clear_pr_poll_failures(id);
-        if let Some(task) = self.find_task_mut(id) {
-            if task.status != TaskStatus::Review {
-                return vec![];
-            }
-            // Don't overwrite attention-requiring substatuses
-            if task.sub_status == SubStatus::Conflict {
-                return vec![];
-            }
-            let new_sub = match review_decision {
-                Some(ReviewDecision::Approved) => SubStatus::Approved,
-                Some(ReviewDecision::ChangesRequested) => SubStatus::ChangesRequested,
-                _ => SubStatus::AwaitingReview,
-            };
-            if task.sub_status != new_sub {
-                task.sub_status = new_sub;
-                let fields = crate::tui::commands::PersistFields::from_task(task);
-                return vec![Command::Task(crate::tui::commands::TaskCommand::Persist(
-                    fields,
-                ))];
-            }
-        }
         vec![]
     }
 }

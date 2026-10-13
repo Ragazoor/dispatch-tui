@@ -91,6 +91,8 @@ enum Sent {
     ClaimSessionRequest(i64, String),
     ReportSessionRequestDone(i64, String),
     ReportSessionRequestFailed(i64, String, String, bool),
+    ReportPrStatus(i64, String, String, String),
+    ReportPrUnreadable(i64, String, String),
     RequestExitSession(TaskId, i64, String, String),
     FailInterruptedSessionRequests(String),
     SaveSetting(String, String, String),
@@ -840,6 +842,25 @@ impl ReducerCaller for RecordingCaller {
         self.answer(Sent::ReportSessionRequestFailed(
             id.0, reporter, reason, conflict,
         ))
+    }
+
+    async fn report_pr_status(
+        &self,
+        task: TaskId,
+        host: String,
+        state: String,
+        review_decision: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ReportPrStatus(task.0, host, state, review_decision))
+    }
+
+    async fn report_pr_unreadable(
+        &self,
+        task: TaskId,
+        host: String,
+        reason: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ReportPrUnreadable(task.0, host, reason))
     }
 
     async fn request_exit_session(

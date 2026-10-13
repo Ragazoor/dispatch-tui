@@ -32,12 +32,13 @@ use crate::spacetime::bindings::{
     recalculate_epic_status as _, record_base_branch as _, record_learning_retrieval as _,
     record_notification as _, record_pre_tool_use as _, record_usage_event as _,
     record_user_prompt_submit as _, register_host as _, regroup_epic as _,
-    report_dispatch_failed as _, report_dispatch_provisioned as _,
-    report_session_request_done as _, report_session_request_failed as _, request_dispatch as _,
-    request_exit_session as _, request_wrap_up as _, rescope_epic_learnings as _,
-    respawn_phoenix_successor as _, save_repo_path as _, save_setting as _, set_task_epic as _,
-    set_verify_command as _, subagent_clear as _, subagent_clear_and_void_pending_stop as _,
-    subagent_start as _, subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
+    report_dispatch_failed as _, report_dispatch_provisioned as _, report_pr_status as _,
+    report_pr_unreadable as _, report_session_request_done as _,
+    report_session_request_failed as _, request_dispatch as _, request_exit_session as _,
+    request_wrap_up as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
+    save_repo_path as _, save_setting as _, set_task_epic as _, set_verify_command as _,
+    subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
+    subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
     unlink_work_package_item as _, unsubscribe_from_epic as _, upsert_feed_tasks as _,
     upsert_feed_tasks_additive as _, DbConnection, DispatchRequestsTableAccess as _,
     EpicsTableAccess as _, LearningsTableAccess as _, SessionRequestsTableAccess as _,
@@ -1079,6 +1080,33 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "the session request failure report",
             report_session_request_failed_then(id.0, reporter, reason, conflict)
+        )
+    }
+
+    async fn report_pr_status(
+        &self,
+        task: TaskId,
+        host: String,
+        state: String,
+        review_decision: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the PR status report",
+            report_pr_status_then(task.0, host, state, review_decision)
+        )
+    }
+
+    async fn report_pr_unreadable(
+        &self,
+        task: TaskId,
+        host: String,
+        reason: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the PR unreadable report",
+            report_pr_unreadable_then(task.0, host, reason)
         )
     }
 

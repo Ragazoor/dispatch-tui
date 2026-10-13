@@ -1,6 +1,6 @@
 use anyhow::Context;
 
-use crate::models::{extract_github_repo, ReviewDecision};
+use crate::models::extract_github_repo;
 use crate::process::{stderr_str, stdout_str, ProcessRunner, SUBPROCESS_TIMEOUT};
 
 /// The tmux window environment every agent launch sets, so any `cargo build`/
@@ -69,31 +69,14 @@ pub use worktree::{branch_from_worktree, teardown_task, validate_repo_path, Tear
 // docs/specs/tasks.allium. The dispatch-side `create_pr` and `merge_pr`
 // helpers have been removed; only the status-check helper remains here.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrState {
-    Open,
-    Merged,
-    Closed,
-}
-
-impl std::str::FromStr for PrState {
-    type Err = anyhow::Error;
-
-    /// `gh pr view`'s state word, in any case.
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_uppercase().as_str() {
-            "OPEN" => Ok(PrState::Open),
-            "MERGED" => Ok(PrState::Merged),
-            "CLOSED" => Ok(PrState::Closed),
-            other => Err(anyhow::anyhow!("unknown PR state {other:?}")),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct PrStatus {
-    pub state: PrState,
-    pub review_decision: Option<ReviewDecision>,
+/// What `gh pr view` printed, untouched: the state word and the review
+/// decision (empty for a repo without branch protection). The board does not
+/// interpret either; the module parses them and writes the task
+/// (`store-split.allium: ReportPrStatus`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawPrStatus {
+    pub state: String,
+    pub review_decision: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -176,11 +159,11 @@ fn classify_gh_failure(stderr: &str, error: anyhow::Error) -> PrCheckFailure {
     }
 }
 
-/// Check the current status of a PR using `gh pr view`.
+/// Read the current status of a PR with `gh pr view`, raw.
 pub fn check_pr_status(
     pr_url: &str,
     runner: &dyn ProcessRunner,
-) -> std::result::Result<PrStatus, PrCheckFailure> {
+) -> std::result::Result<RawPrStatus, PrCheckFailure> {
     let output = runner
         .run(
             "gh",
@@ -208,20 +191,16 @@ pub fn check_pr_status(
     let mut lines = stdout.lines();
     // No output where gh reported success is unmappable, and stays unmappable
     // however often it is retried.
-    let state_str = lines
+    let state = lines
         .next()
+        .map(str::trim)
+        .filter(|state| !state.is_empty())
         .ok_or_else(|| PrCheckFailure::Permanent(anyhow::anyhow!("gh pr view: no output")))?
-        .to_uppercase();
+        .to_string();
     // review_decision is optional — repos without branch-protection rules omit it.
-    let review_str = lines.next().unwrap_or("").to_uppercase();
+    let review_decision = lines.next().unwrap_or("").trim().to_string();
 
-    let state: PrState = state_str
-        .parse()
-        .map_err(|e| PrCheckFailure::Permanent(anyhow::anyhow!("gh pr view: {e}")))?;
-
-    let review_decision = ReviewDecision::parse(&review_str);
-
-    Ok(PrStatus {
+    Ok(RawPrStatus {
         state,
         review_decision,
     })

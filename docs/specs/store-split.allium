@@ -4,8 +4,8 @@
 -- Scope: The TARGET split of responsibility between the dispatch TUI process
 --        and the SpacetimeDB module (spacetime/module/), and the order the
 --        code is migrated in. It says which side owns which kind of
---        behaviour. Migration steps land one at a time: M2, M3, M4 and M5 (below)
---        have landed; M6-M7 have not started. Until a step lands, the rules in
+--        behaviour. Migration steps land one at a time: M2, M3, M4, M5 and M6 (below)
+--        have landed; M7 has not started. Until a step lands, the rules in
 --        the specs listed under Excludes stay authoritative for what the
 --        system does today, and nothing here overrides them. Each step runs
 --        its own spec -> tests -> code cycle on the spec that owns the
@@ -35,7 +35,8 @@
 --           transaction); the rest of wrap-up and PR handling
 --           (pr-workflow.allium);
 --           feed execution and routing (feeds.allium, feed-scripts.allium);
---           watcher notices (task-watchers.allium); the store's
+--           what a host does after a PR merge (pr-workflow.allium: PrMerged);
+--           the store's
 --           subscription and connection mechanics, including the asks that
 --           deliver dispatch and session requests to their host (sync.allium:
 --           SubscribeToThisHostsDispatchRequests,
@@ -455,8 +456,33 @@
 --             how it moves then is an open question for M7.
 --           - Deferred, out of M5's scope as out of M4's: how long finished
 --             rows are kept.
---       M6  Watchers get module-written "notice due" rows; PR state is
---           derived in the module from the raw gh status the host forwards.
+--       M6  PR state is derived in the module from the raw gh status the
+--           host forwards. The watcher half is moot: task watchers were
+--           removed (commit e292acb1) and nothing is left to move.
+--           Decisions taken with the user (task #53259):
+--           - P1, watchers. Dropped. task-watchers.allium, the watcher
+--             service and the notice delivery no longer exist; the dead
+--             task_watchers table stays in the module only so a publish is
+--             not refused.
+--           - P2, one reducer. The host runs gh and posts what it read in
+--             raw form (report_pr_status: the state and reviewDecision
+--             strings as gh printed them) or that it could not read the PR
+--             (report_pr_unreadable). The module parses, validates and
+--             derives every task write: merged -> done, closed -> pr_closed,
+--             open -> the review sub_status, unreadable -> pr_unreachable.
+--           - P3, counters stay on the host. The consecutive-failure counters
+--             and the backoff are pacing of this machine's gh calls and are
+--             session-scoped on purpose (core.allium: PrPollState). No new
+--             table. The give-up THRESHOLD stays a host constant; the module
+--             decides only what a give-up report does to the task.
+--           - P4, effects after a merge. The module sets the task Done
+--             (completed_at, epic rollup) and clears its window. The host,
+--             which read the window before posting, then kills it, sends the
+--             desktop notice and respawns a phoenix task's split pane. No
+--             teardown row: the work is best-effort and the module needs no
+--             answer.
+--           - P5, the gate. The rules version goes from 4 to 5, hand-bumped
+--             in the module crate and in the board in the same commit.
 --       M7  Leftover service logic is removed; MCP handlers call reducers
 --           directly.
 --
@@ -1358,6 +1384,80 @@ rule DeletingATaskFailsItsOpenSessionRequest {
         -- teardown ran still has its window killed by its host
         -- (pr-workflow.allium: ExitSessionTeardown): the close already
         -- cleared the window from the task, so the delete itself does not.
+}
+
+------------------------------------------------------------
+-- PR state (M6)
+------------------------------------------------------------
+
+rule ReportPrStatus {
+    when: PrStatusReported(task, host, state, review_decision)
+
+    -- The raw strings gh printed, in any letter case; review_decision is ""
+    -- for a repo without branch protection.
+    requires: state.upper in { "OPEN", "MERGED", "CLOSED" }
+    requires: review_decision.upper in { "", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED" }
+    -- D11: only the host's own owner may speak for it.
+    requires: host.owner != null and host.owner = caller()
+
+    ensures:
+        -- A report for a task that is gone or no longer in review changes
+        -- nothing and is accepted: the host's read raced a close.
+        if task.status = review and task.url.url_type = pr:
+            if state.upper = "MERGED":
+                task.status = done
+                task.sub_status = core/SubStatus.default_for(done)
+                task.tmux_window = null
+                task.completed_at = now
+                task.updated_at = now
+                -- the epic rollup and the phoenix successor follow, as for
+                -- any route into done
+            else if state.upper = "CLOSED":
+                if task.sub_status != pr_closed:
+                    task.sub_status = pr_closed
+                    task.updated_at = now
+            else if task.sub_status != conflict:
+                let new_sub =
+                    if review_decision.upper = "APPROVED": approved
+                    else if review_decision.upper = "CHANGES_REQUESTED": changes_requested
+                    else: awaiting_review
+                if task.sub_status != new_sub:
+                    task.sub_status = new_sub
+                    task.updated_at = now
+
+    @guidance
+        -- The report_pr_status reducer. It replaces the board's own reading
+        -- of gh output (PollPrStatus, PrMerged, PrClosed in
+        -- pr-workflow.allium). An unknown state or review decision is a
+        -- refusal that writes nothing; the host counts any refusal as one
+        -- permanent read failure toward the give-up threshold (P3), and a
+        -- reducer call that fails in transport as a transient one.
+        -- Repeating the same report is a no-op.
+        -- The host that polls a host-less task is chosen by core/PollOwner,
+        -- as before; the module does not check ownership of the poll, only
+        -- that the caller owns the host it names.
+        -- A closed PR overrides conflict, as before: it is the stronger
+        -- signal. An open one never does.
+}
+
+rule ReportPrUnreadable {
+    when: PrUnreadableReported(task, host, reason)
+
+    requires: host.owner != null and host.owner = caller()
+
+    ensures:
+        if task.status = review and task.url.url_type = pr
+           and task.sub_status != pr_unreachable:
+            task.sub_status = pr_unreachable
+            task.updated_at = now
+
+    @guidance
+        -- The report_pr_unreadable reducer. The host counts consecutive
+        -- permanent failures (P3) and posts this once, at the threshold
+        -- (core/config.pr_poll_permanent_failure_threshold). reason is for
+        -- the log line only; nothing stores it. A later successful
+        -- report_pr_status clears pr_unreachable through its open branch,
+        -- merged branch or closed branch, as before.
 }
 
 ------------------------------------------------------------

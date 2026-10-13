@@ -508,6 +508,23 @@ pub trait ReducerCaller: Send + Sync {
         reason: String,
         conflict: bool,
     ) -> Result<ReducerOutcome>;
+    /// `ReportPrStatus`: post what `gh pr view` printed, raw. The module parses
+    /// it and writes the task; a state or review decision it does not know is
+    /// refused. `host` is the board's own host.
+    async fn report_pr_status(
+        &self,
+        task: TaskId,
+        host: String,
+        state: String,
+        review_decision: String,
+    ) -> Result<ReducerOutcome>;
+    /// `ReportPrUnreadable`: the host gave up reading the task's PR.
+    async fn report_pr_unreadable(
+        &self,
+        task: TaskId,
+        host: String,
+        reason: String,
+    ) -> Result<ReducerOutcome>;
     /// `RequestExitSession`: check `token` (a done wrap_up row's id), apply the
     /// close, run the epic chain and write the exit_session row, all in one
     /// transaction. `pr_url` is `""` unless the action is `pr`. An applied call

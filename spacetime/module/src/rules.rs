@@ -32,9 +32,11 @@ use super::*;
 ///    timer (`dispatch_request.rs`).
 /// 4: store-split M5 — wrap-up and exit-session as request rows, the close and
 ///    the epic chain in the module (`session_request.rs`).
+/// 5: store-split M6 — PR state derived from the host's raw `gh` status
+///    (`pr_status.rs`).
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 4;
+pub const RULES_VERSION: i64 = 5;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///

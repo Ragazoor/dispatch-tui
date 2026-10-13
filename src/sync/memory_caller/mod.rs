@@ -57,6 +57,7 @@ mod dispatch_requests;
 mod feed;
 mod grouping;
 mod learnings;
+mod pr_status;
 mod session_requests;
 mod tasks_epics;
 mod work_packages;
@@ -208,7 +209,8 @@ impl MemoryReducerCaller {
     /// host calls honour it (`claim_dispatch_request`,
     /// `report_dispatch_provisioned`, `report_dispatch_failed`,
     /// `claim_session_request`, `report_session_request_done`,
-    /// `report_session_request_failed`, `request_exit_session`); queue it twice
+    /// `report_session_request_failed`, `request_exit_session`,
+    /// `report_pr_status`, `report_pr_unreadable`); queue it twice
     /// to fail two calls.
     pub fn fail_next(&self, reducer: &'static str, fault: InjectedFault) {
         self.faults
@@ -757,6 +759,29 @@ impl ReducerCaller for MemoryReducerCaller {
     ) -> Result<ReducerOutcome> {
         self.faulted("report_session_request_failed", || {
             self.apply_report_session_request_failed(id, reporter, reason, conflict)
+        })
+    }
+
+    async fn report_pr_status(
+        &self,
+        task: TaskId,
+        host: String,
+        state: String,
+        review_decision: String,
+    ) -> Result<ReducerOutcome> {
+        self.faulted("report_pr_status", || {
+            self.apply_report_pr_status(task, host, state, review_decision)
+        })
+    }
+
+    async fn report_pr_unreadable(
+        &self,
+        task: TaskId,
+        host: String,
+        reason: String,
+    ) -> Result<ReducerOutcome> {
+        self.faulted("report_pr_unreadable", || {
+            self.apply_report_pr_unreadable(task, host, reason)
         })
     }
 

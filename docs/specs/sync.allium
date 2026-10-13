@@ -379,7 +379,7 @@ config {
     -- (wrap-up and exit-session request rows, the conflict sub_status, the
     -- close and the epic chain in the module, store-split.allium:
     -- SessionRequest, W12). The module crate and the board both hold it.
-    rules_version: Integer = 4
+    rules_version: Integer = 5
 }
 
 ------------------------------------------------------------

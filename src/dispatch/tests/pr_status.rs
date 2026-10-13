@@ -3,20 +3,6 @@ use super::*;
 // --- check_pr_status error-path tests ---
 
 #[test]
-fn check_pr_status_unknown_state_returns_error() {
-    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
-        b"FUNKY_NEW_STATE\n",
-    )]);
-    let result = check_pr_status("https://github.com/org/repo/pull/42", &mock);
-    assert!(result.is_err(), "unknown PR state should return an error");
-    let msg = result.unwrap_err().to_string();
-    assert!(
-        msg.contains("FUNKY_NEW_STATE"),
-        "error should include the unknown state, got: {msg}"
-    );
-}
-
-#[test]
 fn check_pr_status_empty_output_returns_error() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"")]);
     let result = check_pr_status("https://github.com/org/repo/pull/42", &mock);
@@ -90,18 +76,6 @@ fn check_pr_status_classifies_an_unrecognised_failure_as_transient() {
         !failure.is_permanent(),
         "an unknown failure must default to transient"
     );
-}
-
-/// A state gh reports that dispatch cannot map is permanent: retrying returns
-/// the same unmappable answer, and the underlying cause is a code change.
-#[test]
-fn check_pr_status_classifies_an_unknown_pr_state_as_permanent() {
-    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
-        b"FUNKY_NEW_STATE\n",
-    )]);
-    let failure = check_pr_status("https://github.com/org/repo/pull/42", &mock)
-        .expect_err("an unmappable state must be an error");
-    assert!(failure.is_permanent(), "unknown state should be permanent");
 }
 
 // --- pr_head_branch tests ---
