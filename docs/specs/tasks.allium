@@ -558,8 +558,8 @@ rule PhoenixRespawn {
         -- re-fires.
         --
         -- Where it hooks. Since store-split M7 every route in runs the
-        -- respawn IN THE MODULE, after the Done write and in the SAME
-        -- transaction, so the successor and the predecessor's flag clear land
+        -- respawn IN THE MODULE, in the SAME transaction as the Done write,
+        -- so the successor and the predecessor's flag clear land
         -- with the status write (TheFlagIsTheReceipt holds trivially there):
         -- the patch_task reducer, which the TUI's status writes (ConfirmDone,
         -- EditTask) go through, when a patch moves a task into Done from
@@ -570,9 +570,12 @@ rule PhoenixRespawn {
         -- M5); and PrMerged's write (store-split.allium: ReportPrStatus, since
         -- M6). The board respawns nothing itself: before M7 its service layer
         -- (TaskService::update_task and close_session) ran the respawn as a
-        -- separate step after the status write. The ordering still matters,
-        -- as DoneOutranksTheRespawn requires: the respawn is a row creation
-        -- after the status write, not a field on it. The successor copies the
+        -- separate step after the status write. Inside the transaction the
+        -- module inserts the successor before it writes the closed task (so
+        -- the predecessor's flag clear rides on that one write); the order is
+        -- not observable from outside. What DoneOutranksTheRespawn requires
+        -- still holds: a successor insert that fails is swallowed, and the
+        -- Done write lands with the flag kept. The successor copies the
         -- predecessor's stored repo_path and plan as they are; the board's path
         -- normalisation ran when those were written.
         --
@@ -624,9 +627,9 @@ rule PhoenixRespawn {
         -- (group_by_repo = true) the successor is routed to the matching
         -- per-repo sub-epic via route_target, using repo_path as the routing
         -- key, rather than landing in that root verbatim. repo_path and
-        -- plan_path are also re-resolved (tilde-expanded / canonicalised)
-        -- rather than copied as stored strings — again mirroring CreateTask's
-        -- own pre-processing of operator-supplied paths.
+        -- plan_path are NOT re-resolved: since the respawn moved into the
+        -- module they are copied as stored, already normalised when they were
+        -- written (see "Where it hooks" above).
         --
         -- The successor is never auto-dispatched. AutoDispatchNextSubtask
         -- (epics.allium) skips phoenix subtasks outright, so a phoenix task

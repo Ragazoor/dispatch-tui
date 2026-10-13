@@ -447,7 +447,12 @@ rule ClosePrOnDone {
         -- PR stays open on GitHub until a human decides what to do with the
         -- task, exactly as PrClosed's own guidance describes. NOT fired for
         -- a task already Done being re-saved (done -> done), matching
-        -- transitions_to's own creation/no-op exemptions — which also
+        -- transitions_to's own creation/no-op exemptions — with one
+        -- exception on the close-row route: update_tasks' status="done" on a
+        -- task already Done that carries a pr-typed url still writes a close
+        -- row (store-split.allium: RequestCloseTask), and the host serving it
+        -- runs gh pr close again, which meets a PR already merged or closed
+        -- and logs quietly. The no-op exemption also
         -- means a task inserted directly with status = done (a feed item
         -- that already arrived done, feeds.allium: UpsertFeedTasks) never
         -- reaches this rule, since transitions_to never fires on creation.
@@ -1009,7 +1014,10 @@ rule ExitSessionTeardown {
         -- close row is always done) and the task carries a pr-typed url, the
         -- host serving this row runs `gh pr close <url>` best-effort,
         -- alongside the kill, reading the url from the task, exactly as
-        -- close_session spawned it before M5. Its outcome is logged and does
+        -- close_session spawned it before M5. The host reads the task when it
+        -- serves the row, and runs the close only if the task is still Done
+        -- then: a task moved out of Done in between keeps its PR open. A row
+        -- with action pr never runs it. Its outcome is logged and does
         -- not affect the row's report. This owner was confirmed as a decision
         -- in M7 (store-split.allium, "ClosePrOnDone's owner"); a row that
         -- fails before it is served leaves the PR open, accepted as built

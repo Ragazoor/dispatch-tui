@@ -516,12 +516,17 @@ rule MarkTaskDoneViaMcp {
         --   3. Unknown task_id → the same NotFound(-32001) every other MCP
         --      task lookup uses ("Task <id> not found").
         --      The check is the service's own existence read, made before
-        --      any write, on every store. It is NOT left to the store: the
-        --      shared store's patch_task reducer is a deliberate silent no-op
-        --      on a missing id (hooks race with deletes), so
-        --      without the service check update_tasks would report success
-        --      for a task that does not exist. The same holds for the TUI's
-        --      sub_status write, which goes through update_tasks.
+        --      any write, on every store. On this path the close_task reducer
+        --      refuses a missing task too, but in its own words, which would
+        --      reach the caller only as the could-not-move-to-done reply
+        --      below; the read is what gives the NotFound answer. (On the
+        --      other update_tasks paths the read is what keeps a missing task
+        --      from looking like success at all: the shared store's
+        --      patch_task reducer is a deliberate silent no-op on a missing id,
+        --      since hooks race with deletes. The same holds for the TUI's
+        --      sub_status write, which goes through update_tasks.) A task
+        --      deleted between the read and the close gets the
+        --      could-not-move reply.
         -- A caller could trip both 1 and 2 at once; 1 is checked first, so
         -- that error names the field-combination problem regardless of who
         -- is calling.
@@ -542,13 +547,20 @@ rule MarkTaskDoneViaMcp {
         -- no-answer text, which names a live tmux session and a still-valid
         -- token — this path may have no session at all to speak of); nothing
         -- was written, no close row exists, and any live window is left
-        -- alive — the task is exactly as it was before the call. When it DOES
+        -- alive — the task is exactly as it was before the call. A call that
+        -- got NO ANSWER from the store gets the same reply, although its
+        -- close may have landed: unlike ExitSessionViaMcp, this path does not
+        -- settle a no-answer by re-reading (an open question in
+        -- store-split.allium). A retry then re-closes a task already Done,
+        -- which restamps and respawns nothing. When it DOES
         -- land: the host serving the close row kills the window (if any) and
         -- closes a pr-typed url's PR, best effort, after the call has
         -- returned; the tool waits for neither. Where the window is on a
         -- machine this caller does not own, no row is written and the window
         -- is left to its own machine (store-split.allium, X1). Boards learn of
-        -- the close through their subscriptions. The response text is
+        -- the close through their subscriptions; this board also sends its
+        -- own task-changed notification (and epic-changed, for a task in an
+        -- epic) after the call, on either outcome. The response text is
         -- unchanged by M7. No epic auto-dispatch chain runs on either
         -- outcome, so the response text never names a chained subtask —
         -- unlike exit_session's, which does.

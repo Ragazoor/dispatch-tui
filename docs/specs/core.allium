@@ -712,7 +712,10 @@ entity Task {
     -- and the drain points in agent-health.allium). Since store-split M7 the
     -- clear is the store module's, applied by patch_task to every patch that
     -- leaves running and by both closes, never added by the board
-    -- (store-split.allium, X2). So the bit cannot outlive the
+    -- (store-split.allium, X2). patch_task skips the clear only for a patch
+    -- that names stop_pending itself, which then wins; no board patch sets it
+    -- true (only HookStop's own write does), so that exception cannot keep a
+    -- Stop alive past running. So the bit cannot outlive the
     -- status it was recorded under, and cannot be waiting for a task that
     -- a later move puts back into running — where the next drain would
     -- otherwise flip it straight back out of a status a human just chose.

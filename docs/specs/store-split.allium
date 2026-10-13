@@ -401,8 +401,8 @@
 --           - W5, the teardown. The host's board claims the exit_session row,
 --             kills the window and reports done, or failed with a reason. A
 --             failed teardown does NOT revert the close; it is recorded on
---             the row and logged, as kill_session_window swallows it today
---             (pr-workflow.allium: ExitSessionTeardown). The same host also
+--             the row and logged, as kill_session_window swallowed it before
+--             M5 (pr-workflow.allium: ExitSessionTeardown). The same host also
 --             runs ClosePrOnDone's gh pr close for a close that took a task
 --             with a pr url into Done, as close_session did before M5
 --             (confirmed as the owner in M7; see "ClosePrOnDone's owner"
@@ -548,7 +548,9 @@
 --             one transaction that either landed whole or not at all.
 --           - X2, patch_task owns the transition rules. When a patch moves a
 --             task out of running the module clears stop_pending in the same
---             write (core.allium: PendingStopOnlyWhileRunning), and when a
+--             write (core.allium: PendingStopOnlyWhileRunning) unless the
+--             patch names stop_pending itself, in which case the patch's value
+--             stands (no board patch sets it true), and when a
 --             patch moves a task into Done from another status it runs the
 --             phoenix respawn in the same transaction (tasks.allium:
 --             PhoenixRespawn; the trigger is unchanged: the phoenix flag, a
@@ -1512,7 +1514,9 @@ rule RequestCloseTask {
     when: CloseTaskRequested(task, host)
 
     -- No requirement on task.status: reachable from any status, done
-    -- included, as MarkTaskDoneViaMcp promises (mcp-task-tools.allium). The
+    -- included, as MarkTaskDoneViaMcp promises (mcp-task-tools.allium). A
+    -- task that no longer exists is refused ("task <id> no longer exists"),
+    -- writing nothing. The
     -- request-shape checks (status the only field; a dispatched agent never
     -- closes its own task) are the tool's, made before this call. No host
     -- check guards the close itself: D11 governs only whether the teardown
@@ -1597,7 +1601,8 @@ rule RequestCloseTask {
         -- already merged or closed, which logs quietly. The module schedules
         -- the row's teardown timer here (W7, config.exit_session_teardown_timeout).
         -- When the teardown host is not the caller's own (a teammate's
-        -- machine, or a host with no owner) there is no row: the task closes
+        -- machine, a host with no owner, or one not registered at all) there
+        -- is no row, and the close is not refused for it: the task closes
         -- and the window, if any, is left to its own machine, as before M7,
         -- where the board's local kill of such a window failed silently.
         --
@@ -1760,3 +1765,7 @@ open question "Window left alive (W5, W7, W8; deferred past M7, and so beyond th
 open question "Seeing other machines' requests (deferred past M7, and so beyond the store-split epic): a board's subscription delivers only request rows naming its own host. A teammate's board that shows the same task in a shared epic cannot see the request, so its UnprovisionedIndicator falls back to the claim stamp. Should boards also receive the open requests of every task they can see?"
 
 open question "M7, close_task on a task with an open DISPATCH request (not decided in M7): RequestCloseTask fails the task's open session request but not an open dispatch request. A task closed while its dispatch is still provisioning can then be reported dispatched, and HostReportsDispatched writes a worktree, window and host onto a Done task, with an agent running in it. The board-side close before M7 had the same gap. Should close_task also fail the task's open dispatch request ('task closed'), as a task delete does (D8), or refuse the close while one is open?"
+
+open question "M7, update_tasks' done path when close_task gets NO ANSWER (found by weed, not decided): the board treats a no-answer like a refusal and the tool replies that the task could NOT be moved to done and is still in its previous status. The close may in fact have landed. A retry is a done -> done re-close (no restamp, no respawn), but for a task with a pr-typed url it writes a second close row and runs gh pr close again. Should the tool settle a no-answer by re-reading the task, as exit_session settles its own no-answer by looking for the row (mcp-task-tools.allium: ExitSessionViaMcp), or is the 'try again' reply acceptable?"
+
+open question "M7 leftovers not named in X5 (found by weed, not decided): besides the plain upsert_feed_tasks reducer, the create_managed_role_epic and create_repo_group_sub_epic reducers and the store's recalculate_epic_status call are now reached only from tests (ProvisionManagedEpics runs through ensure_managed_epics, repo-group routing runs inside the module, and X3 removed every board-side recalculation). Should M7 delete them, or should X5 list them as deferred alongside upsert_feed_tasks?"

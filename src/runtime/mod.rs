@@ -623,8 +623,8 @@ pub(crate) async fn backfill_embeddings(
 
 struct TuiRuntime {
     // Read-only DB handle: queries only. Task/epic mutations go through
-    // `task_svc` / `epic_svc`, which own the `recalculate_epic_status` invariant
-    // — calling a mutating method on `database` is a compile error. See the
+    // `task_svc` / `epic_svc`; the module rolls up the epic chain in its own
+    // transactions (store-split M7) — calling a mutating method on `database` is a compile error. See the
     // mutation-boundary section of docs/conventions.md.
     database: Arc<dyn store::TaskReadStore>,
     /// Where the board's CARDS come from — see

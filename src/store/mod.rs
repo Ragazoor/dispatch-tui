@@ -665,7 +665,7 @@ pub trait EpicRead: Send + Sync {
 }
 
 /// Epic mutations, layered on top of the read surface. The
-/// `recalculate_epic_status` invariant lives here; reachable only by the service
+/// module's reducers own the epic rollup (store-split M7); reachable only by the service
 /// layer and the sanctioned feed subsystem — non-service consumers hold
 /// [`TaskReadStore`].
 #[async_trait::async_trait]
@@ -1273,8 +1273,8 @@ impl<
 /// exposes the task/epic **read** surface ([`TaskRead`] + [`EpicRead`]) but not
 /// [`TaskCrud`]/[`EpicCrud`] mutations, so a direct `state.db.patch_task(...)`
 /// from a handler is a **compile error**. Task and epic writes must go through
-/// `TaskServiceApi`/`EpicServiceApi`, which own the `recalculate_epic_status`
-/// invariant — see the mutation-boundary section of `docs/conventions.md`.
+/// `TaskServiceApi`/`EpicServiceApi`, which reach the module's
+/// reducers — see the mutation-boundary section of `docs/conventions.md`.
 ///
 /// The name is deliberately scoped: it seals **task/epic** writes, not every
 /// write. Repo-config, host, settings, learning and usage writes remain
