@@ -116,6 +116,7 @@ pub fn save_setting(
     if host.trim().is_empty() {
         return Err("a host id must not be empty".to_string());
     }
+    require_acting_for(ctx, &host)?;
     let id = host_scoped_id(&host, &key);
     match ctx.db.settings().id().find(&id) {
         Some(existing) => ctx.db.settings().id().update(Setting { value, ..existing }),
@@ -131,6 +132,7 @@ pub fn save_setting(
 
 #[spacetimedb::reducer]
 pub fn clear_setting(ctx: &ReducerContext, host: String, key: String) -> Result<(), String> {
+    require_acting_for(ctx, &host)?;
     let id = host_scoped_id(&host, &key);
     ctx.db.settings().id().delete(&id);
     Ok(())

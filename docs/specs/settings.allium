@@ -92,6 +92,10 @@ rule SaveSetting {
         -- host replaces the value rather than adding a row, which is what
         -- SettingIsUniquePerHostAndKey requires. A save from a different host
         -- is a different row and never touches this one's.
+        --
+        -- D11 (store-split.allium: SaveSettingForHost): the store refuses the
+        -- write unless the host is registered with an owner equal to the
+        -- caller.
 }
 
 rule ClearSetting {

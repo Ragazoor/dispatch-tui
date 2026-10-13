@@ -907,7 +907,7 @@ rule RequestDispatch {
         -- carries it; a client cannot name some other machine as the host.
         --
         -- A refusal is ORDINARY: it is how a caller learns that another entry
-        -- point claimed the task first, as with today's claim_backlog_task.
+        -- point claimed the task first, as the claim did before M4.
         -- The refusal names why (not backlog, owned by another machine, an
         -- open request already exists, a phoenix task the epic chain may not
         -- take), and nothing was written. The epic chain treats every refusal
@@ -1143,7 +1143,7 @@ rule ReleaseClaimOfFailedRequest {
             RecalculateEpicStatus(task.epic)
 
     @guidance
-        -- Today's release_backlog_claim, applied by the module to every
+        -- The old release_backlog_claim, applied by the module to every
         -- failure: a reported one, a timeout, a host restart. It is
         -- conditional, as today: a task that was provisioned or moved on
         -- meanwhile is left alone rather than stomped back to backlog. The
@@ -1694,6 +1694,73 @@ rule ReportPrUnreadable {
         -- report_pr_status clears pr_unreachable through its open branch,
         -- merged branch or closed branch, as before.
 }
+
+------------------------------------------------------------
+-- Host-scoped writes (D11 follow-up, task #53266)
+------------------------------------------------------------
+
+-- D11 reached the request reducers first. The older reducers that take a
+-- caller-supplied host trusted it, so any client could act as another
+-- person's machine. They are held to the same check: the host they name must
+-- be registered with an owner equal to caller().
+
+rule ClaimPollOwner {
+    when: PollOwnerClaimed(scope, scope_id, host)
+
+    -- D11: only the host's own owner may claim for it.
+    requires: host.owner != null and host.owner = caller()
+
+    ensures: core/PollOwner.claimed_if_absent(scope, scope_id, host)
+
+    @guidance
+        -- claim_poll_owner. The claim itself is unchanged
+        -- (pr-workflow.allium: PollPrStatus, feeds.allium: FeedTick).
+}
+
+rule OverridePollOwner {
+    when: PollOwnerOverridden(scope, scope_id, host)
+
+    -- D11: a client can move a scope only to a host it owns, never to
+    -- someone else's machine, so a poll cannot be stolen for another host.
+    requires: host.owner != null and host.owner = caller()
+
+    ensures: core/PollOwner.reassigned(scope, scope_id, host)
+
+    @guidance
+        -- override_poll_owner. The reassignment itself is unchanged
+        -- (feeds.allium: OverrideFeedOwner).
+}
+
+rule SaveSettingForHost {
+    when: SettingSaved(host, key, value)
+
+    -- D11: a host's settings are written only by its owner. A setting
+    -- can name a script path the host's board runs (the feed commands).
+    requires: host.owner != null and host.owner = caller()
+
+    ensures: core/Setting.created_or_updated(host: host, key: key, value: value)
+
+    @guidance
+        -- save_setting. Unchanged otherwise (settings.allium: SaveSetting).
+}
+
+rule ClearSettingForHost {
+    when: SettingCleared(host, key)
+
+    -- D11: as SaveSettingForHost. An unowned or unregistered host is
+    -- refused even when the key was never set.
+    requires: host.owner != null and host.owner = caller()
+
+    ensures: not exists core/Setting{host: host, key: key}
+
+    @guidance
+        -- clear_setting. Unchanged otherwise (settings.allium: ClearSetting).
+}
+
+-- claim_backlog_task and release_backlog_claim are removed, not checked.
+-- The board stopped calling them in M4: RequestDispatch and
+-- ReleaseClaimOfFailedRequest are the claim and the release now. Left in
+-- place they let a client claim a task for any host.
 
 ------------------------------------------------------------
 -- Invariants

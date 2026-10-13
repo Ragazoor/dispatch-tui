@@ -170,9 +170,42 @@ async fn record_usage_event_refuses_a_non_positive_cap() {
 
 // -- Settings -----------------------------------------------------------------
 
+/// A caller that owns `host-a`, so it may write that host's settings (D11).
+fn owning_caller() -> (MemoryReducerCaller, Arc<SharedRows>) {
+    let (caller, rows) = caller();
+    let caller = caller
+        .with_sender("alice")
+        .with_registered_host("host-a", "alice");
+    (caller, rows)
+}
+
+#[tokio::test]
+async fn setting_writes_refuse_a_host_the_sender_does_not_own() {
+    let (caller, rows) = owning_caller();
+    let caller = caller
+        .with_registered_host("bobs", "bob")
+        .with_registered_host("unowned", "");
+    caller
+        .save_setting("host-a".into(), "theme".into(), "dark".into())
+        .await
+        .unwrap();
+    for host in ["bobs", "unowned", "nowhere"] {
+        let save = caller
+            .save_setting(host.into(), "theme".into(), "x".into())
+            .await
+            .unwrap();
+        let clear = caller
+            .clear_setting(host.into(), "theme".into())
+            .await
+            .unwrap();
+        assert!(!save.won() && !clear.won(), "{host} must be refused");
+    }
+    assert_eq!(rows.setting("theme").as_deref(), Some("dark"));
+}
+
 #[tokio::test]
 async fn save_setting_upserts_by_host_and_key() {
-    let (caller, rows) = caller();
+    let (caller, rows) = owning_caller();
     caller
         .save_setting("host-a".into(), "theme".into(), "dark".into())
         .await
@@ -199,7 +232,7 @@ async fn save_setting_refuses_an_empty_host() {
 
 #[tokio::test]
 async fn clear_setting_removes_a_saved_key() {
-    let (caller, rows) = caller();
+    let (caller, rows) = owning_caller();
     caller
         .save_setting("host-a".into(), "theme".into(), "dark".into())
         .await
@@ -214,7 +247,7 @@ async fn clear_setting_removes_a_saved_key() {
 
 #[tokio::test]
 async fn clear_setting_on_a_never_set_key_is_a_no_op() {
-    let (caller, _rows) = caller();
+    let (caller, _rows) = owning_caller();
     let outcome = caller
         .clear_setting("host-a".into(), "never-set".into())
         .await

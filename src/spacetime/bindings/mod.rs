@@ -11,7 +11,6 @@ pub mod archive_stale_learnings_reducer;
 pub mod batch_delete_reducer;
 pub mod batch_patch_sub_status_reducer;
 pub mod burn_id_sequence_reducer;
-pub mod claim_backlog_task_reducer;
 pub mod claim_dispatch_request_reducer;
 pub mod claim_poll_owner_reducer;
 pub mod claim_session_request_reducer;
@@ -71,7 +70,6 @@ pub mod record_usage_event_reducer;
 pub mod record_user_prompt_submit_reducer;
 pub mod register_host_reducer;
 pub mod regroup_epic_reducer;
-pub mod release_backlog_claim_reducer;
 pub mod repo_base_branch_type;
 pub mod repo_base_branches_table;
 pub mod repo_path_type;
@@ -159,7 +157,6 @@ pub use archive_stale_learnings_reducer::archive_stale_learnings;
 pub use batch_delete_reducer::batch_delete;
 pub use batch_patch_sub_status_reducer::batch_patch_sub_status;
 pub use burn_id_sequence_reducer::burn_id_sequence;
-pub use claim_backlog_task_reducer::claim_backlog_task;
 pub use claim_dispatch_request_reducer::claim_dispatch_request;
 pub use claim_poll_owner_reducer::claim_poll_owner;
 pub use claim_session_request_reducer::claim_session_request;
@@ -219,7 +216,6 @@ pub use record_usage_event_reducer::record_usage_event;
 pub use record_user_prompt_submit_reducer::record_user_prompt_submit;
 pub use register_host_reducer::register_host;
 pub use regroup_epic_reducer::regroup_epic;
-pub use release_backlog_claim_reducer::release_backlog_claim;
 pub use repo_base_branch_type::RepoBaseBranch;
 pub use repo_base_branches_table::*;
 pub use repo_path_type::RepoPath;
@@ -326,10 +322,6 @@ pub enum Reducer {
     BurnIdSequence {
         table: String,
         ceiling: i64,
-    },
-    ClaimBacklogTask {
-        id: i64,
-        host: String,
     },
     ClaimDispatchRequest {
         request_id: i64,
@@ -483,9 +475,6 @@ pub enum Reducer {
     },
     RegroupEpic {
         root_id: i64,
-    },
-    ReleaseBacklogClaim {
-        id: i64,
     },
     ReportDispatchFailed {
         request_id: i64,
@@ -676,7 +665,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::BatchDelete { .. } => "batch_delete",
             Reducer::BatchPatchSubStatus { .. } => "batch_patch_sub_status",
             Reducer::BurnIdSequence { .. } => "burn_id_sequence",
-            Reducer::ClaimBacklogTask { .. } => "claim_backlog_task",
             Reducer::ClaimDispatchRequest { .. } => "claim_dispatch_request",
             Reducer::ClaimPollOwner { .. } => "claim_poll_owner",
             Reducer::ClaimSessionRequest { .. } => "claim_session_request",
@@ -715,7 +703,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::RecordUserPromptSubmit { .. } => "record_user_prompt_submit",
             Reducer::RegisterHost { .. } => "register_host",
             Reducer::RegroupEpic { .. } => "regroup_epic",
-            Reducer::ReleaseBacklogClaim { .. } => "release_backlog_claim",
             Reducer::ReportDispatchFailed { .. } => "report_dispatch_failed",
             Reducer::ReportDispatchProvisioned { .. } => "report_dispatch_provisioned",
             Reducer::ReportPrStatus { .. } => "report_pr_status",
@@ -796,13 +783,6 @@ impl __sdk::Reducer for Reducer {
 }             => __sats::bsatn::to_vec(&burn_id_sequence_reducer::BurnIdSequenceArgs {
                 table: table.clone(),
                 ceiling: ceiling.clone(),
-}),
-            Reducer::ClaimBacklogTask{
-                id,
-                host,
-}             => __sats::bsatn::to_vec(&claim_backlog_task_reducer::ClaimBacklogTaskArgs {
-                id: id.clone(),
-                host: host.clone(),
 }),
             Reducer::ClaimDispatchRequest{
                 request_id,
@@ -1072,11 +1052,6 @@ Reducer::RecalculateEpicStatus{
                 root_id,
 }             => __sats::bsatn::to_vec(&regroup_epic_reducer::RegroupEpicArgs {
                 root_id: root_id.clone(),
-}),
-            Reducer::ReleaseBacklogClaim{
-                id,
-}             => __sats::bsatn::to_vec(&release_backlog_claim_reducer::ReleaseBacklogClaimArgs {
-                id: id.clone(),
 }),
             Reducer::ReportDispatchFailed{
                 request_id,

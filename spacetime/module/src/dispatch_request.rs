@@ -525,7 +525,7 @@ pub(crate) fn fail_open_dispatch_requests_of(ctx: &ReducerContext, task_id: i64)
 /// requester's host, with its backstop timer, in one transaction. `mode` `""`
 /// derives it (D3).
 ///
-/// A refusal is ORDINARY, as with [`claim_backlog_task`]: it is how a caller
+/// A refusal is ORDINARY, as with a lost claim: it is how a caller
 /// learns another entry point got there first, and it writes nothing.
 #[spacetimedb::reducer]
 pub fn request_dispatch(

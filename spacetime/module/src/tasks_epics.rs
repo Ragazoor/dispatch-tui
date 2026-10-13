@@ -873,16 +873,10 @@ pub(crate) fn recalculate_one(ctx: &ReducerContext, epic: &Epic) {
 //
 // WHAT A CLAIM WRITES is one decision and WHICH ROWS IT ACCEPTS is another —
 // the same split `CLAIM_SET` and its per-caller `WHERE` make on the SQLite
-// side. `apply_claim` is the first; the two reducers are the second.
+// side. `claimed_task` is the first; `validate_claim_acceptance` the second.
 
-/// Everything a claim writes to the row it wins.
-pub(crate) fn apply_claim(ctx: &ReducerContext, task: Task) -> Task {
-    claimed_task(task, &now(ctx))
-}
-
-/// [`apply_claim`]'s writes at a given instant, pure so `RequestDispatch`'s
-/// claim (`dispatch_request.rs`) is the same claim and testable without a
-/// store.
+/// Everything a claim writes to the row it wins, pure so `RequestDispatch`'s
+/// claim (`dispatch_request.rs`) is testable without a store.
 pub(crate) fn claimed_task(task: Task, now: &str) -> Task {
     Task {
         status: RUNNING.into(),
@@ -896,7 +890,7 @@ pub(crate) fn claimed_task(task: Task, now: &str) -> Task {
     }
 }
 
-/// What releasing a claim writes, shared by [`release_backlog_claim`] and
+/// What releasing a claim writes, used by
 /// `ReleaseClaimOfFailedRequest` (`dispatch_request.rs`). `updated_at` is the
 /// caller's to stamp.
 pub(crate) fn released_task(task: Task) -> Task {
@@ -921,7 +915,7 @@ pub fn claimable_by(task: &Task, host: &str) -> bool {
     task.host.is_empty() || task.host == host
 }
 
-/// Which rows a claim accepts, shared by [`claim_backlog_task`] and
+/// Which rows a claim accepts, used by
 /// `RequestDispatch` (`validate_dispatch_request`): a backlog task that
 /// [`claimable_by`] `host`.
 pub fn validate_claim_acceptance(task: &Task, host: &str) -> Result<(), String> {
@@ -942,8 +936,7 @@ pub fn validate_claim_acceptance(task: &Task, host: &str) -> Result<(), String> 
 }
 
 /// Whether a task is still the bare claim: running with no worktree yet. Only
-/// such a claim may be released ([`release_backlog_claim`],
-/// `ReleaseClaimOfFailedRequest`); one that got as far as a worktree is a
+/// such a claim may be released (`ReleaseClaimOfFailedRequest`); one that got as far as a worktree is a
 /// dispatch in progress.
 pub(crate) fn is_bare_claim(task: &Task) -> bool {
     task.status == RUNNING && task.worktree.is_empty()
@@ -957,7 +950,7 @@ pub(crate) fn is_bare_claim(task: &Task) -> bool {
 // it is about to provision that task's worktree — and there is no channel to
 // tell it.
 //
-// The named claim above is enough, because a board choosing a candidate for an
+// The named claim (`request_dispatch`) is enough, because a board choosing a candidate for an
 // epic is NOT choosing from a partial view. A subscription to an epic is
 // `WHERE epic_id = N`, which returns every subtask of it regardless of who
 // owns them, so a board that is chaining an epic can see all of that epic's
@@ -966,62 +959,6 @@ pub(crate) fn is_bare_claim(task: &Task) -> bool {
 // epics; it does not reach one epic's own subtask list.
 //
 // So the client orders the candidates by `claim_order_key`'s rule and offers
-// them one at a time, and this reducer arbitrates: a task another host already
-// took is refused, and the client moves to the next. Exclusivity is still the
+// them one at a time, and `request_dispatch` arbitrates: a task another host
+// already took is refused, and the client moves to the next. Exclusivity is still the
 // store's, which is the part that had to move.
-
-/// LOSING IS AN ERROR HERE, and that is how the caller finds out.
-///
-/// A reducer returns no value, so "did I win?" has to be carried by the one
-/// channel a reducer does have: accepted or refused
-/// (`sync.allium: EveryMutationIsAtomicAndAnswered`). Reading the row back
-/// instead would not work — a claim does not stamp the winner's name on it, so
-/// two hosts asking "is it running now?" after a race would both see `running`
-/// and both believe they won, which is the exact failure this reducer exists to
-/// prevent.
-///
-/// The refusal is therefore ORDINARY rather than exceptional. The client maps
-/// it to "somebody else got there first" and moves to the next candidate; it is
-/// a transport failure, not this, that means the store is down.
-#[spacetimedb::reducer]
-pub fn claim_backlog_task(ctx: &ReducerContext, id: i64, host: String) -> Result<(), String> {
-    let Some(task) = ctx.db.tasks().id().find(id) else {
-        return Err(format!("task {id} no longer exists"));
-    };
-    validate_claim_acceptance(&task, &host)?;
-    // THROUGH `write_task`, not around it. Neither this nor the release below
-    // touches `epic_id` or `owner`, so nothing is broken by a direct update
-    // today — but `write_task`'s whole claim is that it is the only path, and a
-    // second path is one the next claim-adjacent reducer copies.
-    write_task(ctx, apply_claim(ctx, task))
-}
-
-/// Undo a claim whose provisioning failed.
-///
-/// Guarded on `worktree` being absent, and that guard is the whole safety of
-/// it: a claim that got as far as a worktree is a dispatch in progress, and
-/// releasing it would put a running agent's task back in the backlog for
-/// another host to claim underneath it.
-#[spacetimedb::reducer]
-pub fn release_backlog_claim(ctx: &ReducerContext, id: i64) -> Result<(), String> {
-    let Some(task) = ctx.db.tasks().id().find(id) else {
-        return Err(format!("task {id} no longer exists"));
-    };
-    if !is_bare_claim(&task) {
-        return Err(if task.status != RUNNING {
-            format!("task {id} is not claimed")
-        } else {
-            format!(
-                "task {id} already has a worktree, so releasing it would put a running \
-                 agent's task back in the backlog"
-            )
-        });
-    }
-    write_task(
-        ctx,
-        Task {
-            updated_at: now(ctx),
-            ..released_task(task)
-        },
-    )
-}

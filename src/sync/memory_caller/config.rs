@@ -217,7 +217,8 @@ impl MemoryReducerCaller {
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    /// Mirrors the module's `save_setting`: refuses an empty host, otherwise
+    /// Mirrors the module's `save_setting`: refuses an empty host and one the
+    /// sender does not own (D11), otherwise
     /// upserts on the derived `(host, key)` id.
     pub(super) fn apply_save_setting(
         &self,
@@ -231,6 +232,9 @@ impl MemoryReducerCaller {
             ));
         }
         let mut tables = self.lock();
+        if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let id = module::host_scoped_id(&host, &key);
         let row = module::Setting {
             id: id.clone(),
@@ -243,10 +247,13 @@ impl MemoryReducerCaller {
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    /// Mirrors the module's `clear_setting`: deleting an absent key is a
-    /// no-op, not a refusal (`docs/specs/settings.allium`'s `ClearSetting`).
+    /// Mirrors the module's `clear_setting`: refuses a host the sender does not
+    /// own (D11); deleting an absent key is a no-op, not a refusal (`docs/specs/settings.allium`'s `ClearSetting`).
     pub(super) fn apply_clear_setting(&self, host: String, key: String) -> Result<ReducerOutcome> {
         let mut tables = self.lock();
+        if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let id = module::host_scoped_id(&host, &key);
         if tables.settings.remove(&id).is_some() {
             self.rows.remove_setting(id);

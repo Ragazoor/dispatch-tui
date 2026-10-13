@@ -1018,145 +1018,6 @@ fn the_store_refuses_a_user_board_task_with_no_owner() {
     assert!(accepted.status.success(), "{}", describe(&accepted));
 }
 
-/// ONE CLAIM, ONE WINNER — and the loser is TOLD.
-///
-/// `dispatch.allium: DispatchClaimExclusive`. A reducer returns no value, so
-/// "did I win?" is carried by the only channel it has: the second claim is
-/// REFUSED. Reading the row back instead would not work — a claim does not
-/// stamp the winner's name on it, so both hosts would see `running` and both
-/// would believe they won.
-///
-/// Sequential here rather than concurrent, and that is the honest limit of this
-/// test: it shows the claim excludes an already-claimed task, not that two
-/// simultaneous calls cannot interleave. The latter is the reducer's
-/// transaction, which is the store's guarantee rather than something a test on
-/// this side can observe.
-#[test]
-fn a_claimed_task_is_not_claimed_twice() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    instance.call(
-        "seed_epics",
-        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
-    );
-    instance.call(
-        "seed_tasks",
-        &[&serde_json::json!([task_json(1, "the only one", "backlog", 1, "")]).to_string()],
-    );
-
-    let first = instance.call("claim_backlog_task", &["1", "host-a"]);
-    assert!(first.status.success(), "{}", describe(&first));
-    assert_eq!(
-        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
-        "running"
-    );
-
-    let second = instance.call("claim_backlog_task", &["1", "host-b"]);
-    assert!(
-        !second.status.success(),
-        "the second claim must be refused, not silently ignored: {}",
-        describe(&second)
-    );
-    assert!(
-        describe(&second).contains("already claimed"),
-        "the refusal must say why: {}",
-        describe(&second)
-    );
-}
-
-/// A foreign-owned backlog task is refused, not claimed. Its worktree is on
-/// another machine, so dispatching an agent here would give it nowhere to work.
-#[test]
-fn a_task_owned_by_another_host_cannot_be_claimed() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    instance.call(
-        "seed_epics",
-        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
-    );
-    instance.call(
-        "seed_tasks",
-        &[&serde_json::json!([task_json(1, "host-a's", "backlog", 1, "host-a")]).to_string()],
-    );
-
-    let refused = instance.call("claim_backlog_task", &["1", "host-b"]);
-    assert!(
-        !refused.status.success(),
-        "a task whose worktree is elsewhere must be refused: {}",
-        describe(&refused)
-    );
-    assert_eq!(
-        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
-        "backlog",
-        "a refused claim must change nothing"
-    );
-
-    // Its owner can still take it, so the refusal is the rule rather than the
-    // reducer being broken.
-    let won = instance.call("claim_backlog_task", &["1", "host-a"]);
-    assert!(won.status.success(), "{}", describe(&won));
-    assert_eq!(
-        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
-        "running"
-    );
-}
-
-/// Releasing a claim that already has a worktree is refused. That claim is a
-/// dispatch in progress, and releasing it would put a running agent's task back
-/// in the backlog for another host to claim underneath it.
-#[test]
-fn a_claim_with_a_worktree_cannot_be_released() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    instance.call(
-        "seed_epics",
-        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
-    );
-    instance.call(
-        "seed_tasks",
-        &[&serde_json::json!([
-            task_json(1, "provisioned", "running", 1, "host-a"),
-            task_json(2, "not yet", "running", 1, "host-a"),
-        ])
-        .to_string()],
-    );
-    let gave_it_a_worktree = instance.call(
-        "patch_task",
-        &["1", &patch_setting("worktree", "/wt/1").to_string()],
-    );
-    assert!(
-        gave_it_a_worktree.status.success(),
-        "{}",
-        describe(&gave_it_a_worktree)
-    );
-
-    let refused = instance.call("release_backlog_claim", &["1"]);
-    assert!(
-        !refused.status.success(),
-        "a provisioned claim must not be releasable: {}",
-        describe(&refused)
-    );
-    assert_eq!(
-        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
-        "running"
-    );
-
-    // One that never got a worktree goes back to the backlog, which is what
-    // the release is for.
-    let released = instance.call("release_backlog_claim", &["2"]);
-    assert!(released.status.success(), "{}", describe(&released));
-    assert_eq!(
-        column(&instance, "SELECT status FROM tasks WHERE id = 2"),
-        "backlog"
-    );
-}
-
 /// **Test 3 of Phase 10 (task #4914).** A task's delete detaches its
 /// learnings (`source_task_id` set null, the learning survives as orphaned
 /// provenance) and cascades their retrievals — reproduced as explicit
@@ -2858,6 +2719,7 @@ fn save_setting_upserts_by_host_and_key() {
         return;
     }
     let instance = published_instance();
+    register_own_hosts(&instance);
 
     let first = instance.call("save_setting", &["host-a", "theme", "dark"]);
     assert!(first.status.success(), "{}", describe(&first));
@@ -2883,6 +2745,7 @@ fn a_setting_written_by_one_host_is_a_separate_row_from_anothers() {
         return;
     }
     let instance = published_instance();
+    register_own_hosts(&instance);
 
     instance.call("save_setting", &["host-a", "theme", "dark"]);
     instance.call("save_setting", &["host-b", "theme", "light"]);
@@ -2911,6 +2774,7 @@ fn clear_setting_removes_the_row() {
         return;
     }
     let instance = published_instance();
+    register_own_hosts(&instance);
     instance.call("save_setting", &["host-a", "theme", "dark"]);
 
     let cleared = instance.call("clear_setting", &["host-a", "theme"]);
@@ -2930,6 +2794,7 @@ fn clearing_an_unset_setting_is_a_no_op() {
         return;
     }
     let instance = published_instance();
+    register_own_hosts(&instance);
 
     let cleared = instance.call("clear_setting", &["host-a", "never-set"]);
     assert!(cleared.status.success(), "{}", describe(&cleared));
@@ -2948,6 +2813,7 @@ fn claim_poll_owner_fills_an_absent_row_but_not_an_existing_one() {
         return;
     }
     let instance = published_instance();
+    register_own_hosts(&instance);
     running_task(&instance, 1);
 
     let first = instance.call("claim_poll_owner", &["task", "1", "host-a"]);
@@ -2986,6 +2852,7 @@ fn override_poll_owner_reassigns_unconditionally() {
         return;
     }
     let instance = published_instance();
+    register_own_hosts(&instance);
     running_task(&instance, 1);
 
     let claimed = instance.call("claim_poll_owner", &["task", "1", "host-a"]);
@@ -3012,6 +2879,7 @@ fn override_poll_owner_with_no_existing_claim_behaves_like_a_claim() {
         return;
     }
     let instance = published_instance();
+    register_own_hosts(&instance);
     instance.call(
         "seed_epics",
         &[&serde_json::json!([epic_json(1, "Feed Epic", "backlog", 0)]).to_string()],
@@ -3048,6 +2916,7 @@ fn task_and_epic_scope_claims_do_not_collide_on_the_same_id() {
         return;
     }
     let instance = published_instance();
+    register_own_hosts(&instance);
     running_task(&instance, 1);
     instance.call(
         "seed_epics",
@@ -3089,6 +2958,7 @@ fn claim_poll_owner_rejects_an_unrecognised_scope() {
         return;
     }
     let instance = published_instance();
+    register_own_hosts(&instance);
 
     let result = instance.call("claim_poll_owner", &["bogus", "1", "host-a"]);
     assert!(
@@ -3100,6 +2970,82 @@ fn claim_poll_owner_rejects_an_unrecognised_scope() {
         column(&instance, "SELECT count(*) AS c FROM poll_owners"),
         "0"
     );
+}
+
+/// D11 follow-up (`store-split.allium`: ClaimPollOwner, OverridePollOwner,
+/// SaveSettingForHost, ClearSettingForHost): a client may name a host in these
+/// reducers only when it owns it. A teammate's host, an ownerless one and an
+/// unregistered one are all refused, and nothing changes.
+#[test]
+fn host_scoped_writes_refuse_a_caller_that_does_not_own_the_host() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    register_own_hosts(&instance);
+    register_teammates_host(&instance, "their-host");
+    running_task(&instance, 1);
+    instance.call("claim_poll_owner", &["task", "1", "host-a"]);
+    instance.call("save_setting", &["host-a", "theme", "dark"]);
+
+    // The teammate acts for my host-a.
+    let teammate = |reducer: &str, args: &[&str]| instance.call_as("teammate", reducer, args);
+    for out in [
+        teammate("override_poll_owner", &["task", "1", "host-a"]),
+        teammate("claim_poll_owner", &["epic", "1", "host-a"]),
+        teammate("save_setting", &["host-a", "theme", "light"]),
+        teammate("clear_setting", &["host-a", "theme"]),
+    ] {
+        assert!(!out.status.success(), "{}", describe(&out));
+    }
+    // I act for the teammate's host, an unregistered one.
+    for out in [
+        instance.call("override_poll_owner", &["task", "1", "their-host"]),
+        instance.call("claim_poll_owner", &["epic", "1", "their-host"]),
+        instance.call("save_setting", &["their-host", "theme", "x"]),
+        instance.call("clear_setting", &["their-host", "theme"]),
+        instance.call("claim_poll_owner", &["epic", "1", "nowhere"]),
+        instance.call("save_setting", &["nowhere", "theme", "x"]),
+        instance.call("clear_setting", &["nowhere", "theme"]),
+    ] {
+        assert!(!out.status.success(), "{}", describe(&out));
+    }
+
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT host FROM poll_owners WHERE scope = 'task' AND scope_id = 1"
+        ),
+        "host-a"
+    );
+    assert_eq!(
+        column(&instance, "SELECT count(*) AS c FROM poll_owners"),
+        "1"
+    );
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT value FROM settings WHERE id = 'host-a/theme'"
+        ),
+        "dark"
+    );
+    assert_eq!(column(&instance, "SELECT count(*) AS c FROM settings"), "1");
+}
+
+/// The backlog claim reducers are gone, not checked: a client cannot claim a
+/// task for a host any more (`store-split.allium`, D11 follow-up).
+#[test]
+fn the_backlog_claim_reducers_are_gone() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    for out in [
+        instance.call("claim_backlog_task", &["1", "host-a"]),
+        instance.call("release_backlog_claim", &["1"]),
+    ] {
+        assert!(!out.status.success(), "{}", describe(&out));
+    }
 }
 
 // -- Work packages (`docs/specs/work-packages.allium`) -----------------------

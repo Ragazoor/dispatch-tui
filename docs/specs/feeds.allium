@@ -1097,7 +1097,8 @@ rule OverrideFeedOwner {
     -- to whoever calls this — unconditionally, even when a different host
     -- already holds it. The only way a feed epic's poll ownership ever
     -- moves, since FeedTick's own claim (above) only ever fills an ABSENT
-    -- row.
+    -- row. D11 (store-split.allium: OverridePollOwner): the store refuses
+    -- unless local_host() is registered with an owner equal to the caller.
     ensures:
         let existing = core/PollOwner{scope: epic, scope_id: epic.id}
         if exists existing:

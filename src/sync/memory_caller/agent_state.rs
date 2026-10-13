@@ -427,6 +427,9 @@ impl MemoryReducerCaller {
     ) -> Result<ReducerOutcome> {
         let (scope, scope_id) = target.wire();
         let mut tables = self.lock();
+        if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         self.write_poll_owner_row(&mut tables, scope, scope_id, host, false);
         Ok(ReducerOutcome::Applied(vec![]))
     }
@@ -438,6 +441,9 @@ impl MemoryReducerCaller {
     ) -> Result<ReducerOutcome> {
         let (scope, scope_id) = target.wire();
         let mut tables = self.lock();
+        if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         self.write_poll_owner_row(&mut tables, scope, scope_id, host, true);
         Ok(ReducerOutcome::Applied(vec![]))
     }

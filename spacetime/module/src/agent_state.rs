@@ -145,7 +145,8 @@ pub(crate) fn require_poll_scope(scope: &str) -> Result<(), String> {
     }
 }
 
-/// Claim an unowned scope. `core.allium: PollOwner`.
+/// Claim an unowned scope. `core.allium: PollOwner`. Only the host's owner
+/// may name it (D11, `store-split.allium: ClaimPollOwner`).
 #[spacetimedb::reducer]
 pub fn claim_poll_owner(
     ctx: &ReducerContext,
@@ -154,12 +155,14 @@ pub fn claim_poll_owner(
     host: String,
 ) -> Result<(), String> {
     require_poll_scope(&scope)?;
+    require_acting_for(ctx, &host)?;
     write_poll_owner_row(ctx, &scope, scope_id, host, false);
     Ok(())
 }
 
 /// Reassign a scope's ownership unconditionally. `pr-workflow.allium:
-/// OverridePrPollOwner`, `feeds.allium: OverrideFeedOwner`.
+/// OverridePrPollOwner`, `feeds.allium: OverrideFeedOwner`. Only the host's
+/// owner may name it (D11, `store-split.allium: OverridePollOwner`).
 #[spacetimedb::reducer]
 pub fn override_poll_owner(
     ctx: &ReducerContext,
@@ -168,6 +171,7 @@ pub fn override_poll_owner(
     host: String,
 ) -> Result<(), String> {
     require_poll_scope(&scope)?;
+    require_acting_for(ctx, &host)?;
     write_poll_owner_row(ctx, &scope, scope_id, host, true);
     Ok(())
 }
@@ -568,7 +572,7 @@ pub fn record_user_prompt_submit(
 
 /// Atomically set `pr_learnings_gate_shown_at` if it is not already set.
 /// Refusal carries the "already shown or task missing" answer the same way
-/// `claim_backlog_task` reports a lost race — the client reads `Applied` as
+/// `request_dispatch` reports a lost race — the client reads `Applied` as
 /// `true` ("this call set it, block the PR") and `Refused` as `false` via
 /// `ReducerOutcome::won()`, no read-back needed. `at` is the client's clock.
 #[spacetimedb::reducer]

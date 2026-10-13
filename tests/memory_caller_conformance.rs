@@ -437,6 +437,20 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
+        // The host-naming reducers below act for "host-a" and "host-b", which
+        // D11 lets only their owner do (`store-split.allium`): register both
+        // as this connection's own, on both sides.
+        let mem = mem.with_sender(accepted.identity.clone());
+        for host in ["host-a", "host-b"] {
+            for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+                caller
+                    .register_host(host.into(), String::new(), accepted.identity.clone())
+                    .await
+                    .unwrap()
+                    .applied()
+                    .unwrap();
+            }
+        }
 
         let mut woken = rows_real.changed();
         macro_rules! wait_for {
@@ -721,6 +735,42 @@ fn memory_caller_matches_the_real_reducers() {
             rows_mem.setting("theme"),
             "setting after refused save"
         );
+
+        // A host this connection does not own is refused the same way, for a
+        // save, a clear and both poll-owner reducers (D11, store-split.allium).
+        let real_foreign = [
+            real.save_setting("not-mine".into(), "theme".into(), "x".into())
+                .await
+                .unwrap(),
+            real.clear_setting("not-mine".into(), "theme".into())
+                .await
+                .unwrap(),
+            real.claim_poll_owner(PollScopeId::Epic(EpicId(1)), "not-mine".into())
+                .await
+                .unwrap(),
+            real.override_poll_owner(PollScopeId::Epic(EpicId(1)), "not-mine".into())
+                .await
+                .unwrap(),
+        ];
+        let mem_foreign = [
+            mem.save_setting("not-mine".into(), "theme".into(), "x".into())
+                .await
+                .unwrap(),
+            mem.clear_setting("not-mine".into(), "theme".into())
+                .await
+                .unwrap(),
+            mem.claim_poll_owner(PollScopeId::Epic(EpicId(1)), "not-mine".into())
+                .await
+                .unwrap(),
+            mem.override_poll_owner(PollScopeId::Epic(EpicId(1)), "not-mine".into())
+                .await
+                .unwrap(),
+        ];
+        for (real_out, mem_out) in real_foreign.iter().zip(&mem_foreign) {
+            assert!(!real_out.won(), "real must refuse a host it does not own");
+            assert!(!mem_out.won(), "mem must refuse a host it does not own");
+        }
+        assert_eq!(rows_real.setting("theme"), rows_mem.setting("theme"));
 
         // Clearing a key that was never set is a no-op, not a refusal
         // (`ClearSetting`'s `@guidance`).

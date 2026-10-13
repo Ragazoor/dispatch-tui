@@ -9,6 +9,36 @@ fn alices_caller() -> (MemoryReducerCaller, Arc<SharedRows>) {
     (caller.with_sender("alice"), rows)
 }
 
+/// A caller that owns `host-a` and `host-b`, so it may act for either (D11).
+fn owning_caller() -> (MemoryReducerCaller, Arc<SharedRows>) {
+    let (caller, rows) = caller();
+    let caller = caller
+        .with_sender("alice")
+        .with_registered_host("host-a", "alice")
+        .with_registered_host("host-b", "alice");
+    (caller, rows)
+}
+
+#[tokio::test]
+async fn poll_owner_writes_refuse_a_host_the_sender_does_not_own() {
+    let (caller, rows) = owning_caller();
+    let caller = caller
+        .with_registered_host("bobs", "bob")
+        .with_registered_host("unowned", "");
+    for host in ["bobs", "unowned", "nowhere"] {
+        let claim = caller
+            .claim_poll_owner(PollScopeId::Task(TaskId(1)), host.into())
+            .await
+            .unwrap();
+        let steal = caller
+            .override_poll_owner(PollScopeId::Task(TaskId(1)), host.into())
+            .await
+            .unwrap();
+        assert!(!claim.won() && !steal.won(), "{host} must be refused");
+    }
+    assert!(rows.poll_owner(PollScopeId::Task(TaskId(1))).is_none());
+}
+
 /// Move a task to running, as a dispatch claim would.
 async fn run(caller: &MemoryReducerCaller, id: TaskId) {
     caller
@@ -88,9 +118,12 @@ async fn unfollow_releases_claims_across_the_subtree_and_every_owned_host() {
 
 #[tokio::test]
 async fn unfollow_keeps_another_persons_claim() {
-    let (caller, rows) = alices_caller();
-    // Bob's machine, registered by Bob: Alice's calls may not name him owner.
-    let caller = caller.with_registered_host("bobs", "bob");
+    let (caller, rows) = caller();
+    // Bob's machine, registered by Bob, and the claim is Bob's own call: only
+    // a host's owner may claim for it (D11).
+    let caller = caller
+        .with_sender("bob")
+        .with_registered_host("bobs", "bob");
     let epic = caller.create_epic(blank_epic()).await.unwrap();
     caller
         .subscribe_to_epic("alice".into(), epic)
@@ -365,7 +398,7 @@ async fn mark_pr_learnings_gate_shown_refuses_a_repeat() {
 
 #[tokio::test]
 async fn claim_poll_owner_fills_an_absent_row_and_leaves_an_existing_one() {
-    let (caller, rows) = caller();
+    let (caller, rows) = owning_caller();
     caller
         .claim_poll_owner(PollScopeId::Task(TaskId(1)), "host-a".into())
         .await
@@ -382,7 +415,7 @@ async fn claim_poll_owner_fills_an_absent_row_and_leaves_an_existing_one() {
 
 #[tokio::test]
 async fn override_poll_owner_reassigns_an_existing_row() {
-    let (caller, rows) = caller();
+    let (caller, rows) = owning_caller();
     caller
         .claim_poll_owner(PollScopeId::Task(TaskId(1)), "host-a".into())
         .await
