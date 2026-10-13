@@ -2343,13 +2343,170 @@ mod session_requests {
         assert!(apply_pr_unreadable(backlog, LATER).is_none());
     }
 
+    // -- RequestCloseTask (store-split.allium, M7 X1) --------------------------
+
+    #[test]
+    fn a_close_row_has_host_work_like_an_exit_session_row() {
+        assert!(session_request_has_host_work(&session(
+            1,
+            "close",
+            "done",
+            "requested"
+        )));
+        assert_eq!(
+            session_request_deadline("close", "2026-09-19 12:34:56.789"),
+            "2026-09-19 12:35:26.789"
+        );
+        assert_eq!(
+            session_request_backstop_due_micros("close", 1_000_000),
+            1_000_000 + 40 * 1_000_000
+        );
+    }
+
+    #[test]
+    fn a_done_close_of_a_running_task_stamps_completion_and_clears_window_and_stop() {
+        let closed = apply_done_close(
+            Task {
+                stop_pending: true,
+                ..running_task()
+            },
+            LATER,
+        );
+        assert_eq!(closed.status, "done");
+        assert_eq!(closed.sub_status, "none");
+        assert_eq!(closed.tmux_window, "");
+        assert_eq!(closed.completed_at, LATER);
+        assert_eq!(closed.updated_at, LATER);
+        assert!(!closed.stop_pending);
+    }
+
+    /// A done -> done re-close is no transition: completed_at is kept.
+    #[test]
+    fn a_done_to_done_reclose_keeps_completed_at() {
+        let done = Task {
+            status: "done".into(),
+            sub_status: "none".into(),
+            completed_at: NOW.into(),
+            tmux_window: "task-1".into(),
+            ..running_task()
+        };
+        let closed = apply_done_close(done, LATER);
+        assert_eq!(closed.completed_at, NOW);
+        assert_eq!(closed.updated_at, LATER);
+        assert_eq!(closed.tmux_window, "");
+    }
+
+    #[test]
+    fn a_close_needs_a_teardown_only_for_a_window_or_a_pr_url() {
+        assert!(close_has_host_work(&running_task()));
+        let no_window = Task {
+            tmux_window: String::new(),
+            ..running_task()
+        };
+        assert!(!close_has_host_work(&no_window));
+        let with_pr = Task {
+            url: "https://github.com/a/b/pull/1".into(),
+            url_type: "pr".into(),
+            ..no_window.clone()
+        };
+        assert!(close_has_host_work(&with_pr));
+        let other_url = Task {
+            url: "https://example.com".into(),
+            url_type: "issue".into(),
+            ..no_window
+        };
+        assert!(!close_has_host_work(&other_url));
+    }
+
+    #[test]
+    fn a_close_row_carries_the_window_read_and_no_token_chain_or_pr_url() {
+        let row = new_close_request(&running_task(), HOST_B, NOW);
+        assert_eq!(row.kind, "close");
+        assert_eq!(row.action, "done");
+        assert_eq!(row.host, HOST_A, "the task's own host wins");
+        assert_eq!(row.state, "requested");
+        assert_eq!(row.tmux_window, "task-1");
+        assert_eq!(row.wrap_up_request, 0);
+        assert_eq!(row.chained_task, 0);
+        assert_eq!(row.pr_url, "");
+        assert_eq!(row.requested_at, NOW);
+        assert_eq!(row.deadline, session_request_deadline("close", NOW));
+    }
+
+    #[test]
+    fn a_close_row_falls_back_to_the_callers_host_when_the_task_has_none() {
+        let hostless = Task {
+            host: String::new(),
+            tmux_window: String::new(),
+            url: "https://github.com/a/b/pull/1".into(),
+            url_type: "pr".into(),
+            ..running_task()
+        };
+        let row = new_close_request(&hostless, HOST_B, NOW);
+        assert_eq!(row.host, HOST_B);
+        assert_eq!(row.tmux_window, "");
+    }
+
+    /// A close row consumes no token: neither a close row nor the open-ness of
+    /// one changes what check_exit_token answers.
+    #[test]
+    fn a_close_row_is_not_an_exit_token_consumer() {
+        let rows = vec![
+            done_wrap_up(3, "rebase", LATER),
+            SessionRequest {
+                id: 9,
+                ..session(9, "close", "done", "requested")
+            },
+        ];
+        assert!(check_exit_token(1, 3, &rows, &[]).is_ok());
+    }
+
+    // -- patch_task's transition rules (M7 X2) -----------------------------------
+
+    #[test]
+    fn leaving_running_clears_a_pending_stop_unless_the_patch_names_it() {
+        let mut row = Task {
+            status: "review".into(),
+            stop_pending: true,
+            ..running_task()
+        };
+        apply_patch_status_rules("running", false, &mut row);
+        assert!(!row.stop_pending);
+
+        let mut named = Task {
+            status: "review".into(),
+            stop_pending: true,
+            ..running_task()
+        };
+        apply_patch_status_rules("running", true, &mut named);
+        assert!(named.stop_pending);
+
+        let mut stays = Task {
+            stop_pending: true,
+            ..running_task()
+        };
+        apply_patch_status_rules("running", false, &mut stays);
+        assert!(stays.stop_pending);
+
+        let mut from_review = Task {
+            status: "done".into(),
+            stop_pending: true,
+            ..running_task()
+        };
+        apply_patch_status_rules("review", false, &mut from_review);
+        assert!(
+            from_review.stop_pending,
+            "only a move out of running clears"
+        );
+    }
+
     // -- the rules version (sync.allium: config.rules_version) ----------------
 
     /// W12: M5 moves the close and the wrap-up request rules into the module,
     /// so the version is 4. The board's own copy is pinned equal to this one
     /// by `src/sync/rules_gate.rs`'s test.
     #[test]
-    fn the_rules_version_is_five_for_m6() {
-        assert_eq!(RULES_VERSION, 5);
+    fn the_rules_version_is_six_for_m7() {
+        assert_eq!(RULES_VERSION, 6);
     }
 }

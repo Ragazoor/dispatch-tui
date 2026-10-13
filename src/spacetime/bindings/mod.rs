@@ -16,6 +16,7 @@ pub mod claim_dispatch_request_reducer;
 pub mod claim_poll_owner_reducer;
 pub mod claim_session_request_reducer;
 pub mod clear_setting_reducer;
+pub mod close_task_reducer;
 pub mod create_epic_reducer;
 pub mod create_learning_reducer;
 pub mod create_managed_role_epic_reducer;
@@ -31,6 +32,7 @@ pub mod dispatch_request_timeout_type;
 pub mod dispatch_request_timeouts_table;
 pub mod dispatch_request_type;
 pub mod dispatch_requests_table;
+pub mod ensure_managed_epics_reducer;
 pub mod epic_patch_type;
 pub mod epic_type;
 pub mod epics_table;
@@ -162,6 +164,7 @@ pub use claim_dispatch_request_reducer::claim_dispatch_request;
 pub use claim_poll_owner_reducer::claim_poll_owner;
 pub use claim_session_request_reducer::claim_session_request;
 pub use clear_setting_reducer::clear_setting;
+pub use close_task_reducer::close_task;
 pub use create_epic_reducer::create_epic;
 pub use create_learning_reducer::create_learning;
 pub use create_managed_role_epic_reducer::create_managed_role_epic;
@@ -177,6 +180,7 @@ pub use dispatch_request_timeout_type::DispatchRequestTimeout;
 pub use dispatch_request_timeouts_table::*;
 pub use dispatch_request_type::DispatchRequest;
 pub use dispatch_requests_table::*;
+pub use ensure_managed_epics_reducer::ensure_managed_epics;
 pub use epic_patch_type::EpicPatch;
 pub use epic_type::Epic;
 pub use epics_table::*;
@@ -344,6 +348,10 @@ pub enum Reducer {
         host: String,
         key: String,
     },
+    CloseTask {
+        task_id: i64,
+        host: String,
+    },
     CreateEpic {
         row: Epic,
     },
@@ -383,6 +391,12 @@ pub enum Reducer {
     },
     DeleteWorkPackage {
         id: i64,
+    },
+    EnsureManagedEpics {
+        reviews_command: String,
+        reviews_interval_secs: i64,
+        cve_command: String,
+        cve_interval_secs: i64,
     },
     FailInterruptedDispatchRequests {
         host: String,
@@ -667,6 +681,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::ClaimPollOwner { .. } => "claim_poll_owner",
             Reducer::ClaimSessionRequest { .. } => "claim_session_request",
             Reducer::ClearSetting { .. } => "clear_setting",
+            Reducer::CloseTask { .. } => "close_task",
             Reducer::CreateEpic { .. } => "create_epic",
             Reducer::CreateLearning { .. } => "create_learning",
             Reducer::CreateManagedRoleEpic { .. } => "create_managed_role_epic",
@@ -678,6 +693,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteRepoPath { .. } => "delete_repo_path",
             Reducer::DeleteTask { .. } => "delete_task",
             Reducer::DeleteWorkPackage { .. } => "delete_work_package",
+            Reducer::EnsureManagedEpics { .. } => "ensure_managed_epics",
             Reducer::FailInterruptedDispatchRequests { .. } => "fail_interrupted_dispatch_requests",
             Reducer::FailInterruptedSessionRequests { .. } => "fail_interrupted_session_requests",
             Reducer::FlattenEpic { .. } => "flatten_epic",
@@ -818,6 +834,13 @@ impl __sdk::Reducer for Reducer {
                 host: host.clone(),
                 key: key.clone(),
 }),
+            Reducer::CloseTask{
+                task_id,
+                host,
+}             => __sats::bsatn::to_vec(&close_task_reducer::CloseTaskArgs {
+                task_id: task_id.clone(),
+                host: host.clone(),
+}),
             Reducer::CreateEpic{
                 row,
 }             => __sats::bsatn::to_vec(&create_epic_reducer::CreateEpicArgs {
@@ -886,6 +909,17 @@ impl __sdk::Reducer for Reducer {
                 id,
 }             => __sats::bsatn::to_vec(&delete_work_package_reducer::DeleteWorkPackageArgs {
                 id: id.clone(),
+}),
+            Reducer::EnsureManagedEpics{
+                reviews_command,
+                reviews_interval_secs,
+                cve_command,
+                cve_interval_secs,
+}             => __sats::bsatn::to_vec(&ensure_managed_epics_reducer::EnsureManagedEpicsArgs {
+                reviews_command: reviews_command.clone(),
+                reviews_interval_secs: reviews_interval_secs.clone(),
+                cve_command: cve_command.clone(),
+                cve_interval_secs: cve_interval_secs.clone(),
 }),
             Reducer::FailInterruptedDispatchRequests{
                 host,

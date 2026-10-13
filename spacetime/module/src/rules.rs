@@ -34,9 +34,12 @@ use super::*;
 ///    the epic chain in the module (`session_request.rs`).
 /// 5: store-split M6 — PR state derived from the host's raw `gh` status
 ///    (`pr_status.rs`).
+/// 6: store-split M7 — `close_task` (the done-path close and its `close` row),
+///    patch_task's stop_pending clear and phoenix respawn, and
+///    `ensure_managed_epics`.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 5;
+pub const RULES_VERSION: i64 = 6;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///
@@ -210,6 +213,8 @@ pub fn check_epic_patch(
 
 /// The `feed_role` of the epic a PR-review feed is attached to.
 pub const ROLE_REVIEWS_PARENT: &str = "reviews-parent";
+/// The `feed_role` of the CVE feed's root epic.
+pub const ROLE_CVE: &str = "cve";
 /// The `feed_role` of the sub-epic for reviews requested of the user.
 pub const ROLE_MY_REVIEWS: &str = "my-reviews";
 /// The `feed_role` of the sub-epic for reviews requested of the user's team.

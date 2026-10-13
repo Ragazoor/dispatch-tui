@@ -42,7 +42,7 @@ pub struct SessionRequest {
     /// task delete fails the task's open one.
     #[index(btree)]
     pub task_id: i64,
-    /// `wrap_up` or `exit_session`.
+    /// `wrap_up`, `exit_session` or `close`.
     pub kind: String,
     /// `rebase`, `done` or `pr`: on a wrap_up row the one asked for, on an
     /// exit_session row the one its token was issued for.
@@ -111,6 +111,8 @@ pub const SESSION_REQUEST_BACKSTOP_GRACE_SECS: i64 = 10;
 
 pub const SESSION_KIND_WRAP_UP: &str = "wrap_up";
 pub const SESSION_KIND_EXIT_SESSION: &str = "exit_session";
+/// `update_tasks`' done-path close (M7, X1): a teardown with no wrap_up behind it.
+pub const SESSION_KIND_CLOSE: &str = "close";
 
 pub const SESSION_REQUESTED: &str = "requested";
 pub const SESSION_RUNNING: &str = "running";
@@ -126,6 +128,8 @@ pub const WRAP_UP_ACTIONS: [&str; 3] = [ACTION_REBASE, ACTION_DONE, ACTION_PR];
 pub const SESSION_REASON_TIMED_OUT: &str = "timed out";
 /// A restarting board's reason (`HostRestartFailsInterruptedSessionRequests`).
 pub const SESSION_REASON_HOST_RESTARTED: &str = "host restarted";
+/// A closed task's reason (`RequestCloseTask`).
+pub const SESSION_REASON_TASK_CLOSED: &str = "task closed";
 /// A deleted task's reason (`DeletingATaskFailsItsOpenSessionRequest`).
 pub const SESSION_REASON_TASK_DELETED: &str = "task deleted";
 
@@ -142,9 +146,11 @@ pub fn session_request_is_open(state: &str) -> bool {
 }
 
 /// `SessionRequest.has_host_work`: a wrap_up with action done or pr is written
-/// already done and never does.
+/// already done and never does; an exit_session or close row always does.
 pub fn session_request_has_host_work(row: &SessionRequest) -> bool {
-    row.kind == SESSION_KIND_EXIT_SESSION || row.action == ACTION_REBASE
+    row.kind == SESSION_KIND_EXIT_SESSION
+        || row.kind == SESSION_KIND_CLOSE
+        || row.action == ACTION_REBASE
 }
 
 fn session_timeout_secs(kind: &str) -> i64 {
@@ -553,6 +559,64 @@ pub fn new_exit_session_request(
     }
 }
 
+/// `RequestCloseTask`'s terminal write: ExitSession's fields for action done,
+/// except that a done -> done re-close is no transition and keeps the task's
+/// `completed_at`.
+pub fn apply_done_close(task: Task, now: &str) -> Task {
+    let was_already_done = task.status == DONE;
+    let kept = task.completed_at.clone();
+    let closed = apply_session_close(task, ACTION_DONE, "", now);
+    if was_already_done {
+        Task {
+            completed_at: kept,
+            ..closed
+        }
+    } else {
+        closed
+    }
+}
+
+/// Whether a close has host work: a live window to kill or a pr-typed url to
+/// close (`RequestCloseTask`'s `needs_teardown`).
+pub fn close_has_host_work(task: &Task) -> bool {
+    !task.tmux_window.is_empty() || (!task.url.is_empty() && task.url_type == "pr")
+}
+
+/// `RequestCloseTask`'s close row. `task` is the task as it was BEFORE the
+/// close, so the window is the one the close cleared; the host is the task's
+/// own, else the caller's.
+pub fn new_close_request(task: &Task, caller_host: &str, now: &str) -> SessionRequest {
+    SessionRequest {
+        task_id: task.id,
+        kind: SESSION_KIND_CLOSE.into(),
+        action: ACTION_DONE.into(),
+        host: if task.host.is_empty() {
+            caller_host.into()
+        } else {
+            task.host.clone()
+        },
+        state: SESSION_REQUESTED.into(),
+        requested_at: now.into(),
+        tmux_window: task.tmux_window.clone(),
+        deadline: session_request_deadline(SESSION_KIND_CLOSE, now),
+        ..blank_session_request()
+    }
+}
+
+/// `patch_task`'s transition rules that are not the patch's own fields (M7,
+/// X2): leaving running clears a deferred Stop
+/// (`core.allium: PendingStopOnlyWhileRunning`) unless the patch names
+/// `stop_pending` itself.
+pub fn apply_patch_status_rules(
+    prior_status: &str,
+    patch_named_stop_pending: bool,
+    row: &mut Task,
+) {
+    if prior_status == RUNNING && row.status != RUNNING && !patch_named_stop_pending {
+        row.stop_pending = false;
+    }
+}
+
 /// `PhoenixRespawn`'s trigger for a close: the task entered Done from another
 /// status, carries the flag and is not feed-owned.
 pub fn should_respawn_phoenix(prior_status: &str, closed: &Task) -> bool {
@@ -655,6 +719,21 @@ pub(crate) fn fail_session_request(ctx: &ReducerContext, row: SessionRequest, re
         .id()
         .update(failed_session_request_row(row, reason, &now(ctx)));
     cancel_session_request_timer(ctx, request_id);
+}
+
+/// `RequestCloseTask`'s first write: the task's open session request, if any,
+/// failed "task closed" (its timer cancelled).
+fn fail_open_session_requests_for_close(ctx: &ReducerContext, task_id: i64) {
+    let open: Vec<SessionRequest> = ctx
+        .db
+        .session_requests()
+        .task_id()
+        .filter(&task_id)
+        .filter(|r| session_request_is_open(&r.state))
+        .collect();
+    for row in open {
+        fail_session_request(ctx, row, SESSION_REASON_TASK_CLOSED);
+    }
 }
 
 /// `DeletingATaskFailsItsOpenSessionRequest`: called by every path that deletes
@@ -887,6 +966,43 @@ pub fn request_exit_session(
         ..new_exit_session_request(&task, token_row.id, &action, &pr_url, chained, &stamp)
     });
     schedule_session_request_timer(ctx, &row);
+    Ok(())
+}
+
+/// `RequestCloseTask` (`update_tasks`' done path): ONE transaction that fails
+/// the task's open session request ("task closed"), applies the Done close,
+/// respawns a phoenix task that enters Done, rolls up the epic chain and, when
+/// there is host work and the teardown host is the caller's, writes a `close`
+/// row with its backstop timer. No token is issued, checked or consumed and no
+/// epic chain runs. A missing task is refused.
+#[spacetimedb::reducer]
+pub fn close_task(ctx: &ReducerContext, task_id: i64, host: String) -> Result<(), String> {
+    let Some(task) = ctx.db.tasks().id().find(task_id) else {
+        return Err(format!("task {task_id} no longer exists"));
+    };
+    let stamp = now(ctx);
+    fail_open_session_requests_for_close(ctx, task_id);
+
+    let epic_id = task.epic_id;
+    let mut closed = apply_done_close(task.clone(), &stamp);
+    if should_respawn_phoenix(&task.status, &closed)
+        && respawn_phoenix_successor_of(ctx, &closed, &stamp)
+    {
+        closed.phoenix = false;
+    }
+    write_task(ctx, closed)?;
+    recalculate_epic_chain(ctx, epic_id);
+
+    let row = new_close_request(&task, &host, &stamp);
+    // D11, without erroring: a row naming a host makes that host's board act,
+    // so only its owner may write one; a non-owner just gets no row.
+    if close_has_host_work(&task) && require_acting_for(ctx, &row.host).is_ok() {
+        let row = ctx.db.session_requests().insert(SessionRequest {
+            requested_by: caller_identity(ctx),
+            ..row
+        });
+        schedule_session_request_timer(ctx, &row);
+    }
     Ok(())
 }
 

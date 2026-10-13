@@ -285,6 +285,7 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
     let prior_status = row.status.clone();
     // Read before `apply_patch!` consumes the patch's fields.
     let caller_named_a_completion = patch.completed_at.is_some();
+    let caller_named_stop_pending = patch.stop_pending.is_some();
     let moved_to_epic = patch.epic_id;
     // A repo change with no explicit relink re-routes within a grouped subtree.
     // A patch that repeats the current repo (the editor sends it on every
@@ -304,6 +305,16 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
         row.completed_at = now(ctx);
     }
     row.updated_at = now(ctx);
+    // store-split.allium X2: the two transition rules the board's service used
+    // to add on top of a patch. A move out of running clears a deferred Stop
+    // unless the patch names it; a move into Done respawns a phoenix task (the
+    // flag is the receipt, so a repeat patch cannot respawn twice).
+    apply_patch_status_rules(&prior_status, caller_named_stop_pending, &mut row);
+    if should_respawn_phoenix(&prior_status, &row)
+        && respawn_phoenix_successor_of(ctx, &row, &now(ctx))
+    {
+        row.phoenix = false;
+    }
 
     let now_in_epic = moved_to_epic.unwrap_or(was_in_epic);
     let status_changed = prior_status != row.status;

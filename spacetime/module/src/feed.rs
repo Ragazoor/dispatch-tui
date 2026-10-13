@@ -464,3 +464,107 @@ pub fn create_managed_role_epic(
     }
     Ok(())
 }
+
+/// `ProvisionManagedEpics` (M7, X4): the managed feed-epic tree in ONE
+/// transaction, so two boards starting together cannot create duplicates.
+///
+/// Each subtree only when its command is non-empty (`""` is the module's
+/// absent: that feed is disabled, nothing is created or removed). An epic is
+/// found by `(feed_role, parent)`, never by title, so a user's rename
+/// survives; a found command-carrying epic has only its `feed_command` and
+/// `feed_interval_secs` reconciled (`0` is no interval), a missing one is
+/// created with `feed_role` set from the start. The three review sub-epics
+/// carry no command. Ports `src/service/managed_feeds.rs::ensure_managed_epics`.
+#[spacetimedb::reducer]
+pub fn ensure_managed_epics(
+    ctx: &ReducerContext,
+    reviews_command: String,
+    reviews_interval_secs: i64,
+    cve_command: String,
+    cve_interval_secs: i64,
+) -> Result<(), String> {
+    let identity = caller_identity(ctx);
+    if !reviews_command.is_empty() {
+        let parent = ensure_role_epic(
+            ctx,
+            ROLE_REVIEWS_PARENT,
+            0,
+            Some((&reviews_command, reviews_interval_secs)),
+            &identity,
+        );
+        for role in [ROLE_MY_REVIEWS, ROLE_TEAM_REVIEWS, ROLE_BOTS] {
+            ensure_role_epic(ctx, role, parent, None, &identity);
+        }
+    }
+    if !cve_command.is_empty() {
+        ensure_role_epic(
+            ctx,
+            ROLE_CVE,
+            0,
+            Some((&cve_command, cve_interval_secs)),
+            &identity,
+        );
+    }
+    Ok(())
+}
+
+/// Default display title of a freshly created managed epic, consulted only on
+/// creation. Agrees with `ensure_role_sub_epic`'s titles in `feed_ingest.rs`.
+fn managed_role_title(role: &str) -> &'static str {
+    match role {
+        ROLE_REVIEWS_PARENT => "PR Reviews",
+        ROLE_MY_REVIEWS => "My Reviews",
+        ROLE_TEAM_REVIEWS => "Team Reviews",
+        ROLE_BOTS => "Bots",
+        ROLE_CVE => "CVE",
+        _ => "Reviews",
+    }
+}
+
+/// One managed epic: found by `(role, parent)` and left alone but for the
+/// command and interval of a command-carrying role, else created. Its id.
+fn ensure_role_epic(
+    ctx: &ReducerContext,
+    role: &str,
+    parent_epic_id: i64,
+    command: Option<(&str, i64)>,
+    created_by: &str,
+) -> i64 {
+    let existing = ctx
+        .db
+        .epics()
+        .parent_epic_id()
+        .filter(&parent_epic_id)
+        .find(|e| e.feed_role == role);
+    if let Some(epic) = existing {
+        if let Some((cmd, interval)) = command {
+            if epic.feed_command != cmd || epic.feed_interval_secs != interval {
+                let id = epic.id;
+                ctx.db.epics().id().update(Epic {
+                    feed_command: cmd.to_string(),
+                    feed_interval_secs: interval,
+                    updated_at: now(ctx),
+                    ..epic
+                });
+                return id;
+            }
+        }
+        return epic.id;
+    }
+    let (feed_command, feed_interval_secs) =
+        command.map(|(c, i)| (c.to_string(), i)).unwrap_or_default();
+    ctx.db
+        .epics()
+        .insert(Epic {
+            title: managed_role_title(role).to_string(),
+            parent_epic_id,
+            feed_role: role.to_string(),
+            feed_command,
+            feed_interval_secs,
+            created_by: created_by.to_string(),
+            created_at: now(ctx),
+            updated_at: now(ctx),
+            ..blank_epic()
+        })
+        .id
+}
