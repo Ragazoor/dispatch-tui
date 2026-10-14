@@ -31,6 +31,12 @@ config {
     -- counts as failed (WrapUpRefusesUnfinishedWork).
     wrap_up_verify_timeout: Duration = 15.minutes
 
+    -- How long one wrap_up call waits on its verify run before refusing with
+    -- "still running" and leaving the run going (WrapUpRefusesUnfinishedWork).
+    -- Must stay below the agent's own tool-call timeout (about 60s), so the
+    -- call answers before the agent's client gives up on it.
+    wrap_up_verify_wait: Duration = 45.seconds
+
     -- How long dispatch_task waits on its dispatch request before returning
     -- the request id and its pending state (DispatchTaskViaMcp). Shorter than
     -- the request's own deadline (store-split.allium:
@@ -1268,7 +1274,9 @@ rule WrapUpViaMcp {
     -- (untracked files count), and `verify_passes` is "the command named by
     -- core/SavedRepoPath.verify_command for task.repo_path, run in the
     -- worktree, exits 0 within config.wrap_up_verify_timeout" — true when the
-    -- repository has no verify command.
+    -- repository has no verify command. A pass this board already recorded
+    -- for the same task, HEAD commit and command counts without a new run
+    -- (the verify outcome memory in WrapUpRefusesUnfinishedWork).
     requires: worktree_is_committed(task.worktree)
     requires: verify_passes(task)
 
@@ -1402,17 +1410,49 @@ rule WrapUpViaMcp {
         --    spawns without a payload to write (git, tmux): none is ever handed
         --    the board's terminal.
         --
-        --    One verify run per task at a time. A wrap_up for a task whose
-        --    verify, started by an earlier wrap_up on this board, is still
-        --    running is refused at once ("A verify run for this task is still
-        --    in progress …"), before the commit check, with no token. The
-        --    earlier run carries on; its outcome is lost to the caller that
-        --    gave up on it, so the agent calls wrap_up again once it has
-        --    finished. The retry is not joined to the running verify: the
-        --    agent may have committed since that run started, and a result for
-        --    an older tree must not pass a newer one. Without this, each retry
-        --    of a timed-out call stacked another full verify run beside the
-        --    ones still going.
+        --    The verify run gets RUSTC_WRAPPER=sccache in its environment when
+        --    `sccache` resolves on the board's PATH and RUSTC_WRAPPER is not
+        --    already set there: the same best-effort rule, for the same reason,
+        --    as an agent launch (dispatch.allium:
+        --    DispatchedAgentsShareASccacheNotATargetDir). Absent, the run
+        --    proceeds without it; a value the board already has is kept.
+        --
+        --    Verify outcome memory. The board remembers the outcome of each
+        --    finished verify run, keyed by (task, HEAD commit of the worktree,
+        --    verify command text). The memory is host-local and in memory
+        --    only: it is not written to the shared store, another board never
+        --    sees it, and a board restart forgets it. A run that hit
+        --    config.wrap_up_verify_timeout is recorded as a fail. Because the
+        --    key names the commit and the command, a new commit or a changed
+        --    command is a different key, so an outcome never applies to a
+        --    tree, or a command, it was not produced by.
+        --
+        --    Once the commit check has passed (the tree is clean, so HEAD is
+        --    the tree), wrap_up looks the key up:
+        --      - a recorded pass: no run; the step passes and the success
+        --        response reports verification as passed, as after a run.
+        --      - a recorded fail: no run; refused with the same refusal text
+        --        and output tail the original run produced, no token.
+        --      - nothing recorded and no run in flight for this task: a run
+        --        starts.
+        --      - a run in flight for this task with the SAME key: the call
+        --        joins it rather than starting another or refusing.
+        --      - a run in flight for this task with a DIFFERENT key (the agent
+        --        committed, or the command changed, since it started): not
+        --        joined, and no second run is started beside it. Refused with
+        --        "Verify is still running … call wrap_up again", no token,
+        --        until that run finishes; the next call then finds no run in
+        --        flight and starts one for its own key.
+        --    A started or joined run is awaited for at most
+        --    config.wrap_up_verify_wait. Finished within it: pass or refuse
+        --    as above. Still going when the wait ends: refused with "Verify is
+        --    still running … call wrap_up again", no token. The run carries on
+        --    and its outcome is recorded, so the next wrap_up on the same
+        --    commit and command joins it while it runs, or reads its outcome
+        --    once it has finished, instead of running verify again. One verify
+        --    run per task at a time still holds: without it, each retry of a
+        --    call that gave up stacked another full verify run beside the ones
+        --    still going.
         --
         -- Order: the commit check runs first (a dirty tree makes a verify result
         -- meaningless, and it is cheap), then verify, then the action. Applies
@@ -1429,7 +1469,8 @@ rule WrapUpViaMcp {
         -- "Verify command" before pushing; wrap_up(pr) is the backstop.
         --
         -- The success response therefore carries no "Verify before exiting"
-        -- line. It states that verification passed when a command ran.
+        -- line. It states that verification passed when a command ran, in
+        -- this call or in an earlier run whose pass the board remembers.
         --
         -- What is NOT enforced: that /retro ran. A retro leaves no trace the
         -- tool can read (it may change nothing), so requiring it would need a
