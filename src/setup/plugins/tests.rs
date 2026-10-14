@@ -1118,9 +1118,9 @@ fn wrap_up_skill_does_not_record_the_pr_url_via_update_task() {
 /// The "Draft the title and body" step of the PR path, isolated from its
 /// neighbouring steps. Not built on `section_after`: that helper ends a
 /// section at the next line starting with `#`, but this step's own
-/// Markdown example contains fenced `## Summary` / `## Test plan` headings
-/// as literal example text, which would truncate the section before the
-/// part these tests need to inspect.
+/// Markdown examples may contain `#`-prefixed lines as literal example text,
+/// which would truncate the section before the part these tests need to
+/// inspect.
 fn pr_body_draft_section() -> String {
     let content = references_text("wrap-up");
     let (_, after) = content
@@ -1133,24 +1133,25 @@ fn pr_body_draft_section() -> String {
     section.to_string()
 }
 
-/// Distilled from the shared PR-description knowledge base (learning #36):
-/// PR bodies must describe the user-visible change and why, not the
-/// implementation — so the template must never invite a function, class,
-/// file, or variable name.
+/// The PR body guidance states principles, not a template: it must not
+/// bring back the fixed `## Summary` + bold category labels shape, and it
+/// must keep the reviewer-minute test that makes the principles checkable.
 #[test]
-fn wrap_up_skill_pr_body_uses_categorized_summary_like_coderabbit() {
+fn wrap_up_skill_pr_body_states_principles_not_a_template() {
     let section = pr_body_draft_section();
     for label in ["**Breaking Changes**", "**New Features**", "**Bug Fixes**"] {
         assert!(
-            section.contains(label),
-            "PR body template must group changes under bold category labels \
-             (CodeRabbit-style), missing: {label}"
+            !section.contains(label),
+            "PR body guidance must not prescribe category labels, found: {label}"
         );
     }
     assert!(
-        section.to_lowercase().contains("coderabbit"),
-        "PR body template should name CodeRabbit as the format it mirrors, \
-         so a future editor knows why the categories look like this"
+        section.to_lowercase().contains("no template"),
+        "PR body guidance must say plainly that there is no template"
+    );
+    assert!(
+        section.contains("under a minute"),
+        "PR body guidance must keep the reviewer-minute test"
     );
 }
 
