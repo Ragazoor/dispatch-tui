@@ -1136,6 +1136,8 @@ fn pr_body_draft_section() -> String {
 /// The PR body guidance states principles, not a template: it must not
 /// bring back the fixed `## Summary` + bold category labels shape, and it
 /// must keep the reviewer-minute test that makes the principles checkable.
+/// The phrases "no template" and "under a minute" are anchors: if you
+/// reword them, re-anchor here, and keep the 500-character feed note.
 #[test]
 fn wrap_up_skill_pr_body_states_principles_not_a_template() {
     let section = pr_body_draft_section();
@@ -1156,6 +1158,11 @@ fn wrap_up_skill_pr_body_states_principles_not_a_template() {
     assert!(
         section.contains("under a minute"),
         "PR body guidance must keep the reviewer-minute test"
+    );
+    assert!(
+        section.contains("500 characters"),
+        "PR body guidance must say the review feed shows only the first 500 \
+         characters, which is why the opening carries the PR"
     );
 }
 
