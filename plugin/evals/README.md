@@ -27,5 +27,5 @@ Cases (2 runs each; the whole suite costs about $2):
 
 Notes: Bash and git are unavailable in a run, so commit steps are not tested.
 `AskUserQuestion` is not available either; the agent asks in plain text, so
-graders check the text, not the tool. The default Haiku judge misreads the
-tool order in `wrap-up-retro-order`; `--judge-model sonnet` was stable there.
+graders check the text, not the tool. The Haiku judge failed `wrap-up-retro-order`
+when its grader was worded around tool names; the current wording passes.
