@@ -1146,6 +1146,10 @@ fn wrap_up_skill_pr_body_states_principles_not_a_template() {
         );
     }
     assert!(
+        !section.contains("## Summary"),
+        "PR body guidance must not prescribe a Summary heading"
+    );
+    assert!(
         section.to_lowercase().contains("no template"),
         "PR body guidance must say plainly that there is no template"
     );
