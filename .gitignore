@@ -19,3 +19,6 @@ scripts/local/
 .claude/ralph-loop.local.md
 .claude/allium-loop-state.local.md
 .claude/allium-weed-loop-state.local.md
+
+# claude plugin eval output
+plugin/evals/results/
