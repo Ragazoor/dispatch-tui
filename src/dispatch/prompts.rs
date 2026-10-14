@@ -379,14 +379,18 @@ implement it in the same session first."
 /// epic is a legitimate terminal state for a decomposition task, since that
 /// task's job is delegation, not implementation.
 ///
+/// The skill is named `dispatch:wrap-up`, never `/wrap-up`: the harness reads a
+/// slash token in the first message as the user naming the skill, and task
+/// #65542's agent ran it on start-up and closed a task with nothing built.
+///
 /// The stopping-point rule that used to open this line moved to
 /// [`plan_not_a_stopping_point_instruction`]. The epic carve-out still appears
 /// in both, deliberately: there it qualifies how the task may *finish*, here it
 /// qualifies when to *call the skill*.
 pub(super) fn wrap_up_instruction() -> &'static str {
     "When your work is done — finishing implementation, or (for an \
-epic-decomposition task) creating work packages for its subtasks — use the \
-/wrap-up skill to commit any remaining changes and finalise the task."
+epic-decomposition task) creating work packages for its subtasks, and not before — use the \
+dispatch:wrap-up skill to commit any remaining changes and finalise the task."
 }
 
 /// Allium spec instruction — shared across all agents that may touch domain behaviour.

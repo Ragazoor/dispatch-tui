@@ -271,8 +271,8 @@ fn build_prompt_mentions_wrap_up_skill() {
         &PromptContext::default(),
     );
     assert!(
-        prompt.contains("/wrap-up"),
-        "with-plan prompt should tell agent to use /wrap-up skill"
+        prompt.contains("dispatch:wrap-up"),
+        "with-plan prompt should tell agent to use dispatch:wrap-up skill"
     );
     assert!(
         prompt.contains("finalise the task"),
@@ -284,7 +284,7 @@ fn build_prompt_mentions_wrap_up_skill() {
 fn build_prompt_without_plan_includes_wrap_up_universally() {
     // wrap_up_instruction is universal across every dispatched-agent prompt
     // — no-plan agents must implement the plan they attach before calling
-    // /wrap-up, and need the same finalise step (commit/finalise) as any
+    // dispatch:wrap-up, and need the same finalise step (commit/finalise) as any
     // other implementing agent.
     let prompt = build_prompt(
         TaskId(7),
@@ -295,8 +295,8 @@ fn build_prompt_without_plan_includes_wrap_up_universally() {
         &PromptContext::default(),
     );
     assert!(
-        prompt.contains("/wrap-up"),
-        "no-plan prompt should mention /wrap-up (universal, reached after implementing)"
+        prompt.contains("dispatch:wrap-up"),
+        "no-plan prompt should mention dispatch:wrap-up (universal, reached after implementing)"
     );
 }
 

@@ -365,9 +365,9 @@ fn no_plan_prompts_reference_the_elicit_skill() {
 /// which knows the two wordings; pinning it here would need a literal no path
 /// shares.
 const SHARED_TRAILING_LINES: &[&str] = &[
-    "docs/specs/", // spec_first_instruction's steps, or allium_instruction
-    "/learnings",  // learning_tools_instruction (names the skill, no MCP tool)
-    "/wrap-up",    // wrap_up_instruction (universal)
+    "docs/specs/",      // spec_first_instruction's steps, or allium_instruction
+    "/learnings",       // learning_tools_instruction (names the skill, no MCP tool)
+    "dispatch:wrap-up", // wrap_up_instruction (universal)
 ];
 
 /// Text no prompt may carry. The dispatch MCP tools reach the agent as real
@@ -476,8 +476,8 @@ fn quick_dispatch_embeds_the_shared_spec_first_instruction() {
 fn wrap_up_instruction_universal_wording() {
     let text = wrap_up_instruction();
     assert!(
-        text.contains("/wrap-up"),
-        "wrap_up_instruction should reference the /wrap-up skill"
+        text.contains("dispatch:wrap-up"),
+        "wrap_up_instruction should reference the dispatch:wrap-up skill"
     );
     assert!(
         text.contains("finishing implementation"),

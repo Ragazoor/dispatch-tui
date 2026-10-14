@@ -19,4 +19,4 @@ Knowledge base: the `/learnings` skill manages it — check it when something is
 
 Attaching a plan for your own task is not a stopping point on its own — implement it in the same session first.
 
-When your work is done — finishing implementation, or (for an epic-decomposition task) creating work packages for its subtasks — use the /wrap-up skill to commit any remaining changes and finalise the task.
+When your work is done — finishing implementation, or (for an epic-decomposition task) creating work packages for its subtasks, and not before — use the dispatch:wrap-up skill to commit any remaining changes and finalise the task.

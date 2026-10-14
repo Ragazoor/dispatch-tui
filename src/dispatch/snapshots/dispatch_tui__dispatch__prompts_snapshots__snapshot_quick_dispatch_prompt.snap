@@ -21,4 +21,4 @@ The spec is not the end of the task — implement it in this same session (or, f
 
 Knowledge base: the `/learnings` skill manages it — check it when something is unclear, and record what you find.
 
-When your work is done — finishing implementation, or (for an epic-decomposition task) creating work packages for its subtasks — use the /wrap-up skill to commit any remaining changes and finalise the task.
+When your work is done — finishing implementation, or (for an epic-decomposition task) creating work packages for its subtasks, and not before — use the dispatch:wrap-up skill to commit any remaining changes and finalise the task.

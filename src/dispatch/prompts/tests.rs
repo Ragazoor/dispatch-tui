@@ -160,7 +160,7 @@ fn learning_instruction_references_learnings_skill() {
 ///
 /// Scanned over the whole trailing block, not just this one line, so the
 /// guard also catches a tool name reintroduced into a neighbouring shared
-/// line. `/wrap-up` is the skill, spelled with a hyphen, and does not match
+/// line. `dispatch:wrap-up` is the skill, spelled with a hyphen, and does not match
 /// the `wrap_up` tool; every registry name is snake_case, so none collides
 /// with ordinary prose.
 ///
@@ -1133,7 +1133,7 @@ fn build_prompt_with_dependabot_tag_includes_review_section() {
     assert!(text.contains("--squash --auto"));
     // The standard trailing wrap-up instruction must not be present.
     assert!(
-        !text.contains("use the /wrap-up skill"),
+        !text.contains("use the dispatch:wrap-up skill"),
         "dependabot prompt must omit the standard wrap-up instruction"
     );
     // No TDD / allium — this agent doesn't edit code.
@@ -1293,7 +1293,7 @@ fn build_prompt_with_pr_review_tag_omits_wrap_up() {
         "pr-review prompt must still state its role, got: {text}"
     );
     assert!(
-        !text.contains("use the /wrap-up skill"),
+        !text.contains("use the dispatch:wrap-up skill"),
         "pr-review prompt must omit the standard wrap-up instruction"
     );
 }
@@ -1340,7 +1340,7 @@ fn review_runbooks_no_longer_forbid_wrap_up() {
             &ctx,
         );
         assert_eq!(
-            text.matches("/wrap-up").count(),
+            text.matches("dispatch:wrap-up").count(),
             0,
             "{label}: wrap_up refuses a review task itself, so the prompt \
 must not ask, got: {text}"
@@ -2079,13 +2079,13 @@ fn cve_task_prompt_replaces_the_design_step() {
 }
 
 /// The runbook is not the review runbooks: a CVE task authors its own PR
-/// and finishes through `/wrap-up`, so the closing lines are owed to it.
+/// and finishes through `dispatch:wrap-up`, so the closing lines are owed to it.
 #[test]
 fn cve_task_prompt_keeps_wrap_up_and_the_knowledge_base() {
     let ctx = PromptContext::default();
     let text = build_prompt(TaskId(1), "t", "d", None, Some(&cve_epic()), &ctx);
     assert!(
-        text.contains("/wrap-up"),
+        text.contains("dispatch:wrap-up"),
         "a CVE task finishes through wrap-up, got: {text}"
     );
     assert!(
@@ -2463,7 +2463,7 @@ fn the_release_runbook_trailing_block_is_the_learning_tools_only() {
         "Allium specs",
         "allium:elicit",
         "docs/plans/",
-        "/wrap-up",
+        "dispatch:wrap-up",
     ] {
         assert!(
             !text.contains(absent),
