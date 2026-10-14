@@ -2148,6 +2148,9 @@ fn write_all_plugin_files(base: &std::path::Path) {
             fs::write(&path, file.contents_utf8().unwrap_or("")).unwrap();
         }
         for subdir in dir.dirs() {
+            if is_dev_only(subdir.path()) {
+                continue;
+            }
             write_dir(subdir, base);
         }
     }
@@ -2233,4 +2236,36 @@ fn install_is_idempotent_after_pruning() {
         !changed,
         "second install with nothing to change must be idempotent"
     );
+}
+
+#[test]
+fn install_does_not_ship_the_evals_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    install_plugin_in(dir.path()).unwrap();
+    assert!(
+        !dir.path().join("evals").exists(),
+        "plugin/evals/ is a local test fixture and must not be installed"
+    );
+    assert!(dir.path().join("skills").is_dir());
+}
+
+#[test]
+fn install_removes_evals_left_by_an_older_install() {
+    let dir = tempfile::tempdir().unwrap();
+    write_all_plugin_files(dir.path());
+    let old = dir.path().join("evals/wrap-up-done/prompt.md");
+    fs::create_dir_all(old.parent().unwrap()).unwrap();
+    fs::write(&old, "old").unwrap();
+
+    assert!(plugin_needs_update_in(dir.path()).unwrap());
+    install_plugin_in(dir.path()).unwrap();
+
+    assert!(!dir.path().join("evals").exists());
+}
+
+#[test]
+fn plugin_with_evals_embedded_needs_no_update_once_installed() {
+    let dir = tempfile::tempdir().unwrap();
+    install_plugin_in(dir.path()).unwrap();
+    assert!(!plugin_needs_update_in(dir.path()).unwrap());
 }

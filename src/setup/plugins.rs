@@ -12,6 +12,15 @@ use std::path::{Path, PathBuf};
 // plugin/ is automatically picked up — no manual registration required.
 pub(super) static PLUGIN_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/plugin");
 
+/// Directories under `plugin/` that are embedded by `include_dir!` but are
+/// local development fixtures, never installed. `plugin/evals/` holds the
+/// `claude plugin eval` cases (see "Agent-behaviour evals" in docs/testing.md).
+const DEV_ONLY_DIRS: &[&str] = &["evals"];
+
+pub(super) fn is_dev_only(path: &Path) -> bool {
+    DEV_ONLY_DIRS.iter().any(|d| path.starts_with(d))
+}
+
 /// The built-in copy of `plugin/skills`, for serving skills as MCP resources.
 /// Read from the embedded tree, never from the installed copy.
 pub(crate) fn built_in_skills_dir() -> Option<&'static Dir<'static>> {
@@ -52,7 +61,7 @@ fn install_dir_recursive(dir: &Dir, base: &std::path::Path, changed: &mut bool) 
             .with_context(|| format!("Non-UTF-8 plugin file: {}", file.path().display()))?;
         *changed |= super::write_file_if_changed(&path, content, is_executable(file.path()))?;
     }
-    for subdir in dir.dirs() {
+    for subdir in dir.dirs().filter(|d| !is_dev_only(d.path())) {
         install_dir_recursive(subdir, base, changed)?;
     }
     Ok(())
@@ -63,7 +72,7 @@ fn embedded_path_set() -> std::collections::HashSet<PathBuf> {
         for file in dir.files() {
             paths.insert(file.path().to_path_buf());
         }
-        for subdir in dir.dirs() {
+        for subdir in dir.dirs().filter(|d| !is_dev_only(d.path())) {
             collect(subdir, paths);
         }
     }
@@ -131,7 +140,7 @@ fn needs_update_recursive(dir: &Dir, base: &std::path::Path) -> Result<bool> {
             return Ok(true);
         }
     }
-    for subdir in dir.dirs() {
+    for subdir in dir.dirs().filter(|d| !is_dev_only(d.path())) {
         if needs_update_recursive(subdir, base)? {
             return Ok(true);
         }

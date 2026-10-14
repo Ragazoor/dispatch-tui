@@ -160,6 +160,21 @@ Inline test modules (`mod tests`, `mod property_tests`) must have `#[allow(clipp
 
 Tests must never sleep on the wall clock — not to "wait for" `spawn_blocking` or detached `tokio::spawn` work, and not to cross a duration threshold — and must never measure it either. Instead await a deterministic completion signal (oneshot / `Notify` / an `BoardEvent`), inject a clock, or inject the threshold. `./scripts/check-no-test-sleep.sh` (in the pre-push hook, with its own self-test) enforces this: no `tokio::time::sleep` anywhere under `src/`/`tests/`, and no `std::thread::sleep` or `.elapsed()` in test code — test files *and* top-level inline `#[cfg(test)] mod` blocks. Production use of both is unaffected, and a deadline-bounded poll may carry an `// allow-test-sleep: <why>` marker. When a test's subject *is* a deadline, bound it structurally (`tokio::time::timeout`, `Receiver::recv_timeout`) rather than asserting on measured elapsed time. See the "No `tokio::time::sleep` in tests" section of `docs/conventions.md` for the exact scoping rule, its remaining blind spot, and the canonical patterns.
 
+## Agent-behaviour evals
+
+`plugin/evals/` holds `claude plugin eval` cases that check what an agent does when it follows a plugin skill (today: `wrap-up`). They are **local only**: not in CI and not in the pre-push hook. Each run is a real model call on your own credentials, so the result is noisy and costs money.
+
+```bash
+./scripts/run-evals.sh                                  # all cases, 3 runs each, $3 cap
+./scripts/run-evals.sh --case 'wrap-up-*' --runs 5 --max-cost-usd 5
+```
+
+`scripts/run-evals.sh` always sets `--max-cost-usd` (default 3, or `EVAL_MAX_COST_USD`) and `--runs` (default 3, or `EVAL_RUNS`), and passes other flags through. It also unsets `GRADLE_USER_HOME`, turns off the with-without baseline and keeps the HTML report local. A full run takes a few minutes, so start it in the background from a Claude Code session. The dispatch MCP server is mocked from `plugin/evals/mocks/`; a case never touches the live store.
+
+Things that trip up a new case: an `llm` grader needs `focus: trace` or it reads only the last message; Bash and git do not work inside a run, so state facts such as the branch in the prompt; the layout is in `plugin/evals/README.md`.
+
+`plugin/` is embedded with `include_dir!`, so `plugin/evals/` is compiled into the binary too, but the installer skips it (`src/setup/plugins.rs::is_dev_only`) and removes a copy left by an older install. `plugin/evals/results/` is gitignored.
+
 ## Coverage
 
 CI's `coverage` job runs `cargo tarpaulin --engine llvm --out xml --out stdout --exclude-files 'src/spacetime/bindings/*' --fail-under 86` (`--out Html` locally). It is **gated**: coverage below the floor fails the job. Each tarpaulin invocation re-runs the whole suite, so both output formats come from one run — don't add a second invocation to render another format.
