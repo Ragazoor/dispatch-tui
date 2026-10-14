@@ -391,7 +391,8 @@ pub struct Task {
     /// A short word naming the task for a person; see `core.allium:
     /// TaskAliasIsASecondName`. Empty only for a task the store has not yet
     /// given one (a row from before the column existed); callers that show it
-    /// use [`Task::display_name`], which falls back to the id.
+    /// fall back to the id when it is empty (see `src/agent_tree/render/agents.rs`
+    /// and `src/mcp/handlers/tasks/mod.rs`).
     pub alias: String,
     pub base_branch: String,
     pub external_id: Option<String>,
