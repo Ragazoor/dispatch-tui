@@ -407,11 +407,21 @@ impl TaskService {
         conflict: bool,
     ) -> ServedSession {
         let id = request.id;
-        tracing::warn!(
-            request = id.0,
-            task_id = request.task_id.0,
-            "session request failed: {reason}"
-        );
+        // A rebase conflict is an expected outcome: it reaches the agent and
+        // the card's Conflict sub_status. Only other failures are warnings.
+        if conflict {
+            tracing::info!(
+                request = id.0,
+                task_id = request.task_id.0,
+                "session request failed: {reason}"
+            );
+        } else {
+            tracing::warn!(
+                request = id.0,
+                task_id = request.task_id.0,
+                "session request failed: {reason}"
+            );
+        }
         let recorded = match self
             .db
             .report_session_request_failed(id, reason, conflict)
