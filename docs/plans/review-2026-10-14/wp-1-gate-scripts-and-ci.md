@@ -36,7 +36,7 @@ timers; name `next_loop_event` as the one site), `docs/testing.md:161`, and
 extend `scripts/test-check-no-test-sleep.sh` with two cases: a production
 `tokio::time::sleep(` passes; one inside an inline `#[cfg(test)] mod` fails.
 
-### 🚨 Coverage job cannot pass (`.github/workflows/ci.yml:226-254`, `docs/testing.md:165-169`, `tests/common/spacetime_instance.rs`)
+### 🚨 Coverage job cannot pass (`.github/workflows/ci.yml:226-254`, `docs/testing.md:180-184`, `tests/common/spacetime_instance.rs`)
 
 **Issue:** Run 37892931546 (2026-10-09) died with `cargo_tarpaulin: Failed to
 run tests: Error: Timed out waiting for test response` inside
@@ -53,7 +53,7 @@ as wasm inside the live store. The board code alone is 92.15%
 **Fix:** Add `--exclude-files 'spacetime/module/*'` next to the bindings
 exclusion, and `--timeout 600` (raise if the live targets still trip it).
 Rewrite the floor comment (`ci.yml:231-250`) and the paragraph at
-`docs/testing.md:165-169` to say both exclusions and why; re-measure and
+`docs/testing.md:180-184` to say both exclusions and why; re-measure and
 record the figure and date beside the floor. Extend
 `tests/ci_gates.rs::ci_coverage_job_enforces_a_coverage_floor` to assert the
 module exclusion is present. If the timeout persists on CI, run
@@ -79,7 +79,7 @@ that one green CI run on `origin/main` closes this finding. Do not push
 | `scripts/check-no-test-sleep.sh` | Scope check 1 (`tokio::time::sleep(`) to test regions; update the header comment |
 | `scripts/test-check-no-test-sleep.sh` | Two new cases: production sleep passes, inline-`cfg(test)` sleep fails |
 | `docs/conventions.md` | "No `tokio::time::sleep` in tests": production timers are legitimate; name the one site |
-| `docs/testing.md` | L161 (sleep rule) and L165-169 (coverage: both exclusions, timeout, new figure) |
+| `docs/testing.md` | L161 (sleep rule) and L180-184 (coverage: both exclusions, timeout, new figure) |
 | `.github/workflows/ci.yml` | `--exclude-files 'spacetime/module/*'`, `--timeout 600`, rewritten floor comment with the 2026-10-14 figures |
 | `tests/ci_gates.rs` | Assert the module exclusion and the timeout are present |
 

@@ -48,7 +48,7 @@ failed on `main` on 2026-10-14 (`check-no-test-sleep.sh`,
 paragraph) before committing, since a wrap-up rebase lands on `main`
 without pushing.
 
-### 💡 Coverage job runs the live store (`CLAUDE.md:30-33`, `docs/testing.md:165-169`)
+### 💡 Coverage job runs the live store (`CLAUDE.md:30-33`, `docs/testing.md:180-184`)
 
 **Issue:** The coverage paragraph does not say the job now runs
 `tests/spacetime_module.rs` and `tests/memory_caller_conformance.rs` under

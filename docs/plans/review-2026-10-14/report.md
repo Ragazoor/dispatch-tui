@@ -442,7 +442,7 @@ tests except the 26 in T3. `#[allow]` audit: 12 sites, all `unwrap_used`/
   the self-test; do **not** rewrite the timer to dodge the grep.
 - **B2. CI coverage job cannot pass: it times out, and when it finishes it
   is under the floor** (`.github/workflows/ci.yml:226-254`,
-  `tests/common/spacetime_instance.rs`, `docs/testing.md:165-169`). Run
+  `tests/common/spacetime_instance.rs`, `docs/testing.md:180-184`). Run
   37892931546 died with "Timed out waiting for test response" in
   `tests/spacetime_module.rs`. Locally the same command finishes at 85.74%
   against a floor of 86, because the module crate's 2,449 native lines
