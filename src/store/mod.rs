@@ -124,6 +124,7 @@ patch_struct! {
         plain    auto_run_plan: bool,
         plain    phoenix:       bool,
         plain    stop_pending: bool,
+        plain    alias:        &'a str,
     }
 }
 

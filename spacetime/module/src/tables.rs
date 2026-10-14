@@ -112,6 +112,17 @@ pub struct Task {
     /// backfilled.
     #[default("")]
     pub created_by: String,
+    /// A short word naming the task for a person (`core.allium:
+    /// TaskAliasIsASecondName`). Assigned by [`write_task`] on the first write
+    /// that finds it empty, so `""` only ever means "not yet assigned" — a row
+    /// that predates this column, or a create that left it to the store.
+    /// Indexed because every MCP tool resolves an alias to an id through it;
+    /// not a unique index, because rows awaiting an alias all hold `""`, and
+    /// uniqueness of the real ones is enforced in [`write_task`]. Appended last
+    /// for the reason `created_by` is.
+    #[index(btree)]
+    #[default("")]
+    pub alias: String,
 }
 
 #[spacetimedb::table(accessor = epics, public)]

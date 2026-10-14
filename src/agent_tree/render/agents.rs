@@ -25,9 +25,23 @@ pub(crate) const MAX_ROWS: usize = 8;
 pub struct AgentRow {
     pub id: TaskId,
     pub title: String,
+    /// The word the row leads with; empty falls back to `#<id>`.
+    pub alias: String,
     pub window: TmuxWindow,
     /// Whether this is the pane's own task — marked, dimmed, and not jumpable.
     pub is_own: bool,
+}
+
+impl AgentRow {
+    /// What the row leads with: the alias, or `#<id>` when the task has none
+    /// (`agent-tree.allium: AgentRowShowsAlias`).
+    pub fn label(&self) -> String {
+        if self.alias.is_empty() {
+            format!("#{}", self.id)
+        } else {
+            self.alias.clone()
+        }
+    }
 }
 
 /// The section's rows and its own cursor. Kept apart from the tree's cursor so
@@ -118,6 +132,7 @@ pub(crate) fn test_row(id: i64, own: bool) -> AgentRow {
     AgentRow {
         id: TaskId(id),
         title: format!("task {id}"),
+        alias: String::new(),
         window: crate::models::test_tmux_window(&format!("task-{id}")),
         is_own: own,
     }
@@ -163,7 +178,7 @@ pub fn render_agents(
             if focused && index == section.cursor {
                 style = style.add_modifier(Modifier::REVERSED);
             }
-            let mut text = format!("#{} {}", row.id, row.title);
+            let mut text = format!("{} {}", row.label(), row.title);
             if row.is_own {
                 text.push_str(" ●");
             }
@@ -191,6 +206,28 @@ mod tests {
             .draw(|frame| render_agents(frame, frame.area(), section, focused, false))
             .expect("draw");
         crate::agent_tree::pane::buffer_to_string(terminal.backend().buffer())
+    }
+
+    // ---- label -----------------------------------------------------------
+
+    #[test]
+    fn a_row_with_an_alias_leads_with_it_and_not_the_id() {
+        let mut section = AgentsSection::new();
+        section.set_rows(vec![AgentRow {
+            alias: "scar".into(),
+            ..row(4941, false)
+        }]);
+        let out = rendered(&mut section, true, 6);
+        assert!(out.contains("scar task 4941"), "{out}");
+        assert!(!out.contains("#4941"), "{out}");
+    }
+
+    #[test]
+    fn a_row_without_an_alias_leads_with_the_id() {
+        let mut section = AgentsSection::new();
+        section.set_rows(vec![row(4941, false)]);
+        let out = rendered(&mut section, true, 6);
+        assert!(out.contains("#4941 task 4941"), "{out}");
     }
 
     // ---- cursor ----------------------------------------------------------

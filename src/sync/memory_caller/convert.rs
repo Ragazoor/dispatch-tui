@@ -70,6 +70,7 @@ mirror!(
         owner,
         completed_at,
         created_by,
+        alias,
     }
 );
 
@@ -106,6 +107,7 @@ mirror!(
         host,
         owner,
         completed_at,
+        alias,
     }
 );
 

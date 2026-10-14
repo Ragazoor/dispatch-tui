@@ -139,6 +139,7 @@ async fn update_task_maps_every_advertised_field_to_params() {
                 "wrap_up_mode": "pr",
                 "auto_run_plan": true,
                 "phoenix": true,
+                "alias": "renamed",
             }
         })),
     )

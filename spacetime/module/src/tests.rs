@@ -269,6 +269,7 @@ mod tests {
                 host: Some(MARK.into()),
                 owner: Some(MARK.into()),
                 completed_at: Some(MARK.into()),
+                alias: Some(MARK.into()),
             },
         );
 
@@ -305,6 +306,7 @@ mod tests {
         assert_eq!(row.host, MARK);
         assert_eq!(row.owner, MARK);
         assert_eq!(row.completed_at, MARK);
+        assert_eq!(row.alias, MARK);
         // created_at/updated_at are not patch fields; the reducer stamps them.
         assert_eq!(row.created_at, before.created_at);
     }

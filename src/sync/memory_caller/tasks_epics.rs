@@ -27,10 +27,25 @@ impl MemoryReducerCaller {
         if row.status == DONE && row.completed_at.is_empty() {
             row.completed_at = self.now();
         }
+        Self::ensure_alias(tables, &mut row)?;
         let id = Self::assign_id(row.id, &mut tables.next_task_id);
         row.id = id;
         tables.tasks.insert(id, row.clone());
         self.rows.upsert_task(&row.into());
+        Ok(())
+    }
+
+    /// Mirrors the module's `ensure_alias`: assign a word to a task that has
+    /// none, and refuse an alias that is malformed or that another task holds.
+    fn ensure_alias(tables: &Tables, row: &mut module::Task) -> Result<(), String> {
+        let taken_by_other = |alias: &str| {
+            tables
+                .tasks
+                .values()
+                .any(|other| other.alias == alias && (other.id != row.id || row.id == 0))
+        };
+        let seed = tables.tasks.len() as u64;
+        row.alias = module::resolve_alias(row.id, &row.alias, seed, taken_by_other)?;
         Ok(())
     }
 

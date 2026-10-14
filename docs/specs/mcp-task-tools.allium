@@ -627,6 +627,19 @@ rule PrFinalisationReflectionNudge {
         -- unconditional (see learnings.allium: WrapUpRateLearningNudge).
 }
 
+-- Anywhere an MCP tool takes a task id it also takes the task's alias.
+--
+-- `get_task`, `update_tasks`, `dispatch_task`, `wrap_up` and the rest resolve
+-- the argument first: digits are an id, anything else is looked up as an alias
+-- (core.allium: TaskAliasIsASecondName). An alias that names no task is the
+-- same NotFound (-32001) an unknown id gets. Results still report the numeric
+-- id as well as the alias. `update_tasks` also takes `alias` as a field, to
+-- rename.
+rule AliasResolvesToTaskId {
+    when: McpToolCalled(task_ref)
+    ensures: TaskResolved(task_ref)
+}
+
 rule UpdateTasksViaMcp {
     when: McpUpdateTasks(caller_identity, task_ids, fields)
 

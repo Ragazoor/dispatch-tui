@@ -189,6 +189,11 @@ pub struct PaneAgent {
     pub title: String,
     /// The task's recorded tmux window (always present: a live agent has one).
     pub tmux_window: String,
+    /// The task's alias, the word the section shows in place of its id
+    /// (`agent-tree.allium: AgentRowShowsAlias`). Empty from a board that
+    /// predates aliases, or for a task not yet given one.
+    #[serde(default)]
+    pub alias: String,
 }
 
 /// The board's answer to a [`Question`].

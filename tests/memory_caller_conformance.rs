@@ -138,6 +138,7 @@ fn blank_task_in_epic(epic_id: i64) -> bindings::Task {
         owner: String::new(),
         completed_at: String::new(),
         created_by: String::new(),
+        alias: String::new(),
     }
 }
 
@@ -173,6 +174,7 @@ fn blank_task_patch() -> bindings::TaskPatch {
         host: None,
         owner: None,
         completed_at: None,
+        alias: None,
     }
 }
 

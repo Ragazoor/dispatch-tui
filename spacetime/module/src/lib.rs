@@ -64,6 +64,7 @@ macro_rules! apply_patch {
 }
 
 mod agent_state;
+mod alias;
 mod blanks;
 mod config;
 mod dispatch_request;
@@ -82,6 +83,7 @@ mod tables;
 mod tasks_epics;
 
 pub use agent_state::*;
+pub use alias::*;
 pub use blanks::*;
 pub use config::*;
 pub use dispatch_request::*;

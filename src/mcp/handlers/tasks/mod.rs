@@ -151,6 +151,12 @@ mcp_args! {
         "type": "boolean",
         "description": "When true, completing this task automatically recreates it as a fresh backlog copy carrying the same settings, and the flag moves to that copy. A recurring task with no schedule — nothing dispatches the copy, you do."
     };
+
+    #[serde(default)]
+    optional alias: Option<String> = [set(alias)] {
+        "type": "string",
+        "description": "Rename the task's alias, the short word people see instead of its id. Lowercase letters, digits and hyphens; not only digits; must not already name another task."
+    };
 }
 
 /// The `update_tasks` input schema: `UpdateTaskArgs`' fields, with `task_ids` in place
@@ -348,6 +354,9 @@ fn format_task_detail(
         repo = task.repo_path,
         desc = task.description,
     );
+    if !task.alias.is_empty() {
+        text.push_str(&format!("\nAlias: {}", task.alias));
+    }
     text.push_str(&format!("\nSub-status: {}", task.sub_status.as_str()));
     if let Some(epic_id) = task.epic_id {
         let epic_label = match epic_titles.get(&epic_id) {
@@ -435,6 +444,11 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str)
         Some(tag) => format!(" [{}]", tag.as_str()),
         None => String::new(),
     };
+    let alias_indicator = if t.alias.is_empty() {
+        String::new()
+    } else {
+        format!(" alias:{}", t.alias)
+    };
     let epic_indicator = match t.epic_id {
         Some(eid) => match epic_titles.get(&eid) {
             Some(title) => format!(" (epic:{eid} {title})"),
@@ -453,9 +467,10 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str)
         format!(" | Goal: {goal}")
     };
     format!(
-        "- [{}] {} ({}/{}){}{} | Base: {}{}{}",
+        "- [{}] {}{} ({}/{}){}{} | Base: {}{}{}",
         t.id,
         t.title,
+        alias_indicator,
         t.status.as_str(),
         t.sub_status.as_str(),
         tag_indicator,
@@ -518,6 +533,32 @@ mod tests {
             .description("A description")
             .base_branch(base_branch)
             .build()
+    }
+
+    #[test]
+    fn format_task_detail_shows_the_alias_beside_the_id() {
+        let task = Task {
+            alias: "scar".into(),
+            ..make_task("main")
+        };
+        let output = format_task_detail(&task, &HashMap::new(), None, None);
+        assert!(output.contains("Alias: scar"), "{output}");
+    }
+
+    #[test]
+    fn format_task_detail_omits_an_unassigned_alias() {
+        let output = format_task_detail(&make_task("main"), &HashMap::new(), None, None);
+        assert!(!output.contains("Alias:"), "{output}");
+    }
+
+    #[test]
+    fn format_task_line_names_the_alias() {
+        let task = Task {
+            alias: "scar".into(),
+            ..make_task("main")
+        };
+        let line = super::format_task_line(&task, &HashMap::new(), "");
+        assert!(line.contains("alias:scar"), "{line}");
     }
 
     #[test]

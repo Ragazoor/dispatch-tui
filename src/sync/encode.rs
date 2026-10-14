@@ -184,6 +184,9 @@ pub fn create_task_row(
         // `sync.allium`'s `own_creations` subscription finds this task
         // regardless of which epic it lands in. `core.allium: Task.created_by`.
         created_by: created_by.to_string(),
+        // Left to the module: `write_task` assigns a word on the first write
+        // that finds none (`core.allium: TaskAliasIsASecondName`).
+        alias: String::new(),
     }
 }
 
@@ -250,6 +253,7 @@ pub fn task_patch(patch: &TaskPatch<'_>) -> bindings::TaskPatch {
         // a task on two boards or on none.
         owner: None,
         completed_at: nullable(patch.completed_at, stamp, String::new()),
+        alias: patch.alias.map(str::to_string),
     }
 }
 

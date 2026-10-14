@@ -1,5 +1,6 @@
 use super::*;
 
+mod alias;
 mod crud;
 mod dispatch;
 mod dispatch_requests;

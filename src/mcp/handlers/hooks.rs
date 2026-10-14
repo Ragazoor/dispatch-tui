@@ -67,6 +67,7 @@ pub async fn handle_pane_view(
                 id: task.id,
                 title: task.title,
                 tmux_window: task.tmux_window?.as_str().to_string(),
+                alias: task.alias,
             })
         })
         .collect();

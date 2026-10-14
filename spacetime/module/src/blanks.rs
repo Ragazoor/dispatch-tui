@@ -46,6 +46,7 @@ pub fn blank_task() -> Task {
         owner: SCRATCH_OWNER.into(),
         completed_at: String::new(),
         created_by: String::new(),
+        alias: String::new(),
     }
 }
 

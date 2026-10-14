@@ -72,6 +72,9 @@ pub(super) fn build_task_patch<'a>(
     if let Some(v) = params.phoenix {
         patch = patch.phoenix(v);
     }
+    if let Some(a) = params.alias.as_deref() {
+        patch = patch.alias(a);
+    }
     patch
 }
 

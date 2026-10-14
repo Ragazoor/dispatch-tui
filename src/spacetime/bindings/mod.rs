@@ -8,6 +8,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 pub mod apply_learning_verdicts_reducer;
 pub mod archive_stale_learnings_reducer;
+pub mod backfill_task_aliases_reducer;
 pub mod batch_delete_reducer;
 pub mod batch_patch_sub_status_reducer;
 pub mod burn_id_sequence_reducer;
@@ -154,6 +155,7 @@ pub mod work_packages_table;
 
 pub use apply_learning_verdicts_reducer::apply_learning_verdicts;
 pub use archive_stale_learnings_reducer::archive_stale_learnings;
+pub use backfill_task_aliases_reducer::backfill_task_aliases;
 pub use batch_delete_reducer::batch_delete;
 pub use batch_patch_sub_status_reducer::batch_patch_sub_status;
 pub use burn_id_sequence_reducer::burn_id_sequence;
@@ -312,6 +314,7 @@ pub enum Reducer {
     ArchiveStaleLearnings {
         cutoff: String,
     },
+    BackfillTaskAliases,
     BatchDelete {
         task_ids: Vec<i64>,
         epic_ids: Vec<i64>,
@@ -662,6 +665,7 @@ impl __sdk::Reducer for Reducer {
         match self {
             Reducer::ApplyLearningVerdicts { .. } => "apply_learning_verdicts",
             Reducer::ArchiveStaleLearnings { .. } => "archive_stale_learnings",
+            Reducer::BackfillTaskAliases => "backfill_task_aliases",
             Reducer::BatchDelete { .. } => "batch_delete",
             Reducer::BatchPatchSubStatus { .. } => "batch_patch_sub_status",
             Reducer::BurnIdSequence { .. } => "burn_id_sequence",
@@ -765,7 +769,9 @@ impl __sdk::Reducer for Reducer {
 }             => __sats::bsatn::to_vec(&archive_stale_learnings_reducer::ArchiveStaleLearningsArgs {
                 cutoff: cutoff.clone(),
 }),
-            Reducer::BatchDelete{
+            Reducer::BackfillTaskAliases => __sats::bsatn::to_vec(&backfill_task_aliases_reducer::BackfillTaskAliasesArgs {
+                }),
+Reducer::BatchDelete{
                 task_ids,
                 epic_ids,
 }             => __sats::bsatn::to_vec(&batch_delete_reducer::BatchDeleteArgs {
