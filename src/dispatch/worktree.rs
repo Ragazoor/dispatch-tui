@@ -606,6 +606,76 @@ fn add_worktree(
     }
 }
 
+/// Move a reused worktree's branch up to `start_ref` when it holds no commits
+/// of its own — `ReusedBranchWithNoOwnWorkIsFastForwarded` in
+/// docs/specs/dispatch.allium.
+///
+/// Skipping `git worktree add` also skipped placing the branch, so a worktree
+/// left by an earlier failed dispatch can sit far behind the base. A branch
+/// with commits of its own is left alone for the agent to merge. Best-effort:
+/// any failure is logged and the dispatch carries on with the branch as it was.
+fn fast_forward_reused_branch(
+    task_id: i64,
+    runner: &dyn ProcessRunner,
+    worktree_path: &str,
+    branch: &str,
+    start_ref: &str,
+    timeout: Duration,
+) {
+    // Left side is the start point, so `ahead` counts what the branch is
+    // missing and `behind` counts its own commits.
+    let Some(drift) = crate::repo_sync::count_left_right(
+        runner,
+        worktree_path,
+        &format!("{start_ref}...HEAD"),
+        timeout,
+    ) else {
+        tracing::warn!(
+            task_id,
+            branch,
+            start_ref,
+            "could not measure reused branch against its base"
+        );
+        return;
+    };
+    let (behind, own) = (drift.ahead, drift.behind);
+    if own > 0 {
+        tracing::info!(
+            task_id,
+            branch,
+            start_ref,
+            own_commits = own,
+            behind,
+            "reused branch has commits of its own, leaving it"
+        );
+        return;
+    }
+    if behind == 0 {
+        return;
+    }
+    match git_checked(
+        runner,
+        worktree_path,
+        &["merge", "--ff-only", start_ref],
+        timeout,
+    ) {
+        Ok(_) => tracing::info!(
+            task_id,
+            branch,
+            start_ref,
+            behind,
+            "fast-forwarded reused branch to its base"
+        ),
+        Err(_) => tracing::warn!(
+            task_id,
+            branch,
+            start_ref,
+            behind,
+            "could not fast-forward reused branch, leaving it"
+        ),
+    }
+}
+
 /// Create a git worktree and open a tmux window.
 /// Shared by `dispatch_agent`, `research_agent`, and `quick_dispatch_agent`,
 /// all of which reach it via `dispatch_with_prompt`.
@@ -651,6 +721,16 @@ pub(super) fn provision_worktree(
 
     if reused_worktree {
         tracing::info!(task_id = task.id.0, %worktree_path, "worktree already exists, reusing");
+        if let (Some(BaseRef::Branch(_)), Some(start_ref)) = (base, start_ref.as_deref()) {
+            fast_forward_reused_branch(
+                task.id.0,
+                runner,
+                &worktree_path,
+                &worktree_name,
+                start_ref,
+                timeout,
+            );
+        }
     } else {
         add_worktree(
             runner,

@@ -962,10 +962,11 @@ fn provision_worktree_reuse_survives_an_unreachable_origin() {
 
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::fail("fatal: unable to access 'origin': network is unreachable"),
-        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
-        MockProcessRunner::ok(), // tmux new-window
-        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+        MockProcessRunner::ok_with_stdout(b"0\t0\n"), // git rev-list: reused branch level with base
+        MockProcessRunner::ok(),                      // tmux list-windows (duplicate-name check)
+        MockProcessRunner::ok(),                      // tmux new-window
+        MockProcessRunner::ok(),                      // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(),                      // tmux set-hook (after-split-window)
     ]);
 
     let task = make_task(&repo_path);
@@ -1014,10 +1015,11 @@ fn provision_worktree_reuse_does_not_retry_or_probe_an_unreachable_origin() {
 
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::fail("fatal: unable to access 'origin': network is unreachable"),
-        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
-        MockProcessRunner::ok(), // tmux new-window
-        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+        MockProcessRunner::ok_with_stdout(b"0\t0\n"), // git rev-list: reused branch level with base
+        MockProcessRunner::ok(),                      // tmux list-windows (duplicate-name check)
+        MockProcessRunner::ok(),                      // tmux new-window
+        MockProcessRunner::ok(),                      // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(),                      // tmux set-hook (after-split-window)
     ]);
 
     let task = make_task(&repo_path);

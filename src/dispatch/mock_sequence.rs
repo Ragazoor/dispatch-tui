@@ -122,8 +122,8 @@ pub(crate) fn pr_view_reply(head: &str, cross_repository: bool) -> Vec<u8> {
 /// `git rev-list --count --left-right <base>...origin/<base>`'s reply: commits
 /// local-only, then commits origin-only, tab separated. `level()` is the common
 /// case and states once that a zero pair means "no drift, so prefer origin".
-fn rev_list_counts(ahead: u32, behind: u32) -> Vec<u8> {
-    format!("{ahead}\t{behind}\n").into_bytes()
+fn rev_list_counts(left: u32, right: u32) -> Vec<u8> {
+    format!("{left}\t{right}\n").into_bytes()
 }
 
 /// One recorded subprocess call in a dispatch's sequence.
@@ -161,6 +161,14 @@ pub(crate) enum Step {
     /// measurement. Only for `BaseRef::Branch`, and only after a fetch succeeded:
     /// a PR head branch is never compared against a local ref.
     AheadBehind,
+    /// `git rev-list --count --left-right <start>...HEAD` in the worktree — how
+    /// far a REUSED branch is behind the start point and how many commits it
+    /// holds of its own (dispatch.allium: `ReusedBranchWithNoOwnWorkIsFastForwarded`).
+    /// Reuse path only, for a branch base.
+    ReusedBranchDrift,
+    /// `git merge --ff-only <start>` in the worktree — only when the reused
+    /// branch is behind and holds nothing of its own.
+    ReusedBranchFastForward,
     /// `git worktree prune` — clears a stale `.git/worktrees/<name>` record
     /// left by any cause, so the add below cannot fail with "'<branch>' is
     /// already used by worktree at ...". Fresh path only, immediately before
@@ -237,7 +245,8 @@ impl Step {
             // `--verify` is what separates this from `CurrentBranch`, which
             // also runs `rev-parse` (with `--abbrev-ref`).
             Step::LocalBaseProbe => program == "git" && has("rev-parse") && has("--verify"),
-            Step::AheadBehind => program == "git" && has("rev-list"),
+            Step::AheadBehind | Step::ReusedBranchDrift => program == "git" && has("rev-list"),
+            Step::ReusedBranchFastForward => program == "git" && has("merge") && has("--ff-only"),
             // Both are `git worktree <verb>`, so the verb is the whole
             // difference — `has("worktree")` alone would let a prune pass as
             // an add, which is exactly the ordering this pair exists to pin.
@@ -643,6 +652,17 @@ enum Ending {
     FailsAt(Step),
 }
 
+/// Where a REUSED worktree's branch stands against the start point.
+#[derive(Clone, Copy)]
+enum ReusedBranch {
+    /// Level with the start point: nothing to do.
+    InSync,
+    /// `n` commits behind and none of its own: fast-forwarded.
+    Behind(u32),
+    /// Holds `n` commits of its own: left alone.
+    OwnCommits(u32),
+}
+
 /// The shape of one dispatch's call sequence.
 ///
 /// Holds configuration only — no responses — so it stays usable for
@@ -657,6 +677,8 @@ pub(crate) struct DispatchScript {
     /// [`Step::AheadBehind`]. `0` means "no drift", so origin wins.
     local_ahead: u32,
     fresh_worktree: bool,
+    /// Only read on the reuse path with a branch base.
+    reused_branch: ReusedBranch,
     /// Whether this shape is a resume (as opposed to a fresh dispatch) — the
     /// only shape that issues [`Step::HasWindowQuery`], since the live
     /// `has_window` check lives in `resume_agent`, not `dispatch_agent`.
@@ -686,6 +708,7 @@ impl DispatchScript {
             fetch: FetchOutcome::SucceedsOnAttempt(1),
             local_ahead: 0,
             fresh_worktree: false,
+            reused_branch: ReusedBranch::InSync,
             is_resume: false,
             window_already_alive: false,
             ending: Ending::Complete,
@@ -1003,6 +1026,22 @@ impl DispatchScript {
         self
     }
 
+    /// The reused worktree's branch is `n` commits behind the start point with
+    /// none of its own, so provisioning fast-forwards it.
+    pub(crate) fn reused_branch_behind(mut self, n: u32) -> Self {
+        self.assert_is_dispatch();
+        self.reused_branch = ReusedBranch::Behind(n);
+        self
+    }
+
+    /// The reused worktree's branch holds `n` commits of its own, so
+    /// provisioning leaves it where it is.
+    pub(crate) fn reused_branch_with_own_commits(mut self, n: u32) -> Self {
+        self.assert_is_dispatch();
+        self.reused_branch = ReusedBranch::OwnCommits(n);
+        self
+    }
+
     /// The caller passed no base branch, so the dispatch detects the repo's
     /// default branch first and then fetches `branch`.
     pub(crate) fn detecting_default_branch(mut self, branch: &'static str) -> Self {
@@ -1095,6 +1134,16 @@ impl DispatchScript {
         fetched && !on_pr_head
     }
 
+    /// Whether provisioning reconciles a reused branch with the start point:
+    /// the reuse path, a base to reconcile with, and not a PR head.
+    fn reconciles_reused_branch(&self) -> bool {
+        let on_pr_head = self.pr_head.is_some_and(PrHead::resolves_to_pr_head);
+        !self.fresh_worktree
+            && !self.is_resume
+            && !matches!(self.fetch, FetchOutcome::Absent)
+            && !on_pr_head
+    }
+
     /// Whether the local-base probe runs (dispatch.allium:
     /// `UnresolvableBaseIsRefusedByName`). The 404-class fallback to local
     /// `<base>` is the one start-point choice nothing else proves, so it is the
@@ -1157,6 +1206,12 @@ impl DispatchScript {
         }
         if self.measures() {
             steps.push(Step::AheadBehind);
+        }
+        if self.reconciles_reused_branch() {
+            steps.push(Step::ReusedBranchDrift);
+            if matches!(self.reused_branch, ReusedBranch::Behind(_)) {
+                steps.push(Step::ReusedBranchFastForward);
+            }
         }
         if self.fresh_worktree {
             steps.push(Step::WorktreePrune);
@@ -1261,6 +1316,17 @@ impl DispatchScript {
                     None,
                     MockProcessRunner::ok_with_stdout(&rev_list_counts(self.local_ahead, 0)),
                 ),
+                Step::ReusedBranchDrift => {
+                    let (behind, own) = match self.reused_branch {
+                        ReusedBranch::InSync => (0, 0),
+                        ReusedBranch::Behind(n) => (n, 0),
+                        ReusedBranch::OwnCommits(n) => (0, n),
+                    };
+                    (
+                        None,
+                        MockProcessRunner::ok_with_stdout(&rev_list_counts(behind, own)),
+                    )
+                }
                 // Both lookups answer from the very option that put them in the
                 // sequence, so `steps()` has already ruled out the `None` arm and
                 // no fallback value has to be invented for it.
@@ -1385,7 +1451,7 @@ fn failure_stderr(step: Step) -> &'static str {
         // carries on to the add, so no scripted shape ever ENDS here. A test
         // that wants a failing prune queues one by hand, because `FailsAt`
         // also truncates the sequence — which would be the wrong shape.
-        Step::WorktreePrune => {
+        Step::WorktreePrune | Step::ReusedBranchDrift | Step::ReusedBranchFastForward => {
             unreachable!("{step:?} is best-effort and never ends a sequence")
         }
         Step::NewWindowNameCheck | Step::NewWindow => NO_TMUX_SERVER,
@@ -1936,10 +2002,11 @@ mod tests {
         let script = DispatchScript::dispatch();
         assert_eq!(script.index_of(Step::Fetch), 0);
         assert_eq!(script.index_of(Step::AheadBehind), 1);
-        assert_eq!(script.index_of(Step::NewWindowNameCheck), 2);
-        assert_eq!(script.index_of(Step::NewWindow), 3);
-        assert_eq!(script.index_of(Step::SendKeysLiteral), 6);
-        assert_eq!(script.index_of(Step::CompanionSplit), 8);
+        assert_eq!(script.index_of(Step::ReusedBranchDrift), 2);
+        assert_eq!(script.index_of(Step::NewWindowNameCheck), 3);
+        assert_eq!(script.index_of(Step::NewWindow), 4);
+        assert_eq!(script.index_of(Step::SendKeysLiteral), 7);
+        assert_eq!(script.index_of(Step::CompanionSplit), 9);
     }
 
     /// The whole point of deriving indices: optional steps ahead of the one being

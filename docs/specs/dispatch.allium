@@ -729,6 +729,31 @@ rule ProvisionDispatch {
         -- rollback that did not create it — which is what deciding presence by
         -- a link-following `exists()` used to license.
         --
+        -- == A reused branch with no work of its own is fast-forwarded ==
+        -- ReusedBranchWithNoOwnWorkIsFastForwarded. Skipping `git worktree
+        -- add` also skips the one step that places the branch, so a worktree
+        -- left by an earlier failed dispatch keeps the branch where that
+        -- attempt made it — possibly many commits behind the base (#40984: 60
+        -- behind, noticed by the agent only by chance). On the reuse path,
+        -- when a base branch is known and is not a PR head, the branch is
+        -- therefore reconciled with the start point the selection above chose
+        -- (the same ref a fresh worktree would have been created from):
+        --
+        --   * no commits of its own — `git rev-list --count --left-right
+        --     <start>...HEAD` reports 0 on the HEAD side — and behind the start
+        --     point: `git merge --ff-only <start>` runs in the worktree, and
+        --     the move is logged with the branch and the ref.
+        --   * no commits of its own and not behind: nothing to do.
+        --   * commits of its own: left alone. The agent merges the base as the
+        --     reuse preamble instructs.
+        --
+        -- Best-effort, like the reuse fetch. If the count cannot be read or
+        -- the fast-forward is refused (for example uncommitted changes that
+        -- the move would overwrite), a warning is logged and the dispatch goes
+        -- on with the branch as it was: the preamble's merge instruction still
+        -- covers it. Never a reason to abort, and never a reset — a branch
+        -- with work on it is not moved.
+        --
         -- == A stale admin record is pruned before every fresh add ==
         -- StaleAdminRecordIsPrunedBeforeWorktreeAdd. `git worktree prune` is
         -- run best-effort in the repo root immediately before

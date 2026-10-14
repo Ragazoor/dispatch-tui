@@ -141,16 +141,28 @@ pub fn ahead_behind(
     runner: &dyn ProcessRunner,
 ) -> Option<AheadBehind> {
     let repo_path = expand_tilde(repo_path);
-    let output = git_checked(
+    count_left_right(
         runner,
         &repo_path,
-        &[
-            "rev-list",
-            "--count",
-            "--left-right",
-            &count_range(base_branch),
-        ],
+        &count_range(base_branch),
         SUBPROCESS_TIMEOUT,
+    )
+}
+
+/// Count the commits on each side of `range` (`A...B`) run in `dir`: `ahead`
+/// is reachable only from `A`, `behind` only from `B`. `None` when the walk
+/// fails, times out or prints anything but two counts.
+pub(crate) fn count_left_right(
+    runner: &dyn ProcessRunner,
+    dir: &str,
+    range: &str,
+    timeout: std::time::Duration,
+) -> Option<AheadBehind> {
+    let output = git_checked(
+        runner,
+        dir,
+        &["rev-list", "--count", "--left-right", range],
+        timeout,
     )
     .ok()?;
     let stdout = stdout_str(&output);
