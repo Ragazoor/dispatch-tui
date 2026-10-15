@@ -1,6 +1,15 @@
 use super::*;
 use chrono::Utc;
 
+/// Whether the store accepts `ss` under `status`: the module's
+/// `validate_sub_status`, the one home of the rule (`mcp-task-tools.allium:
+/// UpdateTaskViaMcp`). The board keeps no copy; these tests read the board's
+/// enum spellings through it, so a renamed variant still fails here.
+/// Sibling `models` test modules use it for the same question.
+pub(in crate::models) fn legal(ss: SubStatus, status: TaskStatus) -> bool {
+    dispatch_spacetime_module::validate_sub_status(status.as_str(), ss.as_str()).is_ok()
+}
+
 // --- Signal / FeedItem.signals ---
 
 #[test]
@@ -194,31 +203,31 @@ fn substatus_display() {
 #[test]
 fn substatus_valid_combinations() {
     // Backlog: only None
-    assert!(SubStatus::None.is_valid_for(TaskStatus::Backlog));
-    assert!(!SubStatus::Active.is_valid_for(TaskStatus::Backlog));
-    assert!(!SubStatus::NeedsInput.is_valid_for(TaskStatus::Backlog));
-    assert!(!SubStatus::AwaitingReview.is_valid_for(TaskStatus::Backlog));
+    assert!(legal(SubStatus::None, TaskStatus::Backlog));
+    assert!(!legal(SubStatus::Active, TaskStatus::Backlog));
+    assert!(!legal(SubStatus::NeedsInput, TaskStatus::Backlog));
+    assert!(!legal(SubStatus::AwaitingReview, TaskStatus::Backlog));
 
     // Running: Active, NeedsInput, Stale, Crashed
-    assert!(!SubStatus::None.is_valid_for(TaskStatus::Running));
-    assert!(SubStatus::Active.is_valid_for(TaskStatus::Running));
-    assert!(SubStatus::NeedsInput.is_valid_for(TaskStatus::Running));
-    assert!(SubStatus::Stale.is_valid_for(TaskStatus::Running));
-    assert!(SubStatus::Crashed.is_valid_for(TaskStatus::Running));
-    assert!(!SubStatus::AwaitingReview.is_valid_for(TaskStatus::Running));
+    assert!(!legal(SubStatus::None, TaskStatus::Running));
+    assert!(legal(SubStatus::Active, TaskStatus::Running));
+    assert!(legal(SubStatus::NeedsInput, TaskStatus::Running));
+    assert!(legal(SubStatus::Stale, TaskStatus::Running));
+    assert!(legal(SubStatus::Crashed, TaskStatus::Running));
+    assert!(!legal(SubStatus::AwaitingReview, TaskStatus::Running));
 
     // Review: AwaitingReview, ChangesRequested, Approved, PrClosed
-    assert!(!SubStatus::None.is_valid_for(TaskStatus::Review));
-    assert!(!SubStatus::Active.is_valid_for(TaskStatus::Review));
-    assert!(SubStatus::AwaitingReview.is_valid_for(TaskStatus::Review));
-    assert!(SubStatus::ChangesRequested.is_valid_for(TaskStatus::Review));
-    assert!(SubStatus::Approved.is_valid_for(TaskStatus::Review));
-    assert!(SubStatus::PrClosed.is_valid_for(TaskStatus::Review));
-    assert!(!SubStatus::PrClosed.is_valid_for(TaskStatus::Running));
+    assert!(!legal(SubStatus::None, TaskStatus::Review));
+    assert!(!legal(SubStatus::Active, TaskStatus::Review));
+    assert!(legal(SubStatus::AwaitingReview, TaskStatus::Review));
+    assert!(legal(SubStatus::ChangesRequested, TaskStatus::Review));
+    assert!(legal(SubStatus::Approved, TaskStatus::Review));
+    assert!(legal(SubStatus::PrClosed, TaskStatus::Review));
+    assert!(!legal(SubStatus::PrClosed, TaskStatus::Running));
 
     // Done: only None
-    assert!(SubStatus::None.is_valid_for(TaskStatus::Done));
-    assert!(!SubStatus::Active.is_valid_for(TaskStatus::Done));
+    assert!(legal(SubStatus::None, TaskStatus::Done));
+    assert!(!legal(SubStatus::Active, TaskStatus::Done));
 }
 
 #[test]
@@ -274,10 +283,10 @@ fn substatus_column_priority_matches_urgency_ordering() {
 /// `pr_closed` (core.allium: SubStatus).
 #[test]
 fn pr_unreachable_is_valid_only_for_review() {
-    assert!(SubStatus::PrUnreachable.is_valid_for(TaskStatus::Review));
+    assert!(legal(SubStatus::PrUnreachable, TaskStatus::Review));
     for status in [TaskStatus::Backlog, TaskStatus::Running, TaskStatus::Done] {
         assert!(
-            !SubStatus::PrUnreachable.is_valid_for(status),
+            !legal(SubStatus::PrUnreachable, status),
             "pr_unreachable must not be valid for {status:?}"
         );
     }
@@ -556,7 +565,7 @@ pub(in crate::models) fn make_task_with(plan: Option<&str>, tag: Option<TaskTag>
     }
 }
 
-// --- is_wrappable ---
+// --- wrap_up_block ---
 
 fn wrappable_task(status: TaskStatus, worktree: Option<&str>) -> Task {
     Task {
@@ -567,23 +576,35 @@ fn wrappable_task(status: TaskStatus, worktree: Option<&str>) -> Task {
 }
 
 #[test]
-fn is_wrappable_running_with_worktree() {
-    assert!(wrappable_task(TaskStatus::Running, Some("/tmp/wt")).is_wrappable());
+fn wrap_up_block_running_with_worktree() {
+    assert_eq!(
+        wrappable_task(TaskStatus::Running, Some("/tmp/wt")).wrap_up_block(),
+        None
+    );
 }
 
 #[test]
-fn is_wrappable_review_with_worktree() {
-    assert!(wrappable_task(TaskStatus::Review, Some("/tmp/wt")).is_wrappable());
+fn wrap_up_block_review_with_worktree() {
+    assert_eq!(
+        wrappable_task(TaskStatus::Review, Some("/tmp/wt")).wrap_up_block(),
+        None
+    );
 }
 
 #[test]
-fn is_wrappable_running_without_worktree() {
-    assert!(!wrappable_task(TaskStatus::Running, None).is_wrappable());
+fn wrap_up_block_running_without_worktree() {
+    assert_eq!(
+        wrappable_task(TaskStatus::Running, None).wrap_up_block(),
+        Some(WrapUpBlock::NotDispatched)
+    );
 }
 
 #[test]
-fn is_wrappable_backlog_with_worktree() {
-    assert!(!wrappable_task(TaskStatus::Backlog, Some("/tmp/wt")).is_wrappable());
+fn wrap_up_block_backlog_with_worktree() {
+    assert_eq!(
+        wrappable_task(TaskStatus::Backlog, Some("/tmp/wt")).wrap_up_block(),
+        Some(WrapUpBlock::NotDispatched)
+    );
 }
 
 #[test]
@@ -764,7 +785,6 @@ fn release_please_task_wrap_up_block_is_review_tag() {
         task.wrap_up_block(),
         Some(WrapUpBlock::ReviewTag(TaskTag::ReleasePlease))
     );
-    assert!(!task.is_wrappable());
 }
 
 #[test]

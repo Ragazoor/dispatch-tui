@@ -43,9 +43,9 @@ pub const RULES_VERSION: i64 = 6;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///
-/// `mcp-task-tools.allium: UpdateTaskViaMcp`. The twin of
-/// `SubStatus::is_valid_for` in the board's models; a test in the board's
-/// crate compares the two over every pair.
+/// `mcp-task-tools.allium: UpdateTaskViaMcp`. The one home of the rule: the
+/// board keeps no copy, and its model tests read its `SubStatus` spellings
+/// through [`validate_sub_status`].
 fn sub_status_is_legal(status: &str, sub_status: &str) -> bool {
     match status {
         "backlog" | "done" => sub_status == "none",

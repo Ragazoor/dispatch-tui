@@ -96,8 +96,8 @@ async fn dispatch_task_persist_writes_status_to_db() {
     let mut task = seed(&rt, "Persist me", models::TaskStatus::Backlog).await;
     // Mirror what every production status move does: the sub-status travels
     // with the status (`SubStatus::default_for`), because the store
-    // rejects any (status, sub_status) pair `SubStatus::is_valid_for`
-    // disallows.
+    // rejects any (status, sub_status) pair the module's
+    // `validate_sub_status` disallows.
     task.status = models::TaskStatus::Running;
     task.sub_status = models::SubStatus::default_for(models::TaskStatus::Running);
     task.worktree = Some("/wt".into());
@@ -123,7 +123,7 @@ async fn dispatch_task_persist_writes_status_to_db() {
 async fn dispatch_task_persist_surfaces_service_rejection_and_writes_nothing() {
     let (rt, mut app) = test_runtime().await;
     let mut task = seed(&rt, "Persist me", models::TaskStatus::Backlog).await;
-    // Running + SubStatus::None is rejected by `SubStatus::is_valid_for`, so
+    // Running + SubStatus::None is rejected by the module's `validate_sub_status`, so
     // the whole patch is refused — including the worktree field.
     task.status = models::TaskStatus::Running;
     task.worktree = Some("/wt".into());

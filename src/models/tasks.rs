@@ -268,31 +268,6 @@ impl SubStatus {
         SubStatus::Approved,
     ];
 
-    /// Check whether this sub-status is valid for the given parent status.
-    pub fn is_valid_for(&self, status: TaskStatus) -> bool {
-        match status {
-            TaskStatus::Backlog => matches!(self, SubStatus::None),
-            TaskStatus::Running => matches!(
-                self,
-                SubStatus::Active
-                    | SubStatus::NeedsInput
-                    | SubStatus::Stale
-                    | SubStatus::Crashed
-                    | SubStatus::Conflict
-            ),
-            TaskStatus::Review => matches!(
-                self,
-                SubStatus::AwaitingReview
-                    | SubStatus::ChangesRequested
-                    | SubStatus::Approved
-                    | SubStatus::Conflict
-                    | SubStatus::PrClosed
-                    | SubStatus::PrUnreachable
-            ),
-            TaskStatus::Done => matches!(self, SubStatus::None),
-        }
-    }
-
     /// Return the default sub-status for a given parent status.
     pub fn default_for(status: TaskStatus) -> Self {
         match status {
@@ -527,6 +502,11 @@ impl Task {
     /// dispatch adapter it used to live in — see the header of
     /// `src/models/tmux_window.rs` for why a pure predicate the service layer
     /// gates on cannot sit in an adapter.
+    ///
+    /// The store's own gate is the module's `validate_wrap_up_request`, which
+    /// `request_wrap_up` runs; this is the board's early answer, read by
+    /// `get_task` and `TaskService::validate_wrap_up` so an agent learns the
+    /// refusal before its retro and commit.
     pub fn wrap_up_block(&self) -> Option<WrapUpBlock> {
         // The tag outranks the state. A review task is refused whatever its
         // status, so reporting "it needs a worktree" first would send the
@@ -540,15 +520,6 @@ impl Task {
             return Some(WrapUpBlock::NotDispatched);
         }
         None
-    }
-
-    /// Whether this task can be wrapped up at all.
-    ///
-    /// Defined from [`Task::wrap_up_block`] so the predicate and the reason
-    /// cannot disagree: every gate, and every surface that merely wants to know
-    /// whether the affordance applies, reads the same answer.
-    pub fn is_wrappable(&self) -> bool {
-        self.wrap_up_block().is_none()
     }
 }
 

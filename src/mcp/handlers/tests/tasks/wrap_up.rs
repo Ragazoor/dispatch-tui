@@ -1409,7 +1409,7 @@ async fn wrap_up_rebase_does_not_kill_window() {
         .await
         .unwrap();
 
-    // Set up worktree + tmux_window so is_wrappable passes.
+    // Set up worktree + tmux_window so wrap_up_block passes.
     let window = test_tmux_window("task-rebase-window");
     let patch = crate::store::TaskPatch::new()
         .host(Some(crate::store::MEMORY_HOST_ID))

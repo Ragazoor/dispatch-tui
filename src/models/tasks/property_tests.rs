@@ -1,4 +1,4 @@
-use super::model_tests::make_task_with;
+use super::model_tests::{legal, make_task_with};
 use super::*;
 use proptest::prelude::*;
 
@@ -98,10 +98,10 @@ proptest! {
     }
 
     #[test]
-    fn substatus_default_is_valid_for_status(status in task_status_strategy()) {
+    fn substatus_default_is_legal_for_status(status in task_status_strategy()) {
         let default_ss = SubStatus::default_for(status);
         prop_assert!(
-            default_ss.is_valid_for(status),
+            legal(default_ss, status),
             "default_for({:?}) = {:?} is not valid for that status",
             status,
             default_ss
@@ -113,7 +113,7 @@ proptest! {
         // For Backlog and Done only SubStatus::None is valid. Running and
         // Review require a specific active sub-status.
         for &terminal in &[TaskStatus::Backlog, TaskStatus::Done] {
-            let valid = ss.is_valid_for(terminal);
+            let valid = legal(ss, terminal);
             let expected = matches!(ss, SubStatus::None);
             prop_assert_eq!(valid, expected);
         }

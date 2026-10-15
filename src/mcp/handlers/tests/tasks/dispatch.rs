@@ -226,7 +226,7 @@ impl ChainFixture {
     }
 
     /// The task whose session is about to close: Running with a worktree and a
-    /// tmux window, which is what `is_wrappable` and `exit_session` demand.
+    /// tmux window, which is what `wrap_up_block` and `exit_session` demand.
     /// Only the epic membership and the fixture's real temp repo distinguish it
     /// from the shared helper, so it supplies those and delegates.
     async fn closing_subtask(

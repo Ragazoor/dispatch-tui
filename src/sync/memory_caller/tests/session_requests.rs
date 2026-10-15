@@ -194,6 +194,19 @@ async fn a_refused_wrap_up_request_writes_nothing() {
     let why = refusal(wrap_up(&caller, backlog, "rebase").await);
     assert!(why.contains("cannot be wrapped up"), "{why}");
 
+    // Running, but with no worktree.
+    let no_worktree = caller
+        .create_task(bindings::Task {
+            status: "running".into(),
+            sub_status: "active".into(),
+            host: HOST.into(),
+            ..blank_task()
+        })
+        .await
+        .unwrap();
+    let why = refusal(wrap_up(&caller, no_worktree, "rebase").await);
+    assert!(why.contains("cannot be wrapped up"), "{why}");
+
     // A review-tagged task has no wrap-up (ReviewTasksAreNotWrappedUp).
     let review = dispatched_task_in(
         &caller,

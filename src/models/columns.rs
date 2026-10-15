@@ -480,6 +480,7 @@ mod column_section_for_task_tests {
 #[cfg(test)]
 mod column_section_tests {
     use super::*;
+    use crate::models::tasks::model_tests::legal;
     use crate::models::EpicSubstatus;
 
     /// Every (status, sub_status) pair the model admits names exactly one
@@ -494,7 +495,7 @@ mod column_section_tests {
     fn every_valid_sub_status_names_one_section() {
         for &status in TaskStatus::ALL {
             for &ss in SubStatus::ALL {
-                if !ss.is_valid_for(status) {
+                if !legal(ss, status) {
                     continue;
                 }
                 let section = ss.column_section();
@@ -619,6 +620,7 @@ mod column_section_tests {
 #[cfg(test)]
 mod sectioned_columns_tests {
     use super::*;
+    use crate::models::tasks::model_tests::legal;
 
     /// Exactly Running and Review have sections
     /// (`board-layout.allium`: ColumnSectionLayout.sectioned_statuses). Derived from
@@ -629,7 +631,7 @@ mod sectioned_columns_tests {
         for &status in TaskStatus::ALL {
             let has_sections = SubStatus::ALL
                 .iter()
-                .any(|ss| ss.is_valid_for(status) && ss.column_section().is_some());
+                .any(|ss| legal(*ss, status) && ss.column_section().is_some());
             assert_eq!(
                 has_sections,
                 matches!(status, TaskStatus::Running | TaskStatus::Review),
@@ -652,7 +654,7 @@ mod sectioned_columns_tests {
         for &status in TaskStatus::ALL {
             let mut sections: Vec<ColumnSection> = SubStatus::ALL
                 .iter()
-                .filter(|ss| ss.is_valid_for(status))
+                .filter(|ss| legal(**ss, status))
                 .filter_map(|ss| ss.column_section())
                 .collect();
             // The derived sections are Review-only and reachable there
@@ -694,7 +696,7 @@ mod sectioned_columns_tests {
         for &status in TaskStatus::ALL {
             let has_sections = SubStatus::ALL
                 .iter()
-                .any(|ss| ss.is_valid_for(status) && ss.column_section().is_some());
+                .any(|ss| legal(*ss, status) && ss.column_section().is_some());
             assert_eq!(
                 has_sections,
                 matches!(status, TaskStatus::Running | TaskStatus::Review),
@@ -710,7 +712,7 @@ mod sectioned_columns_tests {
             !TaskStatus::Done.is_unflattened()
                 && !SubStatus::ALL
                     .iter()
-                    .any(|ss| ss.is_valid_for(TaskStatus::Done) && ss.column_section().is_some()),
+                    .any(|ss| legal(*ss, TaskStatus::Done) && ss.column_section().is_some()),
             "Done is the status that sits on neither side — the case that broke \
              the old complement assertion"
         );

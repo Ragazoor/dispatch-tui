@@ -456,9 +456,9 @@ mod rules {
     use super::*;
     use std::collections::HashMap;
 
-    // Which pairs are legal is checked pair by pair against the board's own
-    // `SubStatus::is_valid_for` in `src/sync/rules_gate.rs`; here, only the
-    // refusal's wording.
+    // Which pairs are legal is pinned pair by pair by the board's model tests
+    // (`src/models/tasks/model_tests.rs`), which read the board's `SubStatus`
+    // spellings through `validate_sub_status`; here, only the refusal's wording.
 
     /// The wording reaches MCP callers unchanged from the service that used to
     /// produce it.

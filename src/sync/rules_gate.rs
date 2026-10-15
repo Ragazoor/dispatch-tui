@@ -120,34 +120,11 @@ mod tests {
 
     // -- the board's models and the module's rule functions ------------------
     //
-    // Each rule that moved into the module still has a twin in the board for
-    // what the board draws (`SubStatus::is_valid_for` picks the sections a
-    // column shows; `repo_name_from_path` names a feed's repo groups). The two
-    // are checked against each other, so the module's copy cannot drift from
-    // the one the rest of the board reads.
-
-    #[test]
-    fn the_module_and_the_boards_models_agree_on_which_sub_statuses_are_legal() {
-        use crate::models::{SubStatus, TaskStatus};
-        let statuses = [
-            TaskStatus::Backlog,
-            TaskStatus::Running,
-            TaskStatus::Review,
-            TaskStatus::Done,
-        ];
-        for status in statuses {
-            for sub in SubStatus::ALL {
-                assert_eq!(
-                    dispatch_spacetime_module::validate_sub_status(status.as_str(), sub.as_str())
-                        .is_ok(),
-                    sub.is_valid_for(status),
-                    "{} for {}",
-                    sub.as_str(),
-                    status.as_str()
-                );
-            }
-        }
-    }
+    // `repo_name_from_path` names a feed's repo groups on the board, and the
+    // module's `repo_name_from_url` names them in the store; the two are
+    // checked against each other so they cannot drift. Sub-status legality has
+    // no board twin: the board's tests read the module's `validate_sub_status`
+    // directly.
 
     #[test]
     fn the_module_and_the_boards_models_agree_on_repo_group_names() {
