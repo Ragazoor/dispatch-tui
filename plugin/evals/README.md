@@ -15,7 +15,7 @@ Layout:
 This directory is embedded in the binary with the rest of `plugin/`, but
 `src/setup/plugins.rs::is_dev_only` keeps it out of the installed plugin.
 
-Cases (2 runs each; the whole suite costs about $2):
+Cases (2 runs each; the whole suite costs about $3):
 
 - `wrap-up-done`, `wrap-up-rebase` — a preset path runs to `exit_session`.
 - `wrap-up-asks-path` — no path preset: asks first, no `wrap_up`, no PR work before the choice.
@@ -24,6 +24,11 @@ Cases (2 runs each; the whole suite costs about $2):
 - `learnings-rate-on-use` — rates a used entry `helped`.
 - `learnings-no-lintable` — does not record a rule a lint could check.
 - `grill-one-question` — one question with a recommendation, then waits.
+- `prompt-research-no-wrap-up`, `prompt-pr-review-no-edit`, `prompt-task-no-early-wrap-up` — a built dispatch prompt (copied from the snapshots in `src/dispatch/snapshots/`) is the user message. Research and PR review make no wrap-up or edit call and present findings; a normal task starts work and does not wrap up early.
+
+Prompt cases hold a copy of the snapshot text. Refresh it when a snapshot changes.
+Not covered yet: staying in the worktree (needs Bash and a real checkout) and
+choosing the right MCP tools (needs richer mocks).
 
 Notes: Bash and git are unavailable in a run, so commit steps are not tested.
 `AskUserQuestion` is not available either; the agent asks in plain text, so
