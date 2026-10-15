@@ -1103,7 +1103,7 @@ rule AutoDispatchNextSubtask {
         -- dispatched is briefly running with worktree = null. Both crash
         -- detection and activity classification filter on tmux_window !=
         -- null, so that window produces no spurious Stale or Crashed (see
-        -- agent-health.allium), and is_wrappable requires a worktree, so the
+        -- agent-health.allium), and the wrap-up gate requires a worktree, so the
         -- subtask cannot be wrapped up before it is provisioned.
         --
         -- The chain learns the outcome FROM THE REQUEST ROW, not from a direct

@@ -1895,7 +1895,8 @@ rule EditTask {
 -- wrap_up handler accepts any running or review task with a worktree.
 
 -- SubStatusConsistency: A task's sub_status must always be valid for
--- its parent status: sub_status.is_valid_for(status) = true. This is
+-- its parent status: the pair is one listed in core.allium under "Valid
+-- SubStatus values per parent status". This is
 -- enforced at every status transition: when status changes, sub_status
 -- is reset to SubStatus.default_for(new_status) before being persisted.
 -- Individual handlers may then set a more specific sub_status (e.g.,
@@ -1912,10 +1913,12 @@ rule EditTask {
 -- without mentioning sub_status therefore gets the reset for free, and the
 -- sub_status assertions written out in the rules above document the
 -- resulting state rather than adding a per-rule duty. A write supplying an
--- explicit (status, sub_status) pair that is invalid is rejected before it
--- reaches the store. Nothing behind that check backs the invariant up: the
--- SQLite CHECK constraint that once did went with SQLite (task #36865), and
--- the store's reducers accept any sub_status string.
+-- explicit (status, sub_status) pair that is invalid is refused by the
+-- store's patch_task reducer before anything is applied (mcp-task-tools.allium:
+-- UpdateTaskViaMcp). Nothing else backs the invariant up: the SQLite CHECK
+-- constraint that once did went with SQLite (task #36865), and the store's
+-- other sub_status writers (the batch sub_status patch, the feed upsert)
+-- accept any sub_status string.
 -- Exception: writes that set a specific sub_status override the default
 -- (e.g., HookNotification keeps status=running and sets
 -- sub_status=needs_input; FinishTaskConflict keeps the parent status and

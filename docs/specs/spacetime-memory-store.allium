@@ -70,11 +70,15 @@ contract ReducerConformance {
         -- Reuse spacetime/module's own pure, ctx-free helpers
         -- (derive_epic_status, apply_task_patch, apply_epic_patch,
         -- apply_learning_patch, stamps_completion, validate_task_ownership,
-        -- validate_learning_scope, blank_*) rather than
+        -- validate_learning_scope, validate_status, check_task_patch,
+        -- check_epic_patch, validate_sub_status, blank_*) rather than
         -- re-deriving their logic natively in MemoryReducerCaller. The
         -- module crate is built with crate-type = ["cdylib", "rlib"]
         -- specifically so these are callable outside a SpacetimeDB instance.
-        -- Everything else per reducer — row storage, lookup, delete
+        -- A rule too entangled with row access to be a pure function is
+        -- written once, generic over a store trait, and the double supplies
+        -- the row operations: feed ingestion (ingest_into over IngestStore)
+        -- is the first. Everything else per reducer — row storage, lookup, delete
         -- cascades, id generation, orchestration order — has no such shared
         -- source and is exactly the risk surface this contract exists to
         -- catch drift in.

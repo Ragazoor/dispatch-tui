@@ -37,6 +37,112 @@ fn upsert_items(items: Vec<FeedIngestItem>) -> Vec<FeedTaskUpsertItem> {
     items.into_iter().map(|i| i.item).collect()
 }
 
+/// The store operations feed ingestion reads and writes through.
+///
+/// The routing and reconcile decisions below are written ONCE, generic over
+/// this trait: the reducer runs them against the live tables
+/// ([`ReducerStore`]) and the board's in-memory test double
+/// (`src/sync/memory_caller/feed.rs`) against its own rows. Each method is a
+/// plain row operation or one of the feed helpers both sides already have; no
+/// method makes a routing decision, so the two stores cannot disagree about
+/// one (`spacetime-memory-store.allium: ReducerConformance`).
+pub trait IngestStore {
+    fn epic(&self, id: i64) -> Option<Epic>;
+    /// The direct child epics of `parent`.
+    fn child_epics(&self, parent: i64) -> Vec<Epic>;
+    fn tasks_in_epic(&self, epic_id: i64) -> Vec<Task>;
+    /// The non-empty `external_id`s of every task anywhere under `root`,
+    /// `root` included.
+    fn subtree_external_ids(&self, root: i64) -> HashSet<String>;
+    fn is_retired(&self, feed_epic_id: i64, external_id: &str) -> bool;
+    /// The calling identity, as `caller_identity` reads it.
+    fn identity(&self) -> String;
+    /// The transaction's timestamp, in the store's spelling.
+    fn now(&self) -> String;
+    /// Insert an epic with a generated id; its id.
+    fn insert_epic(&mut self, row: Epic) -> i64;
+    /// Overwrite a task row as given, with no rule applied: a feed move.
+    fn update_task(&mut self, row: Task);
+    fn find_or_create_repo_group(&mut self, root: i64, title: &str, created_by: String) -> i64;
+    fn flatten_epic(&mut self, root: i64) -> Result<(), String>;
+    fn drop_closed_retired(&mut self, feed_epic_id: i64, keep: &HashSet<&str>);
+    fn upsert_feed_tasks(
+        &mut self,
+        epic_id: i64,
+        items: Vec<FeedTaskUpsertItem>,
+        created_by: &str,
+        delete_absent: bool,
+    ) -> Result<(), String>;
+    fn delete_stale_in_children(&mut self, parent: i64, keep: &HashSet<&str>);
+    fn delete_stale_feed_tasks_in_epic(&mut self, epic_id: i64, keep: &HashSet<&str>);
+    fn recalculate_epic_chain(&mut self, epic_id: i64);
+}
+
+/// [`IngestStore`] over a reducer's live tables.
+pub(crate) struct ReducerStore<'a>(pub(crate) &'a ReducerContext);
+
+impl IngestStore for ReducerStore<'_> {
+    fn epic(&self, id: i64) -> Option<Epic> {
+        self.0.db.epics().id().find(id)
+    }
+    fn child_epics(&self, parent: i64) -> Vec<Epic> {
+        self.0.db.epics().parent_epic_id().filter(&parent).collect()
+    }
+    fn tasks_in_epic(&self, epic_id: i64) -> Vec<Task> {
+        self.0.db.tasks().epic_id().filter(&epic_id).collect()
+    }
+    fn subtree_external_ids(&self, root: i64) -> HashSet<String> {
+        collect_epic_subtree_ids(self.0, root)
+            .iter()
+            .flat_map(|&e| self.0.db.tasks().epic_id().filter(&e).collect::<Vec<_>>())
+            .map(|t| t.external_id)
+            .filter(|e| !e.is_empty())
+            .collect()
+    }
+    fn is_retired(&self, feed_epic_id: i64, external_id: &str) -> bool {
+        is_retired(self.0, feed_epic_id, external_id)
+    }
+    fn identity(&self) -> String {
+        caller_identity(self.0)
+    }
+    fn now(&self) -> String {
+        now(self.0)
+    }
+    fn insert_epic(&mut self, row: Epic) -> i64 {
+        self.0.db.epics().insert(row).id
+    }
+    fn update_task(&mut self, row: Task) {
+        self.0.db.tasks().id().update(row);
+    }
+    fn find_or_create_repo_group(&mut self, root: i64, title: &str, created_by: String) -> i64 {
+        find_or_create_repo_group(self.0, root, title, created_by)
+    }
+    fn flatten_epic(&mut self, root: i64) -> Result<(), String> {
+        flatten_epic(self.0, root)
+    }
+    fn drop_closed_retired(&mut self, feed_epic_id: i64, keep: &HashSet<&str>) {
+        drop_closed_retired(self.0, feed_epic_id, keep)
+    }
+    fn upsert_feed_tasks(
+        &mut self,
+        epic_id: i64,
+        items: Vec<FeedTaskUpsertItem>,
+        created_by: &str,
+        delete_absent: bool,
+    ) -> Result<(), String> {
+        upsert_feed_tasks_inner(self.0, epic_id, items, created_by, delete_absent)
+    }
+    fn delete_stale_in_children(&mut self, parent: i64, keep: &HashSet<&str>) {
+        delete_stale_in_children(self.0, parent, keep)
+    }
+    fn delete_stale_feed_tasks_in_epic(&mut self, epic_id: i64, keep: &HashSet<&str>) {
+        delete_stale_feed_tasks_in_epic(self.0, epic_id, keep)
+    }
+    fn recalculate_epic_chain(&mut self, epic_id: i64) {
+        recalculate_epic_chain(self.0, epic_id)
+    }
+}
+
 /// `feeds.allium: IngestFeedEmission`. Apply one parsed emission to the feed
 /// epic `epic_id`.
 ///
@@ -54,55 +160,65 @@ pub fn ingest_feed(
     additive: bool,
     created_by: String,
 ) -> Result<(), String> {
-    let Some(epic) = ctx.db.epics().id().find(epic_id) else {
+    ingest_into(&mut ReducerStore(ctx), epic_id, items, additive, &created_by)
+}
+
+/// The body of [`ingest_feed`], over any [`IngestStore`]: pick the strategy
+/// from the epic's own row and run it.
+pub fn ingest_into(
+    store: &mut impl IngestStore,
+    epic_id: i64,
+    items: Vec<FeedIngestItem>,
+    additive: bool,
+    created_by: &str,
+) -> Result<(), String> {
+    let Some(epic) = store.epic(epic_id) else {
         return Err(format!("epic {epic_id} not found for ingest_feed"));
     };
     match epic.feed_role.as_str() {
-        ROLE_REVIEWS_PARENT => ingest_role_routed(ctx, &epic, items, additive, &created_by),
+        ROLE_REVIEWS_PARENT => ingest_role_routed(store, &epic, items, additive, created_by),
         ROLE_MY_REVIEWS | ROLE_TEAM_REVIEWS | ROLE_BOTS => {
             Err(ROLE_SUB_EPIC_FEED_REFUSED.to_string())
         }
-        _ if epic.group_by_repo => ingest_grouped(ctx, &epic, items, additive, &created_by),
-        _ => ingest_flat(ctx, &epic, items, additive, &created_by),
+        _ if epic.group_by_repo => ingest_grouped(store, &epic, items, additive, created_by),
+        _ => ingest_flat(store, &epic, items, additive, created_by),
     }
 }
 
 /// `FlatFeedReconcile`: heal any repo-group sub-epic left from a grouped past,
 /// then upsert straight onto the epic.
 fn ingest_flat(
-    ctx: &ReducerContext,
+    store: &mut impl IngestStore,
     epic: &Epic,
     items: Vec<FeedIngestItem>,
     additive: bool,
     created_by: &str,
 ) -> Result<(), String> {
-    let has_repo_group = ctx
-        .db
-        .epics()
-        .parent_epic_id()
-        .filter(&epic.id)
+    let has_repo_group = store
+        .child_epics(epic.id)
+        .iter()
         .any(|e| e.origin == REPO_GROUP_ORIGIN);
     if has_repo_group {
-        flatten_epic(ctx, epic.id)?;
+        store.flatten_epic(epic.id)?;
     }
     if !additive {
-        drop_closed_retired(ctx, epic.id, &external_ids(&items));
+        store.drop_closed_retired(epic.id, &external_ids(&items));
     }
-    upsert_feed_tasks_inner(ctx, epic.id, upsert_items(items), created_by, !additive)?;
-    recalculate_epic_chain(ctx, epic.id);
+    store.upsert_feed_tasks(epic.id, upsert_items(items), created_by, !additive)?;
+    store.recalculate_epic_chain(epic.id);
     Ok(())
 }
 
 /// `GroupedFeedUpsert`: one sub-epic per repo name, titled by it.
 fn ingest_grouped(
-    ctx: &ReducerContext,
+    store: &mut impl IngestStore,
     epic: &Epic,
     items: Vec<FeedIngestItem>,
     additive: bool,
     created_by: &str,
 ) -> Result<(), String> {
     if !additive {
-        drop_closed_retired(ctx, epic.id, &external_ids(&items));
+        store.drop_closed_retired(epic.id, &external_ids(&items));
     }
     let mut groups: Vec<(String, Vec<FeedTaskUpsertItem>)> = Vec::new();
     for entry in items {
@@ -113,7 +229,7 @@ fn ingest_grouped(
         }
     }
 
-    let subs: Vec<Epic> = ctx.db.epics().parent_epic_id().filter(&epic.id).collect();
+    let subs: Vec<Epic> = store.child_epics(epic.id);
     let group_names: HashSet<&str> = groups.iter().map(|(n, _)| n.as_str()).collect();
 
     // A repo with no sub-epic yet earns one only if it still has an item the
@@ -123,9 +239,9 @@ fn ingest_grouped(
         .filter(|(name, _)| !subs.iter().any(|s| s.title == *name))
         .flat_map(|(_, group)| group.iter().map(|i| i.external_id.as_str()))
         .collect();
-    let dropped = retired_without_task(ctx, epic.id, &candidates);
+    let dropped = retired_without_task(store, epic.id, &candidates);
 
-    let identity = caller_identity(ctx);
+    let identity = store.identity();
     for (name, group) in &groups {
         let existing = subs.iter().find(|s| s.title == *name).map(|s| s.id);
         let group: Vec<FeedTaskUpsertItem> = match existing {
@@ -139,21 +255,22 @@ fn ingest_grouped(
         if group.is_empty() {
             continue;
         }
-        let sub_id = existing.unwrap_or_else(|| {
-            ctx.db
-                .epics()
-                .insert(Epic {
+        let sub_id = match existing {
+            Some(id) => id,
+            None => {
+                let now = store.now();
+                store.insert_epic(Epic {
                     title: name.clone(),
                     parent_epic_id: epic.id,
                     created_by: identity.clone(),
-                    created_at: now(ctx),
-                    updated_at: now(ctx),
+                    created_at: now.clone(),
+                    updated_at: now,
                     ..blank_epic()
                 })
-                .id
-        });
-        upsert_feed_tasks_inner(ctx, sub_id, group, created_by, !additive)?;
-        recalculate_epic_chain(ctx, sub_id);
+            }
+        };
+        store.upsert_feed_tasks(sub_id, group, created_by, !additive)?;
+        store.recalculate_epic_chain(sub_id);
     }
 
     if !additive {
@@ -161,11 +278,11 @@ fn ingest_grouped(
             .iter()
             .filter(|s| !group_names.contains(s.title.as_str()))
         {
-            upsert_feed_tasks_inner(ctx, sub.id, Vec::new(), created_by, true)?;
-            recalculate_epic_chain(ctx, sub.id);
+            store.upsert_feed_tasks(sub.id, Vec::new(), created_by, true)?;
+            store.recalculate_epic_chain(sub.id);
         }
-        upsert_feed_tasks_inner(ctx, epic.id, Vec::new(), created_by, true)?;
-        recalculate_epic_chain(ctx, epic.id);
+        store.upsert_feed_tasks(epic.id, Vec::new(), created_by, true)?;
+        store.recalculate_epic_chain(epic.id);
     }
     Ok(())
 }
@@ -173,100 +290,96 @@ fn ingest_grouped(
 /// The retired `external_ids` among `candidates` with no surviving task
 /// anywhere under `feed_epic_id` (`feeds.allium`: "Retired feed items").
 fn retired_without_task<'a>(
-    ctx: &ReducerContext,
+    store: &impl IngestStore,
     feed_epic_id: i64,
     candidates: &[&'a str],
 ) -> HashSet<&'a str> {
     if candidates.is_empty() {
         return HashSet::new();
     }
-    let subtree = collect_epic_subtree_ids(ctx, feed_epic_id);
-    let survivors: HashSet<String> = subtree
-        .iter()
-        .flat_map(|&e| ctx.db.tasks().epic_id().filter(&e).collect::<Vec<_>>())
-        .map(|t| t.external_id)
-        .filter(|e| !e.is_empty())
-        .collect();
+    let survivors = store.subtree_external_ids(feed_epic_id);
     candidates
         .iter()
         .copied()
-        .filter(|c| is_retired(ctx, feed_epic_id, c) && !survivors.contains(*c))
+        .filter(|c| store.is_retired(feed_epic_id, c) && !survivors.contains(*c))
         .collect()
 }
 
 /// The role sub-epic of `parent` carrying `role`, created when absent.
 fn ensure_role_sub_epic(
-    ctx: &ReducerContext,
+    store: &mut impl IngestStore,
     parent: i64,
     role: &str,
     title: &str,
     identity: &str,
 ) -> i64 {
-    let existing = ctx
-        .db
-        .epics()
-        .parent_epic_id()
-        .filter(&parent)
+    let existing = store
+        .child_epics(parent)
+        .into_iter()
         .find(|e| e.feed_role == role);
     if let Some(sub) = existing {
         return sub.id;
     }
-    ctx.db
-        .epics()
-        .insert(Epic {
-            title: title.to_string(),
-            parent_epic_id: parent,
-            feed_role: role.to_string(),
-            created_by: identity.to_string(),
-            created_at: now(ctx),
-            updated_at: now(ctx),
-            ..blank_epic()
-        })
-        .id
+    let now = store.now();
+    store.insert_epic(Epic {
+        title: title.to_string(),
+        parent_epic_id: parent,
+        feed_role: role.to_string(),
+        created_by: identity.to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+        ..blank_epic()
+    })
+}
+
+/// Index `epic_id`'s feed tasks by `external_id` into `existing`.
+fn remember_feed_tasks(
+    store: &impl IngestStore,
+    existing: &mut HashMap<String, Task>,
+    epic_id: i64,
+) {
+    for task in store.tasks_in_epic(epic_id) {
+        if !task.external_id.is_empty() {
+            existing.insert(task.external_id.clone(), task);
+        }
+    }
 }
 
 /// `RoleRoutedFeedSync`: reconcile the whole `reviews-parent` subtree from one
 /// emission. Phase order matters and is the board's old order: every
 /// cross-role move lands before any delete, so a moved task is never deleted.
 fn ingest_role_routed(
-    ctx: &ReducerContext,
+    store: &mut impl IngestStore,
     parent: &Epic,
     items: Vec<FeedIngestItem>,
     additive: bool,
     created_by: &str,
 ) -> Result<(), String> {
-    let identity = caller_identity(ctx);
-    let my = ensure_role_sub_epic(ctx, parent.id, ROLE_MY_REVIEWS, "My Reviews", &identity);
-    let team = ensure_role_sub_epic(ctx, parent.id, ROLE_TEAM_REVIEWS, "Team Reviews", &identity);
-    let bots = ensure_role_sub_epic(ctx, parent.id, ROLE_BOTS, "Bots", &identity);
+    let identity = store.identity();
+    let my = ensure_role_sub_epic(store, parent.id, ROLE_MY_REVIEWS, "My Reviews", &identity);
+    let team = ensure_role_sub_epic(store, parent.id, ROLE_TEAM_REVIEWS, "Team Reviews", &identity);
+    let bots = ensure_role_sub_epic(store, parent.id, ROLE_BOTS, "Bots", &identity);
     let roles = [my, team, bots];
 
     // Task identity is global by external_id across the parent, the role
     // sub-epics and their repo-group children.
     let mut existing: HashMap<String, Task> = HashMap::new();
     let mut pre_existing_repo_groups: Vec<i64> = Vec::new();
-    let mut remember = |ctx: &ReducerContext, epic_id: i64| {
-        for task in ctx.db.tasks().epic_id().filter(&epic_id) {
-            if !task.external_id.is_empty() {
-                existing.insert(task.external_id.clone(), task);
-            }
-        }
-    };
-    remember(ctx, parent.id);
+    remember_feed_tasks(store, &mut existing, parent.id);
     for &sub in &roles {
-        for child in ctx.db.epics().parent_epic_id().filter(&sub) {
-            remember(ctx, child.id);
+        for child in store.child_epics(sub) {
+            remember_feed_tasks(store, &mut existing, child.id);
             pre_existing_repo_groups.push(child.id);
         }
     }
     for &sub in &roles {
-        remember(ctx, sub);
+        remember_feed_tasks(store, &mut existing, sub);
     }
 
     // Read from the FULL emission, before the exclusion filter: an excluded
     // but still open PR keeps its retired record.
     if !additive {
-        drop_closed_retired(ctx, parent.id, &external_ids(&items));
+        store.drop_closed_retired(parent.id, &external_ids(&items));
     }
 
     let items: Vec<FeedIngestItem> = items
@@ -275,7 +388,7 @@ fn ingest_role_routed(
         .collect();
 
     let candidates: Vec<&str> = items.iter().map(|i| i.item.external_id.as_str()).collect();
-    let dropped = retired_without_task(ctx, parent.id, &candidates);
+    let dropped = retired_without_task(store, parent.id, &candidates);
 
     let mut groups: HashMap<i64, Vec<FeedTaskUpsertItem>> = HashMap::new();
     let mut all_external_ids: HashSet<String> = HashSet::new();
@@ -290,19 +403,19 @@ fn ingest_role_routed(
             ROLE_BOTS => bots,
             _ => my,
         };
-        let groups_by_repo = ctx
-            .db
-            .epics()
-            .id()
-            .find(role_target)
+        let groups_by_repo = store
+            .epic(role_target)
             .is_some_and(|e| can_auto_group(e.group_by_repo, &e.feed_command));
         let target = if groups_by_repo {
             let name = repo_name_from_url(&item.url);
-            *repo_group_cache
-                .entry((role_target, name.clone()))
-                .or_insert_with(|| {
-                    find_or_create_repo_group(ctx, role_target, &name, identity.clone())
-                })
+            match repo_group_cache.get(&(role_target, name.clone())) {
+                Some(&id) => id,
+                None => {
+                    let id = store.find_or_create_repo_group(role_target, &name, identity.clone());
+                    repo_group_cache.insert((role_target, name), id);
+                    id
+                }
+            }
         } else {
             role_target
         };
@@ -314,9 +427,10 @@ fn ingest_role_routed(
         // refreshes the feed-owned fields.
         if let Some(task) = existing.get(&item.external_id) {
             if task.epic_id != target {
-                ctx.db.tasks().id().update(Task {
+                let updated_at = store.now();
+                store.update_task(Task {
                     epic_id: target,
-                    updated_at: now(ctx),
+                    updated_at,
                     ..task.clone()
                 });
             }
@@ -325,17 +439,17 @@ fn ingest_role_routed(
     }
 
     for (sub, group) in groups {
-        upsert_feed_tasks_inner(ctx, sub, group, created_by, !additive)?;
+        store.upsert_feed_tasks(sub, group, created_by, !additive)?;
     }
     if !additive {
         let keep: HashSet<&str> = all_external_ids.iter().map(String::as_str).collect();
-        delete_stale_in_children(ctx, parent.id, &keep);
+        store.delete_stale_in_children(parent.id, &keep);
         for &sub in &roles {
-            delete_stale_in_children(ctx, sub, &keep);
+            store.delete_stale_in_children(sub, &keep);
         }
         // A reviews parent holds no feed task directly: whatever is left on it
         // is a merged stray or a duplicate of a routed copy.
-        delete_stale_feed_tasks_in_epic(ctx, parent.id, &HashSet::new());
+        store.delete_stale_feed_tasks_in_epic(parent.id, &HashSet::new());
     }
 
     let repo_groups: HashSet<i64> = repo_group_cache
@@ -343,11 +457,11 @@ fn ingest_role_routed(
         .chain(pre_existing_repo_groups)
         .collect();
     for id in repo_groups {
-        recalculate_epic_chain(ctx, id);
+        store.recalculate_epic_chain(id);
     }
     for &sub in &roles {
-        recalculate_epic_chain(ctx, sub);
+        store.recalculate_epic_chain(sub);
     }
-    recalculate_epic_chain(ctx, parent.id);
+    store.recalculate_epic_chain(parent.id);
     Ok(())
 }

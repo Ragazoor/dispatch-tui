@@ -130,7 +130,8 @@ enum EpicOrigin { manual | repo_group }
 enum TaskStatus { backlog | running | review | done }
 
 -- SubStatus refines the parent status into a more precise state.
--- Valid combinations are constrained by SubStatus.is_valid_for(status).
+-- Valid combinations are the pairs listed under "Valid SubStatus values per
+-- parent status" below.
 -- When status changes, sub_status resets to SubStatus.default_for(new_status).
 enum SubStatus {
     -- backlog / done
@@ -247,8 +248,10 @@ enum ColumnSection {
 -- that has a PR renders under plain awaiting_review, because once a PR exists
 -- only the review decision matters.
 
--- Valid SubStatus values per parent status (enforced in the DB by a CHECK
--- constraint and in-code via SubStatus.is_valid_for):
+-- Valid SubStatus values per parent status (enforced by the store: its
+-- patch_task reducer refuses an explicit sub_status outside this table for the
+-- status the row will hold, before applying anything — see mcp-task-tools.allium:
+-- UpdateTaskViaMcp):
 --   backlog   : none
 --   running   : active | needs_input | stale | crashed | conflict
 --   review    : awaiting_review | changes_requested | approved | conflict | pr_closed | pr_unreachable

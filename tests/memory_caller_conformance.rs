@@ -19,8 +19,10 @@
 //! module's own pure helpers directly (`derive_epic_status`,
 //! `stamps_completion`, `apply_task_patch`, `apply_epic_patch`,
 //! `apply_learning_patch`, `validate_task_ownership`, `validate_learning_scope`,
-//! `subscription_id`, `claimable_by`) — for those, "the same function" makes
-//! agreement structural rather than something a test needs to establish. What
+//! `validate_status`, `subscription_id`, `claimable_by`), and runs the module's
+//! own feed-ingest body (`ingest_into`, generic over `IngestStore`) against its
+//! rows — for those, "the same function" makes agreement structural rather
+//! than something a test needs to establish. What
 //! is NOT guaranteed by construction is everything this file's own
 //! reimplementation invents by hand: id generation, row storage, delete
 //! cascades, claim/release exclusivity (which side refuses, not its exact

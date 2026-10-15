@@ -220,10 +220,13 @@ rule UpdateTaskViaMcp {
     -- and is read from the true row, not a subscription view. The service
     -- passes the sub_status through. The refusal reads "sub_status 'x' is not
     -- valid for status 'y'" and reaches the caller as an invalid-params error.
+    -- `sub_status_valid_for(sub_status, status)` is a black box naming the
+    -- store's legality table, the pairs listed in core.allium under "Valid
+    -- SubStatus values per parent status".
     requires:
         if sub_status != null:
             let effective_status = if status != null: status else: task.status
-            sub_status.is_valid_for(effective_status)
+            sub_status_valid_for(sub_status, effective_status)
 
     -- The MCP tool's advertised sub_status enum deliberately omits pr_closed
     -- and pr_unreachable: both are derived from GitHub PR polling
