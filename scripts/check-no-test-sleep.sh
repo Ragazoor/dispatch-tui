@@ -5,13 +5,14 @@
 # measure it, both of which are flaky on slow CI and needlessly slow. See
 # docs/conventions.md ("No `tokio::time::sleep` in tests").
 #
-# Two checks:
+# Two checks, both in *test code* only:
 #
-#  1. `tokio::time::sleep(` anywhere under src/ or tests/. Production code has
-#     no legitimate use for it, so this one is unconditional.
-#  2. In *test code* only: `std::thread::sleep(` and `.elapsed()`. Production
-#     use of both is legitimate — `src/process.rs` and `src/runtime/mod.rs`
-#     sleep, and TTL/interval checks all over the TUI read `.elapsed()`.
+#  1. `tokio::time::sleep(`. Unconditional: the allow marker below does not
+#     exempt it. Production use is legitimate — `next_loop_event` in
+#     src/runtime/event_loop.rs awaits it for the frame-wait deadline.
+#  2. `std::thread::sleep(` and `.elapsed()`. Production use of both is
+#     legitimate — `src/process.rs` and `src/runtime/mod.rs` sleep, and
+#     TTL/interval checks all over the TUI read `.elapsed()`.
 #
 # "Test code" means a test file — anything under tests/, under a src/**/tests/
 # directory, or named tests.rs or *_tests.rs — **or** an inline `#[cfg(test)] mod <name> { …
@@ -26,7 +27,7 @@
 # close a region early is a multi-line string literal with a line starting at
 # column 0 with `}`. That under-reports rather than false-positives.
 #
-# Escape hatch for check 2: an `allow-test-sleep:` comment on the offending
+# Escape hatch for check 2 only: an `allow-test-sleep:` comment on the offending
 # line or the line directly above it, carrying a reason. It exists for the one
 # shape a grep cannot distinguish from a fixed wall-clock dependence — a poll
 # loop that checks a condition against a deadline, where only the failure path
@@ -43,18 +44,10 @@
 # Run from the repo root. Exits non-zero if any match is found.
 set -euo pipefail
 
-if hits=$(grep -rnF --include='*.rs' 'tokio::time::sleep(' src tests 2>/dev/null); then
-    echo "check-no-test-sleep: forbidden tokio::time::sleep() found:" >&2
-    echo "$hits" >&2
-    echo >&2
-    echo "Await a deterministic completion signal (oneshot/Notify/mpsc event)" >&2
-    echo "or inject a clock instead of sleeping. See docs/conventions.md." >&2
-    exit 1
-fi
-
-# Wall-clock reads and sleeps in test code, one "path:line:text" per line. The
-# awk pass decides what counts as test code; the bash loop below applies the
-# allow-marker exemption.
+# Wall-clock reads and sleeps in test code, one "kind:path:line:text" per line,
+# where kind is `tokio` (check 1) or `wall` (check 2). The awk pass decides what
+# counts as test code; the bash loop below applies the allow-marker exemption to
+# `wall` hits only.
 # `-exec … +` runs nothing at all when no file matches, so no emptiness guard is
 # needed; if the arg list is long enough to split, FNR == 1 resets per-file state.
 test_hits=$(
@@ -73,16 +66,27 @@ test_hits=$(
             }
             if (in_mod && $0 ~ /^\}/) { in_mod = 0; next }
         }
-        (test_file || in_mod) &&
-        (index($0, "std::thread::sleep(") > 0 || index($0, ".elapsed()") > 0) {
-            printf "%s:%d:%s\n", FILENAME, FNR, $0
+        !(test_file || in_mod) { next }
+        index($0, "tokio::time::sleep(") > 0 {
+            printf "tokio:%s:%d:%s\n", FILENAME, FNR, $0
+            next
+        }
+        index($0, "std::thread::sleep(") > 0 || index($0, ".elapsed()") > 0 {
+            printf "wall:%s:%d:%s\n", FILENAME, FNR, $0
         }
     ' {} +
 )
 
+sleeps=""
 violations=""
-while IFS= read -r hit; do
-    [ -z "$hit" ] && continue
+while IFS= read -r tagged; do
+    [ -z "$tagged" ] && continue
+    kind=${tagged%%:*}
+    hit=${tagged#*:}
+    if [ "$kind" = tokio ]; then
+        sleeps="${sleeps}${hit}"$'\n'
+        continue
+    fi
     file=${hit%%:*}
     rest=${hit#*:}
     line=${rest%%:*}
@@ -96,6 +100,16 @@ while IFS= read -r hit; do
 done <<EOF
 $test_hits
 EOF
+
+if [ -n "${sleeps//[$'\n']/}" ]; then
+    echo "check-no-test-sleep: forbidden tokio::time::sleep() in test code:" >&2
+    printf '%s' "$sleeps" >&2
+    echo >&2
+    echo "Await a deterministic completion signal (oneshot/Notify/mpsc event)" >&2
+    echo "or inject a clock instead of sleeping. The allow-test-sleep marker" >&2
+    echo "does not apply here. See docs/conventions.md." >&2
+    exit 1
+fi
 
 if [ -n "${violations//[$'\n']/}" ]; then
     echo "check-no-test-sleep: test code must not sleep on or measure the wall clock:" >&2

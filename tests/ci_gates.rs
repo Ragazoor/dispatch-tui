@@ -11,7 +11,9 @@
 //! It also pins the two coverage-job properties #4221 fixed: tarpaulin runs
 //! once (it used to run the whole suite twice, once for XML and once for the
 //! stdout summary), and it enforces a floor rather than reporting a number
-//! nobody reads.
+//! nobody reads. The later tests pin what keeps that floor passable: the
+//! bindings and `spacetime/module` exclusions, and a `--timeout` long enough
+//! for the live-store tests.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -119,5 +121,46 @@ fn ci_coverage_job_excludes_generated_bindings() {
         run.contains("--exclude-files 'src/spacetime/bindings/*'"),
         "generated bindings are ~7% covered and would drag the gated figure down; \
          pass `--exclude-files 'src/spacetime/bindings/*'` to tarpaulin"
+    );
+}
+
+#[test]
+fn ci_coverage_job_excludes_the_spacetime_module_crate() {
+    let ci = repo_file(".github/workflows/ci.yml");
+    let run = ci
+        .lines()
+        .find(|l| l.trim_start().starts_with("run: cargo tarpaulin"))
+        .expect("the coverage job must run `cargo tarpaulin`");
+    assert!(
+        run.contains("--exclude-files 'spacetime/module/*'"),
+        "the module's reducers run as wasm inside the live store, so tarpaulin \
+         sees ~26% of `spacetime/module/src` and the gated figure drops under \
+         the floor; pass `--exclude-files 'spacetime/module/*'` to tarpaulin"
+    );
+}
+
+#[test]
+fn ci_coverage_job_sets_a_test_timeout() {
+    let ci = repo_file(".github/workflows/ci.yml");
+    let run = ci
+        .lines()
+        .find(|l| l.trim_start().starts_with("run: cargo tarpaulin"))
+        .expect("the coverage job must run `cargo tarpaulin`");
+    let secs = run
+        .split_once("--timeout")
+        .map(|(_, rest)| {
+            rest.trim_start()
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+        })
+        .and_then(|d| d.parse::<u32>().ok())
+        .expect(
+            "the coverage job must pass `--timeout <secs>` to tarpaulin; its 60s \
+             default kills the live-store tests (run 37892931546)",
+        );
+    assert!(
+        secs >= 300,
+        "tarpaulin --timeout {secs} is too short for the live-store tests"
     );
 }

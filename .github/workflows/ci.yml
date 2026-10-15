@@ -243,7 +243,23 @@ jobs:
       # re-measured 86.16% (19430/22552 lines, same settings, 2026-10-08).
       # With `spacetime` installed and the live-store tests running under
       # tarpaulin it measured 87.05% (19593/22509 lines, llvm engine, bindings
-      # excluded, 2026-10-08); floor 86 = ~1 point of slack.
+      # excluded, 2026-10-08).
+      #
+      # `--exclude-files 'spacetime/module/*'` keeps the SpacetimeDB module crate
+      # out too. It became a `test-support` path dependency, so tarpaulin
+      # instruments `spacetime/module/src` natively — but its reducers run as wasm
+      # inside the live store, where tarpaulin cannot see them: 25.93% covered,
+      # seven files at 0%, which dropped the figure to 85.74% (2026-10-14). The
+      # module is checked by `check-spacetime-module.sh` and the live-store tests,
+      # not by this number. With both exclusions it measured 92.17%
+      # (21117/22910 lines, llvm engine, `spacetime` on PATH, 2026-10-15). The
+      # floor stays at 86 for now, ~6 points of slack; raise it deliberately.
+      #
+      # `--timeout 600` is per test. Tarpaulin's 60s default killed the
+      # live-store tests in `tests/spacetime_module.rs` ("Timed out waiting for
+      # test response", run 37892931546); that target took 256s locally under
+      # tarpaulin. If it still trips, run the live-store targets outside
+      # tarpaulin and merge the reports.
       #
       # `--engine llvm` is pinned because the floor is calibrated against it.
       # The default (`Auto`) engine measured 88.54% on the same tree the llvm
@@ -251,7 +267,7 @@ jobs:
       # in the code. Leaving the engine to the default would leave a floor of 88
       # half a point of slack and fail on noise.
       - name: Run coverage
-        run: cargo tarpaulin --engine llvm --target x86_64-unknown-linux-gnu --out xml --out stdout --output-dir coverage/ --exclude-files 'src/spacetime/bindings/*' --fail-under 86
+        run: cargo tarpaulin --engine llvm --target x86_64-unknown-linux-gnu --out xml --out stdout --output-dir coverage/ --exclude-files 'src/spacetime/bindings/*' --exclude-files 'spacetime/module/*' --timeout 600 --fail-under 86
 
       # `if: always()` so the report still uploads when the floor trips — that is
       # exactly the run whose per-file numbers someone needs to read.

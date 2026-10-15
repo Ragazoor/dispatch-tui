@@ -28,7 +28,7 @@ cargo run -- tui
 
 **Run `cargo test --no-fail-fast`.** Plain `cargo test` stops at the first failing target, so later targets never run. The live-store tests in `tests/spacetime_module.rs` can flake on a one-off transport error (`Connection reset by peer`, or `error sending request … connection error`); `Instance::publish` and `Instance::sql` each retry once on one, so a failure that survives is real.
 
-**Raw coverage includes generated bindings.** Pass `--exclude-files 'src/spacetime/bindings/*'`, as CI does, or the figure is not comparable to the floor.
+**Raw coverage includes generated bindings and the module crate.** Pass `--exclude-files 'src/spacetime/bindings/*' --exclude-files 'spacetime/module/*' --timeout 600`, as CI does, or the figure is not comparable to the floor.
 
 **`--data-dir` names a directory** (`DISPATCH_DATA_DIR`). The old `--db` flag is gone.
 

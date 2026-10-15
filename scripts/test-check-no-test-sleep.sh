@@ -48,18 +48,36 @@ expect() {
     fi
 }
 
-# --- tokio::time::sleep: banned everywhere under src/ and tests/. -----------
+# --- tokio::time::sleep: production is fine, test code is not. -------------
 
-expect 1 src/prod.rs 'fn f() {
+# A production timer (the frame-wait deadline in src/runtime/event_loop.rs) is a
+# legitimate use; only test code is barred from it.
+expect 0 src/prod.rs 'fn f() {
     tokio::time::sleep(d).await;
-}' 'tokio::time::sleep in production fails'
+}' 'tokio::time::sleep in production passes'
 
 expect 1 tests/it.rs 'fn f() {
     tokio::time::sleep(d).await;
 }' 'tokio::time::sleep in an integration test fails'
 
-expect 0 src/prod.rs '/// Never call tokio::time::sleep in a test.
-fn f() {}' 'a prose mention of tokio::time::sleep passes'
+expect 1 src/prod.rs 'fn prod() {}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn t() {
+        tokio::time::sleep(d).await;
+    }
+}' 'tokio::time::sleep in an inline test module fails'
+
+# The allow marker is for deadline-bounded std::thread::sleep / .elapsed() poll
+# steps only; an async test has a completion signal to await instead.
+expect 1 tests/it.rs 'async fn f() {
+    tokio::time::sleep(d).await; // allow-test-sleep: not honoured here
+}' 'an allow marker does not exempt tokio::time::sleep in test code'
+
+expect 0 tests/it.rs '/// Never call tokio::time::sleep in a test.
+fn f() {}' 'a prose mention of tokio::time::sleep in test code passes'
 
 # --- std::thread::sleep: production is fine, test code is not. -------------
 
