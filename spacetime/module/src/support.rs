@@ -62,7 +62,7 @@ pub(crate) const KNOWN_STATUSES: [&str; 4] = [BACKLOG, RUNNING, REVIEW, DONE];
 /// row of every write, so a patch that moves a legacy row to a known status
 /// succeeds and one that leaves it unknown is refused. Deleting is not a write
 /// and is not checked. `kind` is "task" or "epic".
-pub(crate) fn validate_status(kind: &str, id: i64, status: &str) -> Result<(), String> {
+pub fn validate_status(kind: &str, id: i64, status: &str) -> Result<(), String> {
     if KNOWN_STATUSES.contains(&status) {
         Ok(())
     } else {

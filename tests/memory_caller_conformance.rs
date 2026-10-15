@@ -1869,6 +1869,34 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         assert!(why.contains("sub_status 'active' is not valid for status 'backlog'"));
         same_task(task.0);
 
+        // -- unknown status (spacetime-seed.allium: StoreRefusesUnknownStatus) --
+        let unknown_task_status = bindings::TaskPatch {
+            status: Some("archived".into()),
+            ..blank_task_patch()
+        };
+        let why = refused(
+            real.patch_task(task, unknown_task_status.clone())
+                .await
+                .unwrap(),
+            mem.patch_task(task, unknown_task_status).await.unwrap(),
+        );
+        assert!(why.contains("unknown status \"archived\""), "{why}");
+        same_task(task.0);
+        let unknown_epic_status = bindings::EpicPatch {
+            status: Some("archived".into()),
+            ..blank_epic_patch()
+        };
+        let why = refused(
+            real.patch_epic(EpicId(root), unknown_epic_status.clone())
+                .await
+                .unwrap(),
+            mem.patch_epic(EpicId(root), unknown_epic_status)
+                .await
+                .unwrap(),
+        );
+        assert!(why.contains("unknown status \"archived\""), "{why}");
+        same_epic(root);
+
         // -- reparent checks -----------------------------------------------------
         let into_own_sub_epic = bindings::EpicPatch {
             parent_epic_id: Some(sub),

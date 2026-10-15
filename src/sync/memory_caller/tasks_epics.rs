@@ -13,10 +13,10 @@ use super::super::writes::{ReducerOutcome, StoreRefusal};
 use super::{MemoryReducerCaller, Tables, DONE, MAX_EPIC_DEPTH};
 
 impl MemoryReducerCaller {
-    /// Mirrors the module's `write_task`: validates ownership, stamps
-    /// `completed_at` on a row born `done`, assigns an id if none was given,
-    /// and pushes the result to `SharedRows`. Held under `tables`'s lock by
-    /// every caller.
+    /// Mirrors the module's `write_task`: validates ownership and status,
+    /// stamps `completed_at` on a row born `done`, assigns an id if none was
+    /// given, and pushes the result to `SharedRows`. Held under `tables`'s lock
+    /// by every caller.
     pub(super) fn write_task(
         &self,
         tables: &mut Tables,
@@ -24,6 +24,7 @@ impl MemoryReducerCaller {
     ) -> Result<(), String> {
         module::validate_task_ownership(row.epic_id, &row.owner)
             .map_err(|why| format!("task {}: {why}", row.id))?;
+        module::validate_status("task", row.id, &row.status)?;
         if row.status == DONE && row.completed_at.is_empty() {
             row.completed_at = self.now();
         }
@@ -335,6 +336,9 @@ impl MemoryReducerCaller {
     pub(super) fn apply_create_epic(&self, row: bindings::Epic) -> Result<EpicId> {
         let mut tables = self.lock();
         let parent = row.parent_epic_id;
+        // The module validates on its two epic reducers, not on every epic
+        // insert; the double mirrors that placement.
+        module::validate_status("epic", row.id, &row.status).map_err(anyhow::Error::msg)?;
         let id = self.write_epic(
             &mut tables,
             module::Epic {
@@ -371,6 +375,9 @@ impl MemoryReducerCaller {
             row.completed_at = self.now();
         }
         row.updated_at = self.now();
+        if let Err(why) = module::validate_status("epic", row.id, &row.status) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         self.write_epic(&mut tables, row);
 
         self.recalculate_epic_chain(&mut tables, id);

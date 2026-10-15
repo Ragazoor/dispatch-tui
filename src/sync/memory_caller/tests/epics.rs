@@ -12,6 +12,22 @@ async fn create_epic_generates_sequential_ids() {
     assert_eq!(rows.epics().len(), 2);
 }
 
+/// `spacetime-seed.allium: StoreRefusesUnknownStatus`, through the module's own
+/// `validate_status`: a create with an unknown status writes nothing.
+#[tokio::test]
+async fn create_epic_refuses_an_unknown_status() {
+    let (caller, rows) = caller();
+    let why = caller
+        .create_epic(bindings::Epic {
+            status: "archived".into(),
+            ..blank_epic()
+        })
+        .await
+        .unwrap_err();
+    assert!(why.to_string().contains("unknown status"), "{why}");
+    assert!(rows.epics().is_empty());
+}
+
 #[tokio::test]
 async fn epic_flips_to_done_when_every_child_task_is_done_and_back_when_one_regresses() {
     let (caller, rows) = caller();
