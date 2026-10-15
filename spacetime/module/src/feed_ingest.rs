@@ -51,9 +51,8 @@ pub trait IngestStore {
     /// The direct child epics of `parent`.
     fn child_epics(&self, parent: i64) -> Vec<Epic>;
     fn tasks_in_epic(&self, epic_id: i64) -> Vec<Task>;
-    /// The non-empty `external_id`s of every task anywhere under `root`,
-    /// `root` included.
-    fn subtree_external_ids(&self, root: i64) -> HashSet<String>;
+    /// `root` and every epic under it.
+    fn subtree_ids(&self, root: i64) -> HashSet<i64>;
     fn is_retired(&self, feed_epic_id: i64, external_id: &str) -> bool;
     /// The calling identity, as `caller_identity` reads it.
     fn identity(&self) -> String;
@@ -73,7 +72,6 @@ pub trait IngestStore {
         created_by: &str,
         delete_absent: bool,
     ) -> Result<(), String>;
-    fn delete_stale_in_children(&mut self, parent: i64, keep: &HashSet<&str>);
     fn delete_stale_feed_tasks_in_epic(&mut self, epic_id: i64, keep: &HashSet<&str>);
     fn recalculate_epic_chain(&mut self, epic_id: i64);
 }
@@ -91,13 +89,8 @@ impl IngestStore for ReducerStore<'_> {
     fn tasks_in_epic(&self, epic_id: i64) -> Vec<Task> {
         self.0.db.tasks().epic_id().filter(&epic_id).collect()
     }
-    fn subtree_external_ids(&self, root: i64) -> HashSet<String> {
+    fn subtree_ids(&self, root: i64) -> HashSet<i64> {
         collect_epic_subtree_ids(self.0, root)
-            .iter()
-            .flat_map(|&e| self.0.db.tasks().epic_id().filter(&e).collect::<Vec<_>>())
-            .map(|t| t.external_id)
-            .filter(|e| !e.is_empty())
-            .collect()
     }
     fn is_retired(&self, feed_epic_id: i64, external_id: &str) -> bool {
         is_retired(self.0, feed_epic_id, external_id)
@@ -131,9 +124,6 @@ impl IngestStore for ReducerStore<'_> {
         delete_absent: bool,
     ) -> Result<(), String> {
         upsert_feed_tasks_inner(self.0, epic_id, items, created_by, delete_absent)
-    }
-    fn delete_stale_in_children(&mut self, parent: i64, keep: &HashSet<&str>) {
-        delete_stale_in_children(self.0, parent, keep)
     }
     fn delete_stale_feed_tasks_in_epic(&mut self, epic_id: i64, keep: &HashSet<&str>) {
         delete_stale_feed_tasks_in_epic(self.0, epic_id, keep)
@@ -297,12 +287,26 @@ fn retired_without_task<'a>(
     if candidates.is_empty() {
         return HashSet::new();
     }
-    let survivors = store.subtree_external_ids(feed_epic_id);
+    let survivors: HashSet<String> = store
+        .subtree_ids(feed_epic_id)
+        .into_iter()
+        .flat_map(|e| store.tasks_in_epic(e))
+        .map(|t| t.external_id)
+        .filter(|e| !e.is_empty())
+        .collect();
     candidates
         .iter()
         .copied()
         .filter(|c| store.is_retired(feed_epic_id, c) && !survivors.contains(*c))
         .collect()
+}
+
+/// Delete stale feed tasks in every direct child epic of `parent`, keeping
+/// only `keep`. Manual tasks (`external_id` empty) are always preserved.
+fn delete_stale_in_children(store: &mut impl IngestStore, parent: i64, keep: &HashSet<&str>) {
+    for child in store.child_epics(parent) {
+        store.delete_stale_feed_tasks_in_epic(child.id, keep);
+    }
 }
 
 /// The role sub-epic of `parent` carrying `role`, created when absent.
@@ -408,14 +412,11 @@ fn ingest_role_routed(
             .is_some_and(|e| can_auto_group(e.group_by_repo, &e.feed_command));
         let target = if groups_by_repo {
             let name = repo_name_from_url(&item.url);
-            match repo_group_cache.get(&(role_target, name.clone())) {
-                Some(&id) => id,
-                None => {
-                    let id = store.find_or_create_repo_group(role_target, &name, identity.clone());
-                    repo_group_cache.insert((role_target, name), id);
-                    id
-                }
-            }
+            *repo_group_cache
+                .entry((role_target, name.clone()))
+                .or_insert_with(|| {
+                    store.find_or_create_repo_group(role_target, &name, identity.clone())
+                })
         } else {
             role_target
         };
@@ -443,9 +444,9 @@ fn ingest_role_routed(
     }
     if !additive {
         let keep: HashSet<&str> = all_external_ids.iter().map(String::as_str).collect();
-        store.delete_stale_in_children(parent.id, &keep);
+        delete_stale_in_children(store, parent.id, &keep);
         for &sub in &roles {
-            store.delete_stale_in_children(sub, &keep);
+            delete_stale_in_children(store, sub, &keep);
         }
         // A reviews parent holds no feed task directly: whatever is left on it
         // is a merged stray or a duplicate of a routed copy.

@@ -209,7 +209,7 @@ pub(crate) fn upsert_feed_item(
 
 /// Delete every task in `epic_id` whose `external_id` is set and not in
 /// `keep`. Shared by [`upsert_feed_tasks_inner`]'s single-epic pass and
-/// [`delete_stale_in_children`]'s per-child-epic loop.
+/// `feed_ingest.rs`'s per-child-epic loop.
 ///
 /// Owes each removed row [`delete_task_side_effects`] the same as any other
 /// task removal — see that function's doc comment.
@@ -276,26 +276,6 @@ pub fn upsert_feed_tasks(
     created_by: String,
 ) -> Result<(), String> {
     upsert_feed_tasks_inner(ctx, epic_id, items, &created_by, true)
-}
-
-/// Delete stale feed tasks across the WHOLE subtree of `parent_id` (every
-/// direct child epic), keeping only `keep`. Manual tasks (`external_id`
-/// empty) are always preserved. Used by `ingest_feed`.
-pub(crate) fn delete_stale_in_children(
-    ctx: &ReducerContext,
-    parent_id: i64,
-    keep: &std::collections::HashSet<&str>,
-) {
-    let child_epics: Vec<i64> = ctx
-        .db
-        .epics()
-        .parent_epic_id()
-        .filter(&parent_id)
-        .map(|e| e.id)
-        .collect();
-    for epic_id in child_epics {
-        delete_stale_feed_tasks_in_epic(ctx, epic_id, keep);
-    }
 }
 
 /// feeds.allium: `DropClosedRetiredFeedItems`. Drop every `retired_feed_items`

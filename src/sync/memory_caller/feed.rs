@@ -484,14 +484,8 @@ impl module::IngestStore for TablesIngest<'_> {
             .collect()
     }
 
-    fn subtree_external_ids(&self, root: i64) -> HashSet<String> {
-        let subtree = MemoryReducerCaller::collect_epic_subtree_ids(self.tables, root);
-        self.tables
-            .tasks
-            .values()
-            .filter(|t| subtree.contains(&t.epic_id) && !t.external_id.is_empty())
-            .map(|t| t.external_id.clone())
-            .collect()
+    fn subtree_ids(&self, root: i64) -> HashSet<i64> {
+        MemoryReducerCaller::collect_epic_subtree_ids(self.tables, root)
     }
 
     fn is_retired(&self, feed_epic_id: i64, external_id: &str) -> bool {
@@ -552,20 +546,6 @@ impl module::IngestStore for TablesIngest<'_> {
         ) {
             ReducerOutcome::Refused(why) => Err(why),
             _ => Ok(()),
-        }
-    }
-
-    fn delete_stale_in_children(&mut self, parent: i64, keep: &HashSet<&str>) {
-        let children: Vec<i64> = self
-            .tables
-            .epics
-            .values()
-            .filter(|e| e.parent_epic_id == parent)
-            .map(|e| e.id)
-            .collect();
-        for child in children {
-            self.caller
-                .delete_stale_feed_tasks_in_epic(self.tables, child, keep);
         }
     }
 
