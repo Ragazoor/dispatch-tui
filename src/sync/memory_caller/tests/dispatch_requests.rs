@@ -530,7 +530,8 @@ async fn the_backstop_fails_an_open_row_and_a_late_report_is_refused() {
     );
 }
 
-/// A row its host already finished is left alone by the backstop.
+/// A row its host already finished is left alone by the backstop, and the
+/// expiry still succeeds, as the module's does.
 #[tokio::test]
 async fn the_backstop_leaves_a_finished_row_alone() {
     let (caller, rows) = caller();
@@ -540,12 +541,15 @@ async fn the_backstop_leaves_a_finished_row_alone() {
         .await
         .unwrap();
 
-    caller.expire_dispatch_request(id);
+    let before = rows.dispatch_request(id).unwrap();
 
-    assert_eq!(
-        rows.dispatch_request(id).unwrap().state,
-        DispatchRequestState::Dispatched
+    assert!(
+        caller.expire_dispatch_request(id).won(),
+        "the module's expiry answers Ok on a finished row, so the double does too"
     );
+
+    assert_eq!(rows.dispatch_request(id).unwrap(), before);
+    assert_eq!(before.state, DispatchRequestState::Dispatched);
 }
 
 // -- HostRestartFailsInterrupted ----------------------------------------------

@@ -285,11 +285,9 @@ impl MemoryReducerCaller {
         let Some(row) = tables.dispatch_requests.get(&id.0).cloned() else {
             return ReducerOutcome::Applied(vec![]);
         };
+        // Its own report won: Ok, as the module's version answers.
         if !module::dispatch_request_is_open(&row.state) {
-            return ReducerOutcome::Refused(format!(
-                "dispatch request {} has already finished",
-                id.0
-            ));
+            return ReducerOutcome::Applied(vec![]);
         }
         match self.fail_dispatch_request(&mut tables, row, module::DISPATCH_REASON_TIMED_OUT) {
             Ok(()) => ReducerOutcome::Applied(vec![]),

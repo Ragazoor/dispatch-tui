@@ -421,11 +421,9 @@ impl MemoryReducerCaller {
         let Some(row) = tables.session_requests.get(&id.0).cloned() else {
             return ReducerOutcome::Applied(vec![]);
         };
+        // Its own report won: Ok, as the module's version answers.
         if !module::session_request_is_open(&row.state) {
-            return ReducerOutcome::Refused(format!(
-                "session request {} has already finished",
-                id.0
-            ));
+            return ReducerOutcome::Applied(vec![]);
         }
         self.fail_session_request(&mut tables, row, module::SESSION_REASON_TIMED_OUT);
         ReducerOutcome::Applied(vec![])

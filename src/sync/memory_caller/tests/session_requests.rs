@@ -902,8 +902,14 @@ async fn the_backstop_fails_an_open_row_and_leaves_the_task() {
         .await
         .unwrap()
         .won());
+    let finished = rows.session_request(id).unwrap();
     assert!(
-        !caller.expire_session_request(id).won(),
+        caller.expire_session_request(id).won(),
+        "the module's expiry answers Ok on a finished row, so the double does too"
+    );
+    assert_eq!(
+        rows.session_request(id).unwrap(),
+        finished,
         "a finished row is not failed again"
     );
 }
