@@ -95,7 +95,7 @@ to look.
 | `src/feed/exec.rs` | `resolve_base_branches()` (cached per-path git lookup), `exec_feed_command()` (async shell spawn + stdout capture) |
 | `src/feed/parse.rs` | `parse_feed_items()` — JSON → `Vec<FeedItem>` deserialization |
 | `src/feed/ingest/mod.rs` | `FeedItemWithTarget` (an item with its local repo path and base branch), `ingest_emission()` — posts an emission to the module's `ingest_feed` reducer, which routes, groups, upserts and reconciles |
-| `spacetime/module`'s `feed_ingest.rs` | What an emission does to the store (store-split M3): `ingest_feed` picks flat, grouped or role-routed from the epic's own row, filters and routes by signals (`rules.rs`), makes the role and repo sub-epics, upserts, deletes the stale subtree and recalculates, in one transaction. `src/sync/memory_caller/feed.rs` mirrors it |
+| `spacetime/module`'s `feed_ingest.rs` | What an emission does to the store (store-split M3): `ingest_feed` picks flat, grouped or role-routed from the epic's own row, filters and routes by signals (`rules.rs`), makes the role and repo sub-epics, upserts, deletes the stale subtree and recalculates, in one transaction. The body is written once over the `IngestStore` trait; `src/sync/memory_caller/feed.rs` runs it against the double's rows |
 | `src/process.rs` | `ProcessRunner` trait + `RealProcessRunner` / `MockProcessRunner` for testable shell execution |
 | `src/tmux.rs` | Tmux API: create windows, send keys, capture pane output, kill windows |
 | `src/store/board_reads.rs` | The board's card-read handle: `BoardReads` (`TaskRead + EpicRead + RepoConfigRead`, plus `poll_owner` and `revision`), implemented by `Store`. `TuiRuntime::board_reads` holds it |
