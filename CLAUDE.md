@@ -32,9 +32,9 @@ cargo run -- tui
 
 **`--data-dir` names a directory** (`DISPATCH_DATA_DIR`). The old `--db` flag is gone.
 
-**The lib target runs in ~4s once built (measured 3.5s, 5582 tests); a cold full run (including compile) is ~80s.** Run it in the foreground — don't background it. In a *fresh worktree* the first compile is slower than that and a cold `cargo test` can pass 120s, which is Claude Code's default Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
+**Warm, `cargo test --no-fail-fast` takes ~60s: the lib target ~5s (5,926 tests), `tests/spacetime_module.rs` ~45s. In a fresh worktree the first run, compile included, took ~6 minutes.** (Measured 2026-10-15: 22 cores, other agents building, warm `sccache`, `spacetime` on `PATH`; without `spacetime` the live-store tests skip.) Run it in the foreground — don't background it. A cold `cargo test` passes 120s, which is Claude Code's default Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
 
-**Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. Always pass `--engine llvm`: the default engine scores ~1.8 points lower than CI's floor assumes. With `spacetime` on `PATH` the live-store tests run under it too, as in CI; that is slower, not broken. Other caveats are in [docs/testing.md](docs/testing.md).
+**Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. Always pass `--engine llvm`: the default engine scores ~1.8 points lower than CI's floor assumes. With `spacetime` on `PATH` the live-store targets (`tests/spacetime_module.rs`, `tests/memory_caller_conformance.rs`) run under it too, as in CI; that is slower, not broken, and it is what timed the CI job out on 2026-10-09. Other caveats are in [docs/testing.md](docs/testing.md).
 
 Everything else about tests — the per-target command list, snapshot workflow, where a new test belongs, the no-wall-clock-sleep rule, coverage — is in [docs/testing.md](docs/testing.md).
 
@@ -49,6 +49,8 @@ A fresh clone must point git at the tracked hooks once: `git config core.hooksPa
 The pre-push hook (`.githooks/pre-push`) runs `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `check-rustdoc-links.sh` (rustdoc `[`Item`]` links in `src/`; its own CI job), the three doc checkers (`check-doc-paths.sh`, `check-doc-symbols.sh`, `check-doc-headings.sh`, each with a self-test), `check-no-test-sleep.sh`, `test-fetch-reviews.sh` and the spacetime module check. `cargo test` is not part of the hook; run it yourself before pushing. To exempt a deliberate citation, annotate it with `allow-phantom-symbol: <why>` or `allow-phantom-heading: <why>`.
 
 **That `cargo fmt` step has no `--check`.** Pushing reformats your working tree in place, so a push can leave you with unstaged changes you did not make. Run `cargo fmt` yourself before committing and the step becomes a no-op.
+
+**Run the hook's `check-*.sh` scripts before committing, not only before pushing.** A wrap-up rebase lands your commits on `main` without a push, so the hook never runs; two of them (`check-no-test-sleep.sh`, `check-rustdoc-links.sh`) failed on committed `main` on 2026-10-14 this way.
 
 `check-doc-symbols.sh` also scans `///` and `//!` doc comments in `src/`, but not plain `//` comments; backticked lowercase module paths (`db::queries::f`) are checked too.
 
@@ -76,7 +78,7 @@ Logs do not go to stderr — stderr belongs to the TUI. They append to `app.log`
 
 `store::Store` is the board's one read/write handle (`TaskStore` and friends narrow it). It talks to the shared store through the `sync` adapters: `sync::writes` for reducer calls, `sync::sdk_connector` for the SpacetimeDB SDK. `spacetime/` holds the server lifecycle (`managed_store.rs`), generated `bindings/` and snapshot tooling. `sync/memory_caller/` is the in-memory test double, conformance-checked by `tests/memory_caller_conformance.rs`. See [docs/module-map.md](docs/module-map.md).
 
-**Direction of travel:** rules about shared data belong in the SpacetimeDB module's reducers; the TUI keeps only work that needs the operator's machine (git, tmux, claude, gh, local files). Don't add new data rules to `src/service/`. The target and its migration steps are in `docs/specs/store-split.allium` (epic #32769).
+**Direction of travel:** rules about shared data belong in the SpacetimeDB module's reducers; the TUI keeps only work that needs the operator's machine (git, tmux, claude, gh, local files). Don't add new data rules to `src/service/`. A data rule lives in `spacetime/module/src/`; mirror any change to it in `src/sync/memory_caller/` and cover the pair in `tests/memory_caller_conformance.rs`. `RULES_VERSION` (`spacetime/module/src/rules.rs`) and `BOARD_RULES_VERSION` (`src/sync/rules_gate.rs`) move together, by hand; the module constant says what warrants a bump. The target and its migration steps are in `docs/specs/store-split.allium` (epic #32769), the largest spec.
 
 ## External Dependencies
 
@@ -141,7 +143,7 @@ Read these on demand:
 - [docs/how-to.md](docs/how-to.md) — adding an MCP tool, TUI view, entity; knowledge base MCP tools
 - [docs/mcp.md](docs/mcp.md) — MCP notification flow, error codes, debugging handlers, feed epics, knowledge base flow
 - [docs/reference.md](docs/reference.md) — key bindings, CLI subcommands, configuration, environment variables, troubleshooting, learning store
-- [docs/specs/](docs/specs/) — Allium specifications for domain logic (one file per domain: `tasks`, `dispatch`, `epics`, `feeds`, `learnings`, `sync`, `storage`, `startup`, …; `core` holds the shared model — `ls docs/specs/`)
+- [docs/specs/](docs/specs/) — Allium specifications for domain logic (one file per domain: `tasks`, `dispatch`, `epics`, `feeds`, `learnings`, `sync`, `storage`, `startup`, `store-split`, …; `core` holds the shared model — `ls docs/specs/`)
 - [docs/plans/](docs/plans/) — implementation plans and one-off analysis/review docs. **This repo commits them** (the policy was reversed on 2026-07-26); older entries are filed under `docs/plans/archive/`. Neither doc checker scans them, so treat their contents as dated snapshots.
 
 Subsystem entry points (no dedicated doc page — read the source):

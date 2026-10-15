@@ -154,6 +154,8 @@ Skill copy is asserted with targeted `contains` checks (not snapshots) so that d
 
 The same hazard has a rendering form: the buffer-search helpers in `src/tui/tests/helpers.rs` scan **every row of the whole terminal buffer**, not the overlay's rect. An overlay whose bottom rows are clipped off still satisfies an assertion for a bare `"close"` or `"cancel"`, because the board's own footer hint bar is drawn outside the popup and uses the same words. Assert the overlay's exact wording including its bracketed hints (`"[q/Esc] close"`), and run any new overlay assertion against the unfixed code first to confirm it really goes red.
 
+An inline `#[cfg(test)] mod` that grows past ~200 lines moves to a `tests/` submodule of its owning module (`mod tests;` beside the code, the body in `<module>/tests/`), as `src/store/tests/` and `src/mcp/handlers/tests/` do.
+
 Inline test modules (`mod tests`, `mod property_tests`) must have `#[allow(clippy::unwrap_used, clippy::expect_used)]` at the top — the workspace `-D warnings` policy otherwise rejects bare `unwrap()`/`expect()` calls. See `src/store/tests/mod.rs` for the canonical pattern.
 
 ## No wall-clock sleeps in tests
@@ -182,6 +184,8 @@ CI's `coverage` job runs `cargo tarpaulin --engine llvm --out xml --out stdout -
 **The engine is part of the measurement.** On the same tree, `--engine llvm` scored 90.28% (14846/16445 lines) and the default `Auto` engine 88.54% — a ~1.8-point instrumentation difference with no code change behind it. The floor is calibrated against llvm, which is why CI pins it; quote the engine whenever you quote a number, and don't compare a local default-engine run against the CI floor.
 
 Generated SpacetimeDB bindings (`src/spacetime/bindings/`) are excluded: they are ~7% covered and would drag the figure down for code nobody writes. The floor is 86, deliberately ~1 point below the measured figure (87.05%, llvm engine, bindings excluded, live-store tests running with `spacetime` on `PATH`, 2026-10-08). It is a regression tripwire, not a target: raise it by hand when a step-change in coverage makes the headroom pointless, never automatically to whatever the last run scored. Don't chase 100% on render-heavy code or `src/setup/`'s OS-interaction branches (hooks, filesystem writes) — a single file below the average is not by itself a problem.
+
+**The coverage job runs the live store.** CI installs `spacetime`, so `tests/spacetime_module.rs` and `tests/memory_caller_conformance.rs` publish real modules under tarpaulin's instrumentation. They are the slowest part of the job and what timed it out on 2026-10-09; budget for them before adding live-store cases.
 
 Coverage is not in the pre-push hook; every *other* CI gate is, and `tests/ci_gates.rs` asserts the hook's script list and the workflow's stay in sync.
 
