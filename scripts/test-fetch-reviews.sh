@@ -20,8 +20,10 @@
 #     author-bot and nothing else, so route() sends it to Bots
 #   - a bot PR matched by BOTH the bot-author pass and a review query merges
 #     into one item carrying both signals (engagement precedence preserved)
-#   - the bot-author pass is capped PER REPO: one query per (repo x author),
-#     with --limit 20 --sort created --order desc
+#   - the bot-author pass is capped PER REPO: one `gh pr list` per (repo x
+#     author), off the REST search pool,
+#     with --limit 20 --search sort:created-desc; a busy repo cannot starve
+#     a quiet one, and an unreachable repo is skipped loudly (task 77856)
 #   - the bot-author pass is skipped entirely when bots.conf is absent
 #   - the bot-author pass queries BOT_AUTHORS plus RELEASE_BOT_AUTHORS; a PR
 #     by a RELEASE_BOT_AUTHORS bot gets tag "release-please" and author-bot,
@@ -126,37 +128,74 @@ if [[ "$args" == *"api user"* ]]; then
   exit 0
 fi
 
-# Record every search invocation so the test can assert the per-repo cap and
-# sort flags the bot-author pass must use.
+# Repo probe the bot-author pass makes before listing a repo's bot PRs:
+# `gh pr list --author` returns [] for a repo it cannot see, so the probe is
+# what keeps an unreachable repo a loud failure. STUB_UNREACHABLE names a repo
+# whose probe fails.
+if [[ "$args" == "api repos/"* ]]; then
+  printf '%s\n' "$args" >>"$(dirname "$0")/gh-probe.log"
+  repo="${args#api repos/}"
+  repo="${repo%% *}"
+  if [[ -n "${STUB_UNREACHABLE:-}" && "$repo" == "$STUB_UNREACHABLE" ]]; then
+    echo "stub: HTTP 404: Not Found (https://api.github.com/repos/$repo)" >&2
+    exit 1
+  fi
+  printf '%s\n' "$repo"
+  exit 0
+fi
+
+# Record every PR-listing invocation (search prs AND pr list) so the test can
+# assert which pool each pass draws on, the per-repo cap and the sort.
 printf '%s\n' "$args" >>"$(dirname "$0")/gh-args.log"
 
-# Bot-author pass. Checked before the review qualifiers: its queries also
-# carry --repo flags, so it would otherwise fall through to them. The
-# `author:app/` prefix cannot collide with `commenter:@me -author:@me`.
-if [[ "$args" == *"author:app/"* ]]; then
-  if [[ "$args" == *"author:app/testbot"* ]]; then
+# Bot-author pass: `gh pr list --author app/<slug>`. Returns the REAL
+# `gh pr list` shape, which differs from `gh search prs`: no repository field,
+# and the bot author as {"is_bot":true,"login":"app/<slug>"} rather than
+# "<slug>[bot]". The script must normalise both, so the tag and author-bot
+# assertions below only pass if it does.
+if [[ "$args" == "pr list"* ]]; then
+  if [[ "$args" == *"--author app/busybot"* ]]; then
+    # Starvation fixture: testorg/busy has a 25-PR bot backlog, testorg/quiet
+    # has one. The stub HONOURS --limit as GitHub does, so a pass that capped
+    # several repos with one --limit would let busy's backlog crowd quiet out.
+    repo="$(sed -E 's/.*--repo ([^ ]+).*/\1/' <<<"$args")"
+    limit="$(sed -E 's/.*--limit ([0-9]+).*/\1/' <<<"$args")"
+    case "$repo" in
+      testorg/busy) backlog=25 ;;
+      testorg/quiet) backlog=1 ;;
+      *) backlog=0 ;;
+    esac
+    n=$((backlog < limit ? backlog : limit))
+    jq -nc --arg repo "$repo" --argjson n "$n" '
+      [range(0; $n) | 100 + . | {
+        id: ("PR_" + ($repo | split("/")[1]) + "_" + tostring),
+        number: ., title: "Bump", body: "",
+        url: ("https://github.com/" + $repo + "/pull/" + tostring),
+        isDraft: false, author: {is_bot: true, login: "app/busybot"}
+      }]'
+  elif [[ "$args" == *"--author app/testbot"* ]]; then
     # Matched by NO review query, so the test can assert it lands with ONLY
     # the author-bot signal.
     cat <<'JSON'
 [
-  {"id":"PR_9","number":9,"title":"Bump unrelated dep","body":"","url":"https://github.com/testorg/repo/pull/9","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"testbot[bot]"}}
+  {"id":"PR_9","number":9,"title":"Bump unrelated dep","body":"","url":"https://github.com/testorg/repo/pull/9","isDraft":false,"author":{"is_bot":true,"login":"app/testbot"}}
 ]
 JSON
-  elif [[ "$args" == *"author:app/kognic-gha-release-bot"* ]]; then
+  elif [[ "$args" == *"--author app/kognic-gha-release-bot"* ]]; then
     # A release bot listed in RELEASE_BOT_AUTHORS (task 53281). PR11 is
     # matched by NO review query, so it reaches the board only through the
     # bot-author pass querying the release list.
     cat <<'JSON'
 [
-  {"id":"PR_11","number":11,"title":"chore(master): release 9.0.1","body":"","url":"https://github.com/testorg/repo/pull/11","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"kognic-gha-release-bot[bot]"}}
+  {"id":"PR_11","number":11,"title":"chore(master): release 9.0.1","body":"","url":"https://github.com/testorg/repo/pull/11","isDraft":false,"author":{"is_bot":true,"login":"app/kognic-gha-release-bot"}}
 ]
 JSON
-  elif [[ "$args" == *"author:app/dependabot"* ]]; then
+  elif [[ "$args" == *"--author app/dependabot"* ]]; then
     # PR3 is ALSO returned by reviewed-by:@me below, so the test can assert
     # the two passes merge into one item carrying both signals.
     cat <<'JSON'
 [
-  {"id":"PR_3","number":3,"title":"Bump lib","body":"","url":"https://github.com/testorg/repo/pull/3","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"dependabot[bot]"}}
+  {"id":"PR_3","number":3,"title":"Bump lib","body":"","url":"https://github.com/testorg/repo/pull/3","isDraft":false,"author":{"is_bot":true,"login":"app/dependabot"}}
 ]
 JSON
   else
@@ -324,7 +363,7 @@ assert "team-inclusive org-scoped query never runs (PR8 absent)" \
 
 # --- Bot-author pass (bots.conf) -------------------------------------------
 
-# PR9 is matched by NO review query — only by author:app/testbot. It must
+# PR9 is matched by NO review query — only by --author app/testbot. It must
 # carry author-bot and ONLY author-bot, which is what makes route() send it to
 # Bots (RouteSignals rule 2) rather than the my_reviews fallback.
 assert "bot-only PR9 included" \
@@ -336,7 +375,7 @@ assert "bot-only PR9 carries no other signal" \
 assert "bot-only PR9 tagged dependabot" \
   'map(select(.url | endswith("/pull/9"))) | .[0].tag == "dependabot"'
 
-# PR3 is returned by BOTH reviewed-by:@me and author:app/dependabot. It must
+# PR3 is returned by BOTH reviewed-by:@me and --author app/dependabot. It must
 # collapse to one item carrying both signals — engagement then wins over the
 # bot rule in route(), keeping a bot PR the user reviewed in My Reviews.
 assert "PR3 appears exactly once across both passes" \
@@ -346,21 +385,53 @@ assert "PR3 carries reviewed" \
 assert "PR3 carries author-bot" \
   'map(select(.url | endswith("/pull/3"))) | .[0].signals | index("author-bot")'
 
+# The bot-author pass normalises `gh pr list`'s "app/<slug>" author form to
+# the "<slug>[bot]" form `gh search prs` reports, so the label a card shows is
+# the same whichever pass found it. PR9 is reached by the bot pass alone.
+assert "bot-only PR9 is labelled with the [bot] login, not the app/ form" \
+  'map(select(.url | endswith("/pull/9"))) | .[0].labels | index("@testbot[bot]")'
+assert "no item carries an app/ author label" \
+  'all(.labels | all(startswith("@app/") | not))'
+# gh pr list has no repository field; the pass fills it from the queried repo.
+assert "bot-only PR9 carries its repo label" \
+  'map(select(.url | endswith("/pull/9"))) | .[0].labels | index("repo")'
+assert "bot-only PR9 keyed by its repo" \
+  'map(select(.url | endswith("/pull/9"))) | .[0].external_id == "review:testorg/repo#9"'
+
 # The cap is PER REPO, not per query: every bot-author call carries exactly
 # one --repo, --limit 20, and newest-first sorting. A single multi-repo call
 # with one --limit would let a busy repo starve the others.
-bot_calls="$(grep -c 'author:app/' "$WORKDIR/gh-args.log" || true)"
+bot_calls="$(grep -c -- '--author app/' "$WORKDIR/gh-args.log" || true)"
 [[ "$bot_calls" == "3" ]] ||
   fail "expected 3 bot-author calls (1 repo x 3 authors), got $bot_calls"
 while read -r line; do
+  # `gh pr list`, not `gh search prs`: the pass must stay off the REST search
+  # pool, which its per-(repo x author) calls exhausted (task 77856).
+  [[ "$line" == "pr list "* ]] ||
+    fail "bot-author call must use gh pr list, not the search pool: $line"
+  [[ "$line" == *"--state open"* ]] ||
+    fail "bot-author call missing --state open: $line"
   [[ "$line" == *"--limit 20"* ]] ||
     fail "bot-author call missing --limit 20: $line"
-  [[ "$line" == *"--sort created"* && "$line" == *"--order desc"* ]] ||
+  [[ "$line" == *"--search sort:created-desc"* ]] ||
     fail "bot-author call missing newest-first sort: $line"
   repo_count="$(grep -o -- '--repo' <<<"$line" | wc -l)"
   [[ "$repo_count" == "1" ]] ||
     fail "bot-author call must scope ONE repo, got $repo_count: $line"
-done < <(grep 'author:app/' "$WORKDIR/gh-args.log")
+done < <(grep -- '--author app/' "$WORKDIR/gh-args.log")
+
+# Only the seven review searches (4 repo-scoped + 3 org-scoped) draw on the
+# REST search pool, whatever the bot config. Before task 77856 the bot pass
+# added one search per (repo x author) and tripped the secondary rate limit.
+search_calls="$(grep -c '^search prs' "$WORKDIR/gh-args.log" || true)"
+[[ "$search_calls" == "7" ]] ||
+  fail "expected exactly 7 search-pool calls (the review searches), got $search_calls"
+
+# Every repo is probed once before its bot PRs are listed, since gh pr list
+# reads an unreachable repo as an empty one.
+probe_calls="$(grep -c '^api repos/testorg/repo' "$WORKDIR/gh-probe.log" || true)"
+[[ "$probe_calls" == "1" ]] ||
+  fail "expected 1 repo probe (1 repo), got $probe_calls"
 
 # --- Only a CONFIGURED dependency bot earns tag "dependabot" ---------------
 
@@ -515,7 +586,7 @@ assert "without bots.conf, PR3 falls back to tag dependabot" \
 assert "without bots.conf, the release bot falls back too" \
   'map(select(.url | endswith("/pull/10"))) | .[0].tag == "dependabot"'
 
-if grep -q 'author:app/' "$WORKDIR/gh-args.log"; then
+if grep -q -- '--author app/' "$WORKDIR/gh-args.log"; then
   fail "bot-author pass ran without bots.conf"
 fi
 
@@ -537,18 +608,18 @@ RELEASE_BOT_AUTHORS=("app/kognic-gha-release-bot")'
 
 # The bot-author pass queries BOTH lists: one call per (repo x author, either
 # list), each capped per repo and newest-first.
-bot_calls="$(grep -c 'author:app/' "$WORKDIR/gh-args.log" || true)"
+bot_calls="$(grep -c -- '--author app/' "$WORKDIR/gh-args.log" || true)"
 [[ "$bot_calls" == "4" ]] ||
   fail "expected 4 bot-author calls (1 repo x (3 dependency + 1 release) authors), got $bot_calls"
-grep -q 'author:app/kognic-gha-release-bot' "$WORKDIR/gh-args.log" ||
+grep -q -- '--author app/kognic-gha-release-bot' "$WORKDIR/gh-args.log" ||
   fail "the bot-author pass did not query the RELEASE_BOT_AUTHORS bot"
 while read -r line; do
-  [[ "$line" == *"--limit 20"* && "$line" == *"--sort created"* && "$line" == *"--order desc"* ]] ||
+  [[ "$line" == "pr list "* && "$line" == *"--limit 20"* && "$line" == *"--search sort:created-desc"* ]] ||
     fail "release bot-author call is not capped per repo newest-first: $line"
   repo_count="$(grep -o -- '--repo' <<<"$line" | wc -l)"
   [[ "$repo_count" == "1" ]] ||
     fail "release bot-author call must scope ONE repo, got $repo_count: $line"
-done < <(grep 'author:app/kognic-gha-release-bot' "$WORKDIR/gh-args.log")
+done < <(grep -- '--author app/kognic-gha-release-bot' "$WORKDIR/gh-args.log")
 
 # PR11 reaches the board through the bot-author pass alone.
 assert "with a release list, 9 items (PR11 added by the release pass)" 'length == 9'
@@ -593,7 +664,7 @@ assert "an unlisted release bot's PR10 stays pr-review" \
   'map(select(.url | endswith("/pull/10"))) | .[0].tag == "pr-review"'
 assert "no item is tagged release-please when its author is not listed" \
   'all(.tag != "release-please")'
-grep -q 'author:app/some-other-release-bot' "$WORKDIR/gh-args.log" ||
+grep -q -- '--author app/some-other-release-bot' "$WORKDIR/gh-args.log" ||
   fail "the bot-author pass did not query the configured release bot"
 
 # And with NO release list, nothing is ever tagged release-please, even though
@@ -608,7 +679,7 @@ run_with_conf 'BOT_AUTHORS=()
 RELEASE_BOT_AUTHORS=()'
 assert "with both lists empty, no item is tagged release-please" \
   'all(.tag != "release-please")'
-if grep -q 'author:app/' "$WORKDIR/gh-args.log"; then
+if grep -q -- '--author app/' "$WORKDIR/gh-args.log"; then
   fail "bot-author pass ran with both lists empty"
 fi
 
@@ -618,10 +689,10 @@ fi
 
 run_with_conf 'BOT_AUTHORS=()
 RELEASE_BOT_AUTHORS=("app/kognic-gha-release-bot")'
-bot_calls="$(grep -c 'author:app/' "$WORKDIR/gh-args.log" || true)"
+bot_calls="$(grep -c -- '--author app/' "$WORKDIR/gh-args.log" || true)"
 [[ "$bot_calls" == "1" ]] ||
   fail "with only a release list, expected 1 bot-author call, got $bot_calls"
-grep -q 'author:app/kognic-gha-release-bot' "$WORKDIR/gh-args.log" ||
+grep -q -- '--author app/kognic-gha-release-bot' "$WORKDIR/gh-args.log" ||
   fail "with BOT_AUTHORS empty, the pass must still query RELEASE_BOT_AUTHORS"
 assert "with only a release list, 8 items (7 review-query PRs + release-only PR11)" \
   'length == 8'
@@ -635,5 +706,48 @@ assert "with BOT_AUTHORS empty, PR2 still falls back to dependabot" \
   'map(select(.url | endswith("/pull/2"))) | .[0].tag == "dependabot"'
 assert "with BOT_AUTHORS empty, testbot PR9 is not swept in (not on either list)" \
   '[.[] | select(.url | endswith("/pull/9"))] | length == 0'
+
+# ===========================================================================
+# Task 77856: the bot-author pass moved off the REST search pool to
+# `gh pr list`. The no-starvation guarantee must survive the move, and an
+# unreachable repo must stay a loud failure.
+# ===========================================================================
+
+# --- One repo's bot backlog cannot starve another's -------------------------
+
+printf '%s\n' 'REPOS=("testorg/busy" "testorg/quiet")' >"$WORKDIR/repos.conf"
+: >"$WORKDIR/gh-probe.log"
+run_with_conf 'BOT_AUTHORS=("app/busybot")'
+
+assert "the busy repo is capped at 20 bot PRs" \
+  '[.[] | select(.external_id | startswith("review:testorg/busy#"))] | length == 20'
+assert "the quiet repo keeps its bot PR despite the busy repo's backlog" \
+  '[.[] | select(.external_id | startswith("review:testorg/quiet#"))] | length == 1'
+assert "the quiet repo's bot PR routes to Bots" \
+  'map(select(.external_id == "review:testorg/quiet#100")) | .[0].signals == ["author-bot"]'
+bot_calls="$(grep -c -- '--author app/busybot' "$WORKDIR/gh-args.log" || true)"
+[[ "$bot_calls" == "2" ]] ||
+  fail "expected 2 bot-author calls (2 repos x 1 author), got $bot_calls"
+search_calls="$(grep -c '^search prs' "$WORKDIR/gh-args.log" || true)"
+[[ "$search_calls" == "7" ]] ||
+  fail "with 2 repos the search pool still sees only the 7 review searches, got $search_calls"
+
+# --- An unreachable repo is skipped LOUDLY ----------------------------------
+# gh pr list reads a repo it cannot see as one with no PRs. The probe turns
+# that into a stderr line, so the cycle syncs additively and keeps the repo's
+# bot cards instead of removing them.
+
+printf '%s\n' 'BOT_AUTHORS=("app/busybot")' >"$WORKDIR/bots.conf"
+: >"$WORKDIR/gh-args.log"
+output="$(STUB_UNREACHABLE=testorg/busy PATH="$WORKDIR:$PATH" bash "$WORKDIR/fetch-reviews.sh" 2>"$WORKDIR/unreachable.err")"
+grep -q "testorg/busy" "$WORKDIR/unreachable.err" ||
+  fail "an unreachable repo must write a diagnostic naming it to stderr"
+assert "an unreachable repo contributes no bot PRs" \
+  '[.[] | select(.external_id | startswith("review:testorg/busy#"))] | length == 0'
+assert "an unreachable repo does not cost the other repos their bot PRs" \
+  '[.[] | select(.external_id | startswith("review:testorg/quiet#"))] | length == 1'
+if grep -q -- '--repo testorg/busy' <(grep -- '--author app/' "$WORKDIR/gh-args.log"); then
+  fail "the bot-author pass listed PRs in a repo whose probe failed"
+fi
 
 echo "test-fetch-reviews: all assertions passed"

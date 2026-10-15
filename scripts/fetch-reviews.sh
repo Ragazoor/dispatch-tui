@@ -45,7 +45,7 @@
 #
 #   A fifth pass covers bot-authored PRs you have NO review involvement with,
 #   which the four review queries above can never reach:
-#     - author:<bot>              (per bot in bots.conf, per repo in
+#     - --author <bot>            (gh pr list, per bot in bots.conf, per repo in
 #                                  repos.conf) -> signal "author-bot"
 #   Bot logins go in bots.conf (the BOT_AUTHORS array) because they are
 #   deployment-specific: a self-hosted Renovate app is named after the org
@@ -136,7 +136,7 @@ RELEASE_BOT_AUTHORS=()
 # limit. Raising it reduces calls per poll, never correctness.
 CI_BATCH=50
 
-# Per-repo cap on the bot-author pass. Applied to each (repo x author) query
+# Per-repo cap on the bot-author pass. Applied to each (repo x author) call
 # individually — see search_bot_prs for why it is not one capped multi-repo
 # query.
 BOT_LIMIT=20
@@ -350,13 +350,26 @@ to_feed_items() {
 # REPOS, whether or not you are involved in reviewing it. Signal is
 # "author-bot", which dispatch's router maps to the Bots sub-epic.
 #
-# ONE query per (repo x author), deliberately: --limit caps a single gh search
-# call, so one multi-repo call would cap the pass as a WHOLE and let a repo
-# with a large bot backlog starve every other repo out of the emission. The
-# cost is len(REPOS) * len(BOT_AUTHORS) calls per poll. Newest-first so the cap
-# keeps the freshest bumps.
+# ONE query per (repo x author), deliberately: --limit caps a single call, so
+# one multi-repo call would cap the pass as a WHOLE and let a repo with a large
+# bot backlog starve every other repo out of the emission. The cost is
+# len(REPOS) * len(authors) calls per poll. Newest-first so the cap keeps the
+# freshest bumps.
+#
+# `gh pr list`, NOT `gh search prs`: those calls, fired back to back after the
+# seven review searches, exhausted GitHub's REST search pool (30/min plus
+# secondary burst limits) every busy cycle. `gh pr list --author` searches
+# through GraphQL, a separate budget. It differs from `gh search prs` in three
+# ways the pass absorbs here:
+#   - it reports a bot author as "app/<slug>" (is_bot true), not "<slug>[bot]";
+#     rewritten so to_feed_items tags and labels the PR as the review passes do;
+#   - it has no repository field; filled from the repo queried;
+#   - it returns [] and exits 0 for a repo it cannot see, so each repo is
+#     probed first and an unreachable one is skipped LOUDLY — the stderr line
+#     makes the cycle sync additively instead of removing that repo's cards.
+# See the bot-author pass in docs/specs/feed-scripts.allium.
 search_bot_prs() {
-  local repo author raw
+  local repo author raw probe
 
   local all_authors=(${BOT_AUTHORS[@]+"${BOT_AUTHORS[@]}"} ${RELEASE_BOT_AUTHORS[@]+"${RELEASE_BOT_AUTHORS[@]}"})
   if [[ ${#all_authors[@]} -eq 0 || ${#REPOS[@]} -eq 0 ]]; then
@@ -365,22 +378,30 @@ search_bot_prs() {
   fi
 
   for repo in "${REPOS[@]}"; do
+    if ! probe=$(gh api "repos/$repo" --jq .full_name 2>&1); then
+      echo "fetch-reviews: $repo unreachable, skipping its bot PRs: $probe" >&2
+      continue
+    fi
+
     for author in "${all_authors[@]}"; do
-      # `author:<login>` goes after `--` for the same reason the review
-      # qualifiers do. Quoted here: it is always a single term.
-      if ! raw=$(gh search prs \
-        --state=open \
+      if ! raw=$(gh pr list \
         --repo "$repo" \
-        --json id,number,title,body,url,repository,isDraft,author \
+        --author "$author" \
+        --state open \
         --limit "$BOT_LIMIT" \
-        --sort created \
-        --order desc \
-        -- "author:$author"); then
-        echo "fetch-reviews: gh search prs (author:$author in $repo) failed" >&2
+        --search sort:created-desc \
+        --json id,number,title,body,url,isDraft,author); then
+        echo "fetch-reviews: gh pr list (author $author in $repo) failed" >&2
         continue
       fi
 
-      printf '%s' "$raw" | to_feed_items "author-bot"
+      printf '%s' "$raw" | jq --arg repo "$repo" '[
+        .[]
+        | .repository = {name: ($repo | split("/")[1]), nameWithOwner: $repo}
+        | if (.author.is_bot // false) and ((.author.login // "") | startswith("app/"))
+          then .author.login = ((.author.login | sub("^app/"; "")) + "[bot]")
+          else . end
+      ]' | to_feed_items "author-bot"
     done
   done
 }

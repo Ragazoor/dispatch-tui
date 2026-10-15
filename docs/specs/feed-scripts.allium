@@ -170,11 +170,36 @@
 -- authorship would sweep in every dependency-update PR in the org, orders of
 -- magnitude more than the review passes emit.
 --
--- The pass is capped PER REPO, not per query: one `gh search prs` call per
--- (repo x bot author, either list) with `--limit 20 --sort created --order desc`, keeping
--- the newest bumps. A single multi-repo call with one `--limit` would cap the
--- TOTAL, letting one busy repo starve every other repo's bot PRs out of the
--- emission.
+-- The pass is capped PER REPO, not per query: one `gh pr list --repo <repo>
+-- --author <bot> --state open --limit 20 --search sort:created-desc` call per
+-- (repo x bot author, either list), keeping the newest bumps. A single
+-- multi-repo call with one `--limit` would cap the TOTAL, letting one busy
+-- repo starve every other repo's bot PRs out of the emission.
+--
+-- The pass uses `gh pr list`, NOT `gh search prs`, to stay off GitHub's REST
+-- search pool (30 requests/min, plus secondary burst limits). The per-(repo x
+-- author) split costs len(REPOS) * len(authors) calls a poll — 20 for a
+-- 10-repo, 2-bot deployment — and as `gh search prs` calls those, fired back
+-- to back after the seven review searches, tripped GitHub's secondary rate
+-- limit every busy cycle (task 77856). `gh pr list --author` runs its search
+-- through GraphQL, a separate 5000-point/hour budget, so only the seven review
+-- searches draw on the search pool and the no-starvation split costs nothing
+-- there.
+--
+-- The two commands report a bot author in different forms: `gh search prs`
+-- gives `<slug>[bot]`, `gh pr list` gives `app/<slug>`, flagged as a bot.
+-- The pass rewrites the latter to `<slug>[bot]` before the shared item mapper
+-- sees it, so the author_bot signal, the tag and the `@<login>` label are
+-- identical whichever pass found the PR. `gh pr list` also has no
+-- `repository` field; the pass fills it from the repo it queried.
+--
+-- `gh pr list --author` returns `[]` and exits 0 for a repo that does not
+-- exist or that the token cannot see, where `gh search prs` fails. So the pass
+-- probes each repo first (`gh api repos/<repo>`, the core pool) and, when the
+-- probe fails, says so on stderr and skips that repo. An unreachable repo must
+-- stay a LOUD failure: the stderr line is what makes the cycle sync
+-- additively, so an SSO lapse keeps that repo's bot cards rather than reading
+-- as "no open bot PRs" and removing them.
 --
 -- Plus per-PR author signals, derived from the PR author login:
 --
