@@ -4,8 +4,8 @@ use super::super::types::*;
 use super::super::{filtered_repos, has_new_repo_option, App};
 
 impl App {
-    pub(in crate::tui) fn handle_start_repo_filter(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::RepoFilter;
+    pub(in crate::tui) fn handle_start_board_filter(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::BoardFilter;
         self.input.repo_cursor = 0;
         vec![]
     }
@@ -27,7 +27,7 @@ impl App {
         vec![]
     }
 
-    pub(in crate::tui) fn handle_close_repo_filter(&mut self) -> Vec<Command> {
+    pub(in crate::tui) fn handle_close_board_filter(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
         self.sync_board_selection();
         self.reset_column_scroll();
@@ -98,7 +98,7 @@ impl App {
 
     pub(in crate::tui) fn handle_delete_repo_path(&mut self, path: String) -> Vec<Command> {
         self.filter.repos.remove(&path);
-        self.input.mode = InputMode::RepoFilter;
+        self.input.mode = InputMode::BoardFilter;
         self.status.set("Deleted repo path".to_string());
         vec![Command::RepoFilter(
             crate::tui::commands::RepoFilterCommand::DeleteRepoPath(path),

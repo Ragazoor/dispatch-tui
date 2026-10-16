@@ -778,8 +778,8 @@ fn snapshot_repo_filter_popup() {
         "/home/user/projects/beta".to_string(),
         "/home/user/projects/gamma".to_string(),
     ];
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::Start,
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Start,
     ));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
@@ -787,7 +787,7 @@ fn snapshot_repo_filter_popup() {
 
 #[test]
 fn snapshot_repo_filter_popup_cursor_on_repo() {
-    use crate::tui::messages::RepoFilterMessage;
+    use crate::tui::messages::BoardFilterMessage;
     use crate::tui::Message;
 
     let mut app = make_app();
@@ -796,9 +796,9 @@ fn snapshot_repo_filter_popup_cursor_on_repo() {
         "/home/user/projects/beta".to_string(),
         "/home/user/projects/gamma".to_string(),
     ];
-    app.update(Message::RepoFilter(RepoFilterMessage::Start));
+    app.update(Message::BoardFilter(BoardFilterMessage::Start));
     // Move cursor down once, from the first repo onto the second.
-    app.update(Message::RepoFilter(RepoFilterMessage::MoveCursor(1)));
+    app.update(Message::BoardFilter(BoardFilterMessage::MoveCursor(1)));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }

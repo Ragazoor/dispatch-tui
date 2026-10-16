@@ -44,7 +44,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::Pr(pm) => pm.route(app),
 
         // ── Task repo filters ──
-        Message::RepoFilter(rfm) => rfm.route(app),
+        Message::BoardFilter(rfm) => rfm.route(app),
 
         // ── Local-first repo sync ──
         Message::RepoSync(rsm) => rsm.route(app),

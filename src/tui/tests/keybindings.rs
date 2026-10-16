@@ -413,14 +413,14 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
         .into_iter()
         .map(draft_app)
         .collect(),
-        N::BoardRepoFilter => {
+        N::BoardFilter => {
             let mut app = make_app();
             // Nine repos so every digit 1-9 toggles one.
             app.board.repo_paths = (1..=9).map(|i| format!("/repo/r{i}")).collect();
-            app.update(Message::RepoFilter(
-                crate::tui::messages::RepoFilterMessage::Start,
+            app.update(Message::BoardFilter(
+                crate::tui::messages::BoardFilterMessage::Start,
             ));
-            assert_eq!(app.input.mode, InputMode::RepoFilter);
+            assert_eq!(app.input.mode, InputMode::BoardFilter);
             one(app)
         }
         N::BoardPickerRepoPath => one(draft_app(InputMode::InputRepoPath)),

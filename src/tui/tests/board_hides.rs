@@ -218,9 +218,9 @@ fn closing_the_filter_overlay_persists_both_hide_lists_sorted() {
     let mut app = tree_app();
     app.filter.hidden_epics.extend([EpicId(9), EpicId(2)]);
     app.filter.hidden_packages.insert(WorkPackageId(4));
-    app.input.mode = InputMode::RepoFilter;
-    let cmds = app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::Close,
+    app.input.mode = InputMode::BoardFilter;
+    let cmds = app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Close,
     ));
     let saved = |want: &str| {
         cmds.iter().find_map(|c| match c {

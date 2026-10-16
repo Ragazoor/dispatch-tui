@@ -1,6 +1,6 @@
 mod confirm;
 mod normal;
-mod repo_filter;
+mod board_filter;
 mod table;
 
 use crossterm::event::{KeyCode, KeyEvent};

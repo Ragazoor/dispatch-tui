@@ -51,7 +51,7 @@ impl App {
             InputMode::MoveTaskToEpic(_) => N::BoardPickerMoveToEpic,
             InputMode::ReparentEpic(_) => N::BoardPickerReparentEpic,
             InputMode::Help => N::BoardHelp,
-            InputMode::RepoFilter => N::BoardRepoFilter,
+            InputMode::BoardFilter => N::BoardFilter,
             InputMode::ConfirmQuit => N::BoardConfirmQuit,
             InputMode::ConfirmDeleteTask(_) => N::BoardConfirmDeleteTask,
             InputMode::ConfirmBatchDelete => N::BoardConfirmBatchDelete,
@@ -332,7 +332,7 @@ impl App {
             N::BoardText | N::BoardPickerRepoPath | N::BoardPickerBaseBranch => {
                 self.run_text_mode(action, key, label)
             }
-            N::BoardRepoFilter => self.handle_key_repo_filter(key, action, label),
+            N::BoardFilter => self.handle_key_board_filter(key, action, label),
             N::BoardPickerTag => self.run_tag_picker(action, key, label),
             N::BoardPickerWrapUpMode => self.run_wrap_up_picker(action, key, label),
             N::BoardPickerQuickDispatch => self.run_quick_dispatch_picker(action, key, label),
@@ -480,7 +480,7 @@ impl App {
     ) -> Vec<Command> {
         let delta = if key.code == KeyCode::Down { 1 } else { -1 };
         self.dispatch_keyed(
-            Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(delta)),
+            Message::BoardFilter(crate::tui::messages::BoardFilterMessage::MoveCursor(delta)),
             action,
             label,
         )

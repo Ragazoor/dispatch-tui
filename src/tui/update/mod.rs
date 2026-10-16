@@ -14,7 +14,7 @@ mod lifecycle;
 mod move_task;
 mod navigation;
 mod pr;
-mod repo_filter;
+mod board_filter;
 mod repo_sync;
 mod retry;
 mod selection;

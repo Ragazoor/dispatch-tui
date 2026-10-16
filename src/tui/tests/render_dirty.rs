@@ -249,14 +249,14 @@ fn move_to_epic_navigate_down_sets_dirty() {
 
 #[test]
 fn repo_filter_cursor_move_sets_dirty() {
-    use crate::tui::messages::RepoFilterMessage;
+    use crate::tui::messages::BoardFilterMessage;
 
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.dirty = false;
 
-    app.update(Message::RepoFilter(RepoFilterMessage::MoveCursor(1)));
+    app.update(Message::BoardFilter(BoardFilterMessage::MoveCursor(1)));
 
     assert!(
         app.dirty,
@@ -269,8 +269,8 @@ fn repo_filter_cursor_move_via_key_sets_dirty() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     // Enter repo filter mode.
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::Start,
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Start,
     ));
     app.dirty = false;
 
@@ -288,14 +288,14 @@ fn repo_filter_cursor_move_via_key_sets_dirty() {
 
 #[test]
 fn repo_filter_toggle_sets_dirty() {
-    use crate::tui::messages::RepoFilterMessage;
+    use crate::tui::messages::BoardFilterMessage;
 
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.dirty = false;
 
-    app.update(Message::RepoFilter(RepoFilterMessage::Toggle(
+    app.update(Message::BoardFilter(BoardFilterMessage::Toggle(
         "/repo-a".to_string(),
     )));
 
@@ -309,12 +309,12 @@ fn repo_filter_toggle_sets_dirty() {
 fn repo_filter_toggle_via_space_key_sets_dirty() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::Start,
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Start,
     ));
     // Move cursor to first repo entry (cursor 1 = first repo_path)
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::MoveCursor(1),
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::MoveCursor(1),
     ));
     app.dirty = false;
 
@@ -343,13 +343,13 @@ fn cycling_the_lens_sets_dirty() {
 
 #[test]
 fn repo_filter_toggle_mode_sets_dirty() {
-    use crate::tui::messages::RepoFilterMessage;
+    use crate::tui::messages::BoardFilterMessage;
 
     let mut app = make_app();
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.dirty = false;
 
-    app.update(Message::RepoFilter(RepoFilterMessage::ToggleMode));
+    app.update(Message::BoardFilter(BoardFilterMessage::ToggleMode));
 
     assert!(
         app.dirty,

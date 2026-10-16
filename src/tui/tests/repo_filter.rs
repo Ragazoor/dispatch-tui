@@ -7,26 +7,26 @@ use crossterm::event::KeyCode;
 fn start_repo_filter_enters_mode() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::Start,
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Start,
     ));
-    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert_eq!(app.input.mode, InputMode::BoardFilter);
 }
 
 #[test]
 fn toggle_repo_filter_adds_and_removes() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
 
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::Toggle("/repo-a".to_string()),
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Toggle("/repo-a".to_string()),
     ));
     assert!(app.filter.repos.contains("/repo-a"));
     assert!(!app.filter.repos.contains("/repo-b"));
 
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::Toggle("/repo-a".to_string()),
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Toggle("/repo-a".to_string()),
     ));
     assert!(!app.filter.repos.contains("/repo-a"));
 }
@@ -34,9 +34,9 @@ fn toggle_repo_filter_adds_and_removes() {
 #[test]
 fn close_repo_filter_returns_to_normal() {
     let mut app = make_app();
-    app.input.mode = InputMode::RepoFilter;
-    let cmds = app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::Close,
+    app.input.mode = InputMode::BoardFilter;
+    let cmds = app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Close,
     ));
     assert_eq!(app.input.mode, InputMode::Normal);
     // Should emit PersistStringSetting
@@ -116,14 +116,14 @@ fn f_key_opens_repo_filter() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string()];
     app.handle_key(make_key(KeyCode::Char('f')));
-    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert_eq!(app.input.mode, InputMode::BoardFilter);
 }
 
 #[test]
 fn repo_filter_number_key_toggles_repo() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
 
     app.handle_key(make_key(KeyCode::Char('1')));
     assert!(app.filter.repos.contains("/repo-a"));
@@ -137,7 +137,7 @@ fn repo_filter_number_key_toggles_repo() {
 fn repo_filter_a_key_is_ignored() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
 
     let cmds = app.handle_key(make_key(KeyCode::Char('a')));
     assert!(cmds.is_empty());
@@ -150,12 +150,12 @@ fn repo_filter_a_key_is_ignored() {
 fn repo_filter_former_preset_keys_are_ignored() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
 
     for c in ['s', 'x', 'A', 'M', 'Z'] {
         let cmds = app.handle_key(make_key(KeyCode::Char(c)));
         assert!(cmds.is_empty(), "`{c}` must be ignored");
-        assert_eq!(app.input.mode, InputMode::RepoFilter, "`{c}` changed mode");
+        assert_eq!(app.input.mode, InputMode::BoardFilter, "`{c}` changed mode");
         assert!(app.filter.repos.is_empty());
     }
 }
@@ -163,7 +163,7 @@ fn repo_filter_former_preset_keys_are_ignored() {
 #[test]
 fn repo_filter_enter_closes() {
     let mut app = make_app();
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(|c| matches!(
@@ -175,7 +175,7 @@ fn repo_filter_enter_closes() {
 #[test]
 fn repo_filter_esc_closes() {
     let mut app = make_app();
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
@@ -184,7 +184,7 @@ fn repo_filter_esc_closes() {
 fn repo_filter_out_of_range_number_ignored() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
 
     app.handle_key(make_key(KeyCode::Char('5')));
     assert!(app.filter.repos.is_empty());
@@ -251,9 +251,9 @@ fn repo_filter_exclude_applies_to_epics() {
 fn close_repo_filter_persists_mode() {
     let mut app = make_app();
     app.filter.mode = RepoFilterMode::Exclude;
-    app.input.mode = InputMode::RepoFilter;
-    let cmds = app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::Close,
+    app.input.mode = InputMode::BoardFilter;
+    let cmds = app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Close,
     ));
     let expected_key = "repo_filter_mode";
     assert!(cmds.iter().any(|c| matches!(c,
@@ -265,9 +265,9 @@ fn close_repo_filter_persists_mode() {
 fn close_repo_filter_persists_keys() {
     // Closing repo filter should persist repo_filter and repo_filter_mode settings.
     let mut app = App::new(vec![]);
-    app.input.mode = InputMode::RepoFilter;
-    let cmds = app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::Close,
+    app.input.mode = InputMode::BoardFilter;
+    let cmds = app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Close,
     ));
     let want_filter = "repo_filter";
     let want_mode = "repo_filter_mode";
@@ -295,7 +295,7 @@ fn repo_filter_overlay_shows_mode_in_title() {
     let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.filter.mode = RepoFilterMode::Exclude;
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
 
     let buf = render_to_buffer(&mut app, 80, 25);
     assert!(
@@ -305,35 +305,35 @@ fn repo_filter_overlay_shows_mode_in_title() {
 }
 
 #[test]
-fn handle_key_repo_filter_toggle() {
+fn handle_key_board_filter_toggle() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
 
     app.handle_key(make_key(KeyCode::Char('1')));
     assert!(app.filter.repos.contains("/repo"));
 }
 
 #[test]
-fn handle_key_repo_filter_close_enter() {
+fn handle_key_board_filter_close_enter() {
     let mut app = make_app();
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(*app.mode(), InputMode::Normal);
 }
 
 #[test]
-fn handle_key_repo_filter_close_esc() {
+fn handle_key_board_filter_close_esc() {
     let mut app = make_app();
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(*app.mode(), InputMode::Normal);
 }
 
 #[test]
-fn handle_key_repo_filter_close_q() {
+fn handle_key_board_filter_close_q() {
     let mut app = make_app();
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.handle_key(make_key(KeyCode::Char('q')));
     assert_eq!(*app.mode(), InputMode::Normal);
 }
@@ -342,7 +342,7 @@ fn handle_key_repo_filter_close_q() {
 fn repo_filter_j_moves_cursor_down() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 0;
     app.handle_key(make_key(KeyCode::Char('j')));
     assert_eq!(app.input.repo_cursor, 1);
@@ -352,7 +352,7 @@ fn repo_filter_j_moves_cursor_down() {
 fn repo_filter_space_toggles_cursor_repo() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 1; // /repo-b
     app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(
@@ -365,7 +365,7 @@ fn repo_filter_space_toggles_cursor_repo() {
 #[test]
 fn render_status_bar_repo_filter() {
     let mut app = make_app();
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         buffer_contains(&buf, "Filter repos"),
@@ -374,10 +374,10 @@ fn render_status_bar_repo_filter() {
 }
 
 #[test]
-fn render_repo_filter_overlay_shows_title() {
+fn render_board_filter_overlay_shows_title() {
     let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "Repo Filter"),
@@ -386,10 +386,10 @@ fn render_repo_filter_overlay_shows_title() {
 }
 
 #[test]
-fn render_repo_filter_overlay_shows_repos() {
+fn render_board_filter_overlay_shows_repos() {
     let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo/alpha".to_string(), "/repo/beta".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "/repo/alpha"),
@@ -402,10 +402,10 @@ fn render_repo_filter_overlay_shows_repos() {
 }
 
 #[test]
-fn render_repo_filter_overlay_shows_include_mode() {
+fn render_board_filter_overlay_shows_include_mode() {
     let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo/a".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "include"),
@@ -414,9 +414,9 @@ fn render_repo_filter_overlay_shows_include_mode() {
 }
 
 #[test]
-fn render_repo_filter_overlay_shows_navigate_hint() {
+fn render_board_filter_overlay_shows_navigate_hint() {
     let mut app = App::new(vec![]);
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "navigate"),
@@ -428,9 +428,9 @@ fn render_repo_filter_overlay_shows_navigate_hint() {
 fn start_delete_repo_path_enters_confirm_mode() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
-    app.input.mode = InputMode::RepoFilter;
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::StartDeleteRepoPath,
+    app.input.mode = InputMode::BoardFilter;
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::StartDeleteRepoPath,
     ));
     assert_eq!(app.input.mode, InputMode::ConfirmDeleteRepoPath);
 }
@@ -439,11 +439,11 @@ fn start_delete_repo_path_enters_confirm_mode() {
 fn start_delete_repo_path_no_repos_is_noop() {
     let mut app = make_app();
     app.board.repo_paths = vec![];
-    app.input.mode = InputMode::RepoFilter;
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::StartDeleteRepoPath,
+    app.input.mode = InputMode::BoardFilter;
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::StartDeleteRepoPath,
     ));
-    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert_eq!(app.input.mode, InputMode::BoardFilter);
 }
 
 #[test]
@@ -452,10 +452,10 @@ fn confirm_delete_repo_path_emits_command() {
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
     app.input.repo_cursor = 1;
-    let cmds = app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::DeleteRepoPath("/repo-b".to_string()),
+    let cmds = app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::DeleteRepoPath("/repo-b".to_string()),
     ));
-    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert_eq!(app.input.mode, InputMode::BoardFilter);
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteRepoPath(p)) if p == "/repo-b")));
@@ -467,7 +467,7 @@ fn cancel_delete_repo_path_returns_to_filter() {
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
     app.handle_key(make_key(KeyCode::Esc));
-    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert_eq!(app.input.mode, InputMode::BoardFilter);
 }
 
 #[test]
@@ -477,8 +477,8 @@ fn delete_repo_path_removes_from_active_filter() {
     app.filter.repos.insert("/repo-a".to_string());
     app.filter.repos.insert("/repo-b".to_string());
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::DeleteRepoPath("/repo-a".to_string()),
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::DeleteRepoPath("/repo-a".to_string()),
     ));
     assert!(!app.filter.repos.contains("/repo-a"));
     assert!(app.filter.repos.contains("/repo-b"));
@@ -501,7 +501,7 @@ fn delete_repo_path_clamps_cursor() {
 fn backspace_in_repo_filter_starts_delete() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 0; // on /repo-a, so Backspace will trigger
     app.handle_key(make_key(KeyCode::Backspace));
     assert_eq!(app.input.mode, InputMode::ConfirmDeleteRepoPath);
@@ -511,7 +511,7 @@ fn backspace_in_repo_filter_starts_delete() {
 fn delete_key_in_repo_filter_starts_delete() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 0; // on /repo-a, so Delete will trigger
     app.handle_key(make_key(KeyCode::Delete));
     assert_eq!(app.input.mode, InputMode::ConfirmDeleteRepoPath);
@@ -524,7 +524,7 @@ fn y_in_confirm_delete_repo_path_confirms() {
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
     app.input.repo_cursor = 0; // /repo-a
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert_eq!(app.input.mode, InputMode::BoardFilter);
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteRepoPath(p)) if p == "/repo-a")));
@@ -536,21 +536,21 @@ fn n_in_confirm_delete_repo_path_cancels() {
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
     app.handle_key(make_key(KeyCode::Char('n')));
-    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert_eq!(app.input.mode, InputMode::BoardFilter);
 }
 
 #[test]
 fn handle_key_normal_start_repo_filter() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('f')));
-    assert_eq!(*app.mode(), InputMode::RepoFilter);
+    assert_eq!(*app.mode(), InputMode::BoardFilter);
 }
 
 #[test]
-fn handle_key_repo_filter_space_toggles_cursor_item() {
+fn handle_key_board_filter_space_toggles_cursor_item() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 0; // /repo
 
     app.handle_key(make_key(KeyCode::Char(' ')));
@@ -558,10 +558,10 @@ fn handle_key_repo_filter_space_toggles_cursor_item() {
 }
 
 #[test]
-fn handle_key_repo_filter_j_moves_cursor() {
+fn handle_key_board_filter_j_moves_cursor() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 0;
 
     app.handle_key(make_key(KeyCode::Char('j')));
@@ -569,10 +569,10 @@ fn handle_key_repo_filter_j_moves_cursor() {
 }
 
 #[test]
-fn handle_key_repo_filter_k_moves_cursor() {
+fn handle_key_board_filter_k_moves_cursor() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 1;
 
     app.handle_key(make_key(KeyCode::Char('k')));
@@ -580,10 +580,10 @@ fn handle_key_repo_filter_k_moves_cursor() {
 }
 
 #[test]
-fn handle_key_repo_filter_backspace_starts_delete_repo_path() {
+fn handle_key_board_filter_backspace_starts_delete_repo_path() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 0; // on /repo-a, so Backspace will trigger
 
     app.handle_key(make_key(KeyCode::Backspace));
@@ -591,9 +591,9 @@ fn handle_key_repo_filter_backspace_starts_delete_repo_path() {
 }
 
 #[test]
-fn handle_key_repo_filter_unknown_key_is_noop() {
+fn handle_key_board_filter_unknown_key_is_noop() {
     let mut app = make_app();
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     let cmds = app.handle_key(make_key(KeyCode::Char('z')));
     assert!(cmds.is_empty());
 }
@@ -602,12 +602,12 @@ fn handle_key_repo_filter_unknown_key_is_noop() {
 fn toggle_repo_filter_mode_switches() {
     let mut app = make_app();
     assert_eq!(app.filter.mode, RepoFilterMode::Include);
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::ToggleMode,
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::ToggleMode,
     ));
     assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::ToggleMode,
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::ToggleMode,
     ));
     assert_eq!(app.filter.mode, RepoFilterMode::Include);
 }
@@ -616,7 +616,7 @@ fn toggle_repo_filter_mode_switches() {
 fn tab_key_toggles_repo_filter_mode() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     assert_eq!(app.filter.mode, RepoFilterMode::Include);
     app.handle_key(make_key(KeyCode::Tab));
     assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
@@ -628,7 +628,7 @@ fn tab_key_toggles_repo_filter_mode() {
 fn repo_filter_overlay_shows_tab_hint() {
     let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo/a".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "Tab"),
@@ -657,7 +657,7 @@ fn handle_key_confirm_delete_repo_path_other_cancels() {
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
 
     app.handle_key(make_key(KeyCode::Char('n')));
-    assert_eq!(*app.mode(), InputMode::RepoFilter);
+    assert_eq!(*app.mode(), InputMode::BoardFilter);
 }
 
 #[test]
@@ -676,9 +676,9 @@ fn handle_key_confirm_delete_repo_path_uppercase_y() {
 
 /// RepoFilter mode routes correctly.
 #[test]
-fn handle_key_repo_filter_routes_correctly() {
+fn handle_key_board_filter_routes_correctly() {
     let mut app = make_app();
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     // Esc closes the filter (may emit refresh commands)
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -724,7 +724,7 @@ fn handle_key_confirm_delete_repo_path_routes_correctly() {
     // Any non-y key returns to RepoFilter
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('n'))));
     assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert_eq!(app.input.mode, InputMode::BoardFilter);
 }
 
 #[test]
@@ -744,8 +744,8 @@ fn repo_filter_cursor_zero_is_toggle_row() {
     // After opening the filter, cursor starts at 0 (the first repo).
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::Start,
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Start,
     ));
     assert_eq!(app.input.repo_cursor, 0);
 }
@@ -755,23 +755,23 @@ fn repo_filter_cursor_zero_is_toggle_row() {
 fn repo_filter_cursor_wraps_over_repos_only() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 0;
 
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::MoveCursor(1),
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::MoveCursor(1),
     ));
     assert_eq!(app.input.repo_cursor, 1);
 
     // Down from the last repo wraps to the first
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::MoveCursor(1),
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::MoveCursor(1),
     ));
     assert_eq!(app.input.repo_cursor, 0);
 
     // Up from the first wraps to the last
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::MoveCursor(-1),
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::MoveCursor(-1),
     ));
     assert_eq!(app.input.repo_cursor, 1);
 }
@@ -781,16 +781,16 @@ fn repo_filter_cursor_navigates_with_no_repos() {
     // With zero repos there is no row to move to.
     let mut app = make_app();
     app.board.repo_paths = vec![];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 0;
 
     // Moving up or down stays at 0 (wraps within single item)
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::MoveCursor(1),
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::MoveCursor(1),
     ));
     assert_eq!(app.input.repo_cursor, 0);
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::MoveCursor(-1),
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::MoveCursor(-1),
     ));
     assert_eq!(app.input.repo_cursor, 0);
 }
@@ -805,7 +805,7 @@ fn buffered_editor_keystrokes_do_not_leak_into_repo_picker() {}
 fn repo_filter_overlay_has_no_only_active_row() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
 
     let buf = render_to_buffer(&mut app, 80, 30);
     assert!(!buffer_contains(&buf, "Active sessions only"));
@@ -816,7 +816,7 @@ fn repo_filter_overlay_has_no_only_active_row() {
 fn repo_filter_overlay_repo_row_has_cursor_at_cursor_zero() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 0; // first repo
 
     let buf = render_to_buffer(&mut app, 80, 30);
@@ -834,7 +834,7 @@ fn repo_filter_overlay_repo_row_has_cursor_at_cursor_zero() {
 fn space_at_cursor_zero_toggles_first_repo() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 0; // first repo
 
     app.handle_key(make_key(KeyCode::Char(' ')));
@@ -846,19 +846,19 @@ fn space_at_cursor_zero_toggles_first_repo() {
 fn backspace_with_no_repos_is_noop() {
     let mut app = make_app();
     app.board.repo_paths = vec![];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 0;
 
     // Should not enter ConfirmDeleteRepoPath mode
     app.handle_key(make_key(KeyCode::Backspace));
-    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert_eq!(app.input.mode, InputMode::BoardFilter);
 }
 
 #[test]
 fn backspace_at_cursor_zero_starts_delete() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
-    app.input.mode = InputMode::RepoFilter;
+    app.input.mode = InputMode::BoardFilter;
     app.input.repo_cursor = 0; // first repo
 
     app.handle_key(make_key(KeyCode::Backspace));
@@ -1090,22 +1090,22 @@ fn filter_and_view_changes_reset_column_scroll_offsets() {
     }
 
     check("ToggleRepoFilter", |app| {
-        app.update(Message::RepoFilter(
-            crate::tui::messages::RepoFilterMessage::Toggle("/repo".to_string()),
+        app.update(Message::BoardFilter(
+            crate::tui::messages::BoardFilterMessage::Toggle("/repo".to_string()),
         ));
     });
     check("CycleLens to active", |app| {
         flip_only_active(app);
     });
     check("CloseRepoFilter", |app| {
-        app.input.mode = InputMode::RepoFilter;
-        app.update(Message::RepoFilter(
-            crate::tui::messages::RepoFilterMessage::Close,
+        app.input.mode = InputMode::BoardFilter;
+        app.update(Message::BoardFilter(
+            crate::tui::messages::BoardFilterMessage::Close,
         ));
     });
     check("ToggleRepoFilterMode", |app| {
-        app.update(Message::RepoFilter(
-            crate::tui::messages::RepoFilterMessage::ToggleMode,
+        app.update(Message::BoardFilter(
+            crate::tui::messages::BoardFilterMessage::ToggleMode,
         ));
     });
     check("CycleLens to flat", |app| {

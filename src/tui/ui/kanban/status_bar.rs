@@ -180,7 +180,7 @@ fn status_line(app: &App) -> (Line<'static>, Style) {
         }
         InputMode::ConfirmDeleteEpic => hint_text(app, "Delete epic and subtasks? [y/n]", RED),
         InputMode::Help => hint("[?] or [Esc] to close help", CYAN),
-        InputMode::RepoFilter => hint("Filter repos: [1-9] toggle  [q/Esc] close", CYAN),
+        InputMode::BoardFilter => hint("Filter repos: [1-9] toggle  [q/Esc] close", CYAN),
         InputMode::ConfirmDeleteRepoPath => {
             hint("Delete repo path? y to confirm, any key to cancel", YELLOW)
         }

@@ -140,14 +140,14 @@ fn settle_repo_window(budget: usize, repo_count: usize, repo_cursor: usize) -> R
     window
 }
 
-pub(in crate::tui::ui::kanban) fn render_repo_filter_overlay(
+pub(in crate::tui::ui::kanban) fn render_board_filter_overlay(
     frame: &mut Frame,
     app: &App,
     area: Rect,
 ) {
     let is_filter_mode = matches!(
         app.mode(),
-        InputMode::RepoFilter | InputMode::ConfirmDeleteRepoPath
+        InputMode::BoardFilter | InputMode::ConfirmDeleteRepoPath
     );
     if !is_filter_mode {
         return;

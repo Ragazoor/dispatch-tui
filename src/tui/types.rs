@@ -230,8 +230,8 @@ pub enum Message {
     Epic(crate::tui::messages::EpicMessage),
     /// PR flow messages — see [`crate::tui::messages::PrMessage`].
     Pr(crate::tui::messages::PrMessage),
-    /// Repo-filter overlay messages — see [`crate::tui::messages::RepoFilterMessage`].
-    RepoFilter(crate::tui::messages::RepoFilterMessage),
+    /// Repo-filter overlay messages — see [`crate::tui::messages::BoardFilterMessage`].
+    BoardFilter(crate::tui::messages::BoardFilterMessage),
     /// Local-first repo sync messages — see
     /// [`crate::tui::messages::RepoSyncMessage`].
     RepoSync(crate::tui::messages::RepoSyncMessage),
@@ -361,7 +361,7 @@ pub enum InputMode {
     },
     // Overlay modes
     Help,
-    RepoFilter,
+    BoardFilter,
     ConfirmDeleteRepoPath,
     ConfirmQuit,
     ConfirmTrustRepo {

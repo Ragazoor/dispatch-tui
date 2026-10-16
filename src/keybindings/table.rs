@@ -524,31 +524,31 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     // ---- board.repo_filter ----
     r(
-        N::BoardRepoFilter,
+        N::BoardFilter,
         &["Enter", "Esc", "q"],
         "repo_filter_close",
         "Close the repo filter",
     ),
     r(
-        N::BoardRepoFilter,
+        N::BoardFilter,
         &["j", "Down", "k", "Up"],
         "repo_filter_move_cursor",
         "Move the cursor down (j, Down) or up (k, Up) the repo list",
     ),
     r(
-        N::BoardRepoFilter,
+        N::BoardFilter,
         &["Space", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
         "repo_filter_toggle_repo",
         "Toggle the repo under the cursor (Space) or the repo with that number (1-9) in the filter",
     ),
     r(
-        N::BoardRepoFilter,
+        N::BoardFilter,
         &["Tab"],
         "repo_filter_toggle_mode",
         "Switch the filter between including and excluding the toggled repos",
     ),
     r(
-        N::BoardRepoFilter,
+        N::BoardFilter,
         &["Backspace", "Delete"],
         "repo_filter_delete_repo_path",
         "Delete the repo path under the cursor from the saved list, after a confirmation",

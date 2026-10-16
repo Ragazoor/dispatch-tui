@@ -9,7 +9,7 @@ use super::key_event;
 impl App {
     /// `action` is the row's action id; `key` supplies the direction and the
     /// digit where one row covers several keys.
-    pub(in crate::tui) fn handle_key_repo_filter(
+    pub(in crate::tui) fn handle_key_board_filter(
         &mut self,
         key: KeyEvent,
         action: &str,
@@ -17,7 +17,7 @@ impl App {
     ) -> Vec<Command> {
         match action {
             "repo_filter_close" => self.dispatch_keyed(
-                Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Close),
+                Message::BoardFilter(crate::tui::messages::BoardFilterMessage::Close),
                 action,
                 label,
             ),
@@ -28,7 +28,7 @@ impl App {
                     -1
                 };
                 self.dispatch_keyed(
-                    Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(delta)),
+                    Message::BoardFilter(crate::tui::messages::BoardFilterMessage::MoveCursor(delta)),
                     action,
                     label,
                 )
@@ -40,7 +40,7 @@ impl App {
                 };
                 match self.board.repo_paths.get(idx).cloned() {
                     Some(path) => self.dispatch_keyed(
-                        Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Toggle(path)),
+                        Message::BoardFilter(crate::tui::messages::BoardFilterMessage::Toggle(path)),
                         action,
                         label,
                     ),
@@ -48,15 +48,15 @@ impl App {
                 }
             }
             "repo_filter_toggle_mode" => self.dispatch_keyed(
-                Message::RepoFilter(crate::tui::messages::RepoFilterMessage::ToggleMode),
+                Message::BoardFilter(crate::tui::messages::BoardFilterMessage::ToggleMode),
                 action,
                 label,
             ),
             "repo_filter_delete_repo_path" => {
                 if self.input.repo_cursor < self.board.repo_paths.len() {
                     self.dispatch_keyed(
-                        Message::RepoFilter(
-                            crate::tui::messages::RepoFilterMessage::StartDeleteRepoPath,
+                        Message::BoardFilter(
+                            crate::tui::messages::BoardFilterMessage::StartDeleteRepoPath,
                         ),
                         action,
                         label,
@@ -77,7 +77,7 @@ impl App {
         if yes {
             if let Some(path) = self.board.repo_paths.get(self.input.repo_cursor).cloned() {
                 return self.dispatch_keyed(
-                    Message::RepoFilter(crate::tui::messages::RepoFilterMessage::DeleteRepoPath(
+                    Message::BoardFilter(crate::tui::messages::BoardFilterMessage::DeleteRepoPath(
                         path,
                     )),
                     "confirm_delete_repo_path_yes",
@@ -87,7 +87,7 @@ impl App {
         }
         // Declined, or the cursor no longer points at a deletable row — the
         // prompt just closes, which is the same outcome as declining.
-        self.input.mode = InputMode::RepoFilter;
+        self.input.mode = InputMode::BoardFilter;
         vec![key_event("confirm_delete_repo_path_no", label)]
     }
 }

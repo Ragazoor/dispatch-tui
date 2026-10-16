@@ -36,7 +36,7 @@ impl App {
         label: &str,
     ) -> Option<Vec<Command>> {
         use crate::tui::messages::{
-            EpicMessage, RepoFilterMessage, RepoSyncMessage, SplitMessage, SystemMessage,
+            EpicMessage, BoardFilterMessage, RepoSyncMessage, SplitMessage, SystemMessage,
             TaskMessage,
         };
         let action = b.action;
@@ -66,7 +66,7 @@ impl App {
             "toggle_notifications" => {
                 keyed(self, Message::System(SystemMessage::ToggleNotifications))
             }
-            "filter_repos" => keyed(self, Message::RepoFilter(RepoFilterMessage::Start)),
+            "filter_repos" => keyed(self, Message::BoardFilter(BoardFilterMessage::Start)),
             "search_tasks" => {
                 self.search.saved = Some(self.search.query.clone());
                 self.input.mode = InputMode::SearchTasks;

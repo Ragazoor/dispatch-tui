@@ -23,7 +23,7 @@ If a render path needs data that isn't on `App`, compute it in the runtime/updat
 
 ### The two panic sites layout arithmetic hides
 
-"No `panic!`" is easy to read as "no explicit `panic!` call", but overlay sizing reaches the same place through two ordinary-looking expressions. Both were live in `src/tui/ui/kanban/popups/repo_filter.rs` and the help/reparent overlays until task #4213, and neither is caught by clippy or by the 120×40 snapshot tests — only by rendering at a small size.
+"No `panic!`" is easy to read as "no explicit `panic!` call", but overlay sizing reaches the same place through two ordinary-looking expressions. Both were live in the repo-filter overlay (now `src/tui/ui/kanban/popups/board_filter.rs`) and the help/reparent overlays until task #4213, and neither is caught by clippy or by the 120×40 snapshot tests — only by rendering at a small size.
 
 1. **`x.clamp(lo, hi)` panics when `lo > hi`.** Popup heights are written as `wanted.clamp(MIN, area.height - 4)`, which is fine until the terminal is short enough that `area.height - 4 < MIN`. Write `wanted.clamp(MIN.min(ceiling), ceiling)` — the ceiling wins on a board too small for the floor.
 2. **`Frame::render_widget` does no clipping.** It hands the rect straight to the buffer, and `Clear` writes every cell it is given, so a widget rect extending past the frame panics with `index outside of buffer`. Any overlay whose size has a *floor* (the help overlay's is 25 rows) will exceed a short terminal. `shared::open_overlay` intersects with `frame.area()` for exactly this reason, and `shared::centered_rect` caps to its parent — route new overlays through them rather than hand-rolling `Clear` + `block.inner()`.

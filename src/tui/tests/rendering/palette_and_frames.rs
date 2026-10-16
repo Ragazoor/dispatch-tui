@@ -1190,12 +1190,12 @@ async fn task_card_frame_spans_four_lines_top_to_bottom() {
 /// (not just the layout helper) so the whole overlay is exercised.
 #[tokio::test]
 async fn repo_filter_overlay_renders_on_a_board_too_short_for_its_minimum_height() {
-    use crate::tui::messages::RepoFilterMessage;
+    use crate::tui::messages::BoardFilterMessage;
 
     for height in [6_u16, 8, 10, 11, 12] {
         let mut app = App::new(vec![]);
         app.board.repo_paths = vec!["/repos/alpha".to_string(), "/repos/beta".to_string()];
-        app.update(Message::RepoFilter(RepoFilterMessage::Start));
+        app.update(Message::BoardFilter(BoardFilterMessage::Start));
         // Panics here, not an assertion failure, are the regression.
         let _buf = render_to_buffer(&mut app, 60, height);
     }
@@ -1206,11 +1206,11 @@ async fn repo_filter_overlay_renders_on_a_board_too_short_for_its_minimum_height
 /// on-screen frame. Substitutes for eyeballing the popup at an odd size.
 #[tokio::test]
 async fn repo_filter_overlay_stays_inside_a_narrow_board() {
-    use crate::tui::messages::RepoFilterMessage;
+    use crate::tui::messages::BoardFilterMessage;
 
     let mut app = App::new(vec![]);
     app.board.repo_paths = (0..30).map(|i| format!("/repos/r{i}")).collect();
-    app.update(Message::RepoFilter(RepoFilterMessage::Start));
+    app.update(Message::BoardFilter(BoardFilterMessage::Start));
     let buf = render_to_buffer(&mut app, 46, 18);
 
     assert!(
@@ -1236,7 +1236,7 @@ async fn repo_filter_overlay_stays_inside_a_narrow_board() {
 /// small. One case per overlay, at a board shorter than every floor.
 #[tokio::test]
 async fn every_overlay_survives_a_board_shorter_than_its_own_minimum() {
-    use crate::tui::messages::RepoFilterMessage;
+    use crate::tui::messages::BoardFilterMessage;
 
     let short = (100_u16, 8_u16);
 
@@ -1248,7 +1248,7 @@ async fn every_overlay_survives_a_board_shorter_than_its_own_minimum() {
     // Repo filter — floors at 8 rows.
     let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repos/alpha".to_string()];
-    app.update(Message::RepoFilter(RepoFilterMessage::Start));
+    app.update(Message::BoardFilter(BoardFilterMessage::Start));
     let _ = render_to_buffer(&mut app, short.0, short.1);
 
     // Error popup — fixed 7 rows tall, top-pinned once the board is smaller.
@@ -1272,7 +1272,7 @@ async fn every_overlay_survives_a_board_shorter_than_its_own_minimum() {
 /// (up-marker only) of a list far longer than the popup.
 #[tokio::test]
 async fn repo_filter_renders_its_whole_footer_in_every_mode() {
-    use crate::tui::messages::RepoFilterMessage;
+    use crate::tui::messages::BoardFilterMessage;
 
     // (repo count, board height, repo cursor) — the first fits without
     // scrolling; the rest scroll, exercising each marker combination.
@@ -1285,7 +1285,7 @@ async fn repo_filter_renders_its_whole_footer_in_every_mode() {
         // hint bar sits outside the popup and would satisfy a loose needle even
         // when the overlay's last row was clipped clean off.
         for (mode, expected_footer) in [
-            (crate::tui::InputMode::RepoFilter, "[q/Esc] close"),
+            (crate::tui::InputMode::BoardFilter, "[q/Esc] close"),
             (
                 crate::tui::InputMode::ConfirmDeleteRepoPath,
                 "n/Esc: cancel",
@@ -1293,7 +1293,7 @@ async fn repo_filter_renders_its_whole_footer_in_every_mode() {
         ] {
             let mut app = App::new(vec![]);
             app.board.repo_paths = repos.clone();
-            app.update(Message::RepoFilter(RepoFilterMessage::Start));
+            app.update(Message::BoardFilter(BoardFilterMessage::Start));
             app.input.mode = mode.clone();
             app.input.repo_cursor = repo_cursor;
 
