@@ -585,6 +585,25 @@ impl App {
         &self.filter.hidden_packages
     }
 
+    /// How many hidden epics and packages name something on the board. An id
+    /// left by a deleted epic or package is inert and the user cannot unhide
+    /// it, so it must not show in a count.
+    pub(in crate::tui) fn live_hidden_counts(&self) -> (usize, usize) {
+        let epics = self
+            .board
+            .epics
+            .iter()
+            .filter(|e| self.filter.hidden_epics.contains(&e.id))
+            .count();
+        let packages = self
+            .board
+            .work_packages
+            .iter()
+            .filter(|p| self.filter.hidden_packages.contains(&p.id))
+            .count();
+        (epics, packages)
+    }
+
     /// Restore the saved hide-lists at startup. Ids that name nothing on the
     /// board are kept and stay inert (`board-layout.allium`, "Hidden Epics and
     /// Work Packages").

@@ -299,7 +299,8 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
             ],
         );
     }
-    if let Some(badge) = hidden_badge(app.hidden_epics().len(), app.hidden_packages().len()) {
+    let (hidden_epics, hidden_packages) = app.live_hidden_counts();
+    if let Some(badge) = hidden_badge(hidden_epics, hidden_packages) {
         prepend(
             &mut spans,
             vec![Span::styled(

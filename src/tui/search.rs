@@ -233,6 +233,9 @@ pub(in crate::tui) struct EpicSearchIndex<'a> {
     pub(in crate::tui) by_id: HashMap<EpicId, &'a Epic>,
     pub(in crate::tui) children: HashMap<EpicId, Vec<EpicId>>,
     pub(in crate::tui) task_owners: HashSet<EpicId>,
+    /// The hidden-epic closure: a hidden sub-epic's own match cannot keep its
+    /// ancestor's card alive, any more than a hidden task's can.
+    pub(in crate::tui) hidden_epics: HashSet<EpicId>,
 }
 
 #[cfg(test)]

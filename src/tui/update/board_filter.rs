@@ -199,6 +199,26 @@ impl App {
         self.handle_close_board_filter()
     }
 
+    /// Climb out of every epic or package view the user has just hidden, so
+    /// the board never sits inside work it no longer shows.
+    fn leave_hidden_views(&mut self) {
+        let hidden =
+            super::super::hidden_epic_closure(&self.filter.hidden_epics, &self.board.epics);
+        loop {
+            let inside_hidden = match &self.board.view_mode {
+                ViewMode::Epic { epic_id, .. } => hidden.contains(epic_id),
+                ViewMode::Package { package_id, .. } => {
+                    self.filter.hidden_packages.contains(package_id)
+                }
+                _ => false,
+            };
+            if !inside_hidden {
+                break;
+            }
+            self.handle_exit_epic();
+        }
+    }
+
     fn clamp_epic_cursor(&mut self) {
         let len = self.filter_epic_rows().len();
         let cursor = &mut self.filter_overlay.epic_cursor;
@@ -232,6 +252,7 @@ impl App {
 
     pub(in crate::tui) fn handle_close_board_filter(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
+        self.leave_hidden_views();
         self.sync_board_selection();
         self.reset_column_scroll();
         let mut paths: Vec<_> = self.filter.repos.iter().cloned().collect();

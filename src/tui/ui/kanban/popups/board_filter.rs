@@ -73,7 +73,10 @@ fn filter_layout(
     let popup_height = u16::try_from(wanted_height)
         .unwrap_or(u16::MAX)
         .clamp(MIN_POPUP_HEIGHT.min(ceiling), ceiling);
-    let popup_width = (area.width * 70 / 100).clamp(30, 60);
+    // In u32: `width * 70` overflows u16 on a terminal past 936 columns.
+    let popup_width = u16::try_from(u32::from(area.width) * 70 / 100)
+        .unwrap_or(u16::MAX)
+        .clamp(30, 60);
 
     let content_height = popup_height.saturating_sub(BORDER_ROWS as u16) as usize;
     let budget = content_height.saturating_sub(non_list_rows);
@@ -222,8 +225,8 @@ fn tab_header_line<'a>(app: &'a App, styles: &HintStyles) -> Line<'a> {
         }
         let detail = match tab {
             FilterTab::Repos => format!(" ({})", app.repo_filter_mode().as_str()),
-            FilterTab::Epics => hidden_suffix(app.hidden_epics().len()),
-            FilterTab::Packages => hidden_suffix(app.hidden_packages().len()),
+            FilterTab::Epics => hidden_suffix(app.live_hidden_counts().0),
+            FilterTab::Packages => hidden_suffix(app.live_hidden_counts().1),
         };
         let style = if tab == app.filter_overlay.tab {
             styles

@@ -239,6 +239,7 @@ fn closing_the_filter_overlay_persists_both_hide_lists_sorted() {
 #[test]
 fn the_status_bar_names_what_is_hidden() {
     let mut app = tree_app();
+    app.board.work_packages = vec![package(7)];
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         !buffer_contains(&buf, "[hidden"),
@@ -254,4 +255,46 @@ fn the_status_bar_names_what_is_hidden() {
     app.filter.hidden_packages.clear();
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(buffer_contains(&buf, "[hidden: 1 epic]"));
+}
+
+#[test]
+fn a_hidden_sub_epic_cannot_keep_its_parent_alive_under_a_search() {
+    let mut app = tree_app();
+    app.board.epics[1].title = "needle".into();
+    app.search.query = "needle".into();
+    assert!(
+        cards(&app).0.contains(&EpicId(1)),
+        "the child's match keeps the parent"
+    );
+
+    app.filter.hidden_epics.insert(EpicId(2));
+    assert!(!cards(&app).0.contains(&EpicId(1)));
+}
+
+#[test]
+fn the_badge_counts_only_hides_that_name_something() {
+    let mut app = tree_app();
+    app.filter.hidden_epics.insert(EpicId(999));
+    app.filter.hidden_packages.insert(WorkPackageId(999));
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(!buffer_contains(&buf, "[hidden"));
+}
+
+#[test]
+fn closing_the_overlay_leaves_an_epic_view_the_user_just_hid() {
+    let mut app = tree_app();
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(1),
+    )));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(2),
+    )));
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Start,
+    ));
+    app.filter.hidden_epics.insert(EpicId(1));
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Close,
+    ));
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }

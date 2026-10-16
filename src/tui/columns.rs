@@ -852,8 +852,10 @@ impl<'a> BoardView<'a> {
         let query_lower = self.search.query.to_lowercase();
         // Parsed once per pass, not per epic: this is the render hot path.
         let id_digits = id_digits_query(&self.search.query);
+        let filters = self.board_filters();
         EpicSearchIndex {
-            task_owners: epic_ids_owning_matching_task(&self.board.tasks, &self.board_filters()),
+            task_owners: epic_ids_owning_matching_task(&self.board.tasks, &filters),
+            hidden_epics: filters.hidden_epics,
             by_id: crate::models::epic_id_lookup(&self.board.epics),
             children: crate::models::build_children_map(&self.board.epics),
             query_lower,
@@ -888,6 +890,7 @@ impl<'a> BoardView<'a> {
 
         let sub_epic_matches = epic_ids.iter().any(|&id| {
             id != epic_id
+                && !index.hidden_epics.contains(&id)
                 && index.own_match_by_id(id)
                 && self.epic_matches(id)
                 && self.epic_repo_matches(id)
@@ -982,6 +985,10 @@ impl<'a> BoardView<'a> {
     }
 
     /// Epics eligible as reparent targets for `target`.
+    ///
+    /// Hidden epics stay eligible here and in [`Self::move_task_target_epics`]:
+    /// the hide-list narrows what the board shows, and moving work into a
+    /// hidden epic is an explicit choice the picker should not refuse.
     ///
     /// Excludes the target epic and its descendants (cycle prevention), epics
     /// in `Done` status, and epics filtered out by the active repo /

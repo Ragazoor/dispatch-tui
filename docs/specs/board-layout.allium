@@ -1018,7 +1018,14 @@ rule CycleLensBackward {
 --     it directly: the hide is the stronger statement.
 --   - Inside an epic view the hides apply too: a hidden sub-epic draws no
 --     card inside its parent's view. Entering a hidden epic is not possible
---     from the board, because its card is gone.
+--     from the board, because its card is gone. When the overlay closes while
+--     the user stands inside an epic or package view they have just hidden
+--     (the epic itself or an ancestor), the board climbs out one level at a
+--     time until the view it shows is not hidden, so it never sits inside
+--     work it no longer shows.
+--   - The move-to-epic and reparent pickers still offer hidden epics: moving
+--     work into one is an explicit choice, and the hide only narrows what
+--     the board shows.
 --
 -- Hiding a work package hides its card and nothing else. A package is a view
 -- over work, not work; its linked tasks and epics stay on the board.
@@ -1037,7 +1044,10 @@ rule CycleLensBackward {
 --     not. Re-hiding the same epics after every restart would be the cost of
 --     the alternative, and the badge below keeps a forgotten hide visible.
 --   - An id on a hide-list whose epic or package no longer exists is inert:
---     it hides nothing and errors on nothing. Nothing prunes it.
+--     it hides nothing and errors on nothing. Nothing prunes it, but nothing
+--     counts it either: the badge below and the overlay's tab counts name
+--     only hides of epics and packages the board holds, since the user could
+--     never find the row to unhide a ghost.
 --   - While anything is hidden, the status bar shows a badge naming the
 --     counts, e.g. `[hidden: 2 epics, 1 package]`, so a forgotten hide does
 --     not read as missing work. Nothing hidden, no badge.
