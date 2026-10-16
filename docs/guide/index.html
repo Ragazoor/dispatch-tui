@@ -97,7 +97,8 @@ nav.steps { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margi
   min-width: 860px; height: min(78vh, 760px); min-height: 520px; display: flex; flex-direction: column;
   border-radius: 10px; outline: none;
 }
-.term:focus-visible { box-shadow: 0 0 0 2px var(--t-orange); }
+.term:focus-within { box-shadow: 0 0 0 2px var(--t-orange); }
+.keysink { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; resize: none; pointer-events: none; }
 .t-top { display: flex; justify-content: space-between; padding: 6px 12px 0; color: var(--t-dim); font-size: 11.5px; }
 .t-top .ok { color: var(--t-green); }
 .t-top .on { color: var(--t-orange); }
@@ -325,7 +326,10 @@ footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border
   <section id="step-1">
     <p class="lede">This is a made-up shop team's board. Click it, then use the same keys as the real TUI: <kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd> or the arrows to move, <kbd>Space</kbd> to step into an epic or jump to an agent, <kbd>q</kbd> to come back, <kbd>?</kbd> for every key. The bottom bar always shows what you can press. You can click the keys there too.</p>
     <div class="term-outer">
-      <div class="term" id="term" tabindex="0" aria-label="Imitation dispatch board. Use the keyboard to explore.">
+      <div class="term" id="term">
+        <!-- Keys are read from a hidden text box: browser add-ons that use h/j/k/l
+             themselves (Vimium and friends) leave keys alone inside one. -->
+        <textarea class="keysink" id="keysink" inputmode="none" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Imitation dispatch board. Use the keyboard to explore."></textarea>
         <div class="t-top"><span id="t-top-left"></span><span id="t-top-right"></span></div>
         <div class="t-heads" id="t-heads"></div>
         <div class="t-board" id="t-board"><div class="t-trail" id="t-trail"></div></div>
@@ -840,7 +844,7 @@ function addAnswer(t) {
       const div = document.createElement("div");
       div.className = "say"; div.textContent = `Thanks. Going with "${label}". The card is back in Running › active.`;
       $("t-agent-log").appendChild(div);
-      $("term").focus();
+      focusSink();
     };
     box.appendChild(b);
   }
@@ -1068,21 +1072,43 @@ function press(key) {
   return true;
 }
 
-$("term").addEventListener("keydown", e => {
+function focusSink() { $("keysink").focus({ preventScroll: true }); }
+
+let handledAt = 0, mouseAt = 0;
+$("keysink").addEventListener("keydown", e => {
   if (e.metaKey || e.altKey) return;
-  let key = e.ctrlKey ? (e.key.toLowerCase() === "b" ? "Ctrl+b" : null) : keyName(e);
+  const key = e.ctrlKey ? (e.key.toLowerCase() === "b" ? "Ctrl+b" : null) : keyName(e);
   if (!key) return;
-  if (press(key) || key === "Space" || key.startsWith("Ctrl+") || ["Up", "Down"].includes(key)) e.preventDefault();
+  handledAt = Date.now();
+  press(key);
+  // Never let a key type into the hidden box, scroll the page or reach the browser.
+  if (key !== "Tab") e.preventDefault();
+});
+// Fallback for when an add-on swallows keydown but the character still arrives.
+$("keysink").addEventListener("input", e => {
+  const text = e.target.value;
+  e.target.value = "";
+  if (Date.now() - handledAt < 50) return;
+  for (const ch of text) press(ch === " " ? "Space" : ch);
+});
+// Some add-ons answer Esc in a text box by blurring it. A blur nobody clicked
+// for is read as that Esc, and focus comes back.
+document.addEventListener("mousedown", () => { mouseAt = Date.now(); }, true);
+$("keysink").addEventListener("blur", () => {
+  const now = Date.now();
+  if (now - mouseAt < 400 || now - handledAt < 400 || document.hidden || $("step-1").hidden) return;
+  press("Esc");
+  setTimeout(focusSink, 0);
 });
 $("term").addEventListener("click", e => {
   const k = e.target.closest("[data-key]");
-  if (k) { press(k.dataset.key); $("term").focus(); return; }
+  if (k) { press(k.dataset.key); focusSink(); return; }
   const cell = e.target.closest("[data-c]");
   if (cell && !state.overlay && !state.agent) {
     state.col = +cell.dataset.c; state.row[state.col] = +cell.dataset.r;
     render();
   }
-  $("term").focus();
+  focusSink();
 });
 $("term").addEventListener("dblclick", e => {
   if (e.target.closest("[data-c]") && !state.overlay && !state.agent) press("Space");
