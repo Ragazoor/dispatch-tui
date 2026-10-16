@@ -200,7 +200,7 @@ Two root-level tests watch the module from outside:
 - `src/spacetime/tests/module_schema.rs` reads the module's tables from its source; the snapshot fixtures take their column lists from it.
 - `tests/spacetime_module.rs` publishes the module into a throwaway instance when `spacetime` is on `PATH`.
 
-**The board embeds a committed prebuilt `src/spacetime/module.wasm`.** After any module change, run `./scripts/build-managed-module.sh`. The hook, CI and `cargo test` check a source-hash stamp beside the wasm, not the wasm bytes, which differ per machine.
+**The board embeds a committed prebuilt `src/spacetime/module.wasm`.** After any module change, run `./scripts/build-managed-module.sh`. The hook, CI and `cargo test` check a source-hash stamp beside the wasm, not the wasm bytes, which differ per machine. The stamp hashes every file under `spacetime/module/src`, test files included, so a test-only change there needs a restamp too.
 
 **That check fails spuriously mid-merge.** It publishes the committed module and automigrates the working tree's over it. With a merge resolved but not committed, it reports every difference the merge brought in. Commit the merge, then re-run. See `spacetime/module/README.md`.
 

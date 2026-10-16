@@ -72,7 +72,6 @@ fn scratch_target_dir() -> PathBuf {
 /// guards the *next* change.
 fn committed_module(into: &Path) -> PathBuf {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::fs::create_dir_all(into.join("src")).expect("scratch module dir");
     let git = |args: &[&str]| {
         let mut argv = vec!["-C".to_string(), repo_root.display().to_string()];
         argv.extend(args.iter().map(|a| a.to_string()));
@@ -270,7 +269,7 @@ fn published_instance() -> Instance {
 }
 
 /// A `learnings` row, JSON-encoded for `seed_learnings`'s CLI call — a real
-/// id and an explicit `source_task_id`, unlike `learning_json` above (which
+/// id and an explicit `source_task_id`, unlike `learning_json` in `subscription.rs` (which
 /// `create_learning` always overwrites to 0/none on the way in).
 fn seeded_learning_json(id: i64, summary: &str, source_task_id: Option<i64>) -> serde_json::Value {
     serde_json::json!({
