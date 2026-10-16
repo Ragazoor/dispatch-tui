@@ -2,34 +2,7 @@
 //! Work Packages"; `work-packages.allium`, PackageCardPlacement).
 
 use super::*;
-use crate::models::{EpicId, TaskId, TaskStatus, WorkPackage, WorkPackageId, WorkPackageItem};
-use crate::models::{Task, WorkPackageLink};
-
-fn package(id: i64) -> WorkPackage {
-    let at = chrono::DateTime::from_timestamp(1_700_000_000, 0).expect("valid timestamp");
-    WorkPackage {
-        id: WorkPackageId(id),
-        title: format!("P{id}"),
-        description: String::new(),
-        created_by: None,
-        created_at: at,
-        updated_at: at,
-    }
-}
-
-fn link(package: i64, item: WorkPackageItem) -> WorkPackageLink {
-    WorkPackageLink {
-        work_package_id: WorkPackageId(package),
-        item,
-    }
-}
-
-fn task_in(id: i64, epic: i64, status: TaskStatus) -> Task {
-    Task {
-        epic_id: Some(EpicId(epic)),
-        ..make_task(id, status)
-    }
-}
+use crate::models::{EpicId, TaskId, TaskStatus, WorkPackageId, WorkPackageItem};
 
 fn sub_epic(id: i64, parent: i64) -> crate::models::Epic {
     crate::models::Epic {
@@ -70,8 +43,8 @@ fn package_columns(app: &App, id: i64) -> Vec<TaskStatus> {
 /// Root epic 1 → sub-epic 2; task 10 under 1, task 20 under 2, standalone 30.
 fn tree_app() -> App {
     let mut app = App::new(vec![
-        task_in(10, 1, TaskStatus::Running),
-        task_in(20, 2, TaskStatus::Running),
+        epic_task(10, 1, TaskStatus::Running),
+        epic_task(20, 2, TaskStatus::Running),
         make_task(30, TaskStatus::Running),
     ]);
     app.board.epics = vec![make_epic(1), sub_epic(2, 1)];
@@ -123,7 +96,7 @@ fn a_hidden_sub_epic_draws_no_card_inside_its_parents_view() {
 fn a_hidden_childs_tasks_do_not_place_the_parents_card() {
     // The parent's only Running work sits in the hidden child, so its card
     // falls back to Backlog instead of claiming Running.
-    let mut app = App::new(vec![task_in(20, 2, TaskStatus::Running)]);
+    let mut app = App::new(vec![epic_task(20, 2, TaskStatus::Running)]);
     app.board.epics = vec![make_epic(1), sub_epic(2, 1)];
     app.filter.hidden_epics.insert(EpicId(2));
 
@@ -152,7 +125,7 @@ fn a_search_cannot_bring_back_a_hidden_epic() {
 fn a_task_a_visible_package_links_stays_hidden_under_a_hidden_epic() {
     let mut app = tree_app();
     app.filter.lens = app.filter.lens.with_flattened(true);
-    app.board.work_packages = vec![package(7)];
+    app.board.work_packages = vec![make_package(7, "P7")];
     app.board.work_package_links = vec![link(7, WorkPackageItem::Task(TaskId(10)))];
     app.filter.hidden_epics.insert(EpicId(1));
 
@@ -167,9 +140,9 @@ fn a_task_a_visible_package_links_stays_hidden_under_a_hidden_epic() {
 
 #[test]
 fn a_package_whose_only_link_is_a_hidden_epic_sits_in_backlog() {
-    let mut app = App::new(vec![task_in(10, 1, TaskStatus::Done)]);
+    let mut app = App::new(vec![epic_task(10, 1, TaskStatus::Done)]);
     app.board.epics = vec![make_epic(1)];
-    app.board.work_packages = vec![package(7)];
+    app.board.work_packages = vec![make_package(7, "P7")];
     app.board.work_package_links = vec![link(7, WorkPackageItem::Epic(EpicId(1)))];
     assert_eq!(package_columns(&app, 7), vec![TaskStatus::Done]);
 
@@ -180,7 +153,7 @@ fn a_package_whose_only_link_is_a_hidden_epic_sits_in_backlog() {
 #[test]
 fn hiding_a_package_removes_its_card_and_nothing_else() {
     let mut app = tree_app();
-    app.board.work_packages = vec![package(7), package(8)];
+    app.board.work_packages = vec![make_package(7, "P7"), make_package(8, "P8")];
     app.board.work_package_links = vec![link(7, WorkPackageItem::Epic(EpicId(1)))];
 
     app.filter.hidden_packages.insert(WorkPackageId(7));
@@ -239,7 +212,7 @@ fn closing_the_filter_overlay_persists_both_hide_lists_sorted() {
 #[test]
 fn the_status_bar_names_what_is_hidden() {
     let mut app = tree_app();
-    app.board.work_packages = vec![package(7)];
+    app.board.work_packages = vec![make_package(7, "P7")];
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         !buffer_contains(&buf, "[hidden"),
@@ -301,7 +274,7 @@ fn closing_the_overlay_leaves_an_epic_view_the_user_just_hid() {
 
 #[test]
 fn a_live_task_under_a_hidden_child_does_not_keep_the_parent_under_the_active_lens() {
-    let mut live = task_in(20, 2, TaskStatus::Running);
+    let mut live = epic_task(20, 2, TaskStatus::Running);
     live.tmux_window = Some(crate::models::test_tmux_window("task-20"));
     let mut app = App::new(vec![live]);
     app.board.epics = vec![make_epic(1), sub_epic(2, 1)];

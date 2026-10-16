@@ -284,6 +284,7 @@ impl EpicSearchIndex<'_> {
 pub(in crate::tui) struct EpicSearchPass<'a> {
     index: OnceCell<Option<EpicSearchIndex<'a>>>,
     packages: OnceCell<PackagePlacementMap>,
+    hidden_epics: OnceCell<HashSet<EpicId>>,
 }
 
 impl<'a> EpicSearchPass<'a> {
@@ -294,6 +295,13 @@ impl<'a> EpicSearchPass<'a> {
             .get_or_init(|| view.search_active().then(|| view.epic_search_index()))
             .as_ref()
             .is_none_or(|idx| view.epic_search_matches_indexed(idx, epic_id))
+    }
+
+    /// The hidden-epic closure for this pass, built on the first call and
+    /// shared by every column, rather than rebuilt per column.
+    pub(in crate::tui) fn hidden_epics(&self, view: BoardView<'a>) -> &HashSet<EpicId> {
+        self.hidden_epics
+            .get_or_init(|| hidden_epic_closure(&view.filter.hidden_epics, &view.board.epics))
     }
 
     /// Where each package card sits in this pass, built on the first call

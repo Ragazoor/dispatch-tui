@@ -261,3 +261,35 @@ fn cycle_lens_to(app: &mut App, target: crate::tui::types::Lens) {
         )));
     }
 }
+
+/// A work package with a fixed timestamp.
+pub(in crate::tui) fn make_package(id: i64, title: &str) -> crate::models::WorkPackage {
+    let at = chrono::DateTime::from_timestamp(1_700_000_000, 0).expect("valid timestamp");
+    crate::models::WorkPackage {
+        id: crate::models::WorkPackageId(id),
+        title: title.to_string(),
+        description: String::new(),
+        created_by: None,
+        created_at: at,
+        updated_at: at,
+    }
+}
+
+/// Link `item` into package `package`.
+pub(in crate::tui) fn link(
+    package: i64,
+    item: crate::models::WorkPackageItem,
+) -> crate::models::WorkPackageLink {
+    crate::models::WorkPackageLink {
+        work_package_id: crate::models::WorkPackageId(package),
+        item,
+    }
+}
+
+/// A task of `status` under epic `epic_id`.
+pub(in crate::tui) fn epic_task(id: i64, epic_id: i64, status: TaskStatus) -> Task {
+    Task {
+        epic_id: Some(EpicId(epic_id)),
+        ..make_task(id, status)
+    }
+}

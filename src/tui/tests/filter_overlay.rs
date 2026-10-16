@@ -2,33 +2,17 @@
 //! Overlay Layout").
 
 use super::*;
-use crate::models::{EpicId, TaskStatus, WorkPackage, WorkPackageId};
+use crate::models::{EpicId, TaskStatus, WorkPackageId};
 use crate::tui::types::{FilterEpicMark, FilterTab};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
+use crossterm::event::KeyCode;
 
 fn press(app: &mut App, code: KeyCode) {
-    app.handle_key(key(code));
+    app.handle_key(make_key(code));
 }
 
 fn type_str(app: &mut App, s: &str) {
     for c in s.chars() {
         press(app, KeyCode::Char(c));
-    }
-}
-
-fn package(id: i64) -> WorkPackage {
-    let at = chrono::DateTime::from_timestamp(1_700_000_000, 0).expect("valid timestamp");
-    WorkPackage {
-        id: WorkPackageId(id),
-        title: format!("P{id}"),
-        description: String::new(),
-        created_by: None,
-        created_at: at,
-        updated_at: at,
     }
 }
 
@@ -50,7 +34,7 @@ fn overlay_app() -> App {
         epic(2, Some(1), "Beta", TaskStatus::Backlog),
         epic(3, None, "Gamma", TaskStatus::Done),
     ];
-    app.board.work_packages = vec![package(7), package(8)];
+    app.board.work_packages = vec![make_package(7, "P7"), make_package(8, "P8")];
     press(&mut app, KeyCode::Char('f'));
     app
 }

@@ -81,7 +81,7 @@ impl<'a> BoardView<'a> {
             .board
             .work_packages
             .iter()
-            .filter(|p| !self.filter.hidden_packages.contains(&p.id))
+            .filter(|p| !self.filter.package_is_hidden(p.id))
         {
             let (task_ids, linked_epics) = self.package_item_ids(package.id);
             let subtree: HashSet<EpicId> = linked_epics

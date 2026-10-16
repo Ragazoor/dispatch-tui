@@ -3,31 +3,10 @@
 //!
 //! Obligations from `docs/specs/work-packages.allium`.
 use super::*;
-use crate::models::{
-    EpicId, TaskId, TaskStatus, WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink,
-};
+use crate::models::{EpicId, TaskId, TaskStatus, WorkPackageId, WorkPackageItem};
 use crate::tui::commands::WorkPackageCommand;
 use crate::tui::messages::WorkPackageMessage;
 use crossterm::event::KeyCode;
-
-fn make_package(id: i64, title: &str) -> WorkPackage {
-    let at = chrono::DateTime::from_timestamp(1_700_000_000, 0).expect("valid timestamp");
-    WorkPackage {
-        id: WorkPackageId(id),
-        title: title.to_string(),
-        description: String::new(),
-        created_by: None,
-        created_at: at,
-        updated_at: at,
-    }
-}
-
-fn link(package: i64, item: WorkPackageItem) -> WorkPackageLink {
-    WorkPackageLink {
-        work_package_id: WorkPackageId(package),
-        item,
-    }
-}
 
 fn task_item(id: i64) -> WorkPackageItem {
     WorkPackageItem::Task(TaskId(id))
@@ -35,13 +14,6 @@ fn task_item(id: i64) -> WorkPackageItem {
 
 fn epic_item(id: i64) -> WorkPackageItem {
     WorkPackageItem::Epic(EpicId(id))
-}
-
-fn epic_task(id: i64, epic_id: i64, status: TaskStatus) -> crate::models::Task {
-    crate::models::Task {
-        epic_id: Some(EpicId(epic_id)),
-        ..make_task(id, status)
-    }
 }
 
 /// The columns whose card list holds package `id`, in board order.

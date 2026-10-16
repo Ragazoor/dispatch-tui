@@ -39,61 +39,11 @@ impl App {
                 && fuzzy_matches_lower(&e.title, &query)
         };
 
-        // Post-order: a node is listed when it or a descendant qualifies.
-        fn walk(
-            node: Option<EpicId>,
-            depth: usize,
-            parent_hidden: bool,
-            ctx: &mut WalkCtx<'_>,
-        ) -> Vec<FilterEpicRow> {
-            let mut out = vec![];
-            let Some(kids) = ctx.children.get(&node).cloned() else {
-                return out;
-            };
-            // A cycle written by a bad reparent must not hang the overlay.
-            if depth > ctx.epics.len() {
-                return out;
-            }
-            for i in kids {
-                let e = &ctx.epics[i];
-                let own_hidden = ctx.hidden.contains(&e.id);
-                let mark = if parent_hidden {
-                    FilterEpicMark::HiddenByParent
-                } else if own_hidden {
-                    FilterEpicMark::Hidden
-                } else {
-                    FilterEpicMark::Shown
-                };
-                let below = walk(Some(e.id), depth + 1, parent_hidden || own_hidden, ctx);
-                if (ctx.qualifies)(i) || !below.is_empty() {
-                    out.push(FilterEpicRow {
-                        id: e.id,
-                        depth,
-                        title: e.title.clone(),
-                        mark,
-                    });
-                    out.extend(below);
-                }
-            }
-            out
-        }
-        struct WalkCtx<'a> {
-            epics: &'a [crate::models::Epic],
-            children: &'a HashMap<Option<EpicId>, Vec<usize>>,
-            hidden: &'a std::collections::HashSet<EpicId>,
-            qualifies: &'a dyn Fn(usize) -> bool,
-        }
-        walk(
-            None,
-            0,
-            false,
-            &mut WalkCtx {
-                epics,
-                children: &children,
-                hidden,
-                qualifies: &qualifies,
-            },
-        )
+        let mut rows = vec![];
+        list_epic_subtree(
+            None, 0, false, &children, epics, hidden, &qualifies, &mut rows,
+        );
+        rows
     }
 
     /// The number of rows on `tab`'s list.
@@ -107,16 +57,14 @@ impl App {
 
     pub(in crate::tui) fn handle_move_filter_cursor(&mut self, delta: isize) -> Vec<Command> {
         let tab = self.filter_overlay.tab;
-        if tab == FilterTab::Repos {
-            return self.handle_move_repo_cursor(delta);
-        }
         let count = self.filter_tab_len(tab);
         if count == 0 {
             return vec![];
         }
         let cursor = match tab {
+            FilterTab::Repos => &mut self.input.repo_cursor,
             FilterTab::Epics => &mut self.filter_overlay.epic_cursor,
-            _ => &mut self.filter_overlay.package_cursor,
+            FilterTab::Packages => &mut self.filter_overlay.package_cursor,
         };
         *cursor = (*cursor as isize + delta).rem_euclid(count as isize) as usize;
         self.dirty = true;
@@ -209,9 +157,7 @@ impl App {
         loop {
             let inside_hidden = match &self.board.view_mode {
                 ViewMode::Epic { epic_id, .. } => hidden.contains(epic_id),
-                ViewMode::Package { package_id, .. } => {
-                    self.filter.hidden_packages.contains(package_id)
-                }
+                ViewMode::Package { package_id, .. } => self.filter.package_is_hidden(*package_id),
                 _ => false,
             };
             if !inside_hidden {
@@ -227,8 +173,8 @@ impl App {
         *cursor = (*cursor).min(len.saturating_sub(1));
     }
 
-    /// What every board-filter change does to the board behind the overlay.
-    fn after_filter_change(&mut self) -> Vec<Command> {
+    /// What every board-filter or lens change does to the board behind it.
+    pub(in crate::tui) fn after_filter_change(&mut self) -> Vec<Command> {
         self.sync_board_selection();
         self.reset_column_scroll();
         self.dirty = true;
@@ -259,36 +205,25 @@ impl App {
         self.reset_column_scroll();
         let mut paths: Vec<_> = self.filter.repos.iter().cloned().collect();
         paths.sort();
-        let value = serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string());
-        let mode_value = self.filter.mode.as_str();
-        let hidden_epics = sorted_ids_json(self.filter.hidden_epics.iter().map(|e| e.0));
-        let hidden_packages = sorted_ids_json(self.filter.hidden_packages.iter().map(|p| p.0));
-        vec![
-            Command::Settings(
-                crate::tui::commands::SettingsCommand::PersistStringSetting {
-                    key: crate::tui::HIDDEN_EPICS_KEY.to_string(),
-                    value: hidden_epics,
-                },
+        let settings = [
+            (
+                crate::tui::HIDDEN_EPICS_KEY,
+                sorted_ids_json(self.filter.hidden_epics.iter().map(|e| e.0)),
             ),
-            Command::Settings(
-                crate::tui::commands::SettingsCommand::PersistStringSetting {
-                    key: crate::tui::HIDDEN_PACKAGES_KEY.to_string(),
-                    value: hidden_packages,
-                },
+            (
+                crate::tui::HIDDEN_PACKAGES_KEY,
+                sorted_ids_json(self.filter.hidden_packages.iter().map(|p| p.0)),
             ),
-            Command::Settings(
-                crate::tui::commands::SettingsCommand::PersistStringSetting {
-                    key: "repo_filter".to_string(),
-                    value,
-                },
+            (
+                "repo_filter",
+                serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string()),
             ),
-            Command::Settings(
-                crate::tui::commands::SettingsCommand::PersistStringSetting {
-                    key: "repo_filter_mode".to_string(),
-                    value: mode_value.to_string(),
-                },
-            ),
-        ]
+            ("repo_filter_mode", self.filter.mode.as_str().to_string()),
+        ];
+        settings
+            .into_iter()
+            .flat_map(|(key, value)| Self::persist_setting(key, value))
+            .collect()
     }
 
     pub(in crate::tui) fn handle_toggle_repo_filter(&mut self, path: String) -> Vec<Command> {
@@ -297,10 +232,7 @@ impl App {
         } else {
             self.filter.repos.insert(path);
         }
-        self.sync_board_selection();
-        self.reset_column_scroll();
-        self.dirty = true;
-        vec![]
+        self.after_filter_change()
     }
 
     pub(in crate::tui) fn handle_toggle_repo_filter_mode(&mut self) -> Vec<Command> {
@@ -308,10 +240,7 @@ impl App {
             RepoFilterMode::Include => RepoFilterMode::Exclude,
             RepoFilterMode::Exclude => RepoFilterMode::Include,
         };
-        self.sync_board_selection();
-        self.reset_column_scroll();
-        self.dirty = true;
-        vec![]
+        self.after_filter_change()
     }
 
     pub(in crate::tui) fn handle_start_delete_repo_path(&mut self) -> Vec<Command> {
@@ -338,4 +267,60 @@ fn sorted_ids_json(ids: impl Iterator<Item = i64>) -> String {
     let mut ids: Vec<i64> = ids.collect();
     ids.sort_unstable();
     serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// Append the listed epics under `node` to `out`, depth-first in board order.
+/// A child is listed when it qualifies or some descendant does (post-order
+/// decision, pre-order output). `depth` past the epic count means a parent
+/// cycle; the walk stops rather than hang the overlay.
+#[allow(clippy::too_many_arguments)]
+fn list_epic_subtree(
+    node: Option<EpicId>,
+    depth: usize,
+    parent_hidden: bool,
+    children: &HashMap<Option<EpicId>, Vec<usize>>,
+    epics: &[crate::models::Epic],
+    hidden: &std::collections::HashSet<EpicId>,
+    qualifies: &dyn Fn(usize) -> bool,
+    out: &mut Vec<FilterEpicRow>,
+) {
+    let Some(kids) = children.get(&node) else {
+        return;
+    };
+    if depth > epics.len() {
+        return;
+    }
+    for &i in kids {
+        let e = &epics[i];
+        let own_hidden = hidden.contains(&e.id);
+        let mark = if parent_hidden {
+            FilterEpicMark::HiddenByParent
+        } else if own_hidden {
+            FilterEpicMark::Hidden
+        } else {
+            FilterEpicMark::Shown
+        };
+        let at = out.len();
+        list_epic_subtree(
+            Some(e.id),
+            depth + 1,
+            parent_hidden || own_hidden,
+            children,
+            epics,
+            hidden,
+            qualifies,
+            out,
+        );
+        if qualifies(i) || out.len() > at {
+            out.insert(
+                at,
+                FilterEpicRow {
+                    id: e.id,
+                    depth,
+                    title: e.title.clone(),
+                    mark,
+                },
+            );
+        }
+    }
 }

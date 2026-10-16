@@ -828,6 +828,9 @@ impl<'a> BoardView<'a> {
                 return repo_matches;
             }
         }
+        if self.filter.repos.is_empty() {
+            return true;
+        }
         epic_repo_matches_for_ids(
             &self.board.tasks,
             self.filter,
@@ -863,17 +866,16 @@ impl<'a> BoardView<'a> {
     pub(in crate::tui) fn epic_search_index(self) -> EpicSearchIndex<'a> {
         #[cfg(test)]
         EPIC_SEARCH_INDEX_BUILDS.with(|c| c.set(c.get() + 1));
-        let query_lower = self.search.query.to_lowercase();
-        // Parsed once per pass, not per epic: this is the render hot path.
-        let id_digits = id_digits_query(&self.search.query);
+        // The query is lowercased and parsed once per pass inside
+        // `board_filters`, not per epic: this is the render hot path.
         let filters = self.board_filters();
         EpicSearchIndex {
             task_owners: epic_ids_owning_matching_task(&self.board.tasks, &filters),
-            hidden_epics: filters.hidden_epics,
             by_id: crate::models::epic_id_lookup(&self.board.epics),
             children: crate::models::build_children_map(&self.board.epics),
-            query_lower,
-            id_digits,
+            query_lower: filters.query_lower,
+            id_digits: filters.id_digits,
+            hidden_epics: filters.hidden_epics,
         }
     }
 
@@ -982,9 +984,8 @@ impl<'a> BoardView<'a> {
         };
         // Hidden epics draw no card anywhere, a hidden ancestor hiding its
         // whole subtree (`board-layout.allium`, "Hidden Epics and Work
-        // Packages"). Free when nothing is hidden.
-        let hidden =
-            super::search::hidden_epic_closure(&self.filter.hidden_epics, &self.board.epics);
+        // Packages"). Built once per pass, free when nothing is hidden.
+        let hidden = pass.hidden_epics(self);
         self.board
             .epics
             .iter()

@@ -600,6 +600,11 @@ impl FilterState {
         }
     }
 
+    /// Whether the user hid this work package (its card only).
+    pub fn package_is_hidden(&self, id: WorkPackageId) -> bool {
+        self.hidden_packages.contains(&id)
+    }
+
     /// Returns false when the lens shows only active tasks and the task has no
     /// tmux window.
     pub fn task_matches(&self, task: &crate::models::Task) -> bool {

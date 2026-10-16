@@ -544,10 +544,6 @@ impl App {
         self.filter.mode
     }
 
-    pub fn filter_only_active(&self) -> bool {
-        self.filter.lens.only_active()
-    }
-
     /// Bootstrap-only carve-out: set during runtime startup from the saved
     /// `notifications_enabled` setting before the message loop begins. After
     /// bootstrap completes, this state is mutated only via Messages. See the
@@ -577,10 +573,12 @@ impl App {
         self.sync_board_selection();
     }
 
+    #[cfg(test)]
     pub fn hidden_epics(&self) -> &HashSet<EpicId> {
         &self.filter.hidden_epics
     }
 
+    #[cfg(test)]
     pub fn hidden_packages(&self) -> &HashSet<WorkPackageId> {
         &self.filter.hidden_packages
     }
@@ -599,7 +597,7 @@ impl App {
             .board
             .work_packages
             .iter()
-            .filter(|p| self.filter.hidden_packages.contains(&p.id))
+            .filter(|p| self.filter.package_is_hidden(p.id))
             .count();
         (epics, packages)
     }

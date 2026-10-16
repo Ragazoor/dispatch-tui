@@ -471,9 +471,6 @@ impl App {
         // Column item counts change with the lens (epics hidden / shown, tasks
         // from the subtree merged in / split out, idle tasks dropped), so
         // selection row indices may be out of bounds. Sync to follow the anchor.
-        self.sync_board_selection();
-        self.reset_column_scroll();
-        self.dirty = true;
-        vec![]
+        self.after_filter_change()
     }
 }

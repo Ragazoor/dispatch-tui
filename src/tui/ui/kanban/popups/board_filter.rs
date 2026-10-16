@@ -218,6 +218,7 @@ pub(in crate::tui::ui::kanban) fn render_board_filter_overlay(
 /// `·N` counts the tab's hidden rows. Kept short to fit the popup's 60-column
 /// cap with both counts showing.
 fn tab_header_line<'a>(app: &'a App, styles: &HintStyles) -> Line<'a> {
+    let (hidden_epics, hidden_packages) = app.live_hidden_counts();
     let mut spans = vec![Span::raw("  ")];
     for (i, tab) in FilterTab::ALL.into_iter().enumerate() {
         if i > 0 {
@@ -225,8 +226,8 @@ fn tab_header_line<'a>(app: &'a App, styles: &HintStyles) -> Line<'a> {
         }
         let detail = match tab {
             FilterTab::Repos => format!(" ({})", app.repo_filter_mode().as_str()),
-            FilterTab::Epics => hidden_suffix(app.live_hidden_counts().0),
-            FilterTab::Packages => hidden_suffix(app.live_hidden_counts().1),
+            FilterTab::Epics => hidden_suffix(hidden_epics),
+            FilterTab::Packages => hidden_suffix(hidden_packages),
         };
         let style = if tab == app.filter_overlay.tab {
             styles
@@ -319,21 +320,12 @@ fn epic_list_rows<'a>(rows: &[FilterEpicRow], cursor: usize, styles: &HintStyles
                 FilterEpicMark::HiddenByParent => "[-]",
             };
             let indent = "  ".repeat(row.depth);
-            let style = if i == cursor {
-                styles.accent
-            } else if row.mark == FilterEpicMark::HiddenByParent {
-                Style::default().fg(MUTED)
-            } else {
-                styles.desc
-            };
-            let pointer = if i == cursor { "  ►" } else { "   " };
-            Line::from(vec![
-                Span::styled(pointer, style),
-                Span::styled(
-                    format!(" {indent}{mark} #{} {}", row.id.0, row.title),
-                    style,
-                ),
-            ])
+            cursor_row(
+                i == cursor,
+                row.mark == FilterEpicMark::HiddenByParent,
+                format!(" {indent}{mark} #{} {}", row.id.0, row.title),
+                styles,
+            )
         })
         .collect()
 }
@@ -346,23 +338,31 @@ fn package_rows<'a>(app: &'a App, styles: &HintStyles) -> Vec<Line<'a>> {
         .iter()
         .enumerate()
         .map(|(i, p)| {
-            let mark = if app.hidden_packages().contains(&p.id) {
+            let mark = if app.filter.package_is_hidden(p.id) {
                 "[x]"
             } else {
                 "[ ]"
             };
-            let style = if i == cursor {
-                styles.accent
-            } else {
-                styles.desc
-            };
-            let pointer = if i == cursor { "  ►" } else { "   " };
-            Line::from(vec![
-                Span::styled(pointer, style),
-                Span::styled(format!(" {mark} {}", p.title), style),
-            ])
+            cursor_row(i == cursor, false, format!(" {mark} {}", p.title), styles)
         })
         .collect()
+}
+
+/// One list row: a `►` and the accent colour under the cursor, muted when
+/// `muted`, plain otherwise.
+fn cursor_row<'a>(selected: bool, muted: bool, text: String, styles: &HintStyles) -> Line<'a> {
+    let style = if selected {
+        styles.accent
+    } else if muted {
+        Style::default().fg(MUTED)
+    } else {
+        styles.desc
+    };
+    let pointer = if selected { "  ►" } else { "   " };
+    Line::from(vec![
+        Span::styled(pointer, style),
+        Span::styled(text, style),
+    ])
 }
 
 /// The windowed slice of `rows`, bracketed by "↑ N more" / "↓ N more" markers

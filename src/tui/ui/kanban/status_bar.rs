@@ -318,7 +318,7 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
             )],
         );
     }
-    if app.filter_only_active() {
+    if app.filter.lens.only_active() {
         prepend(
             &mut spans,
             vec![Span::styled(

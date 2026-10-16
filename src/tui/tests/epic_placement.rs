@@ -20,14 +20,6 @@ fn epic_columns(app: &App, epic_id: i64) -> Vec<TaskStatus> {
         .collect()
 }
 
-/// A task owned by `epic_id`, in `status`.
-fn epic_task(id: i64, epic_id: i64, status: TaskStatus) -> crate::models::Task {
-    crate::models::Task {
-        epic_id: Some(EpicId(epic_id)),
-        ..make_task(id, status)
-    }
-}
-
 /// One epic (#1) whose four subtasks sit one in each column.
 fn app_with_epic_spread_over_all_columns() -> App {
     let mut app = App::new(vec![

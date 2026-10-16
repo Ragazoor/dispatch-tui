@@ -125,7 +125,7 @@ impl App {
     }
 
     fn persist_section_folds(&self) -> Vec<Command> {
-        Self::persist_fold_setting(crate::tui::COLLAPSED_SECTIONS_KEY, self.folds.serialise())
+        Self::persist_setting(crate::tui::COLLAPSED_SECTIONS_KEY, self.folds.serialise())
     }
 
     /// Fold or unfold the flattened epic group the cursor is in
@@ -194,12 +194,12 @@ impl App {
     }
 
     fn persist_epic_folds(&self) -> Vec<Command> {
-        Self::persist_fold_setting(crate::tui::COLLAPSED_EPICS_KEY, self.epic_folds.serialise())
+        Self::persist_setting(crate::tui::COLLAPSED_EPICS_KEY, self.epic_folds.serialise())
     }
 
-    /// Wrap a fold state's serialised form as the settings-write command both
-    /// `persist_section_folds` and `persist_epic_folds` return.
-    fn persist_fold_setting(key: &str, value: String) -> Vec<Command> {
+    /// Wrap a serialised setting as the settings-write command the fold and
+    /// board-filter handlers return.
+    pub(in crate::tui) fn persist_setting(key: &str, value: String) -> Vec<Command> {
         vec![Command::Settings(
             crate::tui::commands::SettingsCommand::PersistStringSetting {
                 key: key.to_string(),
