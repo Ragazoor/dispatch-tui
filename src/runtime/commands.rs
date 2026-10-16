@@ -210,7 +210,7 @@ async fn dispatch_task(
             vec![]
         }
         Resume { id, worktree } => {
-            rt.exec_resume(id, worktree);
+            rt.exec_resume(id, worktree).await;
             vec![]
         }
         JumpToTmux { window } => {

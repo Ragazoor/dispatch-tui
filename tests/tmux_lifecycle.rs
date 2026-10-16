@@ -209,6 +209,7 @@ impl Fixture {
     fn dispatch(&self, id: i64) -> dispatch_tui::models::DispatchResult {
         dispatch::dispatch_agent(
             &task(id, &self.repo),
+            "atlas",
             &self.server.runner(),
             &self.server.runner(),
             None,
@@ -221,6 +222,7 @@ impl Fixture {
     fn resume(&self, id: i64, worktree: &Path) -> dispatch_tui::models::ResumeResult {
         dispatch::resume_agent(
             TaskId(id),
+            "atlas",
             worktree.to_str().unwrap(),
             &self.server.runner(),
         )
@@ -599,6 +601,7 @@ fn dispatch_refuses_to_create_a_second_window_under_a_live_name() {
 
     let err = dispatch::dispatch_agent(
         &task(TASK_ID, &fx.repo),
+        "atlas",
         &fx.server.runner(),
         &fx.server.runner(),
         None,

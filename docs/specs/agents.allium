@@ -89,6 +89,9 @@
 --   - A13, Agent stays in this spec for now. No other spec refers to Agent
 --     in A1. It moves into core.allium when a later step (A2's prompt and
 --     tool rules, A4's SubagentEntry.agent) makes another spec reference it.
+--     A2 (task #90116) leaves it here: mcp-task-tools.allium and
+--     dispatch-prompt.allium cite the rules by name, and the move is cheaper
+--     in A4, when SubagentEntry.agent needs it in core as well.
 
 use "./core.allium" as core
 
@@ -434,10 +437,13 @@ surface AgentIdentity {
         -- AgentRowShowsAlias, rewritten by step A3).
 
     @guarantee PromptNamesTheAgent
-        -- A dispatched agent's prompt tells it its own name, and tells it
-        -- that sibling agents are reached by their agent names, which
-        -- list_tasks and get_task show. It no longer says siblings run as
-        -- `task-<id>` (dispatch-prompt.allium, rewritten by step A2).
+        -- A dispatched agent's prompt tells it its own name (a line in the
+        -- task block, for every mode), and, when the task is in an epic, that
+        -- sibling agents are reached by their agent names, which each task's
+        -- details and listing show. It no longer says siblings run as
+        -- `task-<id>` (dispatch-prompt.allium, rewritten by step A2). It names
+        -- no tool to say where the names are shown
+        -- (dispatch-prompt.allium: ThePromptNamesNoToolMerelyToSayItExists).
 }
 
 ------------------------------------------------------------
@@ -528,8 +534,11 @@ invariant AgentNameIsNotAnId {
 --     reached by agent name (PromptNamesTheAgent). Check first, by trying it,
 --     what `claude --resume` does when `--name` differs from the name the
 --     session was started under: every backfilled agent's session started as
---     `task-<id>`. If the rename is refused or ignored, come back to this
---     spec before building.
+--     `task-<id>`. Tried in A2, with `--resume <id>` and with `--continue`:
+--     Claude Code accepts the new name and the session carries it from then on.
+--     A2 also moves the peer-message hook's target lookup (`SendMessage`'s `to`)
+--     from the `task-<id>` parse to an agent-name lookup, keeping the parse for
+--     sessions started before A2 and not yet resumed.
 -- A3. The agent tree. The agents section and the hooks wire carry the agent
 --     name (AgentRowShowsAgentName).
 -- A4. Move the live-session fields. The six fields on Agent above, and
@@ -546,7 +555,7 @@ invariant AgentNameIsNotAnId {
 --     and TaskAliasIsASecondName go. The `alias` column stays in the stored
 --     row, blank and unread, for the same reason as A4's. Do not remove it.
 --
--- Landed: A1 (task #90115).
+-- Landed: A1 (task #90115), A2 (task #90116).
 
 ------------------------------------------------------------
 -- Open questions

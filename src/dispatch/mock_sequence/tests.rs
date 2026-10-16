@@ -55,6 +55,7 @@ fn dispatch_script_matches_a_real_dispatch() {
 
     dispatch_agent(
         &make_task(&repo_path),
+        "atlas",
         &mock,
         &mock,
         None,
@@ -71,7 +72,7 @@ fn resume_script_matches_a_real_resume() {
     let script = DispatchScript::resume();
     let mock = script.runner();
 
-    resume_agent(TaskId(42), dir.path().to_str().unwrap(), &mock).unwrap();
+    resume_agent(TaskId(42), "atlas", dir.path().to_str().unwrap(), &mock).unwrap();
 
     script.assert_matches(&mock.recorded_calls());
 }
@@ -86,7 +87,7 @@ fn resume_script_matches_a_real_resume_when_window_already_alive() {
     let script = DispatchScript::resume().window_already_alive();
     let mock = script.runner();
 
-    resume_agent(TaskId(42), dir.path().to_str().unwrap(), &mock).unwrap();
+    resume_agent(TaskId(42), "atlas", dir.path().to_str().unwrap(), &mock).unwrap();
 
     script.assert_matches(&mock.recorded_calls());
 }
@@ -215,6 +216,7 @@ fn pr_head_script_matches_a_real_review_dispatch() {
 
     dispatch_agent(
         &pr_review_task(&repo_path),
+        "atlas",
         &mock,
         &mock,
         None,
@@ -641,7 +643,7 @@ fn assert_matches_rejects_a_reordered_call() {
 fn recorded_resume_calls() -> Vec<(String, Vec<String>)> {
     let (dir, _repo_path) = bare_repo();
     let mock = DispatchScript::resume().runner();
-    resume_agent(TaskId(42), dir.path().to_str().unwrap(), &mock).unwrap();
+    resume_agent(TaskId(42), "atlas", dir.path().to_str().unwrap(), &mock).unwrap();
     mock.recorded_calls()
 }
 

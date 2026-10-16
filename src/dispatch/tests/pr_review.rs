@@ -50,7 +50,14 @@ fn dispatch_pr_review_task_bases_worktree_on_pr_head_branch() {
     // git calls we assert on were recorded during provisioning beforehand. The
     // failure then rolls the fresh worktree back, hence the two trailing
     // responses above.
-    let _ = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
+    let _ = dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    );
 
     let calls = mock.recorded_calls();
     assert_eq!(
@@ -91,7 +98,14 @@ fn dispatch_pr_review_task_never_measures_the_pr_head_branch() {
     // calls we assert on were recorded during provisioning beforehand. The
     // failure then rolls the fresh worktree back, hence the two trailing
     // responses above.
-    let _ = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
+    let _ = dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    );
 
     let calls = mock.recorded_calls();
     assert!(
@@ -114,7 +128,15 @@ fn dispatch_pr_review_task_prompt_rebases_onto_pr_branch() {
         .runner();
 
     let task = pr_review_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let prompt =
         std::fs::read_to_string(format!("{repo_path}/.worktrees/42-fix-bug/.claude-prompt"))
@@ -147,7 +169,15 @@ fn dispatch_prompt_includes_fetch_warning_when_fetch_fails() {
     let mock = DispatchScript::dispatch().fetch_is_unreachable().runner();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let prompt =
         std::fs::read_to_string(format!("{repo_path}/.worktrees/42-fix-bug/.claude-prompt"))
@@ -172,7 +202,15 @@ fn dispatch_agent_carries_the_reuse_flag_into_its_result() {
     let mock = DispatchScript::dispatch().runner();
 
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    let result = dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     assert!(
         result.reused_worktree,
@@ -189,7 +227,15 @@ fn dispatch_prompt_has_no_warning_when_fetch_succeeds() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let prompt =
         std::fs::read_to_string(format!("{repo_path}/.worktrees/42-fix-bug/.claude-prompt"))
@@ -209,7 +255,14 @@ fn dispatch_non_review_task_skips_gh_and_bases_worktree_on_origin() {
 
     // make_task has tag None / url None — a plain implementation task.
     let task = make_task(&repo_path);
-    let _ = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
+    let _ = dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    );
 
     let calls = mock.recorded_calls();
     assert!(
@@ -231,7 +284,14 @@ fn dispatch_review_task_pr_resolution_failure_falls_back_to_base() {
     let mock = script.runner();
 
     let task = pr_review_task(&repo_path);
-    let _ = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
+    let _ = dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    );
 
     assert_eq!(
         worktree_add_start_point(&mock.recorded_calls()),
@@ -250,7 +310,14 @@ fn dispatch_review_task_fork_pr_falls_back_to_base() {
     let mock = script.runner();
 
     let task = pr_review_task(&repo_path);
-    let _ = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
+    let _ = dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    );
 
     assert_eq!(
         worktree_add_start_point(&mock.recorded_calls()),
@@ -1195,7 +1262,7 @@ fn resume_skips_git_issues_tmux_continue() {
     let script = DispatchScript::resume();
     let mock = script.runner();
 
-    resume_agent(TaskId(42), &worktree_path, &mock).unwrap();
+    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
 
     let calls = mock.recorded_calls();
     script.assert_matches(&calls);
@@ -1224,7 +1291,7 @@ fn resume_agent_splits_agent_tree_companion_pane_after_send_keys() {
     let script = DispatchScript::resume();
     let mock = script.runner();
 
-    resume_agent(TaskId(42), &worktree_path, &mock).unwrap();
+    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
 
     let calls = mock.recorded_calls();
     let last = &calls[script.index_of(Step::CompanionSplit)];
@@ -1257,7 +1324,7 @@ fn resume_agent_succeeds_even_if_companion_pane_split_fails() {
         MockProcessRunner::fail("no target pane"), // tmux split-window fails
     ]);
 
-    let result = resume_agent(TaskId(42), &worktree_path, &mock);
+    let result = resume_agent(TaskId(42), "atlas", &worktree_path, &mock);
     assert!(
         result.is_ok(),
         "a failed companion-pane split must not fail resume: {result:?}"
@@ -1315,7 +1382,15 @@ fn dispatch_uses_task_base_branch_in_prompt() {
 
     let mut task = make_task(&repo_path);
     task.base_branch = "master".into();
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     // Verify the prompt uses task.base_branch directly — no symbolic-ref call needed
     let prompt_file = worktree_dir.join(".claude-prompt");
@@ -1342,7 +1417,14 @@ fn dispatch_fails_fast_if_git_fails() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
+    let result = dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    );
     assert!(result.is_err());
     let calls = mock.recorded_calls();
     assert_eq!(
@@ -1361,7 +1443,15 @@ fn quick_dispatch_reuses_existing_worktree() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    quick_dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -1382,7 +1472,15 @@ fn quick_dispatch_sends_rename_prompt() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    quick_dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();
@@ -1428,7 +1526,14 @@ fn dispatch_release_please_task_bases_worktree_on_pr_head_branch() {
     ]);
 
     let task = release_please_task(&repo_path);
-    let _ = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
+    let _ = dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    );
 
     let calls = mock.recorded_calls();
     assert_eq!(
@@ -1452,7 +1557,15 @@ fn dispatch_release_please_task_prompt_carries_the_release_runbook_and_pr_url() 
         .runner();
 
     let task = release_please_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let prompt = std::fs::read_to_string(format!(
         "{repo_path}/.worktrees/42-chore-master-release-8-21-10/.claude-prompt"

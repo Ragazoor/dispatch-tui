@@ -56,8 +56,12 @@ fn epic_section_names_no_mcp_tool() {
         "got: {text}"
     );
     assert!(
-        text.contains("ListAgents") && text.contains("task-<id>"),
+        text.contains("ListAgents") && text.contains("agent names"),
         "got: {text}"
+    );
+    assert!(
+        !text.contains("task-<id>"),
+        "siblings are reached by agent name now, got: {text}"
     );
     for tool in crate::mcp::handlers::TOOL_NAMES {
         assert!(
@@ -857,4 +861,25 @@ fn research_prompt_content() {
         text.contains("present") || text.contains("findings"),
         "research prompt should instruct presenting findings"
     );
+}
+
+/// `PromptNamesTheAgent`: every mode's prompt tells the agent its own name, in
+/// the task block, whether or not the task sits in an epic.
+#[test]
+fn every_prompt_tells_the_agent_its_own_name() {
+    let ctx = PromptContext {
+        agent_name: "atlas",
+        ..PromptContext::default()
+    };
+    let line = "Your agent name: atlas";
+    let standard = build_prompt(TaskId(1), "t", "d", None, None, &ctx);
+    let quick = build_quick_dispatch_prompt(TaskId(1), "t", "d", None, &ctx);
+    let research = build_research_prompt(TaskId(1), "t", "d", None, &ctx);
+    for (mode, text) in [
+        ("standard", standard),
+        ("quick", quick),
+        ("research", research),
+    ] {
+        assert!(text.contains(line), "{mode} prompt lacks the name: {text}");
+    }
 }

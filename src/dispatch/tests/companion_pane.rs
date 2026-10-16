@@ -532,8 +532,8 @@ fn epic_preamble_returns_id_line_and_section_for_some() {
         "should guide agent to use native cross-session messaging, got: {section}"
     );
     assert!(
-        section.contains("task-<id>") || section.contains("task-{"),
-        "should name the task-<id> session-naming convention, got: {section}"
+        section.contains("agent names") && !section.contains("task-<id>"),
+        "should say siblings are reached by agent name, got: {section}"
     );
     assert!(
         !section.contains("send_message"),

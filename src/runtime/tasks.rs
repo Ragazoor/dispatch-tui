@@ -1046,14 +1046,24 @@ impl TuiRuntime {
         })
     }
 
-    pub(super) fn exec_resume(&self, id: models::TaskId, worktree: Option<String>) {
+    pub(super) async fn exec_resume(&self, id: models::TaskId, worktree: Option<String>) {
         let tx = self.msg_tx.clone();
+        // The session is named after the current agent, so resume needs one.
+        let agent_name = match dispatch::current_agent_name(&*self.database, id).await {
+            Ok(name) => name,
+            Err(e) => {
+                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Resume failed: {e:#}"),
+                )));
+                return;
+            }
+        };
         let worktree_path = worktree.unwrap_or_default();
         let runner = self.runner.clone();
 
         tokio::task::spawn_blocking(move || {
             tracing::info!(task_id = id.0, "resuming task");
-            match dispatch::resume_agent(id, &worktree_path, &*runner) {
+            match dispatch::resume_agent(id, &agent_name, &worktree_path, &*runner) {
                 Ok(result) => {
                     let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Resumed {
                         id,

@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
-use crate::models::{EpicId, Task, TaskId, TaskStatus};
+use crate::models::{Agent, EpicId, Task, TaskId, TaskStatus};
 use crate::service::{
     CreateTaskParams, ListTasksFilter, ServiceError, UpdateTaskParams, UrlUpdate,
 };
@@ -523,10 +523,16 @@ pub(crate) async fn handle_list_tasks(
         );
     }
     let cut_hint = super::super::types::apply_limit(&mut filtered, parsed.limit);
-    let (epic_titles, plan_goals) = tokio::join!(
+    let (epic_titles, plan_goals, agents) = tokio::join!(
         super::build_epic_titles(state),
-        build_plan_goal_cache(&filtered)
+        build_plan_goal_cache(&filtered),
+        state.db.list_agents()
     );
+    let current_agents: HashMap<TaskId, &Agent> = agents
+        .iter()
+        .filter(|a| a.is_current())
+        .map(|a| (a.task_id, a))
+        .collect();
     let mut lines: Vec<String> = filtered
         .iter()
         .map(|t| {
@@ -534,7 +540,7 @@ pub(crate) async fn handle_list_tasks(
                 Some(g) if !g.is_empty() => g.clone(),
                 _ => super::description_preview(&t.description),
             };
-            super::format_task_line(t, &epic_titles, &goal)
+            super::format_task_line(t, current_agents.get(&t.id).copied(), &epic_titles, &goal)
         })
         .collect();
     lines.extend(cut_hint);

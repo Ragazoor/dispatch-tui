@@ -118,7 +118,10 @@ impl TaskService {
 
         // The prologue runs a local embedding inference and several writes, so
         // it happens before the task is handed to the blocking pool.
-        let inputs = dispatch::prepare_inputs(&*self.db, &task, &emb_svc).await;
+        let inputs = match dispatch::prepare_inputs(&*self.db, &task, &emb_svc).await {
+            Ok(inputs) => inputs,
+            Err(e) => return self.report_failure(&request, &format!("{e:#}")).await,
+        };
         let runner = DeadlineRunner::new(
             Arc::clone(&self.runner),
             Arc::clone(&self.clock),

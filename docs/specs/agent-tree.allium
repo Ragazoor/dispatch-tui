@@ -2731,9 +2731,9 @@ surface AgentTreeCompanionPane {
         -- every other row here. The alias comes first because a word is what a
         -- person scans fastest (core.allium: TaskAliasIsASecondName). The
         -- numeric id is not on the row, except for a task whose alias is not
-        -- yet assigned, which leads with `#<id>` instead; the window (`task-<id>`) and messaging
-        -- session keep it, and the alias resolves to it wherever an id is
-        -- accepted.
+        -- yet assigned, which leads with `#<id>` instead; the window (`task-<id>`) keeps it, and the
+        -- alias resolves to it wherever an id is accepted. The messaging
+        -- session is named after the agent (agents.allium, A2).
         --
         -- The pane's own task is marked with a trailing dot and drawn dimmed.
         -- It is listed rather than hidden so the list always reads as the

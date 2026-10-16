@@ -125,8 +125,8 @@ impl EpicContext {
     pub(super) fn prompt_section(&self) -> String {
         format!(
             "\n\nThis task is part of epic #{}: {}\n\
-            Sibling agents run as sessions named task-<id>, matching that task's own id. \
-            Find one with ListAgents and message it with SendMessage.",
+            Sibling agents are reached by their agent names, which each task's details and \
+            listing show. Find one with ListAgents and message it with SendMessage.",
             self.epic_id, self.epic_title
         )
     }
@@ -220,15 +220,24 @@ pub(super) fn epic_preamble(epic: Option<&EpicContext>) -> (String, String) {
 }
 
 /// Standard task identification block shared by all task agent prompts.
+///
+/// `agent_name` is the agent's own name (`PromptNamesTheAgent`); a block built
+/// without one omits the line rather than print an empty name.
 pub(super) fn task_block(
     task_id: TaskId,
+    agent_name: &str,
     title: &str,
     description: &str,
     epic: Option<&EpicContext>,
 ) -> String {
     let (epic_id_line, epic_section) = epic_preamble(epic);
+    let agent_line = if agent_name.is_empty() {
+        String::new()
+    } else {
+        format!("\n  Your agent name: {agent_name}")
+    };
     format!(
-        "Task:\n  ID: {task_id}\n  Title: {title}\n  Description: {description}\
+        "Task:\n  ID: {task_id}{agent_line}\n  Title: {title}\n  Description: {description}\
          {epic_id_line}{epic_section}"
     )
 }
@@ -709,7 +718,7 @@ confirm it. Make no changes until they do."
         ))
     };
 
-    let block = task_block(task_id, title, description, epic);
+    let block = task_block(task_id, ctx.agent_name, title, description, epic);
     render_task_prompt(
         "Your task is:",
         IntroSpacing::SingleNewline,
@@ -989,7 +998,7 @@ Then, before making any changes:\n\
         },
     );
 
-    let block = task_block(task_id, title, description, epic);
+    let block = task_block(task_id, ctx.agent_name, title, description, epic);
     render_task_prompt(
         "You are working interactively with the user.",
         IntroSpacing::BlankLine,
@@ -1022,7 +1031,7 @@ When you have gathered sufficient information, present your findings clearly to 
 and wait for further instructions; this session is for investigation, so code changes and \
 wrapping up are the user's call once they have read what you found.";
 
-    let block = task_block(task_id, title, description, epic);
+    let block = task_block(task_id, ctx.agent_name, title, description, epic);
     render_task_prompt(
         RESEARCH_AGENT_INTRO,
         IntroSpacing::BlankLine,
@@ -1055,6 +1064,10 @@ impl<'a> From<&'a [Learning]> for LearningInjections<'a> {
 /// parameters when a new context source lands.
 pub struct PromptContext<'a> {
     pub learnings: LearningInjections<'a>,
+    /// The agent's own name, which the prompt tells it (`PromptNamesTheAgent`
+    /// in `docs/specs/dispatch-prompt.allium`). Empty only in a context built
+    /// without the store, such as a prompt-wording test.
+    pub agent_name: &'a str,
     pub tag: Option<TaskTag>,
     pub auto_run_plan: bool,
     /// Does the task's repository keep Allium specs? Decides which design step
@@ -1090,6 +1103,7 @@ impl Default for PromptContext<'_> {
     fn default() -> Self {
         Self {
             learnings: LearningInjections::default(),
+            agent_name: "",
             tag: None,
             auto_run_plan: false,
             has_allium_specs: true,

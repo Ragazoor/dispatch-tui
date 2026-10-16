@@ -791,8 +791,9 @@ entity Task {
     -- agent tree shows the alias (agent-tree.allium: AgentRowShowsAlias) and
     -- every place that takes a task id also takes its alias
     -- (mcp-task-tools.allium: AliasResolvesToTaskId). The id stays the key:
-    -- window names (`task-<id>`), messaging sessions and stored references
-    -- keep using it, so a rename never breaks a link.
+    -- window names (`task-<id>`) and stored references keep using it, so a
+    -- rename never breaks a link. A messaging session is named after its
+    -- agent instead (agents.allium: AgentSessionIsNamedAfterTheAgent).
     --
     -- Aliases are unique, so an alias always names one task. A rename to a
     -- taken alias is refused, and so is a rename to a string that is only

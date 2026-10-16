@@ -214,6 +214,23 @@ pub(super) async fn set_feed_command(db: &Arc<Store>, epic_id: crate::models::Ep
     .expect("failed to set feed command");
 }
 
+/// Give `task` a current agent the way production does: by claiming a
+/// dispatch (`StartAgentOnFreshLaunch`). Returns the agent's name.
+///
+/// The task must be in backlog. The request is left open; a test that serves it
+/// does so itself.
+pub(super) async fn give_current_agent(rt: &TuiRuntime, task: crate::models::TaskId) -> String {
+    rt.task_svc
+        .request_dispatch(task, crate::models::DispatchOrigin::Mcp, None)
+        .await
+        .unwrap();
+    rt.database
+        .current_agent(task)
+        .await
+        .expect("the claim starts the task's agent")
+        .name
+}
+
 pub(super) async fn make_runtime(
     db: Arc<Store>,
     tx: mpsc::UnboundedSender<Message>,

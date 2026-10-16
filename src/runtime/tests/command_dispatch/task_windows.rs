@@ -113,11 +113,12 @@ async fn dispatch_task_resume_relaunches_the_agent_window() {
         "desc",
         "/repo",
         None,
-        models::TaskStatus::Running,
+        models::TaskStatus::Backlog,
     )
     .await
     .unwrap();
     let id = task.id;
+    give_current_agent(&h.rt, id).await;
     let worktree = Some("/repo/.worktrees/1-resume-me".to_string());
 
     h.dispatch(Command::Task(TaskCommand::Resume { id, worktree }))

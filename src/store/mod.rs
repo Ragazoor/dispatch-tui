@@ -28,11 +28,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::models::{
-    DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, Epic, EpicId, FeedItem,
-    Learning, LearningId, LearningRetrieval, LearningVerdict, NotificationWrite, PollScopeId,
-    RetrievalSource, SessionRequest, SessionRequestId, StopOutcome, SubStatus, SubagentDrain, Task,
-    TaskId, TmuxWindow, UserPromptOutcome, WorkPackage, WorkPackageId, WorkPackageItem,
-    WorkPackageLink, WrapUpMode,
+    Agent, DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, Epic, EpicId,
+    FeedItem, Learning, LearningId, LearningRetrieval, LearningVerdict, NotificationWrite,
+    PollScopeId, RetrievalSource, SessionRequest, SessionRequestId, StopOutcome, SubStatus,
+    SubagentDrain, Task, TaskId, TmuxWindow, UserPromptOutcome, WorkPackage, WorkPackageId,
+    WorkPackageItem, WorkPackageLink, WrapUpMode,
 };
 
 // ---------------------------------------------------------------------------
@@ -88,6 +88,18 @@ pub trait TaskRead: Send + Sync {
     /// filters in SQL rather than decoding every task ever created.
     async fn list_live_agent_tasks(&self) -> Vec<Task>;
     async fn find_task_by_plan(&self, plan: &str) -> Option<Task>;
+}
+
+/// Reading the agent rows the board's subscription holds, current and ended
+/// (`agents.allium`). On [`TaskReadStore`]: the board never writes an agent,
+/// the module does, inside the claim and the close.
+#[async_trait::async_trait]
+pub trait AgentRead: Send + Sync {
+    /// Every agent, oldest first. What name resolution
+    /// (`AgentNameResolvesToTask`) searches, ended agents included.
+    async fn list_agents(&self) -> Vec<Agent>;
+    /// `current_agent(task)`: the task's one current agent, if any.
+    async fn current_agent(&self, task: TaskId) -> Option<Agent>;
 }
 
 /// Task mutations, layered on top of the read surface. Reachable only by the
@@ -944,6 +956,7 @@ pub trait TaskReadStore:
     + UsageStore
     + DispatchRequestRead
     + SessionRequestRead
+    + AgentRead
 {
 }
 
@@ -960,7 +973,8 @@ impl<
             + LearningRetrievalStore
             + UsageStore
             + DispatchRequestRead
-            + SessionRequestRead,
+            + SessionRequestRead
+            + AgentRead,
     > TaskReadStore for T
 {
 }

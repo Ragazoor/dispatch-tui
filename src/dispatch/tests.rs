@@ -23,10 +23,23 @@ use std::time::Duration;
 
 #[test]
 fn task_block_contains_id_title_description() {
-    let block = task_block(TaskId(5), "My title", "My description", None);
+    let block = task_block(TaskId(5), "atlas", "My title", "My description", None);
     assert!(block.contains("5"));
     assert!(block.contains("My title"));
     assert!(block.contains("My description"));
+}
+
+/// `PromptNamesTheAgent`: the agent is told its own name.
+#[test]
+fn task_block_names_the_agent() {
+    let block = task_block(TaskId(5), "atlas", "T", "D", None);
+    assert!(block.contains("Your agent name: atlas"), "{block}");
+}
+
+#[test]
+fn task_block_without_an_agent_name_omits_the_line() {
+    let block = task_block(TaskId(5), "", "T", "D", None);
+    assert!(!block.contains("agent name"), "{block}");
 }
 
 #[test]
@@ -36,7 +49,7 @@ fn task_block_includes_epic_section_when_present() {
         epic_title: "Big Epic".to_string(),
         under_cve_feed: false,
     };
-    let block = task_block(TaskId(1), "T", "D", Some(&ctx));
+    let block = task_block(TaskId(1), "atlas", "T", "D", Some(&ctx));
     assert!(block.contains("EpicId: 3"));
     assert!(block.contains("Big Epic"));
 }

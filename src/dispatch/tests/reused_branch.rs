@@ -6,7 +6,15 @@ fn dispatch_reusing(script: &DispatchScript) -> (MockProcessRunner, String) {
     let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
     let mock = script.runner();
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
     let worktree = worktree_dir.to_str().unwrap().to_string();
     (mock, worktree)
 }
@@ -85,7 +93,14 @@ fn a_refused_fast_forward_does_not_abort_the_dispatch() {
 
     let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
+    let result = dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    );
 
     assert!(result.is_ok(), "best-effort, got: {:?}", result.err());
     script.assert_matches(&mock.recorded_calls());
@@ -103,7 +118,14 @@ fn an_unreadable_drift_count_does_not_abort_the_dispatch() {
 
     let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
+    let result = dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    );
 
     assert!(result.is_ok(), "best-effort, got: {:?}", result.err());
     assert!(

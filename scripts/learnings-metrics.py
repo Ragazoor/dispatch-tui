@@ -147,6 +147,46 @@ def mistakes_metrics():
         print(f"  {len(tasks):>4} tasks  {method}: {msg}")
 
 
+LEARNING_TOOLS = ("query_learnings", "record_learning", "rate_learning")
+
+
+def trajectory_events():
+    for f in glob.glob(TRAJ):
+        for line in open(f):
+            try:
+                yield json.loads(line)
+            except ValueError:
+                continue
+
+
+def error_text(e):
+    r = e.get("result")
+    return r["error"] if isinstance(r, dict) and isinstance(r.get("error"), str) else None
+
+
+def mistakes_metrics():
+    weeks = collections.defaultdict(lambda: collections.Counter())
+    classes = collections.defaultdict(set)
+    recent = (datetime.datetime.now() - datetime.timedelta(days=14)).strftime("%Y-%m-%d")
+    for e in trajectory_events():
+        err = error_text(e)
+        if e["method"] in LEARNING_TOOLS:
+            y, w, _ = datetime.date.fromisoformat(e["timestamp"][:10]).isocalendar()
+            c = weeks[f"{y}-W{w:02d}"]
+            c[e["method"]] += 1
+            c[e["method"] + " bad"] += bool(err and err.startswith("Invalid arguments"))
+        if err and e["timestamp"][:10] >= recent:
+            classes[(e["method"], re.sub(r"\d+", "N", err)[:90])].add(e["task_id"])
+    print("learnings-tool calls refused for their arguments, per week (bad/calls):")
+    print("  week      " + "  ".join(f"{t:>16}" for t in LEARNING_TOOLS))
+    for wk in sorted(weeks)[-4:]:
+        c = weeks[wk]
+        print(f"  {wk}  " + "  ".join(f"{c[t + ' bad']:>7}/{c[t]:<8}" for t in LEARNING_TOOLS))
+    print(f"errors hit by the most distinct tasks since {recent}:")
+    for (method, msg), tasks in sorted(classes.items(), key=lambda kv: -len(kv[1]))[:8]:
+        print(f"  {len(tasks):>4} tasks  {method}: {msg}")
+
+
 def pr_metrics():
     prs = {}
     for f in glob.glob(TRAJ):

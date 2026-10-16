@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 use crate::models::{
-    EpicId, FeedItem, NotificationWrite, StopOutcome, SubStatus, SubagentDrain, Task, TaskId,
-    TaskStatus, UserPromptOutcome,
+    Agent, EpicId, FeedItem, NotificationWrite, StopOutcome, SubStatus, SubagentDrain, Task,
+    TaskId, TaskStatus, UserPromptOutcome,
 };
 use crate::sync::{encode, ReducerOutcome};
 
@@ -28,6 +28,17 @@ impl super::super::TaskRead for Store {
 
     async fn find_task_by_plan(&self, plan: &str) -> Option<Task> {
         self.rows.task_by_plan(plan)
+    }
+}
+
+#[async_trait::async_trait]
+impl super::super::AgentRead for Store {
+    async fn list_agents(&self) -> Vec<Agent> {
+        self.rows.agents()
+    }
+
+    async fn current_agent(&self, task: TaskId) -> Option<Agent> {
+        self.rows.current_agent(task)
     }
 }
 

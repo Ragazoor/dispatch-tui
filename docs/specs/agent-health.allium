@@ -751,8 +751,10 @@ rule HookNotification {
 rule HookPeerMessageSent {
     -- Fires when a task's agent calls Claude Code's native `SendMessage`
     -- tool (task #4098). Dispatch never performs this delivery itself —
-    -- agents message each other directly, addressed by the `task-<id>`
-    -- session name dispatch assigns at launch — this rule only observes the
+    -- agents message each other directly, addressed by the agent name
+    -- dispatch gives the session at launch (agents.allium:
+    -- AgentSessionIsNamedAfterTheAgent; `task-<id>` for a session started
+    -- before agents and not resumed since) — this rule only observes the
     -- call, via the same Claude Code hook pipeline as HookPreToolUse /
     -- HookNotification, to drive the TUI flash and reconstruct an audit
     -- trail. See mcp-task-tools.allium's note on why `send_message` (the
@@ -766,6 +768,7 @@ rule HookPeerMessageSent {
     -- git instead.
     when: SendMessageObserved(sender, to, message)
 
+    -- `to` is an agent name (current or ended), or a `task-<id>` name.
     let target = core/Task.find_by_session_name(to)
 
     ensures: sender.last_peer_message_sent_at = now

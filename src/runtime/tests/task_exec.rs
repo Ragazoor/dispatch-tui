@@ -1428,14 +1428,15 @@ async fn exec_resume_sends_resumed_message() {
         "desc",
         "/repo",
         None,
-        models::TaskStatus::Running,
+        models::TaskStatus::Backlog,
     )
     .await
     .unwrap();
+    give_current_agent(&rt, task.id).await;
     task.worktree = Some("/repo/.worktrees/1-resume-me".into());
     let id = task.id;
 
-    rt.exec_resume(task.id, task.worktree.clone());
+    rt.exec_resume(task.id, task.worktree.clone()).await;
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -1469,11 +1470,12 @@ async fn exec_resume_sends_error_on_failure() {
         "desc",
         "/repo",
         None,
-        models::TaskStatus::Running,
+        models::TaskStatus::Backlog,
     )
     .await
     .unwrap();
-    rt.exec_resume(task.id, task.worktree.clone());
+    give_current_agent(&rt, task.id).await;
+    rt.exec_resume(task.id, task.worktree.clone()).await;
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -1486,6 +1488,39 @@ async fn exec_resume_sends_error_on_failure() {
         ),
         "Expected Error, got: {msg:?}"
     );
+}
+
+/// `AgentSessionIsNamedAfterTheAgent` needs an agent; a task without one is a
+/// broken store, so the resume reports it and launches nothing.
+#[tokio::test]
+async fn exec_resume_without_a_current_agent_sends_error() {
+    let db = test_db().await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    // No scripted call: a resume that reached tmux would panic the mock.
+    let mock = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+    let task = create_task_returning(
+        &*db,
+        "No Agent",
+        "desc",
+        "/repo",
+        None,
+        models::TaskStatus::Backlog,
+    )
+    .await
+    .unwrap();
+
+    rt.exec_resume(task.id, Some("/repo/.worktrees/x".into()))
+        .await;
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let Message::System(crate::tui::messages::SystemMessage::Error(text)) = msg else {
+        panic!("Expected Error, got: {msg:?}");
+    };
+    assert!(text.contains("no current agent"), "{text}");
 }
 
 #[tokio::test]

@@ -16,17 +16,21 @@ use super::worktree::{provision_worktree, rollback_failed_provisioning, BaseRef,
 
 /// The `--name` flag Claude Code's native cross-session messaging addresses
 /// this task's agent by (`ListAgents`/`SendMessage`/`@mention`), e.g.
-/// `--name task-42`. Deterministic and collision-free within dispatch's own
-/// id space, unlike Claude Code's default cwd-derived name — see
-/// `docs/superpowers/specs/2026-08-15-send-message-native-relay-design.md`.
-/// Built from [`TmuxWindow::for_task`] rather than re-deriving the string,
-/// so the tmux window name and the messaging session name cannot drift apart
-/// — `parse_peer_message_target_name` (`src/service/tasks/crud.rs`) resolves
-/// an incoming `SendMessage`'s `to` field against this same convention.
+/// `--name atlas`.
+///
+/// The name is the current agent's (`AgentSessionIsNamedAfterTheAgent` in
+/// docs/specs/agents.allium), not the tmux window's `task-<id>`: a task's
+/// session is renamed by a resume under a new agent and keeps its window.
+/// Claude Code accepts a `--name` that differs from the one a session started
+/// under, on `--resume` and on `--continue`, so every agent that began as
+/// `task-<id>` takes its agent name at its next resume.
+/// `TaskService::record_peer_message_sent` resolves an incoming
+/// `SendMessage`'s `to` field against the agent names, and still against
+/// `task-<id>` for a session not resumed since.
 /// Leading space included so callers can splice it directly after
 /// [`DISPATCH_PLUGIN_DIR`] in a launch command string.
-fn session_name_flag(task_id: TaskId) -> String {
-    format!(" --name {}", TmuxWindow::for_task(task_id))
+fn session_name_flag(agent_name: &str) -> String {
+    format!(" --name {agent_name}")
 }
 
 /// The flags every TASK agent's `claude` command line carries: the plugin dir
@@ -41,10 +45,15 @@ fn session_name_flag(task_id: TaskId) -> String {
 /// would reintroduce exactly the bug this exists to fix, and nothing would say
 /// so. Coming through here, forgetting it also drops `--plugin-dir` and
 /// `--name`, which fails loudly.
-fn agent_launch_flags(task_id: TaskId, worktree_path: &str, runner: &dyn ProcessRunner) -> String {
+fn agent_launch_flags(
+    task_id: TaskId,
+    agent_name: &str,
+    worktree_path: &str,
+    runner: &dyn ProcessRunner,
+) -> String {
     format!(
         "{DISPATCH_PLUGIN_DIR}{}{}",
-        session_name_flag(task_id),
+        session_name_flag(agent_name),
         super::caller_identity::mcp_config_flag(runner, worktree_path, task_id)
     )
 }
@@ -372,6 +381,7 @@ fn full_agent_prompt(head: &str, prompt: &str) -> String {
 /// rolling the provisioning back if either step fails.
 fn launch_agent(
     task: &Task,
+    agent_name: &str,
     repo_path: &str,
     provision: &super::worktree::ProvisionResult,
     full_prompt: &str,
@@ -380,7 +390,7 @@ fn launch_agent(
 ) -> Result<()> {
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
     let claude = runner.agent_binaries().claude_quoted();
-    let launch_flags = agent_launch_flags(task.id, &provision.worktree_path, runner);
+    let launch_flags = agent_launch_flags(task.id, agent_name, &provision.worktree_path, runner);
     let claude_cmd = prompt_launch_command(&claude, &launch_flags);
 
     // Anything failing here happens after the worktree and tmux window both
@@ -425,6 +435,7 @@ fn launch_agent(
 /// `EveryTaskAgentLaunchesInAutoMode` in `docs/specs/dispatch.allium`.
 fn dispatch_with_prompt(
     task: &Task,
+    agent_name: &str,
     make_prompt: impl FnOnce() -> String,
     runner: &dyn ProcessRunner,
     teardown: &dyn ProcessRunner,
@@ -471,7 +482,15 @@ fn dispatch_with_prompt(
     let head = compose_prompt_head(&preamble, provision.fetch_warning.as_deref());
 
     let full_prompt = full_agent_prompt(&head, &make_prompt());
-    launch_agent(task, &repo_path, &provision, &full_prompt, runner, teardown)?;
+    launch_agent(
+        task,
+        agent_name,
+        &repo_path,
+        &provision,
+        &full_prompt,
+        runner,
+        teardown,
+    )?;
 
     spawn_agent_tree_pane(
         &provision.tmux_window,
@@ -497,6 +516,7 @@ fn dispatch_with_prompt(
 
 pub fn dispatch_agent(
     task: &Task,
+    agent_name: &str,
     runner: &dyn ProcessRunner,
     teardown: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
@@ -504,9 +524,11 @@ pub fn dispatch_agent(
 ) -> Result<DispatchResult> {
     dispatch_with_prompt(
         task,
+        agent_name,
         || {
             let ctx = PromptContext {
                 learnings: injections.clone(),
+                agent_name,
                 tag: task.tag,
                 auto_run_plan: task.auto_run_plan,
                 has_allium_specs: repo_has_allium_specs(&task.repo_path),
@@ -541,19 +563,24 @@ pub fn dispatch_agent(
 
 pub fn research_agent(
     task: &Task,
+    agent_name: &str,
     runner: &dyn ProcessRunner,
     teardown: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
 ) -> Result<DispatchResult> {
     dispatch_with_prompt(
         task,
+        agent_name,
         || {
             build_research_prompt(
                 task.id,
                 &task.title,
                 &task.description,
                 epic,
-                &PromptContext::default(),
+                &PromptContext {
+                    agent_name,
+                    ..PromptContext::default()
+                },
             )
         },
         runner,
@@ -564,6 +591,7 @@ pub fn research_agent(
 
 pub fn quick_dispatch_agent(
     task: &Task,
+    agent_name: &str,
     runner: &dyn ProcessRunner,
     teardown: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
@@ -571,9 +599,11 @@ pub fn quick_dispatch_agent(
 ) -> Result<DispatchResult> {
     dispatch_with_prompt(
         task,
+        agent_name,
         || {
             let ctx = PromptContext {
                 learnings: injections.clone(),
+                agent_name,
                 has_allium_specs: repo_has_allium_specs(&task.repo_path),
                 ..PromptContext::default()
             };
@@ -598,18 +628,32 @@ pub fn run_agent_for_mode(
     teardown: &dyn ProcessRunner,
     inputs: DispatchInputs,
 ) -> Result<DispatchResult> {
-    let DispatchInputs { epic_ctx, injected } = inputs;
+    let DispatchInputs {
+        epic_ctx,
+        injected,
+        agent_name,
+    } = inputs;
     let injections = LearningInjections::from(injected.as_slice());
     match mode {
-        crate::models::DispatchMode::Dispatch => {
-            dispatch_agent(task, runner, teardown, epic_ctx.as_ref(), &injections)
-        }
+        crate::models::DispatchMode::Dispatch => dispatch_agent(
+            task,
+            &agent_name,
+            runner,
+            teardown,
+            epic_ctx.as_ref(),
+            &injections,
+        ),
         crate::models::DispatchMode::Research => {
-            research_agent(task, runner, teardown, epic_ctx.as_ref())
+            research_agent(task, &agent_name, runner, teardown, epic_ctx.as_ref())
         }
-        crate::models::DispatchMode::Quick => {
-            quick_dispatch_agent(task, runner, teardown, epic_ctx.as_ref(), &injections)
-        }
+        crate::models::DispatchMode::Quick => quick_dispatch_agent(
+            task,
+            &agent_name,
+            runner,
+            teardown,
+            epic_ctx.as_ref(),
+            &injections,
+        ),
     }
 }
 
@@ -625,20 +669,45 @@ pub fn run_agent_for_mode(
 pub struct DispatchInputs {
     pub epic_ctx: Option<EpicContext>,
     pub injected: Vec<crate::models::Learning>,
+    /// The task's current agent's name: the session's `--name` and what the
+    /// prompt tells the agent it is called.
+    pub agent_name: String,
 }
 
 /// Run the dispatch prologue for `task`, reading its epic context from the DB.
 ///
 /// Async and side-effecting (it records prompt-injection retrievals), so callers
 /// run it before handing the task to the blocking dispatch itself.
+///
+/// Fails when the task has no current agent: the claim creates one in the same
+/// write that starts the request (`StartAgentOnFreshLaunch`), so a request
+/// being served without one is a broken store, and naming the session after
+/// something else would hide it.
 pub async fn prepare_inputs(
     db: &dyn crate::store::TaskReadStore,
     task: &Task,
     emb_svc: &std::sync::Arc<crate::embeddings::EmbeddingService>,
-) -> DispatchInputs {
+) -> Result<DispatchInputs> {
+    let agent_name = current_agent_name(db, task.id).await?;
     let epic_ctx = EpicContext::from_db(task, db).await;
     let injected = build_and_record_injections(db, task, emb_svc).await;
-    DispatchInputs { epic_ctx, injected }
+    Ok(DispatchInputs {
+        epic_ctx,
+        injected,
+        agent_name,
+    })
+}
+
+/// The name of `task`'s current agent, the one a launch or resume names the
+/// session after (`AgentSessionIsNamedAfterTheAgent`).
+pub async fn current_agent_name(
+    db: &dyn crate::store::TaskReadStore,
+    task: TaskId,
+) -> Result<String> {
+    db.current_agent(task)
+        .await
+        .map(|agent| agent.name)
+        .with_context(|| format!("task {task} has no current agent to name the session after"))
 }
 
 /// Fetch the verify command for a repository path from the settings store.
@@ -674,6 +743,7 @@ pub async fn fetch_verify_command(
 /// `tokio::task::spawn_blocking` from async contexts.
 pub fn resume_agent(
     task_id: TaskId,
+    agent_name: &str,
     worktree_path: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<ResumeResult> {
@@ -703,7 +773,7 @@ pub fn resume_agent(
     let claude = runner.agent_binaries().claude_quoted();
     // Below the live-window early return above, deliberately: these flags cost
     // a config write, and a resume that only reattaches launches nothing.
-    let launch_flags = agent_launch_flags(task_id, worktree_path, runner);
+    let launch_flags = agent_launch_flags(task_id, agent_name, worktree_path, runner);
     tmux::send_keys(
         &tmux_window,
         &format!("{claude} {launch_flags} --continue"),

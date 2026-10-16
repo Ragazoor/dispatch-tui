@@ -44,6 +44,37 @@ async fn record_peer_message_sent_stamps_sender_and_resolved_target() {
     assert!(target_task.last_peer_message_sent_at.is_none());
 }
 
+/// `AgentSessionIsNamedAfterTheAgent`: a session is addressed by its agent's
+/// name, so that is what `SendMessage`'s `to` carries.
+#[tokio::test]
+async fn record_peer_message_sent_resolves_an_agent_name_to_its_task() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let sender = svc.create_task(make_task_params("/repo")).await.unwrap();
+    let target = svc.create_task(make_task_params("/repo")).await.unwrap();
+    svc.request_dispatch(target, crate::models::DispatchOrigin::Mcp, None)
+        .await
+        .unwrap();
+    let name = db.current_agent(target).await.unwrap().name;
+
+    svc.record_peer_message_sent(sender, &format!("{name} [3fa9c1]"))
+        .await
+        .unwrap();
+
+    assert!(db
+        .get_task(target)
+        .await
+        .unwrap()
+        .last_peer_message_received_at
+        .is_some());
+    assert!(db
+        .get_task(sender)
+        .await
+        .unwrap()
+        .last_peer_message_received_at
+        .is_none());
+}
+
 #[tokio::test]
 async fn record_peer_message_sent_ignores_a_name_outside_dispatchs_own_naming_convention() {
     let db = test_db().await;

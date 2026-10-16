@@ -46,20 +46,22 @@ const EXPECTED_GH_CLOSE_FAILURE_MARKERS: &[&str] = &[
     "Pull request is not open",
 ];
 
-/// Parse a native `SendMessage` `to` value back to the `TaskId` dispatch
-/// assigned it at launch (`--name task-<id>`, `session_name_flag` in
-/// `src/dispatch/agents.rs`). Strips a disambiguating `" [ref]"` suffix
-/// first — `ListAgents`/`SendMessage` append one when more than one live
-/// agent answers to a name, even though dispatch's own `task-<id>` names are
-/// unique by construction and should rarely need it — then delegates to
+/// The name part of a native `SendMessage` `to` value. Strips a
+/// disambiguating `" [ref]"` suffix — `ListAgents`/`SendMessage` append one
+/// when more than one live agent answers to a name.
+fn peer_message_target_name(to: &str) -> &str {
+    to.split(' ').next().unwrap_or(to)
+}
+
+/// Parse a native `SendMessage` `to` value as the `task-<id>` name dispatch
+/// gave every session before it named them after their agents
+/// (`session_name_flag` in `src/dispatch/agents.rs`), delegating to
 /// [`TmuxWindow::task_id`](crate::models::TmuxWindow::task_id), the same parser
-/// tmux window names go through, so the two can't drift apart into two
-/// spellings of one convention. `None` for any value that doesn't match this shape — a
-/// message addressed to a session dispatch didn't launch, or one the sender
-/// renamed itself away from.
+/// tmux window names go through. Still read for a session started before
+/// agents and not resumed since, which keeps the name it began with. `None`
+/// for any value that doesn't match this shape.
 fn parse_peer_message_target_name(to: &str) -> Option<TaskId> {
-    let name = to.split(' ').next().unwrap_or(to);
-    crate::models::TmuxWindow::parse(name)?.task_id()
+    crate::models::TmuxWindow::parse(peer_message_target_name(to))?.task_id()
 }
 
 /// Result of [`TaskService::update_task`]. Carries the updated task id plus
@@ -706,9 +708,10 @@ impl TaskService {
     /// observes it to drive the TUI flash and reconstruct an audit trail.
     ///
     /// Stamps `last_peer_message_sent_at` on the sender's own row
-    /// unconditionally. `target_name` is resolved against dispatch's own
-    /// `task-<id>` session-naming convention (`session_name_flag`,
-    /// `src/dispatch/agents.rs`); when it resolves to a task that still
+    /// unconditionally. `target_name` is resolved against the agent names first (a
+    /// session is named after its agent, `AgentSessionIsNamedAfterTheAgent`),
+    /// then against the `task-<id>` name a session started before agents still
+    /// carries; when it resolves to a task that still
     /// exists, that task's `last_peer_message_received_at` is stamped too. A
     /// name that doesn't parse, or a task id that no longer exists, is not an
     /// error — the sender addressed a session outside dispatch's own fleet
@@ -732,7 +735,18 @@ impl TaskService {
             )
             .await?;
 
-        if let Some(target_id) = parse_peer_message_target_name(target_name) {
+        let by_agent_name = {
+            let name = peer_message_target_name(target_name);
+            self.db
+                .list_agents()
+                .await
+                .into_iter()
+                .find(|a| a.name == name)
+                .map(|a| a.task_id)
+        };
+        if let Some(target_id) =
+            by_agent_name.or_else(|| parse_peer_message_target_name(target_name))
+        {
             // No existence pre-check: patch_task itself is the only
             // authoritative answer to "does this row still exist", and
             // checking first would leave a race (the target could be

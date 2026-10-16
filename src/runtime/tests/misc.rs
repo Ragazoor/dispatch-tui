@@ -275,8 +275,11 @@ mod prepare_inputs {
             .await
             .unwrap();
 
-        let inputs =
-            crate::dispatch::prepare_inputs(&*db, &task, &EmbeddingService::new_test()).await;
+        let agent_name = give_current_agent(&rt, task.id).await;
+        let inputs = crate::dispatch::prepare_inputs(&*db, &task, &EmbeddingService::new_test())
+            .await
+            .unwrap();
+        assert_eq!(inputs.agent_name, agent_name);
 
         let epic_ctx = inputs.epic_ctx.expect("epic context read from the DB");
         assert_eq!(epic_ctx.epic_id, epic.id);

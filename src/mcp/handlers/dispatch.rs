@@ -743,19 +743,19 @@ async fn handle_tools_call(
     let tool_name = params.get("name").and_then(Value::as_str).unwrap_or("");
     let mut args = params.get("arguments").cloned().unwrap_or(Value::Null);
 
-    // An alias is a second name for a task id (`AliasResolvesToTaskId`);
-    // swap it for the id before any handler parses the arguments. The task
-    // list is read only when a call actually names one.
-    if super::aliases::holds_alias(&args) {
+    // An alias, or the name of one of its agents, is a second name for a task
+    // id (`AliasResolvesToTaskId`, `AgentNameResolvesToTask`); swap it for the
+    // id before any handler parses the arguments. The task and agent lists are
+    // read only when a call actually names one.
+    if super::aliases::holds_name(&args) {
         let tasks = state.db.list_all().await;
-        if let Err(super::aliases::UnknownAlias(alias)) =
-            super::aliases::resolve_task_aliases(&mut args, &tasks)
-        {
-            return JsonRpcResponse::err(
-                id,
-                super::types::NOT_FOUND_CODE,
-                format!("Task alias '{alias}' not found"),
-            );
+        let agents = state.db.list_agents().await;
+        if let Err(bad) = super::aliases::resolve_task_refs(&mut args, &tasks, &agents) {
+            let code = match bad {
+                super::aliases::BadTaskRef::Unknown(_) => super::types::NOT_FOUND_CODE,
+                super::aliases::BadTaskRef::Ambiguous(_) => INVALID_PARAMS,
+            };
+            return JsonRpcResponse::err(id, code, bad.message());
         }
     }
 

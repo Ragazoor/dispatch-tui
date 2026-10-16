@@ -10,7 +10,15 @@ fn dispatch_agent_includes_plugin_dir() {
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -31,7 +39,7 @@ fn resume_agent_includes_plugin_dir() {
     let script = DispatchScript::resume();
     let mock = script.runner();
 
-    resume_agent(TaskId(42), &worktree_path, &mock).unwrap();
+    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -56,7 +64,15 @@ fn dispatch_agent_sets_rustc_wrapper_when_sccache_available() {
     let mock = script.runner().with_sccache_available(true);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
@@ -76,7 +92,15 @@ fn dispatch_agent_omits_rustc_wrapper_when_sccache_unavailable() {
     let mock = script.runner(); // sccache_available defaults to false
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
@@ -93,7 +117,7 @@ fn resume_agent_sets_rustc_wrapper_when_sccache_available() {
     let script = DispatchScript::resume();
     let mock = script.runner().with_sccache_available(true);
 
-    resume_agent(TaskId(42), &worktree_path, &mock).unwrap();
+    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
 
     let calls = mock.recorded_calls();
     let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
@@ -105,42 +129,58 @@ fn resume_agent_sets_rustc_wrapper_when_sccache_available() {
     );
 }
 
-// --- session naming tests (task #4098: deterministic --name for native
-// cross-session messaging addressing) ---
+// --- session naming tests (AgentSessionIsNamedAfterTheAgent: the `--name` the
+// native cross-session messaging addresses is the agent's name, not the
+// tmux window's task-<id>) ---
 
 #[test]
-fn dispatch_agent_names_the_session_after_the_task() {
+fn dispatch_agent_names_the_session_after_the_agent() {
     let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
     let script = DispatchScript::dispatch();
     let mock = script.runner();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
     assert!(
-        send_keys_arg.contains("--name task-42"),
-        "dispatch_agent should name the session task-<id> for native \
-cross-session-messaging addressing, got: {send_keys_arg}"
+        send_keys_arg.contains(" --name atlas "),
+        "dispatch_agent should name the session after its agent, got: {send_keys_arg}"
+    );
+    assert!(
+        !send_keys_arg.contains("--name task-"),
+        "the session is not named after the tmux window, got: {send_keys_arg}"
     );
 }
 
 #[test]
-fn resume_agent_names_the_session_after_the_task() {
+fn resume_agent_names_the_session_after_the_agent() {
     let (_dir, worktree_path) = make_test_repo();
 
     let script = DispatchScript::resume();
     let mock = script.runner();
 
-    resume_agent(TaskId(42), &worktree_path, &mock).unwrap();
+    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
     assert!(
-        send_keys_arg.contains("--name task-42"),
-        "resume_agent should name the session task-<id>, got: {send_keys_arg}"
+        send_keys_arg.contains(" --name atlas "),
+        "resume_agent should name the session after its agent, got: {send_keys_arg}"
+    );
+    assert!(
+        !send_keys_arg.contains("--name task-"),
+        "the session is not named after the tmux window, got: {send_keys_arg}"
     );
     // Nothing may follow the flags here: the variadic `--mcp-config` would
     // swallow it instead of claude receiving it as an operand. `--continue` is
@@ -174,7 +214,15 @@ fn dispatch_agent_launches_the_runners_claude_binary() {
     let mock = dispatch_mock().with_agent_binaries(AgentBinaries::stub());
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(
@@ -195,7 +243,15 @@ fn dispatch_agent_launches_the_runners_dispatch_binary_in_the_companion_pane() {
     let mock = dispatch_mock().with_agent_binaries(AgentBinaries::stub());
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     // The companion pane is spawned via `split-window --`, so the binary is a
     // plain argv element rather than part of a shell string.
@@ -212,7 +268,7 @@ fn resume_agent_launches_the_runners_claude_binary() {
     let script = DispatchScript::resume();
     let mock = script.runner().with_agent_binaries(AgentBinaries::stub());
 
-    resume_agent(TaskId(42), &worktree_path, &mock).unwrap();
+    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -235,7 +291,15 @@ fn agent_launchers_default_to_bare_binary_names() {
     let mock = dispatch_mock();
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(
@@ -877,7 +941,15 @@ fn dispatch_agent_prompt_includes_worktree_confinement() {
     let script = DispatchScript::dispatch();
     let mock = script.runner();
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
     assert_worktree_confinement(&read_prompt(&worktree_dir));
 }
 
@@ -892,7 +964,15 @@ fn dispatch_agent_prompt_design_step_follows_the_repos_allium_specs() {
     // A bare repo with no docs/specs: brainstorming, and no allium line.
     let script = DispatchScript::dispatch();
     let mock = script.runner();
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
     let prompt = read_prompt(&worktree_dir);
     assert!(
         prompt.contains("superpowers:brainstorming"),
@@ -914,7 +994,15 @@ fn dispatch_agent_prompt_design_step_follows_the_repos_allium_specs() {
 
     let script = DispatchScript::dispatch();
     let mock = script.runner();
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
     let prompt = read_prompt(&worktree_dir);
     assert!(
         prompt.contains("allium:elicit"),
@@ -935,7 +1023,15 @@ fn quick_dispatch_agent_prompt_design_step_follows_the_repos_allium_specs() {
     let mock = script.runner();
     let task = make_task(&repo_path);
 
-    quick_dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    quick_dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let prompt = read_prompt(&worktree_dir);
     assert!(
@@ -950,7 +1046,7 @@ fn research_agent_prompt_is_correct() {
     let script = DispatchScript::dispatch();
     let mock = script.runner();
     let task = make_task(&repo_path);
-    research_agent(&task, &mock, &mock, None).unwrap();
+    research_agent(&task, "atlas", &mock, &mock, None).unwrap();
     let prompt = read_prompt(&worktree_dir);
     assert_worktree_confinement(&prompt);
     assert!(
@@ -975,7 +1071,15 @@ fn quick_dispatch_agent_prompt_includes_worktree_confinement() {
     let script = DispatchScript::dispatch();
     let mock = script.runner();
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    quick_dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
     assert_worktree_confinement(&read_prompt(&worktree_dir));
 }
 
@@ -995,7 +1099,15 @@ fn dispatch_agent_opens_tmux_window_in_worktree_not_parent_repo() {
     let script = DispatchScript::dispatch();
     let mock = script.runner();
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     // `tmux new-window …`; its `-c <dir>` argument sets the window cwd.
@@ -1037,7 +1149,14 @@ fn dispatch_agent_propagates_tmux_new_window_failure() {
     responses.push((None, MockProcessRunner::ok()));
     let mock = MockProcessRunner::new_with_delays(responses);
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
+    let result = dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    );
 
     assert!(
         result.is_err(),
@@ -1066,7 +1185,14 @@ fn dispatch_agent_propagates_send_keys_failure() {
     responses.push((None, MockProcessRunner::ok()));
     let mock = MockProcessRunner::new_with_delays(responses);
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
+    let result = dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    );
 
     assert!(
         result.is_err(),
@@ -1095,7 +1221,14 @@ fn dispatch_agent_rolls_back_a_fresh_worktree_when_the_prompt_write_fails() {
     let (_dir, repo_path) = make_test_repo();
     let mock = DispatchScript::dispatch().fresh_worktree().runner();
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default());
+    let result = dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    );
 
     assert!(
         result.is_err(),
@@ -1124,7 +1257,7 @@ fn resume_agent_propagates_new_window_failure() {
         MockProcessRunner::fail("no server running on /tmp/tmux-1000/default"),
     ]);
 
-    let result = resume_agent(TaskId(42), "/repo/.worktrees/42-fix-bug", &mock);
+    let result = resume_agent(TaskId(42), "atlas", "/repo/.worktrees/42-fix-bug", &mock);
 
     assert!(
         result.is_err(),
@@ -1142,7 +1275,7 @@ fn resume_agent_reattaches_to_live_window_without_creating_duplicate() {
     let script = DispatchScript::resume().window_already_alive();
     let mock = script.runner();
 
-    let result = resume_agent(TaskId(42), "/repo/.worktrees/42-fix-bug", &mock);
+    let result = resume_agent(TaskId(42), "atlas", "/repo/.worktrees/42-fix-bug", &mock);
     assert!(
         result.is_ok(),
         "resume_agent should succeed by reattaching, not erroring: {result:?}"
@@ -1169,7 +1302,7 @@ fn resume_agent_has_window_runner_error_falls_back_to_creating_a_window() {
         MockProcessRunner::ok(),                    // tmux set-option (companion role)
     ]);
 
-    let result = resume_agent(TaskId(42), "/repo/.worktrees/42-fix-bug", &mock);
+    let result = resume_agent(TaskId(42), "atlas", "/repo/.worktrees/42-fix-bug", &mock);
     assert!(
         result.is_ok(),
         "a has_window query failure should fall back to creating a new window: {result:?}"
@@ -1361,7 +1494,15 @@ fn all_spawn_sites_inject_the_statusline_settings_file() {
     let script = DispatchScript::dispatch();
     let mock = script.runner();
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
     assert_spawn_flags(
         "dispatch_agent",
         &find_call_arg(
@@ -1375,7 +1516,7 @@ fn all_spawn_sites_inject_the_statusline_settings_file() {
     let (_resume_dir, worktree_path) = make_test_repo();
     let resume_script = DispatchScript::resume();
     let mock = resume_script.runner();
-    resume_agent(TaskId(42), &worktree_path, &mock).unwrap();
+    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
     assert_spawn_flags(
         "resume_agent",
         &find_call_arg(
@@ -1438,7 +1579,15 @@ fn dispatch_launches_claude_with_the_per_task_mcp_config() {
         .with_claude_json(claude_json_with_dispatch_entry(dir.path()));
     let task = make_task(&repo_path);
 
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -1468,7 +1617,7 @@ fn resume_launches_claude_with_the_per_task_mcp_config() {
         .runner()
         .with_claude_json(claude_json_with_dispatch_entry(dir.path()));
 
-    resume_agent(TaskId(42), &worktree_path, &mock).unwrap();
+    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
 
     let calls = mock.recorded_calls();
     let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -1490,7 +1639,15 @@ fn a_dispatch_that_cannot_write_the_config_launches_without_the_flag() {
     let mock = script.runner();
     let task = make_task(&repo_path);
 
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -1569,7 +1726,15 @@ fn the_dispatch_launch_command_separates_the_prompt_from_the_flags() {
     let mock = script.runner();
     let task = make_task(&repo_path);
 
-    dispatch_agent(&task, &mock, &mock, None, &LearningInjections::default()).unwrap();
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");

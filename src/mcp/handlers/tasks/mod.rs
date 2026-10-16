@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::mcp::McpState;
-use crate::models::{EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, UrlType, WrapUpMode};
+use crate::models::{
+    Agent, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, UrlType, WrapUpMode,
+};
 use crate::service::{FieldUpdate, UpdateTaskParams};
 
 // Promoted to pub(super) so sub-modules can `use super::{parse_args, ...}`
@@ -311,13 +313,15 @@ pub(super) async fn build_epic_titles(state: &McpState) -> HashMap<EpicId, Strin
 /// The text `get_task` returns for `task`; `dispatch://task/self` serves the
 /// same rendering (`task_detail_text` in the spec).
 pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
-    let (epic_titles, verify_command, dispatch_request) = tokio::join!(
+    let (epic_titles, verify_command, dispatch_request, agent) = tokio::join!(
         build_epic_titles(state),
         crate::dispatch::fetch_verify_command(&*state.db, &task.repo_path),
-        state.db.latest_dispatch_request_for_task(task.id)
+        state.db.latest_dispatch_request_for_task(task.id),
+        state.db.current_agent(task.id)
     );
     format_task_detail(
         task,
+        agent.as_ref(),
         &epic_titles,
         verify_command.as_deref(),
         dispatch_request.as_ref(),
@@ -340,8 +344,19 @@ fn dispatch_request_line(request: &crate::models::DispatchRequest) -> String {
     line
 }
 
+/// What `get_task` and `list_tasks` print for an agent's state: live when it
+/// holds a tmux window, paused when it does not (`AgentIdentity`).
+fn agent_state_label(agent: &Agent) -> &'static str {
+    if agent.is_live() {
+        "live"
+    } else {
+        "paused"
+    }
+}
+
 fn format_task_detail(
     task: &Task,
+    agent: Option<&Agent>,
     epic_titles: &HashMap<EpicId, String>,
     verify_command: Option<&str>,
     dispatch_request: Option<&crate::models::DispatchRequest>,
@@ -356,6 +371,13 @@ fn format_task_detail(
     );
     if !task.alias.is_empty() {
         text.push_str(&format!("\nAlias: {}", task.alias));
+    }
+    if let Some(agent) = agent {
+        text.push_str(&format!(
+            "\nAgent: {} ({})",
+            agent.name,
+            agent_state_label(agent)
+        ));
     }
     text.push_str(&format!("\nSub-status: {}", task.sub_status.as_str()));
     if let Some(epic_id) = task.epic_id {
@@ -439,7 +461,12 @@ fn description_preview(s: &str) -> String {
     }
 }
 
-fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str) -> String {
+fn format_task_line(
+    t: &Task,
+    agent: Option<&Agent>,
+    epic_titles: &HashMap<EpicId, String>,
+    goal: &str,
+) -> String {
     let tag_indicator = match t.tag {
         Some(tag) => format!(" [{}]", tag.as_str()),
         None => String::new(),
@@ -449,6 +476,9 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str)
     } else {
         format!(" alias:{}", t.alias)
     };
+    let agent_indicator = agent.map_or(String::new(), |a| {
+        format!(" agent:{} ({})", a.name, agent_state_label(a))
+    });
     let epic_indicator = match t.epic_id {
         Some(eid) => match epic_titles.get(&eid) {
             Some(title) => format!(" (epic:{eid} {title})"),
@@ -467,10 +497,11 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str)
         format!(" | Goal: {goal}")
     };
     format!(
-        "- [{}] {}{} ({}/{}){}{} | Base: {}{}{}",
+        "- [{}] {}{}{} ({}/{}){}{} | Base: {}{}{}",
         t.id,
         t.title,
         alias_indicator,
+        agent_indicator,
         t.status.as_str(),
         t.sub_status.as_str(),
         tag_indicator,
@@ -541,13 +572,13 @@ mod tests {
             alias: "scar".into(),
             ..make_task("main")
         };
-        let output = format_task_detail(&task, &HashMap::new(), None, None);
+        let output = format_task_detail(&task, None, &HashMap::new(), None, None);
         assert!(output.contains("Alias: scar"), "{output}");
     }
 
     #[test]
     fn format_task_detail_omits_an_unassigned_alias() {
-        let output = format_task_detail(&make_task("main"), &HashMap::new(), None, None);
+        let output = format_task_detail(&make_task("main"), None, &HashMap::new(), None, None);
         assert!(!output.contains("Alias:"), "{output}");
     }
 
@@ -557,14 +588,62 @@ mod tests {
             alias: "scar".into(),
             ..make_task("main")
         };
-        let line = super::format_task_line(&task, &HashMap::new(), "");
+        let line = super::format_task_line(&task, None, &HashMap::new(), "");
         assert!(line.contains("alias:scar"), "{line}");
+    }
+
+    fn make_agent(window: Option<&str>) -> crate::models::Agent {
+        crate::models::Agent {
+            id: crate::models::AgentId(1),
+            task_id: crate::models::TaskId(1),
+            name: "ada".into(),
+            host: String::new(),
+            start_mode: crate::models::DispatchMode::Dispatch,
+            state: crate::models::AgentState::Current,
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            end_reason: None,
+            tmux_window: window.map(|w| crate::models::TmuxWindow::parse(w).unwrap()),
+        }
+    }
+
+    #[test]
+    fn format_task_detail_shows_a_live_agent() {
+        let agent = make_agent(Some("task-1"));
+        let output = format_task_detail(
+            &make_task("main"),
+            Some(&agent),
+            &HashMap::new(),
+            None,
+            None,
+        );
+        assert!(output.contains("\nAgent: ada (live)"), "{output}");
+    }
+
+    #[test]
+    fn format_task_detail_shows_an_agent_with_no_window_as_paused() {
+        let agent = make_agent(None);
+        let output = format_task_detail(
+            &make_task("main"),
+            Some(&agent),
+            &HashMap::new(),
+            None,
+            None,
+        );
+        assert!(output.contains("\nAgent: ada (paused)"), "{output}");
+    }
+
+    #[test]
+    fn format_task_line_names_a_live_agent() {
+        let agent = make_agent(Some("task-1"));
+        let line = super::format_task_line(&make_task("main"), Some(&agent), &HashMap::new(), "");
+        assert!(line.contains(" agent:ada (live)"), "{line}");
     }
 
     #[test]
     fn format_task_detail_includes_base_branch() {
         let task = make_task("develop");
-        let output = format_task_detail(&task, &HashMap::new(), None, None);
+        let output = format_task_detail(&task, None, &HashMap::new(), None, None);
         assert!(
             output.contains("Base branch: develop"),
             "expected 'Base branch: develop' in output, got:\n{output}"
@@ -574,7 +653,7 @@ mod tests {
     #[test]
     fn format_task_detail_includes_verify_command_when_set() {
         let task = make_task("main");
-        let output = format_task_detail(&task, &HashMap::new(), Some("cargo test"), None);
+        let output = format_task_detail(&task, None, &HashMap::new(), Some("cargo test"), None);
         assert!(
             output.contains("Verify command: cargo test"),
             "expected 'Verify command: cargo test' in output, got:\n{output}"
@@ -591,7 +670,7 @@ mod tests {
     fn get_task_description_quotes_only_labels_the_renderer_emits() {
         let mut task = make_task("main");
         task.wrap_up_mode = Some(crate::models::WrapUpMode::Rebase);
-        let output = format_task_detail(&task, &HashMap::new(), Some("cargo test"), None);
+        let output = format_task_detail(&task, None, &HashMap::new(), Some("cargo test"), None);
 
         let defs = crate::mcp::handlers::dispatch::tool_definitions();
         let desc = defs["tools"]
@@ -622,7 +701,7 @@ mod tests {
     #[test]
     fn format_task_detail_omits_verify_command_when_unset() {
         let task = make_task("main");
-        let output = format_task_detail(&task, &HashMap::new(), None, None);
+        let output = format_task_detail(&task, None, &HashMap::new(), None, None);
         assert!(
             !output.contains("Verify command"),
             "expected no 'Verify command' line in output, got:\n{output}"

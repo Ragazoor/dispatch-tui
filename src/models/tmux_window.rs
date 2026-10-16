@@ -1,13 +1,15 @@
 //! The `task-<id>` window-name convention, and the [`TmuxWindow`] type that
 //! carries it.
 //!
-//! The same `task-<id>` string names two things: the tmux window a dispatched
-//! agent runs in, and that agent's native cross-session-messaging session
-//! (`dispatch::agents::session_name_flag`). Both the dispatch adapter and
-//! `TaskService::record_peer_message_sent` need to build and parse it, so the
-//! convention lives here in the domain model rather than in either consumer —
-//! a service reaching into the adapter for a pure predicate inverts the
-//! layering, and a second copy of `strip_prefix("task-")` could drift from
+//! The `task-<id>` string names the tmux window a dispatched agent runs in.
+//! Before agents (`docs/specs/agents.allium`) it also named that agent's native
+//! cross-session-messaging session; a session now takes its agent's name
+//! (`dispatch::agents::session_name_flag`), but one started earlier keeps
+//! `task-<id>` until it is resumed. Both the dispatch adapter and
+//! `TaskService::record_peer_message_sent` need to build and parse the
+//! convention, so it lives here in the domain model rather than in either
+//! consumer — a service reaching into the adapter for a pure predicate inverts
+//! the layering, and a second copy of `strip_prefix("task-")` could drift from
 //! this one.
 
 use std::borrow::Cow;
