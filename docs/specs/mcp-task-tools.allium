@@ -620,6 +620,9 @@ rule PrFinalisationReflectionNudge {
         -- unconditional (see learnings.allium: WrapUpRateLearningNudge).
 }
 
+-- RETIRING: agents.allium (task #77852) resolves an agent name here instead
+-- (AgentNameResolvesToTask, step A2); step A5 removes alias resolution. Until
+-- then this rule stays authoritative.
 -- Anywhere an MCP tool takes a task id it also takes the task's alias.
 --
 -- `get_task`, `update_tasks`, `dispatch_task`, `wrap_up` and the rest resolve

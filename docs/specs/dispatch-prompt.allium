@@ -360,6 +360,9 @@ rule ComposeAgentPrompt {
         -- matching that task's own id. The session naming is dispatch's
         -- convention, not the harness's, so it is a fact only the prompt can
         -- state.
+        -- CHANGING: agents.allium (task #77852, step A2) names each session
+        -- after its agent instead (AgentSessionIsNamedAfterTheAgent,
+        -- PromptNamesTheAgent). Until A2 lands, task-<id> stays.
         --
         -- Gated by prompt_trailing_lines_name_no_mcp_tool, which fails on any
         -- mcp__dispatch__* tool name appearing in the shared trailing lines,

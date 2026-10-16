@@ -800,6 +800,9 @@ entity Task {
     --
     -- A task whose alias is still empty shows as `#<id>` wherever an alias
     -- would show, so an old task is never nameless.
+    -- RETIRING: agents.allium (task #77852) replaces the alias with the
+    -- agent name, and step A5 removes this invariant. Until A5 lands it
+    -- stays authoritative.
     invariant TaskAliasIsASecondName {
         for a in Task: for b in Task:
             (a.alias != "" and a.alias = b.alias) implies a = b
