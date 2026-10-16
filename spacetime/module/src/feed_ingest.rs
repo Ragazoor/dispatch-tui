@@ -150,13 +150,7 @@ pub fn ingest_feed(
     additive: bool,
     created_by: String,
 ) -> Result<(), String> {
-    ingest_into(
-        &mut ReducerStore(ctx),
-        epic_id,
-        items,
-        additive,
-        &created_by,
-    )
+    ingest_into(&mut ReducerStore(ctx), epic_id, items, additive, &created_by)
 }
 
 /// The body of [`ingest_feed`], over any [`IngestStore`]: pick the strategy
@@ -367,13 +361,7 @@ fn ingest_role_routed(
 ) -> Result<(), String> {
     let identity = store.identity();
     let my = ensure_role_sub_epic(store, parent.id, ROLE_MY_REVIEWS, "My Reviews", &identity);
-    let team = ensure_role_sub_epic(
-        store,
-        parent.id,
-        ROLE_TEAM_REVIEWS,
-        "Team Reviews",
-        &identity,
-    );
+    let team = ensure_role_sub_epic(store, parent.id, ROLE_TEAM_REVIEWS, "Team Reviews", &identity);
     let bots = ensure_role_sub_epic(store, parent.id, ROLE_BOTS, "Bots", &identity);
     let roles = [my, team, bots];
 
