@@ -101,10 +101,11 @@ fn committed_module(into: &Path) -> PathBuf {
             (path.to_string(), rel.to_string())
         })
         .collect();
-    tracked.push((
-        "spacetime/module/Cargo.toml".to_string(),
-        "Cargo.toml".to_string(),
-    ));
+    // The lockfile too: without it cargo resolves every dependency afresh, and
+    // a newer `spacetimedb` can need a newer rustc than the pinned toolchain.
+    for file in ["Cargo.toml", "Cargo.lock"] {
+        tracked.push((format!("spacetime/module/{file}"), file.to_string()));
+    }
     for (tracked, dest) in tracked {
         let bytes = git(&["show", &format!("HEAD:{tracked}")]);
         let dest = into.join(dest);
