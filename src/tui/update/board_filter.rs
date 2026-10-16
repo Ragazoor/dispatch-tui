@@ -140,6 +140,8 @@ impl App {
         if !self.filter.hidden_epics.remove(&id) {
             self.filter.hidden_epics.insert(id);
         }
+        // Showing a hidden done epic again drops its row unless `d` is on.
+        self.clamp_epic_cursor();
         self.after_filter_change()
     }
 

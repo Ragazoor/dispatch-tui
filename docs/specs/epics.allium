@@ -874,9 +874,10 @@ rule ReparentEpicFromTui {
         -- epic card (not when inside the epic view). A collapsible tree
         -- overlay lists only epics that are relevant reparent targets: it
         -- excludes the target epic and its descendants (cycle prevention at
-        -- the UI layer), epics in Done status, and epics that are
-        -- hidden by the active board filter (repo include/exclude and the
-        -- only-active filter). The board search query is deliberately NOT
+        -- the UI layer), epics in Done status, and epics hidden by the repo
+        -- filter (include/exclude) or by the lens's only-active filter.
+        -- Epics on the board filter's hide-list stay listed, as in
+        -- MoveTaskToEpic. The board search query is deliberately NOT
         -- applied here — this picker has its own input buffer, so inheriting
         -- the board query would hide otherwise-valid targets. See
         -- board_search_filter in board-layout.allium. When status filtering removes a

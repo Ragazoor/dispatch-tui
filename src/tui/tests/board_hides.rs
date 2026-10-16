@@ -298,3 +298,40 @@ fn closing_the_overlay_leaves_an_epic_view_the_user_just_hid() {
     ));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
+
+#[test]
+fn a_live_task_under_a_hidden_child_does_not_keep_the_parent_under_the_active_lens() {
+    let mut live = task_in(20, 2, TaskStatus::Running);
+    live.tmux_window = Some(crate::models::test_tmux_window("task-20"));
+    let mut app = App::new(vec![live]);
+    app.board.epics = vec![make_epic(1), sub_epic(2, 1)];
+    app.filter.lens = crate::tui::types::Lens::Active;
+    assert!(cards(&app).0.contains(&EpicId(1)));
+
+    app.filter.hidden_epics.insert(EpicId(2));
+    app.invalidate_layout_cache();
+    let _ = app.cached_epic_stats();
+    assert!(!cards(&app).0.contains(&EpicId(1)), "cached path");
+    app.invalidate_layout_cache();
+    assert!(!cards(&app).0.contains(&EpicId(1)), "uncached path");
+}
+
+#[test]
+fn space_that_drops_a_row_keeps_the_epic_cursor_on_the_list() {
+    let mut app = tree_app();
+    app.board.epics.push(crate::models::Epic {
+        status: TaskStatus::Done,
+        ..make_epic(3)
+    });
+    app.filter.hidden_epics.insert(EpicId(3));
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::Start,
+    ));
+    app.filter_overlay.tab = crate::tui::types::FilterTab::Epics;
+    app.filter_overlay.epic_cursor = 2; // the hidden done epic, last row
+    app.update(Message::BoardFilter(
+        crate::tui::messages::BoardFilterMessage::ToggleEpic(EpicId(3)),
+    ));
+    assert_eq!(app.filter_epic_rows().len(), 2);
+    assert_eq!(app.filter_overlay.epic_cursor, 1);
+}

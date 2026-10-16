@@ -946,6 +946,10 @@ entity FoldedEpics {
 --   flat_active  → both at once
 -- Forward wraps from flat_active to everything; backward wraps the other way.
 --
+-- The lens does not reach inside a package view: its cards are a hand-picked
+-- set, so it is never flattened (work-packages.allium: PackageViewCards). The
+-- only-active half still applies there.
+--
 -- What `active` narrows: only tasks where tmux_window is set are included in
 -- tasks_for_current_view. This is applied in addition to the board filter.
 -- It is still called the only-active filter everywhere else in this file:
@@ -1135,8 +1139,11 @@ rule ToggleHiddenWorkPackage {
 --
 --   Epics tab: the epics as a tree, children indented under their parent,
 --   each row marked hidden or shown. It lists every epic that is not done,
---   plus every hidden epic whatever its status, so a hidden epic that has
---   since finished can still be shown again. `d` switches the list to every
+--   plus every epic on the hide-list itself whatever its status, so a
+--   hidden epic that has since finished can still be shown again. (A done
+--   epic hidden only through its parent is not listed without `d`: Space on
+--   it could not show it anyway.) A listed epic's ancestors are listed too,
+--   so no row appears out of its place in the tree. `d` switches the list to every
 --   epic, done ones included, and back; this lets the user hide a done
 --   epic's cards in the Done column. A child of a hidden parent draws as
 --   hidden-by-parent, distinct from hidden on its own, because Space on it
@@ -1172,8 +1179,11 @@ rule ToggleHiddenWorkPackage {
 --   either end of a long list, where only one marker is drawn, the spare row
 --   goes to a list row instead of staying blank.
 --
---   The popup's height is sized by the longest of the three tabs' lists (up
---   to the board's ceiling), so it does not jump when the user switches tabs.
+--   The popup's height is sized by the most rows any tab could list — every
+--   repo, every epic (done ones included), every package — up to the
+--   board's ceiling, so it does not jump when the user switches tabs,
+--   presses `d` or types a query. The one exception is the Epics tab's
+--   search row, which adds a row while it shows.
 --
 --   On a board so short that the popup's chrome alone fills the content area,
 --   the list keeps a one-row floor and the markers are dropped: the row

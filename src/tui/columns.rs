@@ -820,14 +820,29 @@ impl<'a> BoardView<'a> {
     /// - The epic has no subtasks (always show empty epics), OR
     /// - At least one subtask's repo_path matches the filter.
     ///
+    /// Tasks under a hidden sub-epic do not count: hidden work cannot keep an
+    /// ancestor's card alive (see [`Self::unhidden_subtree`]).
     pub(in crate::tui) fn epic_repo_matches(self, epic_id: EpicId) -> bool {
         if let Some(ref cache) = self.layout.epic_filter_cache {
             if let Some(&(repo_matches, _)) = cache.get(&epic_id) {
                 return repo_matches;
             }
         }
-        let epic_ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
-        epic_repo_matches_for_ids(&self.board.tasks, self.filter, &epic_ids)
+        epic_repo_matches_for_ids(
+            &self.board.tasks,
+            self.filter,
+            &self.unhidden_subtree(epic_id),
+        )
+    }
+
+    /// `epic_id` and its descendants, less every epic the hide-list hides —
+    /// the epics whose tasks may vouch for `epic_id`'s card.
+    pub(in crate::tui) fn unhidden_subtree(self, epic_id: EpicId) -> HashSet<EpicId> {
+        let hidden =
+            super::search::hidden_epic_closure(&self.filter.hidden_epics, &self.board.epics);
+        let mut ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
+        ids.retain(|id| !hidden.contains(id));
+        ids
     }
 
     pub(in crate::tui) fn epic_matches(self, epic_id: EpicId) -> bool {
@@ -839,8 +854,7 @@ impl<'a> BoardView<'a> {
         if !self.filter.lens.only_active() {
             return true;
         }
-        let epic_ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
-        epic_active_matches_for_ids(&self.board.tasks, &epic_ids)
+        epic_active_matches_for_ids(&self.board.tasks, &self.unhidden_subtree(epic_id))
     }
 
     /// Build the per-pass search index for the current board and query. Doing
@@ -1078,11 +1092,16 @@ impl App {
         let filter_cache: HashMap<EpicId, (bool, bool)> = {
             let tasks = &self.board.tasks;
             let filter = &self.filter;
+            // Hidden work cannot vouch for an ancestor (`unhidden_subtree`).
+            let hidden =
+                super::search::hidden_epic_closure(&filter.hidden_epics, &self.board.epics);
             self.board
                 .epics
                 .iter()
                 .map(|e| {
-                    let epic_ids = crate::models::descendant_epic_ids_with_map(e.id, &children_map);
+                    let mut epic_ids =
+                        crate::models::descendant_epic_ids_with_map(e.id, &children_map);
+                    epic_ids.retain(|id| !hidden.contains(id));
                     let repo_matches = epic_repo_matches_for_ids(tasks, filter, &epic_ids);
                     let active_matches = if !filter.lens.only_active() {
                         true
