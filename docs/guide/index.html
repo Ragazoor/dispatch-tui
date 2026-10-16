@@ -192,26 +192,49 @@ nav.steps { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margi
 .tip.done { border-color: var(--accent); }
 .tip.done h3::after { content: " ✓"; color: var(--accent); }
 
-/* ---------- graph ---------- */
-.graph-box { background: var(--t-bg); border-radius: 10px; padding: 12px; overflow-x: auto; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
-.graph-box svg { display: block; min-width: 900px; }
-.g-label { fill: var(--t-fg); font: 12.5px ui-monospace, Menlo, monospace; }
-.g-label.epic { fill: #d7d0f5; }
-.g-label.root { fill: var(--t-orange); font-weight: 700; }
-.g-sub { fill: var(--t-dim); font: 11px ui-monospace, Menlo, monospace; }
-.g-tree { stroke: var(--t-line); fill: none; }
-.g-link { fill: none; stroke-width: 1.4; opacity: .35; transition: opacity .15s; }
-.g-pkg rect { fill: var(--t-panel); stroke-width: 1.5; }
-.g-pkg { cursor: pointer; }
-.g-pkg text { fill: #f0dfb4; font: 12.5px ui-monospace, Menlo, monospace; }
-.g-dot { transition: opacity .15s; }
-svg.focus .g-link { opacity: .06; }
-svg.focus .g-link.hot { opacity: 1; stroke-width: 2.2; }
-svg.focus .g-row { opacity: .25; }
-svg.focus .g-row.hot { opacity: 1; }
-svg.focus .g-pkg { opacity: .35; }
-svg.focus .g-pkg.hot { opacity: 1; }
-.g-row { transition: opacity .15s; }
+/* ---------- whole picture ---------- */
+.why { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; margin: 0 0 14px; }
+.why div { background: var(--page-card); border: 1px solid var(--page-line); border-radius: 10px; padding: 10px 14px; font-size: 14px; }
+.why b { display: block; font-size: 15px; margin-bottom: 2px; }
+.why .ep b { color: #8a7cc4; }
+.why .wpk b { color: var(--accent); }
+.pick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; font-size: 14px; color: var(--page-muted); }
+.pick button {
+  font: inherit; font-size: 14px; border-radius: 8px; padding: 6px 12px; cursor: pointer;
+  background: var(--page-card); color: var(--page-fg); border: 1px solid var(--page-line);
+}
+.pick button[aria-pressed="true"] { border-color: var(--pc, var(--accent)); box-shadow: 0 0 0 1px var(--pc, var(--accent)); }
+.pick button i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; background: var(--pc); }
+.picture { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 900px) { .picture { grid-template-columns: 1fr; } }
+.panel { background: var(--t-bg); color: var(--t-fg); border-radius: 10px; padding: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.25); font: 12px/1.4 ui-monospace, Menlo, monospace; }
+.picture > .panel:last-child { position: sticky; top: 12px; }
+@media (max-width: 900px) { .picture > .panel:last-child { position: static; } }
+.panel > h3 { margin: 0 0 10px; font: 600 13px ui-monospace, Menlo, monospace; color: var(--t-orange); }
+.panel > h3 span { color: var(--t-dim); font-weight: 400; }
+.tree { columns: 2 260px; column-gap: 10px; }
+.ebox { break-inside: avoid; border: 1px solid #4a4370; border-radius: 6px; padding: 7px 8px 8px; margin: 0 0 10px; background: rgba(160,147,199,.05); transition: opacity .15s, box-shadow .15s; }
+.ebox .ebox { margin: 8px 0 0; background: rgba(160,147,199,.07); }
+.ebox.loose { border-style: dashed; border-color: var(--t-line); background: transparent; }
+.ehead { display: flex; justify-content: space-between; gap: 8px; color: #d7d0f5; }
+.ehead .n { color: var(--t-dim); white-space: nowrap; }
+.ebar { height: 3px; background: var(--t-line); border-radius: 2px; margin: 4px 0 6px; overflow: hidden; }
+.ebar i { display: block; height: 100%; background: var(--t-green); }
+.chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 1px 6px 1px 5px; border-radius: 3px; background: var(--t-panel); color: var(--t-fg); font-size: 11px; transition: opacity .15s, box-shadow .15s; }
+.chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--sc); flex: none; }
+.picture.focus .chip, .picture.focus .ebox { opacity: .28; }
+.picture.focus .ebox.lit, .picture.focus .ebox.lit .chip, .picture.focus .ebox.holds { opacity: 1; }
+.picture.focus .ebox.holds > .ehead, .picture.focus .ebox.holds > .ebar, .picture.focus .ebox.holds > .chips > .chip:not(.lit) { opacity: .35; }
+.picture.focus .chip.lit { opacity: 1; box-shadow: 0 0 0 1.5px var(--pc); }
+.picture.focus .ebox.lit { box-shadow: 0 0 0 2px var(--pc); }
+.mini { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.mini h4 { margin: 0 0 4px; font: 11px ui-monospace, Menlo, monospace; color: var(--t-blue); text-align: center; letter-spacing: .05em; }
+.mini .t-card { font-size: 11px; padding: 3px 6px; white-space: normal; }
+.mini .t-card .ttl { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.mini .from { color: var(--t-dim); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty-pkg { color: var(--t-dim); padding: 30px 10px; text-align: center; font-size: 13px; line-height: 1.6; }
 .g-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--page-muted); font-size: 14px; margin: 10px 0 0; }
 .g-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
 .stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 12px; }
@@ -355,16 +378,24 @@ footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border
 
   <!-- ===================== step 2 ===================== -->
   <section id="step-2" hidden>
-    <p class="lede">The same board, all at once. Each row is an epic. Each dot is one of its tasks, coloured by status. On the right are the work packages: hover one to see which epics and tasks it gathers, wherever they live in the tree.</p>
+    <p class="lede">The same board, all at once. There are two ways it organizes work, and they do different jobs.</p>
+    <div class="why">
+      <div class="ep"><b>Epics: what the work is</b>An epic holds tasks and other epics. Every task lives in exactly one place in this tree, so the backlog never turns into one long list.</div>
+      <div class="wpk"><b>Work packages: what you are doing now</b>A package links to tasks and epics wherever they live, like this week's release. It adds no new work and moves nothing. It is a second board over the same tasks.</div>
+    </div>
     <div class="stats" id="stats"></div>
-    <div class="graph-box"><svg id="graph" role="img" aria-label="Graph of the example board's epics, tasks and work packages"></svg></div>
+    <div class="pick" id="pick"></div>
+    <div class="picture" id="picture">
+      <div class="panel"><h3>The epic tree <span id="tree-sub"></span></h3><div class="tree" id="tree"></div></div>
+      <div class="panel"><h3 id="mini-title"></h3><div id="mini"></div></div>
+    </div>
     <div class="g-legend" id="legend"></div>
   </section>
 
   <!-- ===================== plain-text tour ===================== -->
   <section class="prose" id="tour-text">
     <h2>The tour in words</h2>
-    <p class="muted">Everything the board above shows, as plain text. It reads the same with or without JavaScript, so an agent reading this file gets the whole story too.</p>
+    <p class="muted">Everything the guide above shows, as plain text. It reads the same with or without JavaScript, so an agent reading this file gets the whole story too.</p>
 
     <h3>One board for all your work</h3>
     <p>Dispatch is a kanban board in your terminal. Every piece of work is a task card in one of four columns: <b>Backlog</b>, <b>Running</b>, <b>Review</b> and <b>Done</b>. You move with <kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd> or the arrow keys. <kbd>Enter</kbd> opens a task's details. <kbd>?</kbd> lists every key.</p>
@@ -1132,115 +1163,93 @@ $("tab-2").onclick = () => showStep(2);
 $("btn-next").onclick = () => showStep(Math.min(2, step + 1));
 $("btn-back").onclick = () => showStep(Math.max(1, step - 1));
 
-// ------------------------------------------------------------------ graph
+// ------------------------------------------------------------------ whole picture
 const STATUS_COLOR = { backlog: "#84a0c6", running: "#e2a478", review: "#a093c7", done: "#b4be82" };
 const PKG_COLOR = ["#e2c178", "#e27878", "#89b8c2"];
+let picked = null;
 
 function drawGraph() {
-  const svg = $("graph");
-  const NS = "http://www.w3.org/2000/svg";
-  const rowH = 30, top = 44, labelX = 24, dotX = 330, dotGap = 15, pkgW = 170;
-  const rows = [];
-  const walk = (id, depth) => {
-    rows.push({ kind: "epic", id, depth });
-    for (const c of epics.get(id).children) walk(c, depth + 1);
+  const chip = t => `<span class="chip" data-task="${t.id}" style="--sc:${STATUS_COLOR[t.status]}" title="#${t.id} ${esc(t.title)} — ${t.status}${t.sub !== "none" ? " / " + t.sub.replace(/_/g, " ") : ""}"><span>${esc(t.title)}</span></span>`;
+  const box = id => {
+    const e = epics.get(id);
+    const [d, n] = epicProgress(id);
+    const kids = e.children.map(box).join("");
+    return `<div class="ebox" data-epic="${id}"><div class="ehead"><span>◆ ${esc(e.title)}</span><span class="n">${d}/${n}</span></div>` +
+      `<div class="ebar"><i style="width:${n ? (100 * d) / n : 0}%"></i></div>` +
+      `<div class="chips">${e.tasks.map(t => chip(tasks.get(t))).join("")}</div>${kids}</div>`;
   };
-  for (const e of epics.values()) if (!e.parent) walk(e.id, 1);
-  rows.push({ kind: "loose", depth: 1 });
-  const maxDots = Math.max(...rows.map(r => (r.kind === "epic" ? epics.get(r.id).tasks.length : [...tasks.values()].filter(t => !t.epic).length)));
-  const pkgX = dotX + maxDots * dotGap + 150;
-  const W = pkgX + pkgW + 20;
-  const H = top + rows.length * rowH + 20;
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  svg.setAttribute("width", W);
-  svg.innerHTML = "";
-  const mk = (tag, attrs, parent = svg) => {
-    const n = document.createElementNS(NS, tag);
-    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
-    parent.appendChild(n);
-    return n;
-  };
-  const rootT = mk("text", { x: labelX - 8, y: 22, class: "g-label root" });
-  rootT.textContent = "Shop team board";
+  const loose = [...tasks.values()].filter(t => !t.epic);
+  $("tree").innerHTML = [...epics.values()].filter(e => !e.parent).map(e => box(e.id)).join("") +
+    `<div class="ebox loose"><div class="ehead"><span>Not in an epic</span><span class="n">${loose.length}</span></div><div class="chips" style="margin-top:6px">${loose.map(chip).join("")}</div></div>`;
+  $("tree-sub").textContent = `· ${epics.size} epics · ${tasks.size} tasks`;
 
-  const anchor = { epic: new Map(), task: new Map() };
-  const rowEls = [];
-  rows.forEach((r, i) => {
-    const y = top + i * rowH;
-    const g = mk("g", { class: "g-row" });
-    rowEls.push(g);
-    const x = labelX + (r.depth - 1) * 18;
-    mk("path", { d: `M ${x - 10} ${y - rowH + 8} V ${y - 4} H ${x - 3}`, class: "g-tree" }, g);
-    const label = r.kind === "epic" ? "◆ " + epics.get(r.id).title : "Not in an epic";
-    const t = mk("text", { x, y, class: "g-label" + (r.kind === "epic" ? " epic" : "") }, g);
-    t.textContent = label;
-    const list = r.kind === "epic" ? epics.get(r.id).tasks.map(id => tasks.get(id)) : [...tasks.values()].filter(t => !t.epic);
-    if (r.kind === "epic") {
-      const [d, n] = epicProgress(r.id);
-      const s = mk("text", { x: dotX - 70, y, class: "g-sub" }, g);
-      s.textContent = `${d}/${n}`;
-      // Links to an epic land just past its row of dots, so they read as "the whole row".
-      anchor.epic.set(r.id, { x: dotX + list.length * dotGap + 4, y: y - 4, g });
-    }
-    list.forEach((task, j) => {
-      const cx = dotX + j * dotGap, cy = y - 4;
-      const c = mk("circle", { cx, cy, r: 5, fill: STATUS_COLOR[task.status], class: "g-dot" }, g);
-      mk("title", {}, c).textContent = `#${task.id} ${task.title} — ${task.status}${task.sub !== "none" ? " / " + task.sub.replace(/_/g, " ") : ""}`;
-      anchor.task.set(task.id, { x: cx, y: cy, g });
-    });
-  });
-
-  const pkgEls = [];
-  const linkEls = [];
-  const span = (rows.length * rowH) / packages.length;
-  packages.forEach((p, i) => {
-    const color = PKG_COLOR[i % PKG_COLOR.length];
-    const py = top + span * i + span / 2 - 14;
-    const links = [];
-    for (const [kind, id] of p.links) {
-      const a = anchor[kind].get(id);
-      if (!a) continue;
-      const path = mk("path", {
-        d: `M ${pkgX} ${py + 14} C ${pkgX - 110} ${py + 14}, ${a.x + 110} ${a.y}, ${a.x + 6} ${a.y}`,
-        class: "g-link", stroke: color,
-      });
-      links.push({ path, row: a.g });
-      linkEls.push(path);
-    }
-    const g = mk("g", { class: "g-pkg", tabindex: 0 });
-    mk("rect", { x: pkgX, y: py, width: pkgW, height: 28, rx: 4, stroke: color }, g);
-    mk("text", { x: pkgX + 10, y: py + 18 }, g).textContent = "▣ " + p.title;
-    mk("title", {}, g).textContent = `${p.title}: ${p.description} Links ${p.links.length} items.`;
-    pkgEls.push(g);
-    const on = () => {
-      svg.classList.add("focus");
-      g.classList.add("hot");
-      for (const l of links) { l.path.classList.add("hot"); l.row.classList.add("hot"); }
-    };
-    const off = () => {
-      svg.classList.remove("focus");
-      svg.querySelectorAll(".hot").forEach(n => n.classList.remove("hot"));
-    };
-    g.addEventListener("mouseenter", on);
-    g.addEventListener("mouseleave", off);
-    g.addEventListener("focus", on);
-    g.addEventListener("blur", off);
-  });
-  // Paths under the rows and packages, so dots stay on top.
-  for (const p of linkEls) svg.insertBefore(p, svg.firstChild.nextSibling);
+  $("pick").innerHTML = "Show a work package:" +
+    `<button data-pkg="" aria-pressed="${picked === null}">None</button>` +
+    packages.map((p, i) => `<button data-pkg="${p.id}" style="--pc:${PKG_COLOR[i]}" aria-pressed="${picked === p.id}"><i></i>${esc(p.title)} <span style="color:var(--page-muted)">· ${p.links.length}</span></button>`).join("");
 
   const all = [...tasks.values()];
-  const by = s => all.filter(t => t.status === s).length;
   $("stats").innerHTML = [
-    [epics.size, "epics, nested up to 2 deep"],
+    [epics.size, "epics, some inside others"],
     [all.length, "tasks"],
-    [by("backlog"), "in the backlog"],
+    [all.filter(t => t.status === "backlog").length, "in the backlog"],
     [all.filter(t => t.window).length, "agents running now"],
-    [packages.length, "work packages across the tree"],
+    [packages.length, "work packages"],
   ].map(([n, l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
-  $("legend").innerHTML = Object.entries(STATUS_COLOR).map(([s, c]) => `<span><i style="background:${c}"></i>${s}</span>`).join("") +
-    `<span>— lines: what each work package links to</span>`;
+  $("legend").innerHTML = Object.entries(STATUS_COLOR).map(([s, c]) => `<span><i style="background:${c}"></i>${s}</span>`).join("");
+  showPackage(picked);
 }
+
+function epicPath(epicId) {
+  const names = [];
+  for (let e = epics.get(epicId); e; e = e.parent ? epics.get(e.parent) : null) names.unshift(e.title);
+  return names.join(" › ");
+}
+
+function showPackage(id) {
+  picked = id;
+  const pic = $("picture");
+  pic.querySelectorAll(".lit, .holds").forEach(n => n.classList.remove("lit", "holds"));
+  $("pick").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String((b.dataset.pkg ? +b.dataset.pkg : null) === id)));
+  const i = packages.findIndex(p => p.id === id);
+  if (i < 0) {
+    pic.classList.remove("focus");
+    $("mini-title").innerHTML = "A work package";
+    $("mini").innerHTML = `<div class="empty-pkg">Pick a work package above.<br>Its tasks and epics light up in the tree, wherever they live,<br>and here you see them as one board.</div>`;
+    return;
+  }
+  const p = packages[i];
+  pic.style.setProperty("--pc", PKG_COLOR[i]);
+  pic.classList.add("focus");
+  for (const [kind, lid] of p.links) {
+    const el = pic.querySelector(kind === "epic" ? `.ebox[data-epic="${lid}"]` : `.chip[data-task="${lid}"]`);
+    if (!el) continue;
+    el.classList.add("lit");
+    // Keep the boxes around a linked item readable, so you can see where it lives.
+    for (let up = el.parentElement.closest(".ebox"); up; up = up.parentElement.closest(".ebox")) up.classList.add("holds");
+  }
+  $("mini-title").innerHTML = `▣ ${esc(p.title)} <span>· ${esc(p.description)}</span>`;
+  const cols = COLUMNS.map(c => ({ c, items: [] }));
+  for (const item of packageItems(p)) {
+    if (item.kind === "task") {
+      const t = item.task;
+      cols[COLUMNS.indexOf(t.status)].items.push(`<div class="t-card${t.status === "done" ? " done" : ""}"><div class="ttl"><span class="id">#${t.id}</span> ${esc(t.title)}</div><div class="from">${t.epic ? "from " + esc(epicPath(t.epic)) : "not in an epic"}</div></div>`);
+    } else {
+      // An epic card sits in every column where the epic has work, as on the main board.
+      const [d, n] = epicProgress(item.epic.id);
+      for (const c of COLUMNS) {
+        if (!subtreeTasks(item.epic.id).some(t => t.status === c)) continue;
+        cols[COLUMNS.indexOf(c)].items.push(`<div class="t-card epic"><div class="ttl">◆ ${esc(item.epic.title)}</div><div class="from">epic · ${d}/${n} done</div></div>`);
+      }
+    }
+  }
+  $("mini").innerHTML = `<div class="mini">${cols.map(({ c, items }) => `<div><h4>${c.toUpperCase()} ${items.length}</h4>${items.join("")}</div>`).join("")}</div>` +
+    `<p style="color:var(--t-dim);margin:10px 2px 0">On the real board this is a yellow card. Space opens it as this board; q comes back.</p>`;
+}
+
+$("pick").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (b) showPackage(b.dataset.pkg ? +b.dataset.pkg : null);
+});
 
 render();
 })();
