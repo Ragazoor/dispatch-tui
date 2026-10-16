@@ -2861,7 +2861,7 @@ rule AppendOnlyFeed {
 --     everything that arrives over the wire.
 --
 --     WHAT IT DOES NOT COVER, deliberately: the rule guards the DECODE, not the
---     STORAGE boundary. upsert_feed_tasks does not re-validate, so a FeedItem
+--     STORAGE boundary. the module's upsert does not re-validate, so a FeedItem
 --     built as a struct literal reaches the DB unchecked. No production path
 --     does that — the only two decoders are FeedCycle::run and cmd_verify_feed,
 --     both via parse_feed_items, and nothing outside tests constructs the

@@ -712,7 +712,6 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
     )
     .await
     .unwrap();
-    db.recalculate_epic_status(epic.id).await.unwrap();
     let epic_status_before = db.get_epic(epic.id).await.unwrap().status;
 
     let resp = call(

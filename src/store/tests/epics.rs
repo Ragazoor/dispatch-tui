@@ -3,76 +3,6 @@ use super::*;
 // --- Epic CRUD ---
 
 #[tokio::test]
-async fn create_repo_group_sub_epic_is_idempotent() {
-    let db = crate::store::Store::open_in_memory().unwrap();
-    let root = db.create_epic("root", "", None).await.unwrap();
-
-    let a1 = db
-        .create_repo_group_sub_epic(root.id, "repo-a")
-        .await
-        .unwrap();
-    let a2 = db
-        .create_repo_group_sub_epic(root.id, "repo-a")
-        .await
-        .unwrap();
-    assert_eq!(a1, a2, "same (parent,title) must return the same sub-epic");
-
-    let sub = db.get_epic(a1).await.unwrap();
-    assert_eq!(sub.origin, crate::models::EpicOrigin::RepoGroup);
-    assert_eq!(sub.parent_epic_id, Some(root.id));
-
-    let subs = db.list_sub_epics(root.id).await;
-    assert_eq!(subs.len(), 1, "no duplicate sub-epics created");
-}
-
-#[tokio::test]
-async fn create_managed_role_epic_is_idempotent() {
-    let db = crate::store::Store::open_in_memory().unwrap();
-
-    let a1 = db
-        .create_managed_role_epic(
-            "PR Reviews",
-            None,
-            crate::models::FeedRole::ReviewsParent,
-            Some("/scripts/fetch-reviews.sh"),
-            Some(300),
-        )
-        .await
-        .unwrap();
-    let a2 = db
-        .create_managed_role_epic(
-            "PR Reviews",
-            None,
-            crate::models::FeedRole::ReviewsParent,
-            Some("/scripts/fetch-reviews.sh"),
-            Some(300),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        a1, a2,
-        "a lost race on (parent, feed_role) must be a no-op, not a duplicate"
-    );
-
-    let epic = db.get_epic(a1).await.unwrap();
-    assert_eq!(epic.feed_role, crate::models::FeedRole::ReviewsParent);
-    assert_eq!(
-        epic.feed_command.as_deref(),
-        Some("/scripts/fetch-reviews.sh")
-    );
-    assert_eq!(epic.feed_interval_secs, Some(300));
-
-    let all = db.list_epics().await;
-    assert_eq!(
-        all.iter()
-            .filter(|e| e.feed_role == crate::models::FeedRole::ReviewsParent)
-            .count(),
-        1,
-        "no orphaned untagged epic left behind by the lost race"
-    );
-}
-
-#[tokio::test]
 async fn create_epic_defaults_feed_role_none() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
@@ -276,7 +206,6 @@ async fn recalculate_epic_status_running_task_leaves_epic_in_backlog() {
         .await
         .unwrap();
 
-    db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 }
@@ -297,7 +226,6 @@ async fn recalculate_epic_status_running_task_leaves_review_epic_unchanged() {
         .await
         .unwrap();
 
-    db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Review); // manual placement preserved
 }
@@ -315,7 +243,6 @@ async fn recalculate_epic_status_backlog_task_leaves_review_epic_unchanged() {
         .unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).await.unwrap();
 
-    db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Review); // manual placement preserved
 }
@@ -345,7 +272,6 @@ async fn recalculate_epic_status_review_epic_stays_when_one_task_done_one_runnin
         .await
         .unwrap();
 
-    db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap();
     // t1 still running, t2 done — not all done, not done-regression → no change
     assert_eq!(epic.status, TaskStatus::Review);
@@ -371,7 +297,6 @@ async fn recalculate_epic_status_all_done() {
         .await
         .unwrap();
 
-    db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Done);
 }
@@ -391,7 +316,6 @@ async fn recalculate_epic_status_all_done_stamps_completed_at() {
     // Truncated to the second: `completed_at` stores milliseconds, but the
     // bounds only need to bracket the write.
     let before = chrono::Utc::now() - chrono::Duration::seconds(1);
-    db.recalculate_epic_status(epic.id).await.unwrap();
     let after = chrono::Utc::now() + chrono::Duration::seconds(1);
 
     let epic = db.get_epic(epic.id).await.unwrap();
@@ -431,8 +355,6 @@ async fn recalculate_epic_status_done_regression_keeps_completed_at() {
         .await
         .unwrap();
 
-    db.recalculate_epic_status(epic.id).await.unwrap();
-
     let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
     assert_eq!(
@@ -461,8 +383,6 @@ async fn recalculate_epic_status_already_done_noop_leaves_completed_at_untouched
     )
     .await
     .unwrap();
-
-    db.recalculate_epic_status(epic.id).await.unwrap();
 
     let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Done);
@@ -493,7 +413,6 @@ async fn recalculate_epic_status_mixed_review_done_leaves_epic_in_backlog() {
         .await
         .unwrap();
 
-    db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog); // not all done → no auto-advance
 }
@@ -525,7 +444,6 @@ async fn recalculate_epic_status_mixed_review_running_leaves_epic_in_backlog() {
         .await
         .unwrap();
 
-    db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 }
@@ -585,7 +503,6 @@ async fn epic_stays_backlog_when_review_task_completes() {
         .unwrap();
     db.set_task_epic_id(t1.id, Some(epic.id)).await.unwrap();
     db.set_task_epic_id(t2.id, Some(epic.id)).await.unwrap();
-    db.recalculate_epic_status(epic.id).await.unwrap();
     assert_eq!(
         db.get_epic(epic.id).await.unwrap().status,
         TaskStatus::Backlog // running+review tasks → no auto-advance
@@ -610,7 +527,6 @@ async fn update_task_with_substatus_keeps_task_running_and_epic_in_backlog() {
         .await
         .unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).await.unwrap();
-    db.recalculate_epic_status(epic.id).await.unwrap();
 
     let svc = TaskService::new(db.clone(), crate::process::MockProcessRunner::unused());
     svc.update_task(
@@ -678,7 +594,6 @@ async fn recalculate_epic_status_done_regresses_to_backlog_when_running_task_add
         .await
         .unwrap();
 
-    db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 }
@@ -692,7 +607,6 @@ async fn recalculate_epic_status_no_active_children_leaves_status_unchanged() {
         .await
         .unwrap();
 
-    db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Running);
 }
@@ -709,16 +623,8 @@ async fn recalculate_epic_status_all_done_stays_done_when_already_done() {
         .await
         .unwrap();
 
-    db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Done);
-}
-
-#[tokio::test]
-async fn recalculate_epic_status_nonexistent_is_noop() {
-    let db = in_memory_db().await;
-    // Should not error for nonexistent epic
-    db.recalculate_epic_status(EpicId(9999)).await.unwrap();
 }
 
 #[tokio::test]
@@ -893,7 +799,6 @@ async fn recalculate_parent_status_from_sub_epic() {
 
     // Recalculating the sub-epic should also propagate up to the parent.
     // Running tasks do not auto-advance epics — both stay in backlog.
-    db.recalculate_epic_status(child.id).await.unwrap();
 
     let updated_child = db.get_epic(child.id).await.unwrap();
     assert_eq!(updated_child.status, TaskStatus::Backlog);
@@ -960,11 +865,12 @@ fn retired_test_item(external_id: &str) -> crate::models::FeedItem {
 
 async fn upsert_ids(db: &Store, epic: EpicId, ids: &[&str]) {
     let items: Vec<_> = ids.iter().map(|id| retired_test_item(id)).collect();
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic,
         &items,
         &vec!["/repo".to_string(); items.len()],
         &vec!["main".to_string(); items.len()],
+        false,
     )
     .await
     .unwrap();

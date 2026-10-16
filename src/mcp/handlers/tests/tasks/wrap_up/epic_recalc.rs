@@ -29,7 +29,6 @@ async fn wrap_up_done_recalculates_epic_status() {
     )
     .await
     .unwrap();
-    db.recalculate_epic_status(epic.id).await.unwrap();
 
     let resp = call(
         &state,
@@ -97,11 +96,6 @@ async fn wrap_up_pr_recalculates_epic_status() {
                 .worktree(Some("/repo/.worktrees/1-t"))
                 .tmux_window(Some(&test_tmux_window("task-1"))),
         )
-        .await
-        .unwrap();
-    state
-        .db_write()
-        .recalculate_epic_status(epic.id)
         .await
         .unwrap();
     let epic_before = state.db.get_epic(epic.id).await.unwrap();
@@ -181,7 +175,6 @@ async fn dispatch_task_recalculates_epic_status() {
         .await
         .unwrap();
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
-    db.recalculate_epic_status(epic.id).await.unwrap();
 
     std::fs::create_dir_all(
         dir.path()

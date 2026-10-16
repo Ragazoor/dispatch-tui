@@ -74,10 +74,7 @@ pub(crate) fn retire_task_if_feed_backed(ctx: &ReducerContext, epic_id: i64, ext
 // already draw — a reducer takes a fully-formed row, not a partial one it has
 // to complete. See [`FeedTaskUpsertItem`].
 //
-// No internal recalculation: every call site in `src/feed/` already calls the
-// already-routed `recalculate_epic_status` explicitly afterward
-// (`recalculate_epic_status_after_feed`), so duplicating it here would only be
-// a second, harmless, idempotent call with no caller that needs it.
+// `ingest_feed` recalculates the epic chain itself, in the same transaction.
 
 /// One feed item, already resolved to the fields a task row needs. Not a
 /// [`Task`]: a feed item never carries `status`/`sub_status`/`repo_path`/
@@ -232,7 +229,7 @@ pub(crate) fn delete_stale_feed_tasks_in_epic(
     }
 }
 
-/// Shared body of [`upsert_feed_tasks`] and `ingest_feed`.
+/// The upsert body `ingest_feed` runs for each feed epic.
 /// `delete_absent` selects the stale-delete pass the same way
 /// `src/db/queries/tasks.rs::upsert_feed_tasks_inner` does.
 pub(crate) fn upsert_feed_tasks_inner(
@@ -258,24 +255,6 @@ pub(crate) fn upsert_feed_tasks_inner(
         delete_stale_feed_tasks_in_epic(ctx, epic_id, &keep);
     }
     Ok(())
-}
-
-/// Upsert tasks from a feed, reconciling: every stale feed task in `epic_id`
-/// absent from `items` is removed. `feeds.allium: UpsertFeedTasks`.
-///
-/// `created_by` names the calling host's own owner identity
-/// (`local_host().owner`) — stamped on every newly INSERTED task, never on an
-/// update. May be empty: an install that has never connected to a shared
-/// store has no identity to stamp, and that is a real, honest state rather
-/// than a call this reducer refuses (`core.allium: Task.created_by`).
-#[spacetimedb::reducer]
-pub fn upsert_feed_tasks(
-    ctx: &ReducerContext,
-    epic_id: i64,
-    items: Vec<FeedTaskUpsertItem>,
-    created_by: String,
-) -> Result<(), String> {
-    upsert_feed_tasks_inner(ctx, epic_id, items, &created_by, true)
 }
 
 /// feeds.allium: `DropClosedRetiredFeedItems`. Drop every `retired_feed_items`
@@ -362,87 +341,6 @@ pub(crate) fn drop_retired_feed_items_for_epics(
             ctx.db.retired_feed_items().id().delete(retired_id);
         }
     }
-}
-
-/// Find-or-create the `RepoGroup` sub-epic of `parent_id` titled `title`.
-/// Mirrors `src/db/queries/epics.rs::create_repo_group_sub_epic`, minus the
-/// unique-constraint retry arm that mirror needs and this does not: SQLite
-/// has concurrent writers and a partial unique index to referee them; a
-/// SpacetimeDB reducer runs to completion before the next one starts, so the
-/// look-up this function does IS the whole safety argument — there is no
-/// window for a second caller's insert to land between it and this one's.
-///
-/// **`created_by` is not optional here.** An epic has no `owner` field at
-/// all, and the per-epic subscription (`WHERE id = {epic}`) covers only that
-/// epic's own row and its tasks — never a NEW CHILD epic's row, whatever the
-/// child's parent. `own_creations` (`WHERE created_by = {identity}`) is the
-/// only subscription that can ever make a freshly created or freshly found
-/// sub-epic visible to the caller that needs its id back — see
-/// `create_epic`'s `matches_created_epic` precedent, which this follows.
-/// `created_by` is written only on a genuine insert; the found-existing arm
-/// leaves a prior creator's stamp untouched, same as
-/// `LocalHostOwnerIsWrittenOnce`-shaped fields elsewhere in this module never
-/// get silently reassigned to whoever asked most recently.
-///
-/// There is no archived state for a found epic to be unarchived out of any
-/// more, so a match is simply left alone and the only other case is a fresh
-/// insert. Unlike a managed epic (`epics.allium`'s `ProvisionManagedEpics`
-/// guidance on rename-stability), this reducer is NOT rename-stable: it
-/// matches on `(parent_id, title)`, same as
-/// `src/db/queries/epics.rs::create_repo_group_sub_epic`, so a user rename of
-/// a repo-group sub-epic makes the next grouped cycle create a new one.
-#[spacetimedb::reducer]
-pub fn create_repo_group_sub_epic(
-    ctx: &ReducerContext,
-    parent_id: i64,
-    title: String,
-    created_by: String,
-) -> Result<(), String> {
-    find_or_create_repo_group(ctx, parent_id, &title, created_by);
-    Ok(())
-}
-
-/// Create-or-return a managed-feed-role epic, `feed_role` set from the start.
-/// Mirrors `src/db/queries/epics.rs::create_managed_role_epic` on the same
-/// terms [`create_repo_group_sub_epic`] documents: race-free by construction,
-/// no unique-index retry arm needed, `created_by` required for the same
-/// `own_creations` reason.
-#[spacetimedb::reducer]
-pub fn create_managed_role_epic(
-    ctx: &ReducerContext,
-    title: String,
-    parent_epic_id: i64,
-    role: String,
-    feed_command: String,
-    feed_interval_secs: i64,
-    created_by: String,
-) -> Result<(), String> {
-    let existing = ctx
-        .db
-        .epics()
-        .parent_epic_id()
-        .filter(&parent_epic_id)
-        .find(|e| e.feed_role == role);
-    if existing.is_none() {
-        ctx.db.epics().insert(Epic {
-            title,
-            parent_epic_id,
-            feed_role: role,
-            feed_command,
-            feed_interval_secs,
-            // `origin` stays at `blank_epic()`'s "manual" default, unlisted
-            // here on purpose: the SQLite INSERT this mirrors
-            // (`src/db/queries/epics.rs::create_managed_role_epic`) never sets
-            // it either, so a managed-role epic's origin is "manual" today —
-            // only `create_repo_group_sub_epic` above writes "repo-group",
-            // and nothing anywhere reads "managed" as an origin value.
-            created_by,
-            created_at: now(ctx),
-            updated_at: now(ctx),
-            ..blank_epic()
-        });
-    }
-    Ok(())
 }
 
 /// `ProvisionManagedEpics` (M7, X4): the managed feed-epic tree in ONE

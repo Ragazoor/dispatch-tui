@@ -525,12 +525,6 @@ async fn flat_feed_task_count(db: &Store, epic: EpicId) -> usize {
 async fn route_routed_rescues_flat_task_stranded_on_parent() {
     let db = Arc::new(Store::open_in_memory().unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
-    db.patch_epic(
-        parent.id,
-        &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
-    )
-    .await
-    .unwrap();
 
     // Strand a flat feed task directly on the parent — exactly what an
     // out-of-band flat upsert (the manual-trigger bug, or an older binary)
@@ -541,11 +535,19 @@ async fn route_routed_rescues_flat_task_stranded_on_parent() {
         "https://github.com/org/repo/pull/1",
         vec![Signal::DirectRequest],
     );
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         parent.id,
         std::slice::from_ref(&item),
         &["".into()],
         &["main".into()],
+        false,
+    )
+    .await
+    .unwrap();
+    // The role is set only after the seed: ingest routes a role-carrying epic, so a flat task on the parent can only be planted while it has no role.
+    db.patch_epic(
+        parent.id,
+        &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
     )
     .await
     .unwrap();
@@ -599,17 +601,18 @@ async fn route_routed_rescues_flat_task_stranded_on_parent() {
 async fn route_routed_deletes_stale_flat_task_on_parent() {
     let db = Arc::new(Store::open_in_memory().unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
+
+    let gone = make_item("pr-gone", "https://github.com/org/repo/pull/9");
+    db.ingest_feed(parent.id, &[gone], &["".into()], &["main".into()], false)
+        .await
+        .unwrap();
+    // The role is set only after the seed: ingest routes a role-carrying epic, so a flat task on the parent can only be planted while it has no role.
     db.patch_epic(
         parent.id,
         &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
     )
     .await
     .unwrap();
-
-    let gone = make_item("pr-gone", "https://github.com/org/repo/pull/9");
-    db.upsert_feed_tasks(parent.id, &[gone], &["".into()], &["main".into()])
-        .await
-        .unwrap();
     assert_eq!(flat_feed_task_count(&db, parent.id).await, 1);
 
     // Emission no longer contains pr-gone (merged/closed).
@@ -687,11 +690,23 @@ async fn route_routed_clears_parent_duplicate_when_canonical_in_sub_epic() {
     // Corrupt the state: plant a duplicate flat copy on the parent, as the
     // old manual-trigger flat upsert did (inserting onto a reviews_parent
     // epic does not fire the subtree-uniqueness trigger).
-    db.upsert_feed_tasks(
+    // Ingest routes a role-carrying epic, so the flat copy is planted while the
+    // parent briefly has no role.
+    db.patch_epic(parent.id, &EpicPatch::new().feed_role(FeedRole::None))
+        .await
+        .unwrap();
+    db.ingest_feed(
         parent.id,
         std::slice::from_ref(&item),
         &["".into()],
         &["main".into()],
+        false,
+    )
+    .await
+    .unwrap();
+    db.patch_epic(
+        parent.id,
+        &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
     )
     .await
     .unwrap();
@@ -1345,14 +1360,29 @@ async fn flat_sync_rehomes_tasks_from_existing_repo_group_subepic_and_deletes_it
 
     // Simulate a pre-existing grouped state: a RepoGroup sub-epic holding
     // a feed task, as if group_by_repo had been on for a prior poll.
-    let sub = db
-        .create_repo_group_sub_epic(parent.id, "myrepo")
-        .await
-        .unwrap();
+    // `regroup_epic` is what makes a `repo-group` sub-epic here: the module's
+    // grouped ingest names its sub-epics but does not stamp that origin.
     let seed = vec![make_item("cve-1", "https://github.com/org/myrepo/pull/1")];
-    db.upsert_feed_tasks(sub, &seed, &["".into()], &["main".into()])
+    db.ingest_feed(
+        parent.id,
+        &seed,
+        &["/repos/myrepo".into()],
+        &["main".into()],
+        false,
+    )
+    .await
+    .unwrap();
+    db.patch_epic(parent.id, &EpicPatch::new().group_by_repo(true))
         .await
         .unwrap();
+    db.regroup_epic(parent.id).await.unwrap();
+    let sub = db
+        .list_sub_epics(parent.id)
+        .await
+        .into_iter()
+        .find(|e| e.title == "myrepo")
+        .expect("regroup made the myrepo sub-epic")
+        .id;
     let pre_existing = db.list_tasks_for_epic(sub).await.remove(0);
 
     // Flat sync (group_by_repo=false) with the same item still emitted.
@@ -1426,7 +1456,7 @@ async fn flat_sync_preserves_manual_sub_epic() {
 // One test per removal mechanism, because they are three separate code paths
 // that happen to share an outcome: the role-routed subtree delete, the parent
 // sweep, the grouped absent-sub-epic clear, and the flat/per-epic stale delete
-// inside upsert_feed_tasks. A single end-to-end test would leave three of them
+// inside the module's upsert. A single end-to-end test would leave three of them
 // free to regress independently.
 
 /// The role-routed subtree delete is skipped: a PR omitted by a partially
@@ -1518,19 +1548,21 @@ async fn additive_role_routed_sync_keeps_a_task_absent_from_the_emission() {
 async fn additive_role_routed_sync_keeps_parent_stranded_tasks() {
     let db = Arc::new(Store::open_in_memory().unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
-    db.patch_epic(
-        parent.id,
-        &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
-    )
-    .await
-    .unwrap();
 
     // A feed task stranded flat on the parent, absent from the next emission.
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         parent.id,
         &[make_item("stranded", "https://github.com/org/repo/pull/9")],
         &["".to_string()],
         &["main".to_string()],
+        false,
+    )
+    .await
+    .unwrap();
+    // The role is set only after the seed: ingest routes a role-carrying epic, so a flat task on the parent can only be planted while it has no role.
+    db.patch_epic(
+        parent.id,
+        &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
     )
     .await
     .unwrap();
@@ -1654,8 +1686,8 @@ async fn additive_grouped_sync_keeps_tasks_in_a_dropped_repo_sub_epic() {
     assert!(outcome.removed.is_empty());
 }
 
-/// The flat path's stale delete lives inside `upsert_feed_tasks`, so it is
-/// gated by the additive variant of that call rather than by a skipped step.
+/// The flat path's stale delete lives inside the module's upsert, so it is
+/// gated by the additive variant of the ingest call rather than by a skipped step.
 #[tokio::test]
 async fn additive_flat_sync_keeps_a_task_absent_from_the_emission() {
     let db = Arc::new(Store::open_in_memory().unwrap());

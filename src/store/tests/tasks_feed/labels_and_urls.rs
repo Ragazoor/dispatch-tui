@@ -52,9 +52,15 @@ async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
         signals: vec![],
         wrap_up_mode: None,
     }];
-    db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &items,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
@@ -79,9 +85,15 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
         signals: vec![],
         wrap_up_mode: None,
     }];
-    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &initial,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
     // Simulate user moving the task — status & repo_path must be preserved.
     let task_id = db.list_tasks_for_epic(epic.id).await[0].id;
     db.patch_task(
@@ -106,9 +118,15 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
         signals: vec![],
         wrap_up_mode: None,
     }];
-    db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &updated,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
@@ -143,11 +161,12 @@ async fn upsert_feed_tasks_sets_wrap_up_mode_on_insert() {
             ..make_feed_item("cve:org/repo#2", "[LOW] repo: CVE-2")
         },
     ];
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &items,
         &["/repo".to_string(), "/repo".to_string()],
         &main_branches(2),
+        false,
     )
     .await
     .unwrap();
@@ -174,9 +193,15 @@ async fn upsert_feed_tasks_preserves_wrap_up_mode_on_conflict() {
         wrap_up_mode: Some(crate::models::WrapUpMode::Pr),
         ..make_feed_item("cve:org/repo#1", "T")
     }];
-    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &initial,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     // User changes the wrap-up choice manually.
     let task_id = db.list_tasks_for_epic(epic.id).await[0].id;
@@ -188,9 +213,15 @@ async fn upsert_feed_tasks_preserves_wrap_up_mode_on_conflict() {
     .unwrap();
 
     // Feed re-polls the same alert, still declaring "pr".
-    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &initial,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
@@ -245,11 +276,12 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
             wrap_up_mode: None,
         },
     ];
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &items,
         &vec!["/repo".to_string(); 3],
         &main_branches(3),
+        false,
     )
     .await
     .unwrap();
@@ -301,9 +333,15 @@ async fn upsert_feed_tasks_leaves_pr_url_null_when_item_url_empty() {
         signals: vec![],
         wrap_up_mode: None,
     }];
-    db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &items,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
@@ -328,9 +366,15 @@ async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
         signals: vec![],
         wrap_up_mode: None,
     }];
-    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &initial,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
     let task_id = db.list_tasks_for_epic(epic.id).await[0].id;
     assert!(
         db.get_task(task_id).await.unwrap().url.is_none(),
@@ -342,11 +386,12 @@ async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
         url: "https://github.com/org/repo/pull/42".to_string(),
         ..initial[0].clone()
     }];
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &refreshed,
         &["/repo".to_string()],
         &main_branches(1),
+        false,
     )
     .await
     .unwrap();
@@ -381,9 +426,15 @@ async fn upsert_feed_tasks_preserves_pr_url_on_conflict() {
         signals: vec![],
         wrap_up_mode: None,
     }];
-    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &initial,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
     let task_id = db.list_tasks_for_epic(epic.id).await[0].id;
     let manual = crate::models::TaskUrl::new(
         "https://github.com/org/repo/pull/999",
@@ -394,9 +445,15 @@ async fn upsert_feed_tasks_preserves_pr_url_on_conflict() {
         .unwrap();
 
     // Re-run upsert; url on the existing task must not be overwritten.
-    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &initial,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     let task = db.get_task(task_id).await.unwrap();
     assert_eq!(
@@ -426,7 +483,7 @@ async fn feed_upsert_infers_url_type_and_backfills_atomically() {
     };
     // First emit: a PR URL is inferred as pr.
     let items = vec![feed_item("ext-1", "https://github.com/o/r/pull/5")];
-    db.upsert_feed_tasks(epic.id, &items, &["/r".into()], &main_branches(1))
+    db.ingest_feed(epic.id, &items, &["/r".into()], &main_branches(1), false)
         .await
         .unwrap();
     let t = db.list_tasks_for_epic(epic.id).await.remove(0);
@@ -437,7 +494,7 @@ async fn feed_upsert_infers_url_type_and_backfills_atomically() {
 
     // Conflict re-emit with a DIFFERENT url must NOT clobber the existing pair.
     let items = vec![feed_item("ext-1", "https://github.com/o/r/pull/999")];
-    db.upsert_feed_tasks(epic.id, &items, &["/r".into()], &main_branches(1))
+    db.ingest_feed(epic.id, &items, &["/r".into()], &main_branches(1), false)
         .await
         .unwrap();
     let t = db.list_tasks_for_epic(epic.id).await.remove(0);
@@ -469,11 +526,12 @@ async fn upsert_feed_tasks_explicit_url_type_wins_over_inference() {
             ..make_feed_item("ext-inferred", "inferred")
         },
     ];
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &items,
         &["/repo".to_string(), "/repo".to_string()],
         &main_branches(2),
+        false,
     )
     .await
     .unwrap();
@@ -505,9 +563,15 @@ async fn upsert_feed_tasks_backfill_uses_declared_url_type() {
 
     // First emission: no URL — task created with url = NULL.
     let initial = vec![make_feed_item("ext-1", "alert")];
-    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &initial,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
     let task_id = db.list_tasks_for_epic(epic.id).await[0].id;
     assert!(
         db.get_task(task_id).await.unwrap().url.is_none(),
@@ -521,11 +585,12 @@ async fn upsert_feed_tasks_backfill_uses_declared_url_type() {
         url_type: Some(UrlType::SecurityAlert),
         ..initial[0].clone()
     }];
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &refreshed,
         &["/repo".to_string()],
         &main_branches(1),
+        false,
     )
     .await
     .unwrap();
@@ -547,9 +612,15 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
 
     // First feed run: creates a task.
     let initial = vec![make_feed_item("ext-1", "first")];
-    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &initial,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
     let task_id = db.list_tasks_for_epic(epic.id).await[0].id;
 
     // The dispatched agent records a learning referencing the task as its source.
@@ -570,9 +641,15 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
     // be purged. Without ON DELETE SET NULL on learnings.source_task_id, this
     // fails with a FK violation.
     let next = vec![make_feed_item("ext-2", "second")];
-    db.upsert_feed_tasks(epic.id, &next, &["/repo".to_string()], &main_branches(1))
-        .await
-        .expect("stale feed task with associated learning should be purgeable");
+    db.ingest_feed(
+        epic.id,
+        &next,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .expect("stale feed task with associated learning should be purgeable");
 
     let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
@@ -585,12 +662,24 @@ async fn upsert_feed_tasks_can_purge_stale_task() {
     let epic = db.create_epic("E", "", None).await.unwrap();
 
     let initial = vec![make_feed_item("ext-1", "first")];
-    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &initial,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     let next = vec![make_feed_item("ext-2", "second")];
-    db.upsert_feed_tasks(epic.id, &next, &["/repo".to_string()], &main_branches(1))
-        .await
-        .expect("stale feed task should be purgeable");
+    db.ingest_feed(
+        epic.id,
+        &next,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .expect("stale feed task should be purgeable");
 }

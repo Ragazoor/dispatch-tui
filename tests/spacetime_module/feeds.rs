@@ -19,10 +19,16 @@ fn feed_upsert_updates_feed_fields_and_preserves_user_and_store_fields() {
     );
 
     let first = instance.call(
-        "upsert_feed_tasks",
+        "ingest_feed",
         &[
             "1",
-            &serde_json::json!([feed_item_json("ext-1", "original title", "backlog")]).to_string(),
+            &ingest_items(&serde_json::json!([feed_item_json(
+                "ext-1",
+                "original title",
+                "backlog"
+            )]))
+            .to_string(),
+            "false",
             "test-creator",
         ],
     );
@@ -43,10 +49,16 @@ fn feed_upsert_updates_feed_fields_and_preserves_user_and_store_fields() {
     // Re-poll with a changed title and an item status the SQLite version's
     // `ON CONFLICT` would also ignore.
     let second = instance.call(
-        "upsert_feed_tasks",
+        "ingest_feed",
         &[
             "1",
-            &serde_json::json!([feed_item_json("ext-1", "updated title", "done")]).to_string(),
+            &ingest_items(&serde_json::json!([feed_item_json(
+                "ext-1",
+                "updated title",
+                "done"
+            )]))
+            .to_string(),
+            "false",
             "test-creator",
         ],
     );
@@ -89,10 +101,11 @@ fn feed_upsert_keeps_an_existing_url_over_a_re_polled_one() {
     first_item["url"] = serde_json::json!("https://example.com/1");
     first_item["url_type"] = serde_json::json!("pr");
     instance.call(
-        "upsert_feed_tasks",
+        "ingest_feed",
         &[
             "1",
-            &serde_json::json!([first_item]).to_string(),
+            &ingest_items(&serde_json::json!([first_item])).to_string(),
+            "false",
             "test-creator",
         ],
     );
@@ -101,10 +114,11 @@ fn feed_upsert_keeps_an_existing_url_over_a_re_polled_one() {
     second_item["url"] = serde_json::json!("https://example.com/2");
     second_item["url_type"] = serde_json::json!("issue");
     let second = instance.call(
-        "upsert_feed_tasks",
+        "ingest_feed",
         &[
             "1",
-            &serde_json::json!([second_item]).to_string(),
+            &ingest_items(&serde_json::json!([second_item])).to_string(),
+            "false",
             "test-creator",
         ],
     );
@@ -140,10 +154,11 @@ fn feed_upsert_stamps_completion_only_on_a_genuine_insert() {
         &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
     );
     let made = instance.call(
-        "upsert_feed_tasks",
+        "ingest_feed",
         &[
             "1",
-            &serde_json::json!([feed_item_json("ext-1", "t", "done")]).to_string(),
+            &ingest_items(&serde_json::json!([feed_item_json("ext-1", "t", "done")])).to_string(),
+            "false",
             "test-creator",
         ],
     );
@@ -174,10 +189,14 @@ fn feed_upsert_stamps_created_by_on_insert_only() {
     );
 
     let made = instance.call(
-        "upsert_feed_tasks",
+        "ingest_feed",
         &[
             "1",
-            &serde_json::json!([feed_item_json("ext-1", "t", "backlog")]).to_string(),
+            &ingest_items(&serde_json::json!([feed_item_json(
+                "ext-1", "t", "backlog"
+            )]))
+            .to_string(),
+            "false",
             "host-a",
         ],
     );
@@ -192,10 +211,14 @@ fn feed_upsert_stamps_created_by_on_insert_only() {
     );
 
     let repolled = instance.call(
-        "upsert_feed_tasks",
+        "ingest_feed",
         &[
             "1",
-            &serde_json::json!([feed_item_json("ext-1", "updated", "backlog")]).to_string(),
+            &ingest_items(&serde_json::json!([feed_item_json(
+                "ext-1", "updated", "backlog"
+            )]))
+            .to_string(),
+            "false",
             "host-b",
         ],
     );
@@ -434,14 +457,15 @@ fn feed_upsert_refuses_to_insert_a_retired_external_id() {
     assert!(seeded.status.success(), "{}", describe(&seeded));
 
     let upserted = instance.call(
-        "upsert_feed_tasks",
+        "ingest_feed",
         &[
             "1",
-            &serde_json::json!([
+            &ingest_items(&serde_json::json!([
                 feed_item_json("ext-retired", "back again", "backlog"),
                 feed_item_json("ext-new-1", "fresh", "backlog"),
-            ])
+            ]))
             .to_string(),
+            "false",
             "test-creator",
         ],
     );
@@ -451,7 +475,7 @@ fn feed_upsert_refuses_to_insert_a_retired_external_id() {
             &instance,
             "SELECT id FROM tasks WHERE external_id = 'ext-retired'"
         ),
-        "upsert_feed_tasks must not insert a retired id"
+        "ingest_feed must not insert a retired id"
     );
     assert_eq!(
         column(
@@ -459,7 +483,7 @@ fn feed_upsert_refuses_to_insert_a_retired_external_id() {
             "SELECT count(*) AS c FROM tasks WHERE external_id = 'ext-new-1'"
         ),
         "1",
-        "upsert_feed_tasks must still insert the batch's non-retired item"
+        "ingest_feed must still insert the batch's non-retired item"
     );
 }
 
@@ -487,10 +511,16 @@ fn feed_upsert_refreshes_a_surviving_task_whose_id_is_retired() {
     assert!(seeded.status.success(), "{}", describe(&seeded));
 
     let upserted = instance.call(
-        "upsert_feed_tasks",
+        "ingest_feed",
         &[
             "1",
-            &serde_json::json!([feed_item_json("ext-1", "refreshed title", "backlog")]).to_string(),
+            &ingest_items(&serde_json::json!([feed_item_json(
+                "ext-1",
+                "refreshed title",
+                "backlog"
+            )]))
+            .to_string(),
+            "false",
             "test-creator",
         ],
     );
@@ -573,10 +603,14 @@ fn deleting_a_sub_epic_retires_its_whole_subtrees_feed_tasks() {
 
     // And the retirement bites: the feed's next cycle does not re-insert.
     instance.call(
-        "upsert_feed_tasks",
+        "ingest_feed",
         &[
             "1",
-            &serde_json::json!([feed_item_json("ext-a", "a", "backlog")]).to_string(),
+            &ingest_items(&serde_json::json!([feed_item_json(
+                "ext-a", "a", "backlog"
+            )]))
+            .to_string(),
+            "false",
             "test-creator",
         ],
     );

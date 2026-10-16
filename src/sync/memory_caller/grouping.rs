@@ -37,8 +37,8 @@ impl MemoryReducerCaller {
         }
     }
 
-    /// Mirrors the module's `find_or_create_repo_group`, shared with
-    /// `apply_create_repo_group_sub_epic` as the module shares it.
+    /// Mirrors the module's `find_or_create_repo_group`, shared by manual
+    /// routing and feed ingestion as the module shares it.
     pub(super) fn find_or_create_repo_group(
         &self,
         tables: &mut Tables,

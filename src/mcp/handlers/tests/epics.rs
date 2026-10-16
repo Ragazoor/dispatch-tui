@@ -114,19 +114,17 @@ async fn get_epic_matches_list_epics_progress_for_grouped_epic() {
         .patch_epic(root.id, &store::EpicPatch::new().group_by_repo(true))
         .await
         .unwrap();
-    let sub = state
-        .db_write()
-        .create_repo_group_sub_epic(root.id, "alpha")
-        .await
-        .unwrap();
+    // A task for repo "alpha" under the grouped root, moved into its repo-group
+    // sub-epic by the regroup.
     state
         .db_write()
         .create_task(CreateTaskRequest {
-            epic_id: Some(sub),
+            epic_id: Some(root.id),
             ..CreateTaskRequest::fixture("t", "/x/alpha")
         })
         .await
         .unwrap();
+    state.db_write().regroup_epic(root.id).await.unwrap();
 
     let list_resp = call(
         &state,

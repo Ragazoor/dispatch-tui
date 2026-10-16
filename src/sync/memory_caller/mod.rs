@@ -332,10 +332,6 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_delete_epic(id)
     }
 
-    async fn recalculate_epic_status(&self, id: EpicId) -> Result<ReducerOutcome> {
-        self.apply_recalculate_epic_status(id)
-    }
-
     async fn regroup_epic(&self, root: EpicId) -> Result<ReducerOutcome> {
         self.apply_regroup_epic(root)
     }
@@ -527,15 +523,6 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_mark_pr_learnings_gate_shown(id, at)
     }
 
-    async fn upsert_feed_tasks(
-        &self,
-        epic_id: EpicId,
-        items: Vec<bindings::FeedTaskUpsertItem>,
-        created_by: String,
-    ) -> Result<ReducerOutcome> {
-        self.apply_upsert_feed_tasks(epic_id, items, created_by)
-    }
-
     async fn ingest_feed(
         &self,
         epic_id: EpicId,
@@ -544,34 +531,6 @@ impl ReducerCaller for MemoryReducerCaller {
         created_by: String,
     ) -> Result<ReducerOutcome> {
         self.apply_ingest_feed(epic_id, items, additive, created_by)
-    }
-
-    async fn create_repo_group_sub_epic(
-        &self,
-        parent_id: EpicId,
-        title: String,
-        created_by: String,
-    ) -> Result<EpicId> {
-        self.apply_create_repo_group_sub_epic(parent_id, title, created_by)
-    }
-
-    async fn create_managed_role_epic(
-        &self,
-        title: String,
-        parent_epic_id: Option<EpicId>,
-        role: String,
-        feed_command: String,
-        feed_interval_secs: i64,
-        created_by: String,
-    ) -> Result<EpicId> {
-        self.apply_create_managed_role_epic(
-            title,
-            parent_epic_id,
-            role,
-            feed_command,
-            feed_interval_secs,
-            created_by,
-        )
     }
 
     async fn ensure_managed_epics(

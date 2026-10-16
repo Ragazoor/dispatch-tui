@@ -140,7 +140,6 @@ async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
     db.patch_task(t1, &TaskPatch::new().status(TaskStatus::Running))
         .await
         .unwrap();
-    db.recalculate_epic_status(epic.id).await.unwrap();
     assert_eq!(
         db.get_epic(epic.id).await.unwrap().status,
         TaskStatus::Backlog,
@@ -151,7 +150,6 @@ async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
     db.patch_task(t1, &TaskPatch::new().status(TaskStatus::Review))
         .await
         .unwrap();
-    db.recalculate_epic_status(epic.id).await.unwrap();
     assert_eq!(
         db.get_epic(epic.id).await.unwrap().status,
         TaskStatus::Backlog,
@@ -162,7 +160,6 @@ async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
     db.patch_task(t1, &TaskPatch::new().status(TaskStatus::Done))
         .await
         .unwrap();
-    db.recalculate_epic_status(epic.id).await.unwrap();
     assert_eq!(
         db.get_epic(epic.id).await.unwrap().status,
         TaskStatus::Backlog,
@@ -173,7 +170,6 @@ async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
     db.patch_task(t2, &TaskPatch::new().status(TaskStatus::Done))
         .await
         .unwrap();
-    db.recalculate_epic_status(epic.id).await.unwrap();
     assert_eq!(
         db.get_epic(epic.id).await.unwrap().status,
         TaskStatus::Done,

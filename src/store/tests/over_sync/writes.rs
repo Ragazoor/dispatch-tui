@@ -52,7 +52,6 @@ enum Sent {
     PatchEpic(i64),
     DeleteEpic(i64),
     BatchDelete(Vec<i64>, Vec<i64>),
-    Recalculate(i64),
     Regroup(i64),
     Flatten(i64),
     SaveRepoPath(String, String),
@@ -70,12 +69,9 @@ enum Sent {
     RecordNotification(i64, String, String),
     RecordUserPromptSubmit(i64, String, String),
     MarkPrLearningsGateShown(i64, String),
-    UpsertFeedTasks(i64, usize, String),
     IngestFeed(i64, usize, bool, String),
     ClaimPollOwner(String, i64, String),
     OverridePollOwner(String, i64, String),
-    CreateRepoGroupSubEpic(i64, String, String),
-    CreateManagedRoleEpic(String, i64, String, String, i64, String),
     BatchPatchSubStatus(usize),
     RespawnPhoenixSuccessor(i64, Box<bindings::Task>),
     RegisterHost(String, String, String),
@@ -299,11 +295,6 @@ impl ReducerCaller for RecordingCaller {
         let task_ids: Vec<i64> = task_ids.into_iter().map(|id| id.0).collect();
         let epic_ids: Vec<i64> = epic_ids.into_iter().map(|id| id.0).collect();
         self.answer(Sent::BatchDelete(task_ids, epic_ids))
-    }
-
-    async fn recalculate_epic_status(&self, id: EpicId) -> anyhow::Result<ReducerOutcome> {
-        let id = id.0;
-        self.answer(Sent::Recalculate(id))
     }
 
     async fn regroup_epic(&self, root: EpicId) -> anyhow::Result<ReducerOutcome> {
@@ -551,20 +542,6 @@ impl ReducerCaller for RecordingCaller {
         self.answer(Sent::MarkPrLearningsGateShown(id, at))
     }
 
-    async fn upsert_feed_tasks(
-        &self,
-        epic_id: EpicId,
-        items: Vec<bindings::FeedTaskUpsertItem>,
-        created_by: String,
-    ) -> anyhow::Result<ReducerOutcome> {
-        let epic_id = epic_id.0;
-        let outcome = self.answer(Sent::UpsertFeedTasks(epic_id, items.len(), created_by))?;
-        if matches!(outcome, ReducerOutcome::Applied(_)) {
-            self.simulate_feed_removal();
-        }
-        Ok(outcome)
-    }
-
     async fn ingest_feed(
         &self,
         epic_id: EpicId,
@@ -584,17 +561,6 @@ impl ReducerCaller for RecordingCaller {
         Ok(outcome)
     }
 
-    async fn create_repo_group_sub_epic(
-        &self,
-        parent_id: EpicId,
-        title: String,
-        created_by: String,
-    ) -> anyhow::Result<EpicId> {
-        let parent_id = parent_id.0;
-        self.record(Sent::CreateRepoGroupSubEpic(parent_id, title, created_by))?;
-        Ok(EpicId(8))
-    }
-
     async fn ensure_managed_epics(
         &self,
         reviews_command: String,
@@ -608,27 +574,6 @@ impl ReducerCaller for RecordingCaller {
             cve_command,
             cve_interval_secs,
         ))
-    }
-
-    async fn create_managed_role_epic(
-        &self,
-        title: String,
-        parent_epic_id: Option<EpicId>,
-        role: String,
-        feed_command: String,
-        feed_interval_secs: i64,
-        created_by: String,
-    ) -> anyhow::Result<EpicId> {
-        let parent_epic_id = encode::epic_ref(parent_epic_id);
-        self.record(Sent::CreateManagedRoleEpic(
-            title,
-            parent_epic_id,
-            role,
-            feed_command,
-            feed_interval_secs,
-            created_by,
-        ))?;
-        Ok(EpicId(9))
     }
 
     async fn create_work_package(
@@ -1956,24 +1901,25 @@ async fn a_confirmed_removal_is_reported_but_a_raced_survivor_is_not() {
     let caller = RecordingCaller::removing_on_feed_write(rows.clone(), &[1]);
     let (writer, sent) = writer_over(rows, caller);
 
-    let removed = writer
-        .upsert_feed_tasks(
+    let outcome = writer
+        .ingest_feed(
             EpicId(1),
             &[a_feed_item("kept", "kept")],
             &["/repo".to_string()],
             &["main".to_string()],
+            false,
         )
         .await
         .unwrap();
 
     assert_eq!(
-        removed.iter().map(|r| r.id).collect::<Vec<_>>(),
+        outcome.removed.iter().map(|r| r.id).collect::<Vec<_>>(),
         vec![TaskId(1)],
         "only the CONFIRMED-absent candidate is reported, never a survivor"
     );
     assert_eq!(
         sent.sent(),
-        vec![Sent::UpsertFeedTasks(1, 1, "user-me".to_string())],
+        vec![Sent::IngestFeed(1, 1, false, "user-me".to_string())],
         "the wire item count is what was sent, not the candidate count"
     );
 }
@@ -2005,89 +1951,26 @@ async fn ingest_feed_is_one_call_and_reports_only_confirmed_removals() {
 /// a shared store before — best-effort, unlike every `create_*` call that
 /// uses `require_identity`. `created_by` is honestly empty rather than the
 /// whole sync being refused. `core.allium: Task.created_by`;
-/// `feeds.allium: UpsertFeedTasks`.
+/// `feeds.allium: IngestFeedEmission`.
 #[tokio::test]
 async fn feed_upsert_with_no_settled_identity_still_applies_with_an_empty_created_by() {
     let (writer, sent) = writer_with_no_identity(RecordingCaller::default());
 
     writer
-        .upsert_feed_tasks(
+        .ingest_feed(
             EpicId(1),
             &[a_feed_item("kept", "kept")],
             &["/repo".to_string()],
             &["main".to_string()],
+            false,
         )
         .await
         .unwrap();
 
     assert_eq!(
         sent.sent(),
-        vec![Sent::UpsertFeedTasks(1, 1, String::new())],
+        vec![Sent::IngestFeed(1, 1, false, String::new())],
         "no settled identity stamps an empty created_by, not a refusal"
-    );
-}
-
-/// Find-or-create sends this connection's own settled identity as
-/// `created_by` — required for `own_creations` to ever find the row again
-/// (decision 3 of this task's plan doc) — and returns the id the store
-/// answered, whichever arm it took.
-#[tokio::test]
-async fn create_repo_group_sub_epic_stamps_the_identity_and_returns_the_id() {
-    let (writer, caller) = writer_with(RecordingCaller::default());
-
-    let id = writer
-        .create_repo_group_sub_epic(EpicId(1), "my-repo")
-        .await
-        .unwrap();
-
-    assert_eq!(id, EpicId(8));
-    assert_eq!(
-        caller.sent(),
-        vec![Sent::CreateRepoGroupSubEpic(
-            1,
-            "my-repo".to_string(),
-            "user-me".to_string()
-        )]
-    );
-}
-
-#[tokio::test]
-async fn a_board_with_no_identity_cannot_create_a_repo_group_sub_epic() {
-    let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
-
-    assert!(writer
-        .create_repo_group_sub_epic(EpicId(1), "my-repo")
-        .await
-        .is_err());
-    assert!(caller.sent().is_empty());
-}
-
-#[tokio::test]
-async fn create_managed_role_epic_stamps_the_identity_and_returns_the_id() {
-    let (writer, caller) = writer_with(RecordingCaller::default());
-
-    let id = writer
-        .create_managed_role_epic(
-            "Reviews",
-            Some(EpicId(1)),
-            crate::models::FeedRole::None,
-            Some("gh pr list"),
-            Some(300),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(id, EpicId(9));
-    assert_eq!(
-        caller.sent(),
-        vec![Sent::CreateManagedRoleEpic(
-            "Reviews".to_string(),
-            1,
-            crate::models::FeedRole::None.as_str().to_string(),
-            "gh pr list".to_string(),
-            300,
-            "user-me".to_string()
-        )]
     );
 }
 
@@ -2400,7 +2283,6 @@ async fn every_store_mutation_reaches_the_transport() {
     db.patch_epic(EpicId(1), &crate::models::EpicPatch::new().title("e"))
         .await
         .unwrap();
-    db.recalculate_epic_status(EpicId(1)).await.unwrap();
     db.regroup_epic(EpicId(1)).await.unwrap();
     db.flatten_epic(EpicId(1)).await.unwrap();
     db.delete_epic(EpicId(1)).await.unwrap();
@@ -2442,27 +2324,9 @@ async fn every_store_mutation_reaches_the_transport() {
     db.record_user_prompt_submit(TaskId(1), now).await.unwrap();
     db.mark_pr_learnings_gate_shown(TaskId(1)).await.unwrap();
 
-    let items = vec![a_feed_item("ext-1", "item")];
-    let repo_paths = vec!["/repo".to_string()];
-    let base_branches = vec!["main".to_string()];
-    db.upsert_feed_tasks(EpicId(1), &items, &repo_paths, &base_branches)
-        .await
-        .unwrap();
     db.ingest_feed(EpicId(1), &[], &[], &[], false)
         .await
         .unwrap();
-    db.create_repo_group_sub_epic(EpicId(1), "repo")
-        .await
-        .unwrap();
-    db.create_managed_role_epic(
-        "Reviews",
-        Some(EpicId(1)),
-        crate::models::FeedRole::None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
     db.ensure_managed_epics(Some("reviews.sh"), None, None, None)
         .await
         .unwrap();
@@ -2565,7 +2429,6 @@ async fn every_store_mutation_reaches_the_transport() {
             "FailInterruptedSessionRequests",
             "CreateEpic",
             "PatchEpic",
-            "Recalculate",
             "Regroup",
             "Flatten",
             "DeleteEpic",
@@ -2588,10 +2451,7 @@ async fn every_store_mutation_reaches_the_transport() {
             "RecordNotification",
             "RecordUserPromptSubmit",
             "MarkPrLearningsGateShown",
-            "UpsertFeedTasks",
             "IngestFeed",
-            "CreateRepoGroupSubEpic",
-            "CreateManagedRoleEpic",
             "EnsureManagedEpics",
             "BatchPatchSubStatus",
             "RespawnPhoenixSuccessor",

@@ -322,7 +322,7 @@ Unmocked calls panic rather than silently returning a default, and a new seam me
 
 Reading through `state.db` directly is fine — list, get, and other queries have no side effects beyond the read. **Mutations are different: task and epic writes go through `TaskServiceApi` / `EpicServiceApi`, not `state.db` directly.** The service layer owns the invariants that a bare DB write would skip — most importantly epic-status recalculation (see below).
 
-**This boundary is now compiler-enforced.** `McpState.db` and `TuiRuntime.database` are typed `Arc<dyn store::TaskReadStore>`, not `Arc<dyn store::TaskStore>`. `TaskReadStore` exposes the task/epic **read** surface (`TaskRead` + `EpicRead`) plus the settings/learning/usage stores, but **not** `TaskCrud`/`EpicCrud`. So `state.db.patch_task(...)` (or `create_epic`, `set_task_epic_id`, `recalculate_epic_status`, …) from a handler is a **compile error**. A `compile_fail` doctest on `TaskReadStore` (`src/store/mod.rs`) locks this in. <!-- allow-phantom-symbol: compile_fail is a rustdoc attribute, not our symbol -->
+**This boundary is now compiler-enforced.** `McpState.db` and `TuiRuntime.database` are typed `Arc<dyn store::TaskReadStore>`, not `Arc<dyn store::TaskStore>`. `TaskReadStore` exposes the task/epic **read** surface (`TaskRead` + `EpicRead`) plus the settings/learning/usage stores, but **not** `TaskCrud`/`EpicCrud`. So `state.db.patch_task(...)` (or `create_epic`, `set_task_epic_id`, …) from a handler is a **compile error**. A `compile_fail` doctest on `TaskReadStore` (`src/store/mod.rs`) locks this in. <!-- allow-phantom-symbol: compile_fail is a rustdoc attribute, not our symbol -->
 
 **The name is scoped on purpose.** `TaskReadStore` seals **task/epic** writes only, not every write — settings/learning/usage writes stay reachable through it (see the caveat below). The old name `ReadStore` implied read-only-everything, which was a misnomer; the `Task` prefix makes the guarantee honest.
 
@@ -336,7 +336,7 @@ Settings/learning/usage writes remain reachable through `TaskReadStore` on purpo
 
 **Sanctioned direct-mutation consumers** (they manage their own invariants and hold a write-capable handle, exactly like the feed subsystem):
 
-- `FeedRunner` (`src/feed/`) — holds its own `Arc<dyn TaskStore>` and calls `recalculate_epic_status` itself.
+- `FeedRunner` (`src/feed/`) — holds its own `Arc<dyn TaskStore>` and relies on the module to recalculate.
 - `TuiRuntime::feed_db` — a write handle reserved for the manual `exec_trigger_epic_feed` path (the TUI's version of a feed tick).
 - Startup / CLI paths (`runtime::bootstrap`, `src/setup/`, `src/main.rs`) — use a concrete `&Store` / `Arc<Store>` before the read-only narrowing applies.
 
@@ -344,7 +344,7 @@ Settings/learning/usage writes remain reachable through `TaskReadStore` on purpo
 
 Tests seed fixtures via the `#[cfg(test)]` write accessors `McpState::db_write()` / `TuiRuntime::db_write()`, which are invisible to production handler code.
 
-## `recalculate_epic_status` invariant
+## Epic recalculation invariant
 
 Any code that changes a task's **status** or its **epic linkage** (`epic_id`) must recalculate the affected epic(s). An epic's status is derived from its subtasks' statuses, so a task change that doesn't trigger a recalc leaves the parent epic showing a stale rollup.
 

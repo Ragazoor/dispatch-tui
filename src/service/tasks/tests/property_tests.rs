@@ -7,7 +7,7 @@ use proptest::prelude::*;
 /// The task statuses an epic rolls up over.
 const RECALC_STATUSES: &[TaskStatus] = TaskStatus::ALL;
 
-/// Epic baseline statuses — `recalculate_epic_status` reads the epic's
+/// Epic baseline statuses — the rollup reads the epic's
 /// current status as the fallback/regression pivot.
 const EPIC_BASELINES: &[TaskStatus] = TaskStatus::ALL;
 
@@ -110,7 +110,7 @@ proptest! {
 
     /// Epic sub-status recalculation over random subtask-status combinations:
     /// for any baseline epic status and any multiset of subtask statuses,
-    /// `recalculate_epic_status` must produce the rolled-up status given by
+    /// the epic rollup must produce the rolled-up status given by
     /// `expected_rollup` (all-Done → Done; Done-epic regression → Backlog;
     /// otherwise baseline preserved).
     #[test]
@@ -144,7 +144,6 @@ proptest! {
             db.patch_epic(epic.id, &EpicPatch::new().status(baseline))
                 .await
                 .unwrap();
-            db.recalculate_epic_status(epic.id).await.unwrap();
             db.get_epic(epic.id).await.unwrap().status
         });
 

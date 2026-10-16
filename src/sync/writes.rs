@@ -139,8 +139,6 @@ pub trait ReducerCaller: Send + Sync {
     async fn create_epic(&self, row: bindings::Epic) -> Result<EpicId>;
     async fn patch_epic(&self, id: EpicId, patch: bindings::EpicPatch) -> Result<ReducerOutcome>;
     async fn delete_epic(&self, id: EpicId) -> Result<ReducerOutcome>;
-    async fn recalculate_epic_status(&self, id: EpicId) -> Result<ReducerOutcome>;
-
     /// `epics.allium: RegroupEpic`, in one transaction: every direct task of
     /// `root` moves into its per-repo sub-epic. Idempotent.
     async fn regroup_epic(&self, root: EpicId) -> Result<ReducerOutcome>;
@@ -201,7 +199,7 @@ pub trait ReducerCaller: Send + Sync {
     //
     // Nothing here is scoped by host — a learning's visibility is governed
     // entirely by its own scope/scope_ref (`docs/specs/learnings.allium`). `create_learning` needs the same content-matched id
-    // read-back `create_task` uses: unlike `create_repo_group_sub_epic`, a
+    // read-back `create_task` uses: unlike a find-or-create, a
     // learning has no natural unique key — duplicates are a soft constraint
     // per `docs/specs/learnings.allium`, not something this call can match on
     // instead.
@@ -295,20 +293,6 @@ pub trait ReducerCaller: Send + Sync {
         at: DateTime<Utc>,
     ) -> Result<ReducerOutcome>;
 
-    // -- Feed ingestion (Phase 6c) --------------------------------------------
-    //
-    // No id read-back and no reported removals here — that decoding lives in
-    // the `Store`, which predicts candidates from its own already-
-    // subscribed view before the call and confirms them absent afterward
-    // (see this task's plan doc, decision 1). These are plain
-    // applied-or-refused calls.
-    async fn upsert_feed_tasks(
-        &self,
-        epic_id: EpicId,
-        items: Vec<bindings::FeedTaskUpsertItem>,
-        created_by: String,
-    ) -> Result<ReducerOutcome>;
-
     /// Apply one parsed feed emission to a feed epic (store-split M3,
     /// `feeds.allium: IngestFeedEmission`). The module picks the strategy,
     /// routes, groups, upserts, deletes the stale and recalculates; which rows
@@ -321,27 +305,6 @@ pub trait ReducerCaller: Send + Sync {
         created_by: String,
     ) -> Result<ReducerOutcome>;
 
-    /// Find-or-create; answers with the epic's id either way. Matched by the
-    /// domain key `(parent_id, title)` — exact, not a content/timestamp tie-
-    /// break, because that pair is genuinely unique in the domain (decision 2
-    /// of this task's plan doc).
-    async fn create_repo_group_sub_epic(
-        &self,
-        parent_id: EpicId,
-        title: String,
-        created_by: String,
-    ) -> Result<EpicId>;
-    /// Find-or-create keyed on `(parent_epic_id, role)`, on the same terms as
-    /// [`Self::create_repo_group_sub_epic`].
-    async fn create_managed_role_epic(
-        &self,
-        title: String,
-        parent_epic_id: Option<EpicId>,
-        role: String,
-        feed_command: String,
-        feed_interval_secs: i64,
-        created_by: String,
-    ) -> Result<EpicId>;
     /// `ProvisionManagedEpics` (M7, X4): the whole managed feed-epic tree in
     /// one transaction. `""` is a disabled feed (nothing created, nothing
     /// removed) and `0` no interval.

@@ -8,7 +8,7 @@ async fn upsert_feed_tasks_uses_resolved_repo_path() {
     let repo_paths = vec!["/resolved/local/repo".to_string()];
     let branches = main_branches(items.len());
 
-    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+    db.ingest_feed(epic.id, &items, &repo_paths, &branches, false)
         .await
         .unwrap();
 
@@ -24,7 +24,7 @@ async fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
     let repo_paths = vec!["".to_string()];
     let branches = main_branches(items.len());
 
-    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+    db.ingest_feed(epic.id, &items, &repo_paths, &branches, false)
         .await
         .unwrap();
 
@@ -39,11 +39,12 @@ async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
     let items = vec![make_feed_item("ext-1", "Original")];
 
     // First upsert: resolved path stored
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &items,
         &["/first/path".to_string()],
         &main_branches(1),
+        false,
     )
     .await
     .unwrap();
@@ -64,11 +65,12 @@ async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
         signals: vec![],
         wrap_up_mode: None,
     }];
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &updated,
         &["/second/path".to_string()],
         &main_branches(1),
+        false,
     )
     .await
     .unwrap();
@@ -92,7 +94,7 @@ async fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
     let repo_paths = vec!["/matched/local/path".to_string(), "".to_string()];
     let branches = main_branches(items.len());
 
-    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+    db.ingest_feed(epic.id, &items, &repo_paths, &branches, false)
         .await
         .unwrap();
 
@@ -129,7 +131,7 @@ async fn upsert_feed_tasks_stores_per_task_base_branch() {
         "main".to_string(),
     ];
 
-    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &base_branches)
+    db.ingest_feed(epic.id, &items, &repo_paths, &base_branches, false)
         .await
         .unwrap();
 
@@ -160,17 +162,18 @@ async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
         .unwrap();
 
     // Feed fetch with one item
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &[make_feed_item("ext-1", "Feed Task")],
         &["/repo".to_string()],
         &main_branches(1),
+        false,
     )
     .await
     .unwrap();
 
     // Feed fetch returns nothing — only manual task should survive
-    db.upsert_feed_tasks(epic.id, &[], &[], &[]).await.unwrap();
+    db.ingest_feed(epic.id, &[], &[], &[], false).await.unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(
@@ -199,9 +202,15 @@ async fn upsert_feed_tasks_persists_tag() {
         wrap_up_mode: None,
     }];
 
-    db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &items,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
@@ -225,9 +234,15 @@ async fn upsert_feed_tasks_updates_tag_on_conflict() {
         signals: vec![],
         wrap_up_mode: None,
     }];
-    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &initial,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     // Re-emit the same item with a different tag — feed is the source of truth.
     let updated = vec![crate::models::FeedItem {
@@ -243,9 +258,15 @@ async fn upsert_feed_tasks_updates_tag_on_conflict() {
         signals: vec![],
         wrap_up_mode: None,
     }];
-    db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &updated,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);

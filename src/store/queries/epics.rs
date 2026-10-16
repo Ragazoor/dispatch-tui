@@ -64,45 +64,6 @@ impl super::super::EpicCrud for Store {
             .map_err(|e| anyhow::anyhow!("the created epic could not be read back: {e}"))
     }
 
-    async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId> {
-        // `sync.allium: CreatesRequireASettledIdentity`. Required even on the
-        // FOUND arm, not only the created one: the module cannot tell this
-        // caller which arm it took, so both need the same identity to stamp
-        // — see `create_repo_group_sub_epic`'s doc comment in the module for
-        // why `created_by` is what makes either answer readable back at all.
-        let identity = self
-            .require_identity("there is no name to stamp on a repo-group epic; it was not created")
-            .await?;
-        self.caller
-            .create_repo_group_sub_epic(parent_id, title.to_string(), identity)
-            .await
-    }
-
-    async fn create_managed_role_epic(
-        &self,
-        title: &str,
-        parent_epic_id: Option<EpicId>,
-        role: crate::models::FeedRole,
-        feed_command: Option<&str>,
-        feed_interval_secs: Option<i64>,
-    ) -> Result<EpicId> {
-        let identity = self
-            .require_identity(
-                "there is no name to stamp on a managed-role epic; it was not created",
-            )
-            .await?;
-        self.caller
-            .create_managed_role_epic(
-                title.to_string(),
-                parent_epic_id,
-                role.as_str().to_string(),
-                feed_command.unwrap_or_default().to_string(),
-                feed_interval_secs.unwrap_or(0),
-                identity,
-            )
-            .await
-    }
-
     async fn ensure_managed_epics(
         &self,
         reviews_command: Option<&str>,
@@ -151,16 +112,6 @@ impl super::super::EpicCrud for Store {
         };
         self.caller
             .set_task_epic(task_id, epic_id, owner)
-            .await?
-            .applied()
-    }
-
-    /// On a store this is the ONLY place it can run: the derivation needs
-    /// every child, and no board subscribes to all of them
-    /// (`epics.allium: EpicStatusRecalculation`).
-    async fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()> {
-        self.caller
-            .recalculate_epic_status(epic_id)
             .await?
             .applied()
     }

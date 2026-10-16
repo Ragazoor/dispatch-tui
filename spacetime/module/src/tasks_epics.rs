@@ -515,7 +515,7 @@ pub fn respawn_phoenix_successor(
 /// No recalculation: `sub_status` is derived board state, not a
 /// status/epic-linkage change (`TaskServiceApi::batch_patch_sub_status`'s doc
 /// comment states this explicitly), so it carries no
-/// `recalculate_epic_status` obligation on either backing.
+/// epic recalculation obligation on either backing.
 #[spacetimedb::reducer]
 pub fn batch_patch_sub_status(
     ctx: &ReducerContext,
@@ -830,16 +830,9 @@ pub(crate) fn delete_epic_subtree(ctx: &ReducerContext, id: i64, depth: usize) {
 /// `epics.allium: EpicStatusRecalculation` and
 /// `sync.allium: TheStoreEnforcesTheSharedRules`.
 ///
-/// Called by the mutations above rather than exposed as the only entry point,
-/// so the recalculation is part of the same transaction as the change that
-/// provoked it. An epic whose status lagged its children by one round trip
+/// Called by the mutations above, so the recalculation is part of the same
+/// transaction as the change that provoked it. An epic whose status lagged its children by one round trip
 /// would be a board showing a column that is briefly wrong, on every machine.
-#[spacetimedb::reducer]
-pub fn recalculate_epic_status(ctx: &ReducerContext, epic_id: i64) -> Result<(), String> {
-    recalculate_epic_chain(ctx, epic_id);
-    Ok(())
-}
-
 pub(crate) fn recalculate_epic_chain(ctx: &ReducerContext, epic_id: i64) {
     // Zero is the absent epic, not epic zero. A task on somebody's user board
     // reaches here with it and there is nothing to recalculate.

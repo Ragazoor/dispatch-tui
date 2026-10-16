@@ -194,3 +194,35 @@ async fn wrap_up_refusal_names_at_most_ten_paths() {
     );
     assert!(msg.contains("and 3 more"), "got: {msg}");
 }
+
+#[tokio::test]
+async fn wrap_up_rebase_with_no_branch_is_refused_before_the_verify_run() {
+    // `store-split.allium` W2: the branch check comes before the commit check
+    // and the verify run, so a rebase that cannot work costs no verify run.
+    let runner = checked_runner("", Some(MockProcessRunner::ok_with_stdout(b"")), vec![]);
+    let (state, db) = make_state_with_runner(runner.clone()).await;
+    let task_id = create_wrappable_task(&db).await;
+    db.save_repo_path("/repo").await.unwrap();
+    db.set_verify_command("/repo", Some("cargo test"))
+        .await
+        .unwrap();
+    // A worktree path with no final component names no branch.
+    db.patch_task(task_id, &store::TaskPatch::new().worktree(Some("/")))
+        .await
+        .unwrap();
+
+    let resp = wrap_up_call(&state, task_id, "rebase").await;
+
+    assert!(is_error(&resp), "expected a refusal");
+    let msg = error_message(&resp);
+    assert!(
+        msg.contains("Cannot derive branch"),
+        "must say no branch can be derived; got: {msg}"
+    );
+    assert_no_token(&state, task_id).await;
+    assert!(
+        runner.recorded_calls().is_empty(),
+        "no command may run before the branch check; got: {:?}",
+        runner.flattened_calls()
+    );
+}

@@ -136,7 +136,7 @@ curl -s -X POST http://127.0.0.1:3142/mcp \
 
 ## Feed Epics
 
-Feed epics are epics whose tasks are populated externally by a shell command rather than by a human. When an epic has a `feed_command` set, the runtime runs it periodically (`feed_interval_secs`) and calls `upsert_feed_tasks()` to sync the results. Each feed task has an `external_id` that is used as the upsert key — tasks are created on first appearance and updated (but not deleted) on subsequent runs.
+Feed epics are epics whose tasks are populated externally by a shell command rather than by a human. When an epic has a `feed_command` set, the runtime runs it periodically (`feed_interval_secs`) and calls the `ingest_feed` reducer to sync the results. Each feed task has an `external_id` that is used as the upsert key — tasks are created on first appearance and updated (but not deleted) on subsequent runs.
 
 Feed tasks appear in their own column on the kanban board (`SubStatus::Feed`). The schema is part of the store module. See `docs/specs/feeds.allium` for the full specification.
 

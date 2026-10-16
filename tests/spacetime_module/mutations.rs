@@ -40,8 +40,6 @@ fn an_epics_status_is_derived_from_every_hosts_children() {
     );
     assert!(seeded.status.success(), "{}", describe(&seeded));
 
-    let recalculated = instance.call("recalculate_epic_status", &["1"]);
-    assert!(recalculated.status.success(), "{}", describe(&recalculated));
     assert_eq!(
         column(&instance, "SELECT status FROM epics WHERE id = 1"),
         "backlog",

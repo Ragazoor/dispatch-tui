@@ -1020,10 +1020,14 @@ fn a_feed_ingest_that_deletes_a_stale_task_fails_its_open_session_request() {
     let seeded = instance.call("seed_epics", &[&serde_json::json!([epic]).to_string()]);
     assert!(seeded.status.success(), "{}", describe(&seeded));
     let upserted = instance.call(
-        "upsert_feed_tasks",
+        "ingest_feed",
         &[
             "1",
-            &serde_json::json!([feed_item_json("ext-1", "one", "running")]).to_string(),
+            &ingest_items(&serde_json::json!([feed_item_json(
+                "ext-1", "one", "running"
+            )]))
+            .to_string(),
+            "false",
             "test-creator",
         ],
     );

@@ -29,10 +29,10 @@ use std::sync::Arc;
 
 use crate::models::{
     DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, Epic, EpicId, FeedItem,
-    FeedRole, Learning, LearningId, LearningRetrieval, LearningVerdict, NotificationWrite,
-    PollScopeId, RetrievalSource, SessionRequest, SessionRequestId, StopOutcome, SubStatus,
-    SubagentDrain, Task, TaskId, TmuxWindow, UserPromptOutcome, WorkPackage, WorkPackageId,
-    WorkPackageItem, WorkPackageLink, WrapUpMode,
+    Learning, LearningId, LearningRetrieval, LearningVerdict, NotificationWrite, PollScopeId,
+    RetrievalSource, SessionRequest, SessionRequestId, StopOutcome, SubStatus, SubagentDrain, Task,
+    TaskId, TmuxWindow, UserPromptOutcome, WorkPackage, WorkPackageId, WorkPackageItem,
+    WorkPackageLink, WrapUpMode,
 };
 
 // ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ use crate::models::{
 
 /// A task row that a feed stale-delete removed and which still owns on-disk or
 /// in-tmux state, so the caller has something to tear down. Returned by
-/// [`TaskCrud::upsert_feed_tasks`] and [`TaskCrud::ingest_feed`].
+/// [`TaskCrud::ingest_feed`].
 ///
 /// Rows with neither a worktree nor a tmux window are deleted just the same but
 /// are not reported — there is nothing to clean up for a plain card.
@@ -243,29 +243,6 @@ pub trait TaskCrud: TaskRead {
         id: TaskId,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<UserPromptOutcome>;
-    /// Upsert tasks from a feed. Inserts new tasks; on conflict (epic_id, external_id)
-    /// updates title and description only — status and other user-managed fields are preserved.
-    ///
-    /// `repo_paths` is a parallel slice: `repo_paths[i]` is the resolved local path for
-    /// `items[i]`. Pass `""` when the path could not be resolved — dispatch will be blocked
-    /// until the user sets it via the task editor.
-    ///
-    /// `base_branches` is a parallel slice: `base_branches[i]` is the base branch the
-    /// inserted task should use for its worktree. The caller is expected to resolve the
-    /// repo's default branch (typically via [`crate::git::detect_default_branch`]),
-    /// falling back to `"main"` when no path is known.
-    ///
-    /// Returns the rows its stale-delete pass removed that still own a worktree
-    /// or tmux window — see [`RemovedFeedTask`]. The delete itself is unchanged:
-    /// every stale feed task in the epic is removed whether or not it is
-    /// reported.
-    async fn upsert_feed_tasks(
-        &self,
-        epic_id: EpicId,
-        items: &[FeedItem],
-        repo_paths: &[String],
-        base_branches: &[String],
-    ) -> Result<Vec<RemovedFeedTask>>;
     /// Post one parsed feed emission to the store (store-split M3,
     /// `feeds.allium: IngestFeedEmission`). The three slices are co-indexed.
     /// The module alone decides what the items do: the strategy from the epic's
@@ -544,23 +521,6 @@ pub trait EpicCrud: EpicRead {
         description: &str,
         parent_epic_id: Option<EpicId>,
     ) -> Result<Epic>;
-    /// Find-or-create the `RepoGroup` sub-epic of `parent_id` titled `title`.
-    /// Race-safe via the partial unique index; reuses an existing match
-    /// rather than creating a duplicate.
-    async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId>;
-    /// Create a managed-feed-role epic in a single insert, `feed_role` set from
-    /// the start. Race-safe via the partial unique index on
-    /// `(parent_epic_id, feed_role)`: a lost race re-selects and returns the
-    /// winner's id rather than leaving an orphaned, untagged epic behind — see
-    /// [`Self::create_repo_group_sub_epic`] for the same pattern.
-    async fn create_managed_role_epic(
-        &self,
-        title: &str,
-        parent_epic_id: Option<EpicId>,
-        role: FeedRole,
-        feed_command: Option<&str>,
-        feed_interval_secs: Option<i64>,
-    ) -> Result<EpicId>;
     /// `epics.allium: ProvisionManagedEpics`, decided in the module in one
     /// transaction (store-split M7, X4). `None` is a disabled feed: nothing is
     /// created or removed for it. An interval of `None` is no interval.
@@ -574,9 +534,6 @@ pub trait EpicCrud: EpicRead {
     async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
     async fn delete_epic(&self, id: EpicId) -> Result<()>;
     async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()>;
-    /// Recalculate an epic's status from its active children (tasks + sub-epics).
-    /// Propagates upward to the parent epic if one exists.
-    async fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()>;
     /// `epics.allium: RegroupEpic`, decided and applied by the store in one
     /// transaction: every direct task of `root` moves into its per-repo
     /// sub-epic.

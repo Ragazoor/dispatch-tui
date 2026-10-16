@@ -480,8 +480,8 @@ impl TaskService {
         // its parent, so there is no existence gap to close there.
         //
         // Same `requires` as CreateTaskViaMcp: `if epic_id != null:
-        // core/Epic.exists(epic_id)`. Left to the SQLite foreign key it
-        // surfaced as ServiceError::Internal with a bare "Failed to insert
+        // core/Epic.exists(epic_id)`. Left to the store's own insert it
+        // would surface as ServiceError::Internal with a bare "Failed to insert
         // task", which reads as a dispatch fault rather than the bad argument
         // it is.
         if let Some(epic_id) = params.epic_id {
@@ -560,7 +560,7 @@ impl TaskService {
     /// Batch-update `sub_status` for many tasks in a single transaction.
     ///
     /// `sub_status` is derived board state (activity classification), not a
-    /// status/epic-linkage change, so it carries no `recalculate_epic_status`
+    /// status/epic-linkage change, so it carries no epic recalculation
     /// obligation — but it still routes through the service so consumers
     /// (the tick) never touch the DB write surface directly.
     pub async fn batch_patch_sub_status(

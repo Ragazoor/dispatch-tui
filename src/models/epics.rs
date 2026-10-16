@@ -11,8 +11,8 @@ define_id_newtype!(EpicId, epic_id_tests);
 // Epic
 // ---------------------------------------------------------------------------
 
-// `PartialEq` so the two decoders — SQLite's and the shared store's — can be
-// compared against each other field for field. See `sync::tests::decode`.
+// `PartialEq` so a decoded row can be compared against an expected one field
+// for field. See `sync::tests::decode`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Epic {
     pub id: EpicId,

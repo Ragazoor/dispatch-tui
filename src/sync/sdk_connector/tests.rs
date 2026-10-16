@@ -344,10 +344,6 @@ mod unconnected {
                 .unwrap_err(),
         );
         refused(
-            "recalculate_epic_status",
-            caller.recalculate_epic_status(EpicId(1)).await.unwrap_err(),
-        );
-        refused(
             "delete_repo_path",
             caller.delete_repo_path("/repo".into()).await.unwrap_err(),
         );
@@ -395,27 +391,6 @@ mod unconnected {
             "try_record_stop",
             caller
                 .try_record_stop(TaskId(1), Utc::now())
-                .await
-                .unwrap_err(),
-        );
-        refused(
-            "create_repo_group_sub_epic",
-            caller
-                .create_repo_group_sub_epic(EpicId(1), "t".into(), "alice".into())
-                .await
-                .unwrap_err(),
-        );
-        refused(
-            "create_managed_role_epic",
-            caller
-                .create_managed_role_epic(
-                    "t".into(),
-                    None,
-                    "role".into(),
-                    "cmd".into(),
-                    60,
-                    "alice".into(),
-                )
                 .await
                 .unwrap_err(),
         );

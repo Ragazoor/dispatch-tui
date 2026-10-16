@@ -4,9 +4,9 @@
 -- Scope: The TARGET split of responsibility between the dispatch TUI process
 --        and the SpacetimeDB module (spacetime/module/), and the order the
 --        code is migrated in. It says which side owns which kind of
---        behaviour. Migration steps land one at a time: M2, M3, M4, M5 and M6 (below)
---        have landed; M7, the last step, is landing (task #53260), and
---        completes the migration when it lands. Until a step lands, the rules in
+--        behaviour. Migration steps land one at a time: M2, M3, M4, M5, M6 and M7 (below)
+--        have landed; M7 (task #53260) was the last step and completes the
+--        migration. Until a step lands, the rules in
 --        the specs listed under Excludes stay authoritative for what the
 --        system does today, and nothing here overrides them. Each step runs
 --        its own spec -> tests -> code cycle on the spec that owns the
@@ -278,9 +278,11 @@
 --             identity has settled, and always as that identity
 --             (sync.allium: RegisterHostOnConnect). LIMIT, by decision: one person's machines
 --             share an owner, so one of their machines can still name
---             another of theirs; a teammate cannot. The older reducers that
---             take a host argument (the backlog claim, poll ownership,
---             settings) do not check it yet; that gap is tracked separately.
+--             another of theirs; a teammate cannot. The reducers that take a
+--             host argument outside the request tables (poll ownership and
+--             the host-scoped settings) make the same check, so a client acts
+--             for a host only if it owns it; see "Host-scoped writes" below.
+--             The backlog claim reducers no longer exist.
 --           - D12, failures while no board ran. A request its host's board
 --             was not running to see fail — the backstop fired while the
 --             board was closed — is already failed in the starting board's
@@ -494,7 +496,7 @@
 --             in the module crate and in the board in the same commit.
 --       M7  Leftover service logic is removed; MCP handlers call reducers
 --           directly.
---           LANDING (task #53260): update_tasks' status="done" path closes in
+--           LANDED (task #53260): update_tasks' status="done" path closes in
 --           the module, through a new close_task reducer (RequestCloseTask
 --           below), and a third session request kind, close, carries the
 --           host's teardown. patch_task applies the two transition rules the
@@ -576,10 +578,17 @@
 --             shape, the "not retrieved" check); work-package validation and
 --             the atomicity of its multi-call update; the atomicity of epic
 --             create's two writes; the feed-interval floor and the delete
---             pre-checks in the module; and the plain upsert_feed_tasks
---             reducer, which only test seeding still uses. The feed
+--             pre-checks in the module. The feed
 --             code-citation lint and the embeddings stay on the board: they
 --             need the operator's machine (S1).
+--             Four reducers nothing in the board called once M7 landed were
+--             deleted after it (task #77830), not deferred: upsert_feed_tasks
+--             (ingest_feed is the one feed entry), and, allow-phantom-symbol: deleted in #77830,
+--             create_repo_group_sub_epic
+--             and create_managed_role_epic (ingest_feed and
+--             ensure_managed_epics do their work inside the module) and
+--             recalculate_epic_status (every mutation rolls the epic up in its
+--             own transaction, X3).
 --           - X6, the gate. This moves rules into the module, so the rules
 --             version goes from 5 to 6, hand-bumped in the module crate and
 --             in the board in the same commit as the code (sync.allium:
@@ -959,6 +968,8 @@ rule HostReportsDispatched {
     requires: request.state = provisioning
     -- D11.
     requires: reporter.owner != null and reporter.owner = caller()
+    -- A dispatched report names the worktree it made; an empty one is refused.
+    requires: worktree != ""
     -- D4: a dispatched report is too late once the row's deadline has
     -- passed, by the module's clock. The host has stopped by then
     -- (dispatch.allium: ProvisioningStopsAtTheDeadline); a report that raced
@@ -1837,5 +1848,3 @@ open question "Seeing other machines' requests (deferred past M7, and so beyond 
 open question "M7, close_task on a task with an open DISPATCH request (not decided in M7): RequestCloseTask fails the task's open session request but not an open dispatch request. A task closed while its dispatch is still provisioning can then be reported dispatched, and HostReportsDispatched writes a worktree, window and host onto a Done task, with an agent running in it. The board-side close before M7 had the same gap. Should close_task also fail the task's open dispatch request ('task closed'), as a task delete does (D8), or refuse the close while one is open?"
 
 open question "M7, update_tasks' done path when close_task gets NO ANSWER (found by weed, not decided): the board treats a no-answer like a refusal and the tool replies that the task could NOT be moved to done and is still in its previous status. The close may in fact have landed. A retry is a done -> done re-close (no restamp, no respawn), but for a task with a pr-typed url it writes a second close row and runs gh pr close again. Should the tool settle a no-answer by re-reading the task, as exit_session settles its own no-answer by looking for the row (mcp-task-tools.allium: ExitSessionViaMcp), or is the 'try again' reply acceptable?"
-
-open question "M7 leftovers not named in X5 (found by weed, not decided): besides the plain upsert_feed_tasks reducer, the create_managed_role_epic and create_repo_group_sub_epic reducers and the store's recalculate_epic_status call are now reached only from tests (ProvisionManagedEpics runs through ensure_managed_epics, repo-group routing runs inside the module, and X3 removed every board-side recalculation). Should M7 delete them, or should X5 list them as deferred alongside upsert_feed_tasks?"

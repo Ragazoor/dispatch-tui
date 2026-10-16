@@ -22,13 +22,12 @@ use crate::spacetime::bindings::{
     apply_learning_verdicts as _, archive_stale_learnings as _, batch_delete as _,
     batch_patch_sub_status as _, claim_dispatch_request as _, claim_poll_owner as _,
     claim_session_request as _, clear_setting as _, close_task as _, create_epic as _,
-    create_learning as _, create_managed_role_epic as _, create_repo_group_sub_epic as _,
-    create_task as _, create_work_package as _, delete_epic as _, delete_learning as _,
-    delete_repo_path as _, delete_task as _, delete_work_package as _, ensure_managed_epics as _,
-    fail_interrupted_dispatch_requests as _, fail_interrupted_session_requests as _,
-    flatten_epic as _, ingest_feed as _, link_work_package_item as _,
-    mark_pr_learnings_gate_shown as _, override_poll_owner as _, patch_epic as _,
-    patch_learning as _, patch_task as _, patch_work_package as _, recalculate_epic_status as _,
+    create_learning as _, create_task as _, create_work_package as _, delete_epic as _,
+    delete_learning as _, delete_repo_path as _, delete_task as _, delete_work_package as _,
+    ensure_managed_epics as _, fail_interrupted_dispatch_requests as _,
+    fail_interrupted_session_requests as _, flatten_epic as _, ingest_feed as _,
+    link_work_package_item as _, mark_pr_learnings_gate_shown as _, override_poll_owner as _,
+    patch_epic as _, patch_learning as _, patch_task as _, patch_work_package as _,
     record_base_branch as _, record_learning_retrieval as _, record_notification as _,
     record_pre_tool_use as _, record_usage_event as _, record_user_prompt_submit as _,
     register_host as _, regroup_epic as _, report_dispatch_failed as _,
@@ -38,10 +37,9 @@ use crate::spacetime::bindings::{
     respawn_phoenix_successor as _, save_repo_path as _, save_setting as _, set_task_epic as _,
     set_verify_command as _, subagent_clear as _, subagent_clear_and_void_pending_stop as _,
     subagent_start as _, subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
-    unlink_work_package_item as _, unsubscribe_from_epic as _, upsert_feed_tasks as _,
-    DbConnection, DispatchRequestsTableAccess as _, EpicsTableAccess as _,
-    LearningsTableAccess as _, SessionRequestsTableAccess as _, TasksTableAccess as _,
-    WorkPackagesTableAccess as _,
+    unlink_work_package_item as _, unsubscribe_from_epic as _, DbConnection,
+    DispatchRequestsTableAccess as _, EpicsTableAccess as _, LearningsTableAccess as _,
+    SessionRequestsTableAccess as _, TasksTableAccess as _, WorkPackagesTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -244,14 +242,6 @@ impl ReducerCaller for SdkReducerCaller {
                 task_ids.into_iter().map(|id| id.0).collect(),
                 epic_ids.into_iter().map(|id| id.0).collect()
             )
-        )
-    }
-
-    async fn recalculate_epic_status(&self, id: EpicId) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(
-            self,
-            "the epic recalculation",
-            recalculate_epic_status_then(id.0)
         )
     }
 
@@ -644,19 +634,6 @@ impl ReducerCaller for SdkReducerCaller {
     // decoded in the `Store`, from its own pre-read, not here — see this
     // task's plan doc, decision 1.
 
-    async fn upsert_feed_tasks(
-        &self,
-        epic_id: EpicId,
-        items: Vec<bindings::FeedTaskUpsertItem>,
-        created_by: String,
-    ) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(
-            self,
-            "the feed upsert",
-            upsert_feed_tasks_then(epic_id.0, items, created_by)
-        )
-    }
-
     async fn ingest_feed(
         &self,
         epic_id: EpicId,
@@ -669,64 +646,6 @@ impl ReducerCaller for SdkReducerCaller {
             "the feed ingest",
             ingest_feed_then(epic_id.0, items, additive, created_by)
         )
-    }
-
-    /// Find-or-create: matched by the domain key `(parent_id, title)` rather
-    /// than content/timestamp — exact, not a tie-break, because that pair is
-    /// genuinely unique (the module's own `create_repo_group_sub_epic` doc
-    /// comment). Covers both arms: a FOUND epic answers with its existing id
-    /// the same way a freshly created one answers with its new one.
-    async fn create_repo_group_sub_epic(
-        &self,
-        parent_id: EpicId,
-        title: String,
-        created_by: String,
-    ) -> anyhow::Result<EpicId> {
-        let parent_id = parent_id.0;
-        let wanted_title = title.clone();
-        created_call!(
-            self,
-            "the repo-group epic",
-            "repo-group epic",
-            create_repo_group_sub_epic_then(parent_id, title, created_by),
-            epics,
-            |e| e.parent_epic_id == parent_id
-                && e.title == wanted_title
-                && e.origin == "repo-group"
-        )
-        .map(EpicId)
-    }
-
-    /// The managed-role twin, matched on `(parent_epic_id, feed_role)` — the
-    /// module's own uniqueness key for this find-or-create, same reasoning as
-    /// [`Self::create_repo_group_sub_epic`].
-    async fn create_managed_role_epic(
-        &self,
-        title: String,
-        parent_epic_id: Option<EpicId>,
-        role: String,
-        feed_command: String,
-        feed_interval_secs: i64,
-        created_by: String,
-    ) -> anyhow::Result<EpicId> {
-        let parent_epic_id = encode::epic_ref(parent_epic_id);
-        let wanted_role = role.clone();
-        created_call!(
-            self,
-            "the managed-role epic",
-            "managed-role epic",
-            create_managed_role_epic_then(
-                title,
-                parent_epic_id,
-                role,
-                feed_command,
-                feed_interval_secs,
-                created_by
-            ),
-            epics,
-            |e| e.parent_epic_id == parent_epic_id && e.feed_role == wanted_role
-        )
-        .map(EpicId)
     }
 
     async fn ensure_managed_epics(

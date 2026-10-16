@@ -713,10 +713,7 @@ async fn reparent_repo_group_sub_epic_is_rejected() {
     let svc = EpicService::new(db.clone());
     let root = db.create_epic("root", "", None).await.unwrap();
     let other = db.create_epic("other", "", None).await.unwrap();
-    let sub = db
-        .create_repo_group_sub_epic(root.id, "alpha")
-        .await
-        .unwrap();
+    let sub = repo_group_sub_epic(&db, root.id, "alpha").await;
 
     let err = svc
         .update_epic(UpdateEpicParams {
@@ -738,10 +735,7 @@ async fn detach_repo_group_sub_epic_is_rejected() {
     let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let root = db.create_epic("root", "", None).await.unwrap();
-    let sub = db
-        .create_repo_group_sub_epic(root.id, "alpha")
-        .await
-        .unwrap();
+    let sub = repo_group_sub_epic(&db, root.id, "alpha").await;
 
     let err = svc
         .update_epic(UpdateEpicParams {
@@ -781,23 +775,15 @@ async fn detach_manual_sub_epic_is_allowed() {
 
 #[tokio::test]
 async fn progress_aggregates_descendants_for_grouped_epic() {
-    use crate::store::{EpicCrud as _, TaskCrud as _};
+    use crate::store::EpicCrud as _;
     let db = Arc::new(Store::open_in_memory().unwrap());
     let svc = EpicService::new(db.clone());
     let root = db.create_epic("root", "", None).await.unwrap();
     db.patch_epic(root.id, &crate::store::EpicPatch::new().group_by_repo(true))
         .await
         .unwrap();
-    let sub = db
-        .create_repo_group_sub_epic(root.id, "alpha")
-        .await
-        .unwrap();
-    db.create_task(crate::store::CreateTaskRequest {
-        epic_id: Some(sub),
-        ..crate::store::CreateTaskRequest::fixture("t", "/x/alpha")
-    })
-    .await
-    .unwrap();
+    // The helper's seed task lands in the sub-epic: one descendant task.
+    repo_group_sub_epic(&db, root.id, "alpha").await;
 
     let rows = svc
         .list_epics_with_progress_under(None, false)
@@ -805,4 +791,26 @@ async fn progress_aggregates_descendants_for_grouped_epic() {
         .unwrap();
     let (_, _done, total) = rows.iter().find(|(e, _, _)| e.id == root.id).unwrap();
     assert_eq!(*total, 1, "grouped root aggregates descendant task counts");
+}
+
+/// A `repo-group` sub-epic of `root` titled `title`, made the way the module
+/// makes one: a task for that repo under a `group_by_repo` root, then a regroup.
+async fn repo_group_sub_epic(db: &Store, root: EpicId, title: &str) -> EpicId {
+    use crate::store::{EpicCrud as _, EpicPatch, TaskCrud as _};
+    db.patch_epic(root, &EpicPatch::new().group_by_repo(true))
+        .await
+        .unwrap();
+    db.create_task(crate::store::CreateTaskRequest {
+        epic_id: Some(root),
+        ..crate::store::CreateTaskRequest::fixture("seed", &format!("/x/{title}"))
+    })
+    .await
+    .unwrap();
+    db.regroup_epic(root).await.unwrap();
+    db.list_sub_epics(root)
+        .await
+        .into_iter()
+        .find(|e| e.title == title)
+        .unwrap()
+        .id
 }

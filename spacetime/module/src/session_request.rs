@@ -22,7 +22,7 @@ use super::*;
 
 // -- Tables -------------------------------------------------------------------
 
-/// One wrap_up or exit_session request for one task
+/// One wrap_up, exit_session or close request for one task
 /// (`store-split.allium: SessionRequest`), open while `requested` or `running`,
 /// kept as history once `done` or `failed`. A done wrap_up row's id IS the exit
 /// token (W3).
@@ -37,7 +37,7 @@ pub struct SessionRequest {
     #[primary_key]
     #[auto_inc]
     pub id: i64,
-    /// Indexed: `RequestWrapUp` and `RequestExitSession` ask "does this task
+    /// Indexed: `RequestWrapUp`, `RequestExitSession` and `RequestCloseTask` ask "does this task
     /// hold an open request?", the token checks read the task's rows, and every
     /// task delete fails the task's open one.
     #[index(btree)]
@@ -45,7 +45,8 @@ pub struct SessionRequest {
     /// `wrap_up`, `exit_session` or `close`.
     pub kind: String,
     /// `rebase`, `done` or `pr`: on a wrap_up row the one asked for, on an
-    /// exit_session row the one its token was issued for.
+    /// exit_session row the one its token was issued for, and always `done` on a
+    /// close row.
     pub action: String,
     /// The machine holding the task's worktree and window, whose board does the
     /// host work. Indexed: a board subscribes to its own host's rows, and a
@@ -64,10 +65,10 @@ pub struct SessionRequest {
     /// On an exit_session row with action pr: the PR url the close recorded.
     pub pr_url: String,
     /// On an exit_session row: the wrap_up row whose id was the token, which
-    /// this row consumed. `0` on a wrap_up row.
+    /// this row consumed. `0` on a wrap_up or close row.
     pub wrap_up_request: i64,
-    /// On an exit_session row: the window the close cleared from the task,
-    /// which the host tears down.
+    /// On an exit_session or close row: the window the close cleared from the
+    /// task, which the host tears down.
     pub tmux_window: String,
     /// On an exit_session row: the subtask the epic chain requested in the same
     /// transaction, or `0` when the chain stopped.

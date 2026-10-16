@@ -506,7 +506,7 @@ async fn wrap_up_rebase_does_not_kill_window() {
 async fn exit_session_marks_task_done_with_no_epic() {
     // No-epic branch: the closing call must mark the task Done even when
     // there is no epic to recalculate. Pins the `is_some()` guard around
-    // recalculate_epic_status.
+    // the epic rollup.
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
     let token = seed_exit_token(&state, task_id, WrapUpAction::Done).await;
@@ -571,11 +571,6 @@ async fn exit_session_recalculates_epic_status() {
     state
         .db_write()
         .set_task_epic_id(task_id, Some(epic.id))
-        .await
-        .unwrap();
-    state
-        .db_write()
-        .recalculate_epic_status(epic.id)
         .await
         .unwrap();
     let epic_before = state.db.get_epic(epic.id).await.unwrap();
@@ -710,7 +705,6 @@ async fn wrap_up_then_exit_session_end_to_end() {
     )
     .await
     .unwrap();
-    db.recalculate_epic_status(epic.id).await.unwrap();
     let epic_before = db.get_epic(epic.id).await.unwrap();
     assert_ne!(epic_before.status, TaskStatus::Done);
 

@@ -48,7 +48,7 @@ impl TuiRuntime {
     /// `feeds.allium: OverrideFeedOwner`, fired after `ConfirmOverrideFeedOwner`
     /// accepts. Not an epic field mutation, so this goes straight through
     /// `database` (`PollOwnershipStore`) rather than `epic_svc` — there is no
-    /// `recalculate_epic_status` obligation to own.
+    /// epic recalculation obligation to own.
     pub(super) async fn exec_override_feed_owner(&self, app: &mut App, id: models::EpicId) {
         match self
             .database

@@ -72,8 +72,8 @@ async fn tick_background_task_upserts_tasks() {
 #[tokio::test]
 async fn tick_done_epic_moves_to_backlog_when_new_feed_tasks_added() {
     // Regression test: a done epic should regress to backlog when the feed
-    // adds new non-done tasks, because recalculate_epic_status must be
-    // called after upsert_feed_tasks.
+    // adds new non-done tasks, because the module recalculates the epic
+    // chain when it ingests.
     let db = Arc::new(Store::open_in_memory().unwrap());
     let epic = db.create_epic("Done Epic", "", None).await.unwrap();
 
@@ -177,7 +177,7 @@ async fn tick_degraded_empty_emission_does_not_delete_existing_tasks() {
     let epic = db.create_epic("Degraded Epic", "", None).await.unwrap();
 
     // Seed one feed task, as a previous healthy poll would have.
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &[crate::models::FeedItem {
             external_id: "pr-1".to_string(),
@@ -194,6 +194,7 @@ async fn tick_degraded_empty_emission_does_not_delete_existing_tasks() {
         }],
         &["".to_string()],
         &["main".to_string()],
+        false,
     )
     .await
     .unwrap();
@@ -237,7 +238,7 @@ async fn tick_removed_task_tears_down_its_worktree() {
 
     // Seed one feed task, as a previous healthy poll would have, and give it
     // the on-disk state a dispatched agent would own.
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &[crate::models::FeedItem {
             external_id: "pr-1".to_string(),
@@ -254,6 +255,7 @@ async fn tick_removed_task_tears_down_its_worktree() {
         }],
         &["/repo/a".to_string()],
         &["main".to_string()],
+        false,
     )
     .await
     .unwrap();
@@ -335,11 +337,12 @@ async fn tick_partially_degraded_emission_does_not_delete_or_tear_down() {
             wrap_up_mode: None,
         })
         .collect();
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &seeded,
         &vec!["/repo/a".to_string(); 2],
         &vec!["main".to_string(); 2],
+        false,
     )
     .await
     .unwrap();

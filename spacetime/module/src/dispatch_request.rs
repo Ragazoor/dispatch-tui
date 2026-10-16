@@ -34,8 +34,9 @@ pub struct DispatchRequest {
     /// and every task delete fails the task's open one.
     #[index(btree)]
     pub task_id: i64,
-    /// [`DISPATCH_REQUEST_KIND`] for now; M5 adds wrap-up and exit-session
-    /// requests as further values rather than further columns (D1).
+    /// [`DISPATCH_REQUEST_KIND`] for every row in this table. Wrap-up,
+    /// exit-session and close requests are rows of `session_request`, not further
+    /// values here (D1).
     pub kind: String,
     /// The machine that provisions this request: always the one that asked
     /// (D2). Indexed: a board subscribes to its own host's rows, and a

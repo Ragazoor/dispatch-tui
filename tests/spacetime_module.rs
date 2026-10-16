@@ -413,6 +413,18 @@ fn running_task(instance: &Instance, id: i64) {
 
 /// A feed item, already resolved the way the client resolves one before
 /// sending — see `FeedTaskUpsertItem`'s doc comment in the module.
+/// Wrap plain feed items as `ingest_feed` takes them: no signals.
+fn ingest_items(items: &serde_json::Value) -> serde_json::Value {
+    serde_json::Value::Array(
+        items
+            .as_array()
+            .expect("feed items are an array")
+            .iter()
+            .map(|item| serde_json::json!({ "item": item, "signals": [] }))
+            .collect(),
+    )
+}
+
 fn feed_item_json(external_id: &str, title: &str, status: &str) -> serde_json::Value {
     serde_json::json!({
         "external_id": external_id,

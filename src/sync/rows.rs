@@ -18,9 +18,8 @@
 //!
 //! # Ordering is part of the contract
 //!
-//! Every accessor returns rows in the order the retired SQLite store's
-//! corresponding `ORDER BY` returned them, because "renders identically" is a claim about a `Vec`, not
-//! about a set. The orderings are stated at each accessor and are the reason
+//! Every accessor returns rows in a stated order (each accessor says which),
+//! because "renders identically" is a claim about a `Vec`, not about a set. The orderings are stated at each accessor and are the reason
 //! this type keeps `BTreeMap`s rather than hash maps: the tiebreak is then the
 //! id, deterministically, without a second sort.
 //!

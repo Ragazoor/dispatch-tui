@@ -218,7 +218,7 @@ pub struct TaskWatcher {
 ///
 /// At most one row per (feed_epic_id, external_id)
 /// (`core/RetiredFeedItem: UniqueRetiredFeedItemPerFeed`) — enforced the same
-/// way [`create_repo_group_sub_epic`] documents: reducers run to completion
+/// way every find-or-create here is: reducers run to completion
 /// one at a time, so a check-then-insert here has no race window and needs no
 /// declared unique index.
 #[spacetimedb::table(accessor = retired_feed_items, public)]
@@ -468,7 +468,7 @@ pub struct Host {
 /// fills an ABSENT row; `override_*_owner` unconditionally reassigns an
 /// EXISTING one — see both below. Both are find-or-create by
 /// `(scope, scope_id)`, race-free by construction the same way
-/// `create_repo_group_sub_epic` is: reducers run one at a time, so the lookup
+/// every find-or-create here is: reducers run one at a time, so the lookup
 /// each does IS the whole safety argument.
 ///
 /// New in this migration, so it starts at the end of the column order like

@@ -414,7 +414,7 @@ mod feed_epic_trigger {
         epic_id: crate::models::EpicId,
         title: &str,
     ) {
-        db.upsert_feed_tasks(
+        db.ingest_feed(
             epic_id,
             &[crate::models::FeedItem {
                 external_id: "pr-1".to_string(),
@@ -436,6 +436,7 @@ mod feed_epic_trigger {
             }],
             &["/repo/a".to_string()],
             &["main".to_string()],
+            false,
         )
         .await
         .unwrap();
@@ -546,7 +547,7 @@ mod feed_epic_trigger {
         let epic = db.create_epic("Degraded Feed", "", None).await.unwrap();
 
         // Seed one feed task, as a previous healthy refresh would have.
-        db.upsert_feed_tasks(
+        db.ingest_feed(
             epic.id,
             &[crate::models::FeedItem {
                 external_id: "pr-1".to_string(),
@@ -563,6 +564,7 @@ mod feed_epic_trigger {
             }],
             &["".to_string()],
             &["main".to_string()],
+            false,
         )
         .await
         .unwrap();
@@ -626,11 +628,12 @@ mod feed_epic_trigger {
                 wrap_up_mode: None,
             })
             .collect();
-        db.upsert_feed_tasks(
+        db.ingest_feed(
             epic.id,
             &seeded,
             &vec!["/repo/a".to_string(); 2],
             &vec!["main".to_string(); 2],
+            false,
         )
         .await
         .unwrap();

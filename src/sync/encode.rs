@@ -349,7 +349,7 @@ pub fn create_work_package_row(
 // Feed ingestion (Phase 6c)
 // ---------------------------------------------------------------------------
 
-/// Resolve one feed item into the fully-formed row `upsert_feed_tasks`'s
+/// Resolve one feed item into the fully-formed row the `ingest_feed`
 /// reducer applies. Resolves each item as follows — `sub_status` from
 /// `SubStatus::default_for(item.status)`, `url_type` inferred where the item
 /// does not name one explicitly — so the reducer itself never has to know a

@@ -11,7 +11,7 @@ async fn upsert_feed_tasks_creates_tasks() {
     let repo_paths = vec!["/repo".to_string(), "/repo".to_string()];
     let branches = main_branches(items.len());
 
-    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+    db.ingest_feed(epic.id, &items, &repo_paths, &branches, false)
         .await
         .unwrap();
 
@@ -41,7 +41,13 @@ async fn upsert_feed_tasks_rejects_mismatched_slice_lengths() {
 
     // repo_paths shorter than items
     let err = db
-        .upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(2))
+        .ingest_feed(
+            epic.id,
+            &items,
+            &["/repo".to_string()],
+            &main_branches(2),
+            false,
+        )
         .await
         .expect_err("mismatched repo_paths length must error");
     assert!(
@@ -51,11 +57,12 @@ async fn upsert_feed_tasks_rejects_mismatched_slice_lengths() {
 
     // base_branches shorter than items
     let err = db
-        .upsert_feed_tasks(
+        .ingest_feed(
             epic.id,
             &items,
             &["/repo".to_string(), "/repo".to_string()],
             &main_branches(1),
+            false,
         )
         .await
         .expect_err("mismatched base_branches length must error");
@@ -77,10 +84,10 @@ async fn upsert_feed_tasks_idempotent() {
     let repo_paths = vec!["/repo".to_string()];
     let branches = main_branches(items.len());
 
-    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+    db.ingest_feed(epic.id, &items, &repo_paths, &branches, false)
         .await
         .unwrap();
-    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+    db.ingest_feed(epic.id, &items, &repo_paths, &branches, false)
         .await
         .unwrap();
 

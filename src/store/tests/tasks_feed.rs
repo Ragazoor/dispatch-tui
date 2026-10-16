@@ -1,7 +1,7 @@
 use super::*;
 
 // ---------------------------------------------------------------------------
-// upsert_feed_tasks
+// ingest_feed
 // ---------------------------------------------------------------------------
 
 fn make_feed_item(external_id: &str, title: &str) -> crate::models::FeedItem {
@@ -47,11 +47,12 @@ async fn feed_epic(db: &Store, title: &str) -> Epic {
 
 /// Upsert `items` into `epic` with placeholder repo paths and base branches.
 async fn upsert(db: &Store, epic: EpicId, items: &[crate::models::FeedItem]) {
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic,
         items,
         &vec!["/repo".to_string(); items.len()],
         &main_branches(items.len()),
+        false,
     )
     .await
     .unwrap();

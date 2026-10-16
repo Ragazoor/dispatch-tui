@@ -15,13 +15,28 @@ async fn task_in_epic(db: &Store, epic_id: EpicId) -> crate::models::Task {
     db.get_task(id).await.unwrap()
 }
 
+/// The managed epic carrying `role`, provisioned the way the board does it.
+async fn managed_epic(db: &Store, role: FeedRole) -> EpicId {
+    db.ensure_managed_epics(
+        Some("./fetch-reviews.sh"),
+        None,
+        Some("./fetch-cve.sh"),
+        None,
+    )
+    .await
+    .unwrap();
+    db.list_epics()
+        .await
+        .into_iter()
+        .find(|e| e.feed_role == role)
+        .unwrap()
+        .id
+}
+
 #[tokio::test]
 async fn a_task_on_the_cve_root_is_under_the_cve_feed() {
     let db = Store::open_in_memory().unwrap();
-    let cve = db
-        .create_managed_role_epic("CVE", None, FeedRole::Cve, Some("./fetch-cve.sh"), None)
-        .await
-        .unwrap();
+    let cve = managed_epic(&db, FeedRole::Cve).await;
     let task = task_in_epic(&db, cve).await;
     let ctx = EpicContext::from_db(&task, &db).await.unwrap();
     assert!(ctx.under_cve_feed, "the CVE root itself must answer true");
@@ -30,15 +45,41 @@ async fn a_task_on_the_cve_root_is_under_the_cve_feed() {
 #[tokio::test]
 async fn a_task_on_a_repo_group_sub_epic_of_the_cve_root_is_under_the_cve_feed() {
     let db = Store::open_in_memory().unwrap();
-    let cve = db
-        .create_managed_role_epic("CVE", None, FeedRole::Cve, Some("./fetch-cve.sh"), None)
-        .await
-        .unwrap();
+    let cve = managed_epic(&db, FeedRole::Cve).await;
     // What `group_by_repo` produces: feed_role stays `none` on the child.
-    let group = db
-        .create_repo_group_sub_epic(cve, "dispatch")
+    db.patch_epic(cve, &crate::store::EpicPatch::new().group_by_repo(true))
         .await
         .unwrap();
+    // A feed epic is grouped by ingestion, not by `regroup_epic`.
+    let item = crate::models::FeedItem {
+        external_id: "CVE-1".to_string(),
+        title: "CVE-1".to_string(),
+        description: String::new(),
+        url: "https://github.com/kognic/dispatch/issues/1".to_string(),
+        url_type: None,
+        status: crate::models::TaskStatus::Backlog,
+        tag: TaskTag::Fix,
+        labels: Vec::new(),
+        sort_order: None,
+        signals: vec![],
+        wrap_up_mode: None,
+    };
+    db.ingest_feed(
+        cve,
+        &[item],
+        &["/x/dispatch".to_string()],
+        &["main".to_string()],
+        false,
+    )
+    .await
+    .unwrap();
+    let group = db
+        .list_sub_epics(cve)
+        .await
+        .into_iter()
+        .find(|e| e.title == "dispatch")
+        .unwrap()
+        .id;
     assert_eq!(
         db.get_epic(group).await.unwrap().feed_role,
         FeedRole::None,
@@ -76,20 +117,7 @@ async fn an_ordinary_epic_tree_is_not_under_the_cve_feed() {
 #[tokio::test]
 async fn the_reviews_tree_is_not_under_the_cve_feed() {
     let db = Store::open_in_memory().unwrap();
-    let parent = db
-        .create_managed_role_epic(
-            "PR Reviews",
-            None,
-            FeedRole::ReviewsParent,
-            Some("./fetch-reviews.sh"),
-            None,
-        )
-        .await
-        .unwrap();
-    let bots = db
-        .create_managed_role_epic("Bots", Some(parent), FeedRole::Bots, None, None)
-        .await
-        .unwrap();
+    let bots = managed_epic(&db, FeedRole::Bots).await;
     let task = task_in_epic(&db, bots).await;
     let ctx = EpicContext::from_db(&task, &db).await.unwrap();
     assert!(!ctx.under_cve_feed, "a reviews sub-epic is not CVE work");

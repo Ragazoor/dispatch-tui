@@ -6,9 +6,15 @@ async fn upsert_feed_tasks_preserves_status() {
     let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![make_feed_item("ext-1", "Original Title")];
 
-    db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &items,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     // Simulate user moving task to Running
     let tasks = db.list_tasks_for_epic(epic.id).await;
@@ -30,9 +36,15 @@ async fn upsert_feed_tasks_preserves_status() {
         signals: vec![],
         wrap_up_mode: None,
     }];
-    db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &updated,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await;
     assert_eq!(tasks.len(), 1);
@@ -60,9 +72,15 @@ async fn upsert_feed_tasks_updates_a_done_tasks_sort_order_and_keeps_its_complet
     let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![make_feed_item("ext-1", "Original Title")];
 
-    db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &items,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     let finished = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
     let tasks = db.list_tasks_for_epic(epic.id).await;
@@ -77,11 +95,12 @@ async fn upsert_feed_tasks_updates_a_done_tasks_sort_order_and_keeps_its_complet
 
     let mut updated_item = make_feed_item("ext-1", "Original Title");
     updated_item.sort_order = Some(1); // feed severity rank
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &[updated_item],
         &["/repo".to_string()],
         &main_branches(1),
+        false,
     )
     .await
     .unwrap();
@@ -112,9 +131,15 @@ async fn upsert_feed_tasks_stamps_a_task_inserted_straight_into_done() {
     item.status = TaskStatus::Done;
 
     let before = chrono::Utc::now() - chrono::Duration::seconds(1);
-    db.upsert_feed_tasks(epic.id, &[item], &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &[item],
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
     let after = chrono::Utc::now() + chrono::Duration::seconds(1);
 
     let tasks = db.list_tasks_for_epic(epic.id).await;
@@ -178,11 +203,12 @@ async fn upsert_feed_tasks_does_not_stamp_a_task_inserted_outside_done() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
 
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &[make_feed_item("ext-1", "Open")],
         &["/repo".to_string()],
         &main_branches(1),
+        false,
     )
     .await
     .unwrap();
@@ -197,17 +223,24 @@ async fn upsert_feed_tasks_still_updates_sort_order_when_task_is_not_done() {
     let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![make_feed_item("ext-1", "Original Title")];
 
-    db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    db.ingest_feed(
+        epic.id,
+        &items,
+        &["/repo".to_string()],
+        &main_branches(1),
+        false,
+    )
+    .await
+    .unwrap();
 
     let mut updated_item = make_feed_item("ext-1", "Original Title");
     updated_item.sort_order = Some(7);
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &[updated_item],
         &["/repo".to_string()],
         &main_branches(1),
+        false,
     )
     .await
     .unwrap();

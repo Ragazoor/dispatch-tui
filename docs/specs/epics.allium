@@ -1568,7 +1568,7 @@ rule ProvisionManagedEpics {
         -- transaction, the store runs the two one after the other, and the
         -- second finds every epic the first created and creates no second
         -- one (X4). Before M7 the guard was per row — the store's
-        -- create_managed_role_epic inserted feed_role in the same write as
+        -- create_managed_role_epic (since deleted) inserted feed_role in the same write as
         -- the row itself, and a second insert re-selected the winner — and
         -- the board's run as a whole was not one transaction. The one
         -- exception is a database that already held
@@ -1836,7 +1836,7 @@ rule ExitAllEpics {
 ------------------------------------------------------------
 
 -- EpicStatusRecalculation:
--- Epic status is persisted and recalculated via recalculate_epic_status.
+-- Epic status is persisted and recalculated by the module (recalculate_epic_chain).
     --
     -- WHERE IT IS DERIVED. Wherever the rows live, and by whatever holds all of
     -- them. On a single-machine install that is the local store and this has
@@ -1920,17 +1920,17 @@ rule ExitAllEpics {
     -- (tasks.allium, ReorderItem). Accepted: the epic genuinely finished at
     -- this moment, and a real completion outranks an earlier hand-placement.
     --
-    -- Trigger points: recalculate_epic_status must be called whenever the
+    -- Trigger points: the epic chain must be recalculated whenever the
     -- set of children or their statuses change. This includes:
     --   * task status transitions (patch_task, wrap_up, dispatch, etc.)
     --   * task creation or deletion within the epic
-    --   * feed task upserts (upsert_feed_tasks) — both flat and grouped;
+    --   * feed task upserts (ingest_feed) — both flat and grouped;
     --     for grouped feeds, each sub-epic's recalculation propagates upward
     --     to the parent automatically via the Propagation rule below.
     --   * sub-epic creation or status change
     --
     -- Propagation: after recalculating an epic's status, if the epic has a
-    -- parent, recalculate_epic_status is called on the parent as well.
+    -- parent, the parent is recalculated as well.
     -- This propagates status changes up the full ancestry chain, to a bounded
     -- depth. The bound is not a modelling choice — no real ancestry approaches
     -- it — it is what turns a corrupt parent chain into one refused

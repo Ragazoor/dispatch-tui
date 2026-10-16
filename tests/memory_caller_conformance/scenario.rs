@@ -86,25 +86,6 @@ fn memory_caller_matches_the_real_reducers() {
                 "epic {id}"
             );
         };
-        // For an epic whose `created_at` the STORE stamps
-        // (`create_repo_group_sub_epic`/`create_managed_role_epic`, unlike
-        // `create_epic`'s caller-supplied one) rather than the caller: drops
-        // `created_at` from the comparison, on the same reasoning
-        // `ReducerConformance.SameEndState` excludes it generally — each
-        // side's own clock, not something to compare bit-for-bit.
-        let compare_epic_ignoring_created_at = |id: i64| {
-            assert_eq!(
-                rows_real.epic(EpicId(id)).map(|e| EpicShape {
-                    created_at: chrono::DateTime::UNIX_EPOCH,
-                    ..epic_shape(&e)
-                }),
-                rows_mem.epic(EpicId(id)).map(|e| EpicShape {
-                    created_at: chrono::DateTime::UNIX_EPOCH,
-                    ..epic_shape(&e)
-                }),
-                "epic {id} (ignoring created_at)"
-            );
-        };
         // `owner` is a bindings/DB-only column `crate::models::Task` does not
         // carry (see `TaskShape`'s doc comment), so this reads it directly:
         // over SQL on the real side, off `MemoryReducerCaller`'s own table on
@@ -193,15 +174,6 @@ fn memory_caller_matches_the_real_reducers() {
         compare_epic(epic_id_real);
         compare_epic(epic2_id_real);
         compare_owner(task_id_real.0);
-
-        // -- recalculate_epic_status is idempotent when nothing changed -------------
-        real.recalculate_epic_status(EpicId(epic2_id_real))
-            .await
-            .unwrap();
-        mem.recalculate_epic_status(EpicId(epic2_id_mem))
-            .await
-            .unwrap();
-        compare_epic(epic2_id_real);
 
         // Move it back, so the delete section below only has one epic's worth
         // of tasks to clean up.
@@ -1011,37 +983,42 @@ fn memory_caller_matches_the_real_reducers() {
         let feed_epic_id_mem = mem.create_epic(feed_epic(epic_id_mem)).await.unwrap().0;
         assert_eq!(feed_epic_id_real, feed_epic_id_mem, "feed epic id");
 
-        let feed_item = |external_id: &str| bindings::FeedTaskUpsertItem {
-            external_id: external_id.into(),
-            title: "feed task".into(),
-            description: String::new(),
-            repo_path: "/repo".into(),
-            status: "backlog".into(),
-            sub_status: "none".into(),
-            base_branch: "main".into(),
-            tag: String::new(),
-            labels: "[]".into(),
-            sort_order: None,
-            url: String::new(),
-            url_type: String::new(),
-            wrap_up_mode: String::new(),
+        let feed_item = |external_id: &str| bindings::FeedIngestItem {
+            item: bindings::FeedTaskUpsertItem {
+                external_id: external_id.into(),
+                title: "feed task".into(),
+                description: String::new(),
+                repo_path: "/repo".into(),
+                status: "backlog".into(),
+                sub_status: "none".into(),
+                base_branch: "main".into(),
+                tag: String::new(),
+                labels: "[]".into(),
+                sort_order: None,
+                url: String::new(),
+                url_type: String::new(),
+                wrap_up_mode: String::new(),
+            },
+            signals: Vec::new(),
         };
         // `created_by` is this connection's own identity here too: a feed
         // task's home epic (`feed_epic_id_real`) is not a followed epic, so
         // only `own_creations` (`SELECT * FROM tasks WHERE created_by =
         // '{owner}'`) makes the inserted rows arrive on this subscription at
         // all.
-        real.upsert_feed_tasks(
+        real.ingest_feed(
             EpicId(feed_epic_id_real),
             vec![feed_item("feed-a"), feed_item("feed-b")],
+            false,
             accepted.identity.clone(),
         )
         .await
         .unwrap();
         wait_for!(rows_real.tasks_for_epic(EpicId(feed_epic_id_real)).len() == 2);
-        mem.upsert_feed_tasks(
+        mem.ingest_feed(
             EpicId(feed_epic_id_mem),
             vec![feed_item("feed-a"), feed_item("feed-b")],
+            false,
             "conformance".into(),
         )
         .await
@@ -1053,17 +1030,19 @@ fn memory_caller_matches_the_real_reducers() {
         );
 
         // Non-additive: absent items are removed.
-        real.upsert_feed_tasks(
+        real.ingest_feed(
             EpicId(feed_epic_id_real),
             vec![feed_item("feed-a")],
+            false,
             accepted.identity.clone(),
         )
         .await
         .unwrap();
         wait_for!(rows_real.tasks_for_epic(EpicId(feed_epic_id_real)).len() == 1);
-        mem.upsert_feed_tasks(
+        mem.ingest_feed(
             EpicId(feed_epic_id_mem),
             vec![feed_item("feed-a")],
+            false,
             "conformance".into(),
         )
         .await
@@ -1075,101 +1054,35 @@ fn memory_caller_matches_the_real_reducers() {
         );
 
         // An empty emission reconciles the feed epic down to nothing.
-        real.upsert_feed_tasks(EpicId(feed_epic_id_real), vec![], accepted.identity.clone())
-            .await
-            .unwrap();
+        real.ingest_feed(
+            EpicId(feed_epic_id_real),
+            vec![],
+            false,
+            accepted.identity.clone(),
+        )
+        .await
+        .unwrap();
         wait_for!(rows_real
             .tasks_for_epic(EpicId(feed_epic_id_real))
             .is_empty());
-        mem.upsert_feed_tasks(EpicId(feed_epic_id_mem), vec![], "conformance".into())
-            .await
-            .unwrap();
+        mem.ingest_feed(
+            EpicId(feed_epic_id_mem),
+            vec![],
+            false,
+            "conformance".into(),
+        )
+        .await
+        .unwrap();
         assert!(rows_mem.tasks_for_epic(EpicId(feed_epic_id_mem)).is_empty());
-
-        // `created_by` is this connection's own identity, same reasoning as
-        // `feed_epic`'s above: these are new top-level-from-the-client's-view
-        // epics (a child of the followed `epic_id_real`, but its read-back
-        // runs inside the SAME transaction callback the create fired, before
-        // any subtree-widening re-subscribe could land it any other way), so
-        // `own_creations` is what makes them visible for the id read-back.
-        let real_repo_group = real
-            .create_repo_group_sub_epic(
-                EpicId(epic_id_real),
-                "repo-group".into(),
-                accepted.identity.clone(),
-            )
-            .await
-            .unwrap();
-        wait_for!(rows_real.epic(real_repo_group).is_some());
-        let mem_repo_group = mem
-            .create_repo_group_sub_epic(
-                EpicId(epic_id_mem),
-                "repo-group".into(),
-                accepted.identity.clone(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(real_repo_group, mem_repo_group, "repo-group sub-epic id");
-        compare_epic_ignoring_created_at(real_repo_group.0);
-        // Find-or-create: a repeat resolves to the same id.
-        let real_repo_group_again = real
-            .create_repo_group_sub_epic(
-                EpicId(epic_id_real),
-                "repo-group".into(),
-                accepted.identity.clone(),
-            )
-            .await
-            .unwrap();
-        let mem_repo_group_again = mem
-            .create_repo_group_sub_epic(
-                EpicId(epic_id_mem),
-                "repo-group".into(),
-                accepted.identity.clone(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            real_repo_group_again, real_repo_group,
-            "real repo-group is found, not recreated"
-        );
-        assert_eq!(
-            mem_repo_group_again, mem_repo_group,
-            "mem repo-group is found, not recreated"
-        );
-
-        let real_managed = real
-            .create_managed_role_epic(
-                "reviewer".into(),
-                Some(EpicId(epic_id_real)),
-                "review".into(),
-                "cmd".into(),
-                60,
-                accepted.identity.clone(),
-            )
-            .await
-            .unwrap();
-        wait_for!(rows_real.epic(real_managed).is_some());
-        let mem_managed = mem
-            .create_managed_role_epic(
-                "reviewer".into(),
-                Some(EpicId(epic_id_mem)),
-                "review".into(),
-                "cmd".into(),
-                60,
-                "conformance".into(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(real_managed, mem_managed, "managed-role epic id");
-        compare_epic_ignoring_created_at(real_managed.0);
 
         // -- retirement on delete_task (agent_state) -----------------------------
         // Retirement only fires from the guarded `delete_task`, never from a
         // feed's own stale-reconciliation delete — see the module's own
         // `delete_stale_feed_tasks_in_epic` vs. `delete_task_side_effects`.
-        real.upsert_feed_tasks(
+        real.ingest_feed(
             EpicId(feed_epic_id_real),
             vec![feed_item("retire-me")],
+            false,
             accepted.identity.clone(),
         )
         .await
@@ -1177,9 +1090,10 @@ fn memory_caller_matches_the_real_reducers() {
         wait_for!(!rows_real
             .tasks_for_epic(EpicId(feed_epic_id_real))
             .is_empty());
-        mem.upsert_feed_tasks(
+        mem.ingest_feed(
             EpicId(feed_epic_id_mem),
             vec![feed_item("retire-me")],
+            false,
             "conformance".into(),
         )
         .await
@@ -1263,12 +1177,6 @@ fn memory_caller_matches_the_real_reducers() {
             wait_for!(rows_real.task(real_id).is_none());
             mem.delete_task(mem_id).await.unwrap();
         }
-        real.delete_epic(real_repo_group).await.unwrap();
-        wait_for!(rows_real.epic(real_repo_group).is_none());
-        mem.delete_epic(mem_repo_group).await.unwrap();
-        real.delete_epic(real_managed).await.unwrap();
-        wait_for!(rows_real.epic(real_managed).is_none());
-        mem.delete_epic(mem_managed).await.unwrap();
         real.delete_epic(EpicId(feed_epic_id_real)).await.unwrap();
         wait_for!(rows_real.epic(EpicId(feed_epic_id_real)).is_none());
         mem.delete_epic(EpicId(feed_epic_id_mem)).await.unwrap();

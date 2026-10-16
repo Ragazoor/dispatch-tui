@@ -88,73 +88,16 @@ impl Store {
         }
     }
 
-    /// Body of `upsert_feed_tasks`: upsert, then the stale-delete pass.
-    ///
-    /// The predict-then-verify shape (this task's plan doc, decision 1): a
-    /// reducer cannot report which rows it deleted, and a deleted row is gone
-    /// from `ctx.db` by the time anything could match against it — unlike a
-    /// CREATE's id, there is no later state to read. So this reads its own
-    /// already-subscribed candidates BEFORE the call, using the identical
-    /// predicate the reducer applies, then keeps only the ones CONFIRMED
-    /// absent afterward. A candidate that survived (a race) is silently
-    /// dropped rather than torn down — never a false positive that could
-    /// destroy a worktree the reducer did not actually remove, only a
-    /// possible missed teardown, which is the existing best-effort bargain
-    /// `cleanup_removed_feed_tasks` already documents.
-    async fn upsert_feed_tasks_inner(
-        &self,
-        epic_id: EpicId,
-        items: &[crate::models::FeedItem],
-        repo_paths: &[String],
-        base_branches: &[String],
-    ) -> Result<Vec<crate::store::RemovedFeedTask>> {
-        if items.len() != repo_paths.len() || items.len() != base_branches.len() {
-            anyhow::bail!(
-                "upsert_feed_tasks slice length mismatch: items={}, repo_paths={}, base_branches={}",
-                items.len(),
-                repo_paths.len(),
-                base_branches.len()
-            );
-        }
-        let wire_items: Vec<bindings::FeedTaskUpsertItem> = items
-            .iter()
-            .zip(repo_paths)
-            .zip(base_branches)
-            .map(|((item, repo_path), base_branch)| {
-                encode::feed_task_upsert_item(item, repo_path, base_branch)
-            })
-            .collect();
-
-        let keep: std::collections::HashSet<&str> =
-            items.iter().map(|i| i.external_id.as_str()).collect();
-        let candidates = self.feed_removal_candidates(epic_id, &keep);
-
-        // Best-effort, unlike `require_identity`: a feed sync must not fail
-        // just because this install has never connected before (no identity
-        // to stamp yet — `core.allium: Task.created_by` is honestly empty in
-        // that case, not a call this method refuses). `feeds.allium:
-        // UpsertFeedTasks`.
-        let created_by = self
-            .identity
-            .user()
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default();
-
-        self.caller
-            .upsert_feed_tasks(epic_id, wire_items, created_by)
-            .await?
-            .applied()?;
-
-        Ok(self.confirm_removed(candidates))
-    }
-
     /// `TaskCrud::ingest_feed`: one reducer call, then the board's own
     /// before-and-after read for the outcome.
     ///
-    /// Predict-then-verify as [`Self::upsert_feed_tasks_inner`] documents, over
-    /// the whole subtree because the module may delete in any of it. A task the
+    /// Predict-then-verify: a reducer cannot report which rows it deleted, and a
+    /// deleted row is gone from `ctx.db` by the time anything could match against
+    /// it. So this reads its own already-subscribed candidates BEFORE the call and
+    /// keeps only the ones CONFIRMED absent afterward. A candidate that survived
+    /// (a race) is dropped rather than torn down: a missed teardown at worst,
+    /// never a worktree removed that the reducer kept. It reads the whole
+    /// subtree because the module may delete in any of it. A task the
     /// module MOVED between sub-epics is still in the view afterwards, so it is
     /// never reported as removed. An additive call removes nothing and
     /// predicts nothing.
@@ -220,22 +163,6 @@ impl Store {
             .into_iter()
             .flat_map(|e| self.rows.tasks_for_epic(e))
             .filter(|t| t.external_id.is_some())
-            .collect()
-    }
-
-    /// Tasks in `epic_id` this board can currently see whose `external_id` is
-    /// set and not in `keep` — the same predicate the reducer's stale-delete
-    /// pass applies, read from this connection's own subscription rather
-    /// than predicted from nothing.
-    fn feed_removal_candidates(
-        &self,
-        epic_id: EpicId,
-        keep: &std::collections::HashSet<&str>,
-    ) -> Vec<crate::models::Task> {
-        self.rows
-            .tasks_for_epic(epic_id)
-            .into_iter()
-            .filter(|t| matches!(&t.external_id, Some(e) if !keep.contains(e.as_str())))
             .collect()
     }
 

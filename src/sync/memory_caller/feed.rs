@@ -9,7 +9,6 @@ use dispatch_spacetime_module as module;
 use crate::models::EpicId;
 use crate::spacetime::bindings;
 
-use super::super::encode;
 use super::super::writes::ReducerOutcome;
 use super::{MemoryReducerCaller, Tables, MAX_EPIC_DEPTH};
 
@@ -285,72 +284,6 @@ impl MemoryReducerCaller {
                 Err(why) => ReducerOutcome::Refused(why),
             },
         )
-    }
-
-    pub(super) fn apply_upsert_feed_tasks(
-        &self,
-        epic_id: EpicId,
-        items: Vec<bindings::FeedTaskUpsertItem>,
-        created_by: String,
-    ) -> Result<ReducerOutcome> {
-        let epic_id = epic_id.0;
-        let mut tables = self.lock();
-        let items = items
-            .into_iter()
-            .map(module::FeedTaskUpsertItem::from)
-            .collect();
-        Ok(self.upsert_feed_tasks_inner(&mut tables, epic_id, items, &created_by, true))
-    }
-
-    pub(super) fn apply_create_repo_group_sub_epic(
-        &self,
-        parent_id: EpicId,
-        title: String,
-        created_by: String,
-    ) -> Result<EpicId> {
-        let mut tables = self.lock();
-        Ok(EpicId(self.find_or_create_repo_group(
-            &mut tables,
-            parent_id.0,
-            &title,
-            created_by,
-        )))
-    }
-
-    pub(super) fn apply_create_managed_role_epic(
-        &self,
-        title: String,
-        parent_epic_id: Option<EpicId>,
-        role: String,
-        feed_command: String,
-        feed_interval_secs: i64,
-        created_by: String,
-    ) -> Result<EpicId> {
-        let parent_epic_id = encode::epic_ref(parent_epic_id);
-        let mut tables = self.lock();
-        let existing = tables
-            .epics
-            .values()
-            .find(|e| e.parent_epic_id == parent_epic_id && e.feed_role == role)
-            .map(|e| e.id);
-        if let Some(id) = existing {
-            return Ok(EpicId(id));
-        }
-        let now = self.now();
-        Ok(EpicId(self.write_epic(
-            &mut tables,
-            module::Epic {
-                title,
-                parent_epic_id,
-                feed_role: role,
-                feed_command,
-                feed_interval_secs,
-                created_by,
-                created_at: now.clone(),
-                updated_at: now,
-                ..module::blank_epic()
-            },
-        )))
     }
 
     pub(super) fn apply_ensure_managed_epics(

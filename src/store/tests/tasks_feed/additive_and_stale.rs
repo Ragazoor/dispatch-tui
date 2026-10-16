@@ -5,16 +5,17 @@ async fn upsert_feed_tasks_adds_new_items() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
 
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &[make_feed_item("ext-1", "First")],
         &["/repo".to_string()],
         &main_branches(1),
+        false,
     )
     .await
     .unwrap();
 
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &[
             make_feed_item("ext-1", "First"),
@@ -22,6 +23,7 @@ async fn upsert_feed_tasks_adds_new_items() {
         ],
         &["/repo".to_string(), "/repo".to_string()],
         &main_branches(2),
+        false,
     )
     .await
     .unwrap();
@@ -36,7 +38,7 @@ async fn upsert_feed_tasks_removes_stale_items() {
     let epic = db.create_epic("E", "", None).await.unwrap();
 
     // First fetch: two items
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &[
             make_feed_item("ext-1", "First"),
@@ -44,17 +46,19 @@ async fn upsert_feed_tasks_removes_stale_items() {
         ],
         &["/repo".to_string(), "/repo".to_string()],
         &main_branches(2),
+        false,
     )
     .await
     .unwrap();
     assert_eq!(db.list_tasks_for_epic(epic.id).await.len(), 2);
 
     // Second fetch: only ext-1 remains in the feed
-    db.upsert_feed_tasks(
+    db.ingest_feed(
         epic.id,
         &[make_feed_item("ext-1", "First")],
         &["/repo".to_string()],
         &main_branches(1),
+        false,
     )
     .await
     .unwrap();

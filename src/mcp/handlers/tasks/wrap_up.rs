@@ -190,14 +190,10 @@ pub(crate) async fn handle_wrap_up(
         Err(resp) => return resp,
     };
 
-    // The host-local checks, before anything is written: a refusal here writes
-    // no request row and issues no token. `WrapUpRefusesUnfinishedWork`.
-    let checks = match state.task_svc.check_wrap_up_ready(task.clone()).await {
-        Ok(c) => c,
-        Err(e) => return service_err_to_response(id, e),
-    };
     // For rebase the worktree path names a branch (the rebase needs one):
-    // refused as a bad request rather than reported as a failed rebase.
+    // refused as a bad request rather than reported as a failed rebase, and
+    // before the commit check and the verify run (`store-split.allium` W2), so a
+    // rebase that cannot work costs no verify run.
     if parsed.action == WrapUpAction::Rebase {
         let worktree = task.worktree.clone().unwrap_or_default();
         if crate::dispatch::branch_from_worktree(&worktree).is_none() {
@@ -208,6 +204,13 @@ pub(crate) async fn handle_wrap_up(
             );
         }
     }
+
+    // The host-local checks, before anything is written: a refusal here writes
+    // no request row and issues no token. `WrapUpRefusesUnfinishedWork`.
+    let checks = match state.task_svc.check_wrap_up_ready(task.clone()).await {
+        Ok(c) => c,
+        Err(e) => return service_err_to_response(id, e),
+    };
 
     // Subscribed BEFORE the request is written, so no change to the row can
     // land between writing it and starting to wait on it.

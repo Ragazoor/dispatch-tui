@@ -407,13 +407,6 @@ impl MemoryReducerCaller {
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    pub(super) fn apply_recalculate_epic_status(&self, id: EpicId) -> Result<ReducerOutcome> {
-        let id = id.0;
-        let mut tables = self.lock();
-        self.recalculate_epic_chain(&mut tables, id);
-        Ok(ReducerOutcome::Applied(vec![]))
-    }
-
     /// Mirrors the module's `batch_delete` (task #4971): validate every
     /// selected epic's whole subtree and every selected plain task FIRST,
     /// mutating nothing until all of them pass, then perform every delete
