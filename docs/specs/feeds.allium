@@ -1330,7 +1330,7 @@ rule IngestFeedEmission {
         -- board-side tests that existed before M3; the same obligations are
         -- now covered through the store handle (src/feed/ingest/tests.rs),
         -- by the module's own tests (spacetime/module/src/tests.rs) and by
-        -- tests/memory_caller_conformance.rs::memory_caller_ingests_a_feed_like_the_real_module,
+        -- tests/memory_caller_conformance/feeds.rs::memory_caller_ingests_a_feed_like_the_real_module,
         -- which runs one emission sequence against the live module and the
         -- in-memory double (src/sync/memory_caller/feed.rs).
         --
