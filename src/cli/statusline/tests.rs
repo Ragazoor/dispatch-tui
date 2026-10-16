@@ -1,0 +1,259 @@
+use super::*;
+use crate::models::budget::BudgetSnapshot;
+
+const PAYLOAD: &str = r#"{"rate_limits":{"five_hour":{"used_percentage":23.5,"resets_at":100},"seven_day":{"used_percentage":41.0,"resets_at":200}}}"#;
+
+fn read_snapshot(path: &Path) -> BudgetSnapshot {
+    let text = std::fs::read_to_string(path).unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
+#[test]
+fn writes_snapshot_from_payload() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rate-limits.json");
+    assert!(record_snapshot(PAYLOAD, &path, 42));
+    let snap = read_snapshot(&path);
+    assert_eq!(snap.five_hour.unwrap().used_percentage, 23.5);
+    assert_eq!(snap.captured_at, 42);
+}
+
+#[test]
+fn creates_missing_parent_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp
+        .path()
+        .join("nested")
+        .join("deeper")
+        .join("rate-limits.json");
+    assert!(record_snapshot(PAYLOAD, &path, 1));
+    assert!(path.exists());
+}
+
+#[test]
+fn model_only_payload_still_writes_snapshot() {
+    // API-key/cloud-provider auth sessions never emit rate_limits, but the
+    // active model must still be captured (observability.allium:
+    // StatusLineDecorator's SnapshotWrittenWhenEitherFieldPresent).
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rate-limits.json");
+    assert!(record_snapshot(
+        r#"{"model":{"display_name":"Opus"}}"#,
+        &path,
+        1
+    ));
+    let snap = read_snapshot(&path);
+    assert_eq!(snap.model.as_deref(), Some("Opus"));
+    assert!(snap.five_hour.is_none());
+}
+
+#[test]
+fn neither_field_writes_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rate-limits.json");
+    assert!(!record_snapshot("{}", &path, 1));
+    assert!(!path.exists());
+}
+
+#[test]
+fn malformed_stdin_writes_nothing_and_does_not_panic() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rate-limits.json");
+    assert!(!record_snapshot("not json at all {{{", &path, 1));
+    assert!(!path.exists());
+}
+
+#[test]
+fn empty_stdin_writes_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rate-limits.json");
+    assert!(!record_snapshot("", &path, 1));
+    assert!(!path.exists());
+}
+
+#[test]
+fn overwrites_previous_snapshot() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rate-limits.json");
+    record_snapshot(PAYLOAD, &path, 1);
+    let newer = r#"{"rate_limits":{"five_hour":{"used_percentage":99.0,"resets_at":100}}}"#;
+    record_snapshot(newer, &path, 2);
+    let snap = read_snapshot(&path);
+    assert_eq!(snap.five_hour.unwrap().used_percentage, 99.0);
+    assert_eq!(snap.captured_at, 2);
+}
+
+#[test]
+fn leaves_no_temp_files_behind() {
+    // A fixed temp name would let concurrent writers publish each other's
+    // partial bytes; a unique temp file must also not accumulate.
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rate-limits.json");
+    for i in 0..5 {
+        record_snapshot(PAYLOAD, &path, i);
+    }
+    let entries: Vec<_> = std::fs::read_dir(tmp.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "expected only the snapshot, got {entries:?}"
+    );
+}
+
+#[test]
+fn concurrent_writers_never_publish_foreign_or_torn_bytes() {
+    // The property the unique temp name exists for: every Claude session
+    // writes this same path concurrently, so a reader must see either no
+    // snapshot or one writer's complete bytes — never a blend of two, never
+    // a truncation. observability.allium: StatusLineDecorator (@guarantee
+    // PublishedSnapshotIsAlwaysWholeAndFromOneWriter).
+    //
+    // Barrier-synchronised rather than timed, and gated on writer *progress*
+    // rather than on an iteration budget. The barrier alone is not enough: it
+    // only releases the writers, and under load the reader could burn through
+    // every attempt before either writer was scheduled far enough to complete
+    // its first rename, so the old `observed > 0` assertion was load-sensitive
+    // (#3855). Each writer now signals its first successful publish, and the
+    // reader waits for both before it starts reading. Since the snapshot is
+    // published by rename and never unlinked, every one of the reader's reads
+    // must then find a whole snapshot — a miss is a failure, not a `continue`.
+    const ROUNDS: usize = 200;
+    const WRITERS: [(f64, i64); 2] = [(11.0, 1), (99.0, 2)];
+
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rate-limits.json");
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(WRITERS.len() + 1));
+    let (published_tx, published_rx) = std::sync::mpsc::channel();
+
+    let writers: Vec<_> = WRITERS
+        .iter()
+        .map(|&(pct, captured_at)| {
+            let path = path.clone();
+            let barrier = barrier.clone();
+            let published_tx = published_tx.clone();
+            std::thread::spawn(move || {
+                let payload = format!(
+                    r#"{{"rate_limits":{{"five_hour":{{"used_percentage":{pct},"resets_at":7}}}}}}"#
+                );
+                barrier.wait();
+                for round in 0..ROUNDS {
+                    assert!(record_snapshot(&payload, &path, captured_at));
+                    if round == 0 {
+                        let _ = published_tx.send(());
+                    }
+                }
+            })
+        })
+        .collect();
+    // Only the writers' clones may keep the channel alive, so a dead writer
+    // surfaces as a disconnect rather than a hang.
+    drop(published_tx);
+
+    barrier.wait();
+    for _ in 0..WRITERS.len() {
+        published_rx
+            .recv()
+            .expect("a writer thread died before publishing its first snapshot");
+    }
+
+    for _ in 0..ROUNDS * 4 {
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("published snapshot disappeared: {e}"));
+        let snap: BudgetSnapshot = serde_json::from_str(&text)
+            .unwrap_or_else(|e| panic!("torn snapshot published: {e}: {text:?}"));
+        let pair = (snap.five_hour.unwrap().used_percentage, snap.captured_at);
+        assert!(
+            WRITERS.contains(&pair),
+            "blended snapshot: percentage {} paired with captured_at {}",
+            pair.0,
+            pair.1
+        );
+    }
+    for writer in writers {
+        writer.join().unwrap();
+    }
+
+    // Both writers' temp files were renamed; none accumulated.
+    let entries: Vec<_> = std::fs::read_dir(tmp.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "expected only the snapshot, got {entries:?}"
+    );
+}
+
+#[test]
+fn run_returns_zero_without_chain() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rate-limits.json");
+    assert_eq!(run(PAYLOAD, &path, None, 1), 0);
+}
+
+#[test]
+fn run_returns_zero_when_snapshot_path_unwritable() {
+    // /proc is not writable; the decorator must still succeed.
+    let path = Path::new("/proc/definitely/not/writable/rate-limits.json");
+    assert_eq!(run(PAYLOAD, path, None, 1), 0);
+}
+
+#[test]
+fn run_returns_zero_when_chained_command_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rate-limits.json");
+    assert_eq!(run(PAYLOAD, &path, Some("exit 3"), 1), 0);
+}
+
+#[test]
+fn run_returns_zero_when_chained_command_does_not_exist() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rate-limits.json");
+    assert_eq!(
+        run(PAYLOAD, &path, Some("definitely-not-a-real-binary-xyz"), 1),
+        0
+    );
+}
+
+#[test]
+fn chained_command_receives_stdin_and_its_stdout_is_returned() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rate-limits.json");
+    let out = run_capturing(PAYLOAD, &path, Some("cat"), 1);
+    assert_eq!(
+        out, PAYLOAD,
+        "chained command must receive the payload verbatim"
+    );
+}
+
+#[test]
+fn snapshot_is_written_even_when_chain_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rate-limits.json");
+    run(PAYLOAD, &path, Some("exit 1"), 7);
+    assert_eq!(read_snapshot(&path).captured_at, 7);
+}
+
+#[test]
+fn chain_that_never_exits_times_out_and_returns_empty() {
+    // Exercises run_chain directly with an injected short timeout so the
+    // test does not wait out CHAIN_TIMEOUT's production value of 2s. A
+    // chain that never exits (blocked on a lock, NFS, a network remote,
+    // or here, `sleep`) must not hang the caller.
+    let out = run_chain("sleep 30", PAYLOAD, Duration::from_millis(100));
+    assert_eq!(
+        out, "",
+        "a hung chain command must yield empty output, not hang"
+    );
+}
+
+// The subprocess hazards themselves — a chain that closes stdout and keeps
+// running, and a payload past the pipe buffer against a chain that echoes as
+// it reads — are asserted once, against the primitive that now owns them
+// (`run_bounded` in src/process.rs). What stays here is what this decorator
+// adds on top: every failure becomes a blank status line, and the payload
+// reaches the chain at all.

@@ -1,0 +1,312 @@
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
+
+use super::*;
+use crate::process::{MockProcessRunner, ProcessRunner};
+
+/// Generous bound for tests that don't care about the deadline itself —
+/// every command below finishes in milliseconds.
+const TEST_CMD_TIMEOUT: Duration = Duration::from_secs(5);
+
+struct FixedBranchRunner(std::collections::HashMap<String, String>);
+
+impl FixedBranchRunner {
+    fn new(pairs: &[(&str, &str)]) -> Self {
+        Self(
+            pairs
+                .iter()
+                .map(|(p, b)| (p.to_string(), b.to_string()))
+                .collect(),
+        )
+    }
+}
+
+impl ProcessRunner for FixedBranchRunner {
+    fn run(&self, _program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+        let path = args.get(1).copied().unwrap_or("");
+        match self.0.get(path) {
+            Some(branch) => MockProcessRunner::ok_with_stdout(
+                format!("refs/remotes/origin/{branch}\n").as_bytes(),
+            ),
+            None => MockProcessRunner::fail("unknown repo"),
+        }
+    }
+}
+
+struct CountingRunner(Arc<AtomicUsize>);
+
+impl ProcessRunner for CountingRunner {
+    fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n")
+    }
+}
+
+#[test]
+fn empty_path_resolves_to_main_without_calling_runner() {
+    let paths = vec!["".to_string(), "".to_string()];
+    let branches = resolve_base_branches(&paths, &AlwaysFailRunner);
+    assert_eq!(branches, vec!["main", "main"]);
+}
+
+#[test]
+fn known_path_resolves_to_configured_branch() {
+    let runner = FixedBranchRunner::new(&[("/repo/a", "develop")]);
+    let paths = vec!["/repo/a".to_string()];
+    let branches = resolve_base_branches(&paths, &runner);
+    assert_eq!(branches, vec!["develop"]);
+}
+
+#[test]
+fn same_path_queried_only_once() {
+    let counter = Arc::new(AtomicUsize::new(0));
+    let runner = CountingRunner(counter.clone());
+    let paths = vec![
+        "/repo".to_string(),
+        "/repo".to_string(),
+        "/repo".to_string(),
+    ];
+    let _ = resolve_base_branches(&paths, &runner);
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        1,
+        "runner called more than once for the same path"
+    );
+}
+
+#[test]
+fn unknown_path_falls_back_to_main() {
+    let paths = vec!["/unknown/repo".to_string()];
+    let branches = resolve_base_branches(&paths, &AlwaysFailRunner);
+    assert_eq!(branches, vec!["main"]);
+}
+
+// --- exec_feed_command ---
+
+#[tokio::test]
+async fn exec_feed_command_returns_stdout_on_success() {
+    let out = exec_feed_command("printf 'hello'", 1, "test-epic", TEST_CMD_TIMEOUT)
+        .await
+        .expect("zero-exit command must succeed");
+    assert_eq!(out.stdout, b"hello".to_vec());
+    assert_eq!(out.stderr, "", "no stderr written, so none reported");
+}
+
+#[tokio::test]
+async fn exec_feed_command_returns_err_on_nonzero_exit() {
+    let result = exec_feed_command("exit 1", 2, "test-epic", TEST_CMD_TIMEOUT).await;
+    assert!(result.is_err(), "non-zero exit must be an error");
+}
+
+#[tokio::test]
+async fn exec_feed_command_err_carries_stderr_of_failed_command() {
+    let err = exec_feed_command(
+        "echo 'error msg' >&2; exit 1",
+        3,
+        "test-epic",
+        TEST_CMD_TIMEOUT,
+    )
+    .await
+    .expect_err("non-zero exit must be an error");
+    assert!(
+        err.contains("error msg"),
+        "error must carry the command's stderr, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn exec_feed_command_returns_empty_stdout_on_zero_exit_with_no_output() {
+    let out = exec_feed_command("true", 4, "test-epic", TEST_CMD_TIMEOUT)
+        .await
+        .expect("zero-exit command must succeed");
+    assert!(out.stdout.is_empty(), "no stdout written");
+    assert_eq!(out.stderr, "");
+}
+
+// The regression this whole change exists for: a command that fails
+// internally, writes the reason to stderr, and STILL exits 0 with a valid
+// (empty) JSON array. Previously the stderr was captured and discarded.
+#[tokio::test]
+async fn exec_feed_command_captures_stderr_written_on_zero_exit() {
+    let out = exec_feed_command(
+        "echo 'Invalid search query' >&2; printf '[]'",
+        5,
+        "test-epic",
+        TEST_CMD_TIMEOUT,
+    )
+    .await
+    .expect("zero exit must still succeed");
+    assert_eq!(out.stdout, b"[]".to_vec(), "stdout must be untouched");
+    assert_eq!(
+        out.stderr, "Invalid search query",
+        "stderr written on a zero exit must be reported, trimmed"
+    );
+}
+
+#[tokio::test]
+async fn exec_feed_command_truncates_long_stderr() {
+    // 3000 'x' characters on stderr, valid empty array on stdout.
+    let out = exec_feed_command(
+        "printf '%3000s' '' | tr ' ' x >&2; printf '[]'",
+        6,
+        "test-epic",
+        TEST_CMD_TIMEOUT,
+    )
+    .await
+    .expect("zero exit must still succeed");
+    assert_eq!(
+        out.stderr.chars().count(),
+        MAX_FEED_STDERR_CHARS,
+        "stderr must be truncated to the cap"
+    );
+}
+
+// truncate_stderr's doc comment promises a character-boundary-safe
+// truncation. 3000 ASCII bytes alone can't distinguish that from a naive
+// `&text[..2000]` byte slice, which would panic on multi-byte input. This
+// drives well over the cap with a repeated non-ASCII character so a
+// byte-slicing regression panics this test instead of shipping.
+#[tokio::test]
+async fn exec_feed_command_truncates_multi_byte_stderr_without_panicking() {
+    // 'é' is 2 bytes in UTF-8; "yes é" repeats "é\n" (3 bytes), so
+    // `head -c 9000` yields exactly 3000 'é' characters once newlines
+    // are stripped — well over the 2000-character cap. A naive
+    // `&text[..2000]` byte slice would land mid-character and panic.
+    let out = exec_feed_command(
+        "yes é 2>/dev/null | head -c 9000 | tr -d '\\n' >&2; printf '[]'",
+        8,
+        "test-epic",
+        TEST_CMD_TIMEOUT,
+    )
+    .await
+    .expect("zero exit must still succeed");
+    assert_eq!(
+        out.stderr.chars().count(),
+        MAX_FEED_STDERR_CHARS,
+        "multi-byte stderr must be truncated to exactly the character cap without panicking"
+    );
+}
+
+#[tokio::test]
+async fn exec_feed_command_reports_stderr_of_exactly_the_cap_complete() {
+    // Exactly MAX_FEED_STDERR_CHARS ASCII characters must come back
+    // whole, not truncated by one.
+    let out = exec_feed_command(
+        &format!(
+            "printf '%{n}s' '' | tr ' ' x >&2; printf '[]'",
+            n = MAX_FEED_STDERR_CHARS
+        ),
+        9,
+        "test-epic",
+        TEST_CMD_TIMEOUT,
+    )
+    .await
+    .expect("zero exit must still succeed");
+    assert_eq!(
+        out.stderr.chars().count(),
+        MAX_FEED_STDERR_CHARS,
+        "exact-cap stderr must be reported in full"
+    );
+    assert!(
+        out.stderr.chars().all(|c| c == 'x'),
+        "exact-cap stderr must be untruncated content"
+    );
+}
+
+// --- exec_feed_command timeout (feeds.allium: FeedCommandFailure bucket 7) ---
+
+/// A command that never exits must fail within its deadline, not be
+/// awaited forever. `sleep 30` mirrors the shape already used in
+/// `src/process.rs`'s `run_bounded_kills_a_child_that_closed_stdout_but_keeps_running`
+/// test: a single trailing shell command, which `sh` execs into directly
+/// (no forked grandchild), so killing the spawned process actually stops
+/// the sleep rather than orphaning it.
+///
+/// The bound is an outer `timeout` rather than an assertion on measured
+/// elapsed time, sized to sit between the honoured and unhonoured paths —
+/// see "Bounding a wait is not the same as asserting on one" in
+/// docs/conventions.md.
+#[tokio::test]
+async fn exec_feed_command_returns_err_when_it_exceeds_the_deadline() {
+    let err = tokio::time::timeout(
+        Duration::from_secs(5),
+        exec_feed_command("sleep 30", 10, "test-epic", Duration::from_millis(100)),
+    )
+    .await
+    .expect("the wait must be bounded by the 100ms deadline, not the 30s sleep")
+    .expect_err("a command that outlives its deadline must fail");
+    assert!(
+        err.contains("timed out"),
+        "error must say the command timed out, got: {err}"
+    );
+}
+
+// --- degraded_empty_emission (feeds.allium: DegradedEmptyEmission) ---
+
+#[test]
+fn degraded_when_zero_items_and_stderr_present() {
+    let reason = degraded_empty_emission(0, "Invalid search query")
+        .expect("zero items plus stderr must be treated as a failure");
+    assert!(
+        reason.contains("Invalid search query"),
+        "reason must carry the stderr so the status bar can show it, got: {reason}"
+    );
+}
+
+#[test]
+fn not_degraded_when_zero_items_and_no_stderr() {
+    // A genuinely-empty clean run must still reconcile — this is the
+    // false-positive boundary the guard must never cross.
+    assert!(degraded_empty_emission(0, "").is_none());
+}
+
+#[test]
+fn not_degraded_when_items_present_despite_stderr() {
+    // A non-empty emission is never SUPPRESSED. It is downgraded to an
+    // additive sync by degraded_partial_emission instead — this predicate
+    // owns the zero-item arm only.
+    assert!(degraded_empty_emission(3, "some warning").is_none());
+}
+
+// --- degraded_partial_emission (feeds.allium: DegradedNonEmptyEmission) ---
+
+#[test]
+fn degraded_partial_when_items_present_and_stderr_present() {
+    let reason = degraded_partial_emission(3, "fetch-reviews: gh search prs failed")
+        .expect("items alongside stderr must downgrade the sync to additive");
+    assert!(
+        reason.contains("fetch-reviews: gh search prs failed"),
+        "reason must carry the stderr so the status bar can show it, got: {reason}"
+    );
+}
+
+#[test]
+fn not_partially_degraded_when_no_stderr() {
+    // A clean non-empty emission is fully trusted and still reconciles.
+    assert!(degraded_partial_emission(3, "").is_none());
+}
+
+#[test]
+fn not_partially_degraded_when_zero_items() {
+    // The zero-item arm belongs to degraded_empty_emission, which
+    // suppresses the sync outright. The two predicates must never both
+    // fire for one emission.
+    assert!(degraded_partial_emission(0, "some warning").is_none());
+    assert!(degraded_partial_emission(0, "").is_none());
+}
+
+#[test]
+fn the_two_degradation_predicates_are_mutually_exclusive() {
+    for count in [0usize, 1, 7] {
+        for stderr in ["", "boom"] {
+            let empty = degraded_empty_emission(count, stderr).is_some();
+            let partial = degraded_partial_emission(count, stderr).is_some();
+            assert!(
+                !(empty && partial),
+                "both guards fired for count={count} stderr={stderr:?}"
+            );
+        }
+    }
+}

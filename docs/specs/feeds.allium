@@ -1258,7 +1258,7 @@ rule SerialisedFeedCycle {
         -- (both surfaces against one epic with a genuine cycle mid-exec, which
         -- is the only test that would catch the two surfaces being wired to
         -- different registries); and
-        -- src/feed/cycle.rs::a_hung_command_times_out_and_the_epic_recovers_on_the_next_cycle
+        -- src/feed/cycle/tests.rs::a_hung_command_times_out_and_the_epic_recovers_on_the_next_cycle
         -- (the bounded-cost case: a hung command times out, fails, releases
         -- its claim, and a fresh cycle for the same epic afterward proceeds
         -- and syncs).
@@ -1796,7 +1796,7 @@ rule FlatFeedReconcile {
         -- sub-epic on flat sync; no-op when no sub-epics exist; manual sub-epics
         -- preserved; reviews_parent epic unaffected — routed to
         -- RoleRoutedFeedSync instead);
-        -- src/feed/ingest/tests.rs::flat_sync_reports_removed_task_with_worktree.
+        -- src/feed/ingest/tests/role_routing.rs::flat_sync_reports_removed_task_with_worktree.
 }
 
 -- == Role-routed reconcile (PR-review feed) ==
@@ -2176,13 +2176,13 @@ rule RoleRoutedFeedSync {
         -- stranded on the parent is moved down to its routed role sub-epic with
         -- state preserved; a parent-stranded task absent from the emission is
         -- deleted as stale; a manual task on the parent is never touched);
-        -- src/feed/ingest/tests.rs::moved_task_is_never_reported_as_removed
+        -- src/feed/ingest/tests/role_routing.rs::moved_task_is_never_reported_as_removed
         -- (the ordering invariant above — a task moved between role sub-epics
         -- is never handed to teardown),
-        -- src/feed/ingest/tests.rs::absent_task_with_worktree_is_reported_as_removed
-        -- and src/feed/ingest/tests.rs::flat_sync_reports_removed_task_with_worktree
+        -- src/feed/ingest/tests/role_routing.rs::absent_task_with_worktree_is_reported_as_removed
+        -- and src/feed/ingest/tests/role_routing.rs::flat_sync_reports_removed_task_with_worktree
         -- (the report reaches the outcome on both sync paths);
-        -- src/feed/ingest/tests.rs::route_routed_preserves_manual_task_on_parent
+        -- src/feed/ingest/tests/role_routing.rs::route_routed_preserves_manual_task_on_parent
         -- (a manual task survives the stale delete, so it never reaches the
         -- removed-rows report; the per-step reducer whose own test covered
         -- that report directly was deleted in store-split M7);
@@ -2311,10 +2311,10 @@ rule FeedCommandFailure {
         -- Bucket 7 is exec_feed_command's tokio::time::timeout around the
         -- child (see SerialisedFeedCycle's BOUNDED COST note above for why
         -- src/process.rs::run_bounded couldn't be reused for this call site).
-        -- Coverage: src/feed/exec.rs::exec_feed_command_returns_err_when_it_exceeds_the_deadline
+        -- Coverage: src/feed/exec/tests.rs::exec_feed_command_returns_err_when_it_exceeds_the_deadline
         -- (the raw timeout, with a bounded elapsed-time assertion so the test
         -- doesn't merely wait out the hang) and
-        -- src/feed/cycle.rs::a_hung_command_times_out_and_the_epic_recovers_on_the_next_cycle
+        -- src/feed/cycle/tests.rs::a_hung_command_times_out_and_the_epic_recovers_on_the_next_cycle
         -- (the whole cycle: a hung command times out, fails, releases its
         -- claim, and a fresh cycle for the same epic afterward proceeds and
         -- syncs — proving recovery, not merely that one call returned).
@@ -2409,7 +2409,7 @@ rule FeedCommandStderrOnSuccess {
         -- feed paths cannot even in principle disagree about them. When BOTH
         -- return None the emission syncs and reconciles as normal, with the
         -- stderr logged and nothing else.
-        -- Coverage: src/feed/exec.rs::exec_feed_command_captures_stderr_written_on_zero_exit,
+        -- Coverage: src/feed/exec/tests.rs::exec_feed_command_captures_stderr_written_on_zero_exit,
         -- exec_feed_command_truncates_long_stderr,
         -- exec_feed_command_truncates_multi_byte_stderr_without_panicking and
         -- exec_feed_command_reports_stderr_of_exactly_the_cap_complete (the
