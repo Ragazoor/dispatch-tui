@@ -60,7 +60,7 @@ Every database-touching test runs over the in-memory store, which builds no
 schema. Incremental compilation after a one-file edit (~13 s) is now the larger
 half of an edit→test cycle, so if a run feels slow, it is the compile.
 
-The dev profile uses `debug = "line-tables-only"` (`DevBuildsKeepLineTablesNotFullDebugInfo` in `docs/specs/dispatch.allium`). That cut a one-file rebuild from ~50s to ~29s. A *fresh* worktree still pays a cold build (~2.5 min) and its first `tests/spacetime_module.rs` run builds the wasm module (~40s); later runs reuse the cache.
+The dev profile uses `debug = "line-tables-only"` (`DevBuildsKeepLineTablesNotFullDebugInfo` in `docs/specs/dispatch.allium`). That cut a one-file rebuild from ~50s to ~29s. A *fresh* worktree still pays a cold build (~2.5 min for the build alone; the ~6 minutes above includes the first run) and its first `tests/spacetime_module.rs` run builds the wasm module (~40s); later runs reuse the cache.
 
 If you do background a `cargo` command anyway, two things, both learned the hard
 way. **Don't run any other `cargo` command while one is backgrounded** —

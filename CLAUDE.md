@@ -16,7 +16,7 @@ cargo test
 cargo run -- tui
 ```
 
-**This repo has a verify command every dispatched agent must run green before declaring work complete — read it from `get_task`'s *Verify command* line, never from this file.** You run it, not dispatch: `wrap_up` neither runs nor checks it. How it is stored and surfaced: [docs/reference.md](docs/reference.md) ("Verify Command"). **If it fails for a reason your change did not cause, including a broken `main`, do not wrap up past it alone and do not just stop.** Coordinate with the other agents and the board: look for a task already fixing it (`list_tasks`, `ListAgents`), and if there is none, propose a fix or create and dispatch a task for it.
+**This repo has a verify command every dispatched agent must run green before declaring work complete — read it from `get_task`'s *Verify command* line, never from this file.** You run it, not dispatch: `wrap_up` neither runs nor checks it. How it is stored and surfaced: [docs/reference.md](docs/reference.md) ("Verify Command"). **If it fails for a reason your change did not cause, including a broken `main`, do not wrap up past it alone and do not just stop.** Coordinate with the other agents and the board: look for a task already fixing it (`list_tasks`, `ListAgents`), and if there is none, propose a fix or create and dispatch a task for it. Use judgement; there is no fixed procedure.
 
 **Dispatch-spawned sessions do not run under Claude Code's sandbox** — see `SandboxDisabledForDockerAndUnixSockets` in `docs/specs/dispatch.allium`. If you've enabled the sandbox yourself outside of dispatch, see "Sandbox (historical)" in [docs/reference.md](docs/reference.md).
 
