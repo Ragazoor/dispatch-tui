@@ -421,7 +421,7 @@ pub(crate) async fn read_agent_rows(
             Some(AgentRow {
                 id: agent.id,
                 title: agent.title,
-                alias: agent.alias,
+                agent_name: agent.agent_name,
                 window: TmuxWindow::parse(&agent.tmux_window)?,
                 is_own: agent.id == own,
             })

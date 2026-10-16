@@ -2726,14 +2726,16 @@ surface AgentTreeCompanionPane {
         -- or the reverse — whenever the commits section was scrolled or
         -- focus was elsewhere.
 
-    @guarantee AgentRowShowsAlias
-        -- Each agent row reads `<alias> <title>`, clipped at the pane edge like
-        -- every other row here. The alias comes first because a word is what a
-        -- person scans fastest (core.allium: TaskAliasIsASecondName). The
-        -- numeric id is not on the row, except for a task whose alias is not
-        -- yet assigned, which leads with `#<id>` instead; the window (`task-<id>`) keeps it, and the
-        -- alias resolves to it wherever an id is accepted. The messaging
-        -- session is named after the agent (agents.allium, A2).
+    @guarantee AgentRowShowsAgentName
+        -- Each agent row reads `<agent name> <title>`, clipped at the pane edge
+        -- like every other row here. The name comes first because a word is
+        -- what a person scans fastest. It is the name of the task's current
+        -- agent (agents.allium), which is also the name of the messaging
+        -- session and the word a peer is addressed by. The numeric id is not
+        -- on the row, except for a task with no current agent, which leads
+        -- with `#<id>` instead; the window (`task-<id>`) keeps it. The hooks
+        -- wire (PaneAgent) carries the agent name for the row, not the task's
+        -- alias.
         --
         -- The pane's own task is marked with a trailing dot and drawn dimmed.
         -- It is listed rather than hidden so the list always reads as the

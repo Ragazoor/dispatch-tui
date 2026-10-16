@@ -210,3 +210,43 @@ async fn a_task_with_no_agent_shows_none() {
     .await;
     assert!(!extract_response_text(&resp).contains("Agent:"));
 }
+
+/// agent-tree.allium: AgentRowShowsAgentName. The pane view carries the current
+/// agent's name, and nothing for a live task with no current agent.
+#[tokio::test]
+async fn the_pane_view_carries_the_current_agents_name() {
+    use axum::extract::State;
+    use axum::Json;
+
+    let state = test_state().await;
+    let (named, name) = task_with_agent(&state).await;
+    let nameless = state
+        .db_write()
+        .create_task(CreateTaskRequest::fixture("N", "/repo"))
+        .await
+        .unwrap();
+    for id in [named, nameless] {
+        let window = crate::models::test_tmux_window(&format!("task-{}", id.0));
+        state
+            .db_write()
+            .patch_task(
+                id,
+                &crate::store::TaskPatch::new()
+                    .status(crate::models::TaskStatus::Running)
+                    .tmux_window(Some(&window)),
+            )
+            .await
+            .unwrap();
+    }
+
+    let Json(view) = crate::mcp::handlers::handle_pane_view(
+        State(state.clone()),
+        Json(crate::hooks::wire::PaneViewRequest { task_id: named }),
+    )
+    .await
+    .unwrap();
+
+    let by_id = |id| view.live_agents.iter().find(|a| a.id == id).unwrap();
+    assert_eq!(by_id(named).agent_name, name);
+    assert_eq!(by_id(nameless).agent_name, "");
+}

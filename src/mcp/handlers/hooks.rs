@@ -62,17 +62,20 @@ pub async fn handle_pane_view(
             worktree: task.worktree,
             base_branch: task.base_branch,
         });
-    let live_agents = state
-        .db
-        .list_live_agent_tasks()
-        .await
+    let (live_tasks, agents) =
+        tokio::join!(state.db.list_live_agent_tasks(), state.db.list_agents());
+    let live_agents = live_tasks
         .into_iter()
         .filter_map(|task| {
             Some(PaneAgent {
                 id: task.id,
                 title: task.title,
                 tmux_window: task.tmux_window?.as_str().to_string(),
-                alias: task.alias,
+                agent_name: agents
+                    .iter()
+                    .find(|a| a.task_id == task.id && a.is_current())
+                    .map(|a| a.name.clone())
+                    .unwrap_or_default(),
             })
         })
         .collect();

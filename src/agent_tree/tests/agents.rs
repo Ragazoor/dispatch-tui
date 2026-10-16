@@ -271,24 +271,24 @@ fn pane_agent(id: i64) -> crate::hooks::wire::PaneAgent {
         id: TaskId(id),
         title: format!("task {id}"),
         tmux_window: format!("task-{id}"),
-        alias: String::new(),
+        agent_name: String::new(),
     }
 }
 
-/// `AgentRowShowsAlias`: the alias the board sends reaches the row.
+/// `AgentRowShowsAgentName`: the agent name the board sends reaches the row.
 #[tokio::test]
-async fn the_boards_alias_reaches_the_agent_row() {
+async fn the_boards_agent_name_reaches_the_agent_row() {
     let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
         task: None,
         live_agents: vec![crate::hooks::wire::PaneAgent {
-            alias: "scar".into(),
+            agent_name: "scar".into(),
             ..pane_agent(9)
         }],
     }));
 
     let rows = read_agent_rows(&board, TaskId(7)).await.unwrap();
 
-    assert_eq!(rows[0].alias, "scar");
+    assert_eq!(rows[0].agent_name, "scar");
 }
 
 /// The board's live agents become the section's rows: ordered by id, the

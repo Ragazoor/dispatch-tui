@@ -788,7 +788,7 @@ entity Task {
     -- The alias is a second name for the task, not a replacement for its id.
     --
     -- A five-digit id is hard for a person to scan; a word is easy. So the
-    -- agent tree shows the alias (agent-tree.allium: AgentRowShowsAlias) and
+    -- agent tree shows the agent name (agent-tree.allium: AgentRowShowsAgentName) and
     -- every place that takes a task id also takes its alias
     -- (mcp-task-tools.allium: AliasResolvesToTaskId). The id stays the key:
     -- window names (`task-<id>`) and stored references keep using it, so a

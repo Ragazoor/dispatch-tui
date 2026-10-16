@@ -25,21 +25,23 @@ pub(crate) const MAX_ROWS: usize = 8;
 pub struct AgentRow {
     pub id: TaskId,
     pub title: String,
-    /// The word the row leads with; empty falls back to `#<id>`.
-    pub alias: String,
+    /// The word the row leads with, the task's current agent name; empty
+    /// falls back to `#<id>`.
+    pub agent_name: String,
     pub window: TmuxWindow,
     /// Whether this is the pane's own task — marked, dimmed, and not jumpable.
     pub is_own: bool,
 }
 
 impl AgentRow {
-    /// What the row leads with: the alias, or `#<id>` when the task has none
-    /// (`agent-tree.allium: AgentRowShowsAlias`).
+    /// What the row leads with: the agent name, or `#<id>` when the task has no
+    /// current agent
+    /// (`agent-tree.allium: AgentRowShowsAgentName`).
     pub fn label(&self) -> String {
-        if self.alias.is_empty() {
+        if self.agent_name.is_empty() {
             format!("#{}", self.id)
         } else {
-            self.alias.clone()
+            self.agent_name.clone()
         }
     }
 }
@@ -132,7 +134,7 @@ pub(crate) fn test_row(id: i64, own: bool) -> AgentRow {
     AgentRow {
         id: TaskId(id),
         title: format!("task {id}"),
-        alias: String::new(),
+        agent_name: String::new(),
         window: crate::models::test_tmux_window(&format!("task-{id}")),
         is_own: own,
     }
@@ -211,10 +213,10 @@ mod tests {
     // ---- label -----------------------------------------------------------
 
     #[test]
-    fn a_row_with_an_alias_leads_with_it_and_not_the_id() {
+    fn a_row_with_an_agent_name_leads_with_it_and_not_the_id() {
         let mut section = AgentsSection::new();
         section.set_rows(vec![AgentRow {
-            alias: "scar".into(),
+            agent_name: "scar".into(),
             ..row(4941, false)
         }]);
         let out = rendered(&mut section, true, 6);
@@ -223,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn a_row_without_an_alias_leads_with_the_id() {
+    fn a_row_without_an_agent_name_leads_with_the_id() {
         let mut section = AgentsSection::new();
         section.set_rows(vec![row(4941, false)]);
         let out = rendered(&mut section, true, 6);

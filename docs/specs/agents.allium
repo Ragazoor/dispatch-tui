@@ -433,8 +433,8 @@ surface AgentIdentity {
 
     @guarantee AgentRowShowsAgentName
         -- The agent tree's agents section reads `<agent name> <title>` per
-        -- row, in place of today's `<alias> <title>` (agent-tree.allium:
-        -- AgentRowShowsAlias, rewritten by step A3).
+        -- row, in place of the `<alias> <title>` it read before step A3
+        -- (agent-tree.allium: AgentRowShowsAgentName).
 
     @guarantee PromptNamesTheAgent
         -- A dispatched agent's prompt tells it its own name (a line in the
@@ -555,7 +555,7 @@ invariant AgentNameIsNotAnId {
 --     and TaskAliasIsASecondName go. The `alias` column stays in the stored
 --     row, blank and unread, for the same reason as A4's. Do not remove it.
 --
--- Landed: A1 (task #90115), A2 (task #90116).
+-- Landed: A1 (task #90115), A2 (task #90116), A3 (task #90117).
 
 ------------------------------------------------------------
 -- Open questions
