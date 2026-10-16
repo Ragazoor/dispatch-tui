@@ -1894,7 +1894,7 @@ fn wrap_up_skill_runs_retro_between_the_action_choice_and_the_commit() {
         .find("Skill({ skill: \"retro\" })")
         .expect("wrap-up skill must invoke the retro skill");
     let commit_at = content
-        .find("## Step 6: Commit uncommitted changes")
+        .find("## Step 6: Verify, then commit")
         .expect("wrap-up skill must have a commit step to anchor retro before");
     assert!(
         choice_at < retro_at,
@@ -2084,28 +2084,24 @@ fn plugin_hook_scripts_are_executable() {
     }
 }
 
-/// Task #53262: the `wrap_up` tool runs the verify command and refuses on
-/// failure (`WrapUpRefusesUnfinishedWork`), so the skill carries no verify step
-/// of its own — a prose rule the tool enforces is a rule stated twice. The one
-/// exception is the pr path, which pushes before it calls `wrap_up`.
+/// Task #81924: the board no longer runs the verify command
+/// (`AgentsRunTheVerifyCommand`), so the skill sends the agent to run it
+/// before it commits and calls `wrap_up`.
 #[test]
-fn wrap_up_skill_leaves_verification_to_the_tool() {
+fn wrap_up_skill_has_the_agent_run_the_verify_command() {
     let content = skill_body("wrap-up");
     assert!(
-        !content.contains("Run verification"),
-        "the skill must not carry its own verify step — wrap_up runs the command"
+        content.contains("## Step 6: Verify, then commit") && content.contains("`Verify command:`"),
+        "the skill must send the agent to run the get_task verify command before the commit"
     );
     let closing = wrap_up_closing_sequence();
     assert!(
-        closing.contains("failing verify command") && closing.contains("`wrap_up` again"),
-        "the closing sequence must say a verify refusal is fixed and wrap_up called again, \
-         got: {closing}"
+        !closing.contains("failing verify command"),
+        "wrap_up no longer refuses a failing verify command, got: {closing}"
     );
-    let (_, pr) = reference_containing("wrap-up", "### Draft the title and body", "the pr path");
     assert!(
-        pr.contains("Verify command:") && pr.contains("before you push"),
-        "the pr path pushes before wrap_up runs, so its reference must have the agent verify \
-         before pushing, got: {pr}"
+        closing.contains("re-run the verify command"),
+        "the closing sequence must name the re-run after a rebase, got: {closing}"
     );
 }
 

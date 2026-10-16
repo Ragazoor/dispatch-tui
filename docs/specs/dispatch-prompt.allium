@@ -320,10 +320,9 @@ rule ComposeAgentPrompt {
         --
         -- The command reaches the agent through get_task's response (see
         -- GetTaskViaMcp in mcp-task-tools.allium), so it can run the check while
-        -- it works. wrap_up does not rely on that: it runs the command itself
-        -- and refuses on failure (WrapUpRefusesUnfinishedWork in
-        -- mcp-task-tools.allium), so there is no second reminder to keep in
-        -- step.
+        -- it works. The /wrap-up skill sends the agent to run it before wrap_up
+        -- (AgentsRunTheVerifyCommand in mcp-task-tools.allium); the board does
+        -- not, so there is no second reminder to keep in step.
 
     @guarantee ThePromptNamesNoToolMerelyToSayItExists
         -- Dispatch's MCP tools reach the agent as real tool schemas, so prompt

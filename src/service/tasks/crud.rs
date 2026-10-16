@@ -97,11 +97,6 @@ pub struct TaskService {
     pub db: Arc<dyn store::TaskStore>,
     pub(super) clock: Arc<dyn crate::clock::Clock>,
     pub(super) runner: Arc<dyn crate::process::ProcessRunner>,
-    /// The verify runs in flight and the outcomes they recorded. See
-    /// `src/service/tasks/wrap_up.rs::check_wrap_up_ready`.
-    pub(super) verifying: Arc<std::sync::Mutex<super::wrap_up::VerifyBook>>,
-    /// How long one `wrap_up` call waits for a verify run.
-    pub(super) verify_wait: std::time::Duration,
     /// Handles for in-flight `ClosePrOnDone` closes (`spawn_close_attached_pr`),
     /// so a test can wait for a fire-and-forget close to actually finish —
     /// deterministically, rather than sleeping — before asserting on
@@ -128,8 +123,6 @@ impl TaskService {
             db,
             clock: Arc::new(crate::clock::SystemClock),
             runner,
-            verifying: Arc::default(),
-            verify_wait: super::wrap_up::WRAP_UP_VERIFY_WAIT,
             #[cfg(test)]
             background_pr_closes: std::sync::Mutex::new(Vec::new()),
         }

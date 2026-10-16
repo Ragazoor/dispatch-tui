@@ -616,12 +616,13 @@ rule WrapUpRebase {
         -- Reachable only from MCP (the wrap_up tool with action "rebase");
         -- there is no board entry point.
         --
-        -- Verification and the commit check run BEFORE this rule's rebase, in
-        -- the wrap_up tool itself: see WrapUpRefusesUnfinishedWork in
-        -- mcp-task-tools.allium. A dirty worktree or a failing verify command
-        -- refuses the call, so the branch is verified before the rebase starts. (The
-        -- rebased result is not re-verified: see WrapUpRefusesUnfinishedWork.) The
-        -- success response carries no "Verify before exiting" line.
+        -- The commit check runs BEFORE this rule's rebase, in the wrap_up tool
+        -- itself: see WrapUpRefusesUnfinishedWork in mcp-task-tools.allium. A
+        -- dirty worktree refuses the call. The board never runs the verify
+        -- command: the agent ran it before calling wrap_up, and when this
+        -- rebase moved the worktree's HEAD the success response tells it to
+        -- run the command again before exit_session
+        -- (AgentsRunTheVerifyCommand in mcp-task-tools.allium).
         --
         -- The BranchRebased emission belongs to this rule, on the host that
         -- ran the rebase, which is the only rebase path. Its consumer is
@@ -684,10 +685,11 @@ rule WrapUpPr {
         -- wrap-up key and the epic merge queue have both been removed.
         -- Wrap-up is agent-driven through the MCP wrap_up tool only.
         --
-        -- wrap_up(action="pr") runs the verify command itself, before minting
-        -- the token, and refuses on a dirty worktree or a failing command (see
-        -- WrapUpRefusesUnfinishedWork in mcp-task-tools.allium). The response no
-        -- longer asks the agent to verify.
+        -- wrap_up(action="pr") refuses a dirty worktree (see
+        -- WrapUpRefusesUnfinishedWork in mcp-task-tools.allium). It does not run
+        -- the verify command: the agent runs it before it pushes
+        -- (AgentsRunTheVerifyCommand), because the PR is already open by the
+        -- time wrap_up is called.
         --
         -- The same response also carries an unconditional rate_learning nudge,
         -- specified in learnings.allium: WrapUpRateLearningNudge (not repeated
@@ -730,7 +732,7 @@ rule WrapUpDone {
         -- wrap_up(action="done"), then exit_session(token,
         -- action="done") — no git commands.
         --
-        -- wrap_up(action="done") is verified and commit-checked exactly like
+        -- wrap_up(action="done") is commit-checked exactly like
         -- the other two actions (WrapUpRefusesUnfinishedWork in
         -- mcp-task-tools.allium).
 }

@@ -414,10 +414,6 @@ rule ProvisionDispatch {
         -- convention as this repo's other optional external tools
         -- (bubblewrap, socat) rather than its required ones (tmux, git, gh,
         -- claude), which have no such fallback.
-        --
-        -- wrap_up's own verify run follows the same best-effort rule, and
-        -- also leaves a RUSTC_WRAPPER the board already has untouched
-        -- (mcp-task-tools.allium: WrapUpRefusesUnfinishedWork).
 
     @guarantee DevBuildsKeepLineTablesNotFullDebugInfo
         -- The dev profile in Cargo.toml sets `debug = "line-tables-only"`.

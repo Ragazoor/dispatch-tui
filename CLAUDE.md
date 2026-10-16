@@ -92,6 +92,8 @@ POSIX-only. Embeddings/RAG (`src/embeddings.rs`) run **locally** — `fastembed`
 
 Read it from `get_task`'s "Verify command" line, never from this file; how it is stored and surfaced is in [docs/reference.md](docs/reference.md) ("Verify Command").
 
+**You run it, not dispatch.** `wrap_up` does not run or check the verify command; run it in your worktree before you commit and wrap up (the wrap-up skill's Step 6). **If it fails for a reason your change did not cause, including a broken `main`, do not wrap up past it alone and do not just stop.** Coordinate with the other agents and the board: look for a task already fixing it (`list_tasks`, `ListAgents`), and if there is none, propose a fix or create and dispatch a task for it. Use judgement; there is no fixed procedure.
+
 ## Working With the User
 
 The most important thing is to stay aligned with the user. The Allium specs in `docs/specs/` are the shared source of truth that alignment is expressed in — when the spec and your intent agree, you are aligned; when they don't, one of them is wrong and it must be resolved before code is written.

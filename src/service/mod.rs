@@ -24,7 +24,7 @@ pub use services::Services;
 pub use tasks::wrap_up_block_message;
 pub use tasks::{
     CreateTaskParams, ListTasksFilter, ServedDispatch, ServedSession, SessionOutcome, TaskService,
-    UpdateTaskParams, UpdateTaskResult, WrapUpChecks, WRAP_UP_VERIFY_TIMEOUT,
+    UpdateTaskParams, UpdateTaskResult,
 };
 pub use usage::record_usage_event_logged;
 pub use work_packages::{

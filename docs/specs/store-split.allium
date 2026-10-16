@@ -350,7 +350,7 @@
 --           - W2, the wrap_up flow. The MCP handler first runs the
 --             host-local checks, BEFORE writing anything: the task is
 --             wrappable, its worktree names a branch (rebase only), the
---             worktree is committed and the verify command passes
+--             worktree is committed
 --             (WrapUpRefusesUnfinishedWork). A refusal there writes no row
 --             and issues no token. Then it calls request_wrap_up(task, host,
 --             action), host being this board's own. The module checks D11,

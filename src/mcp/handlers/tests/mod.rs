@@ -714,7 +714,7 @@ fn set_verify_command_description_names_the_surfaces_that_carry_the_command() {
         !desc.contains("injected into"),
         "set_verify_command must not claim the command is injected into prompts, got: {desc}"
     );
-    for needle in ["get_task", "wrap_up"] {
+    for needle in ["get_task", "agent"] {
         assert!(
             desc.contains(needle),
             "set_verify_command description must name the '{needle}' surface, got: {desc}"

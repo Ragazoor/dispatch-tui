@@ -387,15 +387,19 @@ macro_rules! task_service_api {
                 reason: String
             ) -> Result<bool, $crate::service::ServiceError>;
 
-            /// The checks `wrap_up` makes before it acts: the worktree is
-            /// committed and the repo's verify command, if any, passes in it.
-            /// `Err(Validation)` is the refusal message.
+            /// The check `wrap_up` makes before it acts: the worktree is
+            /// committed. `Err(Validation)` is the refusal message.
             /// `WrapUpRefusesUnfinishedWork` in
             /// `docs/specs/mcp-task-tools.allium`.
             async fn check_wrap_up_ready(
                 &self,
                 task: $crate::models::Task
-            ) -> Result<$crate::service::WrapUpChecks, $crate::service::ServiceError>;
+            ) -> Result<(), $crate::service::ServiceError>;
+
+            /// The commit the worktree is at, or `None` when git cannot say.
+            /// `AgentsRunTheVerifyCommand` in
+            /// `docs/specs/mcp-task-tools.allium`.
+            async fn worktree_head(&self, worktree: String) -> Option<String>;
 
             /// Kill the tmux window a closed session left behind. Keeps the
             /// only tmux call the MCP layer needs behind the service boundary

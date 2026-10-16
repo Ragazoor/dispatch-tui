@@ -644,8 +644,9 @@ pub async fn prepare_inputs(
 /// Fetch the verify command for a repository path from the settings store.
 ///
 /// Called by `get_task` (its "Verify command" line) and by the `wrap_up`
-/// handler, which runs it and refuses on failure. No prompt builder reads it, so
-/// this has no caller on a dispatch path despite living here. Returns `None`
+/// handler, which only checks whether a rebase answer should tell the agent to
+/// re-run it. No prompt builder reads it, so this has no caller on a dispatch
+/// path despite living here. Returns `None`
 /// when no verify command is configured.
 pub async fn fetch_verify_command(
     db: &dyn crate::store::TaskReadStore,

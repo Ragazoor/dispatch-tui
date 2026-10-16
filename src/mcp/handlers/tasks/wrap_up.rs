@@ -5,7 +5,6 @@ use crate::mcp::McpState;
 use crate::models::{
     SessionRequest, SessionRequestId, SessionRequestKind, SessionRequestState, Task, TaskId,
 };
-use crate::service::WrapUpChecks;
 use crate::store::SessionRequestAnswer;
 
 use super::{
@@ -26,13 +25,15 @@ fn exit_instruction(action: WrapUpAction) -> String {
     )
 }
 
-/// The sentence reporting that `wrap_up` itself ran the verify command, or
-/// nothing when the repo has none. The agent is not asked to verify: the tool
-/// already did, and refused otherwise (`WrapUpRefusesUnfinishedWork` in
-/// `docs/specs/mcp-task-tools.allium`).
-fn verified_line(checks: &WrapUpChecks) -> String {
-    match &checks.verified {
-        Some(cmd) => format!(" Verified: `{cmd}` passed in your worktree."),
+/// The line telling the agent to run the repo's verify command again, or
+/// nothing. The board never runs the command; this is the one moment it names
+/// it (`AgentsRunTheVerifyCommand` in `docs/specs/mcp-task-tools.allium`).
+fn rerun_line(command: Option<&str>) -> String {
+    match command {
+        Some(cmd) => format!(
+            " The rebase moved your branch onto new commits. Re-run `{cmd}` in your worktree \
+             before `exit_session`, and fix any failure first."
+        ),
         None => String::new(),
     }
 }
@@ -40,7 +41,7 @@ fn verified_line(checks: &WrapUpChecks) -> String {
 /// Checks the task is wrappable, returning the JSON-RPC error response to
 /// return immediately if not. The module checks it again when the request is
 /// written; this is the early refusal, with the same wording, before the
-/// commit and verify checks (`ReviewTasksAreNotWrappedUp`).
+/// commit check (`ReviewTasksAreNotWrappedUp`).
 async fn validate_wrap_up_request(
     state: &McpState,
     id: &Option<Value>,
@@ -53,18 +54,17 @@ async fn validate_wrap_up_request(
         .map_err(|e| service_err_to_response(id.clone(), e))
 }
 
-/// The success response of a wrap-up whose request row is done: report the
-/// verification, hand over the row's id as the exit token recording `action`,
-/// and name the exit_session call. Only the surrounding prose differs per
-/// action.
+/// The success response of a wrap-up whose request row is done: hand over the
+/// row's id as the exit token recording `action`, and name the exit_session
+/// call. Only the surrounding prose differs per action. `verify_line` is empty
+/// unless a rebase moved the branch and the repo has a verify command.
 fn wrap_up_complete(
     id: Option<Value>,
     task_id: TaskId,
-    checks: &WrapUpChecks,
+    verify_line: &str,
     action: WrapUpAction,
     token: SessionRequestId,
 ) -> JsonRpcResponse {
-    let verify_line = verified_line(checks);
     let exit_line = exit_instruction(action);
     let tail = match action {
         WrapUpAction::Rebase => {
@@ -125,6 +125,14 @@ async fn wait_for_session_request(
     }
 }
 
+/// What a rebase answer needs to tell whether the rebase moved the branch: the
+/// repo's verify command and where the worktree stood before the rebase.
+struct BranchWatch {
+    worktree: String,
+    verify_command: String,
+    head_before: String,
+}
+
 /// Shapes the outcome of a rebase request row (`WrapUpRebase` in
 /// `docs/specs/pr-workflow.allium`) into a JSON-RPC response. The git work, the
 /// `Conflict` sub_status and the report are this board's host and the module's;
@@ -133,7 +141,7 @@ async fn answer_rebase(
     state: &McpState,
     id: Option<Value>,
     task_id: TaskId,
-    checks: &WrapUpChecks,
+    watch: Option<BranchWatch>,
     request: SessionRequestId,
     changes: &mut tokio::sync::watch::Receiver<u64>,
 ) -> JsonRpcResponse {
@@ -143,7 +151,16 @@ async fn answer_rebase(
     state.notify_task_changed(task_id);
     match row {
         Some(row) if row.state == SessionRequestState::Done => {
-            wrap_up_complete(id, task_id, checks, WrapUpAction::Rebase, request)
+            // The rebase moved the branch when HEAD is not where it was.
+            let line = match watch {
+                Some(w) => {
+                    let after = state.task_svc.worktree_head(w.worktree).await;
+                    let moved = after.is_some_and(|h| h != w.head_before);
+                    rerun_line(moved.then_some(w.verify_command.as_str()))
+                }
+                None => String::new(),
+            };
+            wrap_up_complete(id, task_id, &line, WrapUpAction::Rebase, request)
         }
         Some(row) if row.state == SessionRequestState::Failed => {
             let reason = row
@@ -192,8 +209,7 @@ pub(crate) async fn handle_wrap_up(
 
     // For rebase the worktree path names a branch (the rebase needs one):
     // refused as a bad request rather than reported as a failed rebase, and
-    // before the commit check and the verify run (`store-split.allium` W2), so a
-    // rebase that cannot work costs no verify run.
+    // before the commit check (`store-split.allium` W2).
     if parsed.action == WrapUpAction::Rebase {
         let worktree = task.worktree.clone().unwrap_or_default();
         if crate::dispatch::branch_from_worktree(&worktree).is_none() {
@@ -205,11 +221,35 @@ pub(crate) async fn handle_wrap_up(
         }
     }
 
-    // The host-local checks, before anything is written: a refusal here writes
+    // The host-local check, before anything is written: a refusal here writes
     // no request row and issues no token. `WrapUpRefusesUnfinishedWork`.
-    let checks = match state.task_svc.check_wrap_up_ready(task.clone()).await {
-        Ok(c) => c,
-        Err(e) => return service_err_to_response(id, e),
+    if let Err(e) = state.task_svc.check_wrap_up_ready(task.clone()).await {
+        return service_err_to_response(id, e);
+    }
+
+    // For a rebase, where the branch stands now, so the answer can tell
+    // whether the rebase moved it. Only read when a verify command makes the
+    // difference matter.
+    let watch = match parsed.action {
+        WrapUpAction::Rebase => {
+            let worktree = task.worktree.clone().unwrap_or_default();
+            let command = crate::dispatch::fetch_verify_command(&*state.db, &task.repo_path).await;
+            match command {
+                Some(verify_command) => {
+                    state
+                        .task_svc
+                        .worktree_head(worktree.clone())
+                        .await
+                        .map(|head_before| BranchWatch {
+                            worktree,
+                            verify_command,
+                            head_before,
+                        })
+                }
+                None => None,
+            }
+        }
+        WrapUpAction::Done | WrapUpAction::Pr => None,
     };
 
     // Subscribed BEFORE the request is written, so no change to the row can
@@ -230,10 +270,10 @@ pub(crate) async fn handle_wrap_up(
     match parsed.action {
         // No host work: the module wrote the row already done.
         WrapUpAction::Done | WrapUpAction::Pr => {
-            wrap_up_complete(id, task.id, &checks, parsed.action, request)
+            wrap_up_complete(id, task.id, "", parsed.action, request)
         }
         WrapUpAction::Rebase => {
-            answer_rebase(state, id, task.id, &checks, request, &mut changes).await
+            answer_rebase(state, id, task.id, watch, request, &mut changes).await
         }
     }
 }

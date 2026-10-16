@@ -108,25 +108,17 @@ async fn assert_no_token(state: &McpState, task_id: crate::models::TaskId) {
     );
 }
 
-/// A runner scripted for the checks `wrap_up` makes before it acts, then
-/// whatever `after` answers. `status` is what `git status --porcelain` prints;
-/// `verify` is the reply to the verify command, or `None` when the repo has no
-/// verify command and so no call is made. With a verify command the commit
-/// check is followed by the `git rev-parse HEAD` that keys the outcome memory
-/// (`HEAD_A`).
+/// A runner scripted for the one check `wrap_up` makes before it acts (the
+/// commit check; `status` is what `git status --porcelain` prints), then
+/// whatever `after` answers.
 fn checked_runner(
     status: &str,
-    verify: Option<anyhow::Result<std::process::Output>>,
     after: Vec<(
         Option<std::time::Duration>,
         anyhow::Result<std::process::Output>,
     )>,
 ) -> Arc<MockProcessRunner> {
     let mut responses = vec![(None, MockProcessRunner::ok_with_stdout(status.as_bytes()))];
-    if let Some(v) = verify {
-        responses.push((None, MockProcessRunner::ok_with_stdout(HEAD_A.as_bytes())));
-        responses.push((None, v));
-    }
     responses.extend(after);
     Arc::new(MockProcessRunner::new_with_delays(responses))
 }
@@ -149,4 +141,3 @@ mod exit_session;
 mod notifications;
 mod ready_checks;
 mod request_flow;
-mod verify;

@@ -1,6 +1,6 @@
 # The PR path
 
-Do all of this after the commit (Step 6) and before the closing sequence (Step 7), then close with `action="pr"`. `wrap_up` runs the verify command, but only after the PR exists, so first run the `Verify command:` line from `get_task` (if it has one) in your worktree and fix any failure before you push. You are writing a real PR whose title and body reflect the actual work; dispatch does not author it.
+Do all of this after the commit (Step 6) and before the closing sequence (Step 7), then close with `action="pr"`. Step 6 has already run the verify command; if you changed code since, run the `Verify command:` line from `get_task` again before you push. You are writing a real PR whose title and body reflect the actual work; dispatch does not author it.
 
 ### Inspect what changed
 

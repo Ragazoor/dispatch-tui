@@ -1,13 +1,13 @@
 ---
 name: wrap-up
-description: Use to finish a dispatch task and close its session — whenever work in a dispatch worktree is complete and the user says to wrap up, finish, close out, finalise, or "we're done here", even if they don't name this skill. The user first chooses one of three paths: rebase onto the task's base_branch (dispatch-driven), author and open a draft GitHub PR yourself (you write the title and body), or done with no git operations. It then runs the retro, commits remaining changes, and calls wrap_up, which checks the commit and runs the repo's verify command itself. Always use this rather than calling wrap_up/exit_session by hand — the path must be settled before the retro, and the retro must run before the commit.
+description: Use to finish a dispatch task and close its session — whenever work in a dispatch worktree is complete and the user says to wrap up, finish, close out, finalise, or "we're done here", even if they don't name this skill. The user first chooses one of three paths: rebase onto the task's base_branch (dispatch-driven), author and open a draft GitHub PR yourself (you write the title and body), or done with no git operations. It then runs the retro, commits remaining changes, and runs the repo's verify command, commits, and calls wrap_up, which checks the commit. Always use this rather than calling wrap_up/exit_session by hand — the path must be settled before the retro, and the retro must run before the commit.
 ---
 
 # Wrap Up
 
-choose the action → `/retro` → commit → `wrap_up(action)` → `exit_session(token, action, ...)`.
+choose the action → `/retro` → verify → commit → `wrap_up(action)` → `exit_session(token, action, ...)`.
 
-`wrap_up` refuses an uncommitted worktree and a failing verify command, so there is no verify step here, except before pushing on the pr path (`references/pr.md`). `exit_session` is mandatory on every path: without it the task does not move and the session does not close.
+`wrap_up` refuses an uncommitted worktree but does not run the verify command: you do, in Step 6. `exit_session` is mandatory on every path: without it the task does not move and the session does not close.
 
 - **rebase** — dispatch rebases and fast-forwards `{base_branch}`; `exit_session` marks the task Done and kills your tmux window.
 - **pr** — you do it; read `references/pr.md` when this path is chosen. Write a real title and body from the diff and run `gh pr create --draft`.
@@ -59,7 +59,9 @@ On cancel, exit without calling any tool.
 
 Run `Skill({ skill: "retro" })` and tell it which action you are wrapping up with. It runs after the action is settled (on `done` a fix would be stranded, so retro files a task instead) and before the commit (so its fixes travel with your work). Leave the follow-up tasks it files alone.
 
-## Step 6: Commit uncommitted changes
+## Step 6: Verify, then commit
+
+If `get_task` printed a `Verify command:` line, run it in your worktree now, whatever the path, and fix any failure before you go on (on the pr path this is also what keeps a red build out of the push). Dispatch does not run it for you and does not check that you did. If it fails for a reason your change did not cause, do not wrap up past it alone: coordinate with other agents and the board, as `CLAUDE.md` says.
 
 Run `git status --porcelain`. If it is not clean, `git add` the relevant files by name, review `git diff --cached`, and `git commit -m "..."` with a short message. `wrap_up` refuses a dirty worktree.
 
@@ -68,5 +70,5 @@ Run `git status --porcelain`. If it is not clean, `git add` the relevant files b
 Run these back to back in one turn; any pause risks going idle with `{base_branch}` already fast-forwarded and the task still in its old status.
 
 1. **Rate retrieved knowledge.** `rate_learning(learning_id, task_id, verdict)` for each entry from "## Validated knowledge for this task" or `query_learnings` that you acted on and have not rated: `helped` if you applied it, `wrong` if it misled you (or `delete_learning` if clearly wrong). See the `learnings` skill.
-2. **`wrap_up(task_id, action)`.** It returns an **Exit token**. If it refuses — uncommitted changes, a failing verify command, a rebase conflict — show the user the exact message. For a verify failure or a dirty tree, fix it, commit (Step 6) and call `wrap_up` again; for a conflict, suggest resolution steps. Any other refusal (a backlog or review-tagged task, no worktree, the main checkout not on `{base_branch}`): show the exact message and stop. Do not call `exit_session` without a token.
+2. **`wrap_up(task_id, action)`.** It returns an **Exit token**. After a rebase, if its response tells you to re-run the verify command, do that and commit any fix before `exit_session`. If it refuses — uncommitted changes, a rebase conflict — show the user the exact message. For a dirty tree, commit (Step 6) and call `wrap_up` again; for a conflict, suggest resolution steps. Any other refusal (a backlog or review-tagged task, no worktree, the main checkout not on `{base_branch}`): show the exact message and stop. Do not call `exit_session` without a token.
 3. **`exit_session(task_id, token, action)`**, plus `pr_url` on the pr path only. Make it your final action. If it errors, or succeeds but reports that the close did not take effect, read `references/exit-session-errors.md` before reacting.

@@ -14,7 +14,6 @@ pub use crud::{wrap_up_block_message, TaskService, UpdateTaskResult};
 pub use dispatch::ServedDispatch;
 pub use params::{CreateTaskParams, ListTasksFilter, UpdateTaskParams};
 pub use session::{ServedSession, SessionOutcome};
-pub use wrap_up::{WrapUpChecks, WRAP_UP_VERIFY_TIMEOUT, WRAP_UP_VERIFY_WAIT};
 
 #[cfg(test)]
 mod tests;

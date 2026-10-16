@@ -27,16 +27,6 @@ config {
     -- reached through nextCursor (ListContextResourcesViaMcp).
     context_list_page_size: Integer = 50
 
-    -- How long wrap_up lets the repository's verify command run before it
-    -- counts as failed (WrapUpRefusesUnfinishedWork).
-    wrap_up_verify_timeout: Duration = 15.minutes
-
-    -- How long one wrap_up call waits on its verify run before refusing with
-    -- "still running" and leaving the run going (WrapUpRefusesUnfinishedWork).
-    -- Must stay below the agent's own tool-call timeout (about 60s), so the
-    -- call answers before the agent's client gives up on it.
-    wrap_up_verify_wait: Duration = 45.seconds
-
     -- How long dispatch_task waits on its dispatch request before returning
     -- the request id and its pending state (DispatchTaskViaMcp). Shorter than
     -- the request's own deadline (store-split.allium:
@@ -919,12 +909,10 @@ rule GetTaskViaMcp {
         -- pr_learnings_gate_shown_at).
         --
         -- [Verify command] is not a Task field: it is task.repo_path resolved
-        -- against core/SavedRepoPath.verify_command, the same lookup wrap_up
-        -- performs when it runs the command itself (WrapUpRefusesUnfinishedWork).
-        -- Omitted when no verify_command is set for the repo. The line lets an
-        -- agent run the command while it works, so a refusal at wrap_up is not
-        -- its first sight of a failure; wrap_up does not depend on the agent
-        -- having run it. See also ThePromptCarriesNoVerifyCommand in
+        -- against core/SavedRepoPath.verify_command.
+        -- Omitted when no verify_command is set for the repo. The line is how
+        -- the agent learns the command it runs itself, while it works and
+        -- before wrap_up (AgentsRunTheVerifyCommand); the board never runs it. See also ThePromptCarriesNoVerifyCommand in
         -- dispatch-prompt.allium.
         -- An unknown task_id is a not-found condition, not a validation one:
         -- ServiceError::NotFound surfaces as the -32001 not-found code, the
@@ -1280,24 +1268,18 @@ rule WrapUpViaMcp {
     -- test that derives the review set from TaskTag::ALL fails on a new review
     -- tag and sends whoever added it here (core.allium: "THE REVIEW SET").
     requires: task.tag not in {pr_review, dependabot, release_please}
-    -- WrapUpRefusesUnfinishedWork, below: the worktree is committed and the
-    -- repository's verify command, when it has one, exits 0 in the worktree.
-    -- Both are checked before the action runs, and before any request is
-    -- written, so a refusal has no side effect and issues no token.
-    -- Both are observations of the worktree made by running a subprocess, so
-    -- they are named by the guarantee rather than modelled as fields:
-    -- `worktree_is_committed` is "git status --porcelain prints nothing"
-    -- (untracked files count), and `verify_passes` is "the command named by
-    -- core/SavedRepoPath.verify_command for task.repo_path, run in the
-    -- worktree, exits 0 within config.wrap_up_verify_timeout" — true when the
-    -- repository has no verify command. A pass this board already recorded
-    -- for the same task, HEAD commit and command counts without a new run
-    -- (the verify outcome memory in WrapUpRefusesUnfinishedWork).
+    -- WrapUpRefusesUnfinishedWork, below: the worktree is committed. Checked
+    -- before the action runs, and before any request is written, so a refusal
+    -- has no side effect and issues no token. It is an observation of the
+    -- worktree made by running a subprocess, so it is named by the guarantee
+    -- rather than modelled as a field: `worktree_is_committed` is "git status
+    -- --porcelain prints nothing" (untracked files count). The repository's
+    -- verify command is NOT checked here: the agent runs it itself
+    -- (AgentsRunTheVerifyCommand).
     requires: worktree_is_committed(task.worktree)
-    requires: verify_passes(task)
 
     -- For rebase, the worktree path names a branch (the rebase needs one).
-    -- Checked here, after the two checks above and before any request is
+    -- Checked here, after the commit check above and before any request is
     -- written, so an underivable branch is refused as a bad request
     -- ("Cannot derive branch from worktree: <path>", INVALID_PARAMS) rather
     -- than reported as a failed rebase. done and pr need no branch.
@@ -1335,7 +1317,7 @@ rule WrapUpViaMcp {
         -- == The request, then a wait (store-split M5) ==
         -- The tool checks the request first, in today's order: wrappable
         -- (running or review, a worktree, ReviewTasksAreNotWrappedUp), then
-        -- WrapUpRefusesUnfinishedWork (commit, then verify), then for rebase
+        -- WrapUpRefusesUnfinishedWork (commit), then for rebase
         -- the branch. Only then does it call request_wrap_up. It subscribes to the request rows' changes BEFORE
         -- writing, so no change to the row is missed, and answers:
         --   - refused by the module (not running or review, no worktree, a
@@ -1363,12 +1345,13 @@ rule WrapUpViaMcp {
         --     and saying no token was issued and to call wrap_up again; a
         --     second request is refused while the first is still open.
         -- The success texts are today's: the action, that the session is NOT
-        -- yet closed, the verified line, "Exit token: <id>" with the
+        -- yet closed, "Exit token: <id>" with the
         -- exit_session instruction naming the action (and pr_url for pr),
         -- the rate_learning nudge for pr (learnings.allium:
         -- WrapUpRateLearningNudge), "No git operations performed." for done,
         -- and for rebase the warning that without exit_session the window
-        -- stays alive.
+        -- stays alive, plus, when the rebase moved the worktree's HEAD and the
+        -- repo has a verify command, the line from AgentsRunTheVerifyCommand.
         -- The /wrap-up skill runs the /retro skill before its commit step,
         -- ahead of wrap_up, so any agent-context fix retro makes is committed
         -- with the session's work rather than stranded after the rebase.
@@ -1398,106 +1381,61 @@ rule WrapUpViaMcp {
         -- agent could misuse to do it anyway.
 
     @guarantee WrapUpRefusesUnfinishedWork
-        -- Skipping a wrap-up step is how agents went idle with the branch
-        -- unmerged or shipped code that did not pass, so the two steps a tool
-        -- can check are enforced by the tool, not by the /wrap-up skill's prose.
+        -- Skipping the commit is how agents went idle with work stranded on
+        -- an uncommitted tree, so the step a tool can check cheaply is
+        -- enforced by the tool, not by the /wrap-up skill's prose.
         --
-        -- 1. Commit. `git status --porcelain` in the task's worktree must be
-        --    empty, untracked files included. A status that cannot be read (git
-        --    fails or exits non-zero) refuses too: the check fails closed. Otherwise wrap_up is refused, naming the uncommitted paths
-        --    (at most a short list, then a count) and saying to commit them and
-        --    call wrap_up again. This also makes the retro/commit ORDER hold in
-        --    the one way observable from here: a retro fix left uncommitted
-        --    blocks the call instead of being stranded after the rebase.
-        -- 2. Verify. When the task's repo has a verify command, wrap_up runs it
-        --    itself, in the worktree, bounded by config.wrap_up_verify_timeout. A
-        --    non-zero exit or a timeout refuses the call with the command and the
-        --    outcome and no token; a non-zero exit also carries the tail of the
-        --    command's output (a timed-out run's partial output is not kept). The agent fixes the cause,
-        --    commits, and calls wrap_up again. No verify command: this step is a
-        --    no-op, exactly as before.
+        -- Commit. `git status --porcelain` in the task's worktree must be
+        -- empty, untracked files included. A status that cannot be read (git
+        -- fails or exits non-zero) refuses too: the check fails closed.
+        -- Otherwise wrap_up is refused, naming the uncommitted paths (at most
+        -- a short list, then a count) and saying to commit them and call
+        -- wrap_up again. This also makes the retro/commit ORDER hold in the
+        -- one way observable from here: a retro fix left uncommitted blocks
+        -- the call instead of being stranded after the rebase.
         --
-        --    The verify command runs with its standard input closed (/dev/null),
-        --    never the board's terminal. The board runs it, so an inherited
-        --    stdin is the board's own tty: anything in the verify run that
-        --    reads it (a test that reaches an interactive prompt) blocks until
-        --    the timeout and takes the operator's keystrokes from the board
-        --    while it waits. The same holds for every bounded child the board
-        --    spawns without a payload to write (git, tmux): none is ever handed
-        --    the board's terminal.
+        -- Refused wrap-ups are INVALID_PARAMS errors, as for a backlog task. A
+        -- dirty tree changes no task state.
         --
-        --    The verify run gets RUSTC_WRAPPER=sccache in its environment when
-        --    `sccache` resolves on the board's PATH and RUSTC_WRAPPER is not
-        --    already set there: the same best-effort rule, for the same reason,
-        --    as an agent launch (dispatch.allium:
-        --    DispatchedAgentsShareASccacheNotATargetDir). Absent, the run
-        --    proceeds without it; a value the board already has is kept.
-        --
-        --    Verify outcome memory. The board remembers the outcome of each
-        --    finished verify run, keyed by (task, HEAD commit of the worktree,
-        --    verify command text). The memory is host-local and in memory
-        --    only: it is not written to the shared store, another board never
-        --    sees it, and a board restart forgets it. A run that hit
-        --    config.wrap_up_verify_timeout is recorded as a fail. Because the
-        --    key names the commit and the command, a new commit or a changed
-        --    command is a different key, so an outcome never applies to a
-        --    tree, or a command, it was not produced by.
-        --
-        --    Once the commit check has passed (the tree is clean, so HEAD is
-        --    the tree), wrap_up looks the key up:
-        --      - a recorded pass: no run; the step passes and the success
-        --        response reports verification as passed, as after a run.
-        --      - a recorded fail: no run; refused with the same refusal text
-        --        and output tail the original run produced, no token.
-        --      - nothing recorded and no run in flight for this task: a run
-        --        starts.
-        --      - a run in flight for this task with the SAME key: the call
-        --        joins it rather than starting another or refusing.
-        --      - a run in flight for this task with a DIFFERENT key (the agent
-        --        committed, or the command changed, since it started): not
-        --        joined, and no second run is started beside it. Refused with
-        --        "Verify is still running … call wrap_up again", no token,
-        --        until that run finishes; the next call then finds no run in
-        --        flight and starts one for its own key.
-        --    A started or joined run is awaited for at most
-        --    config.wrap_up_verify_wait. Finished within it: pass or refuse
-        --    as above. Still going when the wait ends: refused with "Verify is
-        --    still running … call wrap_up again", no token. The run carries on
-        --    and its outcome is recorded, so the next wrap_up on the same
-        --    commit and command joins it while it runs, or reads its outcome
-        --    once it has finished, instead of running verify again. One verify
-        --    run per task at a time still holds: without it, each retry of a
-        --    call that gave up stacked another full verify run beside the ones
-        --    still going.
-        --
-        -- Order: the commit check runs first (a dirty tree makes a verify result
-        -- meaningless, and it is cheap), then verify, then the action. Applies
-        -- to all three actions, so a pr or done wrap-up is verified too — the
-        -- same coverage the skill's verify step gave. The rebase's own
-        -- pull/rebase can still change the code afterwards, and nothing then
-        -- verifies the rebased result before it is fast-forwarded; the response no longer asks the
-        -- agent to re-verify, because the tool now owns verification and an
-        -- instruction to repeat it was a prose rule the tool could not enforce.
-        --
-        -- The pr action is the one place this runs too late to protect the
-        -- remote: the agent pushes and opens the PR before it calls wrap_up(pr).
-        -- The pr reference file therefore has the agent run the get_task
-        -- "Verify command" before pushing; wrap_up(pr) is the backstop.
-        --
-        -- The success response therefore carries no "Verify before exiting"
-        -- line. It states that verification passed when a command ran, in
-        -- this call or in an earlier run whose pass the board remembers.
-        --
-        -- What is NOT enforced: that /retro ran. A retro leaves no trace the
+        -- What is NOT enforced: that /retro ran, and that the verify command
+        -- passed (AgentsRunTheVerifyCommand). A retro leaves no trace the
         -- tool can read (it may change nothing), so requiring it would need a
         -- marker the agent sets itself, which is the same honour system as the
         -- prose. It stays one line in the skill; only its fixes are held to the
         -- commit check above. Choosing the action first stays in the skill for
         -- the same reason: it is a question for the user, not a state of the
         -- repository.
+
+    @guarantee AgentsRunTheVerifyCommand
+        -- The board never runs a repository's verify command. The agent runs
+        -- it, in its own worktree, with its own shell: a long test run is
+        -- then not bounded by the agent's tool-call timeout, the board spends
+        -- no time or memory on it, and there is no board-side verify state
+        -- (no timeout, no wait cap, no outcome memory, no stdin or sccache
+        -- handling for it). wrap_up does not check that the command passed
+        -- and issues a token whether or not it did: the board trusts the
+        -- agent (task #81924).
         --
-        -- Refused wrap-ups are INVALID_PARAMS errors, as for a backlog task. A
-        -- failed verify or dirty tree changes no task state.
+        -- The command reaches the agent through get_task's "Verify command"
+        -- line (GetTaskViaMcp), and the /wrap-up skill has a step that sends
+        -- the agent to run it, fix failures and commit BEFORE it calls
+        -- wrap_up. On the pr path that step comes before the push.
+        --
+        -- One case is named just in time in wrap_up's rebase response: when
+        -- the rebase moved the worktree's HEAD (the base branch had commits
+        -- the branch lacked, so the branch was rewritten on top of them) and
+        -- the task's repo has a verify command, the success text adds a line
+        -- naming the command and telling the agent to re-run it before
+        -- exit_session. A rebase that left HEAD where it was, a done or pr
+        -- action, and a repo with no verify command add no such line. The
+        -- board does not run the command or check the result.
+        --
+        -- When the verify command fails for a reason the agent did not
+        -- cause, including a broken base branch, no fixed procedure is
+        -- specified. The repository's CLAUDE.md tells agents to coordinate
+        -- with other agents and the board (look for a task already fixing
+        -- it, otherwise propose or create one) rather than wrapping up past a
+        -- red result alone.
 
     @guarantee ReviewTasksAreNotWrappedUp
         -- A review-tagged task is refused, whatever its status and whatever
@@ -1557,7 +1495,7 @@ rule WrapUpViaMcp {
         -- dependabot or release_please; store-split.allium: RequestWrapUp,
         -- W2), so no client can wrap one
         -- up. The tool may still check it first, as an early refusal before
-        -- the commit and verify checks, with the same wording.
+        -- the commit check, with the same wording.
         --
         -- The refusal is also REPORTED by GetTaskViaMcp, on a "Wrap-up:
         -- refused — …" line carrying the same sentence. wrap_up is the last
@@ -1703,14 +1641,14 @@ rule SetVerifyCommandViaMcp {
         -- with JSON-RPC -32602 (invalid params) before reaching the DB,
         -- which would otherwise surface the constraint as -32603.
         -- Nothing nudges an agent to call this tool: exit_session carries no
-        -- prompt about it, and wrap_up only runs an already-recorded command
-        -- (WrapUpRefusesUnfinishedWork). Recording a verify command is an explicit act by
+        -- prompt about it, and the agent only runs an already-recorded command
+        -- (AgentsRunTheVerifyCommand). Recording a verify command is an explicit act by
         -- an agent or operator (see the `dispatch repo set-verify` CLI above).
         --
         -- == The tool description does not claim prompt injection ==
         -- The description states that the command never appears in a dispatch
         -- prompt, names the surface that does carry it (get_task's "Verify
-        -- command" line) and says wrap_up runs it itself. It said the opposite for a time — that the command
+        -- command" line) and says the agent runs it itself. It said the opposite for a time — that the command
         -- was injected into future agent prompts — which contradicts the
         -- prompt-assembly rule in dispatch-prompt.allium and sends the one reader who
         -- needs the command looking on the single surface that never carries

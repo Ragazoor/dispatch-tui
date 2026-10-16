@@ -563,11 +563,11 @@ async fn wrap_up_without_verdicts_still_succeeds() {
 }
 
 // ---------------------------------------------------------------------------
-// wrap_up verify reminder tests
+// wrap_up verify line tests
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn wrap_up_success_omits_verify_reminder_when_unconfigured() {
+async fn wrap_up_success_omits_verify_line_when_unconfigured() {
     let (state, db) = make_state_with_runner(rebase_ok_runner()).await;
     let task_id = create_wrappable_task(&db).await;
 
@@ -583,8 +583,8 @@ async fn wrap_up_success_omits_verify_reminder_when_unconfigured() {
 
     let text = extract_response_text(&resp);
     assert!(
-        !text.contains("Verify before"),
-        "Expected no 'Verify before' in unconfigured response, got: {text}"
+        !text.contains("Re-run"),
+        "Expected no re-run line in unconfigured response, got: {text}"
     );
     assert!(
         text.contains("exit_session"),
