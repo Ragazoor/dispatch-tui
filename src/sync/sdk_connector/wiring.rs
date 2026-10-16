@@ -8,12 +8,12 @@ use super::subtree_queries;
 use super::SpacetimeSdkConnector;
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
-    DbConnection, DispatchRequestsTableAccess as _, EpicsTableAccess as _, HostsTableAccess as _,
-    LearningRetrievalsTableAccess as _, LearningsTableAccess as _, PollOwnersTableAccess as _,
-    RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _, RetiredFeedItemsTableAccess as _,
-    SessionRequestsTableAccess as _, SettingsTableAccess as _, SubscriptionHandle,
-    SubscriptionsTableAccess as _, TasksTableAccess as _, UsageEventsTableAccess as _,
-    WorkPackageLinksTableAccess as _, WorkPackagesTableAccess as _,
+    AgentsTableAccess as _, DbConnection, DispatchRequestsTableAccess as _, EpicsTableAccess as _,
+    HostsTableAccess as _, LearningRetrievalsTableAccess as _, LearningsTableAccess as _,
+    PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
+    RetiredFeedItemsTableAccess as _, SessionRequestsTableAccess as _, SettingsTableAccess as _,
+    SubscriptionHandle, SubscriptionsTableAccess as _, TasksTableAccess as _,
+    UsageEventsTableAccess as _, WorkPackageLinksTableAccess as _, WorkPackagesTableAccess as _,
 };
 use crate::sync::subtree::SubtreeCover;
 
@@ -199,6 +199,14 @@ impl SpacetimeSdkConnector {
             upsert_session_request,
             remove_session_request,
             |row: &bindings::SessionRequest| row.id
+        );
+        wire!(
+            self,
+            db,
+            agents,
+            upsert_agent,
+            remove_agent,
+            |row: &bindings::Agent| crate::models::AgentId(row.id)
         );
     }
 

@@ -137,6 +137,47 @@ async fn rows_that_only_describe_a_dropped_task_are_dropped_with_it() {
     assert_eq!(report.dropped(SharedTable::TaskSubagents), 1);
 }
 
+/// `DependentsOfDroppedRowsAreDropped`, for agents: an agent of a dropped
+/// task goes with it, and its name stays in the ledger
+/// (`agents.allium: AgentNameIsNeverReused`).
+#[tokio::test]
+async fn an_agent_of_a_dropped_task_is_dropped_and_its_name_kept() {
+    let mut source = snapshot_of_a_populated_board().await;
+    archive(&mut source, SharedTable::Tasks, 3); // worked by agent 1, "ada"
+    let target = store_for(&source);
+
+    let report = import_old_store(&target, &source, OPERATOR).await.unwrap();
+
+    assert!(rows(&target, SharedTable::Agents).await.is_empty());
+    assert_eq!(report.dropped(SharedTable::Agents), 1);
+    assert_eq!(
+        rows(&target, SharedTable::HandedOutAgentNames).await.len(),
+        1
+    );
+}
+
+/// `ImportOldStore` keeps `CurrentAgentTracksWorktree`: once its rows are
+/// written it asks the store for the agent backfill, exactly once.
+#[tokio::test]
+async fn an_import_asks_the_store_for_the_agent_backfill() {
+    let source = snapshot_of_a_populated_board().await;
+    let target = store_for(&source);
+
+    import_old_store(&target, &source, OPERATOR).await.unwrap();
+
+    assert_eq!(target.agent_backfills(), 1);
+}
+
+/// A refused import writes nothing, the backfill included.
+#[tokio::test]
+async fn a_refused_import_asks_for_no_backfill() {
+    let source = snapshot_of_a_populated_board().await;
+    let target = MemoryStore::new();
+
+    assert!(import_old_store(&target, &source, OPERATOR).await.is_err());
+    assert_eq!(target.agent_backfills(), 0);
+}
+
 /// `DependentsOfDroppedRowsAreDropped`, for work package links: a link to a
 /// dropped task or epic names nothing, and the package itself stays.
 #[tokio::test]

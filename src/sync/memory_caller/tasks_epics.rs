@@ -31,7 +31,10 @@ impl MemoryReducerCaller {
         Self::ensure_alias(tables, &mut row)?;
         let id = Self::assign_id(row.id, &mut tables.next_task_id);
         row.id = id;
-        tables.tasks.insert(id, row.clone());
+        let prior = tables.tasks.insert(id, row.clone());
+        // Mirrors the module's `write_task`: CurrentAgentMirrorsTheWindow and
+        // EndAgentWhenWorktreeGoes (agents.allium).
+        module::follow_task_write(&mut self.agent_store(tables), prior.as_ref(), &row);
         self.rows.upsert_task(&row.into());
         Ok(())
     }

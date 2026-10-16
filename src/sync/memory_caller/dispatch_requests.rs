@@ -74,6 +74,12 @@ impl MemoryReducerCaller {
                         ..released
                     },
                 )?;
+                // agents.allium: EndAgentWhenLaunchFails.
+                module::end_current_agent(
+                    &mut self.agent_store(tables),
+                    task_id,
+                    module::AGENT_END_LAUNCH_FAILED,
+                );
             }
             self.recalculate_epic_chain(tables, epic_id);
         }
@@ -147,7 +153,15 @@ impl MemoryReducerCaller {
         let stamp = self.now();
         let task_id = task.id;
         let epic_id = task.epic_id;
-        self.write_task(tables, module::apply_dispatch_claim(task, &stamp))?;
+        let claimed = module::apply_dispatch_claim(task, &stamp);
+        self.write_task(tables, claimed.clone())?;
+        // agents.allium: StartAgentOnFreshLaunch.
+        module::start_agent_on_fresh_launch(
+            &mut self.agent_store(tables),
+            &claimed,
+            requester,
+            mode,
+        );
         Self::delete_all_subagents(tables, task_id);
         self.recalculate_epic_chain(tables, epic_id);
         Ok(self.write_dispatch_request(

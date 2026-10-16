@@ -34,8 +34,9 @@ pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 /// `learning_retrievals`, the thirteenth and fourteenth, needed it again;
 /// `usage_events`, the fifteenth, needed it once more; `retired_feed_items`,
 /// the sixteenth, needed it yet again; `work_packages` and
-/// `work_package_links`, the eighteenth and nineteenth, once more).
-pub const SHARED_TABLE_COUNT: usize = 19;
+/// `work_package_links`, the eighteenth and nineteenth, once more; `agents`
+/// and `handed_out_agent_names`, the twentieth and twenty-first, again).
+pub const SHARED_TABLE_COUNT: usize = 21;
 
 /// One row, carried whole. Deliberately untyped: this module does not describe
 /// the shape of a task row — `core.allium` does — and a second description here
@@ -70,6 +71,8 @@ pub enum SharedTable {
     RetiredFeedItems,
     WorkPackages,
     WorkPackageLinks,
+    Agents,
+    HandedOutAgentNames,
 }
 
 impl SharedTable {
@@ -95,6 +98,8 @@ impl SharedTable {
         SharedTable::RetiredFeedItems,
         SharedTable::WorkPackages,
         SharedTable::WorkPackageLinks,
+        SharedTable::Agents,
+        SharedTable::HandedOutAgentNames,
     ];
 
     pub fn name(self) -> &'static str {
@@ -118,6 +123,8 @@ impl SharedTable {
             SharedTable::RetiredFeedItems => "retired_feed_items",
             SharedTable::WorkPackages => "work_packages",
             SharedTable::WorkPackageLinks => "work_package_links",
+            SharedTable::Agents => "agents",
+            SharedTable::HandedOutAgentNames => "handed_out_agent_names",
         }
     }
 
@@ -146,10 +153,13 @@ impl SharedTable {
             | SharedTable::LearningRetrievals
             | SharedTable::UsageEvents
             | SharedTable::RetiredFeedItems
-            | SharedTable::WorkPackages => Some("id"),
+            | SharedTable::WorkPackages
+            | SharedTable::Agents => Some("id"),
             // A link's id is derived (`"<package>/<kind>/<item>"`), like a
             // subscription's: nothing generated, nothing to burn.
             SharedTable::WorkPackageLinks
+            // A ledger row is its name.
+            | SharedTable::HandedOutAgentNames
             | SharedTable::TaskShells
             | SharedTable::TaskSubagents
             | SharedTable::Hosts
@@ -193,7 +203,9 @@ impl SharedTable {
             | SharedTable::UsageEvents
             | SharedTable::RetiredFeedItems
             | SharedTable::WorkPackages
-            | SharedTable::WorkPackageLinks => &[],
+            | SharedTable::WorkPackageLinks
+            | SharedTable::Agents
+            | SharedTable::HandedOutAgentNames => &[],
         }
     }
 
@@ -330,7 +342,11 @@ impl SharedTable {
             // `retired_feed_items.feed_epic_id` is already required on both
             // sides — nothing here to sentinel.
             | SharedTable::RetiredFeedItems
-            | SharedTable::WorkPackageLinks => &[],
+            | SharedTable::WorkPackageLinks
+            | SharedTable::HandedOutAgentNames => &[],
+            // An ended agent's stamp and reason, and a paused one's window,
+            // are absent while they do not apply (`agents.allium: Agent`).
+            SharedTable::Agents => &[("ended_at", S), ("end_reason", S), ("tmux_window", S)],
             // The package twin of `Epic.created_by` above: the board
             // subscribes by it, so it cannot be optional.
             SharedTable::WorkPackages => &[("created_by", S)],
@@ -429,7 +445,9 @@ impl SharedTable {
             | SharedTable::UsageEvents
             | SharedTable::RetiredFeedItems
             | SharedTable::WorkPackages
-            | SharedTable::WorkPackageLinks => &[],
+            | SharedTable::WorkPackageLinks
+            | SharedTable::Agents
+            | SharedTable::HandedOutAgentNames => &[],
         }
     }
 
@@ -492,7 +510,9 @@ impl SharedTable {
             | SharedTable::UsageEvents
             | SharedTable::RetiredFeedItems
             | SharedTable::WorkPackages
-            | SharedTable::WorkPackageLinks => &[],
+            | SharedTable::WorkPackageLinks
+            | SharedTable::Agents
+            | SharedTable::HandedOutAgentNames => &[],
         }
     }
 

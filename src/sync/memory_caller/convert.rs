@@ -385,3 +385,19 @@ mirror!(
         deadline,
     }
 );
+
+mirror!(
+    module::Agent,
+    bindings::Agent {
+        id,
+        task_id,
+        name,
+        host,
+        start_mode,
+        state,
+        started_at,
+        ended_at,
+        end_reason,
+        tmux_window,
+    }
+);

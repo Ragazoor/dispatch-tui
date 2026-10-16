@@ -189,6 +189,19 @@ pub(super) fn snapshot_of_a_populated_board_sync() -> Snapshot {
                     ("item_id", json!(9)),
                 ],
             ],
+            "agents" => vec![vec![
+                ("id", json!(1)),
+                ("task_id", json!(3)),
+                ("name", json!("ada")),
+                ("host", json!("host-1")),
+                ("start_mode", json!("dispatch")),
+                ("state", json!("current")),
+                ("started_at", json!("2026-09-17T10:00:00Z")),
+            ]],
+            "handed_out_agent_names" => vec![vec![
+                ("name", json!("ada")),
+                ("handed_out_at", json!("2026-09-17T10:00:00Z")),
+            ]],
             _ => vec![],
         }
     };

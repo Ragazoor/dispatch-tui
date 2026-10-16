@@ -119,6 +119,13 @@ pub(in crate::sync) fn subscription_queries(
         // `session_request_timeouts` schedule table is its own, never asked
         // for.
         format!("SELECT * FROM session_requests WHERE host = '{host}'"),
+        // Agents (agents A1, `sync.allium: SubscribeToAgents`). Unfiltered,
+        // like the work package links: the store's SQL cannot join an agent
+        // to the tasks this board holds, and a row carries a task id, a name,
+        // a host and a window, never the task's text. A row whose task this
+        // board does not hold draws nothing. The name ledger is not asked
+        // for: only the module's picker reads it.
+        "SELECT * FROM agents".to_string(),
     ];
 
     // The epic ids are integers by type, so they need no validation beyond

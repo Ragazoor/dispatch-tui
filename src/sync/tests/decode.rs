@@ -225,3 +225,66 @@ fn an_undecodable_task_is_remembered_against_its_epic_until_replaced_or_removed(
     shared.remove_task(TaskId(task.id));
     assert!(shared.undecodable_task_ids_for_epic(EpicId(7)).is_empty());
 }
+
+fn agent_row() -> bindings::Agent {
+    bindings::Agent {
+        id: 4,
+        task_id: 9,
+        name: "ada".into(),
+        host: "host-a".into(),
+        start_mode: "research".into(),
+        state: "ended".into(),
+        started_at: "2026-10-16 10:00:00.000".into(),
+        ended_at: "2026-10-16 11:00:00.000".into(),
+        end_reason: "worktree_gone".into(),
+        tmux_window: String::new(),
+    }
+}
+
+/// agents A1: an agent row decodes field for field, `""` reading as absent.
+#[test]
+fn an_agent_row_decodes_with_its_vocabulary() {
+    use crate::models::{AgentEndReason, AgentState, DispatchMode, TaskId};
+    let agent = decode::agent(&agent_row()).unwrap();
+    assert_eq!(agent.task_id, TaskId(9));
+    assert_eq!(agent.name, "ada");
+    assert_eq!(agent.start_mode, DispatchMode::Research);
+    assert_eq!(agent.state, AgentState::Ended);
+    assert_eq!(agent.end_reason, Some(AgentEndReason::WorktreeGone));
+    assert!(agent.ended_at.is_some());
+    assert_eq!(agent.tmux_window, None);
+    assert!(!agent.is_current() && !agent.is_live());
+
+    let current = decode::agent(&bindings::Agent {
+        state: "current".into(),
+        ended_at: String::new(),
+        end_reason: String::new(),
+        tmux_window: "task-9".into(),
+        ..agent_row()
+    })
+    .unwrap();
+    assert_eq!(current.end_reason, None);
+    assert!(current.is_live());
+}
+
+/// A state, start mode or end reason this binary does not know fails the row
+/// rather than being guessed.
+#[test]
+fn an_agent_row_with_unknown_vocabulary_fails() {
+    for row in [
+        bindings::Agent {
+            state: "paused".into(),
+            ..agent_row()
+        },
+        bindings::Agent {
+            start_mode: "resume".into(),
+            ..agent_row()
+        },
+        bindings::Agent {
+            end_reason: "crashed".into(),
+            ..agent_row()
+        },
+    ] {
+        assert!(decode::agent(&row).is_err(), "{row:?}");
+    }
+}

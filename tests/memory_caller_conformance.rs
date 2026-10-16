@@ -439,6 +439,8 @@ fn session_shape(r: &dispatch_tui::models::SessionRequest) -> SessionShape {
     }
 }
 
+#[path = "memory_caller_conformance/agents.rs"]
+mod agents;
 #[path = "memory_caller_conformance/close_and_managed_epics.rs"]
 mod close_and_managed_epics;
 #[path = "memory_caller_conformance/data_rules.rs"]

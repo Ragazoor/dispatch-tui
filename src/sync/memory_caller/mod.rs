@@ -51,6 +51,7 @@ use super::rows::SharedRows;
 use super::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
 
 mod agent_state;
+mod agents;
 mod config;
 mod convert;
 mod dispatch_requests;
@@ -131,6 +132,11 @@ struct Tables {
     /// store-split M5. As above, the module's timer table has no counterpart:
     /// the backstop is [`MemoryReducerCaller::expire_session_request`].
     session_requests: BTreeMap<i64, module::SessionRequest>,
+    /// agents A1.
+    agents: BTreeMap<i64, module::Agent>,
+    /// The name ledger, keyed by name. Never pushed into `SharedRows`: no
+    /// board subscribes to it.
+    handed_out_agent_names: BTreeMap<String, module::HandedOutAgentName>,
     next_task_id: i64,
     next_epic_id: i64,
     next_repo_path_id: i64,
@@ -143,6 +149,7 @@ struct Tables {
     next_work_package_id: i64,
     next_dispatch_request_id: i64,
     next_session_request_id: i64,
+    next_agent_id: i64,
 }
 
 impl Tables {
@@ -160,6 +167,7 @@ impl Tables {
             next_work_package_id: 1,
             next_dispatch_request_id: 1,
             next_session_request_id: 1,
+            next_agent_id: 1,
             ..Self::default()
         }
     }

@@ -107,7 +107,9 @@ pub fn seed_work_package_links(
 }
 
 /// Agents keep their ids, like every seeded row; a name already held by a
-/// different agent is refused rather than overwritten (`AgentNameIsNeverReused`).
+/// different agent is refused rather than overwritten, and every seeded name
+/// is written to the ledger if it is not there yet, so the picker can never
+/// hand it out again (`AgentNameIsNeverReused`).
 #[spacetimedb::reducer]
 pub fn seed_agents(ctx: &ReducerContext, rows: Vec<Agent>) -> Result<(), String> {
     for row in rows {
@@ -121,6 +123,27 @@ pub fn seed_agents(ctx: &ReducerContext, rows: Vec<Agent>) -> Result<(), String>
                     row.id, row.name, holder.id
                 ));
             }
+        }
+        if !AGENT_START_MODES.contains(&row.start_mode.as_str())
+            || ![AGENT_CURRENT, AGENT_ENDED].contains(&row.state.as_str())
+            || !(row.end_reason.is_empty() || AGENT_END_REASONS.contains(&row.end_reason.as_str()))
+        {
+            return Err(format!(
+                "agent {}: unknown start mode, state or end reason",
+                row.id
+            ));
+        }
+        if ctx
+            .db
+            .handed_out_agent_names()
+            .name()
+            .find(&row.name)
+            .is_none()
+        {
+            ctx.db.handed_out_agent_names().insert(HandedOutAgentName {
+                name: row.name.clone(),
+                handed_out_at: row.started_at.clone(),
+            });
         }
         if ctx.db.agents().id().find(row.id).is_some() {
             ctx.db.agents().id().update(row);

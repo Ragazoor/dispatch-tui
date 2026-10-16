@@ -85,6 +85,12 @@ pub trait SnapshotTarget: Send + Sync {
     /// Every row of a table, for re-dumping and for tests.
     async fn rows(&self, table: SharedTable) -> Result<Vec<Row>>;
 
+    /// Give every task with a worktree and no current agent one, with a fresh
+    /// name (`agents.allium: BackfillCurrentAgents`). The store does it: its
+    /// picker reads the name ledger, which only the module may write. An
+    /// import runs it once its rows are written (`ImportOldStore`).
+    async fn backfill_agents(&self) -> Result<()>;
+
     /// The generated ids present in a table, ascending.
     async fn row_ids(&self, table: SharedTable) -> Result<Vec<i64>> {
         // `columns` is irrelevant to id extraction — `TableExtract::row_ids`
@@ -140,7 +146,9 @@ pub(super) fn key_columns(table: SharedTable) -> &'static [&'static str] {
         | SharedTable::UsageEvents
         | SharedTable::RetiredFeedItems
         | SharedTable::WorkPackages
-        | SharedTable::WorkPackageLinks => &["id"],
+        | SharedTable::WorkPackageLinks
+        | SharedTable::Agents => &["id"],
+        SharedTable::HandedOutAgentNames => &["name"],
         SharedTable::TaskShells => &["task_id", "shell_id"],
         SharedTable::TaskSubagents => &["task_id", "agent_id"],
     }
@@ -200,9 +208,18 @@ struct MemoryState {
     /// built by hand refuses every snapshot rather than silently agreeing
     /// with one.
     columns: BTreeMap<SharedTable, Vec<String>>,
+    /// How many times [`SnapshotTarget::backfill_agents`] was asked for. This
+    /// fake does not model the module's picker; the live-store tests cover the
+    /// backfill itself.
+    agent_backfills: usize,
 }
 
 impl MemoryStore {
+    /// How many agent backfills were asked of this store.
+    pub fn agent_backfills(&self) -> usize {
+        self.lock().agent_backfills
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -270,6 +287,11 @@ impl MemoryStore {
 
 #[async_trait]
 impl SnapshotTarget for MemoryStore {
+    async fn backfill_agents(&self) -> Result<()> {
+        self.lock().agent_backfills += 1;
+        Ok(())
+    }
+
     async fn columns(&self, table: SharedTable) -> Result<Vec<String>> {
         Ok(self.lock().columns.get(&table).cloned().unwrap_or_default())
     }

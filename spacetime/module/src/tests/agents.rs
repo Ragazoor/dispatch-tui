@@ -14,7 +14,11 @@ struct Rows {
 
 impl AgentStore for Rows {
     fn agents_of_task(&self, task_id: i64) -> Vec<Agent> {
-        self.agents.iter().filter(|a| a.task_id == task_id).cloned().collect()
+        self.agents
+            .iter()
+            .filter(|a| a.task_id == task_id)
+            .cloned()
+            .collect()
     }
     fn name_is_handed_out(&self, name: &str) -> bool {
         self.ledger.iter().any(|r| r.name == name)
@@ -34,7 +38,11 @@ impl AgentStore for Rows {
         self.agents.retain(|a| a.id != id);
     }
     fn insert_handed_out_name(&mut self, row: HandedOutAgentName) {
-        assert!(!self.name_is_handed_out(&row.name), "{} handed out twice", row.name);
+        assert!(
+            !self.name_is_handed_out(&row.name),
+            "{} handed out twice",
+            row.name
+        );
         self.ledger.push(row);
     }
     fn now(&self) -> String {
@@ -46,10 +54,7 @@ impl AgentStore for Rows {
 }
 
 fn task(id: i64) -> Task {
-    Task {
-        id,
-        ..blank_task()
-    }
+    Task { id, ..blank_task() }
 }
 
 fn with_worktree(id: i64, window: &str) -> Task {
@@ -90,7 +95,9 @@ fn every_agent_name_is_short_unique_and_not_an_alias_word() {
 
 #[test]
 fn the_name_list_leaves_out_tool_names() {
-    for tool in ["git", "gh", "tmux", "claude", "cargo", "rust", "ruby", "perl", "julia"] {
+    for tool in [
+        "git", "gh", "tmux", "claude", "cargo", "rust", "ruby", "perl", "julia",
+    ] {
         assert!(!AGENT_NAMES.contains(&tool), "{tool}");
     }
 }
@@ -207,7 +214,10 @@ fn a_write_that_moves_nothing_an_agent_mirrors_changes_nothing() {
         title: "new".into(),
         ..live.clone()
     };
-    assert_eq!(agent_follow_up(Some(&live), &retitled), AgentFollowUp::Nothing);
+    assert_eq!(
+        agent_follow_up(Some(&live), &retitled),
+        AgentFollowUp::Nothing
+    );
     assert_eq!(agent_follow_up(None, &live), AgentFollowUp::Nothing);
 }
 
@@ -272,4 +282,11 @@ fn the_backfill_names_every_task_with_a_worktree_and_no_current_agent() {
     let before = rows.agents.len();
     backfill_agents_into(&mut rows, tasks);
     assert_eq!(rows.agents.len(), before);
+}
+
+/// A1 moves the agent rules into the module, so the version is 7. The board's
+/// own copy is pinned equal to this one by `src/sync/rules_gate.rs`'s test.
+#[test]
+fn the_rules_version_is_seven_for_agents_a1() {
+    assert_eq!(RULES_VERSION, 7);
 }

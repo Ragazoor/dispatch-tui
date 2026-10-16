@@ -30,11 +30,12 @@
 use chrono::{DateTime, Utc};
 
 use crate::models::{
-    DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, DispatchRequestState, Epic,
-    EpicId, EpicOrigin, FeedRole, Learning, LearningId, LearningKind, LearningRetrieval,
-    LearningScope, LearningStatus, RetrievalSource, SessionRequest, SessionRequestId,
-    SessionRequestKind, SessionRequestState, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUrl,
-    TmuxWindow, UrlType, WorkPackage, WorkPackageId, WorkPackageItem, WorkPackageLink, WrapUpMode,
+    Agent, AgentEndReason, AgentId, AgentState, DispatchMode, DispatchOrigin, DispatchRequest,
+    DispatchRequestId, DispatchRequestState, Epic, EpicId, EpicOrigin, FeedRole, Learning,
+    LearningId, LearningKind, LearningRetrieval, LearningScope, LearningStatus, RetrievalSource,
+    SessionRequest, SessionRequestId, SessionRequestKind, SessionRequestState, SubStatus, Task,
+    TaskId, TaskStatus, TaskTag, TaskUrl, TmuxWindow, UrlType, WorkPackage, WorkPackageId,
+    WorkPackageItem, WorkPackageLink, WrapUpMode,
 };
 use crate::spacetime::bindings;
 
@@ -506,6 +507,43 @@ pub fn dispatch_request(row: &bindings::DispatchRequest) -> Decoded<DispatchRequ
         tmux_window: tmux_window(&row.tmux_window),
         reused_worktree: row.reused_worktree,
         deadline: required_timestamp(T, row.id, "deadline", &row.deadline)?,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Agents (agents A1)
+// ---------------------------------------------------------------------------
+
+/// The store's `agents` row as the board's [`Agent`]. An unknown start mode,
+/// state or end reason refuses the row rather than guessing: read as current
+/// or as ended, a row from a newer binary would name the wrong session.
+pub fn agent(row: &bindings::Agent) -> Decoded<Agent> {
+    const T: &str = "agents";
+    let refuse = |detail: String| DecodeError::new(T, row.id, detail);
+
+    let start_mode = DispatchMode::parse(&row.start_mode)
+        .ok_or_else(|| refuse(format!("unknown start mode {:?}", row.start_mode)))?;
+    let state = AgentState::parse(&row.state)
+        .ok_or_else(|| refuse(format!("unknown state {:?}", row.state)))?;
+    let end_reason = match text(&row.end_reason) {
+        None => None,
+        Some(reason) => Some(
+            AgentEndReason::parse(reason)
+                .ok_or_else(|| refuse(format!("unknown end reason {reason:?}")))?,
+        ),
+    };
+
+    Ok(Agent {
+        id: AgentId(row.id),
+        task_id: TaskId(row.task_id),
+        name: row.name.clone(),
+        host: row.host.clone(),
+        start_mode,
+        state,
+        started_at: required_timestamp(T, row.id, "started_at", &row.started_at)?,
+        ended_at: timestamp(T, row.id, "ended_at", &row.ended_at)?,
+        end_reason,
+        tmux_window: tmux_window(&row.tmux_window),
     })
 }
 

@@ -40,9 +40,9 @@ use chrono::{DateTime, Utc};
 use tokio::sync::watch;
 
 use crate::models::{
-    DispatchRequest, DispatchRequestId, Epic, EpicId, Learning, LearningFilter, LearningId,
-    LearningRetrieval, PollScopeId, SessionRequest, SessionRequestId, Task, TaskId, UsageQuery,
-    UsageSummary, WorkPackage, WorkPackageId, WorkPackageLink,
+    Agent, AgentId, DispatchRequest, DispatchRequestId, Epic, EpicId, Learning, LearningFilter,
+    LearningId, LearningRetrieval, PollScopeId, SessionRequest, SessionRequestId, Task, TaskId,
+    UsageQuery, UsageSummary, WorkPackage, WorkPackageId, WorkPackageLink,
 };
 use crate::spacetime::bindings;
 
@@ -165,6 +165,9 @@ struct Rows {
     /// `WHERE host = …` (`sync.allium: SubscribeToThisHostsSessionRequests`),
     /// in every state, so nothing here filters by host or state.
     session_requests: BTreeMap<i64, SessionRequest>,
+    /// agents A1. Arrive unfiltered (`sync.allium: SubscribeToAgents`),
+    /// current and ended alike.
+    agents: BTreeMap<i64, Agent>,
 }
 
 impl Rows {
@@ -185,6 +188,7 @@ impl Rows {
             && self.work_package_links.is_empty()
             && self.dispatch_requests.is_empty()
             && self.session_requests.is_empty()
+            && self.agents.is_empty()
     }
 }
 
@@ -513,6 +517,24 @@ impl SharedRows {
         self.write(|rows| rows.dispatch_requests.remove(&id).is_some());
     }
 
+    /// An agent row (agents A1). An undecodable one is dropped, as a task is.
+    pub fn upsert_agent(&self, row: &bindings::Agent) {
+        match decode::agent(row) {
+            Ok(agent) => self.write(|rows| {
+                rows.agents.insert(agent.id.0, agent);
+                true
+            }),
+            Err(e) => {
+                super::drop_undecodable("agent", &e);
+                self.write(|rows| rows.agents.remove(&row.id).is_some());
+            }
+        }
+    }
+
+    pub fn remove_agent(&self, id: AgentId) {
+        self.write(|rows| rows.agents.remove(&id.0).is_some());
+    }
+
     /// A session request row (store-split M5). An undecodable one is dropped,
     /// as a dispatch request is: read as open or as finished it would drive the
     /// `wrap_up` wait and the exit token wrongly either way.
@@ -694,6 +716,22 @@ impl SharedRows {
     /// every state — oldest first (by id).
     pub fn dispatch_requests(&self) -> Vec<DispatchRequest> {
         self.read(|rows| rows.dispatch_requests.values().cloned().collect())
+    }
+
+    /// Every agent row, current and ended, oldest first (by id).
+    pub fn agents(&self) -> Vec<Agent> {
+        self.read(|rows| rows.agents.values().cloned().collect())
+    }
+
+    /// `current_agent(task)`: the task's one current agent, if this
+    /// subscription holds it (`agents.allium: OneCurrentAgentPerTask`).
+    pub fn current_agent(&self, task: TaskId) -> Option<Agent> {
+        self.read(|rows| {
+            rows.agents
+                .values()
+                .find(|a| a.task_id == task && a.is_current())
+                .cloned()
+        })
     }
 
     /// One session request row by id.

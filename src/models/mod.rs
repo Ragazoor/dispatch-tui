@@ -12,6 +12,7 @@
 //! - [`tasks`] — tasks, statuses, tags, dispatch mode, slugify, age formatting
 //! - [`dispatch_request`] — the store-split M4 dispatch request row and its vocabulary
 //! - [`session_request`] — the store-split M5 wrap-up and exit-session request row
+//! - [`agents`] — the agents A1 agent row and its vocabulary
 //! - [`epics`] — epics, epic sub-status, descendant traversal
 //! - [`review`] — review decisions, PR-URL parsing
 //! - [`learnings`] — knowledge-base entries
@@ -62,6 +63,8 @@ pub use tasks::*;
 
 pub mod dispatch_request;
 pub use dispatch_request::*;
+pub mod agents;
+pub use agents::*;
 pub mod session_request;
 pub use session_request::*;
 

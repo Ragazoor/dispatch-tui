@@ -82,6 +82,8 @@ fn natural_key(table: SharedTable) -> &'static [&'static str] {
         SharedTable::RepoBaseBranches => &["repo_path", "branch"],
         SharedTable::TaskWatchers => &["watcher_task_id", "target_task_id"],
         SharedTable::Settings => &["host", "key"],
+        // An agent's name is unique across every agent there is.
+        SharedTable::Agents => &["name"],
         _ => &[],
     }
 }
@@ -172,6 +174,12 @@ pub async fn import_old_store(
             .await
             .map_err(RestoreError::Failed)?;
     }
+    // `agents.allium: CurrentAgentTracksWorktree`: an imported task with a
+    // worktree and no current agent gets one, from the store's own picker.
+    target
+        .backfill_agents()
+        .await
+        .map_err(RestoreError::Failed)?;
     Ok(report)
 }
 
@@ -245,7 +253,9 @@ impl DroppedIds {
     fn drops(&self, table: SharedTable, row: &Row) -> bool {
         match table {
             SharedTable::Tasks | SharedTable::Epics => is_dropped_status(row),
-            SharedTable::TaskSubagents => {
+            // An agent of a dropped task goes with it; its ledger row stays
+            // (`agents.allium: AgentNameIsNeverReused`).
+            SharedTable::TaskSubagents | SharedTable::Agents => {
                 id_of(row, "task_id").is_some_and(|t| self.tasks.contains(&t))
             }
             SharedTable::TaskWatchers => {

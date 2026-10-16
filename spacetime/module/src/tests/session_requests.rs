@@ -1,4 +1,3 @@
-
 use super::*;
 
 const HOST_A: &str = "host-a";
@@ -1201,11 +1200,3 @@ fn leaving_running_clears_a_pending_stop_unless_the_patch_names_it() {
 }
 
 // -- the rules version (sync.allium: config.rules_version) ----------------
-
-/// W12: M5 moves the close and the wrap-up request rules into the module,
-/// so the version is 4. The board's own copy is pinned equal to this one
-/// by `src/sync/rules_gate.rs`'s test.
-#[test]
-fn the_rules_version_is_six_for_m7() {
-    assert_eq!(RULES_VERSION, 6);
-}

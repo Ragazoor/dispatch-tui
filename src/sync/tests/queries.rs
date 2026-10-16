@@ -352,3 +352,18 @@ fn session_requests_are_asked_for_by_this_hosts_own_id_in_every_state() {
         "the backstop's schedule table is the module's and is never asked for"
     );
 }
+
+/// agents A1 (`sync.allium: SubscribeToAgents`): every agent row, unfiltered,
+/// and never the name ledger, which only the module's picker reads.
+#[test]
+fn agents_are_asked_for_unfiltered_and_the_ledger_is_not() {
+    let queries = subscription_queries(&SubscriptionRequest::new(ID, vec![], HOST)).unwrap();
+    assert!(
+        queries.iter().any(|q| q == "SELECT * FROM agents"),
+        "{queries:?}"
+    );
+    assert!(
+        !queries.iter().any(|q| q.contains("handed_out_agent_names")),
+        "{queries:?}"
+    );
+}

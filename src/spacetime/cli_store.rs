@@ -269,6 +269,11 @@ impl SnapshotTarget for SpacetimeCliStore {
             .collect())
     }
 
+    async fn backfill_agents(&self) -> Result<()> {
+        self.call("backfill_agents", &[])
+            .context("the agent backfill after the import failed")
+    }
+
     async fn upsert_rows(&self, table: SharedTable, rows: &[Row]) -> Result<()> {
         // An empty table still has a reducer and still costs nothing; skipped
         // rather than sent so the log of a restore reads as the work it did.
@@ -410,6 +415,8 @@ fn seed_reducer(table: SharedTable) -> &'static str {
         SharedTable::RetiredFeedItems => "seed_retired_feed_items",
         SharedTable::WorkPackages => "seed_work_packages",
         SharedTable::WorkPackageLinks => "seed_work_package_links",
+        SharedTable::Agents => "seed_agents",
+        SharedTable::HandedOutAgentNames => "seed_handed_out_agent_names",
     }
 }
 

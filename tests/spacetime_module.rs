@@ -555,6 +555,8 @@ fn register_host(instance: &Instance, host: &str, owner: &str) {
 
 #[path = "spacetime_module/agent_state.rs"]
 mod agent_state;
+#[path = "spacetime_module/agents.rs"]
+mod agents;
 #[path = "spacetime_module/aliases.rs"]
 mod aliases;
 #[path = "spacetime_module/close_task.rs"]

@@ -329,7 +329,10 @@ pub fn delete_agents_of<S: AgentStore + ?Sized>(store: &mut S, task_id: i64) {
 
 /// `BackfillCurrentAgents`: give every task in `tasks` that has a worktree and
 /// no current agent one, with a fresh name. Idempotent.
-pub fn backfill_agents_into<S: AgentStore + ?Sized>(store: &mut S, tasks: impl IntoIterator<Item = Task>) {
+pub fn backfill_agents_into<S: AgentStore + ?Sized>(
+    store: &mut S,
+    tasks: impl IntoIterator<Item = Task>,
+) {
     for task in tasks {
         if task.worktree.is_empty() || current_agent(store, task.id).is_some() {
             continue;
@@ -348,13 +351,18 @@ impl AgentStore for AgentTables<'_> {
     fn agents_of_task(&self, task_id: i64) -> Vec<Agent> {
         self.0.db.agents().task_id().filter(&task_id).collect()
     }
+    /// The ledger, and as a backstop the agent rows' unique names too: an
+    /// agent written without its ledger row (by hand, or by an older seed)
+    /// must not make the claim's insert fail on the unique `name`.
     fn name_is_handed_out(&self, name: &str) -> bool {
+        let name = name.to_string();
         self.0
             .db
             .handed_out_agent_names()
             .name()
-            .find(&name.to_string())
+            .find(&name)
             .is_some()
+            || self.0.db.agents().name().find(&name).is_some()
     }
     fn insert_agent(&mut self, row: Agent) {
         self.0.db.agents().insert(Agent { id: 0, ..row });
@@ -378,7 +386,12 @@ impl AgentStore for AgentTables<'_> {
 
 /// Run [`backfill_agents_into`] over every task in the store.
 pub(crate) fn backfill_all_agents(ctx: &ReducerContext) {
-    let tasks: Vec<Task> = ctx.db.tasks().iter().filter(|t| !t.worktree.is_empty()).collect();
+    let tasks: Vec<Task> = ctx
+        .db
+        .tasks()
+        .iter()
+        .filter(|t| !t.worktree.is_empty())
+        .collect();
     backfill_agents_into(&mut AgentTables(ctx), tasks);
 }
 
