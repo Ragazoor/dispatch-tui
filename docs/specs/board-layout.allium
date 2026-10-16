@@ -4,15 +4,16 @@
 -- Scope: The board's structural layout — which navigation column and which
 --        section a card lands in, how the cursor moves through them, the
 --        flattened rendering mode, the vertical bands of the board frame,
---        and the three filters that narrow what a column renders.
+--        the board lens, and the filters that narrow what a column renders.
 -- Includes: Board Columns (the navigation index space, review-section order,
 --           row navigation and the `gg` chord),
 --           EpicCardPlacement, FlattenedView, ColumnSectionLayout,
 --           collapsed sections
 --           (SectionRef, CollapsedSections), epic folding
 --           (EpicFoldRef, FoldedEpics), board vertical layout, the
---           only-active filter, the repo-filter overlay layout, the board
---           search filter, cursor selection preservation, and the shared
+--           board lens (BoardLens: the only-active filter and flattening),
+--           hidden epics and work packages (BoardHides), the board-filter
+--           overlay layout, the board search filter, cursor selection preservation, and the shared
 --           single-line text buffer the input panel edits (TextInputField).
 -- Excludes: The board's visual language — identity hue, the focus channel,
 --           header-bar and card chrome, the neutral ground ramp (see
@@ -26,6 +27,14 @@
 -- specification inside a file whose header declared it a domain model.
 
 use "./core.allium" as core
+use "./work-packages.allium" as wp
+
+-- The board's one lens and one pair of hide-lists. See "Board Lens" and
+-- "Hidden Epics and Work Packages".
+given {
+    board_lens: BoardLens
+    board_hides: BoardHides
+}
 
 ------------------------------------------------------------
 -- Board Columns
@@ -195,7 +204,8 @@ use "./core.allium" as core
 --     level down would otherwise place no card at all.
 --   - Visible means the task survives the same predicates every other card on
 --     the board is held to: admitted by the repo filter, the
---     only-active filter and the search query. A task the board is hiding
+--     only-active filter and the search query, and not under a hidden epic
+--     (see "Hidden Epics and Work Packages"). A task the board is hiding
 --     cannot place its ancestor's card — the same reasoning that gates the
 --     descendant clause in board_search_filter, and for the same reason:
 --     entering the card would be a dead end, because the work that justified
@@ -244,12 +254,14 @@ value EpicCardPlacement {
     -- The tasks that place an epic's cards: its whole subtree, held to the
     -- visibility predicates every card on the board is held to.
     --
-    -- Like FlattenedView.in_scope this names the repo filter explicitly and
-    -- leaves the other two to their own sections — only_active_filter and
-    -- board_search_filter — which compose on top identically.
+    -- Like FlattenedView.in_scope this names the repo filter and the epic
+    -- hide-list explicitly and leaves the other two to their own sections —
+    -- the only-active filter ("Board Lens") and board_search_filter — which
+    -- compose on top identically.
     placing_tasks(epic, view):
         epic.subtree_tasks.where(t =>
-            t.repo_path in view.active_repo_filter)
+            t.repo_path in view.active_repo_filter
+            and not board_hides.task_is_hidden(t))
 
     has_placing_tasks(epic, view):
         placing_tasks(epic, view).any(t => true)
@@ -485,8 +497,9 @@ value EpicCardPlacement {
 --     the column's navigable items.
 --
 -- State model:
---   - Flattened is a single board-level boolean, toggled by the user.
---   - The value is preserved as the user navigates into sub-epics and
+--   - Flattened is derived from the board lens (BoardLens.flattened): it
+--     holds under the `flat` and `flat_active` lenses. See "Board Lens".
+--   - The lens is preserved as the user navigates into sub-epics and
 --     back out: drilling down or exiting an epic does not change it.
 --   - It is session-scoped and does not persist across app restarts.
 --
@@ -534,10 +547,13 @@ value FlattenedView {
     --
     -- This is the flatten decision alone, not the whole visibility test.
     -- The board-wide filters compose on top of it and are specified in
-    -- their own sections: only_active_filter and board_search_filter.
-    -- Both apply identically in either mode.
+    -- their own sections: the only-active filter ("Board Lens") and
+    -- board_search_filter. Both apply identically in either mode. The epic
+    -- hide-list is named here because a flattened column is exactly where a
+    -- hidden epic's tasks would otherwise reappear.
     in_scope(task, view, status):
         task.repo_path in view.active_repo_filter
+        and not board_hides.task_is_hidden(task)
         and (view.is_board or task.is_descendant_of(view.current_epic))
         and (flattens(status) or directly_under(task, view))
 }
@@ -644,9 +660,9 @@ value ColumnSectionLayout {
 --     frame; a header has no frame, and a brightness step alone on one
 --     already-bold line is too small to find, so it takes both.
 --   - The count is of cards the column would otherwise have rendered there —
---     what the repo filter, the only-active filter and the search query all
---     admit. A section is never described as hiding a card the user could not
---     have seen anyway.
+--     what the repo filter, the epic hide-list, the only-active filter and the
+--     search query all admit. A section is never described as hiding a card
+--     the user could not have seen anyway.
 --   - A section with no cards renders no header, collapsed or not, exactly as
 --     today. Its collapse is remembered regardless, so the header comes back
 --     folded when a card next lands in it.
@@ -883,7 +899,7 @@ entity FoldedEpics {
 --   columns run uninterrupted down to the status bar. This is the default
 --   (no input mode active) but is not limited to it: a mode whose prompt
 --   is shown elsewhere — a y/n confirmation in the status bar, the live
---   search bar, the help overlay, the repo-filter popup, an epic/task
+--   search bar, the help overlay, the board-filter popup, an epic/task
 --   picker overlay — is idle from the panel's perspective too, since it has
 --   nothing of its own to draw there.
 --
@@ -899,54 +915,258 @@ entity FoldedEpics {
 --   immediately; the kanban board resizes on the same frame, never leaving
 --   a gap or an overlap between the two bands.
 
--- == Only Active Filter ==
+-- == Board Lens ==
 
--- only_active_filter:
---   When view.only_active is true, only tasks where tmux_window is set
---   are included in tasks_for_current_view. This filter is applied in
---   addition to the repo filter.
---   The filter is toggled by `A` on the board. That is its only toggle:
---   the [f] overlay once carried an "Active sessions only" row for it,
---   removed in task #4969 because telemetry recorded zero uses of the row
---   against hundreds of `A` presses.
---   The filter is session-scoped and does not persist across app restarts.
-
--- == Repo Filter Overlay Layout ==
-
--- repo_filter_overlay_layout:
---   The [f] overlay is a centred popup whose content rows are, top to bottom:
---   the repo list, then a footer block of help rows — two of them in browse
---   mode, one in the delete-repo-path confirm mode. There is no preset
---   section, no preset-name input row, and no delete-preset confirm: saved
---   filter presets were removed in task #4972 (telemetry: one cancelled save,
---   zero loads or deletes). `s`, `x` and `A`-`Z` are ignored in the overlay.
+-- The board has two independent controls over what it shows (decided
+-- 2026-10-16, task #77840):
+--   - The LENS says HOW the board is read: every card, or only the cards with
+--     a live session; grouped under epics, or flattened. One key cycles it.
+--   - The board FILTER says WHICH work is on the board at all: repos, epics
+--     and work packages. It is set in the board-filter overlay (`f`, below).
 --
---   The cursor ranges over the repo list only: position 0 is the first repo.
---   Every repo-level key — Space to toggle, Backspace/Delete to forget the
---   path — acts on the repo under the cursor, and `1`-`9` toggle the repo
---   at that list position regardless of the cursor. There is no toggle-all
---   key: `a` was removed in task #4969 after telemetry recorded zero
---   presses, and `a` is now ignored in the overlay.
+-- Intent: the board used to carry one toggle key per reading mode (`A` for
+-- only-active, `F` for flattened), and every new axis of "which things"
+-- threatened another key. Splitting the two leaves one key for the reading
+-- mode and puts every "which things" choice in one overlay, where a new axis
+-- is a new tab rather than a new board key.
+--
+-- Reversed decision, recorded so it is not re-derived: task #4969 made `A`
+-- the ONLY toggle for the only-active filter, after telemetry recorded
+-- hundreds of `A` presses and zero uses of an overlay row for it. That
+-- telemetry argued against moving only-active into the overlay, and it is
+-- still not in the overlay: it is a lens. What changed is the key. `A` and
+-- `F` are removed; Tab steps the lens forward and BackTab (Shift+Tab) steps
+-- it back, so every lens is at most two presses away — the same reach `A`
+-- gave the most used one.
+--
+-- The four lenses, in cycle order:
+--   everything   → every card the board filter admits (the default)
+--   active       → only tasks with a live session (tmux_window set)
+--   flat         → the flattened rendering (see FlattenedView)
+--   flat_active  → both at once
+-- Forward wraps from flat_active to everything; backward wraps the other way.
+--
+-- What `active` narrows: only tasks where tmux_window is set are included in
+-- tasks_for_current_view. This is applied in addition to the board filter.
+-- It is still called the only-active filter everywhere else in this file:
+-- BoardLens.only_active is that predicate's switch.
+--
+-- State model:
+--   - One lens per board, preserved as the user navigates into sub-epics and
+--     back out.
+--   - Session-scoped: every app start begins at `everything`.
+--   - The lens shows as the status bar's existing badges: `[active]` while
+--     only_active holds and `[flat]` while flattened holds, both for
+--     flat_active. `everything` shows neither.
+--
+-- No MCP tool reads or sets the lens. It is the operator's reading of their
+-- own board for one session, needs nothing from the shared store (store-split
+-- S1 keeps it in the TUI), and no agent sees that board.
+
+enum Lens { everything | active | flat | flat_active }
+
+entity BoardLens {
+    lens: Lens
+
+    -- The two switches the rest of this file reads. Derived, never set on
+    -- their own: the lens is the only state.
+    only_active: lens = active or lens = flat_active
+    flattened: lens = flat or lens = flat_active
+
+    next: if lens = everything: active
+          else if lens = active: flat
+          else if lens = flat: flat_active
+          else: everything
+
+    previous: if lens = everything: flat_active
+              else if lens = active: everything
+              else if lens = flat: active
+              else: flat
+}
+
+rule CycleLensForward {
+    when: CycleLensForward()
+    ensures: board_lens.lens = board_lens.next
+
+    @guidance
+        -- Bound to Tab on the board (board.normal), in the main board and in
+        -- an epic view alike.
+}
+
+rule CycleLensBackward {
+    when: CycleLensBackward()
+    ensures: board_lens.lens = board_lens.previous
+
+    @guidance
+        -- Bound to BackTab (Shift+Tab) on the board (board.normal).
+}
+
+-- == Hidden Epics and Work Packages ==
+
+-- Besides the repo filter, the board filter holds two hide-lists: epics the
+-- user has hidden and work packages the user has hidden. Both are lists of
+-- what is HIDDEN, never of what is shown: an epic or package created after
+-- the user hid something else is visible. A filter that listed what to show
+-- would make new work vanish silently on a board agents add work to.
+--
+-- Hiding an epic hides its whole subtree:
+--   - The epic's own card, and the cards of every descendant sub-epic.
+--   - Every task in its subtree, in every column, in hierarchical and
+--     flattened lenses alike. Flattening would otherwise bring the hidden
+--     work back as plain task cards.
+--   - A task in the subtree is hidden even when a visible work package links
+--     it directly: the hide is the stronger statement.
+--   - Inside an epic view the hides apply too: a hidden sub-epic draws no
+--     card inside its parent's view. Entering a hidden epic is not possible
+--     from the board, because its card is gone.
+--
+-- Hiding a work package hides its card and nothing else. A package is a view
+-- over work, not work; its linked tasks and epics stay on the board.
+--
+-- Hidden work is invisible in the sense every visibility clause in this file
+-- uses: a task under a hidden epic cannot place an ancestor's epic card
+-- (EpicCardPlacement), keep an epic card alive under a search
+-- (board_search_filter), or count toward a work package's placement
+-- (work-packages.allium: PackageCardPlacement).
+--
+-- State model:
+--   - Persisted, like the repo selection and its include/exclude mode: both
+--     hide-lists are saved as this host's settings (settings.allium:
+--     SaveSetting) when the overlay closes, and read back at startup. The
+--     whole board filter therefore survives a restart; only the lens does
+--     not. Re-hiding the same epics after every restart would be the cost of
+--     the alternative, and the badge below keeps a forgotten hide visible.
+--   - An id on a hide-list whose epic or package no longer exists is inert:
+--     it hides nothing and errors on nothing. Nothing prunes it.
+--   - While anything is hidden, the status bar shows a badge naming the
+--     counts, e.g. `[hidden: 2 epics, 1 package]`, so a forgotten hide does
+--     not read as missing work. Nothing hidden, no badge.
+--
+-- No MCP tool reads or sets the hide-lists: they are the operator's view of
+-- their own board, and no agent sees that board. The saved settings are
+-- per-host rows like the repo filter's, not shared data about the work.
+
+entity BoardHides {
+    hidden_epics: Set<core/Epic>
+    hidden_packages: Set<wp/WorkPackage>
+
+    -- An epic is hidden when it or any ancestor is on the list.
+    epic_is_hidden(epic):
+        epic in hidden_epics
+        or hidden_epics.any(h => epic in h.subtree_epics)
+
+    -- A task is hidden when its epic is. A task with no epic is never hidden
+    -- by this list.
+    task_is_hidden(task):
+        task.epic != null and epic_is_hidden(task.epic)
+
+    package_is_hidden(package): package in hidden_packages
+
+    hidden_count: hidden_epics.count + hidden_packages.count
+}
+
+rule ToggleHiddenEpic {
+    when: ToggleHiddenEpic(epic)
+    ensures:
+        if epic in board_hides.hidden_epics:
+            board_hides.hidden_epics.remove(epic)
+        else:
+            board_hides.hidden_epics.add(epic)
+
+    @guidance
+        -- Space on an epic row in the overlay's Epics tab. Toggling a parent
+        -- does not touch its children's own entries: a child the user hid
+        -- separately stays hidden when the parent is shown again.
+}
+
+rule ToggleHiddenWorkPackage {
+    when: ToggleHiddenWorkPackage(package)
+    ensures:
+        if package in board_hides.hidden_packages:
+            board_hides.hidden_packages.remove(package)
+        else:
+            board_hides.hidden_packages.add(package)
+
+    @guidance
+        -- Space on a package row in the overlay's Work packages tab.
+}
+
+-- == Board Filter Overlay Layout ==
+
+-- board_filter_overlay_layout:
+--   The [f] overlay is a centred popup with three tabs, in this order:
+--   Repos, Epics, Work packages. It opens on Repos. Exactly one tab shows at
+--   a time; its name is highlighted in a tab-header row at the top of the
+--   popup. Tab moves to the next tab and BackTab (Shift+Tab) to the previous,
+--   both wrapping.
+--
+--   Tabs, not one list: a live board holds about 150 epics, nested up to five
+--   levels, against a handful of packages and a few dozen repos. One
+--   scrolling list would bury the packages under the epics.
+--
+--   Content rows, top to bottom: the tab header, the active tab's list, then
+--   a footer block of help rows. There is no preset section, no preset-name
+--   input row, and no delete-preset confirm: saved filter presets were
+--   removed in task #4972 (telemetry: one cancelled save, zero loads or
+--   deletes). `s`, `x` and `A`-`Z` are ignored in the overlay.
+--
+--   Each tab keeps its own cursor and its own scroll, so switching away and
+--   back returns to the same row. Space toggles the row under the cursor in
+--   every tab. There is no toggle-all key: `a` was removed in task #4969
+--   after telemetry recorded zero presses, and `a` is ignored in the overlay.
+--
+--   Repos tab: the repo list, as before. Space includes or excludes the repo
+--   under the cursor; `1`-`9` toggle the repo at that list position
+--   regardless of the cursor; `i` switches the whole repo filter between
+--   including and excluding the toggled repos (this was Tab before the
+--   overlay had tabs); Backspace/Delete forgets the repo path, after a
+--   confirm, which takes the footer down to one row. `1`-`9`, `i` and
+--   Backspace/Delete do nothing on the other tabs.
+--
+--   Epics tab: the epics as a tree, children indented under their parent,
+--   each row marked hidden or shown. It lists every epic that is not done,
+--   plus every hidden epic whatever its status, so a hidden epic that has
+--   since finished can still be shown again. `d` switches the list to every
+--   epic, done ones included, and back; this lets the user hide a done
+--   epic's cards in the Done column. A child of a hidden parent draws as
+--   hidden-by-parent, distinct from hidden on its own, because Space on it
+--   cannot bring it back while the parent is hidden.
+--
+--   `/` on the Epics tab opens a title search inside the tab: the tree
+--   narrows to epics whose title matches (the same fuzzy subsequence match as
+--   board_search_filter's title match) and their ancestors, so a match is
+--   never shown out of its place in the tree. The query takes its own
+--   content row under the tab header while it is non-empty or being typed.
+--   Esc with a query clears the query; Esc with none closes the overlay.
+--   The query is the overlay's own: it does not touch the board's `/`
+--   search, and it is gone when the overlay closes.
+--
+--   Work packages tab: every work package, one row each, marked hidden or
+--   shown.
 --
 --   Invariant: the footer is never clipped. Every row the overlay draws is
---   reserved by the height budget that sized the popup, including the
---   "↑ N more" / "↓ N more" markers that bracket a scrolling repo list. The
---   markers are content rows, not free decoration: they are paid for out of
---   the same budget as the repo rows, so a scrolling list shows fewer repos
---   rather than pushing the help rows off the bottom of the box.
+--   reserved by the height budget that sized the popup, including the tab
+--   header, the search row when it shows, and the "↑ N more" / "↓ N more"
+--   markers that bracket a scrolling list. The markers are content rows, not
+--   free decoration: they are paid for out of the same budget as the list
+--   rows, so a scrolling list shows fewer rows rather than pushing the help
+--   rows off the bottom of the box.
 --
 --   Sizing the marker rows is circular — whether a marker appears depends on
---   the scroll offset, which depends on how many repos are visible, which
+--   the scroll offset, which depends on how many rows are visible, which
 --   depends on how many marker rows were reserved. It is settled as a fixed
 --   point over the reservation, smallest first: the overlay reserves the
 --   fewest marker rows (0, then 1, then 2) whose resulting window draws no
 --   more markers than were reserved. Reserving both always satisfies that, so
 --   the settle terminates; preferring smaller reservations means that at
 --   either end of a long list, where only one marker is drawn, the spare row
---   goes to a repo instead of staying blank.
+--   goes to a list row instead of staying blank.
+--
+--   The popup's height is sized by the longest of the three tabs' lists (up
+--   to the board's ceiling), so it does not jump when the user switches tabs.
 --
 --   On a board so short that the popup's chrome alone fills the content area,
---   the repo list keeps a one-row floor and the markers are dropped: the row
+--   the list keeps a one-row floor and the markers are dropped: the row
 --   under the cursor is worth more than a count of the rows that did not fit.
 
 -- == Board Search Filter ==
@@ -954,7 +1174,9 @@ entity FoldedEpics {
 -- board_search_filter:
 --   When view.search_query is non-empty, the query narrows BOTH task cards and
 --   epic cards. An empty query matches everything. This filter is applied in
---   addition to the repo filter and the only-active filter (logical AND).
+--   addition to the repo filter, the epic hide-list and the only-active
+--   filter (logical AND). A hidden epic's card stays hidden however well it
+--   matches: the hide is the user's explicit word, the query is not.
 --
 --   own_match(entity) — the shared per-entity predicate. It holds when EITHER
 --   sub-predicate holds (logical OR):
@@ -976,11 +1198,12 @@ entity FoldedEpics {
 --
 --   Epics: an epic card is visible when own_match(epic) holds, OR when some
 --   descendant sub-epic satisfies own_match AND is itself visible under the
---   repo and only-active filters, OR when some task in the
---   epic's subtree satisfies own_match AND is itself visible under the repo
---   and only-active filters (the same two predicates tasks_for_current_view
---   applies to a task: filter.matches on repo_path, and the only-active
---   filter).
+--   repo filter, the epic hide-list and the only-active filter, OR when some
+--   task in the epic's subtree satisfies own_match AND is itself visible
+--   under the repo filter, the epic hide-list and the only-active filter (the
+--   same three predicates tasks_for_current_view applies to a task:
+--   filter.matches on repo_path, BoardHides.task_is_hidden, and the
+--   only-active filter).
 --
 --   The "itself visible" clause on both the sub-epic and the task branch is
 --   load-bearing: a descendant the board would hide cannot keep its ancestor's
@@ -989,7 +1212,7 @@ entity FoldedEpics {
 --   descendant clause exists at all because a hierarchical board does not
 --   render epic-owned tasks on the board itself — the epic card is the only
 --   path to them, so hiding the card would make a reachable match
---   unreachable; gating the descendant by the repo and only-active filters
+--   unreachable; gating the descendant by those three predicates
 --   keeps that reachability promise honest.
 --
 --   Epic ids and task ids are separate sequences, so one digit payload can match

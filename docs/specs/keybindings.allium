@@ -60,7 +60,7 @@ use "./observability.allium" as observability
 --                                                             epic description, a new
 --                                                             work package's title, a
 --                                                             work package rename
---   board_repo_filter            board.repo_filter            the repo-filter picker (`f`)
+--   board_filter                 board.filter                 the board-filter overlay (`f`)
 --   board_picker_repo_path       board.picker.repo_path       repo-path field with candidate list
 --   board_picker_base_branch     board.picker.base_branch     base-branch field with candidate list
 --   board_picker_tag             board.picker.tag             tag step of task creation (also arms phoenix)
@@ -106,7 +106,7 @@ use "./observability.allium" as observability
 -- usual); Left/Right are caret motion in the field, not list motion.
 -- board.search carries only text_backspace [Backspace], records_usage false:
 -- the search bar has no caret, so it has no caret motion to bind.
--- board.repo_filter's Backspace/Delete is not text editing: it runs
+-- board.filter's Backspace/Delete is not text editing: it runs
 -- repo_filter_delete_repo_path and stays recorded.
 --
 -- The panes' rows (agent_tree.tree, agent_tree.commits, agent_tree.agents,
@@ -182,7 +182,7 @@ use "./observability.allium" as observability
 -- the omission shows up the first time anyone presses a key, not later.
 enum KeyNamespace {
     board_normal | board_detail | board_search | board_help | board_error |
-    board_text | board_repo_filter |
+    board_text | board_filter |
     board_picker_repo_path | board_picker_base_branch | board_picker_tag |
     board_picker_wrap_up_mode | board_picker_quick_dispatch |
     board_picker_move_to_epic | board_picker_reparent_epic |

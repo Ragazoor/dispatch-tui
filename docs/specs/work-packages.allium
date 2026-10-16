@@ -213,19 +213,26 @@ rule DeletingAnItemRemovesItsLinks {
 --   - the linked tasks themselves, and
 --   - every task in the subtree of every linked epic.
 -- Visible means the same as for epic cards: admitted by the repo filter, the
--- only-active filter and the search query. The card is in Done when there is
--- at least one visible placement task and every one of them is done. In every
--- other case it is in Backlog: no links yet, everything hidden by a filter,
--- or any visible task not done. Unlike an epic card, a package card is never
--- hidden by the repo or only-active filter: a package is the user's own
--- grouping, not work in a repo. Only a search query can take a package's
--- card off the board (see the guidance below).
+-- only-active filter and the search query, and not under a hidden epic
+-- (board-layout.allium, "Hidden Epics and Work Packages"). The card is in
+-- Done when there is at least one visible placement task and every one of
+-- them is done. In every other case it is in Backlog: no links yet,
+-- everything hidden by a filter, or any visible task not done. So a package
+-- whose only links are hidden epics sits in Backlog, as an empty one does.
+-- Unlike an epic card, a package card is never hidden by the repo or
+-- only-active filter, or by hiding the epics it links: a package is the
+-- user's own grouping, not work in a repo. Two things take a package's card
+-- off the board: the user hiding the package itself in the board-filter
+-- overlay's Work packages tab, and a search query (see the guidance below).
+-- Hiding a package hides its card only; its linked tasks and epics stay.
 --
 -- That is the whole of "finished": there is no package status.
 
 rule PackageCardPlacement {
     when: MainBoardRendered()
 
+    -- A package the user hid (board-layout.allium: BoardHides.package_is_hidden)
+    -- is not in WorkPackages as this rule reads it: it draws no card at all.
     ensures:
         for package in WorkPackages:
             let tasks = package.placement_tasks(visible)
