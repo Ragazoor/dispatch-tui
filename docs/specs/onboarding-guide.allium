@@ -172,8 +172,8 @@ rule BackGoesToTheBoard {
     ensures: visit.step = explore_board
 
     @guidance
-        -- An on-page button, not a key. Whether the board step comes back
-        -- where the visitor left it is not decided (see Open Questions).
+        -- An on-page button, not a key. The board comes back where the
+        -- visitor left it: cursor, open epic or package, open overlay.
 }
 
 -- == Keys ==
@@ -202,6 +202,12 @@ rule GuideKeyRunsItsDeclaredAction {
         -- detail panel; open a fake agent window for a running task with
         -- Space and come back with Prefix+Space (tmux.global
         -- jump_to_dispatch); open the ? help overlay.
+        -- Prefix is Ctrl+b, tmux's default; the agent window's banner says so.
+        -- Each block entry also carries the guide's own imitation of the
+        -- row's context, so q is exit_epic inside a view and quit (shown as
+        -- a note, never acted on) on the top-level board, as on the real
+        -- board. The parity test checks namespace, action, key and
+        -- description, not that context.
 }
 
 rule GuideKeyOutsideTheBlockDoesNothing {
@@ -292,12 +298,18 @@ surface OnboardingGuidePage {
         -- names a key the page does not answer to, and a key the page
         -- answers to in that place is not left off it.
 
-    @guarantee GraphShowsHowMuchTheBoardHolds
-        -- The Graph step draws the same example data: the epic tree, with
-        -- the tasks inside each epic, and the work packages drawn across
-        -- that tree to the tasks and epics they link. Hovering or selecting
-        -- a package highlights what it links. Its purpose is to give a sense
-        -- of how much the board holds, not to be operated with keys.
+    @guarantee GraphShowsHowTheBoardOrganizesWork
+        -- The Graph step shows the same example data two ways side by side,
+        -- to make the difference between the two groupings plain:
+        --   - the epic tree as nested boxes: each epic holds its own tasks
+        --     and its sub-epics, so every task visibly lives in one place;
+        --   - a chosen work package laid out as its own four-column board of
+        --     the tasks and epic cards it links, each task saying which epic
+        --     it comes from.
+        -- Choosing a package (an on-page button) lights up what it links in
+        -- the tree, wherever it lives, and dims the rest. With no package
+        -- chosen the tree shows plainly. It also gives a sense of how much
+        -- the board holds. It is not operated with keys.
 
     @guarantee WalkthroughReadsWithoutJavaScript
         -- The page carries a plain-text walkthrough of the same tour in its
@@ -321,11 +333,3 @@ surface GuideKeyParityTestSuite {
     contracts:
         demands GuideKeyParityGate
 }
-
-------------------------------------------------------------
--- Open Questions
-------------------------------------------------------------
-
-open question "Key parity checks namespace, action and key, but not a row's context. Must the guide also answer a key only where the real row's context holds (for example q runs exit_epic inside an epic view, but on the top-level board q is quit, which the guide should not imitate), and should the block or the test carry that context?"
-open question "What browser keystroke stands for tmux's Prefix in Prefix+Space (jump_to_dispatch) inside the fake agent window — the default Ctrl+B followed by Space, or something else — and how does the banner show it?"
-open question "When the visitor presses Back from the Graph step, does the board come back where they left it (cursor, open epic or package, open overlay), or reset to the top-level board?"
