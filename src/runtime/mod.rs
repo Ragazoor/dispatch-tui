@@ -54,14 +54,14 @@ const AGENT_TREE_TOGGLE_COMMAND: &str = concat!(
 );
 
 use crate::embeddings::EmbeddingService;
-use crate::models::{TaskId, TmuxWindow};
+use crate::models::{EpicId, TaskId, TmuxWindow, WorkPackageId};
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::FieldUpdate;
 use crate::store::{RepoConfigRead, TaskRead};
 use crate::store_connection::{on_store_connected, StoreParts};
 use crate::tui::{
     self, App, Command, EpicFoldState, Message, RepoFilterMode, SectionFoldState,
-    COLLAPSED_EPICS_KEY, COLLAPSED_SECTIONS_KEY,
+    COLLAPSED_EPICS_KEY, COLLAPSED_SECTIONS_KEY, HIDDEN_EPICS_KEY, HIDDEN_PACKAGES_KEY,
 };
 use crate::{dispatch, mcp, models, store, tmux};
 
@@ -1195,6 +1195,7 @@ async fn hydrate_app(
     )));
     load_notifications_pref(database, &mut app).await;
     load_repo_filter(database, &mut app).await;
+    load_board_hides(database, &mut app).await;
     load_collapsed_sections(database, &mut app).await;
     load_collapsed_epics(database, &mut app).await;
     if let Some(msg) = apply_tmux_focus_warning(runner) {
@@ -1227,6 +1228,24 @@ async fn load_repo_filter(db: &dyn store::SettingsStore, app: &mut App) {
             app.set_repo_filter_mode(mode);
         }
     }
+}
+
+/// Restore the hidden epics and work packages the board filter overlay saved
+/// (board-layout.allium: "Hidden Epics and Work Packages"). An unreadable or
+/// absent row leaves that list empty.
+async fn load_board_hides(db: &dyn store::SettingsStore, app: &mut App) {
+    async fn ids(db: &dyn store::SettingsStore, key: &str) -> Vec<i64> {
+        match db.get_setting_string(key).await {
+            Ok(Some(val)) => serde_json::from_str(&val).unwrap_or_default(),
+            _ => vec![],
+        }
+    }
+    let epics = ids(db, HIDDEN_EPICS_KEY).await.into_iter().map(EpicId);
+    let packages = ids(db, HIDDEN_PACKAGES_KEY).await;
+    app.set_board_hides(
+        epics.collect(),
+        packages.into_iter().map(WorkPackageId).collect(),
+    );
 }
 
 /// Restore the folded sub-status sections. Unlike the flat-view toggle, a fold

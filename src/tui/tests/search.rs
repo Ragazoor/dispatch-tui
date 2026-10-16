@@ -434,9 +434,7 @@ fn epic_ids_owning_matching_task_collects_only_board_visible_matches() {
 
     let owners = epic_ids_owning_matching_task(
         &[matching, wrong_repo, no_match, standalone],
-        &filter,
-        "login",
-        None,
+        &crate::tui::search::BoardFilters::new(&filter, "login", &[]),
     );
 
     // Only epic 1: epic 2's match is outside the repo filter, epic 4 has no

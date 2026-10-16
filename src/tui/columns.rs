@@ -93,7 +93,7 @@ impl<'a> BoardView<'a> {
     /// The board-wide filters, resolved against the current query and filter
     /// state. Build one per pass and share it; see [`BoardFilters`].
     pub(in crate::tui) fn board_filters(self) -> BoardFilters<'a> {
-        BoardFilters::new(self.filter, &self.search.query)
+        BoardFilters::new(self.filter, &self.search.query, &self.board.epics)
     }
 
     /// Return tasks visible in the current view.
@@ -155,8 +155,9 @@ impl<'a> BoardView<'a> {
     /// An epic card appears in every column where the epic's subtree holds a
     /// *visible* task of that status, so one epic can hold four cards at once
     /// (`board-layout.allium`, "Epic Card Placement"). Visible means the task
-    /// survives the same three predicates `tasks_for_current_view` applies —
-    /// the repo filter, the only-active filter and the search query. A task
+    /// survives the same four predicates `tasks_for_current_view` applies —
+    /// the repo filter, the epic hide-list, the only-active filter and the
+    /// search query. A task
     /// the board is hiding cannot place its ancestor's card: entering it
     /// would be a dead end.
     ///
@@ -311,7 +312,8 @@ impl<'a> BoardView<'a> {
         let acc = self.folds.fold_into_fingerprint(acc);
         let acc = self.epic_folds.fold_into_fingerprint(acc);
 
-        // The three board-wide filters (see `BoardFilters`). `epic_filter_cache`
+        // The board-wide filters (see `BoardFilters`), the lens and both
+        // hide-lists. `epic_filter_cache`
         // and `epic_placements_cache` are both derived through them, so a
         // fingerprint blind to them would let a filter change serve a stale
         // board — the one hazard this fingerprint exists to catch.
@@ -327,6 +329,16 @@ impl<'a> BoardView<'a> {
             repos ^= fnv_bytes(repo.as_bytes());
         }
         acc = fnv_fold(acc, repos);
+        // Hide-lists are sets too, so they are combined order-free like repos.
+        // Tagged so hiding epic 7 and hiding package 7 read differently.
+        let mut hidden = 0u64;
+        for e in &self.filter.hidden_epics {
+            hidden ^= fnv_fold(fnv_fold(fnv_seed(), 1), e.0 as u64);
+        }
+        for p in &self.filter.hidden_packages {
+            hidden ^= fnv_fold(fnv_fold(fnv_seed(), 2), p.0 as u64);
+        }
+        acc = fnv_fold(acc, hidden);
         fnv_fold(acc, fnv_bytes(self.search.query.as_bytes()))
     }
 
@@ -841,12 +853,7 @@ impl<'a> BoardView<'a> {
         // Parsed once per pass, not per epic: this is the render hot path.
         let id_digits = id_digits_query(&self.search.query);
         EpicSearchIndex {
-            task_owners: epic_ids_owning_matching_task(
-                &self.board.tasks,
-                self.filter,
-                &query_lower,
-                id_digits,
-            ),
+            task_owners: epic_ids_owning_matching_task(&self.board.tasks, &self.board_filters()),
             by_id: crate::models::epic_id_lookup(&self.board.epics),
             children: crate::models::build_children_map(&self.board.epics),
             query_lower,
@@ -956,6 +963,11 @@ impl<'a> BoardView<'a> {
                 Scope::Linked(self.package_item_ids(package_id).1)
             }
         };
+        // Hidden epics draw no card anywhere, a hidden ancestor hiding its
+        // whole subtree (`board-layout.allium`, "Hidden Epics and Work
+        // Packages"). Free when nothing is hidden.
+        let hidden =
+            super::search::hidden_epic_closure(&self.filter.hidden_epics, &self.board.epics);
         self.board
             .epics
             .iter()
@@ -963,6 +975,7 @@ impl<'a> BoardView<'a> {
                 Scope::Children(parent) => e.parent_epic_id == *parent,
                 Scope::Linked(ids) => ids.contains(&e.id),
             })
+            .filter(move |e| !hidden.contains(&e.id))
             .filter(move |e| {
                 self.epic_matches(e.id) && self.epic_repo_matches(e.id) && pass.admits(self, e.id)
             })

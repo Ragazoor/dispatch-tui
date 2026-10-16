@@ -180,6 +180,43 @@ mod load_init_helpers {
     }
 
     #[tokio::test]
+    async fn load_board_hides_restores_both_hide_lists() {
+        let db = Store::open_in_memory().unwrap();
+        db.set_setting_string("hidden_epics", "[3,5]")
+            .await
+            .unwrap();
+        db.set_setting_string("hidden_packages", "[7]")
+            .await
+            .unwrap();
+        let mut app = empty_app();
+
+        load_board_hides(&db, &mut app).await;
+
+        assert_eq!(
+            app.hidden_epics(),
+            &std::collections::HashSet::from([crate::models::EpicId(3), crate::models::EpicId(5)])
+        );
+        assert_eq!(
+            app.hidden_packages(),
+            &std::collections::HashSet::from([crate::models::WorkPackageId(7)])
+        );
+    }
+
+    #[tokio::test]
+    async fn load_board_hides_ignores_unreadable_rows() {
+        let db = Store::open_in_memory().unwrap();
+        db.set_setting_string("hidden_epics", "not json")
+            .await
+            .unwrap();
+        let mut app = empty_app();
+
+        load_board_hides(&db, &mut app).await;
+
+        assert!(app.hidden_epics().is_empty());
+        assert!(app.hidden_packages().is_empty());
+    }
+
+    #[tokio::test]
     async fn apply_tmux_focus_warning_returns_none_when_enabled() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"on\n")]);
         let result = apply_tmux_focus_warning(&mock);

@@ -21,6 +21,7 @@ use chrono::{DateTime, Utc};
 
 use crate::models::{
     section_sort_priority, ColumnSection, Epic, EpicId, SubStatus, Task, TaskId, TaskStatus,
+    WorkPackageId,
 };
 
 // ---------------------------------------------------------------------------
@@ -570,6 +571,23 @@ impl App {
 
     pub fn set_repo_filter_mode(&mut self, mode: RepoFilterMode) {
         self.filter.mode = mode;
+        self.sync_board_selection();
+    }
+
+    pub fn hidden_epics(&self) -> &HashSet<EpicId> {
+        &self.filter.hidden_epics
+    }
+
+    pub fn hidden_packages(&self) -> &HashSet<WorkPackageId> {
+        &self.filter.hidden_packages
+    }
+
+    /// Restore the saved hide-lists at startup. Ids that name nothing on the
+    /// board are kept and stay inert (`board-layout.allium`, "Hidden Epics and
+    /// Work Packages").
+    pub fn set_board_hides(&mut self, epics: HashSet<EpicId>, packages: HashSet<WorkPackageId>) {
+        self.filter.hidden_epics = epics;
+        self.filter.hidden_packages = packages;
         self.sync_board_selection();
     }
 

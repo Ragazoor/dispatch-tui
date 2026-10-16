@@ -571,6 +571,10 @@ impl SelectionState {
 // FilterState — repo filter for the task board
 // ---------------------------------------------------------------------------
 
+/// Settings keys the hide-lists are saved under, as JSON arrays of ids.
+pub const HIDDEN_EPICS_KEY: &str = "hidden_epics";
+pub const HIDDEN_PACKAGES_KEY: &str = "hidden_packages";
+
 #[derive(Debug, Clone, Default)]
 pub struct FilterState {
     pub repos: HashSet<String>,
@@ -578,6 +582,11 @@ pub struct FilterState {
     /// How the board is read; see [`Lens`]. Kept beside the filters because
     /// its only-active half narrows the same task set they do.
     pub lens: Lens,
+    /// Epics the user hid; each hides its whole subtree. A hide-list, so new
+    /// epics show (`board-layout.allium`, "Hidden Epics and Work Packages").
+    pub hidden_epics: HashSet<EpicId>,
+    /// Work packages the user hid; each hides its own card only.
+    pub hidden_packages: HashSet<WorkPackageId>,
 }
 
 impl FilterState {

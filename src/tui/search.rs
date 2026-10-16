@@ -132,24 +132,40 @@ pub(in crate::tui) struct BoardFilters<'a> {
     pub(in crate::tui) filter: &'a FilterState,
     pub(in crate::tui) query_lower: String,
     pub(in crate::tui) id_digits: Option<&'a str>,
+    /// Every epic the hide-list hides: the hidden ones and all their
+    /// descendants. See [`hidden_epic_closure`].
+    pub(in crate::tui) hidden_epics: HashSet<EpicId>,
 }
 
 impl<'a> BoardFilters<'a> {
-    pub(in crate::tui) fn new(filter: &'a FilterState, query: &'a str) -> Self {
+    pub(in crate::tui) fn new(filter: &'a FilterState, query: &'a str, epics: &[Epic]) -> Self {
         BoardFilters {
             filter,
             // Lowercased once per pass, not once per task: this is the render
             // hot path.
             query_lower: query.to_lowercase(),
             id_digits: id_digits_query(query),
+            hidden_epics: hidden_epic_closure(&filter.hidden_epics, epics),
         }
     }
 
-    /// Whether `task` survives all three filters.
+    /// Whether `task` survives all four filters: repo, epic hide-list,
+    /// only-active and search.
     pub(in crate::tui) fn admits(&self, task: &Task) -> bool {
         self.filter.matches(&task.repo_path)
+            && !self.task_is_hidden(task)
             && self.filter.task_matches(task)
             && self.matches_query(&task.title, task.id.0)
+    }
+
+    /// Whether `epic` is hidden, on its own or through an ancestor.
+    pub(in crate::tui) fn epic_is_hidden(&self, epic: EpicId) -> bool {
+        self.hidden_epics.contains(&epic)
+    }
+
+    /// Whether `task` sits under a hidden epic. A task with no epic never does.
+    pub(in crate::tui) fn task_is_hidden(&self, task: &Task) -> bool {
+        task.epic_id.is_some_and(|e| self.epic_is_hidden(e))
     }
 
     /// The search half alone, for a caller that has already applied the other
@@ -157,6 +173,23 @@ impl<'a> BoardFilters<'a> {
     pub(in crate::tui) fn matches_query(&self, title: &str, id: i64) -> bool {
         own_search_match(title, id, &self.query_lower, self.id_digits)
     }
+}
+
+/// The hidden epics and every descendant of them: what
+/// `board-layout.allium: BoardHides.epic_is_hidden` holds for. Free when nothing
+/// is hidden, which is the common case on the render hot path.
+pub(in crate::tui) fn hidden_epic_closure(
+    hidden: &HashSet<EpicId>,
+    epics: &[Epic],
+) -> HashSet<EpicId> {
+    if hidden.is_empty() {
+        return HashSet::new();
+    }
+    let children = crate::models::build_children_map(epics);
+    hidden
+        .iter()
+        .flat_map(|&e| crate::models::descendant_epic_ids_with_map(e, &children))
+        .collect()
 }
 
 /// The epic ids that *directly own* at least one task carrying the
@@ -171,15 +204,8 @@ impl<'a> BoardFilters<'a> {
 /// per descendant — see [`EpicSearchIndex`].
 pub(in crate::tui) fn epic_ids_owning_matching_task(
     tasks: &[Task],
-    filter: &FilterState,
-    query_lower: &str,
-    id_digits: Option<&str>,
+    filters: &BoardFilters<'_>,
 ) -> HashSet<EpicId> {
-    let filters = BoardFilters {
-        filter,
-        query_lower: query_lower.to_string(),
-        id_digits,
-    };
     tasks
         .iter()
         .filter(|t| filters.admits(t))

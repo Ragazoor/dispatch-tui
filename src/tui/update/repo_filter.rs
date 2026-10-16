@@ -35,7 +35,21 @@ impl App {
         paths.sort();
         let value = serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string());
         let mode_value = self.filter.mode.as_str();
+        let hidden_epics = sorted_ids_json(self.filter.hidden_epics.iter().map(|e| e.0));
+        let hidden_packages = sorted_ids_json(self.filter.hidden_packages.iter().map(|p| p.0));
         vec![
+            Command::Settings(
+                crate::tui::commands::SettingsCommand::PersistStringSetting {
+                    key: crate::tui::HIDDEN_EPICS_KEY.to_string(),
+                    value: hidden_epics,
+                },
+            ),
+            Command::Settings(
+                crate::tui::commands::SettingsCommand::PersistStringSetting {
+                    key: crate::tui::HIDDEN_PACKAGES_KEY.to_string(),
+                    value: hidden_packages,
+                },
+            ),
             Command::Settings(
                 crate::tui::commands::SettingsCommand::PersistStringSetting {
                     key: "repo_filter".to_string(),
@@ -90,4 +104,12 @@ impl App {
             crate::tui::commands::RepoFilterCommand::DeleteRepoPath(path),
         )]
     }
+}
+
+/// A hide-list as its saved setting: a JSON array, sorted so an unchanged set
+/// always saves the same string.
+fn sorted_ids_json(ids: impl Iterator<Item = i64>) -> String {
+    let mut ids: Vec<i64> = ids.collect();
+    ids.sort_unstable();
+    serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string())
 }

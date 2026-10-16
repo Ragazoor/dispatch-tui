@@ -76,7 +76,13 @@ impl<'a> BoardView<'a> {
         let filters = self.board_filters();
         let searching = !self.search.query.is_empty();
         let children = crate::models::build_children_map(&self.board.epics);
-        for package in &self.board.work_packages {
+        // A hidden package draws no card; its linked work is untouched.
+        for package in self
+            .board
+            .work_packages
+            .iter()
+            .filter(|p| !self.filter.hidden_packages.contains(&p.id))
+        {
             let (task_ids, linked_epics) = self.package_item_ids(package.id);
             let subtree: HashSet<EpicId> = linked_epics
                 .into_iter()
