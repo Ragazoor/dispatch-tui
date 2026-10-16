@@ -71,7 +71,8 @@ pub struct HandedOutAgentName {
 pub const AGENT_CURRENT: &str = "current";
 pub const AGENT_ENDED: &str = "ended";
 
-pub const AGENT_START_MODES: [&str; 3] = ["dispatch", "research", "quick"];
+/// The launch kinds, which are the dispatch modes (D3).
+pub const AGENT_START_MODES: [&str; 3] = DISPATCH_MODES;
 /// The start mode a backfilled agent gets: the store cannot tell how the old
 /// session started, and dispatch is the common case.
 pub const AGENT_BACKFILL_START_MODE: &str = "dispatch";
@@ -242,12 +243,8 @@ pub fn validate_seeded_agent(row: &Agent) -> Result<(), String> {
         AGENT_ENDED => true,
         other => return Err(format!("agent {id}: unknown state {other:?}")),
     };
-    if row.name.is_empty() || row.name.chars().all(|c| c.is_ascii_digit()) {
-        return Err(format!(
-            "agent {id}: name {:?} is empty or only digits",
-            row.name
-        ));
-    }
+    // AgentNameIsNotAnId, by the alias rule every picked name already passes.
+    validate_alias(&row.name).map_err(|why| format!("agent {id}: {why}"))?;
     if ended != AGENT_END_REASONS.contains(&row.end_reason.as_str()) {
         return Err(format!(
             "agent {id}: end reason {:?} does not fit state {}",
@@ -268,7 +265,12 @@ pub fn validate_seeded_agent(row: &Agent) -> Result<(), String> {
 pub trait AgentStore {
     /// Every agent `task_id` has had, current and ended.
     fn agents_of_task(&self, task_id: i64) -> Vec<Agent>;
+    /// Whether the ledger holds `name`.
     fn name_is_handed_out(&self, name: &str) -> bool;
+    /// Whether an agent row holds `name`. The picker treats it as taken too:
+    /// a backstop for a row written without its ledger entry, so the insert
+    /// cannot fail on the unique name.
+    fn name_held_by_agent(&self, name: &str) -> bool;
     /// Insert with a generated id.
     fn insert_agent(&mut self, row: Agent);
     fn update_agent(&mut self, row: Agent);
@@ -289,9 +291,16 @@ pub fn current_agent<S: AgentStore + ?Sized>(store: &S, task_id: i64) -> Option<
         .find(|a| a.state == AGENT_CURRENT)
 }
 
-/// Pick a fresh name and write its ledger row (`AgentNameIsNeverReused`).
-fn hand_out_agent_name<S: AgentStore + ?Sized>(store: &mut S) -> String {
-    let name = pick_agent_name(store.name_seed(), |n| store.name_is_handed_out(n));
+/// Pick a fresh name for `task_id` and write its ledger row
+/// (`AgentNameIsNeverReused`). The task id is mixed into the store's seed: the
+/// clock does not move inside one reducer, so a backfill naming many tasks
+/// would otherwise start every pick at the same name and walk past all the
+/// names it had just handed out.
+fn hand_out_agent_name<S: AgentStore + ?Sized>(store: &mut S, task_id: i64) -> String {
+    let seed = store.name_seed().wrapping_add(task_id as u64);
+    let name = pick_agent_name(seed, |n| {
+        store.name_is_handed_out(n) || store.name_held_by_agent(n)
+    });
     store.insert_handed_out_name(HandedOutAgentName {
         name: name.clone(),
         handed_out_at: store.now(),
@@ -302,7 +311,7 @@ fn hand_out_agent_name<S: AgentStore + ?Sized>(store: &mut S) -> String {
 /// Start a new current agent for `task`, with a fresh name and the task's
 /// window.
 fn create_agent<S: AgentStore + ?Sized>(store: &mut S, task: &Task, host: &str, start_mode: &str) {
-    let name = hand_out_agent_name(store);
+    let name = hand_out_agent_name(store, task.id);
     let now = store.now();
     store.insert_agent(new_agent(
         task.id,
@@ -372,8 +381,7 @@ pub fn backfill_agents_into<S: AgentStore + ?Sized>(
         if task.worktree.is_empty() || current_agent(store, task.id).is_some() {
             continue;
         }
-        let host = task.host.clone();
-        create_agent(store, &task, &host, AGENT_BACKFILL_START_MODE);
+        create_agent(store, &task, &task.host, AGENT_BACKFILL_START_MODE);
     }
 }
 
@@ -386,18 +394,16 @@ impl AgentStore for AgentTables<'_> {
     fn agents_of_task(&self, task_id: i64) -> Vec<Agent> {
         self.0.db.agents().task_id().filter(&task_id).collect()
     }
-    /// The ledger, and as a backstop the agent rows' unique names too: an
-    /// agent written without its ledger row (by hand, or by an older seed)
-    /// must not make the claim's insert fail on the unique `name`.
     fn name_is_handed_out(&self, name: &str) -> bool {
-        let name = name.to_string();
         self.0
             .db
             .handed_out_agent_names()
             .name()
-            .find(&name)
+            .find(&name.to_string())
             .is_some()
-            || self.0.db.agents().name().find(&name).is_some()
+    }
+    fn name_held_by_agent(&self, name: &str) -> bool {
+        self.0.db.agents().name().find(&name.to_string()).is_some()
     }
     fn insert_agent(&mut self, row: Agent) {
         self.0.db.agents().insert(Agent { id: 0, ..row });
@@ -421,12 +427,7 @@ impl AgentStore for AgentTables<'_> {
 
 /// Run [`backfill_agents_into`] over every task in the store.
 pub(crate) fn backfill_all_agents(ctx: &ReducerContext) {
-    let tasks: Vec<Task> = ctx
-        .db
-        .tasks()
-        .iter()
-        .filter(|t| !t.worktree.is_empty())
-        .collect();
+    let tasks: Vec<Task> = ctx.db.tasks().iter().collect();
     backfill_agents_into(&mut AgentTables(ctx), tasks);
 }
 

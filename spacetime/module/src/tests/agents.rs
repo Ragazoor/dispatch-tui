@@ -23,6 +23,9 @@ impl AgentStore for Rows {
     fn name_is_handed_out(&self, name: &str) -> bool {
         self.ledger.iter().any(|r| r.name == name)
     }
+    fn name_held_by_agent(&self, name: &str) -> bool {
+        self.agents.iter().any(|a| a.name == name)
+    }
     fn insert_agent(&mut self, row: Agent) {
         self.next_id += 1;
         self.agents.push(Agent {

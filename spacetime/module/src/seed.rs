@@ -125,13 +125,14 @@ pub fn seed_agents(ctx: &ReducerContext, rows: Vec<Agent>) -> Result<(), String>
             }
         }
         validate_seeded_agent(&row)?;
-        let other_current = ctx
-            .db
-            .agents()
-            .task_id()
-            .filter(&row.task_id)
-            .any(|a| a.id != row.id && a.state == AGENT_CURRENT);
-        if row.state == AGENT_CURRENT && other_current {
+        if row.state == AGENT_CURRENT
+            && ctx
+                .db
+                .agents()
+                .task_id()
+                .filter(&row.task_id)
+                .any(|a| a.id != row.id && a.state == AGENT_CURRENT)
+        {
             return Err(format!(
                 "agent {}: task {} already has a current agent",
                 row.id, row.task_id

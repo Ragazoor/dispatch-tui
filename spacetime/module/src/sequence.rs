@@ -81,8 +81,7 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
         "retired_feed_items" => burn_table!(retired_feed_items, blank_retired_feed_item()),
         // `task_shells`, `task_subagents`, `hosts`, `subscriptions`, `settings`,
         // `filter_presets`, `work_package_links` and `handed_out_agent_names`
-        // generate no ids, so there
-        // is nothing to burn.
+        // generate no ids, so there is nothing to burn.
         // Accepted rather than rejected so a caller can loop over every shared
         // table without a special case.
         "task_shells"

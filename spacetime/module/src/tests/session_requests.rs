@@ -1198,5 +1198,3 @@ fn leaving_running_clears_a_pending_stop_unless_the_patch_names_it() {
         "only a move out of running clears"
     );
 }
-
-// -- the rules version (sync.allium: config.rules_version) ----------------

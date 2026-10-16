@@ -27,10 +27,11 @@ impl module::AgentStore for MemAgentStore<'_> {
             .cloned()
             .collect()
     }
-    /// The ledger, and the agent rows' names as the module's backstop does.
     fn name_is_handed_out(&self, name: &str) -> bool {
         self.tables.handed_out_agent_names.contains_key(name)
-            || self.tables.agents.values().any(|a| a.name == name)
+    }
+    fn name_held_by_agent(&self, name: &str) -> bool {
+        self.tables.agents.values().any(|a| a.name == name)
     }
     fn insert_agent(&mut self, row: module::Agent) {
         let id = MemoryReducerCaller::assign_id(0, &mut self.tables.next_agent_id);
@@ -72,12 +73,7 @@ impl MemoryReducerCaller {
     /// because no board calls it (only `store import` does, over the CLI).
     pub fn backfill_agents(&self) -> anyhow::Result<super::ReducerOutcome> {
         let mut tables = self.lock();
-        let tasks: Vec<module::Task> = tables
-            .tasks
-            .values()
-            .filter(|t| !t.worktree.is_empty())
-            .cloned()
-            .collect();
+        let tasks: Vec<module::Task> = tables.tasks.values().cloned().collect();
         module::backfill_agents_into(&mut self.agent_store(&mut tables), tasks);
         Ok(super::ReducerOutcome::Applied(vec![]))
     }
