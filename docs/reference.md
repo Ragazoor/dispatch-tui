@@ -915,6 +915,33 @@ summary="Rebase on main resolved the rusqlite version conflict; use that if it r
 
 A per-repo, single-line shell command that dispatched agents must run before declaring work complete. Stored on the `repo_paths` row for the task's `repo_path`; set via the `set_verify_command` MCP tool or `cargo run -- repo set-verify <path> <command>`. Newlines and carriage returns are rejected — chain steps with `&&` or `;`. It never appears in the dispatch prompt. It reaches the agent through `get_task`'s "Verify command" line, and the agent runs it itself in its worktree, guided by the wrap-up skill. The board never runs it and `wrap_up` does not check the result; `wrap_up` refuses only a worktree with uncommitted changes, and after a rebase that moved the branch its response tells the agent to re-run the command. See `AgentsRunTheVerifyCommand` and `WrapUpRefusesUnfinishedWork` in `docs/specs/mcp-task-tools.allium`.
 
+## Releases
+
+`.github/workflows/release-please.yml` does both halves. On every push to
+`main`, release-please keeps a release PR open; merging it tags `vX.Y.Z` and
+creates the GitHub release. The `build` job in the same file then builds
+`dispatch` natively for `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`
+and `aarch64-apple-darwin` and uploads `dispatch-<target>.tar.gz` plus a
+`.sha256` to that release. It must stay in the same file: a release made with
+`GITHUB_TOKEN` triggers no other workflow.
+
+- **release-please needs a repo setting.** Settings → Actions → General →
+  "Allow GitHub Actions to create and approve pull requests". Without it the
+  job fails with "GitHub Actions is not permitted to create or approve pull
+  requests".
+- **The release PR gets no CI run**, for the same `GITHUB_TOKEN` reason. Its
+  diff is only the version bump and the changelog.
+- **Versions come from conventional-commit prefixes** (`feat:`, `fix:`,
+  `feat!:`). Commits without one do not bump the version or reach the
+  changelog.
+- **Rebuild by hand** with `gh workflow run release-please.yml -f tag=vX.Y.Z`
+  (re-uploads with `--clobber`); with no `tag` it only builds and keeps the
+  archives as workflow artifacts.
+- **Why native runners, not cross-compiling:** ort-sys downloads an ONNX
+  Runtime for the build host and links it statically. Linux builds on
+  `ubuntu-22.04` for a glibc 2.35 floor and links the system OpenSSL 3
+  (`spacetimedb-sdk` → `native-tls`).
+
 ## Agent-Facing Skill Copy
 
 `plugin/skills/*/SKILL.md` is the **source of truth** for the skills agents run (`/wrap-up`, `/retro`, `/learnings`, `/grill`, `/decompose-review`, `/allium-loop`). The directory is embedded in the binary via `include_dir!` and only reaches `~/.claude/plugins/local/dispatch/` when `dispatch tui`'s startup configuration check reports the plugin stale and the operator accepts (`docs/specs/startup.allium`) — editing the installed copy is editing a build artifact.

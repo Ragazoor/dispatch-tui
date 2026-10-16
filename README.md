@@ -34,13 +34,26 @@ Most agent managers are session managers: they open a terminal and let you watch
 
 | Tool | | Install |
 |---|---|---|
-| Rust | required | [rustup.rs](https://rustup.rs) |
+| Rust | only to build from source | [rustup.rs](https://rustup.rs) |
 | `tmux` | required | `dnf install tmux` / `brew install tmux` |
 | `git` | required | usually already there |
 | `claude` | required | [Claude Code CLI](https://claude.ai/code) |
 | `gh` | optional | [GitHub CLI](https://cli.github.com), for pull requests |
 
 ## Install
+
+Download a prebuilt binary from [Releases](https://github.com/Ragazoor/dispatch-tui/releases). Builds exist for Linux (x86_64, aarch64) and macOS (Apple Silicon). Pick your target:
+
+```bash
+target=x86_64-unknown-linux-gnu   # or aarch64-unknown-linux-gnu, aarch64-apple-darwin
+curl -fsSL "https://github.com/Ragazoor/dispatch-tui/releases/latest/download/dispatch-$target.tar.gz" | tar -xz
+mkdir -p ~/.local/bin && install -m 755 "dispatch-$target/dispatch" ~/.local/bin/dispatch
+dispatch tui
+```
+
+The Linux binary needs glibc 2.35 or newer and OpenSSL 3. Each archive has a `.sha256` file beside it.
+
+Or build from source:
 
 ```bash
 git clone https://github.com/Ragazoor/dispatch-tui

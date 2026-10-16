@@ -3,17 +3,125 @@ name: Release Please
 on:
   push:
     branches: [main]
+  # Builds the binaries for an existing release tag by hand: to backfill a
+  # release, or to retry a failed upload. With an empty tag it builds and
+  # keeps the archives as workflow artifacts without touching any release.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach binaries to (empty = build only)
+        required: false
+        default: ""
 
 permissions:
   contents: write
   pull-requests: write
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   release-please:
     name: Release Please
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # Lives in this file, not in an `on: release` workflow: a release created
+  # with GITHUB_TOKEN triggers no other workflow.
+  #
+  # Each target builds on its own native runner. ort-sys (pulled in by
+  # fastembed) downloads a prebuilt ONNX Runtime for the build host and links
+  # it statically, so cross-compiling would link the wrong one. The SpacetimeDB
+  # module and `plugin/` are embedded with `include_bytes!`/`include_dir!`, so
+  # the one binary is the whole install.
+  #
+  # Linux builds on ubuntu-22.04 for an older glibc floor. The binary links
+  # the system OpenSSL 3 (spacetimedb-sdk -> native-tls).
+  build:
+    name: Build ${{ matrix.target }}
+    needs: release-please
+    if: >-
+      always() &&
+      (github.event_name == 'workflow_dispatch' ||
+       needs.release-please.outputs.release_created == 'true')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+          - target: aarch64-apple-darwin
+            os: macos-14
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG || github.sha }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: ${{ matrix.target }}
+
+      # Same pairing as ci.yml: ort-sys records an absolute `-L` into
+      # `~/.cache/ort.pyke.io`, so that directory and `target` must be
+      # cached together.
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/ort.pyke.io
+            target
+          key: release-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            release-${{ matrix.target }}-
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Smoke test
+        run: ./target/${{ matrix.target }}/release/dispatch --version
+
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          # No version in the name, so
+          # releases/latest/download/dispatch-<target>.tar.gz stays a stable URL.
+          name="dispatch-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/dispatch" README.md LICENSE "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
+          echo "archive=dist/$name.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dispatch-${{ matrix.target }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
+
+      - name: Upload to release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "$TAG" --clobber
+          "${{ steps.package.outputs.archive }}"
+          "${{ steps.package.outputs.archive }}.sha256"
