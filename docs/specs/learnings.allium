@@ -415,7 +415,7 @@ rule WrapUpRateLearningNudge {
         -- gated by core/config.learning_reflection_enabled, and it never mentions
         -- record_learning. Confirmed by the test
         -- wrap_up_rebase_omits_reflection_nudge_regardless_of_setting in
-        -- src/mcp/handlers/tests/tasks/wrap_up.rs. The config-gated
+        -- src/mcp/handlers/tests/tasks/wrap_up/exit_session.rs. The config-gated
         -- record_learning nudge is a different behaviour on a different tool —
         -- see mcp-task-tools.allium: PrFinalisationReflectionNudge.
         -- This rule covers only the wrap_up-time rate_learning nudge. Reflection
