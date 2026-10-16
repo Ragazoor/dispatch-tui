@@ -169,3 +169,66 @@ fn m_key_on_task_card_opens_move_picker() {
     assert_eq!(app.input.mode, InputMode::MoveTaskToEpic(TaskId(1)));
     assert!(app.interaction.move_task_picker.is_some());
 }
+
+#[test]
+fn start_move_to_epic_puts_cursor_on_the_tasks_current_epic() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.epic_id = Some(EpicId(20));
+    let mut app = App::new(vec![task]);
+    let mut child = make_epic(20);
+    child.parent_epic_id = Some(EpicId(10));
+    app.board.epics = vec![make_epic(10), child, make_epic(30)];
+
+    app.update(Message::Task(TaskMessage::StartMoveToEpic(TaskId(1))));
+
+    let picker = app.interaction.move_task_picker.as_ref().unwrap();
+    assert_eq!(
+        picker.tree_state.borrow().selected(),
+        vec!["epic:10".to_string(), "epic:20".to_string()]
+    );
+}
+
+#[test]
+fn start_move_to_epic_without_current_epic_starts_on_no_parent() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.epics = vec![make_epic(10)];
+
+    app.update(Message::Task(TaskMessage::StartMoveToEpic(TaskId(1))));
+
+    let picker = app.interaction.move_task_picker.as_ref().unwrap();
+    assert_eq!(
+        picker.tree_state.borrow().selected(),
+        vec![crate::tui::types::REPARENT_NO_PARENT_SENTINEL.to_string()]
+    );
+}
+
+#[test]
+fn space_confirms_in_move_to_epic_picker_and_does_not_expand() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut child = make_epic(20);
+    child.parent_epic_id = Some(EpicId(10));
+    app.board.epics = vec![make_epic(10), child];
+    app.update(Message::Task(TaskMessage::StartMoveToEpic(TaskId(1))));
+    // Keys move the cursor over the last rendered rows, so set it directly.
+    app.interaction
+        .move_task_picker
+        .as_ref()
+        .unwrap()
+        .tree_state
+        .borrow_mut()
+        .select(vec!["epic:10".to_string()]);
+
+    app.handle_key(make_key(KeyCode::Char(' ')));
+
+    assert!(
+        matches!(
+            app.input.mode,
+            InputMode::ConfirmMoveTaskToEpic {
+                new_epic: Some(EpicId(10)),
+                ..
+            }
+        ),
+        "got {:?}",
+        app.input.mode
+    );
+}

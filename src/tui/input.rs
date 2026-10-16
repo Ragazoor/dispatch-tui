@@ -28,7 +28,7 @@ fn tree_nav_for(key: KeyEvent) -> Option<crate::tui::types::TreeNav> {
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => Some(TreeNav::Down),
         KeyCode::Char('k') | KeyCode::Up => Some(TreeNav::Up),
-        KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => Some(TreeNav::Right),
+        KeyCode::Char('l') | KeyCode::Right => Some(TreeNav::Right),
         KeyCode::Char('h') | KeyCode::Left => Some(TreeNav::Left),
         _ => None,
     }

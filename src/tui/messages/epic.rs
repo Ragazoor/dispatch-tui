@@ -92,7 +92,19 @@ impl EpicMessage {
             EpicMessage::StartReparent(id) => {
                 let items =
                     crate::tui::ui::build_reparent_tree(&app.view().reparent_target_epics(id));
-                epic_input::start_reparent(&mut app.input, &mut app.interaction, id, items);
+                let current_parent = app
+                    .board
+                    .epics
+                    .iter()
+                    .find(|e| e.id == id)
+                    .and_then(|e| e.parent_epic_id);
+                epic_input::start_reparent(
+                    &mut app.input,
+                    &mut app.interaction,
+                    id,
+                    items,
+                    current_parent,
+                );
                 vec![]
             }
             EpicMessage::ReparentNavigate(nav) => {

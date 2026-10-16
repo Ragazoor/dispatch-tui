@@ -38,7 +38,7 @@ expression: rendered
                               │                                                          │
                               │                                                          │
                               │                                                          │
-                              │ j/k:navigate  l/Space/→:expand  h/←:collapse  Enter:selec│
+                              │ j/k:navigate  h/l/←/→:fold  Space/Enter:select  q/Esc:can│
                               ╰──────────────────────────────────────────────────────────╯
                               │                           │                              │
 Select target epic: navigate tree above, Enter to select

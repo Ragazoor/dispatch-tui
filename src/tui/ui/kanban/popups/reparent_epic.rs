@@ -107,7 +107,7 @@ fn render_tree_picker(
     };
 
     let hints = Paragraph::new(
-        " j/k:navigate  l/Space/\u{2192}:expand  h/\u{2190}:collapse  Enter:select  q/Esc:cancel",
+        " j/k:navigate  h/l/\u{2190}/\u{2192}:fold  Space/Enter:select  q/Esc:cancel",
     )
     .style(Style::default().fg(MUTED));
     frame.render_widget(hints, footer_area);
@@ -140,6 +140,36 @@ pub(in crate::tui) fn build_reparent_tree(
     let mut items = vec![no_parent];
     items.extend(build_epic_nodes(eligible, &eligible_ids, None));
     items
+}
+
+/// A tree state with the cursor on `epic` and its ancestors expanded, so the
+/// row is visible. Falls back to the first row ("— no parent —") when `epic`
+/// is `None` or is not among `items`.
+pub(in crate::tui) fn tree_state_at(
+    items: &[tui_tree_widget::TreeItem<'static, String>],
+    epic: Option<EpicId>,
+) -> tui_tree_widget::TreeState<String> {
+    fn path_to(
+        items: &[tui_tree_widget::TreeItem<'static, String>],
+        id: &str,
+    ) -> Option<Vec<String>> {
+        items.iter().find_map(|item| {
+            if item.identifier() == id {
+                return Some(vec![id.to_string()]);
+            }
+            let mut rest = path_to(item.children(), id)?;
+            rest.insert(0, item.identifier().clone());
+            Some(rest)
+        })
+    }
+    let mut state = tui_tree_widget::TreeState::default();
+    let path = epic.and_then(|e| path_to(items, &format!("epic:{}", e.0)));
+    let path = path.unwrap_or_else(|| vec![REPARENT_NO_PARENT_SENTINEL.to_string()]);
+    for depth in 1..path.len() {
+        state.open(path[..depth].to_vec());
+    }
+    state.select(path);
+    state
 }
 
 fn build_epic_nodes(

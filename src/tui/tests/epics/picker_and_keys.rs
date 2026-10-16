@@ -560,3 +560,40 @@ fn flattened_epic_view_done_shows_the_whole_subtree() {
         "nested running task still surfaces in flat mode"
     );
 }
+
+#[test]
+fn start_reparent_puts_cursor_on_the_epics_current_parent() {
+    use crate::tui::messages::EpicMessage;
+    let mut app = App::new(vec![]);
+    let mut child = make_epic(20);
+    child.parent_epic_id = Some(EpicId(10));
+    let mut grand = make_epic(21);
+    grand.parent_epic_id = Some(EpicId(20));
+    app.board.epics = vec![make_epic(10), child, grand, make_epic(30), make_epic(40)];
+    // Epic 21 sits under 20, itself under 10.
+    app.update(Message::Epic(EpicMessage::StartReparent(EpicId(21))));
+
+    let picker = app.interaction.reparent_picker.as_ref().unwrap();
+    assert_eq!(
+        picker.tree_state.borrow().selected(),
+        vec!["epic:10".to_string(), "epic:20".to_string()]
+    );
+}
+
+#[test]
+fn space_confirms_in_reparent_picker_and_does_not_expand() {
+    use crate::tui::messages::EpicMessage;
+    use crossterm::event::KeyCode;
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    app.update(Message::Epic(EpicMessage::StartReparent(EpicId(20))));
+    app.handle_key(make_key(KeyCode::Char('j')));
+
+    app.handle_key(make_key(KeyCode::Char(' ')));
+
+    assert!(
+        matches!(app.input.mode, InputMode::ConfirmReparentEpic { .. }),
+        "got {:?}",
+        app.input.mode
+    );
+}

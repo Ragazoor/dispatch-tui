@@ -861,13 +861,13 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- board.picker.move_to_epic ----
     r(
         N::BoardPickerMoveToEpic,
-        &["j", "Down", "k", "Up", "l", "Right", "Space", "h", "Left"],
+        &["j", "Down", "k", "Up", "l", "Right", "h", "Left"],
         "move_to_epic_picker_navigate",
-        "Move through the epic tree: down (j, Down), up (k, Up), expand or descend (l, Right, Space), collapse or ascend (h, Left)",
+        "Move through the epic tree: down (j, Down), up (k, Up), expand or descend (l, Right), collapse or ascend (h, Left)",
     ),
     r(
         N::BoardPickerMoveToEpic,
-        &["Enter"],
+        &["Space", "Enter"],
         "move_to_epic_picker_confirm",
         "Choose the highlighted epic and ask for confirmation",
     ),
@@ -880,13 +880,13 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     // ---- board.picker.reparent_epic ----
     r(
         N::BoardPickerReparentEpic,
-        &["j", "Down", "k", "Up", "l", "Right", "Space", "h", "Left"],
+        &["j", "Down", "k", "Up", "l", "Right", "h", "Left"],
         "reparent_picker_navigate",
-        "Move through the epic tree: down (j, Down), up (k, Up), expand or descend (l, Right, Space), collapse or ascend (h, Left)",
+        "Move through the epic tree: down (j, Down), up (k, Up), expand or descend (l, Right), collapse or ascend (h, Left)",
     ),
     r(
         N::BoardPickerReparentEpic,
-        &["Enter"],
+        &["Space", "Enter"],
         "reparent_picker_confirm",
         "Choose the highlighted epic as the new parent and ask for confirmation",
     ),

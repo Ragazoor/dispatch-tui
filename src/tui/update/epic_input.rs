@@ -87,9 +87,9 @@ pub(in crate::tui) fn start_reparent(
     interaction: &mut InteractionState,
     epic_id: EpicId,
     items: Vec<tui_tree_widget::TreeItem<'static, String>>,
+    current_parent: Option<EpicId>,
 ) {
-    let mut tree_state = tui_tree_widget::TreeState::default();
-    tree_state.select_first();
+    let tree_state = crate::tui::ui::tree_state_at(&items, current_parent);
     interaction.reparent_picker = Some(crate::tui::ReparentPickerState {
         epic_id,
         tree_state: std::cell::RefCell::new(tree_state),

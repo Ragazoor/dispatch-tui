@@ -11,10 +11,15 @@ use super::super::{truncate_title, App, MoveTaskPickerState, TITLE_DISPLAY_LENGT
 
 impl App {
     pub(in crate::tui) fn handle_start_move_to_epic(&mut self, task_id: TaskId) -> Vec<Command> {
-        let mut tree_state = tui_tree_widget::TreeState::default();
-        tree_state.select_first();
         let eligible = self.view().move_task_target_epics();
         let items = crate::tui::ui::build_reparent_tree(&eligible);
+        let current = self
+            .board
+            .tasks
+            .iter()
+            .find(|t| t.id == task_id)
+            .and_then(|t| t.epic_id);
+        let tree_state = crate::tui::ui::tree_state_at(&items, current);
         self.interaction.move_task_picker = Some(MoveTaskPickerState {
             task_id,
             tree_state: std::cell::RefCell::new(tree_state),

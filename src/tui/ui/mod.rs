@@ -4,7 +4,7 @@ mod kanban;
 pub(in crate::tui::ui) mod model_indicator;
 mod shared;
 
-pub(in crate::tui) use kanban::build_reparent_tree;
+pub(in crate::tui) use kanban::{build_reparent_tree, tree_state_at};
 // The tag step's prompt reaches three surfaces, one of them outside this
 // module tree (update/forms.rs), so it is re-exported rather than reached for
 // through the private module.

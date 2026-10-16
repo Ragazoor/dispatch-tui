@@ -7,7 +7,7 @@ mod columns;
 mod popups;
 mod status_bar;
 
-pub(in crate::tui) use popups::build_reparent_tree;
+pub(in crate::tui) use popups::{build_reparent_tree, tree_state_at};
 #[cfg(test)]
 pub(in crate::tui) use status_bar::repo_drift_segment;
 pub(in crate::tui) use status_bar::repo_sync_prompt_text;

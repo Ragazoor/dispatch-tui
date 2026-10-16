@@ -1081,8 +1081,12 @@ rule MoveTaskToEpic {
         -- parent but keeps an eligible child, the child is re-rooted to the
         -- top level so it stays selectable. The first item is always
         -- "— no parent —", which sets epic to null.
-        -- Tree navigation: j/k = up/down, l/Space/→ = expand,
-        -- h/← = collapse, Enter = select.
+        -- Tree navigation: j/k = up/down, l/→ = expand,
+        -- h/← = collapse, Space/Enter = select. Space does not expand:
+        -- it chooses, so it never reads as a fold key.
+        -- The cursor opens on the task's current epic (its ancestors are
+        -- expanded so the row is visible); with none, or when that epic is
+        -- not offered, it opens on "— no parent —".
         -- A [y/n] confirmation prompt is shown before committing the
         -- change. Pressing n returns to the picker; Esc/q cancels entirely.
         -- The confirmation is UI sugar — the normative outcome is the
