@@ -504,6 +504,23 @@ async fn pr_gate_reminder_suggests_no_tag_filter() {
     );
 }
 
+/// See `PrLearningsGate` in `docs/specs/pr-workflow.allium`: a reminder that
+/// named only `query` was read as the whole call, and the agent's first
+/// `query_learnings` was refused for a missing `task_id`.
+#[tokio::test]
+async fn pr_gate_reminder_names_task_id_with_this_tasks_id() {
+    let board = spawn_board().await;
+    let (id, stderr) = pr_gate_first_reminder(&board).await;
+    assert!(
+        stderr.contains("task_id"),
+        "reminder must name the `task_id` argument, got: {stderr}"
+    );
+    assert!(
+        stderr.contains(&id),
+        "reminder must write out this task's id ({id}), got: {stderr}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // 3. Structural: no hook path opens the database
 // ---------------------------------------------------------------------------

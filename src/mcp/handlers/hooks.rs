@@ -25,11 +25,16 @@ use crate::service::ServiceError;
 /// need not be the build the board is running. Composed here, revised wording
 /// takes effect with the board that serves it. See `PrLearningsGate` in
 /// `docs/specs/pr-workflow.allium` for why the scope is the whole submission
-/// and why it suggests no tag.
-const PR_GATE_REMINDER: &str = "Before creating this PR, consult the knowledge base for the \
-     conventions that apply to what you are submitting — the code in the diff as well as the \
-     PR title and body. Call the dispatch `query_learnings` MCP tool, describing this change \
-     in `query`, then apply what it returns and re-run the command.";
+/// and why it suggests no tag, and why it names `task_id` with the id.
+fn pr_gate_reminder(task_id: TaskId) -> String {
+    format!(
+        "Before creating this PR, consult the knowledge base for the conventions that apply \
+         to what you are submitting — the code in the diff as well as the PR title and body. \
+         Call the dispatch `query_learnings` MCP tool with `task_id` {id} and a `query` \
+         describing this change, then apply what it returns and re-run the command.",
+        id = task_id.0
+    )
+}
 
 pub async fn handle_hook(
     State(state): State<Arc<McpState>>,
@@ -151,7 +156,7 @@ async fn answer(state: &McpState, question: Question) -> Answer {
         Question::PrGate { .. } => match state.task_svc.mark_pr_learnings_gate_shown(task_id).await
         {
             Ok(first_time) => Answer::PrGate {
-                reminder: first_time.then(|| PR_GATE_REMINDER.to_string()),
+                reminder: first_time.then(|| pr_gate_reminder(task_id)),
             },
             Err(e) => {
                 tracing::warn!(task_id = task_id.0, "pr gate failed: {e}");

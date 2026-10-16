@@ -91,6 +91,14 @@ rule PrLearningsGate {
         -- (QueryLearningsViaMcp in learnings.allium) it demotes
         -- everything else until `limit` drops it. The reminder points at
         -- `query` instead, which is what the ranking keys on.
+        --
+        -- The reminder names every argument query_learnings requires:
+        -- `task_id`, with this task's own id written out, and `query`.
+        -- Naming only `query` was read as the whole call: 35 of the 44
+        -- query_learnings calls refused for a missing `task_id` up to
+        -- 2026-10-16 came within five minutes of the gate firing
+        -- (docs/plans/2026-10-16-77825-learnings-iteration-2.md). The id is
+        -- the task the gate was asked about, which is always the caller's.
 }
 
 rule PollPrStatus {
