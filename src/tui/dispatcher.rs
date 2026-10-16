@@ -28,7 +28,11 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::RepoPathsUpdated(paths) => app.handle_repo_paths_updated(paths),
         Message::BaseBranchesUpdated(map) => app.handle_base_branches_updated(map),
 
-        Message::ClearSelection => app.handle_clear_selection(),
+        Message::ClearSelection => {
+            app.select.clear();
+            app.selection_mut().on_select_all = false;
+            vec![]
+        }
         Message::SelectAllColumn => app.handle_select_all_column(),
         Message::ToggleSectionCollapse => app.handle_toggle_section_collapse(),
         Message::ToggleEpicFold => app.handle_toggle_epic_fold(),

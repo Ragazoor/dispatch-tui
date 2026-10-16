@@ -8,7 +8,8 @@ use ratatui::widgets::ListState;
 
 use super::{ColumnAnchor, EpicDraft, InputMode, Lens, RepoFilterMode, TaskDraft};
 use crate::models::{
-    Epic, EpicId, Task, TaskId, TaskStatus, WorkPackage, WorkPackageId, WorkPackageLink,
+    Epic, EpicId, Task, TaskId, TaskStatus, WorkPackage, WorkPackageId, WorkPackageItem,
+    WorkPackageLink,
 };
 
 // BoardState — tasks, epics, view mode, and related board data
@@ -217,7 +218,7 @@ pub struct InputState {
     /// (its description is copied outright). See CopyTask in
     /// `docs/specs/tasks.allium`.
     ///
-    /// Set by `handle_copy_task` and consumed — `mem::take` — by the one
+    /// Set by `copy_task` and consumed — `mem::take` — by the one
     /// handler that reads it, so it cannot outlive the draft it describes. A
     /// stale `true` would silently skip the description editor on the next new
     /// task, which is a failure with no error to notice.
@@ -300,6 +301,21 @@ impl InputState {
 
     pub(in crate::tui) fn cursor_end(&mut self) {
         self.caret = crate::tui::text_caret::end(&self.buffer);
+    }
+
+    /// Esc in the new-package title: back to the link picker with the cursor
+    /// on the row a new package would occupy (`package_count`, since packages
+    /// are listed oldest first). Nothing is created.
+    pub(in crate::tui) fn reopen_link_picker(
+        &mut self,
+        item: WorkPackageItem,
+        package_count: usize,
+    ) {
+        self.clear_buffer();
+        self.mode = InputMode::LinkWorkPackage {
+            item,
+            cursor: package_count,
+        };
     }
 
     /// Land a detected default base branch in the buffer, if the form still

@@ -4,6 +4,7 @@
 use crate::models::{TaskTag, WrapUpMode};
 
 use crate::tui::types::Command;
+use crate::tui::update::forms;
 use crate::tui::App;
 
 /// Messages targeting the form-input flow.
@@ -54,19 +55,41 @@ impl InputMessage {
     /// Route this message to its handler on [`App`]. See [`super::SplitMessage::route`].
     pub(in crate::tui) fn route(self, app: &mut App) -> Vec<Command> {
         match self {
-            InputMessage::StartNewTask => app.handle_start_new_task(),
-            InputMessage::CopyTask => app.handle_copy_task(),
-            InputMessage::CancelInput => app.handle_cancel_input(),
-            InputMessage::SubmitTitle(value) => app.handle_submit_title(value),
-            InputMessage::SubmitDescription(value) => app.handle_submit_description(value),
-            InputMessage::SubmitRepoPath(value) => app.handle_submit_repo_path(value),
-            InputMessage::SubmitTag(tag) => app.handle_submit_tag(tag),
-            InputMessage::SubmitBaseBranch(value) => app.handle_submit_base_branch(value),
-            InputMessage::DefaultBranchDetected { branch, replacing } => {
-                app.handle_default_branch_detected(branch, replacing)
+            InputMessage::StartNewTask => forms::start_new_task(&mut app.input, &mut app.status),
+            InputMessage::CopyTask => match app.selected_task().cloned() {
+                Some(task) => forms::copy_task(&mut app.input, &mut app.status, &task),
+                None => vec![],
+            },
+            InputMessage::CancelInput => forms::cancel_input(
+                &mut app.input,
+                &mut app.interaction,
+                &mut app.status,
+                app.board.work_packages.len(),
+            ),
+            InputMessage::SubmitTitle(value) => {
+                forms::submit_title(&mut app.input, &mut app.status, value)
             }
-            InputMessage::SubmitWrapUpMode(mode) => app.handle_submit_wrap_up_mode(mode),
-            InputMessage::ArmPhoenix => app.handle_arm_phoenix(),
+            InputMessage::SubmitDescription(value) => {
+                forms::submit_description(&mut app.input, &mut app.status, value)
+            }
+            InputMessage::SubmitRepoPath(value) => forms::submit_repo_path(
+                &mut app.input,
+                &mut app.status,
+                &app.board.repo_base_branches,
+                value,
+            ),
+            InputMessage::SubmitTag(tag) => forms::submit_tag(&mut app.input, &mut app.status, tag),
+            InputMessage::SubmitBaseBranch(value) => {
+                forms::submit_base_branch(&mut app.input, &mut app.status, value)
+            }
+            InputMessage::DefaultBranchDetected { branch, replacing } => {
+                forms::default_branch_detected(&mut app.input, branch, replacing)
+            }
+            InputMessage::SubmitWrapUpMode(mode) => {
+                forms::apply_wrap_up_mode(&mut app.input, mode);
+                app.finish_task_creation()
+            }
+            InputMessage::ArmPhoenix => forms::arm_phoenix(&mut app.input, &mut app.status),
             InputMessage::InputChar(c) => {
                 app.input.insert_char(c);
                 vec![]
@@ -104,12 +127,20 @@ impl InputMessage {
                 vec![]
             }
             InputMessage::StartQuickDispatchSelection => {
-                app.handle_start_quick_dispatch_selection()
+                forms::start_quick_dispatch_selection(&mut app.input, &mut app.status)
             }
             InputMessage::SelectQuickDispatchRepo(idx) => {
-                app.handle_select_quick_dispatch_repo(idx)
+                match forms::take_quick_dispatch_repo(
+                    &mut app.input,
+                    &mut app.status,
+                    &app.board.repo_paths,
+                    idx,
+                ) {
+                    Some((repo_path, epic_id)) => app.handle_quick_dispatch(repo_path, epic_id),
+                    None => vec![],
+                }
             }
-            InputMessage::CancelRetry => app.handle_cancel_retry(),
+            InputMessage::CancelRetry => forms::cancel_retry(&mut app.input, &mut app.status),
             InputMessage::ConfirmDone => app.handle_confirm_done(),
             InputMessage::CancelDone => app.handle_cancel_done(),
             InputMessage::ConfirmDetachTmux => app.handle_confirm_detach_tmux(),

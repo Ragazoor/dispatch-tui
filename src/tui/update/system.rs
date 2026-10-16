@@ -324,8 +324,13 @@ impl App {
         value: String,
     ) -> Vec<Command> {
         match self.input.mode {
-            InputMode::InputDescription => self.handle_submit_description(value),
-            InputMode::InputEpicDescription => self.handle_submit_epic_description(value),
+            InputMode::InputDescription => {
+                super::forms::submit_description(&mut self.input, &mut self.status, value)
+            }
+            InputMode::InputEpicDescription => {
+                super::epic_input::apply_epic_description(&mut self.input, value);
+                self.finish_epic_creation()
+            }
             _ => vec![],
         }
     }

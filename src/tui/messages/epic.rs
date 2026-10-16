@@ -3,6 +3,7 @@
 use crate::models::{Epic, EpicId};
 
 use super::super::types::{Command, MoveDirection, TreeNav};
+use crate::tui::update::{epic_input, selection};
 use crate::tui::App;
 
 /// Messages targeting the epic domain.
@@ -66,24 +67,69 @@ impl EpicMessage {
             EpicMessage::Edit(id) => app.handle_edit_epic(id),
             EpicMessage::Edited(epic) => app.handle_epic_edited(epic),
             EpicMessage::Delete(id) => app.handle_delete_epic(id),
-            EpicMessage::ToggleAutoDispatch(id) => app.handle_toggle_epic_auto_dispatch(id),
-            EpicMessage::ToggleGroupByRepo(id) => app.handle_toggle_epic_group_by_repo(id),
+            EpicMessage::ToggleAutoDispatch(id) => {
+                selection::toggle_epic_auto_dispatch(&mut app.board.epics, id)
+            }
+            EpicMessage::ToggleGroupByRepo(id) => {
+                selection::toggle_epic_group_by_repo(&mut app.board.epics, id)
+            }
             EpicMessage::ConfirmDelete => app.handle_confirm_delete_epic(),
             EpicMessage::MoveStatus(id, dir) => app.handle_move_epic_status(id, dir),
-            EpicMessage::StartNew => app.handle_start_new_epic(),
-            EpicMessage::SubmitTitle(v) => app.handle_submit_epic_title(v),
-            EpicMessage::SubmitDescription(v) => app.handle_submit_epic_description(v),
-            EpicMessage::ToggleSelect(id) => app.handle_toggle_select_epic(id),
-            EpicMessage::StartReparent(id) => app.handle_start_reparent(id),
-            EpicMessage::ReparentNavigate(nav) => app.handle_reparent_navigate(nav),
-            EpicMessage::ReparentConfirm => app.handle_reparent_confirm(),
-            EpicMessage::ReparentExecute => app.handle_reparent_execute(),
-            EpicMessage::ReparentCancel => app.handle_reparent_cancel(),
-            EpicMessage::ReparentCancelAll => app.handle_reparent_cancel_all(),
+            EpicMessage::StartNew => {
+                epic_input::start_new_epic(&mut app.input, &mut app.status, &app.board.view_mode)
+            }
+            EpicMessage::SubmitTitle(v) => {
+                epic_input::submit_epic_title(&mut app.input, &mut app.status, v)
+            }
+            EpicMessage::SubmitDescription(v) => {
+                epic_input::apply_epic_description(&mut app.input, v);
+                app.finish_epic_creation()
+            }
+            EpicMessage::ToggleSelect(id) => {
+                app.select.toggle_epic(id);
+                vec![]
+            }
+            EpicMessage::StartReparent(id) => {
+                let items =
+                    crate::tui::ui::build_reparent_tree(&app.view().reparent_target_epics(id));
+                epic_input::start_reparent(&mut app.input, &mut app.interaction, id, items);
+                vec![]
+            }
+            EpicMessage::ReparentNavigate(nav) => {
+                if epic_input::reparent_navigate(&app.interaction, nav) {
+                    app.dirty = true;
+                }
+                vec![]
+            }
+            EpicMessage::ReparentConfirm => {
+                epic_input::reparent_confirm(
+                    &mut app.input,
+                    &app.interaction,
+                    &mut app.status,
+                    &app.board.epics,
+                );
+                vec![]
+            }
+            EpicMessage::ReparentExecute => {
+                epic_input::reparent_execute(&mut app.input, &mut app.interaction, &mut app.status)
+            }
+            EpicMessage::ReparentCancel => {
+                epic_input::reparent_cancel(&mut app.input, &mut app.interaction, &mut app.status)
+            }
+            EpicMessage::ReparentCancelAll => epic_input::reparent_cancel_all(
+                &mut app.input,
+                &mut app.interaction,
+                &mut app.status,
+            ),
             EpicMessage::FeedOwnerTakeoverOffered {
                 epic_id,
                 other_host,
-            } => app.handle_feed_owner_takeover_offered(epic_id, other_host),
+            } => epic_input::feed_owner_takeover_offered(
+                &mut app.input,
+                &mut app.status,
+                epic_id,
+                other_host,
+            ),
         }
     }
 }

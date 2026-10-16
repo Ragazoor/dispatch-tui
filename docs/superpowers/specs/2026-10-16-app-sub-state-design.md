@@ -100,3 +100,36 @@ count does not fall. A fall needs the `update` dispatch to call free
 functions over fields directly, which touches every handler's call site in
 `src/tui/messages/`. That is the next step if the count is to be the goal;
 it is left as a follow-up.
+
+## Outcome of the follow-up pass (#81925)
+
+The `update` dispatch now calls free functions over fields directly; the
+`App` wrappers are gone. Behaviour is unchanged.
+
+- `src/tui/update/forms.rs`: every form step (`start_new_task`, `copy_task`,
+  `cancel_input`, `submit_title`, `submit_description`, `submit_repo_path`,
+  `submit_base_branch`, `submit_tag`, `arm_phoenix`, the quick-dispatch steps,
+  `cancel_retry`, `default_branch_detected`) takes `&mut InputState` and
+  `&mut StatusState`, plus the one extra field it reads. Two steps end in an
+  `App` call that needs the whole app (`finish_task_creation`,
+  `handle_quick_dispatch`); the route splits them: the free function does the
+  field part (`apply_wrap_up_mode`, `take_quick_dispatch_repo`) and the route
+  makes the `App` call.
+- `src/tui/update/epic_input.rs` (new): epic title/description entry, the
+  feed-owner take-over prompt and the reparent flow. `start_reparent` takes the
+  tree items already built, because `App::view()` borrows every field.
+- `src/tui/update/selection.rs`: `toggle_epic_auto_dispatch` and
+  `toggle_epic_group_by_repo` take `&mut [Epic]`. The select toggles and
+  `ClearSelection` are inline in their routes.
+- `InputState::reopen_link_picker` replaces `App::cancel_new_package_title`.
+
+Counts of `fn` inside `impl App` blocks (same scan as before, by
+`awk` over non-test blocks): before 318, after 286 on the branch point. After merging a later `main`
+(336 methods there, other work added some), the branch has 304: 32 fewer than
+its base.
+
+Not converted, and why: `columns.rs` and the cursor methods in `selection.rs`
+build `view()`, a borrow of six fields, so a free function would take the same
+six arguments and gain nothing. `input/table.rs` and `input/confirm.rs` are
+dispatch glue that call back into `App`. `invalidate_layout_cache` stays, as
+agreed above.

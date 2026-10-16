@@ -175,7 +175,10 @@ impl TaskMessage {
                 error,
             } => app.handle_cleanup_failed(id, worktree, error),
             TaskMessage::DeleteRefused { error } => app.handle_delete_refused(error),
-            TaskMessage::ToggleSelect(id) => app.handle_toggle_select(id),
+            TaskMessage::ToggleSelect(id) => {
+                app.select.toggle_task(id);
+                vec![]
+            }
             TaskMessage::BatchMove { ids, direction } => {
                 app.handle_batch_move_tasks(ids, direction)
             }

@@ -1,27 +1,11 @@
 //! Selection state and batch operation handlers.
 
-use crate::models::{EpicId, TaskId, TaskStatus};
+use crate::models::{Epic, EpicId, TaskId, TaskStatus};
 
 use super::super::types::*;
 use super::super::App;
 
 impl App {
-    pub(in crate::tui) fn handle_toggle_select(&mut self, id: TaskId) -> Vec<Command> {
-        self.select.toggle_task(id);
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_toggle_select_epic(&mut self, id: EpicId) -> Vec<Command> {
-        self.select.toggle_epic(id);
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_clear_selection(&mut self) -> Vec<Command> {
-        self.select.clear();
-        self.selection_mut().on_select_all = false;
-        vec![]
-    }
-
     /// Fold or unfold the section the cursor is in
     /// (`docs/specs/tasks.allium`: ToggleSectionCollapse).
     ///
@@ -310,36 +294,6 @@ impl App {
         cmds
     }
 
-    pub(in crate::tui) fn handle_toggle_epic_auto_dispatch(&mut self, id: EpicId) -> Vec<Command> {
-        if let Some(epic) = self.board.epics.iter_mut().find(|e| e.id == id) {
-            let new_val = !epic.auto_dispatch;
-            epic.auto_dispatch = new_val;
-            vec![Command::Epic(
-                crate::tui::commands::EpicCommand::ToggleAutoDispatch {
-                    id,
-                    auto_dispatch: new_val,
-                },
-            )]
-        } else {
-            vec![]
-        }
-    }
-
-    pub(in crate::tui) fn handle_toggle_epic_group_by_repo(&mut self, id: EpicId) -> Vec<Command> {
-        if let Some(epic) = self.board.epics.iter_mut().find(|e| e.id == id) {
-            let new_val = !epic.group_by_repo;
-            epic.group_by_repo = new_val;
-            vec![Command::Epic(
-                crate::tui::commands::EpicCommand::ToggleGroupByRepo {
-                    id,
-                    group_by_repo: new_val,
-                },
-            )]
-        } else {
-            vec![]
-        }
-    }
-
     pub(in crate::tui) fn handle_batch_move_tasks(
         &mut self,
         ids: Vec<TaskId>,
@@ -380,4 +334,34 @@ impl App {
         self.select.tasks.clear();
         cmds
     }
+}
+
+/// Flip an epic's auto-dispatch flag in the board's copy and emit the store
+/// write. No such epic: nothing happens.
+pub(in crate::tui) fn toggle_epic_auto_dispatch(epics: &mut [Epic], id: EpicId) -> Vec<Command> {
+    let Some(epic) = epics.iter_mut().find(|e| e.id == id) else {
+        return vec![];
+    };
+    epic.auto_dispatch = !epic.auto_dispatch;
+    vec![Command::Epic(
+        crate::tui::commands::EpicCommand::ToggleAutoDispatch {
+            id,
+            auto_dispatch: epic.auto_dispatch,
+        },
+    )]
+}
+
+/// Flip an epic's group-by-repo flag in the board's copy and emit the store
+/// write. No such epic: nothing happens.
+pub(in crate::tui) fn toggle_epic_group_by_repo(epics: &mut [Epic], id: EpicId) -> Vec<Command> {
+    let Some(epic) = epics.iter_mut().find(|e| e.id == id) else {
+        return vec![];
+    };
+    epic.group_by_repo = !epic.group_by_repo;
+    vec![Command::Epic(
+        crate::tui::commands::EpicCommand::ToggleGroupByRepo {
+            id,
+            group_by_repo: epic.group_by_repo,
+        },
+    )]
 }

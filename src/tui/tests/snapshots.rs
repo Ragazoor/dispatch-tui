@@ -649,7 +649,9 @@ fn reparent_epic_overlay_renders() {
     use crate::models::EpicId;
     let mut app = make_app();
     app.board.epics = vec![make_epic(10), make_epic(20)];
-    app.handle_start_reparent(EpicId(10));
+    app.update(crate::tui::types::Message::Epic(
+        crate::tui::messages::EpicMessage::StartReparent(EpicId(10)),
+    ));
 
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
     terminal

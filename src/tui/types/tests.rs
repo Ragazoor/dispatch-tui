@@ -421,3 +421,13 @@ fn reparent_picker_selected_id_is_the_last_path_segment() {
         .select(vec!["epic:3".to_string()]);
     assert_eq!(picker.selected_id().as_deref(), Some("epic:3"));
 }
+
+#[test]
+fn reopen_link_picker_clears_buffer_and_points_past_the_last_package() {
+    use crate::models::{TaskId, WorkPackageItem};
+    let item = WorkPackageItem::Task(TaskId(7));
+    let mut input = base_branch_input("typed title", InputMode::InputWorkPackageTitle(item));
+    input.reopen_link_picker(item, 3);
+    assert_eq!(input.buffer, "");
+    assert_eq!(input.mode, InputMode::LinkWorkPackage { item, cursor: 3 });
+}

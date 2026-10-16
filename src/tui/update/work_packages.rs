@@ -156,7 +156,8 @@ impl App {
         let InputMode::InputWorkPackageTitle(item) = self.input.mode else {
             return vec![];
         };
-        self.cancel_new_package_title(item);
+        self.input
+            .reopen_link_picker(item, self.board.work_packages.len());
         let title = title.trim().to_string();
         if title.is_empty() {
             return vec![];
@@ -165,19 +166,6 @@ impl App {
             title,
             item,
         })]
-    }
-
-    /// Esc in the new-package title: back to the picker, nothing created.
-    pub(in crate::tui) fn cancel_new_package_title(
-        &mut self,
-        item: WorkPackageItem,
-    ) -> Vec<Command> {
-        self.input.clear_buffer();
-        self.input.mode = InputMode::LinkWorkPackage {
-            item,
-            cursor: self.board.work_packages.len(),
-        };
-        vec![]
     }
 
     /// `e` on a package card (`RenamePackageFromBoard`).
