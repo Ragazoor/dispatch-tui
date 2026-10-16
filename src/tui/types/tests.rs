@@ -315,3 +315,53 @@ fn selection_toggles_flip_membership() {
     select.toggle_epic(EpicId(2));
     assert!(!select.has_selection());
 }
+
+// -- InputState form steps --
+
+fn base_branch_input(buffer: &str, mode: InputMode) -> InputState {
+    let mut input = InputState {
+        mode,
+        ..InputState::default()
+    };
+    input.set_buffer(buffer.to_string());
+    input
+}
+
+#[test]
+fn apply_default_branch_prefills_only_when_mode_and_buffer_still_match() {
+    let mut input = base_branch_input("main", InputMode::InputBaseBranch);
+    input.apply_default_branch("develop".to_string(), "main");
+    assert_eq!(input.buffer, "develop");
+    assert_eq!(input.caret, "develop".chars().count());
+
+    // The user typed while the repo was read: the answer is dropped.
+    let mut typed = base_branch_input("mai", InputMode::InputBaseBranch);
+    typed.apply_default_branch("develop".to_string(), "main");
+    assert_eq!(typed.buffer, "mai");
+
+    // The form moved on: the answer is dropped.
+    let mut moved = base_branch_input("main", InputMode::InputTag);
+    moved.apply_default_branch("develop".to_string(), "main");
+    assert_eq!(moved.buffer, "main");
+}
+
+#[test]
+fn enter_repo_path_step_prefills_from_draft_and_resets_cursor() {
+    let mut input = InputState {
+        task_draft: Some(TaskDraft {
+            repo_path: "/src/copied".to_string(),
+            ..TaskDraft::default()
+        }),
+        repo_cursor: 4,
+        ..InputState::default()
+    };
+    input.enter_repo_path_step();
+    assert_eq!(input.mode, InputMode::InputRepoPath);
+    assert_eq!(input.buffer, "/src/copied");
+    assert_eq!(input.repo_cursor, 0);
+
+    let mut bare = InputState::default();
+    bare.enter_repo_path_step();
+    assert_eq!(bare.buffer, "");
+    assert_eq!(bare.mode, InputMode::InputRepoPath);
+}

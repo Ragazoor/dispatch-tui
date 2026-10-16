@@ -94,15 +94,7 @@ impl App {
     /// `repo_path`, so the prefill is a no-op there; the copy's carries the
     /// source's path.
     fn enter_repo_path_step(&mut self) {
-        let prefill = self
-            .input
-            .task_draft
-            .as_ref()
-            .map(|d| d.repo_path.clone())
-            .unwrap_or_default();
-        self.input.set_buffer(prefill);
-        self.input.repo_cursor = 0;
-        self.input.mode = InputMode::InputRepoPath;
+        self.input.enter_repo_path_step();
         self.status.set("Enter repo path: ".to_string());
     }
 
@@ -177,9 +169,7 @@ impl App {
         branch: String,
         replacing: String,
     ) -> Vec<Command> {
-        if self.input.mode == InputMode::InputBaseBranch && self.input.buffer == replacing {
-            self.input.set_buffer(branch);
-        }
+        self.input.apply_default_branch(branch, &replacing);
         vec![]
     }
 

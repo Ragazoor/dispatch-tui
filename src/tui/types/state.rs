@@ -306,6 +306,30 @@ impl InputState {
         self.caret = crate::tui::text_caret::end(&self.buffer);
     }
 
+    /// Land a detected default base branch in the buffer, if the form still
+    /// wants it: the mode must still be `InputBaseBranch` and the buffer must
+    /// still hold `replacing` (the prefill the detection was started against).
+    /// Otherwise the answer is dropped in silence.
+    pub(in crate::tui) fn apply_default_branch(&mut self, branch: String, replacing: &str) {
+        if self.mode == InputMode::InputBaseBranch && self.buffer == replacing {
+            self.set_buffer(branch);
+        }
+    }
+
+    /// The input side of entering InputRepoPath: prefill the buffer from the
+    /// draft's `repo_path` (empty for a new task, the source's for a copy),
+    /// reset the picker cursor and switch mode. The caller owns the prompt.
+    pub(in crate::tui) fn enter_repo_path_step(&mut self) {
+        let prefill = self
+            .task_draft
+            .as_ref()
+            .map(|d| d.repo_path.clone())
+            .unwrap_or_default();
+        self.set_buffer(prefill);
+        self.repo_cursor = 0;
+        self.mode = InputMode::InputRepoPath;
+    }
+
     /// Whether the in-flight draft has armed the phoenix flag.
     ///
     /// One accessor because four surfaces must agree on this bit — the tag
