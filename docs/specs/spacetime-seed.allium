@@ -935,8 +935,13 @@ rule ImportOldStore {
         -- written the import runs the module's agent backfill
         -- (agents.allium: BackfillCurrentAgents), so every imported task with
         -- a worktree and no current agent gets one with a fresh name, and the
-        -- store keeps CurrentAgentTracksWorktree. The backfill is reported
-        -- with the import, not counted as imported rows.
+        -- store keeps CurrentAgentTracksWorktree. The agents the backfill
+        -- creates are neither counted as imported rows nor reported.
+        --
+        -- Seeded agent rows are checked against the agent invariants
+        -- (seed_agents): a name that is empty or only digits, an ended row
+        -- that holds a window or lacks an end reason, a current row with an
+        -- end reason, and a second current agent for one task are refused.
         --
         -- THE TARGET IS THE MANAGED STORE unless a store is named
         -- (startup.allium: ImportBringsUpTheManagedStore). The source is never

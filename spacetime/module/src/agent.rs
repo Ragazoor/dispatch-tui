@@ -161,7 +161,8 @@ pub const AGENT_NAMES: &[&str] = &[
 
 /// Pick a name no agent has ever had: the shared walk over [`AGENT_NAMES`],
 /// with the numbered fallback once every name is taken (A4). `is_handed_out`
-/// must answer from the ledger, never from the agent rows.
+/// must answer from the ledger, which keeps a deleted agent's name taken; the
+/// stores also count the agent rows' names, as a backstop.
 pub fn pick_agent_name(seed: u64, is_handed_out: impl Fn(&str) -> bool) -> String {
     pick_word(AGENT_NAMES, seed, is_handed_out)
 }
@@ -223,6 +224,40 @@ pub fn agent_follow_up(prior: Option<&Task>, row: &Task) -> AgentFollowUp {
     } else {
         AgentFollowUp::Nothing
     }
+}
+
+/// The row-local agent invariants a seeded row must keep (`seed_agents`):
+/// a known vocabulary, `AgentNameIsNotAnId`, `EndedAgentHoldsNothing`, and an
+/// end reason exactly when the agent has ended.
+pub fn validate_seeded_agent(row: &Agent) -> Result<(), String> {
+    let id = row.id;
+    if !AGENT_START_MODES.contains(&row.start_mode.as_str()) {
+        return Err(format!(
+            "agent {id}: unknown start mode {:?}",
+            row.start_mode
+        ));
+    }
+    let ended = match row.state.as_str() {
+        AGENT_CURRENT => false,
+        AGENT_ENDED => true,
+        other => return Err(format!("agent {id}: unknown state {other:?}")),
+    };
+    if row.name.is_empty() || row.name.chars().all(|c| c.is_ascii_digit()) {
+        return Err(format!(
+            "agent {id}: name {:?} is empty or only digits",
+            row.name
+        ));
+    }
+    if ended != AGENT_END_REASONS.contains(&row.end_reason.as_str()) {
+        return Err(format!(
+            "agent {id}: end reason {:?} does not fit state {}",
+            row.end_reason, row.state
+        ));
+    }
+    if ended && !row.tmux_window.is_empty() {
+        return Err(format!("agent {id}: an ended agent holds no window"));
+    }
+    Ok(())
 }
 
 // -- The store seam -----------------------------------------------------------

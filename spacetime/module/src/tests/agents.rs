@@ -290,3 +290,38 @@ fn the_backfill_names_every_task_with_a_worktree_and_no_current_agent() {
 fn the_rules_version_is_seven_for_agents_a1() {
     assert_eq!(RULES_VERSION, 7);
 }
+
+// -- seed_agents' row checks ----------------------------------------------------
+
+fn seeded(state: &str, end_reason: &str, window: &str, name: &str) -> Agent {
+    Agent {
+        id: 1,
+        task_id: 1,
+        name: name.into(),
+        start_mode: "dispatch".into(),
+        state: state.into(),
+        end_reason: end_reason.into(),
+        tmux_window: window.into(),
+        ..blank_agent()
+    }
+}
+
+#[test]
+fn a_seeded_agent_must_keep_the_row_invariants() {
+    assert!(validate_seeded_agent(&seeded("current", "", "task-1", "ada")).is_ok());
+    assert!(validate_seeded_agent(&seeded("ended", "replaced", "", "ada")).is_ok());
+    for bad in [
+        seeded("ended", "replaced", "task-1", "ada"),
+        seeded("ended", "", "", "ada"),
+        seeded("current", "replaced", "", "ada"),
+        seeded("current", "", "", ""),
+        seeded("current", "", "", "123"),
+        seeded("paused", "", "", "ada"),
+        Agent {
+            start_mode: "resume".into(),
+            ..seeded("current", "", "", "ada")
+        },
+    ] {
+        assert!(validate_seeded_agent(&bad).is_err(), "{bad:?}");
+    }
+}

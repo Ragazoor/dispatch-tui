@@ -237,7 +237,10 @@ rule StartAgentOnFreshLaunch {
         -- The picker starts at a clock-seeded place in the name list and walks
         -- forward to the first name the ledger does not hold. When every name
         -- is taken it appends 2, 3, ... to the name at the seed (A4, as the
-        -- alias picker does). It reads only the ledger, never the Agent rows.
+        -- alias picker does). It reads the ledger, which is what keeps a
+        -- deleted agent's name taken. It also treats a name an Agent row holds
+        -- as taken, a backstop for a row written without its ledger entry;
+        -- by AgentNameIsNeverReused that adds nothing when the store is sound.
 }
 
 -- A launch whose request fails before any worktree exists ends its agent
@@ -247,13 +250,12 @@ rule StartAgentOnFreshLaunch {
 -- (a dispatch that reused a kept one) leaves the agent current, because the
 -- worktree it works in is still there.
 rule EndAgentWhenLaunchFails {
-    when: request: DispatchRequest.state transitions_to failed
+    -- Emitted by store-split.allium's ReleaseClaimOfFailedRequest when its
+    -- release applies (the task is still running with no worktree).
+    when: FailedDispatchReleasedClaim(task)
 
-    let task = request.task
-    let still_claimed = exists task and task.status = running and task.worktree = null
     let agent = current_agent(task)
 
-    requires: still_claimed
     requires: exists agent
 
     ensures: agent.state = ended
@@ -307,11 +309,18 @@ rule EndAgentWhenWorktreeGoes {
 
     @guidance
         -- The store ends the agent on the task write that clears the
-        -- worktree, whichever reducer carries it. RetryFresh's pointer clear
-        -- (src/runtime/tasks.rs::clear_worktree_pointer) is the only board
-        -- write that clears a worktree today, so the two are the same event.
-        -- Keying it on the write rather than the rule keeps
-        -- CurrentAgentTracksWorktree true if a second path ever clears one.
+        -- worktree, whichever reducer carries it. In RetryFresh that is the
+        -- board's Persist of the task moved back to backlog
+        -- (src/runtime/tasks.rs::exec_persist_task), which carries the
+        -- board's whole worktree field; the later pointer clear
+        -- (src/runtime/tasks.rs::clear_worktree_pointer) then finds nothing to
+        -- end. Keying it on the write rather than the rule keeps
+        -- CurrentAgentTracksWorktree true whichever write clears it.
+        --
+        -- Known risk, tracked apart from A1: every Persist sends the board's
+        -- copy of the worktree, so a stale copy that lacks it clears the
+        -- store's worktree and now also ends the agent, which cannot be
+        -- undone.
 }
 
 -- An agent goes with its task. Deleting a task removes every agent it has

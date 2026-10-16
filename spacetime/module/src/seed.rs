@@ -124,13 +124,17 @@ pub fn seed_agents(ctx: &ReducerContext, rows: Vec<Agent>) -> Result<(), String>
                 ));
             }
         }
-        if !AGENT_START_MODES.contains(&row.start_mode.as_str())
-            || ![AGENT_CURRENT, AGENT_ENDED].contains(&row.state.as_str())
-            || !(row.end_reason.is_empty() || AGENT_END_REASONS.contains(&row.end_reason.as_str()))
-        {
+        validate_seeded_agent(&row)?;
+        let other_current = ctx
+            .db
+            .agents()
+            .task_id()
+            .filter(&row.task_id)
+            .any(|a| a.id != row.id && a.state == AGENT_CURRENT);
+        if row.state == AGENT_CURRENT && other_current {
             return Err(format!(
-                "agent {}: unknown start mode, state or end reason",
-                row.id
+                "agent {}: task {} already has a current agent",
+                row.id, row.task_id
             ));
         }
         if ctx
