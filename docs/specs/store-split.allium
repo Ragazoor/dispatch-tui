@@ -906,6 +906,11 @@ rule RequestDispatch {
     )
 
     @guidance
+        -- THE CLAIM STARTS AN AGENT (agents.allium: StartAgentOnFreshLaunch,
+        -- since A1). In this same transaction the store ends the task's
+        -- current agent as replaced, hands out a fresh name from the ledger
+        -- and creates the new current agent. A refused claim starts none.
+        --
         -- The request reducer. Every launch path that provisions reaches it
         -- (D6): dispatch.allium's DispatchTask and DispatchResearchTask (the
         -- TUI keys and retry-fresh), tasks.allium's CreateQuickTask,
@@ -1154,6 +1159,9 @@ rule ReleaseClaimOfFailedRequest {
             RecalculateEpicStatus(task.epic)
 
     @guidance
+        -- When the release applies, the same write ends the task's current
+        -- agent as launch_failed (agents.allium: EndAgentWhenLaunchFails).
+        --
         -- The old release_backlog_claim, applied by the module to every
         -- failure: a reported one, a timeout, a host restart. It is
         -- conditional, as today: a task that was provisioned or moved on

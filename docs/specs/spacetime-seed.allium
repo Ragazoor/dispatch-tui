@@ -125,6 +125,10 @@ enum SharedTable {
     learning_retrievals
     usage_events
     retired_feed_items
+    work_packages
+    work_package_links
+    agents
+    handed_out_agent_names
 }
 
 -- Why a restore refused a snapshot. Every arm is a refusal to write anything
@@ -297,7 +301,7 @@ config {
     -- than written into the invariant so that the number and the SharedTable
     -- enumeration are visibly two statements of the same fact, and disagreeing
     -- is a spec-level error rather than a silent gap in a backup.
-    shared_table_count: Integer = 17
+    shared_table_count: Integer = 21
 
     -- Bumped when the snapshot layout changes in a way an older reader cannot
     -- interpret. A reader refuses a version it does not know rather than
@@ -906,8 +910,9 @@ rule ImportOldStore {
         -- repo_paths (with each repo's verify command), repo_base_branches,
         -- hosts, settings, task_watchers, task_subagents, poll_owners,
         -- subscriptions, learnings (with their embeddings and upvotes),
-        -- learning_retrievals, usage_events and retired_feed_items cross as
-        -- well as tasks and epics. A table that cannot be imported is a
+        -- learning_retrievals, usage_events, retired_feed_items,
+        -- work_packages, work_package_links, agents and
+        -- handed_out_agent_names cross as well as tasks and epics. A table that cannot be imported is a
         -- refusal (incomplete), not a quiet omission.
         --
         -- OWNERSHIP IS NOT RE-STAMPED. The old store's rows already carry
@@ -922,6 +927,16 @@ rule ImportOldStore {
         -- reasons (NothingIsWrittenBeforeTheChecksPass). The burn goes past the
         -- SOURCE's highest id so that the next task created on the managed
         -- store cannot collide with an imported one.
+        --
+        -- AGENTS (agents.allium, since A1). An agent row is keyed by its id,
+        -- with its name as the natural key; a ledger row is keyed by its name.
+        -- Both are add-only like everything else, so a name the target has
+        -- already handed out is kept as the target has it. Once the rows are
+        -- written the import runs the module's agent backfill
+        -- (agents.allium: BackfillCurrentAgents), so every imported task with
+        -- a worktree and no current agent gets one with a fresh name, and the
+        -- store keeps CurrentAgentTracksWorktree. The backfill is reported
+        -- with the import, not counted as imported rows.
         --
         -- THE TARGET IS THE MANAGED STORE unless a store is named
         -- (startup.allium: ImportBringsUpTheManagedStore). The source is never
@@ -940,7 +955,9 @@ rule DependentsOfDroppedRowsAreDropped {
     @guidance
         -- A row that exists only to describe a dropped row is dropped with it:
         -- a watch on a task that is gone, a live-subagent record for it, a
-        -- subscription to an epic that is gone. They would be dangling
+        -- subscription to an epic that is gone, an agent of a dropped task.
+        -- A dropped agent's ledger row is kept: names are never reused
+        -- (agents.allium: AgentNameIsNeverReused). They would be dangling
         -- references the board could not draw, and the store has no foreign
         -- keys to refuse them. Measured against the real old store: 14
         -- subagent rows, no watches, subscriptions or poll claims.
@@ -1066,3 +1083,7 @@ open question "Who takes the dump, on what cadence, and where does it go? The de
 -- `retired_feed_items`, which is what that pass was for; `enum SharedTable`
 -- and `shared_table_count` above now list all seventeen and are back in sync
 -- with `src/spacetime/snapshot.rs::SharedTable::ALL`.
+--
+-- Resolved 2026-10-16 (task #90115): `work_packages` and `work_package_links`
+-- had joined `SharedTable::ALL` without this spec following; they are listed
+-- now, beside A1's `agents` and `handed_out_agent_names`, for twenty-one.

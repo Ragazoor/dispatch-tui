@@ -63,6 +63,7 @@ macro_rules! apply_patch {
     };
 }
 
+mod agent;
 mod agent_state;
 mod alias;
 mod blanks;
@@ -82,6 +83,7 @@ mod support;
 mod tables;
 mod tasks_epics;
 
+pub use agent::*;
 pub use agent_state::*;
 pub use alias::*;
 pub use blanks::*;
@@ -237,7 +239,7 @@ pub fn stamp_rules_version_on_connect(ctx: &ReducerContext) {
         version: RULES_VERSION,
     };
     match ctx.db.rules_version().id().find(1) {
-        Some(existing) if existing.version == RULES_VERSION => {}
+        Some(existing) if existing.version == RULES_VERSION => return,
         Some(_) => {
             ctx.db.rules_version().id().update(row);
         }
@@ -245,4 +247,9 @@ pub fn stamp_rules_version_on_connect(ctx: &ReducerContext) {
             ctx.db.rules_version().insert(row);
         }
     }
+    // The first connection after a publish that changed the rules: the one
+    // moment every upgraded store passes through before a board reads it
+    // (`agents.allium: BackfillCurrentAgents`). Idempotent, so a store already
+    // backfilled loses nothing to a later bump.
+    backfill_all_agents(ctx);
 }

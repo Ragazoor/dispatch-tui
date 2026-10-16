@@ -34,8 +34,16 @@ pub(crate) fn write_task(ctx: &ReducerContext, row: Task) -> Result<(), String> 
         row
     };
     let row = ensure_alias(ctx, row)?;
-    if row.id != 0 && ctx.db.tasks().id().find(row.id).is_some() {
-        ctx.db.tasks().id().update(row);
+    let prior = if row.id != 0 {
+        ctx.db.tasks().id().find(row.id)
+    } else {
+        None
+    };
+    if prior.is_some() {
+        let row = ctx.db.tasks().id().update(row);
+        // `agents.allium`: CurrentAgentMirrorsTheWindow and
+        // EndAgentWhenWorktreeGoes, in the same transaction as the write.
+        follow_task_write(&mut AgentTables(ctx), prior.as_ref(), &row);
     } else {
         ctx.db.tasks().insert(row);
     }
@@ -418,6 +426,8 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 /// without it (task #4971's design doc flagged the gap).
 pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
     delete_agent_state_for(ctx, task_id);
+    // agents.allium: AgentsGoWithTheirTask. Their names stay in the ledger.
+    delete_agents_of(&mut AgentTables(ctx), task_id);
     detach_learnings_from_task(ctx, task_id);
     delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, task_id);
     // store-split.allium: DeletingATaskFailsItsOpenRequest (D8).

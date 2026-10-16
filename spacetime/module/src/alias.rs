@@ -58,19 +58,27 @@ pub fn validate_alias(alias: &str) -> Result<(), String> {
 /// taken it appends a number to the word at `seed` (`scar2`, `scar3`, ...), so
 /// the pick always terminates with an unused alias.
 pub fn pick_alias(seed: u64, is_taken: impl Fn(&str) -> bool) -> String {
-    let n = ALIAS_WORDS.len();
+    pick_word(ALIAS_WORDS, seed, is_taken)
+}
+
+/// The walk [`pick_alias`] and the agent-name picker share
+/// (`agents.allium: StartAgentOnFreshLaunch`): start at `seed` in `words`,
+/// take the first word `is_taken` does not claim, and when every word is
+/// taken append 2, 3, ... to the word at `seed`. `words` must not be empty.
+pub fn pick_word(words: &[&str], seed: u64, is_taken: impl Fn(&str) -> bool) -> String {
+    let n = words.len();
     let start = (seed % n as u64) as usize;
     for offset in 0..n {
-        let word = ALIAS_WORDS[(start + offset) % n];
+        let word = words[(start + offset) % n];
         if !is_taken(word) {
             return word.to_string();
         }
     }
-    let base = ALIAS_WORDS[start];
+    let base = words[start];
     (2u64..)
         .map(|k| format!("{base}{k}"))
         .find(|candidate| !is_taken(candidate))
-        .expect("an unbounded counter always finds an unused alias")
+        .expect("an unbounded counter always finds an unused word")
 }
 
 /// The alias a write to task `row_id` should store: `alias` itself once it is

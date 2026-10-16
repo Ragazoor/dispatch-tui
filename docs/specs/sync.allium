@@ -674,6 +674,29 @@ rule SubscribeToThisHostsSessionRequests {
         -- like the rest.
 }
 
+rule SubscribeToAgents {
+    when: UserIdentitySettled(identity)
+
+    let connection = the_board_connection()
+
+    requires: connection.status = connected
+
+    ensures: AgentSubscriptionAsserted(connection: connection)
+
+    @guidance
+        -- THE SEVENTH ASK (agents.allium, since A1): every Agent row,
+        -- unfiltered. The store's SQL cannot join an agent to the tasks a
+        -- board holds, the way work_package_links cannot be joined to their
+        -- packages. An agent row carries a task id, a name, a host, a window
+        -- and its lifecycle stamps, never the task's title or text, so
+        -- nothing private travels in it; a row whose task this board does not
+        -- hold draws nothing. The board needs every agent, ended ones too,
+        -- because A2 resolves a name to its task on any task the board can
+        -- see. The HandedOutAgentName ledger is NOT asked for: only the
+        -- module's picker reads it. Re-asserted on every connection, like the
+        -- rest.
+}
+
 rule ASubEpicOfAFollowedEpicIsAskedForToo {
     when: SubEpicDelivered(connection, epic)
 

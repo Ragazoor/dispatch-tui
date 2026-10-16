@@ -1223,6 +1223,9 @@ rule RetryResume {
         -- is not on this disk. See ResumeTask's guidance for the full reading.
 }
 
+-- The write that clears the worktree also ends the task's current agent as
+-- worktree_gone (agents.allium: EndAgentWhenWorktreeGoes, since A1), so the
+-- relaunch this rule chains into starts a new one.
 rule RetryFresh {
     when: RetryFresh(task)
 

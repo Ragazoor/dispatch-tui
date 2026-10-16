@@ -497,6 +497,8 @@ pub(crate) fn fail_dispatch_request(
                     ..released
                 },
             )?;
+            // agents.allium: EndAgentWhenLaunchFails, with the release.
+            end_current_agent(&mut AgentTables(ctx), task_id, AGENT_END_LAUNCH_FAILED);
         }
         recalculate_epic_chain(ctx, epic_id);
     }
@@ -572,7 +574,10 @@ pub(crate) fn create_dispatch_request(
     let stamp = now(ctx);
     let task_id = task.id;
     let epic_id = task.epic_id;
-    write_task(ctx, apply_dispatch_claim(task, &stamp))?;
+    let claimed = apply_dispatch_claim(task, &stamp);
+    write_task(ctx, claimed.clone())?;
+    // agents.allium: StartAgentOnFreshLaunch, in the claim's transaction.
+    start_agent_on_fresh_launch(&mut AgentTables(ctx), &claimed, requester, mode);
     delete_all_subagents(ctx, task_id);
     // The epic status rollup for the claimed task's epic chain, in this
     // reducer (`RequestDispatch`), like every later move of the request.

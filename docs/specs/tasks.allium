@@ -1445,6 +1445,9 @@ rule MoveTaskToEpic {
 -- handle in scope — it is the single place where a guard could be reintroduced
 -- cheaply, so it is the place worth guarding.
 
+-- Removing the task row removes every agent the task has had, current and
+-- ended; their names stay in the ledger (agents.allium: AgentsGoWithTheirTask,
+-- since A1). BatchDelete removes them the same way.
 rule DeleteTask {
     when: DeleteTask(task)
 

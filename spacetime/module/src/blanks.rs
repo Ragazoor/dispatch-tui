@@ -234,3 +234,20 @@ pub fn blank_session_request() -> SessionRequest {
         deadline: String::new(),
     }
 }
+
+/// The one blank agent row: every optional column absent (`""`, or `0` for a
+/// row reference).
+pub fn blank_agent() -> Agent {
+    Agent {
+        id: 0,
+        task_id: 0,
+        name: String::new(),
+        host: String::new(),
+        start_mode: String::new(),
+        state: String::new(),
+        started_at: String::new(),
+        ended_at: String::new(),
+        end_reason: String::new(),
+        tmux_window: String::new(),
+    }
+}

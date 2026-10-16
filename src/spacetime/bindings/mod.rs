@@ -6,8 +6,11 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+pub mod agent_type;
+pub mod agents_table;
 pub mod apply_learning_verdicts_reducer;
 pub mod archive_stale_learnings_reducer;
+pub mod backfill_agents_reducer;
 pub mod backfill_task_aliases_reducer;
 pub mod batch_delete_reducer;
 pub mod batch_patch_sub_status_reducer;
@@ -41,6 +44,8 @@ pub mod feed_task_upsert_item_type;
 pub mod filter_preset_type;
 pub mod filter_presets_table;
 pub mod flatten_epic_reducer;
+pub mod handed_out_agent_name_type;
+pub mod handed_out_agent_names_table;
 pub mod host_type;
 pub mod hosts_table;
 pub mod ingest_feed_reducer;
@@ -91,8 +96,10 @@ pub mod save_repo_path_reducer;
 pub mod save_setting_reducer;
 pub mod schema_version_table;
 pub mod schema_version_type;
+pub mod seed_agents_reducer;
 pub mod seed_epics_reducer;
 pub mod seed_filter_presets_reducer;
+pub mod seed_handed_out_agent_names_reducer;
 pub mod seed_hosts_reducer;
 pub mod seed_learning_retrievals_reducer;
 pub mod seed_learnings_reducer;
@@ -149,8 +156,11 @@ pub mod work_package_patch_type;
 pub mod work_package_type;
 pub mod work_packages_table;
 
+pub use agent_type::Agent;
+pub use agents_table::*;
 pub use apply_learning_verdicts_reducer::apply_learning_verdicts;
 pub use archive_stale_learnings_reducer::archive_stale_learnings;
+pub use backfill_agents_reducer::backfill_agents;
 pub use backfill_task_aliases_reducer::backfill_task_aliases;
 pub use batch_delete_reducer::batch_delete;
 pub use batch_patch_sub_status_reducer::batch_patch_sub_status;
@@ -184,6 +194,8 @@ pub use feed_task_upsert_item_type::FeedTaskUpsertItem;
 pub use filter_preset_type::FilterPreset;
 pub use filter_presets_table::*;
 pub use flatten_epic_reducer::flatten_epic;
+pub use handed_out_agent_name_type::HandedOutAgentName;
+pub use handed_out_agent_names_table::*;
 pub use host_type::Host;
 pub use hosts_table::*;
 pub use ingest_feed_reducer::ingest_feed;
@@ -234,8 +246,10 @@ pub use save_repo_path_reducer::save_repo_path;
 pub use save_setting_reducer::save_setting;
 pub use schema_version_table::*;
 pub use schema_version_type::SchemaVersion;
+pub use seed_agents_reducer::seed_agents;
 pub use seed_epics_reducer::seed_epics;
 pub use seed_filter_presets_reducer::seed_filter_presets;
+pub use seed_handed_out_agent_names_reducer::seed_handed_out_agent_names;
 pub use seed_hosts_reducer::seed_hosts;
 pub use seed_learning_retrievals_reducer::seed_learning_retrievals;
 pub use seed_learnings_reducer::seed_learnings;
@@ -306,6 +320,7 @@ pub enum Reducer {
     ArchiveStaleLearnings {
         cutoff: String,
     },
+    BackfillAgents,
     BackfillTaskAliases,
     BatchDelete {
         task_ids: Vec<i64>,
@@ -522,11 +537,17 @@ pub enum Reducer {
         key: String,
         value: String,
     },
+    SeedAgents {
+        rows: Vec<Agent>,
+    },
     SeedEpics {
         rows: Vec<Epic>,
     },
     SeedFilterPresets {
         rows: Vec<FilterPreset>,
+    },
+    SeedHandedOutAgentNames {
+        rows: Vec<HandedOutAgentName>,
     },
     SeedHosts {
         rows: Vec<Host>,
@@ -636,6 +657,7 @@ impl __sdk::Reducer for Reducer {
         match self {
             Reducer::ApplyLearningVerdicts { .. } => "apply_learning_verdicts",
             Reducer::ArchiveStaleLearnings { .. } => "archive_stale_learnings",
+            Reducer::BackfillAgents => "backfill_agents",
             Reducer::BackfillTaskAliases => "backfill_task_aliases",
             Reducer::BatchDelete { .. } => "batch_delete",
             Reducer::BatchPatchSubStatus { .. } => "batch_patch_sub_status",
@@ -688,8 +710,10 @@ impl __sdk::Reducer for Reducer {
             Reducer::RespawnPhoenixSuccessor { .. } => "respawn_phoenix_successor",
             Reducer::SaveRepoPath { .. } => "save_repo_path",
             Reducer::SaveSetting { .. } => "save_setting",
+            Reducer::SeedAgents { .. } => "seed_agents",
             Reducer::SeedEpics { .. } => "seed_epics",
             Reducer::SeedFilterPresets { .. } => "seed_filter_presets",
+            Reducer::SeedHandedOutAgentNames { .. } => "seed_handed_out_agent_names",
             Reducer::SeedHosts { .. } => "seed_hosts",
             Reducer::SeedLearningRetrievals { .. } => "seed_learning_retrievals",
             Reducer::SeedLearnings { .. } => "seed_learnings",
@@ -736,7 +760,9 @@ impl __sdk::Reducer for Reducer {
 }             => __sats::bsatn::to_vec(&archive_stale_learnings_reducer::ArchiveStaleLearningsArgs {
                 cutoff: cutoff.clone(),
 }),
-            Reducer::BackfillTaskAliases => __sats::bsatn::to_vec(&backfill_task_aliases_reducer::BackfillTaskAliasesArgs {
+            Reducer::BackfillAgents => __sats::bsatn::to_vec(&backfill_agents_reducer::BackfillAgentsArgs {
+                }),
+Reducer::BackfillTaskAliases => __sats::bsatn::to_vec(&backfill_task_aliases_reducer::BackfillTaskAliasesArgs {
                 }),
 Reducer::BatchDelete{
                 task_ids,
@@ -1118,6 +1144,11 @@ Reducer::RecordBaseBranch{
                 key: key.clone(),
                 value: value.clone(),
 }),
+            Reducer::SeedAgents{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_agents_reducer::SeedAgentsArgs {
+                rows: rows.clone(),
+}),
             Reducer::SeedEpics{
                 rows,
 }             => __sats::bsatn::to_vec(&seed_epics_reducer::SeedEpicsArgs {
@@ -1126,6 +1157,11 @@ Reducer::RecordBaseBranch{
             Reducer::SeedFilterPresets{
                 rows,
 }             => __sats::bsatn::to_vec(&seed_filter_presets_reducer::SeedFilterPresetsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedHandedOutAgentNames{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_handed_out_agent_names_reducer::SeedHandedOutAgentNamesArgs {
                 rows: rows.clone(),
 }),
             Reducer::SeedHosts{
@@ -1303,10 +1339,12 @@ Reducer::RecordBaseBranch{
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct DbUpdate {
+    agents: __sdk::TableUpdate<Agent>,
     dispatch_request_timeouts: __sdk::TableUpdate<DispatchRequestTimeout>,
     dispatch_requests: __sdk::TableUpdate<DispatchRequest>,
     epics: __sdk::TableUpdate<Epic>,
     filter_presets: __sdk::TableUpdate<FilterPreset>,
+    handed_out_agent_names: __sdk::TableUpdate<HandedOutAgentName>,
     hosts: __sdk::TableUpdate<Host>,
     learning_retrievals: __sdk::TableUpdate<LearningRetrieval>,
     learnings: __sdk::TableUpdate<Learning>,
@@ -1336,6 +1374,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_update in __sdk::transaction_update_iter_table_updates(raw) {
             match &table_update.table_name[..] {
+                "agents" => db_update
+                    .agents
+                    .append(agents_table::parse_table_update(table_update)?),
                 "dispatch_request_timeouts" => db_update.dispatch_request_timeouts.append(
                     dispatch_request_timeouts_table::parse_table_update(table_update)?,
                 ),
@@ -1348,6 +1389,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "filter_presets" => db_update
                     .filter_presets
                     .append(filter_presets_table::parse_table_update(table_update)?),
+                "handed_out_agent_names" => db_update.handed_out_agent_names.append(
+                    handed_out_agent_names_table::parse_table_update(table_update)?,
+                ),
                 "hosts" => db_update
                     .hosts
                     .append(hosts_table::parse_table_update(table_update)?),
@@ -1437,6 +1481,9 @@ impl __sdk::DbUpdate for DbUpdate {
     ) -> AppliedDiff<'_> {
         let mut diff = AppliedDiff::default();
 
+        diff.agents = cache
+            .apply_diff_to_table::<Agent>("agents", &self.agents)
+            .with_updates_by_pk(|row| &row.id);
         diff.dispatch_request_timeouts = cache
             .apply_diff_to_table::<DispatchRequestTimeout>(
                 "dispatch_request_timeouts",
@@ -1452,6 +1499,12 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.filter_presets = cache
             .apply_diff_to_table::<FilterPreset>("filter_presets", &self.filter_presets)
             .with_updates_by_pk(|row| &row.id);
+        diff.handed_out_agent_names = cache
+            .apply_diff_to_table::<HandedOutAgentName>(
+                "handed_out_agent_names",
+                &self.handed_out_agent_names,
+            )
+            .with_updates_by_pk(|row| &row.name);
         diff.hosts = cache
             .apply_diff_to_table::<Host>("hosts", &self.hosts)
             .with_updates_by_pk(|row| &row.id);
@@ -1525,6 +1578,9 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "agents" => db_update
+                    .agents
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "dispatch_request_timeouts" => db_update
                     .dispatch_request_timeouts
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -1536,6 +1592,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "filter_presets" => db_update
                     .filter_presets
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "handed_out_agent_names" => db_update
+                    .handed_out_agent_names
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "hosts" => db_update
                     .hosts
@@ -1613,6 +1672,9 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "agents" => db_update
+                    .agents
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "dispatch_request_timeouts" => db_update
                     .dispatch_request_timeouts
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1624,6 +1686,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "filter_presets" => db_update
                     .filter_presets
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "handed_out_agent_names" => db_update
+                    .handed_out_agent_names
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "hosts" => db_update
                     .hosts
@@ -1703,10 +1768,12 @@ impl __sdk::DbUpdate for DbUpdate {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
+    agents: __sdk::TableAppliedDiff<'r, Agent>,
     dispatch_request_timeouts: __sdk::TableAppliedDiff<'r, DispatchRequestTimeout>,
     dispatch_requests: __sdk::TableAppliedDiff<'r, DispatchRequest>,
     epics: __sdk::TableAppliedDiff<'r, Epic>,
     filter_presets: __sdk::TableAppliedDiff<'r, FilterPreset>,
+    handed_out_agent_names: __sdk::TableAppliedDiff<'r, HandedOutAgentName>,
     hosts: __sdk::TableAppliedDiff<'r, Host>,
     learning_retrievals: __sdk::TableAppliedDiff<'r, LearningRetrieval>,
     learnings: __sdk::TableAppliedDiff<'r, Learning>,
@@ -1741,6 +1808,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         event: &EventContext,
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
+        callbacks.invoke_table_row_callbacks::<Agent>("agents", &self.agents, event);
         callbacks.invoke_table_row_callbacks::<DispatchRequestTimeout>(
             "dispatch_request_timeouts",
             &self.dispatch_request_timeouts,
@@ -1755,6 +1823,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<FilterPreset>(
             "filter_presets",
             &self.filter_presets,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<HandedOutAgentName>(
+            "handed_out_agent_names",
+            &self.handed_out_agent_names,
             event,
         );
         callbacks.invoke_table_row_callbacks::<Host>("hosts", &self.hosts, event);
@@ -2490,10 +2563,12 @@ impl __sdk::SpacetimeModule for RemoteModule {
     type QueryBuilder = __sdk::QueryBuilder;
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
+        agents_table::register_table(client_cache);
         dispatch_request_timeouts_table::register_table(client_cache);
         dispatch_requests_table::register_table(client_cache);
         epics_table::register_table(client_cache);
         filter_presets_table::register_table(client_cache);
+        handed_out_agent_names_table::register_table(client_cache);
         hosts_table::register_table(client_cache);
         learning_retrievals_table::register_table(client_cache);
         learnings_table::register_table(client_cache);
@@ -2517,10 +2592,12 @@ impl __sdk::SpacetimeModule for RemoteModule {
         work_packages_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
+        "agents",
         "dispatch_request_timeouts",
         "dispatch_requests",
         "epics",
         "filter_presets",
+        "handed_out_agent_names",
         "hosts",
         "learning_retrievals",
         "learnings",

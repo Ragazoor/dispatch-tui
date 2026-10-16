@@ -106,6 +106,55 @@ pub fn seed_work_package_links(
     Ok(())
 }
 
+/// Agents keep their ids, like every seeded row; a name already held by a
+/// different agent is refused rather than overwritten (`AgentNameIsNeverReused`).
+#[spacetimedb::reducer]
+pub fn seed_agents(ctx: &ReducerContext, rows: Vec<Agent>) -> Result<(), String> {
+    for row in rows {
+        if row.id == 0 {
+            return Err("seed_agents needs each agent's real id".into());
+        }
+        if let Some(holder) = ctx.db.agents().name().find(&row.name) {
+            if holder.id != row.id {
+                return Err(format!(
+                    "agent {}: name {:?} already belongs to agent {}",
+                    row.id, row.name, holder.id
+                ));
+            }
+        }
+        if ctx.db.agents().id().find(row.id).is_some() {
+            ctx.db.agents().id().update(row);
+        } else {
+            ctx.db.agents().insert(row);
+        }
+    }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn seed_handed_out_agent_names(
+    ctx: &ReducerContext,
+    rows: Vec<HandedOutAgentName>,
+) -> Result<(), String> {
+    for row in rows {
+        if row.name.is_empty() {
+            return Err("a handed-out agent name cannot be empty".into());
+        }
+        if ctx
+            .db
+            .handed_out_agent_names()
+            .name()
+            .find(&row.name)
+            .is_some()
+        {
+            ctx.db.handed_out_agent_names().name().update(row);
+        } else {
+            ctx.db.handed_out_agent_names().insert(row);
+        }
+    }
+    Ok(())
+}
+
 #[spacetimedb::reducer]
 pub fn seed_repo_paths(ctx: &ReducerContext, rows: Vec<RepoPath>) -> Result<(), String> {
     for row in rows {

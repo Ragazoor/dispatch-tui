@@ -36,3 +36,8 @@ mod dispatch_requests;
 /// ([`expire_session_request_row`]).
 #[cfg(test)]
 mod session_requests;
+
+/// The agent rules of agents.allium step A1 (task #90115), generic over
+/// `AgentStore` and run here over a plain in-test store (`agent.rs`).
+#[cfg(test)]
+mod agents;

@@ -38,8 +38,12 @@ use super::*;
 ///    patch_task's stop_pending clear and phoenix respawn, and
 ///    `ensure_managed_epics`.
 ///
+/// 7: agents A1 — agent rows and the name ledger, started by the dispatch
+///    claim, mirrored and ended by task writes, deleted with their task
+///    (`agent.rs`).
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 6;
+pub const RULES_VERSION: i64 = 7;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///
