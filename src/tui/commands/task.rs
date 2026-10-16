@@ -12,10 +12,13 @@ use super::super::types::TaskDraft;
 /// doesn't force a ~470-byte deep clone (title, description, repo_path,
 /// base_branch, labels, ...) at every call site for fields it never reads.
 ///
-/// Field names and types mirror `Task`'s corresponding fields, not
-/// `UpdateTaskParams`'s `FieldUpdate`/tri-state ones: there is no "leave
-/// untouched" state at this layer, only "here is the current value" — the
-/// same all-or-nothing semantics `Box<Task>` had before it.
+/// Field names and types mirror `Task`'s corresponding fields. A `None`
+/// `worktree`, `host` or `tmux_window` means "leave the store's value alone",
+/// not "clear it": the board's copy can be stale, and sending its absence as a
+/// clear would wipe a pointer the board never saw (tasks.allium:
+/// ABoardWriteLeavesThePointersAlone). A caller that means to clear says so
+/// with [`releasing_worktree`](Self::releasing_worktree) or
+/// [`releasing_tmux_window`](Self::releasing_tmux_window).
 #[derive(Debug, Clone)]
 pub struct PersistFields {
     pub id: TaskId,
@@ -34,6 +37,12 @@ pub struct PersistFields {
     /// a manual reorder in Done writes this field instead — see
     /// `App::handle_reorder_item`.
     pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Clear `worktree` and `host` (and the window with them) in the store.
+    /// Only RetryFresh sets it.
+    pub release_worktree: bool,
+    /// Clear `tmux_window` in the store: a detach, a window that went away,
+    /// or a crash.
+    pub release_tmux_window: bool,
 }
 
 impl PersistFields {
@@ -48,7 +57,22 @@ impl PersistFields {
             url: task.url.clone(),
             sort_order: task.sort_order,
             completed_at: task.completed_at,
+            release_worktree: false,
+            release_tmux_window: false,
         }
+    }
+
+    /// RetryFresh's release: the store's worktree, host and window are cleared.
+    pub fn releasing_worktree(mut self) -> Self {
+        self.release_worktree = true;
+        self.release_tmux_window = true;
+        self
+    }
+
+    /// The caller took the window off the board's copy on purpose.
+    pub fn releasing_tmux_window(mut self) -> Self {
+        self.release_tmux_window = true;
+        self
     }
 }
 

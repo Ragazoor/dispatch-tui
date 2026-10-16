@@ -47,7 +47,10 @@ impl App {
                 at
             });
 
-            let fields = crate::tui::commands::PersistFields::from_task(task);
+            let mut fields = crate::tui::commands::PersistFields::from_task(task);
+            if detach.is_some() {
+                fields = fields.releasing_tmux_window();
+            }
             self.clear_agent_tracking(id);
             self.sync_board_selection();
 
@@ -115,7 +118,10 @@ impl App {
                 }
                 let detach = Self::take_detach(task);
                 Self::set_local_status(task, TaskStatus::Done);
-                let fields = crate::tui::commands::PersistFields::from_task(task);
+                let mut fields = crate::tui::commands::PersistFields::from_task(task);
+                if detach.is_some() {
+                    fields = fields.releasing_tmux_window();
+                }
                 self.clear_agent_tracking(id);
                 if let Some(c) = detach {
                     cmds.push(c);

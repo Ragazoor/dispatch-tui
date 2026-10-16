@@ -26,7 +26,8 @@ impl App {
         // Non-running task: existing behavior
         if let Some(task) = self.find_task_mut(id) {
             task.tmux_window = None;
-            let fields = crate::tui::commands::PersistFields::from_task(task);
+            let fields =
+                crate::tui::commands::PersistFields::from_task(task).releasing_tmux_window();
             vec![Command::Task(crate::tui::commands::TaskCommand::Persist(
                 fields,
             ))]
@@ -561,7 +562,7 @@ impl App {
         }
         if let Some(task) = self.board.find_task(id) {
             cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
-                crate::tui::commands::PersistFields::from_task(task),
+                crate::tui::commands::PersistFields::from_task(task).releasing_tmux_window(),
             )));
         }
         // No-drain: the task is already going to `Crashed`, and draining here

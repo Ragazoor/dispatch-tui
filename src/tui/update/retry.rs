@@ -115,7 +115,8 @@ impl App {
             // Retry-fresh is the likeliest leaving-Running board write to carry
             // a deferred Stop: a crashed task is still Running.
             Self::set_local_status(task, TaskStatus::Backlog);
-            let fields = crate::tui::commands::PersistFields::from_task(task);
+            // The one board write that releases the worktree.
+            let fields = crate::tui::commands::PersistFields::from_task(task).releasing_worktree();
             self.sync_board_selection();
 
             let mut cmds = Vec::new();

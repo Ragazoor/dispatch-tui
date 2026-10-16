@@ -1044,6 +1044,20 @@ rule ReorderItem {
         -- An epic override is not permanent. EpicStatusRecalculation
         -- (epics.allium) rewrites epic.completed_at when the epic itself
         -- transitions into done, which discards an override made earlier.
+    @guarantee ABoardWriteLeavesThePointersAlone
+        -- A reorder, and every other board write that goes through the
+        -- generic Persist (detach, epic moves, lifecycle moves, a window
+        -- that went away), writes task.worktree, task.host and
+        -- task.tmux_window only when the operation means to. The board's copy
+        -- of a task can be stale: a reorder pressed before the provisioned
+        -- report reached this board sees no worktree, and sending that copy
+        -- as a clear would wipe the store's pointer and, since
+        -- agents.allium: EndAgentWhenWorktreeGoes, end the task's agent for
+        -- good. So an absent value on the board's copy means "do not touch",
+        -- never "clear".
+        -- The operations that do mean to clear say so: RetryFresh releases
+        -- the worktree (its host and window with it), and a detach, a
+        -- window-gone or a crash clears the window only.
 }
 
 -- == Move To Epic ==

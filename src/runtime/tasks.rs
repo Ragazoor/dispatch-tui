@@ -214,7 +214,7 @@ impl TuiRuntime {
         app: &mut App,
         fields: crate::tui::commands::PersistFields,
     ) {
-        use crate::service::UpdateTaskParams;
+        use crate::service::{FieldUpdate, UpdateTaskParams};
         // `last_pre_tool_use_at` is intentionally omitted: hooks own that
         // column. Writing it here would let a stale in-memory snapshot
         // (e.g. from a tick reclassification or sort_order swap) overwrite
@@ -222,10 +222,26 @@ impl TuiRuntime {
         // Backlog→Running seeds go through `SeedActivity` instead.
         let mut p = UpdateTaskParams::for_task(fields.id)
             .status(fields.status)
-            .sub_status(fields.sub_status)
-            .worktree(option_to_field_update(fields.worktree))
-            .tmux_window(option_to_tmux_window_update(fields.tmux_window))
-            .host(option_to_field_update(fields.host));
+            .sub_status(fields.sub_status);
+        // worktree, host and window: an absent value on the board's copy is
+        // "do not touch" unless the caller said it releases them. A stale copy
+        // that lacks a worktree must not clear the store's, which also ends the
+        // task's agent (tasks.allium: ABoardWriteLeavesThePointersAlone).
+        match (fields.worktree, fields.release_worktree) {
+            (Some(w), false) => p = p.worktree(FieldUpdate::Set(w)),
+            (_, true) => p = p.worktree(FieldUpdate::Clear),
+            (None, false) => {}
+        }
+        match (fields.host, fields.release_worktree) {
+            (Some(h), false) => p = p.host(FieldUpdate::Set(h)),
+            (_, true) => p = p.host(FieldUpdate::Clear),
+            (None, false) => {}
+        }
+        match (fields.tmux_window, fields.release_tmux_window) {
+            (Some(w), false) => p = p.tmux_window(crate::service::TmuxWindowUpdate::Set(w)),
+            (_, true) => p = p.tmux_window(crate::service::TmuxWindowUpdate::Clear),
+            (None, false) => {}
+        }
         // No UrlUpdate::Clear is emitted for the None branch intentionally: no
         // runtime/persist flow removes a task URL. If that ever changes, emit
         //   p = p.url(crate::service::UrlUpdate::Clear);

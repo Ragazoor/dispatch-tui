@@ -65,22 +65,6 @@ use crate::tui::{
 };
 use crate::{dispatch, mcp, models, store, tmux};
 
-/// Convert `Option<String>` to `FieldUpdate`: `Some(v)` → `Set(v)`, `None` → `Clear`.
-fn option_to_field_update(opt: Option<String>) -> FieldUpdate {
-    match opt {
-        Some(v) => FieldUpdate::Set(v),
-        None => FieldUpdate::Clear,
-    }
-}
-
-/// [`option_to_field_update`] for the typed window field.
-fn option_to_tmux_window_update(opt: Option<TmuxWindow>) -> crate::service::TmuxWindowUpdate {
-    match opt {
-        Some(w) => crate::service::TmuxWindowUpdate::Set(w),
-        None => crate::service::TmuxWindowUpdate::Clear,
-    }
-}
-
 /// Fold `(repo_path, branch)` pairs (as returned by `list_all_base_branches`,
 /// ordered by `last_used DESC`) into a per-repo history map, preserving
 /// recency order within each repo's `Vec`.

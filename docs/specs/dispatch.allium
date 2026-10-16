@@ -1287,6 +1287,9 @@ rule RetryFresh {
         -- One operator pressing retry on a card they did not dispatch is all
         -- it takes. See ResumeTask's guidance for why the surrounding
         -- preconditions do not already prevent this.
+        --
+        -- RetryFresh is the one board write that clears the worktree, host and
+        -- window (tasks.allium: ABoardWriteLeavesThePointersAlone).
 }
 
 ------------------------------------------------------------

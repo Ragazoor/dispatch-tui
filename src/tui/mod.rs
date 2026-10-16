@@ -876,7 +876,9 @@ impl App {
         for id in ids {
             self.clear_agent_tracking(id);
             if let Some(task) = self.find_task_mut(id) {
+                let mut released_window = false;
                 if let Some(window) = task.tmux_window.take() {
+                    released_window = true;
                     cmds.push(Command::Task(
                         crate::tui::commands::TaskCommand::KillTmuxWindow { window },
                     ));
@@ -885,7 +887,10 @@ impl App {
                 if task.sub_status == SubStatus::Stale || task.sub_status == SubStatus::Crashed {
                     task.sub_status = SubStatus::default_for(task.status);
                 }
-                let fields = crate::tui::commands::PersistFields::from_task(task);
+                let mut fields = crate::tui::commands::PersistFields::from_task(task);
+                if released_window {
+                    fields = fields.releasing_tmux_window();
+                }
                 cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
                     fields,
                 )));

@@ -1353,27 +1353,6 @@ mod startup_helpers {
     }
 
     #[test]
-    fn an_absent_value_clears_the_field() {
-        assert!(matches!(option_to_field_update(None), FieldUpdate::Clear));
-        assert!(matches!(
-            option_to_field_update(Some("x".into())),
-            FieldUpdate::Set(v) if v == "x"
-        ));
-    }
-
-    #[test]
-    fn an_absent_window_clears_the_window() {
-        assert!(matches!(
-            option_to_tmux_window_update(None),
-            crate::service::TmuxWindowUpdate::Clear
-        ));
-        assert!(matches!(
-            option_to_tmux_window_update(Some(test_tmux_window("w"))),
-            crate::service::TmuxWindowUpdate::Set(_)
-        ));
-    }
-
-    #[test]
     fn base_branches_group_by_repo_keeping_recency_order() {
         let grouped = group_base_branches_by_repo(vec![
             ("/a".into(), "main".into()),

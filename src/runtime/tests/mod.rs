@@ -437,6 +437,101 @@ async fn exec_persist_task_preserves_sub_status() {
     assert_eq!(db_task.sub_status, models::SubStatus::Approved);
 }
 
+/// Insert a task whose store row holds a worktree, host and window, and
+/// return its id. The caller then persists a copy of the board's task that
+/// lacks them, which is what a stale board copy looks like.
+async fn task_with_store_pointers(
+    rt: &TuiRuntime,
+    app: &mut App,
+) -> (models::TaskId, models::TmuxWindow) {
+    rt.exec_insert_task(
+        app,
+        tui::TaskDraft {
+            title: "Pointers".into(),
+            description: "Desc".into(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    let id = app.tasks()[0].id;
+    let window = models::TmuxWindow::for_task(id);
+    rt.db_write()
+        .patch_task(
+            id,
+            &store::TaskPatch::new()
+                .worktree(Some("/repo/.worktrees/x"))
+                .tmux_window(Some(&window))
+                .host(Some("host-a")),
+        )
+        .await
+        .unwrap();
+    (id, window)
+}
+
+/// tasks.allium: ABoardWriteLeavesThePointersAlone. A board copy that lacks
+/// the worktree (a reorder pressed before the provisioned report arrived) must
+/// not clear the store's worktree, host or window — the write that clears the
+/// worktree also ends the task's agent.
+#[tokio::test]
+async fn exec_persist_task_from_a_stale_copy_leaves_the_pointers_alone() {
+    let (rt, mut app) = test_runtime().await;
+    let (id, window) = task_with_store_pointers(&rt, &mut app).await;
+
+    // The board's copy has no pointers: it never saw them.
+    let stale = app.tasks()[0].clone();
+    assert!(stale.worktree.is_none() && stale.tmux_window.is_none());
+    rt.exec_persist_task(
+        &mut app,
+        crate::tui::commands::PersistFields::from_task(&stale),
+    )
+    .await;
+
+    let db_task = rt.database.get_task(id).await.unwrap();
+    assert_eq!(db_task.worktree.as_deref(), Some("/repo/.worktrees/x"));
+    assert_eq!(db_task.host.as_deref(), Some("host-a"));
+    assert_eq!(db_task.tmux_window, Some(window));
+}
+
+/// RetryFresh is the one flow that releases the worktree: its Persist says so.
+#[tokio::test]
+async fn exec_persist_task_releasing_clears_worktree_host_and_window() {
+    let (rt, mut app) = test_runtime().await;
+    let (id, _) = task_with_store_pointers(&rt, &mut app).await;
+
+    let stale = app.tasks()[0].clone();
+    rt.exec_persist_task(
+        &mut app,
+        crate::tui::commands::PersistFields::from_task(&stale).releasing_worktree(),
+    )
+    .await;
+
+    let db_task = rt.database.get_task(id).await.unwrap();
+    assert_eq!(db_task.worktree, None);
+    assert_eq!(db_task.host, None);
+    assert_eq!(db_task.tmux_window, None);
+}
+
+/// A detach, window-gone or crash clears the window only; the worktree stays.
+#[tokio::test]
+async fn exec_persist_task_releasing_the_window_keeps_the_worktree() {
+    let (rt, mut app) = test_runtime().await;
+    let (id, _) = task_with_store_pointers(&rt, &mut app).await;
+
+    let stale = app.tasks()[0].clone();
+    rt.exec_persist_task(
+        &mut app,
+        crate::tui::commands::PersistFields::from_task(&stale).releasing_tmux_window(),
+    )
+    .await;
+
+    let db_task = rt.database.get_task(id).await.unwrap();
+    assert_eq!(db_task.tmux_window, None);
+    assert_eq!(db_task.worktree.as_deref(), Some("/repo/.worktrees/x"));
+    assert_eq!(db_task.host.as_deref(), Some("host-a"));
+}
+
 /// Persist must not clobber `last_pre_tool_use_at`. Hooks own that column —
 /// if the TUI's in-memory snapshot races against a fresh hook write and wins,
 /// the task flickers Active → Stale on the next tick.

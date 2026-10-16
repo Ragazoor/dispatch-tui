@@ -311,16 +311,16 @@ rule EndAgentWhenWorktreeGoes {
         -- The store ends the agent on the task write that clears the
         -- worktree, whichever reducer carries it. In RetryFresh that is the
         -- board's Persist of the task moved back to backlog
-        -- (src/runtime/tasks.rs::exec_persist_task), which carries the
-        -- board's whole worktree field; the later pointer clear
+        -- (src/runtime/tasks.rs::exec_persist_task), which clears the
+        -- worktree because RetryFresh says to (PersistFields::release_worktree);
+        -- the later pointer clear
         -- (src/runtime/tasks.rs::clear_worktree_pointer) then finds nothing to
         -- end. Keying it on the write rather than the rule keeps
         -- CurrentAgentTracksWorktree true whichever write clears it.
         --
-        -- Known risk, tracked apart from A1: every Persist sends the board's
-        -- copy of the worktree, so a stale copy that lacks it clears the
-        -- store's worktree and now also ends the agent, which cannot be
-        -- undone.
+        -- No other Persist clears the worktree
+        -- (tasks.allium: ABoardWriteLeavesThePointersAlone): a stale board
+        -- copy that lacks the worktree cannot end the agent.
 }
 
 -- An agent goes with its task. Deleting a task removes every agent it has
