@@ -180,6 +180,12 @@ pub enum TaskCommand {
     BatchCheckWindows {
         windows: Vec<(TaskId, TmuxWindow)>,
     },
+    /// Remove the build output of each Done task's worktree
+    /// (`tasks.allium: ClearBuildOutputOfDoneTask`). Best effort, off the
+    /// board's thread; nothing comes back.
+    ClearBuildOutput {
+        worktrees: Vec<(TaskId, String)>,
+    },
     Resume {
         id: TaskId,
         worktree: Option<String>,

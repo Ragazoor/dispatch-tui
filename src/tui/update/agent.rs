@@ -201,6 +201,7 @@ impl App {
         cmds.extend(self.tick_stale_learning());
         cmds.extend(self.tick_budget_poll());
         cmds.extend(self.tick_db_refresh());
+        cmds.extend(self.tick_build_output_cleanup());
 
         self.mark_tick_dirty(&status_before, flash_count_before, flash_sent_count_before);
         cmds
@@ -405,6 +406,46 @@ impl App {
             }));
         }
         cmds
+    }
+
+    /// `tasks.allium: ClearBuildOutputOfDoneTask`: hand the host every Done task
+    /// it holds a worktree for, once per board run. A task that left Done is
+    /// forgotten here, so it is cleared again when it returns. A worktree that
+    /// a task not yet Done also names is skipped without being marked, so a
+    /// later tick picks it up. The guard reads the current task list.
+    fn tick_build_output_cleanup(&mut self) -> Vec<Command> {
+        let Some(local) = self.local_host_id.as_deref() else {
+            return vec![];
+        };
+        let tasks = &self.board.tasks;
+        let done: HashSet<TaskId> = tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Done)
+            .map(|t| t.id)
+            .collect();
+        self.build_output_cleared.retain(|id| done.contains(id));
+        let busy: HashSet<&str> = tasks
+            .iter()
+            .filter(|t| t.status != TaskStatus::Done)
+            .filter_map(|t| t.worktree.as_deref())
+            .collect();
+        let worktrees: Vec<(TaskId, String)> = tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Done)
+            .filter(|t| t.host.as_deref() == Some(local))
+            .filter(|t| !self.build_output_cleared.contains(&t.id))
+            .filter_map(|t| t.worktree.as_deref().map(|w| (t.id, w)))
+            .filter(|(_, w)| !busy.contains(w))
+            .map(|(id, w)| (id, w.to_string()))
+            .collect();
+        if worktrees.is_empty() {
+            return vec![];
+        }
+        self.build_output_cleared
+            .extend(worktrees.iter().map(|(id, _)| *id));
+        vec![Command::Task(
+            crate::tui::commands::TaskCommand::ClearBuildOutput { worktrees },
+        )]
     }
 
     /// Verify the split-mode right pane still exists, if split mode is active.

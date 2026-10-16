@@ -283,6 +283,10 @@ pub struct App {
     /// [`STALE_CLEANUP_INTERVAL`] by consulting this. See
     /// docs/specs/learnings.allium: ArchiveStaleLearning.
     pub(crate) last_stale_cleanup_at: Option<Instant>,
+    /// Done tasks whose build output this board run has already handed to the
+    /// host for clearing (`tasks.allium: ClearBuildOutputOfDoneTask`). A task
+    /// leaves the set when it leaves Done, so a later return clears it again.
+    pub(in crate::tui) build_output_cleared: HashSet<TaskId>,
     /// This install's opaque Host id (`core/Host.id` in `docs/specs/core.allium`),
     /// used to evaluate `Task::is_locally_owned` in board handlers that cannot
     /// reach the database (they act on `board.tasks` synchronously). `None`
@@ -361,6 +365,7 @@ impl App {
             broken_repo_paths: HashSet::new(),
             repo_sync: crate::repo_sync::RepoSyncCache::default(),
             last_stale_cleanup_at: None,
+            build_output_cleared: HashSet::new(),
             local_host_id: None,
         };
         // Prime all caches so the first render is a cache hit instead of recomputing.

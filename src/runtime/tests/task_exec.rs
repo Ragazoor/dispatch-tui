@@ -1630,3 +1630,26 @@ async fn exec_move_task_to_epic_shows_error_for_missing_epic() {
     assert!(app.error_popup().is_some());
     assert_eq!(rt.database.get_task(id).await.unwrap().epic_id, None);
 }
+
+/// `tasks.allium: ClearBuildOutputOfDoneTask`: the command removes the tagged
+/// build output and leaves the rest of the worktree.
+#[tokio::test]
+async fn exec_clear_build_output_removes_tagged_dirs_only() {
+    let (rt, _app) = test_runtime().await;
+    let wt = tempfile::tempdir().unwrap();
+    let target = wt.path().join("target");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::write(
+        target.join("CACHEDIR.TAG"),
+        format!("{}\n", crate::dispatch::CACHEDIR_TAG_SIGNATURE),
+    )
+    .unwrap();
+    std::fs::write(wt.path().join("Cargo.toml"), b"[package]\n").unwrap();
+
+    rt.exec_clear_build_output(vec![(TaskId(1), wt.path().to_string_lossy().into_owned())])
+        .await
+        .unwrap();
+
+    assert!(!target.exists());
+    assert!(wt.path().join("Cargo.toml").exists());
+}

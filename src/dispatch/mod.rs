@@ -24,6 +24,7 @@ fn sccache_launch_env(runner: &dyn ProcessRunner) -> Vec<(&'static str, &'static
 
 mod agents;
 mod allium_specs;
+mod build_output;
 mod bump;
 mod caller_identity;
 mod finish;
@@ -44,6 +45,7 @@ pub use agents::{
     quick_dispatch_agent, research_agent, resume_agent, resync_agent_tree_pane, run_agent_for_mode,
     toggle_agent_tree_pane, DispatchInputs,
 };
+pub use build_output::{clear_build_output, BuildOutputCleared, CACHEDIR_TAG_SIGNATURE};
 pub use finish::{finish_task, finish_task_with_abort_runner, FinishContext, FinishError};
 // Test-only re-export: `prompts` is private, and the routing tests in
 // `src/runtime/tests/` and `src/service/tasks/tests/` assert on this marker to

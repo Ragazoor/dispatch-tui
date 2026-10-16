@@ -611,8 +611,9 @@ rule WrapUpRebase {
         -- fails for any other reason, and the rule already reports the
         -- underlying conflict rather than the abort's fate.
         --
-        -- The worktree is preserved after a successful rebase (cleaned
-        -- up only on delete). finish_task performs no session teardown at
+        -- The worktree is preserved after a successful rebase (removed
+        -- only on delete; once the task is Done its build output is cleared,
+        -- tasks.allium: ClearBuildOutputOfDoneTask). finish_task performs no session teardown at
         -- all — it is the git half only — so the agent's session stays alive
         -- until it explicitly calls exit_session. The MCP wrap_up handler returns
         -- an exit token in its success response: the id of the done request

@@ -4,6 +4,7 @@ pub mod snapshots;
 mod board_hides;
 mod board_lens;
 mod budget;
+mod build_output;
 mod column_sections;
 mod commands;
 mod confirm_done;

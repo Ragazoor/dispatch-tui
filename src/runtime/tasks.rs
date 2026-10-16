@@ -570,6 +570,30 @@ impl TuiRuntime {
         })
     }
 
+    /// `tasks.allium: ClearBuildOutputOfDoneTask`: remove each worktree's build
+    /// output on a blocking thread. Best effort: what was removed is logged at
+    /// info, what could not be at warn, and the Done transition is untouched.
+    pub(super) fn exec_clear_build_output(
+        &self,
+        worktrees: Vec<(TaskId, String)>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::task::spawn_blocking(move || {
+            for (id, worktree) in worktrees {
+                let cleared = dispatch::clear_build_output(std::path::Path::new(&worktree));
+                for dir in &cleared.removed {
+                    tracing::info!(task_id = id.0, dir = %dir.display(), "removed build output");
+                }
+                for (dir, e) in &cleared.failed {
+                    tracing::warn!(
+                        task_id = id.0,
+                        dir = %dir.display(),
+                        "could not remove build output: {e}"
+                    );
+                }
+            }
+        })
+    }
+
     /// Ask a repository for its own default branch and hand the answer back to
     /// the base-branch field.
     ///

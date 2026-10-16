@@ -426,7 +426,8 @@ rule ConfirmDone {
         -- Each task is individually guarded before transitioning: tasks
         -- already in Done are skipped rather than re-moved.
         -- The tmux window is killed but the worktree is preserved —
-        -- unlike DeleteTask, which removes it along with the row. As with MoveTaskForward,
+        -- unlike DeleteTask, which removes it along with the row. Only its
+        -- build output goes (ClearBuildOutputOfDoneTask). As with MoveTaskForward,
         -- the task's agent notification/poll tracking flags are cleared,
         -- and a deferred Stop is voided when the task was running.
         --
@@ -639,6 +640,86 @@ rule PhoenixRespawn {
         -- (epics.allium) skips phoenix subtasks outright, so a phoenix task
         -- inside an auto_dispatch epic cannot chain into itself forever. See
         -- that rule for why the guard lives there rather than here.
+}
+
+-- == Build Output Cleanup ==
+--
+-- A Done task keeps its worktree (code, branch, commits) until it is deleted
+-- (TaskTeardown, below). Its build output is a different matter: a fresh Rust
+-- build is ~8.5G and a long-lived worktree grows to 25-40G, because cargo
+-- never removes stale artifacts. On 2026-10-16 139 kept worktrees, only 4 of
+-- them for open tasks, had filled the disk (task #90113). So the host that
+-- holds a Done task's worktree removes the worktree's build output, and disk
+-- use is bounded by open tasks.
+
+rule ClearBuildOutputOfDoneTask {
+    when: task: core/Task.status becomes done
+
+    requires: task.worktree != null
+    -- HostTracksWorktree (core.allium): the worktree is on task.host's disk,
+    -- so only that host can see it.
+    requires: task.host = core/local_host()
+    -- The worktree is not in use by a task that is still working.
+    requires: not exists core/Task{worktree: task.worktree, status: not done}
+
+    ensures: BuildOutputCleared(task: task, dirs: build_output_dirs(task.worktree))
+
+    @guidance
+        -- == What counts as build output ==
+        -- build_output_dirs(worktree) is every TOP-LEVEL directory of the
+        -- worktree that holds a CACHEDIR.TAG file whose content starts with
+        -- the standard signature line
+        -- "Signature: 8a477f597d28d172789f06886806bc55"
+        -- (https://bford.info/cachedir/). Cargo writes one into target/; uv
+        -- writes one into .venv/. The rule is repo-agnostic: it names no
+        -- directory. A file called CACHEDIR.TAG without the signature does
+        -- not count. A symlink is never followed and never removed, so the
+        -- cleanup cannot reach outside the worktree. Nothing below the top
+        -- level is examined. Each such directory is removed whole; the rest
+        -- of the worktree, its .git file and its branch are untouched.
+        --
+        -- == Every route into Done ==
+        -- The trigger is the state, not an operator action, so all routes
+        -- reach it: ConfirmDone, EditTask's STATUS section, update_tasks'
+        -- status="done" path, ExitSession's rebase and done branches, PrMerged
+        -- (so a pr wrap-up's worktree is cleared when its PR merges, not when
+        -- it enters review), and a feed upsert. The host does NOT hook any of
+        -- those writes. It watches its own board: on each tick it looks for
+        -- tasks that are Done, hold a worktree and are held by this host, and
+        -- clears each one ONCE PER BOARD RUN. `becomes` (not transitions_to)
+        -- is deliberate: a task that was already Done when this board started
+        -- is first seen Done here, and is cleared then. That first run after
+        -- this rule lands clears every kept Done worktree at once; that was
+        -- the intent (decided with the user, task #90114).
+        --
+        -- A task that leaves Done and comes back is cleared again. A Done
+        -- task cleared once is not looked at again in the same board run, so
+        -- the steady-state cost is one set lookup per Done task per tick.
+        --
+        -- == The shared-worktree guard ==
+        -- A worktree path can be named by more than one task row (dispatch
+        -- reuses an existing worktree directory: see "Fresh vs reused" in
+        -- dispatch.allium). While any task naming the same worktree is not
+        -- Done, the cleanup is skipped and the task is NOT marked cleared, so
+        -- a later tick tries again once the other task is Done. The guard is
+        -- evaluated against the board's current task list at the moment the
+        -- cleanup is decided, never against a list cached earlier.
+        --
+        -- == Best effort ==
+        -- The cleanup runs off the board's thread and never blocks or reverts
+        -- the Done transition. A directory that cannot be removed (for
+        -- example root-owned files a Docker bind mount left) is logged at
+        -- warn and left; the task still counts as cleared for this board run,
+        -- so a failure is logged once per run, not on every tick. A worktree
+        -- directory that no longer exists is nothing to clear. What was
+        -- removed is logged at info with the task id.
+        --
+        -- A task re-dispatched from Done in the moment the cleanup runs may
+        -- see its target/ disappear under a starting build. That costs a
+        -- rebuild, nothing more, and is accepted.
+        --
+        -- Out of scope (decided with the user): merging tests/*.rs into one
+        -- binary, and CARGO_INCREMENTAL=0.
 }
 
 -- == Multi-Selection ==
@@ -1046,6 +1127,9 @@ rule MoveTaskToEpic {
 --   2. Remove the task's git worktree if it has one.
 --   3. Best-effort branch deletion. A failure here is not fatal to the
 --      operation that requested the teardown.
+--
+-- Done is not teardown. A Done task keeps its worktree and branch; only the
+-- worktree's build output is cleared (ClearBuildOutputOfDoneTask, above).
 --
 -- A task whose worktree or window has already been removed out of band tears
 -- down cleanly: step 2 treats an already-absent worktree as released. "Absent"
