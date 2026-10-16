@@ -75,7 +75,7 @@ pub use connection::{
 pub use connector::{Accepted, ConnectError, StoreConnector, SubscriptionRequest};
 pub use decode::DecodeError;
 pub use decode_support::decode_fallback_count;
-pub(crate) use decode_support::{bump_decode_fallback, drop_undecodable, parse_datetime};
+use decode_support::{bump_decode_fallback, drop_undecodable, parse_datetime};
 pub use identity::{identity_conflict_message, settle_identity, IdentityVerdict};
 #[cfg(any(test, feature = "test-support"))]
 pub use memory_caller::{InjectedFault, MemoryReducerCaller};

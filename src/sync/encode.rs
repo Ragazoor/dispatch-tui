@@ -34,8 +34,7 @@
 //! the module too (zero is a real sort order and null means "fall back to the
 //! id"), so it stays doubly optional all the way through.
 
-use crate::models::TaskStatus;
-use crate::models::{CreateTaskRequest, TaskPatch};
+use crate::models::{CreateTaskRequest, TaskPatch, TaskStatus};
 use crate::spacetime::bindings;
 
 /// The module's spelling of an empty label list. Not `""`: the column holds

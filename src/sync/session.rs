@@ -28,14 +28,13 @@ use super::{
 // ---------------------------------------------------------------------------
 
 /// This install's entry in the host registry (`SharedTable::Hosts`) — see
-/// [`TaskStore`](crate::store::TaskStore). Its reads and writes stay on this
-/// machine; the shared registry gets a mirror (`sync.allium:
-/// RegisterHostOnConnect`).
+/// `store::TaskStore`. Its reads and writes stay on this machine; the shared
+/// registry gets a mirror (`sync.allium: RegisterHostOnConnect`).
 ///
 /// Backed by this install's `host.json` (`host.allium:
-/// IdentityLivesInHostFile`), not by a store table.
-/// [`SettingsStore`](crate::store::SettingsStore)'s key/value accessors refuse
-/// the identity keys, so this trait is the only way to read or change them.
+/// IdentityLivesInHostFile`), not by a store table. `store::SettingsStore`'s
+/// key/value accessors refuse the identity keys, so this trait is the only way
+/// to read or change them.
 ///
 /// See `docs/specs/host.allium` (MintHostIdentity, RenameHost) and `core/Host`
 /// in `docs/specs/core.allium`.
@@ -106,7 +105,7 @@ pub trait HostStore: Send + Sync {
 
 /// The credential this install presents to prove it is
 /// [`HostStore::user_identity`]. Never routed to the store — see
-/// [`TaskStore`](crate::store::TaskStore).
+/// `store::TaskStore`.
 ///
 /// **Deliberately not on [`HostStore`]**, although it is about the same
 /// identity. `HostStore` is the shared half, and a second backend implementing
@@ -138,7 +137,7 @@ pub trait IdentityCredentialStore: Send + Sync {
 // ---------------------------------------------------------------------------
 
 /// Which epics a person follows (`SharedTable::Subscriptions`) — see
-/// [`TaskStore`](crate::store::TaskStore).
+/// `store::TaskStore`.
 ///
 /// A subscription belongs to the PERSON, not the machine, which is why every
 /// method here takes a subscriber rather than reading the local host: following

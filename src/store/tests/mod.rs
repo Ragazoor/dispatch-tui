@@ -4,6 +4,7 @@ use crate::models::{TaskStatus, TaskTag};
 mod epics;
 mod grouping;
 mod hooks;
+mod identity;
 mod learnings;
 mod open_in_memory_store;
 mod over_sync;

@@ -11,7 +11,7 @@ use crate::store::{CreateTaskRequest, EpicRead, RepoConfigRead, Store, TaskCrud,
 /// empty subscription: every read answers empty, although the row is right
 /// there in the other store.
 ///
-/// This is the property that makes the containment claim in `tests::queries`
+/// This is the property that makes the containment claim in `sync::tests::queries`
 /// worth anything. Asking for only your own rows means nothing if the reader
 /// can also reach past the subscription — and a read-through fallback is
 /// exactly the "local read cache" Phase 5 records as not existing.

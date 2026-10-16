@@ -41,11 +41,10 @@ use chrono::{DateTime, Utc};
 use tokio::sync::watch;
 
 use crate::models::{
-    DispatchRequest, DispatchRequestId, Epic, EpicId, Learning, LearningId, LearningRetrieval,
-    PollScopeId, SessionRequest, SessionRequestId, Task, TaskId, UsageSummary, WorkPackage,
-    WorkPackageId, WorkPackageLink,
+    DispatchRequest, DispatchRequestId, Epic, EpicId, Learning, LearningFilter, LearningId,
+    LearningRetrieval, PollScopeId, SessionRequest, SessionRequestId, Task, TaskId, UsageQuery,
+    UsageSummary, WorkPackage, WorkPackageId, WorkPackageLink,
 };
-use crate::models::{LearningFilter, UsageQuery};
 use crate::spacetime::bindings;
 
 use super::decode;

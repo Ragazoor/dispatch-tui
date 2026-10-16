@@ -8,7 +8,6 @@
 
 mod board_reads;
 mod host_file_identity;
-mod identity;
 mod reconnect;
 mod settings_store_only;
 mod startup_connect;

@@ -4,8 +4,9 @@
 //! compiler already checks: it is the two places the two sides disagree about
 //! how to say "nothing", and the one place a single field becomes two columns.
 
-use crate::models::{CreateTaskRequest, TaskPatch};
-use crate::models::{SubStatus, TaskStatus, TaskTag, TaskUrl, TmuxWindow, UrlType};
+use crate::models::{
+    CreateTaskRequest, SubStatus, TaskPatch, TaskStatus, TaskTag, TaskUrl, TmuxWindow, UrlType,
+};
 use crate::sync::encode;
 
 /// A real timestamp in the format both stores write. Not "now": a placeholder

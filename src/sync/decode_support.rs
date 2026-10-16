@@ -16,7 +16,7 @@ static DECODE_FALLBACKS: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 /// event enabled, so an inline bump would silently stop counting in every
 /// process without a subscriber (most one-shot CLI subcommands, and the test
 /// suite).
-pub(crate) fn bump_decode_fallback() -> u64 {
+pub(super) fn bump_decode_fallback() -> u64 {
     DECODE_FALLBACKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }
 
@@ -32,7 +32,7 @@ pub fn decode_fallback_count() -> u64 {
 /// Drop a row of `kind` that the shared store sent and the board cannot
 /// decode. Counted as well as logged: [`decode_fallback_count`] is the one
 /// number that says a board is quietly dropping rows.
-pub(crate) fn drop_undecodable(kind: &str, error: &dyn std::fmt::Display) {
+pub(super) fn drop_undecodable(kind: &str, error: &dyn std::fmt::Display) {
     let count = bump_decode_fallback();
     tracing::warn!(
         count,
@@ -43,7 +43,7 @@ pub(crate) fn drop_undecodable(kind: &str, error: &dyn std::fmt::Display) {
 /// Parse a stored timestamp: "YYYY-MM-DD HH:MM:SS", with optional fractional
 /// seconds. The store's rows carry this text, and [`super::decode`] reads
 /// it back through here, so there is one parser for the one format.
-pub(crate) fn parse_datetime(s: &str) -> Result<DateTime<Utc>, String> {
+pub(super) fn parse_datetime(s: &str) -> Result<DateTime<Utc>, String> {
     NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f")
         .map(|ndt| Utc.from_utc_datetime(&ndt))
         .map_err(|e| format!("invalid datetime {s:?}: {e}"))
