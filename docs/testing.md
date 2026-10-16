@@ -116,13 +116,13 @@ rm src/dispatch/snapshots/*.snap.new                 # always clean up
 | A `Store` driven over the sync transport (its reducer calls, identity, subscriptions) | `src/store/tests/over_sync/` — `sync` itself may not name `store`, its tests included (`tests/module_layering.rs`) |
 | The sync session, connection state machine, decoders and encoders | `src/sync/tests/` |
 | A SpacetimeDB module change (table, column, reducer) | `spacetime/module/` tests and `tests/spacetime_module.rs`; mirror it in `src/sync/memory_caller/` |
-| Service-layer business rules | inline in `src/service/<domain>/` |
+| Service-layer business rules | inline in `src/service/<domain>/`, or a sibling `tests` file once past ~200 lines (`src/service/learnings/learning_tests.rs`) |
 | MCP JSON-RPC handler behaviour | `src/mcp/handlers/tests/` |
 | Full task/epic lifecycle | `tests/` (integration tests) |
 | A `Task` fixture | `TaskBuilder` (`src/models/task_builder.rs`, gated like `test_tmux_window`) — don't hand-roll another `Task { .. }` literal |
 | An `Epic` fixture | `EpicBuilder` (`src/models/epic_builder.rs`, gated the same way) — don't hand-roll another `Epic { .. }` literal |
 | A `CreateTaskRequest`, `CreateTaskParams` or `CreateEpicParams` | `::fixture(..)` (`src/store/fixtures.rs`, `src/service/fixtures.rs`), with only the differing fields spelled out: `CreateTaskRequest { plan: Some("p.md"), ..CreateTaskRequest::fixture("T", "/repo") }` |
-| Domain-type invariants | inline in the owning module |
+| Domain-type invariants | inline in the owning module, or a sibling `tests` file once past ~200 lines (`src/models/epics/tests.rs`) |
 | Agent prompt rendering (all variants) | `src/dispatch/prompts_snapshots.rs` |
 | Agent-facing skill copy (`plugin/skills/*/SKILL.md`) | `src/setup/plugins/tests.rs` (via `skill_body`) |
 | tmux semantics — which pane, which cwd, how many panes, which window a name resolves to | `tests/tmux_lifecycle.rs` (topology/cwd) / `tests/tmux_split_hook.rs` (split-pane cwd and keystroke absence) / `tests/tmux_window_targets.rs` (exact window-name resolution under prefix collisions) / `tests/tmux_diff_pane.rs` (agent-tree diff pane geometry, and which panes the toggle kills), shared rig in `tests/tmux_harness/mod.rs` |
@@ -156,7 +156,7 @@ Skill copy is asserted with targeted `contains` checks (not snapshots) so that d
 
 The same hazard has a rendering form: the buffer-search helpers in `src/tui/tests/helpers.rs` scan **every row of the whole terminal buffer**, not the overlay's rect. An overlay whose bottom rows are clipped off still satisfies an assertion for a bare `"close"` or `"cancel"`, because the board's own footer hint bar is drawn outside the popup and uses the same words. Assert the overlay's exact wording including its bracketed hints (`"[q/Esc] close"`), and run any new overlay assertion against the unfixed code first to confirm it really goes red.
 
-An inline `#[cfg(test)] mod` that grows past ~200 lines moves to a `tests/` submodule of its owning module (`mod tests;` beside the code, the body in `<module>/tests/`), as `src/store/tests/` and `src/mcp/handlers/tests/` do.
+An inline `#[cfg(test)] mod` that grows past ~200 lines moves out of the file. For `foo.rs` the body goes to `foo/tests.rs` behind `#[cfg(test)] mod tests;`, which keeps the module path, so `use super::*`, private access and insta snapshot names are unchanged (`src/dispatch/bump/tests.rs`). A module with many test files uses a `tests/` directory instead, as `src/store/tests/` and `src/mcp/handlers/tests/` do. A test file past ~2,000 lines splits into child modules by family, with helpers two or more children use kept in the parent. An integration target keeps its `tests/<name>.rs` entry and points each child at `tests/<name>/<child>.rs` with `#[path]` (`tests/spacetime_module.rs`), so its `--test <name>` stays valid.
 
 Inline test modules (`mod tests`, `mod property_tests`) must have `#[allow(clippy::unwrap_used, clippy::expect_used)]` at the top — the workspace `-D warnings` policy otherwise rejects bare `unwrap()`/`expect()` calls. See `src/store/tests/mod.rs` for the canonical pattern.
 
