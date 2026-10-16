@@ -252,6 +252,7 @@ fn ingest_grouped(
                 store.insert_epic(Epic {
                     title: name.clone(),
                     parent_epic_id: epic.id,
+                    origin: REPO_GROUP_ORIGIN.to_string(),
                     created_by: identity.clone(),
                     created_at: now.clone(),
                     updated_at: now,

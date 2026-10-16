@@ -1658,7 +1658,8 @@ rule GroupedFeedUpsert {
             let sub_epic = Epic.find(parent = epic, title = name)
                            ?? Epic.created(title: name, parent: epic,
                                            project_id: epic.project_id,
-                                           repo_path: "", description: "")
+                                           repo_path: "", description: "",
+                                           origin: repo_group)
             UpsertFeedTasks(sub_epic, group_items)
         -- Reconcile sub-epics absent from this emission. A sub-epic
         -- whose title no current item maps to has its feed tasks cleared
@@ -1691,6 +1692,11 @@ rule GroupedFeedUpsert {
         -- malformed). Implementation: spacetime/module/src/feed_ingest.rs::ingest_grouped,
         -- spacetime/module/src/rules.rs::repo_name_from_url (the module's twin
         -- of src/models/paths.rs::repo_name_from_url).
+        -- A sub-epic created here carries origin = repo_group, as
+        -- find_or_create_repo_group's do. That is what lets FlatFeedReconcile
+        -- (and the manual FlattenEpic) find and flatten it when grouping is
+        -- turned off. A sub-epic found by title keeps the origin it has: a
+        -- manual one of the same name is reused, not claimed.
         -- Sub-epics are not auto-deleted when their tasks disappear; empty
         -- sub-epics remain for the user to clean up manually. The
         -- reconciliation only clears their feed tasks — it never removes the
