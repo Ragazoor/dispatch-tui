@@ -1,0 +1,331 @@
+-- allium: 3
+-- onboarding-guide.allium
+--
+-- Scope: The onboarding guide — one self-contained web page that lets anyone
+--        curious try the board without installing anything. It is a playable
+--        imitation of the board on invented example data, in two steps (the
+--        board, then a graph of the same data), plus a plain-text walkthrough
+--        of the same tour.
+-- Includes: The page and where it lives (docs/guide/index.html, served by
+--           GitHub Pages); its two steps and the Next/Back buttons between
+--           them; what the example board holds; which keys the page answers
+--           to and the rule that every one of them is a real binding
+--           (key parity), with the test that holds the page to it; the
+--           status-bar banner; the graph step; the walkthrough; the README
+--           link to the page.
+-- Excludes: What each key DOES on the real board (keybindings.allium and the
+--           spec owning each action; the guide imitates those effects, it
+--           does not redefine them). The real board's layout, columns and
+--           sub-status sections (board-layout.allium), epics (epics.allium)
+--           and work packages (work-packages.allium) — the guide shows
+--           invented instances of them, nothing more. Colours, layout and
+--           visual styling of the page: deliberately not specified.
+-- Dependencies: KeyBinding, KeyNamespace from keybindings.allium.
+--
+-- Audience: anyone curious — a new teammate, a friend, a GitHub visitor. Most
+-- only look briefly, so the guide has to work the moment the page opens.
+--
+-- Decisions taken with the user (task #86018), recorded so they are not
+-- re-litigated:
+--   - One self-contained HTML page, docs/guide/index.html, served by GitHub
+--     Pages. No build step, no external scripts, no network fetches; opening
+--     the file straight from disk works the same.
+--   - It is an imitation on invented example data. It never talks to a real
+--     store, MCP server or tmux.
+--   - Two steps, ExploreBoard then Graph, moved between with on-page Next and
+--     Back buttons. Buttons, not keys, so the guide invents no key of its own.
+--   - Key parity is the most important rule: every key the guide answers to
+--     is a real binding from the keybinding table. The guide may answer to a
+--     subset of the table, never to a key or action the table lacks. The
+--     direction is guide within table, not the reverse.
+--   - The page declares the bindings it answers to in one embedded JSON
+--     block; its key handling and its banner both read that block, and a test
+--     reads it too.
+--   - The page carries a plain-text walkthrough of the same tour, readable
+--     without JavaScript, so an agent reading the file or a visitor who
+--     prefers reading gets the whole story.
+--   - The README links to the guide.
+
+use "./keybindings.allium" as keybindings
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+-- Whoever opens the page. No account, no identity: the page is public.
+external entity Visitor {}
+
+-- The repo's Rust test suite, the party the parity gate is demanded of.
+external entity TestSuite {}
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- The parity gate: an obligation on the test suite, stated as a contract so
+-- that removing the check is a visible spec change rather than a quiet test
+-- deletion.
+contract GuideKeyParityGate {
+    -- For one entry of the page's dispatch-keys block: whether every key it
+    -- declares is listed by a real row with the entry's namespace and action.
+    entry_is_real_binding: (entry: GuideBinding) -> Boolean
+
+    @invariant GuideBlockIsCheckedAgainstTheRealTable
+        -- The Rust test
+        -- src/keybindings/tests.rs::guide_declares_only_real_bindings reads
+        -- docs/guide/index.html from the repo, parses the
+        -- <script type="application/json" id="dispatch-keys"> block, and
+        -- asserts, for every entry and every key in it, that some
+        -- KEY_BINDINGS row has that namespace (by its published dotted name)
+        -- and that action, and lists that key. This is
+        -- GuideKeysAreRealBindings checked over the real page and the real
+        -- table, not over a fixture.
+
+    @invariant GuideBlockIsPresentAndNonEmpty
+        -- Non-vacuity: the test fails if the page has no dispatch-keys
+        -- block, if the block does not parse, or if it declares no entry.
+        -- A missing block would make the parity check pass trivially while
+        -- the page answers to keys nothing checks.
+
+    @invariant OnlyThisDirectionIsChecked
+        -- The test does not require the guide to declare every row. A row
+        -- the guide leaves out is fine; a guide entry the table lacks fails.
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- The guide's two steps, in tour order.
+enum GuideStep { explore_board | graph }
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- One entry of the page's dispatch-keys block:
+--   <script type="application/json" id="dispatch-keys">
+-- The block is a JSON array of objects {namespace, action, keys}:
+--   namespace  the published dotted name of a KeyNamespace (board.normal,
+--              board.detail, board.help, tmux.global, …)
+--   action     the keybinding table's action id (navigate_row, exit_epic,
+--              toggle_help, jump_to_dispatch, …)
+--   keys       the keys, written exactly as the table writes them ("j",
+--              "Space", "Esc", "Prefix+Space")
+-- The block is the guide's one list of keys. The page's key handling and its
+-- banner both read it; there is no second list in the page's script.
+entity GuideBinding {
+    namespace: keybindings/KeyNamespace
+    action:    String
+    keys:      Set<String>
+
+    invariant DeclaresAtLeastOneKey {
+        keys.count >= 1
+    }
+}
+
+-- One visit to the page, from opening it to closing it. Nothing about a visit
+-- is stored anywhere; it lives in the open page only.
+entity GuideVisit {
+    visitor: Visitor
+    step:    GuideStep
+
+    transitions step {
+        explore_board -> graph
+        graph -> explore_board
+    }
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == The two steps ==
+
+rule GuideOpensOnTheBoard {
+    when: GuideOpened(visitor)
+
+    ensures: GuideVisit.created(visitor: visitor, step: explore_board)
+
+    @guidance
+        -- Opening the page from GitHub Pages or straight from disk is the
+        -- same event; the page fetches nothing either way.
+}
+
+rule NextGoesToTheGraph {
+    when: GuideNextPressed(visit)
+
+    requires: visit.step = explore_board
+
+    ensures: visit.step = graph
+
+    @guidance
+        -- An on-page button, not a key. The graph shows the same example
+        -- data the board step showed.
+}
+
+rule BackGoesToTheBoard {
+    when: GuideBackPressed(visit)
+
+    requires: visit.step = graph
+
+    ensures: visit.step = explore_board
+
+    @guidance
+        -- An on-page button, not a key. Whether the board step comes back
+        -- where the visitor left it is not decided (see Open Questions).
+}
+
+-- == Keys ==
+
+rule GuideKeyRunsItsDeclaredAction {
+    -- The guide answers a key only through the dispatch-keys block: it finds
+    -- the entry in the namespace the imitation is in that lists the key, and
+    -- imitates that entry's action as the real board would.
+    when: GuideKeyPressed(visit, namespace, key)
+
+    requires: visit.step = explore_board
+
+    let binding = GuideBindings.any(g => g.namespace = namespace and key in g.keys)
+
+    requires: binding != null
+
+    ensures: GuideActionImitated(visit: visit, namespace: namespace, action: binding.action, key: key)
+
+    @guidance
+        -- The namespace is the mode the imitation is in, decided as on the
+        -- real board: board.normal on the board, board.detail with the
+        -- detail panel open, board.help with the ? overlay open, tmux.global
+        -- inside the fake agent window.
+        -- The tour, as agreed: move around the board; enter epics and work
+        -- packages with Space and leave them with q / Esc / Q; open the
+        -- detail panel; open a fake agent window for a running task with
+        -- Space and come back with Prefix+Space (tmux.global
+        -- jump_to_dispatch); open the ? help overlay.
+}
+
+rule GuideKeyOutsideTheBlockDoesNothing {
+    -- The converse: a key the block does not list for the current namespace
+    -- does nothing, as on the real board (keybindings.allium:
+    -- KeyWithoutARowCannotAct). The Graph step declares no keys, so every key
+    -- does nothing there.
+    when: GuideKeyPressed(visit, namespace, key)
+
+    requires: visit.step != explore_board
+              or not GuideBindings.any(g => g.namespace = namespace and key in g.keys)
+
+    ensures: GuideKeyIgnored(visit: visit, namespace: namespace, key: key)
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- Key parity, the most important rule of the guide. Every (namespace, action,
+-- key) the guide declares is listed by some row of the real keybinding table
+-- with that namespace and that action. The guide may declare a subset of the
+-- table, never a key or action the table lacks. Checked by
+-- GuideKeyParityGate.
+invariant GuideKeysAreRealBindings {
+    for g in GuideBindings:
+        g.keys.all(k =>
+            keybindings/KeyBindings.any(b =>
+                b.namespace = g.namespace
+                and b.action = g.action
+                and k in b.keys))
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+-- A visitor reading or playing the page. Anyone may.
+actor GuideReader {
+    identified_by: Visitor where true
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface OnboardingGuidePage {
+    facing reader: GuideReader
+    context visit: GuideVisit where visitor = reader
+
+    exposes:
+        visit.step
+        for binding in GuideBindings:
+            binding.namespace
+            binding.action
+            binding.keys
+
+    provides:
+        GuideOpened(reader)
+        GuideNextPressed(visit) when visit.step = explore_board
+        GuideBackPressed(visit) when visit.step = graph
+        GuideKeyPressed(visit, namespace, key)
+
+    @guarantee OnePageNoBuildNoNetwork
+        -- The guide is one HTML file, docs/guide/index.html, served by
+        -- GitHub Pages. It has no build step, loads no external script and
+        -- makes no network fetch; opened as a plain file from disk it works
+        -- the same. Nothing has to be installed to use it.
+
+    @guarantee ImitationOnlyNeverTheRealThing
+        -- Everything the page shows is invented example data. The page never
+        -- talks to a real store, MCP server or tmux, and nothing a visitor
+        -- does on it reaches any of them.
+
+    @guarantee ExampleBoardIsLarge
+        -- The ExploreBoard step is the kanban board with its four columns
+        -- (Backlog, Running, Review, Done) and a large example board: many
+        -- epics, including epics nested inside epics; a big backlog;
+        -- running tasks spread over several sub-status sections (for
+        -- example active, needs input, stale, crashed); review tasks in
+        -- several review sections; and at least two work packages whose
+        -- cards sit on the main board.
+
+    @guarantee BannerListsTheKeysThatApplyHere
+        -- A banner, the imitation of the board's status bar, is always shown
+        -- in the ExploreBoard step and lists the keys that apply where the
+        -- cursor is. It is built from the dispatch-keys block, so it never
+        -- names a key the page does not answer to, and a key the page
+        -- answers to in that place is not left off it.
+
+    @guarantee GraphShowsHowMuchTheBoardHolds
+        -- The Graph step draws the same example data: the epic tree, with
+        -- the tasks inside each epic, and the work packages drawn across
+        -- that tree to the tasks and epics they link. Hovering or selecting
+        -- a package highlights what it links. Its purpose is to give a sense
+        -- of how much the board holds, not to be operated with keys.
+
+    @guarantee WalkthroughReadsWithoutJavaScript
+        -- The page carries a plain-text walkthrough of the same tour in its
+        -- HTML, readable with JavaScript off, so an agent reading the file
+        -- or a visitor who prefers reading gets the whole story: the board
+        -- and its columns; sub-statuses; epics and auto-dispatch; work
+        -- packages; agents working in worktrees and tmux windows; skills,
+        -- the knowledge base and the MCP tools at a high level; and a link
+        -- to install via the README.
+
+    @guarantee ReadmeLinksToTheGuide
+        -- The repo's README links to the guide.
+
+    @guidance
+        -- Colours and layout are deliberately left to the page.
+}
+
+surface GuideKeyParityTestSuite {
+    facing caller: TestSuite
+
+    contracts:
+        demands GuideKeyParityGate
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Key parity checks namespace, action and key, but not a row's context. Must the guide also answer a key only where the real row's context holds (for example q runs exit_epic inside an epic view, but on the top-level board q is quit, which the guide should not imitate), and should the block or the test carry that context?"
+open question "What browser keystroke stands for tmux's Prefix in Prefix+Space (jump_to_dispatch) inside the fake agent window — the default Ctrl+B followed by Space, or something else — and how does the banner show it?"
+open question "When the visitor presses Back from the Graph step, does the board come back where they left it (cursor, open epic or package, open overlay), or reset to the top-level board?"

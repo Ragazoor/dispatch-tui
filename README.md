@@ -5,6 +5,8 @@ A terminal kanban board that runs Claude Code agents. Each agent gets its own gi
 <!-- The images below come from a made-up demo project. Regenerate them with scripts/readme-demo/run.sh. -->
 ![A tour of the board: into an epic, into a nested epic, back out, and into a work package](docs/images/tour.gif)
 
+**[Try it in your browser →](https://ragazoor.github.io/dispatch-tui/guide/)** A playable tour of the board, epics and work packages. Nothing to install.
+
 ## Why
 
 Most agent managers are session managers: they open a terminal and let you watch. Dispatch is a workflow tool.
@@ -85,6 +87,7 @@ In a hurry? Press `D` instead. It skips the form, dispatches at once, and the ag
 
 ## Docs
 
+- [Guided tour](docs/guide/index.html) — try the board in your browser
 - [Reference](docs/reference.md) — key bindings, configuration, CLI, feeds, troubleshooting
 - [MCP](docs/mcp.md) — the tools agents call
 - [Specs](docs/specs/) — what the system is meant to do

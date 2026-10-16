@@ -778,3 +778,39 @@ fn contexts_overlap_reports_real_co_occurrence() {
         assert!(!contexts_overlap(b, a), "{b:?} and {a:?} must be symmetric");
     }
 }
+
+/// The onboarding guide answers only to real keys: every (namespace, action,
+/// key) its `dispatch-keys` block declares is listed by a table row with that
+/// namespace and action, and any description it carries is that row's
+/// (`GuideKeysAreRealBindings` in
+/// `docs/specs/onboarding-guide.allium`). The guide may show a subset.
+#[test]
+fn guide_declares_only_real_bindings() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/guide/index.html");
+    let html = std::fs::read_to_string(&path).expect("docs/guide/index.html exists");
+    let open = r#"<script type="application/json" id="dispatch-keys">"#;
+    let start = html.find(open).expect("guide has a dispatch-keys block") + open.len();
+    let len = html[start..].find("</script>").expect("block is closed");
+    let declared: Vec<serde_json::Value> =
+        serde_json::from_str(&html[start..start + len]).expect("block is a JSON array");
+    assert!(!declared.is_empty(), "guide declares no keys");
+    for entry in &declared {
+        let ns_name = entry["namespace"].as_str().expect("namespace");
+        let action = entry["action"].as_str().expect("action");
+        let ns =
+            KeyNamespace::parse(ns_name).unwrap_or_else(|| panic!("{ns_name}: no such namespace"));
+        if let Some(description) = entry["description"].as_str() {
+            assert!(
+                bindings_in(ns).any(|b| b.action == action && b.description == description),
+                "guide's description of {ns_name}/{action} is not the table's"
+            );
+        }
+        for key in entry["keys"].as_array().expect("keys") {
+            let key = key.as_str().expect("key is a string");
+            assert!(
+                bindings_in(ns).any(|b| b.action == action && b.keys.contains(&key)),
+                "guide binds {key} to {ns_name}/{action}, which the table does not"
+            );
+        }
+    }
+}
