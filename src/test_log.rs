@@ -6,19 +6,13 @@
 //! need to assert on it. This is the one harness for doing that — don't grow a
 //! second copy alongside the test that needs it.
 //!
-//! One process-wide subscriber does the formatting; only the *capture* is
-//! thread-local. A thread-local subscriber per test (the old design) lost
-//! events at random (task #77857): tracing caches each callsite's interest
-//! when a thread first reaches it, and while only one subscriber was live
-//! that thread's own default decided it. A plain test thread has none, so a
-//! sibling test reaching the same `debug!` mid-capture cached "never" and the
-//! capture came back empty. The global subscriber answers "sometimes" for
-//! every callsite and decides per event, on the emitting thread.
-//!
-//! The one window left is the install itself: a callsite registered on
-//! another thread exactly while the global is being set can still cache
-//! "never". The install rebuilds the cache to close all but that instant,
-//! once per process.
+//! One process-wide subscriber formats; only the capture buffer is
+//! thread-local. tracing caches a callsite's interest on the first thread to
+//! reach it, so a per-test thread-local subscriber lost events whenever a
+//! sibling test with no subscriber got there first (task #77857). The global
+//! filter answers "sometimes" and decides per event on the emitting thread.
+//! The only window left is a callsite registering on another thread at the
+//! instant of the one-time install.
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex, Once};
@@ -52,13 +46,10 @@ fn capturing() -> bool {
     CAPTURE.with(|c| c.borrow().is_some())
 }
 
-/// Hands the formatter this thread's capture buffer. The filter only lets
-/// events through on a capturing thread, so the sink is a fallback.
-fn capture_writer() -> Box<dyn std::io::Write> {
-    match CAPTURE.with(|c| c.borrow().clone()) {
-        Some(buffer) => Box::new(buffer),
-        None => Box::new(std::io::sink()),
-    }
+/// This thread's capture buffer. The filter only passes events on a
+/// capturing thread, so the default is never written to in practice.
+fn capture_writer() -> LogBuffer {
+    CAPTURE.with(|c| c.borrow().clone()).unwrap_or_default()
 }
 
 /// Install the process-wide capturing subscriber, once.
