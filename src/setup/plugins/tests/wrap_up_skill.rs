@@ -26,6 +26,7 @@ fn plugin_embeds_required_files() {
         "skills/decompose-review/references/plan-template.md",
         "skills/learnings/SKILL.md",
         "skills/grill/SKILL.md",
+        "skills/fix/SKILL.md",
         "skills/allium-loop/SKILL.md",
         "skills/allium-loop/prompt.md",
     ];

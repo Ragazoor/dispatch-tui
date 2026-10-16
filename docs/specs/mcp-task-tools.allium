@@ -88,7 +88,7 @@ config {
 --
 -- == Skill copy ==
 --
--- The agent-facing skills (the /wrap-up, /retro, /allium-loop and /learnings
+-- The agent-facing skills (the /wrap-up, /retro, /allium-loop, /fix and /learnings
 -- skills and their siblings) follow the same just-in-time principle. A skill's
 -- SKILL.md carries the flow every invocation walks. Detail only one branch
 -- needs lives in a references/ file beside it, and the branch names that file
@@ -104,6 +104,11 @@ config {
 -- under ~/.claude/plugins/. So a skill's copy reaches an agent by two routes,
 -- both carry the text in plugin/skills, and a branch that names a references/
 -- file can be followed over MCP too.
+--
+-- The /fix skill creates and dispatches a task in the repo that owns a defect.
+-- It checks for a duplicate and asks the user to confirm before create_task,
+-- because dispatch launches an agent in auto mode and a dispatched agent may
+-- invoke /fix itself; the confirmation is the only bound on that chain.
 
 -- == Tool definitions follow the authoring standard ==
 --

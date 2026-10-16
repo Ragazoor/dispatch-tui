@@ -282,3 +282,36 @@ fn learnings_skill_wrong_verdict_does_not_claim_human_review() {
          review step: {content}"
     );
 }
+
+/// /fix files the issue as a task in the repo that owns it and dispatches it.
+/// It must never edit that repo itself, must resolve the main repo root (a
+/// worktree path as `repo_path` makes dispatch branch from the wrong place),
+/// and must get the user's confirmation before anything is created: dispatch
+/// launches an agent in auto mode, and a dispatched agent can invoke /fix too.
+#[test]
+fn fix_skill_confirms_then_creates_and_dispatches_a_fix_task_in_the_owning_repo() {
+    let content = skill_body("fix");
+    for needle in [
+        "`create_task`",
+        "`dispatch_task`",
+        "`tag`: `\"fix\"`",
+        "--git-common-dir",
+        "never a\nworktree path",
+        "`epic_id`",
+        "`list_tasks`",
+        "Do not edit",
+    ] {
+        assert!(content.contains(needle), "fix skill must mention {needle}");
+    }
+    let at = |needle: &str| {
+        content
+            .find(needle)
+            .unwrap_or_else(|| panic!("fix skill must mention {needle}"))
+    };
+    assert!(
+        at("`list_tasks`") < at("`AskUserQuestion`")
+            && at("`AskUserQuestion`") < at("`create_task`")
+            && at("`create_task`") < at("`dispatch_task`"),
+        "fix skill must check duplicates, then confirm, then create, then dispatch"
+    );
+}
