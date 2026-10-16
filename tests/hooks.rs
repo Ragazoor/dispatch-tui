@@ -511,13 +511,11 @@ async fn pr_gate_reminder_suggests_no_tag_filter() {
 async fn pr_gate_reminder_names_task_id_with_this_tasks_id() {
     let board = spawn_board().await;
     let (id, stderr) = pr_gate_first_reminder(&board).await;
+    // Tied to the argument name: a fresh board's id is a small number that
+    // any stray digit in the text would match on its own.
     assert!(
-        stderr.contains("task_id"),
-        "reminder must name the `task_id` argument, got: {stderr}"
-    );
-    assert!(
-        stderr.contains(&id),
-        "reminder must write out this task's id ({id}), got: {stderr}"
+        stderr.contains(&format!("`task_id` {id}")),
+        "reminder must give `task_id` this task's id ({id}), got: {stderr}"
     );
 }
 

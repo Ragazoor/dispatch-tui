@@ -27,15 +27,16 @@ W41 9/31, W42 23/73 (32%). In the last 14 days, "missing field `task_id`" on
 Cause: 79 of the 88 refused calls passed only `query`. The PR gate's reminder said
 "call `query_learnings`, describing this change in `query`" and nothing else. Of
 the 44 refused calls on tasks still in the store, 35 came within five minutes after
-that task's gate fired. 85 calls in the same window succeeded, so about 30% of
-gate-prompted queries failed on the first try. Agents nearly always retried
+that task's gate fired. 85 tasks made a `query_learnings` call in that window, and
+35 of those first attempts were refused (41%). Agents nearly always retried
 (95% recover), so the cost is a wasted turn on the one forced knowledge-base
 lookup per PR, not lost recall.
 
 ## The change
 
 - Spec: `PrLearningsGate` in `docs/specs/pr-workflow.allium` now says the reminder
-  names every argument `query_learnings` requires, with the task's own id.
+  names `task_id`, the one argument `query_learnings` requires, with the task's
+  own id.
 - Test: `tests/hooks.rs::pr_gate_reminder_names_task_id_with_this_tasks_id`
   (failed first, then passed).
 - Code: the reminder is composed per task with its id.
@@ -69,11 +70,14 @@ Store measures from `uv run python -I scripts/learnings-metrics.py`.
 
 The two bold rows are the outcome signal this run adds. The "after" number needs a
 week of agents on a board built from this commit: the board composes the reminder,
-so the fix takes effect when the operator's board restarts on it.
+so the fix takes effect when the operator's board restarts on it. The skill line
+takes effect when the plugin is reinstalled. The weekly rows count every call,
+retries included, so compare them week to week, not with the 41% above.
 
 Retrieval rows fell because deleting a task deletes its retrieval rows (the task
 delete reducer detaches learnings and drops their retrievals). 8,590 rows still
-point at tasks that are gone, from before that cascade. Retrieval counts therefore
+point at tasks that are gone, presumably rows carried over when retrievals moved
+into the shared store on 2026-09-26, before the cascade reached them. Retrieval counts therefore
 shrink as tasks are deleted and are not comparable run to run. Trajectory files
 are never deleted, so prefer them for anything measured over time.
 

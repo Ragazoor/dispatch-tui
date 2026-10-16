@@ -92,8 +92,8 @@ rule PrLearningsGate {
         -- everything else until `limit` drops it. The reminder points at
         -- `query` instead, which is what the ranking keys on.
         --
-        -- The reminder names every argument query_learnings requires:
-        -- `task_id`, with this task's own id written out, and `query`.
+        -- The reminder names the one argument query_learnings requires,
+        -- `task_id`, with this task's own id written out, alongside `query`.
         -- Naming only `query` was read as the whole call: 35 of the 44
         -- query_learnings calls refused for a missing `task_id` up to
         -- 2026-10-16 came within five minutes of the gate firing
