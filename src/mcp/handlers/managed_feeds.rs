@@ -83,17 +83,26 @@ pub(super) async fn handle_managed_feed_config(
     tracing::info!("MCP managed_feed_config");
 
     if parsed.is_read() {
-        return match config_summary(state, "Managed-feed config:").await {
-            Ok(text) => {
-                JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
-            }
-            Err(e) => service_err_to_response(
-                id,
-                ServiceError::Internal(e.context("failed to read managed feed config")),
-            ),
-        };
+        return read_config(state, id).await;
     }
+    write_config(state, id, parsed).await
+}
 
+async fn read_config(state: &McpState, id: Option<Value>) -> JsonRpcResponse {
+    match config_summary(state, "Managed-feed config:").await {
+        Ok(text) => JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]})),
+        Err(e) => service_err_to_response(
+            id,
+            ServiceError::Internal(e.context("failed to read managed feed config")),
+        ),
+    }
+}
+
+async fn write_config(
+    state: &McpState,
+    id: Option<Value>,
+    parsed: ManagedFeedConfigArgs,
+) -> JsonRpcResponse {
     // Interval validation is NOT done here. The floor is a domain invariant of
     // the field rather than a property of this entry point, so it lives in the
     // service (`validate_feed_interval`) where every write path inherits it —

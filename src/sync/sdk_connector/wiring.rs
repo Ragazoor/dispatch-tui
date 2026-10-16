@@ -17,6 +17,25 @@ use crate::spacetime::bindings::{
 };
 use crate::sync::subtree::SubtreeCover;
 
+// One table's three callbacks, so "every table gets all three" is
+// structural rather than something a reader verifies by counting.
+//
+// An update is an UPSERT, not a patch: the SDK hands over the old row
+// and the new one, and only the new one is kept — the rows are keyed by
+// id and a row's id cannot change.
+macro_rules! wire {
+    ($wiring:expr, $db:expr, $table:ident, $upsert:ident, $remove:ident, $key:expr) => {{
+        let rows = $wiring.rows.clone();
+        $db.$table().on_insert(move |_, row| rows.$upsert(row));
+        let rows = $wiring.rows.clone();
+        $db.$table()
+            .on_update(move |_, _old, new| rows.$upsert(new));
+        let rows = $wiring.rows.clone();
+        let key = $key;
+        $db.$table().on_delete(move |_, row| rows.$remove(key(row)));
+    }};
+}
+
 impl SpacetimeSdkConnector {
     /// Point every subscribed table at [`Self::rows`].
     ///
@@ -37,37 +56,39 @@ impl SpacetimeSdkConnector {
 
     /// Every table's row callbacks. See [`Self::wire_rows`].
     pub(super) fn wire_tables(&self, db: &bindings::RemoteTables) {
-        // One table's three callbacks, so "every table gets all three" is
-        // structural rather than something a reader verifies by counting.
-        //
-        // An update is an UPSERT, not a patch: the SDK hands over the old row
-        // and the new one, and only the new one is kept — the rows are keyed by
-        // id and a row's id cannot change.
-        macro_rules! wire {
-            ($table:ident, $upsert:ident, $remove:ident, $key:expr) => {{
-                let rows = self.rows.clone();
-                db.$table().on_insert(move |_, row| rows.$upsert(row));
-                let rows = self.rows.clone();
-                db.$table().on_update(move |_, _old, new| rows.$upsert(new));
-                let rows = self.rows.clone();
-                let key = $key;
-                db.$table().on_delete(move |_, row| rows.$remove(key(row)));
-            }};
-        }
+        self.wire_board_tables(db);
+        self.wire_shared_tables(db);
+    }
 
-        wire!(tasks, upsert_task, remove_task, |row: &bindings::Task| {
-            crate::models::TaskId(row.id)
-        });
-        wire!(epics, upsert_epic, remove_epic, |row: &bindings::Epic| {
-            crate::models::EpicId(row.id)
-        });
+    /// Row callbacks for the tables the board itself shows.
+    fn wire_board_tables(&self, db: &bindings::RemoteTables) {
         wire!(
+            self,
+            db,
+            tasks,
+            upsert_task,
+            remove_task,
+            |row: &bindings::Task| { crate::models::TaskId(row.id) }
+        );
+        wire!(
+            self,
+            db,
+            epics,
+            upsert_epic,
+            remove_epic,
+            |row: &bindings::Epic| { crate::models::EpicId(row.id) }
+        );
+        wire!(
+            self,
+            db,
             repo_paths,
             upsert_repo_path,
             remove_repo_path,
             |row: &bindings::RepoPath| row.id
         );
         wire!(
+            self,
+            db,
             repo_base_branches,
             upsert_repo_base_branch,
             remove_repo_base_branch,
@@ -86,32 +107,45 @@ impl SpacetimeSdkConnector {
         let rows = self.rows.clone();
         db.hosts()
             .on_delete(move |_, row| rows.remove_host(&row.id));
+    }
 
+    /// Row callbacks for the remaining shared tables.
+    fn wire_shared_tables(&self, db: &bindings::RemoteTables) {
         wire!(
+            self,
+            db,
             poll_owners,
             upsert_poll_owner,
             remove_poll_owner,
             |row: &bindings::PollOwner| row.id
         );
         wire!(
+            self,
+            db,
             learnings,
             upsert_learning,
             remove_learning,
             |row: &bindings::Learning| crate::models::LearningId(row.id)
         );
         wire!(
+            self,
+            db,
             learning_retrievals,
             upsert_learning_retrieval,
             remove_learning_retrieval,
             |row: &bindings::LearningRetrieval| row.id
         );
         wire!(
+            self,
+            db,
             usage_events,
             upsert_usage_event,
             remove_usage_event,
             |row: &bindings::UsageEvent| row.id
         );
         wire!(
+            self,
+            db,
             retired_feed_items,
             upsert_retired_feed_item,
             remove_retired_feed_item,
@@ -119,36 +153,48 @@ impl SpacetimeSdkConnector {
         );
 
         wire!(
+            self,
+            db,
             subscriptions,
             upsert_subscription,
             remove_subscription,
             |row: &bindings::Subscription| row.id.clone()
         );
         wire!(
+            self,
+            db,
             settings,
             upsert_setting,
             remove_setting,
             |row: &bindings::Setting| { row.id.clone() }
         );
         wire!(
+            self,
+            db,
             work_packages,
             upsert_work_package,
             remove_work_package,
             |row: &bindings::WorkPackage| crate::models::WorkPackageId(row.id)
         );
         wire!(
+            self,
+            db,
             work_package_links,
             upsert_work_package_link,
             remove_work_package_link,
             |row: &bindings::WorkPackageLink| row.id.clone()
         );
         wire!(
+            self,
+            db,
             dispatch_requests,
             upsert_dispatch_request,
             remove_dispatch_request,
             |row: &bindings::DispatchRequest| row.id
         );
         wire!(
+            self,
+            db,
             session_requests,
             upsert_session_request,
             remove_session_request,

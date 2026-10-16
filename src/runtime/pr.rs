@@ -128,52 +128,7 @@ impl PrReporter {
     ) {
         use crate::tui::messages::PrMessage;
         let message = match result {
-            Ok(status) => {
-                // Read BEFORE posting: a merge clears the window in the store,
-                // and the host still has to kill it.
-                // Only a merge or a close has host effects, so only they pay
-                // for the read; an open PR goes straight to the post.
-                let effectful = matches!(status.state.to_uppercase().as_str(), "MERGED" | "CLOSED");
-                let before = if effectful {
-                    self.database.get_task(id).await
-                } else {
-                    None
-                };
-                let window = before.as_ref().and_then(|task| task.tmux_window.clone());
-                // A closed PR the task already shows as closed changed nothing:
-                // no second notice. Decided here, from the row read before the
-                // post, because the store's row can reach the board before this
-                // message does.
-                let already_closed = before
-                    .as_ref()
-                    .is_some_and(|task| task.sub_status == crate::models::SubStatus::PrClosed);
-                match self
-                    .task_svc
-                    .report_pr_status(id, status.state.clone(), status.review_decision.clone())
-                    .await
-                {
-                    Ok(true) => match status.state.to_uppercase().as_str() {
-                        "MERGED" => PrMessage::Merged { id, window },
-                        "CLOSED" if !already_closed => PrMessage::Closed(id),
-                        _ => PrMessage::ReviewState(id),
-                    },
-                    // A state or review decision the module does not know stays
-                    // unknown however often it is retried.
-                    Ok(false) => PrMessage::CheckFailed {
-                        id,
-                        permanent: true,
-                        error: format!(
-                            "the store does not know PR state {:?} / review decision {:?}",
-                            status.state, status.review_decision
-                        ),
-                    },
-                    Err(e) => PrMessage::CheckFailed {
-                        id,
-                        permanent: false,
-                        error: format!("could not report the PR status: {e:#}"),
-                    },
-                }
-            }
+            Ok(status) => self.report_raw_status(id, status).await,
             // Deliberately NOT logged here. This ran once per task per
             // PR_POLL_INTERVAL, so a permanently unreadable PR warned every 30
             // seconds — 63,000 identical lines from five tasks over five
@@ -187,5 +142,58 @@ impl PrReporter {
             },
         };
         let _ = self.tx.send(Message::Pr(message));
+    }
+
+    /// Post a raw PR status to the module and pick the host's follow-up message.
+    async fn report_raw_status(
+        &self,
+        id: TaskId,
+        status: dispatch::RawPrStatus,
+    ) -> crate::tui::messages::PrMessage {
+        use crate::tui::messages::PrMessage;
+        // Read BEFORE posting: a merge clears the window in the store,
+        // and the host still has to kill it.
+        // Only a merge or a close has host effects, so only they pay
+        // for the read; an open PR goes straight to the post.
+        let effectful = matches!(status.state.to_uppercase().as_str(), "MERGED" | "CLOSED");
+        let before = if effectful {
+            self.database.get_task(id).await
+        } else {
+            None
+        };
+        let window = before.as_ref().and_then(|task| task.tmux_window.clone());
+        // A closed PR the task already shows as closed changed nothing:
+        // no second notice. Decided here, from the row read before the
+        // post, because the store's row can reach the board before this
+        // message does.
+        let already_closed = before
+            .as_ref()
+            .is_some_and(|task| task.sub_status == crate::models::SubStatus::PrClosed);
+        match self
+            .task_svc
+            .report_pr_status(id, status.state.clone(), status.review_decision.clone())
+            .await
+        {
+            Ok(true) => match status.state.to_uppercase().as_str() {
+                "MERGED" => PrMessage::Merged { id, window },
+                "CLOSED" if !already_closed => PrMessage::Closed(id),
+                _ => PrMessage::ReviewState(id),
+            },
+            // A state or review decision the module does not know stays
+            // unknown however often it is retried.
+            Ok(false) => PrMessage::CheckFailed {
+                id,
+                permanent: true,
+                error: format!(
+                    "the store does not know PR state {:?} / review decision {:?}",
+                    status.state, status.review_decision
+                ),
+            },
+            Err(e) => PrMessage::CheckFailed {
+                id,
+                permanent: false,
+                error: format!("could not report the PR status: {e:#}"),
+            },
+        }
     }
 }

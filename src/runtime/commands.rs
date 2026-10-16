@@ -183,14 +183,14 @@ async fn dispatch_task(
             follow_up,
             guard,
         } => {
-            // The pre-check runs before ANY side effect: a refusal tears
-            // nothing down (tasks.allium: DeleteTask).
-            if let Some(guard) = guard {
-                if !rt.pass_delete_guard(&guard).await {
-                    return vec![];
-                }
-            }
-            drop(rt.exec_cleanup(id, repo_path, worktree, tmux_window, follow_up));
+            let request = super::tasks::CleanupRequest {
+                id,
+                repo_path,
+                worktree,
+                tmux_window,
+                follow_up,
+            };
+            run_cleanup(rt, request, guard).await;
             vec![]
         }
         ClearWorktreePointer(id) => {
@@ -239,6 +239,22 @@ async fn dispatch_task(
         }
         RefreshFromDb => rt.exec_refresh_from_db(app).await,
     }
+}
+
+/// Run a cleanup, after its delete guard (if any) passes. The pre-check runs
+/// before ANY side effect: a refusal tears nothing down (tasks.allium:
+/// DeleteTask).
+async fn run_cleanup(
+    rt: &super::TuiRuntime,
+    request: super::tasks::CleanupRequest,
+    guard: Option<crate::tui::commands::DeleteGuard>,
+) {
+    if let Some(guard) = guard {
+        if !rt.pass_delete_guard(&guard).await {
+            return;
+        }
+    }
+    drop(rt.exec_cleanup(request));
 }
 
 /// Per-domain dispatcher for [`crate::tui::commands::EpicCommand`] variants.

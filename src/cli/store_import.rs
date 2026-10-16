@@ -136,43 +136,12 @@ async fn read_data_dir_with(
         .await?
         .context("could not copy the data folder")?;
 
-    // The port is free when picked, not when the store starts: another process
-    // can take it in between. Pick again when the start reports that.
     let log = scratch.path().join("store.log");
-    let mut attempt = 1;
-    let (address, child) = loop {
-        let port = std::net::TcpListener::bind("127.0.0.1:0")?
-            .local_addr()?
-            .port();
-        let address = format!("127.0.0.1:{port}");
-        match spawner.spawn(&address, &copy, &log) {
-            Ok(child) => break (address, child),
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && attempt < PORT_ATTEMPTS => {
-                attempt += 1;
-            }
-            Err(e) => return Err(e).context("could not run `spacetime start`"),
-        }
-    };
+    let (address, child) = spawn_on_free_port(spawner, &copy, &log)?;
     let group = child.id();
 
     let result = async {
-        let a = address.clone();
-        tokio::task::spawn_blocking(move || {
-            let deadline = Instant::now() + start_timeout;
-            while probe_address(&a, Duration::from_millis(500))
-                != ManagedAddressState::StoreAnswering
-            {
-                if Instant::now() > deadline {
-                    bail!(
-                        "the copy of the store did not start within {} seconds",
-                        start_timeout.as_secs()
-                    );
-                }
-                std::thread::sleep(Duration::from_millis(250));
-            }
-            Ok(())
-        })
-        .await??;
+        wait_until_answering(&address, start_timeout).await?;
         store_at(&format!("http://{address}")).dump().await
     }
     .await;
@@ -182,6 +151,51 @@ async fn read_data_dir_with(
         .args(["-TERM", "--", &format!("-{group}")])
         .status();
     result
+}
+
+/// Start a store over `copy` on a free local port, returning its address and
+/// process.
+///
+/// The port is free when picked, not when the store starts: another process
+/// can take it in between. Pick again when the start reports that.
+fn spawn_on_free_port(
+    spawner: &dyn StoreSpawner,
+    copy: &Path,
+    log: &Path,
+) -> Result<(String, std::process::Child)> {
+    let mut attempt = 1;
+    loop {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")?
+            .local_addr()?
+            .port();
+        let address = format!("127.0.0.1:{port}");
+        match spawner.spawn(&address, copy, log) {
+            Ok(child) => return Ok((address, child)),
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && attempt < PORT_ATTEMPTS => {
+                attempt += 1;
+            }
+            Err(e) => return Err(e).context("could not run `spacetime start`"),
+        }
+    }
+}
+
+/// Poll `address` until a store answers, or fail after `start_timeout`.
+async fn wait_until_answering(address: &str, start_timeout: Duration) -> Result<()> {
+    let a = address.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let deadline = Instant::now() + start_timeout;
+        while probe_address(&a, Duration::from_millis(500)) != ManagedAddressState::StoreAnswering {
+            if Instant::now() > deadline {
+                bail!(
+                    "the copy of the store did not start within {} seconds",
+                    start_timeout.as_secs()
+                );
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        Ok(())
+    })
+    .await?
 }
 
 /// Read the old store into a snapshot. Read-only on the source.

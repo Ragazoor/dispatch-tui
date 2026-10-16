@@ -87,7 +87,7 @@ pub(super) async fn handle_create_epic(
     };
     tracing::info!(title = %parsed.title, "MCP create_epic");
 
-    match state
+    let created = state
         .epic_svc
         .create_epic(CreateEpicParams {
             title: parsed.title,
@@ -97,17 +97,14 @@ pub(super) async fn handle_create_epic(
             feed_command: None,
             feed_interval_secs: None,
         })
-        .await
-    {
-        Ok(epic) => {
-            state.notify_epic_changed(epic.id);
-            JsonRpcResponse::ok(
-                id,
-                json!({"content": [{"type": "text", "text": format!("Epic {} created: {}", epic.id, epic.title)}]}),
-            )
-        }
-        Err(e) => service_err_to_response(id, e),
-    }
+        .await;
+    let epic = match created {
+        Ok(epic) => epic,
+        Err(e) => return service_err_to_response(id, e),
+    };
+    state.notify_epic_changed(epic.id);
+    let text = format!("Epic {} created: {}", epic.id, epic.title);
+    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
 /// epics.allium: GetEpicViaMcp, the `epic_id` form of list_epics.
@@ -276,15 +273,12 @@ pub(super) async fn handle_update_epic(
         .map(String::from)
         .collect();
 
-    match state.epic_svc.update_epic(params).await {
-        Ok(result) => {
-            let epic_id = result.epic_id;
-            state.notify_epic_changed(epic_id);
-            JsonRpcResponse::ok(
-                id,
-                json!({"content": [{"type": "text", "text": format!("Epic {} updated ({})", epic_id, field_names.join(", "))}]}),
-            )
-        }
-        Err(e) => service_err_to_response(id, e),
-    }
+    let result = match state.epic_svc.update_epic(params).await {
+        Ok(result) => result,
+        Err(e) => return service_err_to_response(id, e),
+    };
+    let epic_id = result.epic_id;
+    state.notify_epic_changed(epic_id);
+    let text = format!("Epic {} updated ({})", epic_id, field_names.join(", "));
+    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }

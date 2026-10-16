@@ -149,7 +149,7 @@ pub(super) async fn handle_record_learning(
     };
 
     let scope_filter = scope_ref.clone();
-    match state
+    let created = state
         .learning_svc
         .create_learning(crate::service::CreateLearningParams {
             kind: parsed.kind,
@@ -160,41 +160,48 @@ pub(super) async fn handle_record_learning(
             tags: parsed.tags,
             source_task_id: Some(task_id),
         })
-        .await
-    {
-        Ok(learning_id) => {
-            let similar =
-                similar_learnings(state, parsed.kind, parsed.scope, scope_filter, learning_id)
-                    .await;
+        .await;
+    let learning_id = match created {
+        Ok(learning_id) => learning_id,
+        Err(e) => return service_err_to_response(id, e),
+    };
 
-            let mut text = format!(
-                "Learning {learning_id} recorded and active. \
-                 It will be injected into future dispatch prompts for matching tasks."
-            );
+    let similar =
+        similar_learnings(state, parsed.kind, parsed.scope, scope_filter, learning_id).await;
+    let text = recorded_text(learning_id, parsed.kind, parsed.scope, &similar);
+    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
+}
 
-            if !similar.is_empty() {
-                text.push_str(&format!(
-                    "\n\nSimilar approved learnings already exist for \
-                     (kind={kind}, scope={scope}):",
-                    kind = parsed.kind,
-                    scope = parsed.scope,
-                ));
-                for l in &similar {
-                    text.push_str(&format!(
-                        "\n  [{}] {} (upvoted {}x)",
-                        l.id, l.summary, l.upvote_count
-                    ));
-                }
-                text.push_str(
-                    "\n\nIf one of these already captures what you intended, \
-                     prefer it over keeping this duplicate.",
-                );
-            }
-
-            JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
-        }
-        Err(e) => service_err_to_response(id, e),
+/// The confirmation text for a recorded learning, with a duplicate warning
+/// when approved entries of the same kind and scope already exist.
+fn recorded_text(
+    learning_id: LearningId,
+    kind: LearningKind,
+    scope: LearningScope,
+    similar: &[crate::models::Learning],
+) -> String {
+    let mut text = format!(
+        "Learning {learning_id} recorded and active. \
+         It will be injected into future dispatch prompts for matching tasks."
+    );
+    if similar.is_empty() {
+        return text;
     }
+    text.push_str(&format!(
+        "\n\nSimilar approved learnings already exist for \
+         (kind={kind}, scope={scope}):",
+    ));
+    for l in similar {
+        text.push_str(&format!(
+            "\n  [{}] {} (upvoted {}x)",
+            l.id, l.summary, l.upvote_count
+        ));
+    }
+    text.push_str(
+        "\n\nIf one of these already captures what you intended, \
+         prefer it over keeping this duplicate.",
+    );
+    text
 }
 
 pub(super) async fn handle_query_learnings(
@@ -274,28 +281,26 @@ pub(super) async fn handle_rate_learning(
         "MCP rate_learning"
     );
 
-    match state
+    let applied = state
         .learning_svc
         .apply_verdicts(parsed.task_id, vec![(parsed.learning_id, parsed.verdict)])
-        .await
-    {
-        Ok(()) => {
-            let note = match parsed.verdict {
-                LearningVerdict::Helped => "recorded as helped (upvoted)",
-                LearningVerdict::Wrong => "recorded as wrong (downvoted; no review step)",
-            };
-            JsonRpcResponse::ok(
-                id,
-                json!({
-                    "content": [{
-                        "type": "text",
-                        "text": format!("Learning {} {note}.", parsed.learning_id.0)
-                    }]
-                }),
-            )
-        }
-        Err(e) => service_err_to_response(id, e),
+        .await;
+    if let Err(e) = applied {
+        return service_err_to_response(id, e);
     }
+    let note = match parsed.verdict {
+        LearningVerdict::Helped => "recorded as helped (upvoted)",
+        LearningVerdict::Wrong => "recorded as wrong (downvoted; no review step)",
+    };
+    JsonRpcResponse::ok(
+        id,
+        json!({
+            "content": [{
+                "type": "text",
+                "text": format!("Learning {} {note}.", parsed.learning_id.0)
+            }]
+        }),
+    )
 }
 
 pub(super) async fn handle_delete_learning(

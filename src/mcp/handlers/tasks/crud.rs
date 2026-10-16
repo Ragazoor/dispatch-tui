@@ -44,46 +44,54 @@ async fn handle_update_task(
     // validate as a pair rather than mapping to one setter each, so they are
     // taken out here and everything else is folded in by the generated
     // `apply_to_params` below.
-    match parsed.url.take() {
-        // Empty string clears the URL (legacy clear convention).
-        Some(ref u) if u.is_empty() => {
-            params = params.url(UrlUpdate::Clear);
-        }
-        Some(u) => {
-            let url_type = match parsed.url_type.take() {
-                Some(t) => t,
-                None => {
-                    return service_err_to_response(
-                        id,
-                        ServiceError::Validation(
-                            "url_type is required when url is set (one of: pr, security_alert, issue, other)".into(),
-                        ),
-                    )
-                }
-            };
-            params = params.url(UrlUpdate::Set(crate::models::TaskUrl::new(u, url_type)));
-        }
-        None => {}
+    match url_update(parsed.url.take(), parsed.url_type.take()) {
+        Ok(Some(update)) => params = params.url(update),
+        Ok(None) => {}
+        Err(e) => return service_err_to_response(id, e),
     }
 
     let params = parsed.apply_to_params(params);
     let fields_display = params.updated_field_names().join(", ");
 
-    match state.task_svc.update_task(params).await {
-        Ok(result) => {
-            state.notify_task_changed(task_id);
-            let nudge = if result.was_pr_finalisation {
-                super::reflection_nudge(&*state.db).await
-            } else {
-                ""
-            };
-            JsonRpcResponse::ok(
-                id,
-                json!({"content": [{"type": "text", "text": format!("Task {} updated ({}){}", result.task_id, fields_display, nudge)}]}),
-            )
-        }
-        Err(e) => service_err_to_response(id, e),
+    let result = match state.task_svc.update_task(params).await {
+        Ok(result) => result,
+        Err(e) => return service_err_to_response(id, e),
+    };
+    state.notify_task_changed(task_id);
+    let nudge = if result.was_pr_finalisation {
+        super::reflection_nudge(&*state.db).await
+    } else {
+        ""
+    };
+    let text = format!(
+        "Task {} updated ({}){}",
+        result.task_id, fields_display, nudge
+    );
+    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
+}
+
+/// Fold the `url`/`url_type` pair of an update into one [`UrlUpdate`].
+/// An empty `url` clears it; a `url` without `url_type` is a validation error.
+fn url_update(
+    url: Option<String>,
+    url_type: Option<crate::models::UrlType>,
+) -> Result<Option<UrlUpdate>, ServiceError> {
+    let Some(u) = url else {
+        return Ok(None);
+    };
+    // Empty string clears the URL (legacy clear convention).
+    if u.is_empty() {
+        return Ok(Some(UrlUpdate::Clear));
     }
+    let Some(url_type) = url_type else {
+        return Err(ServiceError::Validation(
+            "url_type is required when url is set (one of: pr, security_alert, issue, other)"
+                .into(),
+        ));
+    };
+    Ok(Some(UrlUpdate::Set(crate::models::TaskUrl::new(
+        u, url_type,
+    ))))
 }
 
 // ---------------------------------------------------------------------------
@@ -378,7 +386,7 @@ pub(crate) async fn handle_create_task(
         );
     };
 
-    match state
+    let created = state
         .task_svc
         .create_task(CreateTaskParams {
             title: parsed.title,
@@ -393,17 +401,14 @@ pub(crate) async fn handle_create_task(
             auto_run_plan: parsed.auto_run_plan,
             phoenix: parsed.phoenix,
         })
-        .await
-    {
-        Ok(task_id) => {
-            state.notify_task_changed(task_id);
-            JsonRpcResponse::ok(
-                id,
-                json!({"content": [{"type": "text", "text": format!("Task {task_id} created")}]}),
-            )
-        }
-        Err(e) => service_err_to_response(id, e),
-    }
+        .await;
+    let task_id = match created {
+        Ok(task_id) => task_id,
+        Err(e) => return service_err_to_response(id, e),
+    };
+    state.notify_task_changed(task_id);
+    let text = format!("Task {task_id} created");
+    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
 pub(crate) async fn handle_get_task(

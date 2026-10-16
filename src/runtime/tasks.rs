@@ -701,42 +701,16 @@ impl TuiRuntime {
             ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 ticks.tick().await;
-                match session.step(&*store, std::time::Instant::now()).await {
-                    Ok(crate::sync::StepOutcome::Conflicted) => {
-                        // The connection already carries the composed message —
-                        // `identity_conflict_message` wrote it when the event
-                        // was applied — so this reports it rather than
-                        // recomposing it from the two identities and risking a
-                        // second, differently-worded version of the same fatal
-                        // state.
-                        let reason = session
-                            .connection()
-                            .last_error()
-                            .unwrap_or("the shared store identified this install as somebody else")
-                            .to_string();
-                        let _ = tx.send(Message::System(
-                            crate::tui::messages::SystemMessage::Error(reason),
-                        ));
-                        return;
-                    }
-                    Ok(crate::sync::StepOutcome::Connected) => {
-                        on_store_connected(&*store, &settled_identity, &*reducer_caller).await;
-                    }
-                    Ok(_) => {
-                        // Publish why the connection is down, so a write made
-                        // during the outage can say. Cleared by `settle` on the
-                        // next success, so a refusal never quotes an outage
-                        // that is over.
-                        settled_identity
-                            .set_last_error(session.connection().last_error().map(str::to_string));
-                    }
-                    Err(e) => {
-                        // Reported and retried on the next tick. A step that
-                        // fails on the STORE's account is already an outage the
-                        // session recorded; one that fails here is a local read
-                        // of the identity, which the next tick repeats.
-                        tracing::warn!("shared store step failed: {e:#}");
-                    }
+                let stop = step_shared_store(
+                    &mut session,
+                    &*store,
+                    &settled_identity,
+                    &*reducer_caller,
+                    &tx,
+                )
+                .await;
+                if stop {
+                    return;
                 }
             }
         })
@@ -1009,14 +983,14 @@ impl TuiRuntime {
     /// (`WorktreeReleaseIsGated` in docs/specs/tasks.allium).
     ///
     /// Returns the removal's handle. Callers `drop` it; tests await it.
-    pub(super) fn exec_cleanup(
-        &self,
-        id: TaskId,
-        repo_path: String,
-        worktree: Option<String>,
-        tmux_window: Option<TmuxWindow>,
-        follow_up: crate::tui::commands::CleanupFollowUp,
-    ) -> tokio::task::JoinHandle<()> {
+    pub(super) fn exec_cleanup(&self, request: CleanupRequest) -> tokio::task::JoinHandle<()> {
+        let CleanupRequest {
+            id,
+            repo_path,
+            worktree,
+            tmux_window,
+            follow_up,
+        } = request;
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
 
@@ -1054,6 +1028,63 @@ impl TuiRuntime {
             }
         });
     }
+}
+
+/// One tick of the shared-store connection loop. Returns `true` when the loop
+/// must end: the store identified this install as somebody else, which is fatal.
+async fn step_shared_store(
+    session: &mut crate::sync::SyncSession,
+    store: &dyn crate::sync::SyncStore,
+    settled_identity: &crate::sync::SettledIdentity,
+    reducer_caller: &dyn crate::sync::ReducerCaller,
+    tx: &tokio::sync::mpsc::UnboundedSender<Message>,
+) -> bool {
+    match session.step(store, std::time::Instant::now()).await {
+        Ok(crate::sync::StepOutcome::Conflicted) => {
+            // The connection already carries the composed message —
+            // `identity_conflict_message` wrote it when the event
+            // was applied — so this reports it rather than
+            // recomposing it from the two identities and risking a
+            // second, differently-worded version of the same fatal
+            // state.
+            let reason = session
+                .connection()
+                .last_error()
+                .unwrap_or("the shared store identified this install as somebody else")
+                .to_string();
+            let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                reason,
+            )));
+            return true;
+        }
+        Ok(crate::sync::StepOutcome::Connected) => {
+            on_store_connected(store, settled_identity, reducer_caller).await;
+        }
+        Ok(_) => {
+            // Publish why the connection is down, so a write made
+            // during the outage can say. Cleared by `settle` on the
+            // next success, so a refusal never quotes an outage
+            // that is over.
+            settled_identity.set_last_error(session.connection().last_error().map(str::to_string));
+        }
+        Err(e) => {
+            // Reported and retried on the next tick. A step that
+            // fails on the STORE's account is already an outage the
+            // session recorded; one that fails here is a local read
+            // of the identity, which the next tick repeats.
+            tracing::warn!("shared store step failed: {e:#}");
+        }
+    }
+    false
+}
+
+/// What [`TuiRuntime::exec_cleanup`] tears down, and what to do once it has.
+pub(super) struct CleanupRequest {
+    pub(super) id: TaskId,
+    pub(super) repo_path: String,
+    pub(super) worktree: Option<String>,
+    pub(super) tmux_window: Option<TmuxWindow>,
+    pub(super) follow_up: crate::tui::commands::CleanupFollowUp,
 }
 
 /// The message a finished [`TuiRuntime::exec_cleanup`] teardown reports.

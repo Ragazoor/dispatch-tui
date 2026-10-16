@@ -672,13 +672,13 @@ async fn exec_cleanup_failure_keeps_the_worktree_pointer() {
     )
     .await;
 
-    let handle = rt.exec_cleanup(
+    let handle = rt.exec_cleanup(super::super::tasks::CleanupRequest {
         id,
-        "/repo".into(),
-        Some(worktree.into()),
-        None,
-        crate::tui::commands::CleanupFollowUp::ClearPointer,
-    );
+        repo_path: "/repo".into(),
+        worktree: Some(worktree.into()),
+        tmux_window: None,
+        follow_up: crate::tui::commands::CleanupFollowUp::ClearPointer,
+    });
     handle.await.unwrap();
 
     let row = rt.database.get_task(id).await.unwrap();
@@ -712,13 +712,13 @@ async fn exec_cleanup_success_reports_its_follow_up() {
     )
     .await;
 
-    let handle = rt.exec_cleanup(
+    let handle = rt.exec_cleanup(super::super::tasks::CleanupRequest {
         id,
-        "/repo".into(),
-        Some(worktree.into()),
-        None,
-        crate::tui::commands::CleanupFollowUp::DeleteRow,
-    );
+        repo_path: "/repo".into(),
+        worktree: Some(worktree.into()),
+        tmux_window: None,
+        follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
+    });
     handle.await.unwrap();
 
     let msg = rx.recv().await.unwrap();
@@ -753,13 +753,13 @@ async fn exec_cleanup_failure_does_not_delete_the_row() {
     )
     .await;
 
-    let handle = rt.exec_cleanup(
+    let handle = rt.exec_cleanup(super::super::tasks::CleanupRequest {
         id,
-        "/repo".into(),
-        Some(worktree.into()),
-        None,
-        crate::tui::commands::CleanupFollowUp::DeleteRow,
-    );
+        repo_path: "/repo".into(),
+        worktree: Some(worktree.into()),
+        tmux_window: None,
+        follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
+    });
     handle.await.unwrap();
 
     let row = rt
@@ -795,13 +795,13 @@ async fn exec_cleanup_kills_the_window_of_a_task_with_no_worktree() {
     )
     .await;
 
-    rt.exec_cleanup(
+    rt.exec_cleanup(super::super::tasks::CleanupRequest {
         id,
-        "/repo".into(),
-        None,
-        Some(test_tmux_window("task-1")),
-        crate::tui::commands::CleanupFollowUp::DeleteRow,
-    )
+        repo_path: "/repo".into(),
+        worktree: None,
+        tmux_window: Some(test_tmux_window("task-1")),
+        follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
+    })
     .await
     .unwrap();
 
@@ -844,13 +844,13 @@ async fn exec_cleanup_window_only_kill_failure_still_applies_the_follow_up() {
     )
     .await;
 
-    rt.exec_cleanup(
+    rt.exec_cleanup(super::super::tasks::CleanupRequest {
         id,
-        "/repo".into(),
-        None,
-        Some(test_tmux_window("task-1")),
-        crate::tui::commands::CleanupFollowUp::DeleteRow,
-    )
+        repo_path: "/repo".into(),
+        worktree: None,
+        tmux_window: Some(test_tmux_window("task-1")),
+        follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
+    })
     .await
     .unwrap();
 
@@ -904,13 +904,13 @@ async fn exec_cleanup_tears_down_even_if_another_row_names_the_worktree() {
         .await
         .unwrap();
 
-    rt.exec_cleanup(
+    rt.exec_cleanup(super::super::tasks::CleanupRequest {
         id,
-        "/repo".into(),
-        Some(worktree.into()),
-        Some(test_tmux_window("task-1")),
-        crate::tui::commands::CleanupFollowUp::DeleteRow,
-    )
+        repo_path: "/repo".into(),
+        worktree: Some(worktree.into()),
+        tmux_window: Some(test_tmux_window("task-1")),
+        follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
+    })
     .await
     .unwrap();
 

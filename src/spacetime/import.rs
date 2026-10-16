@@ -147,30 +147,10 @@ pub async fn import_old_store(
     let mut to_write: Vec<(SharedTable, Vec<Row>)> = Vec::new();
     let mut conflicts: Vec<String> = Vec::new();
     for extract in prepared.extracts() {
-        let table = extract.table;
-        let held = target.rows(table).await.map_err(RestoreError::Failed)?;
-        let by_key: BTreeMap<String, &Row> = held.iter().map(|r| (row_key(table, r), r)).collect();
-        let natural: BTreeSet<String> = held
-            .iter()
-            .filter_map(|r| natural_identity(table, r))
-            .collect();
-
-        let mut missing = Vec::new();
-        for row in &extract.rows {
-            if let Some(existing) = by_key.get(&row_key(table, row)) {
-                if differs_in_creation(table, existing, row) {
-                    conflicts.push(format!("{} {}", table.name(), row_key_display(table, row)));
-                }
-                *report.kept.entry(table).or_default() += 1;
-            } else if natural_identity(table, row).is_some_and(|n| natural.contains(&n)) {
-                *report.kept.entry(table).or_default() += 1;
-            } else {
-                missing.push(row.clone());
-            }
-        }
+        let missing = missing_rows(target, extract, &mut report, &mut conflicts).await?;
         if !missing.is_empty() {
-            report.imported.insert(table, missing.len());
-            to_write.push((table, missing));
+            report.imported.insert(extract.table, missing.len());
+            to_write.push((extract.table, missing));
         }
     }
     if !conflicts.is_empty() {
@@ -193,6 +173,39 @@ pub async fn import_old_store(
             .map_err(RestoreError::Failed)?;
     }
     Ok(report)
+}
+
+/// The rows of `extract` the target lacks. Counts the ones it holds into
+/// `report.kept` and names the ones whose id is taken by a different row in
+/// `conflicts`.
+async fn missing_rows(
+    target: &dyn SnapshotTarget,
+    extract: &TableExtract,
+    report: &mut ImportReport,
+    conflicts: &mut Vec<String>,
+) -> Result<Vec<Row>, RestoreError> {
+    let table = extract.table;
+    let held = target.rows(table).await.map_err(RestoreError::Failed)?;
+    let by_key: BTreeMap<String, &Row> = held.iter().map(|r| (row_key(table, r), r)).collect();
+    let natural: BTreeSet<String> = held
+        .iter()
+        .filter_map(|r| natural_identity(table, r))
+        .collect();
+
+    let mut missing = Vec::new();
+    for row in &extract.rows {
+        if let Some(existing) = by_key.get(&row_key(table, row)) {
+            if differs_in_creation(table, existing, row) {
+                conflicts.push(format!("{} {}", table.name(), row_key_display(table, row)));
+            }
+            *report.kept.entry(table).or_default() += 1;
+        } else if natural_identity(table, row).is_some_and(|n| natural.contains(&n)) {
+            *report.kept.entry(table).or_default() += 1;
+        } else {
+            missing.push(row.clone());
+        }
+    }
+    Ok(missing)
 }
 
 /// Same key, different `created_at`: two different things sharing a number.

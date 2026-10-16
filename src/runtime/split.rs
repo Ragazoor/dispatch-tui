@@ -47,30 +47,8 @@ impl TuiRuntime {
         let tx = self.msg_tx.clone();
         let runner = Arc::clone(&self.runner);
         tokio::task::spawn_blocking(move || {
-            let dispatch_pane = match tmux::current_pane_id(&*runner) {
-                Ok(id) => id,
-                Err(_) => {
-                    let _ = tx.send(Message::Split(SplitMessage::EnterFailed {
-                        failure: EnterFailure::NoTmux,
-                    }));
-                    return;
-                }
-            };
-            match tmux::split_window_horizontal(&dispatch_pane, &*runner) {
-                Ok(pane_id) => {
-                    let _ = tx.send(Message::Split(
-                        crate::tui::messages::SplitMessage::EntryOpened {
-                            pane_id,
-                            task_id: None,
-                        },
-                    ));
-                }
-                Err(e) => {
-                    let _ = tx.send(Message::Split(SplitMessage::EnterFailed {
-                        failure: EnterFailure::Failed(format!("Split failed: {e:#}")),
-                    }));
-                }
-            }
+            let msg = enter_split_outcome(&*runner);
+            let _ = tx.send(Message::Split(msg));
         })
     }
 
@@ -83,31 +61,8 @@ impl TuiRuntime {
         let runner = Arc::clone(&self.runner);
         let window = window.clone();
         tokio::task::spawn_blocking(move || {
-            let dispatch_pane = match tmux::current_pane_id(&*runner) {
-                Ok(id) => id,
-                Err(_) => {
-                    let _ = tx.send(Message::Split(SplitMessage::EnterFailed {
-                        failure: EnterFailure::NoTmux,
-                    }));
-                    return;
-                }
-            };
-
-            match dispatch::join_task_window_into_pane(&window, &dispatch_pane, &*runner) {
-                Ok(pane_id) => {
-                    let _ = tx.send(Message::Split(
-                        crate::tui::messages::SplitMessage::EntryOpened {
-                            pane_id,
-                            task_id: Some(task_id),
-                        },
-                    ));
-                }
-                Err(e) => {
-                    let _ = tx.send(Message::Split(SplitMessage::EnterFailed {
-                        failure: EnterFailure::Failed(format!("Split with task failed: {e:#}")),
-                    }));
-                }
-            }
+            let msg = enter_split_with_task_outcome(&*runner, task_id, &window);
+            let _ = tx.send(Message::Split(msg));
         })
     }
 
@@ -170,30 +125,15 @@ impl TuiRuntime {
         let old_task = old_task.map(|(window, worktree)| (window.clone(), worktree.to_owned()));
 
         tokio::task::spawn_blocking(move || {
-            match dispatch::swap_task_window_into_pane(
+            let result = dispatch::swap_task_window_into_pane(
                 &new_window,
                 &right_pane,
                 old_task
                     .as_ref()
                     .map(|(window, worktree)| (window, worktree.as_str())),
                 &*runner,
-            ) {
-                Ok(new_pane_id) => {
-                    let _ = tx.send(Message::Split(
-                        crate::tui::messages::SplitMessage::SwapOpened {
-                            pane_id: new_pane_id,
-                            task_id,
-                        },
-                    ));
-                }
-                Err(e) => {
-                    let _ = tx.send(Message::Split(
-                        crate::tui::messages::SplitMessage::SwapFailed {
-                            error: format!("Swap failed: {e:#}"),
-                        },
-                    ));
-                }
-            }
+            );
+            let _ = tx.send(Message::Split(swap_outcome(result, task_id)));
         })
     }
 
@@ -248,5 +188,62 @@ impl TuiRuntime {
                 tracing::warn!("select-pane failed: {e:#}");
             }
         })
+    }
+}
+
+/// The one message an entry into split mode settles with: the pane's id, or why
+/// there is none (`SplitPaneEntrySettles`).
+fn enter_split_outcome(runner: &dyn ProcessRunner) -> SplitMessage {
+    let dispatch_pane = match tmux::current_pane_id(runner) {
+        Ok(id) => id,
+        Err(_) => {
+            return SplitMessage::EnterFailed {
+                failure: EnterFailure::NoTmux,
+            }
+        }
+    };
+    match tmux::split_window_horizontal(&dispatch_pane, runner) {
+        Ok(pane_id) => SplitMessage::EntryOpened {
+            pane_id,
+            task_id: None,
+        },
+        Err(e) => SplitMessage::EnterFailed {
+            failure: EnterFailure::Failed(format!("Split failed: {e:#}")),
+        },
+    }
+}
+
+/// [`enter_split_outcome`] for an entry that pins `task_id`'s window.
+fn enter_split_with_task_outcome(
+    runner: &dyn ProcessRunner,
+    task_id: TaskId,
+    window: &TmuxWindow,
+) -> SplitMessage {
+    let dispatch_pane = match tmux::current_pane_id(runner) {
+        Ok(id) => id,
+        Err(_) => {
+            return SplitMessage::EnterFailed {
+                failure: EnterFailure::NoTmux,
+            }
+        }
+    };
+    match dispatch::join_task_window_into_pane(window, &dispatch_pane, runner) {
+        Ok(pane_id) => SplitMessage::EntryOpened {
+            pane_id,
+            task_id: Some(task_id),
+        },
+        Err(e) => SplitMessage::EnterFailed {
+            failure: EnterFailure::Failed(format!("Split with task failed: {e:#}")),
+        },
+    }
+}
+
+/// The one message a swap settles with (`SplitPaneSwapSettles`).
+fn swap_outcome(result: anyhow::Result<String>, task_id: TaskId) -> SplitMessage {
+    match result {
+        Ok(pane_id) => SplitMessage::SwapOpened { pane_id, task_id },
+        Err(e) => SplitMessage::SwapFailed {
+            error: format!("Swap failed: {e:#}"),
+        },
     }
 }

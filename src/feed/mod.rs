@@ -87,19 +87,7 @@ pub(crate) async fn cleanup_removed_feed_tasks(
     for (_repo, tasks) in by_repo {
         let runner = runner.clone();
         handles.push(tokio::task::spawn_blocking(move || {
-            for task in tasks {
-                if let Err(failure) = crate::dispatch::teardown_task(
-                    &task.repo_path,
-                    task.worktree.as_deref(),
-                    task.tmux_window.as_ref(),
-                    &*runner,
-                ) {
-                    tracing::warn!(
-                        task_id = task.id.0,
-                        "feed cleanup: teardown_task failed: {failure}"
-                    );
-                }
-            }
+            teardown_repo_queue(&*runner, tasks);
         }));
     }
     for handle in handles {
@@ -108,6 +96,24 @@ pub(crate) async fn cleanup_removed_feed_tasks(
         // lost or garbles the display. Log it ourselves, to the app log.
         if let Err(err) = handle.await {
             tracing::warn!("feed cleanup: teardown thread did not complete: {err}");
+        }
+    }
+}
+
+/// Tear down one repo's removed tasks one after another, so they do not
+/// contend on that repo's index lock. A failure is logged and the queue goes on.
+fn teardown_repo_queue(runner: &dyn ProcessRunner, tasks: Vec<RemovedFeedTask>) {
+    for task in tasks {
+        if let Err(failure) = crate::dispatch::teardown_task(
+            &task.repo_path,
+            task.worktree.as_deref(),
+            task.tmux_window.as_ref(),
+            runner,
+        ) {
+            tracing::warn!(
+                task_id = task.id.0,
+                "feed cleanup: teardown_task failed: {failure}"
+            );
         }
     }
 }

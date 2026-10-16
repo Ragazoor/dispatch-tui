@@ -142,6 +142,12 @@ pub(super) struct VerifyBook {
     done: std::collections::HashMap<crate::models::TaskId, (VerifyKey, VerifyOutcome)>,
 }
 
+/// What the verify book holds for a (task, HEAD, command) key.
+enum VerifyRun {
+    Recorded(VerifyOutcome),
+    Running(tokio::sync::watch::Receiver<Option<VerifyOutcome>>),
+}
+
 type SharedVerifyBook = std::sync::Arc<std::sync::Mutex<VerifyBook>>;
 
 /// Clears a task's in-flight mark if the worker dies before it records an
@@ -245,33 +251,11 @@ impl TaskService {
             )));
         };
         let verify = dispatch::fetch_verify_command(&*self.db, &task.repo_path).await;
-        let runner = self.runner.clone();
 
         // The commit check, and HEAD when a verify command makes it the key.
-        let need_head = verify.is_some();
-        let pre = {
-            let runner = runner.clone();
-            let worktree = worktree.clone();
-            tokio::task::spawn_blocking(move || {
-                commit_check(&*runner, &worktree).and_then(|()| {
-                    if need_head {
-                        head_of(&*runner, &worktree)
-                    } else {
-                        Ok(String::new())
-                    }
-                })
-            })
-            .await
-        };
-        let head = match pre {
-            Ok(Ok(head)) => head,
-            Ok(Err(message)) => return Err(ServiceError::Validation(message)),
-            Err(e) => {
-                return Err(ServiceError::Internal(anyhow::anyhow!(
-                    "wrap_up checks worker died: {e}"
-                )))
-            }
-        };
+        let head = self
+            .commit_check_and_head(&worktree, verify.is_some())
+            .await?;
         let Some(command) = verify else {
             return Ok(WrapUpChecks { verified: None });
         };
@@ -280,45 +264,9 @@ impl TaskService {
             head,
             command: command.clone(),
         };
-        let mut rx = {
-            let mut book = self.verifying.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some((k, outcome)) = book.done.get(&task.id) {
-                if *k == key {
-                    return outcome_to_checks(outcome.clone(), command);
-                }
-            }
-            match book.in_flight.get(&task.id) {
-                Some((k, rx)) if *k == key => rx.clone(),
-                // The agent committed (or the command changed) since that run
-                // started: its outcome would be for another tree, and a second
-                // run beside it is what one-run-per-task forbids.
-                Some(_) => return Err(still_running()),
-                None => {
-                    let (tx, rx) = tokio::sync::watch::channel(None);
-                    book.in_flight.insert(task.id, (key.clone(), rx.clone()));
-                    let guard = InFlightGuard {
-                        book: self.verifying.clone(),
-                        id: task.id,
-                        armed: true,
-                    };
-                    let book_handle = self.verifying.clone();
-                    let id = task.id;
-                    // Detached: it outlives a caller that gave up, and records
-                    // its outcome for the retry.
-                    drop(tokio::task::spawn_blocking(move || {
-                        let mut guard = guard;
-                        let outcome = run_verify(&*runner, &worktree, &key.command);
-                        {
-                            let mut book = book_handle.lock().unwrap_or_else(|e| e.into_inner());
-                            book.in_flight.remove(&id);
-                            book.done.insert(id, (key, outcome.clone()));
-                        }
-                        guard.armed = false;
-                        let _ = tx.send(Some(outcome));
-                    }));
-                    rx
-                }
-            }
+        let mut rx = match self.join_or_start_verify(task.id, key, worktree)? {
+            VerifyRun::Recorded(outcome) => return outcome_to_checks(outcome, command),
+            VerifyRun::Running(rx) => rx,
         };
 
         let waited = tokio::time::timeout(self.verify_wait, rx.wait_for(|o| o.is_some())).await;
@@ -332,6 +280,81 @@ impl TaskService {
             Err(_) => return Err(still_running()),
         };
         outcome_to_checks(outcome.unwrap_or(Ok(())), command)
+    }
+
+    /// Run the commit check on the blocking pool and, when `need_head`, read
+    /// HEAD too (an empty string otherwise).
+    async fn commit_check_and_head(
+        &self,
+        worktree: &str,
+        need_head: bool,
+    ) -> Result<String, ServiceError> {
+        let runner = self.runner.clone();
+        let worktree = worktree.to_owned();
+        let pre = tokio::task::spawn_blocking(move || {
+            commit_check(&*runner, &worktree).and_then(|()| {
+                if need_head {
+                    head_of(&*runner, &worktree)
+                } else {
+                    Ok(String::new())
+                }
+            })
+        })
+        .await;
+        match pre {
+            Ok(Ok(head)) => Ok(head),
+            Ok(Err(message)) => Err(ServiceError::Validation(message)),
+            Err(e) => Err(ServiceError::Internal(anyhow::anyhow!(
+                "wrap_up checks worker died: {e}"
+            ))),
+        }
+    }
+
+    /// Look `key` up in the verify book: a recorded outcome, the run already in
+    /// flight, or a new detached run that records its outcome for the retry.
+    fn join_or_start_verify(
+        &self,
+        task_id: crate::models::TaskId,
+        key: VerifyKey,
+        worktree: String,
+    ) -> Result<VerifyRun, ServiceError> {
+        let mut book = self.verifying.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((k, outcome)) = book.done.get(&task_id) {
+            if *k == key {
+                return Ok(VerifyRun::Recorded(outcome.clone()));
+            }
+        }
+        match book.in_flight.get(&task_id) {
+            Some((k, rx)) if *k == key => return Ok(VerifyRun::Running(rx.clone())),
+            // The agent committed (or the command changed) since that run
+            // started: its outcome would be for another tree, and a second
+            // run beside it is what one-run-per-task forbids.
+            Some(_) => return Err(still_running()),
+            None => {}
+        }
+        let (tx, rx) = tokio::sync::watch::channel(None);
+        book.in_flight.insert(task_id, (key.clone(), rx.clone()));
+        let guard = InFlightGuard {
+            book: self.verifying.clone(),
+            id: task_id,
+            armed: true,
+        };
+        let book_handle = self.verifying.clone();
+        let runner = self.runner.clone();
+        // Detached: it outlives a caller that gave up, and records
+        // its outcome for the retry.
+        drop(tokio::task::spawn_blocking(move || {
+            let mut guard = guard;
+            let outcome = run_verify(&*runner, &worktree, &key.command);
+            {
+                let mut book = book_handle.lock().unwrap_or_else(|e| e.into_inner());
+                book.in_flight.remove(&task_id);
+                book.done.insert(task_id, (key, outcome.clone()));
+            }
+            guard.armed = false;
+            let _ = tx.send(Some(outcome));
+        }));
+        Ok(VerifyRun::Running(rx))
     }
 
     /// Kill the tmux window a failed teardown row left behind
