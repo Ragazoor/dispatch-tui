@@ -29,6 +29,7 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         id: release
@@ -45,8 +46,14 @@ jobs:
   # module and `plugin/` are embedded with `include_bytes!`/`include_dir!`, so
   # the one binary is the whole install.
   #
-  # Linux builds on ubuntu-22.04 for an older glibc floor. The binary links
-  # the system OpenSSL 3 (spacetimedb-sdk -> native-tls).
+  # Linux builds on ubuntu-24.04: the prebuilt ONNX Runtime that ort-sys
+  # downloads needs glibc 2.38 symbols (`__isoc23_strtol`) and a newer
+  # libstdc++ (`__cxa_call_terminate`), so ubuntu-22.04 fails to link. The
+  # binary links the system OpenSSL 3 (spacetimedb-sdk -> native-tls).
+  #
+  # Releases are immutable once published, so release-please creates a draft
+  # (`"draft": true` in release-please-config.json), the builds upload into
+  # it, and the `publish` job publishes it last.
   build:
     name: Build ${{ matrix.target }}
     needs: release-please
@@ -59,9 +66,9 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
+            os: ubuntu-24.04
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04-arm
+            os: ubuntu-24.04-arm
           - target: aarch64-apple-darwin
             os: macos-14
     runs-on: ${{ matrix.os }}
@@ -74,7 +81,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ env.TAG || github.sha }}
+          # A draft release has no tag yet, so a release-please build checks
+          # out the release commit. A manual backfill checks out its tag.
+          ref: ${{ inputs.tag || needs.release-please.outputs.sha || github.sha }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@d86e0fa8f147d6539442c26a61ebba8becc19489 # 1.96.0
@@ -130,3 +139,19 @@ jobs:
           gh release upload "$TAG" --clobber
           "${{ steps.package.outputs.archive }}"
           "${{ steps.package.outputs.archive }}.sha256"
+
+  # Publishes the draft once every archive is attached. If a build fails the
+  # draft stays unpublished: fix the build, then re-run the failed jobs.
+  publish:
+    name: Publish release
+    needs: [release-please, build]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
