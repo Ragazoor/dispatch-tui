@@ -320,10 +320,15 @@ fn epic_list_rows<'a>(rows: &[FilterEpicRow], cursor: usize, styles: &HintStyles
                 FilterEpicMark::HiddenByParent => "[-]",
             };
             let indent = "  ".repeat(row.depth);
+            let fold = match (row.has_children, row.folded) {
+                (false, _) => " ",
+                (true, false) => "▾",
+                (true, true) => "▸",
+            };
             cursor_row(
                 i == cursor,
                 row.mark == FilterEpicMark::HiddenByParent,
-                format!(" {indent}{mark} #{} {}", row.id.0, row.title),
+                format!(" {indent}{fold}{mark} #{} {}", row.id.0, row.title),
                 styles,
             )
         })
@@ -433,9 +438,15 @@ fn append_browse_help_lines<'a>(lines: &mut Vec<Line<'a>>, tab: FilterTab, style
         ]
     };
     let first: Vec<Span> = match tab {
-        FilterTab::Repos => [hint("  [j/k]", " navigate  "), hint("[Space]", " toggle  ")].concat(),
+        FilterTab::Repos => [
+            hint("  [j/k]", " navigate  "),
+            hint("[Space]", " toggle  "),
+            hint("[Del]", " forget"),
+        ]
+        .concat(),
         FilterTab::Epics => [
             hint("  [Space]", " hide/show  "),
+            hint("[z]", " fold  "),
             hint("[d]", " done  "),
             hint("[/]", " search  "),
         ]

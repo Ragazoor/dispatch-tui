@@ -23,6 +23,10 @@ pub enum BoardFilterMessage {
     TogglePackage(WorkPackageId),
     ToggleShowDoneEpics,
     StartEpicSearch,
+    /// `z`: fold or unfold the epic row under the cursor.
+    ToggleEpicFold,
+    /// `Z`: fold every parent, or unfold all when any is folded.
+    ToggleAllEpicFolds,
     EpicQueryChar(char),
     EpicQueryBackspace,
     /// Leave the epic search: `keep` holds the query, otherwise it is cleared.
@@ -50,6 +54,8 @@ impl BoardFilterMessage {
             BoardFilterMessage::TogglePackage(id) => app.handle_toggle_hidden_package(id),
             BoardFilterMessage::ToggleShowDoneEpics => app.handle_toggle_show_done_epics(),
             BoardFilterMessage::StartEpicSearch => app.handle_start_epic_search(),
+            BoardFilterMessage::ToggleEpicFold => app.handle_toggle_filter_epic_fold(),
+            BoardFilterMessage::ToggleAllEpicFolds => app.handle_toggle_all_filter_epic_folds(),
             BoardFilterMessage::EpicQueryChar(c) => app.handle_epic_query_edit(Some(c)),
             BoardFilterMessage::EpicQueryBackspace => app.handle_epic_query_edit(None),
             BoardFilterMessage::EndEpicSearch { keep } => app.handle_end_epic_search(keep),

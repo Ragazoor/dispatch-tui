@@ -49,6 +49,8 @@ impl App {
             }
             "filter_toggle_done_epics" if tab == FilterTab::Epics => M::ToggleShowDoneEpics,
             "filter_search_epics" if tab == FilterTab::Epics => M::StartEpicSearch,
+            "filter_fold_epics" if tab == FilterTab::Epics => M::ToggleEpicFold,
+            "filter_fold_all_epics" if tab == FilterTab::Epics => M::ToggleAllEpicFolds,
             _ => return vec![],
         };
         self.dispatch_keyed(Message::BoardFilter(msg), action, label)

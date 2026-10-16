@@ -260,3 +260,94 @@ fn reopening_the_overlay_starts_on_repos_with_no_epic_query() {
     assert_eq!(app.filter_overlay.tab, FilterTab::Repos);
     assert_eq!(app.filter_overlay.epic_query, "");
 }
+
+fn epics_tab() -> App {
+    let mut app = overlay_app();
+    press(&mut app, KeyCode::Tab);
+    app
+}
+
+#[test]
+fn z_folds_the_epic_under_the_cursor_and_hides_its_subtree() {
+    let mut app = epics_tab();
+    press(&mut app, KeyCode::Char('z'));
+    assert_eq!(epic_rows(&app), vec![(EpicId(1), 0)]);
+    assert!(app.filter_epic_rows()[0].folded);
+    press(&mut app, KeyCode::Char('z'));
+    assert_eq!(epic_rows(&app), vec![(EpicId(1), 0), (EpicId(2), 1)]);
+}
+
+#[test]
+fn z_on_a_leaf_does_nothing() {
+    let mut app = epics_tab();
+    press(&mut app, KeyCode::Char('j'));
+    press(&mut app, KeyCode::Char('z'));
+    assert_eq!(epic_rows(&app).len(), 2);
+}
+
+#[test]
+fn z_does_nothing_on_the_other_tabs() {
+    let mut app = overlay_app();
+    press(&mut app, KeyCode::Char('z'));
+    assert!(app.filter_overlay.folded_epics.is_empty());
+}
+
+#[test]
+fn capital_z_folds_every_parent_then_unfolds_all() {
+    let mut app = epics_tab();
+    press(&mut app, KeyCode::Char('Z'));
+    assert_eq!(epic_rows(&app), vec![(EpicId(1), 0)]);
+    press(&mut app, KeyCode::Char('Z'));
+    assert_eq!(epic_rows(&app).len(), 2);
+}
+
+#[test]
+fn folding_does_not_change_what_is_hidden() {
+    let mut app = epics_tab();
+    press(&mut app, KeyCode::Char(' '));
+    press(&mut app, KeyCode::Char('z'));
+    assert!(app.filter.hidden_epics.contains(&EpicId(1)));
+    press(&mut app, KeyCode::Char('z'));
+    assert_eq!(
+        app.filter_epic_rows()[1].mark,
+        FilterEpicMark::HiddenByParent
+    );
+}
+
+#[test]
+fn a_standing_query_ignores_folds() {
+    let mut app = epics_tab();
+    press(&mut app, KeyCode::Char('z'));
+    press(&mut app, KeyCode::Char('/'));
+    type_str(&mut app, "bet");
+    assert_eq!(epic_rows(&app), vec![(EpicId(1), 0), (EpicId(2), 1)]);
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(epic_rows(&app), vec![(EpicId(1), 0)]);
+}
+
+#[test]
+fn reopening_the_overlay_unfolds_everything() {
+    let mut app = epics_tab();
+    press(&mut app, KeyCode::Char('z'));
+    press(&mut app, KeyCode::Esc);
+    press(&mut app, KeyCode::Char('f'));
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(epic_rows(&app).len(), 2);
+}
+
+#[test]
+fn the_epics_tab_draws_fold_markers() {
+    let mut app = epics_tab();
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(buffer_contains(&buf, "▾"));
+    press(&mut app, KeyCode::Char('z'));
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(buffer_contains(&buf, "▸"));
+}
+
+#[test]
+fn the_repos_footer_names_the_forget_key() {
+    let mut app = overlay_app();
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(buffer_contains(&buf, "[Del]"));
+}

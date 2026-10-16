@@ -1134,7 +1134,9 @@ rule ToggleHiddenWorkPackage {
 --   regardless of the cursor; `i` switches the whole repo filter between
 --   including and excluding the toggled repos (this was Tab before the
 --   overlay had tabs); Backspace/Delete forgets the repo path, after a
---   confirm, which takes the footer down to one row. `1`-`9`, `i` and
+--   confirm, which takes the footer down to one row. The Repos footer shows
+--   `[Del] forget` so the key can be found; it also works on a path that no
+--   longer exists on disk, which is what it is for. `1`-`9`, `i` and
 --   Backspace/Delete do nothing on the other tabs.
 --
 --   Epics tab: the epics as a tree, children indented under their parent,
@@ -1148,6 +1150,18 @@ rule ToggleHiddenWorkPackage {
 --   epic's cards in the Done column. A child of a hidden parent draws as
 --   hidden-by-parent, distinct from hidden on its own, because Space on it
 --   cannot bring it back while the parent is hidden.
+--
+--   The tree folds. An epic with listed children carries a `▾` (open) or `▸`
+--   (folded) before its checkbox; a leaf carries neither. `z` folds or
+--   unfolds the row under the cursor, hiding or showing its whole subtree;
+--   `z` on a leaf does nothing. `Z` folds every epic that has children, or,
+--   when any is already folded, unfolds them all. Every epic starts unfolded.
+--   The cursor stays on the row it was on, and a fold never changes whether
+--   an epic is hidden: a folded hidden parent still hides its children.
+--   Folds are the overlay's own and are gone when it closes. While a title
+--   query stands, folds are ignored so a match is never tucked away; the
+--   tree folds again when the query is cleared. `z` and `Z` do nothing on
+--   the other tabs.
 --
 --   `/` on the Epics tab opens a title search inside the tab: the tree
 --   narrows to epics whose title matches (the same fuzzy subsequence match as

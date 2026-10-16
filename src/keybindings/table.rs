@@ -594,6 +594,18 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "filter_search_epics",
         "Epics tab: narrow the tree to epics whose title matches what you type",
     ),
+    r(
+        N::BoardFilter,
+        &["z"],
+        "filter_fold_epics",
+        "Epics tab: fold or unfold the epic under the cursor, hiding or showing its children",
+    ),
+    r(
+        N::BoardFilter,
+        &["Z"],
+        "filter_fold_all_epics",
+        "Epics tab: fold every epic that has children, or unfold them all when any is folded",
+    ),
     // ---- board.filter_search ----
     r(
         N::BoardFilterSearch,

@@ -1,6 +1,5 @@
 ---
 source: src/tui/tests/snapshots.rs
-assertion_line: 785
 expression: rendered
 ---
                                                                                                                   🔕  [N]
@@ -25,7 +24,7 @@ expression: rendered
                               ║  2. [ ] /home/user/projects/beta                         ║
                               ║  3. [ ] /home/user/projects/gamma                        ║
                               ║                                                          ║
-                              ║  [j/k] navigate  [Space] toggle                          ║
+                              ║  [j/k] navigate  [Space] toggle  [Del] forget            ║
                               ║  [i] incl/excl  [Tab] next tab  [q/Esc] close            ║
                               ╚══════════════════════════════════════════════════════════╝
                               │                           │                              │

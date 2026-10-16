@@ -686,6 +686,10 @@ pub struct FilterEpicRow {
     pub depth: usize,
     pub title: String,
     pub mark: FilterEpicMark,
+    /// Some child is listed under this row, so `z` can fold it.
+    pub has_children: bool,
+    /// The row's subtree is folded away.
+    pub folded: bool,
 }
 
 /// The board-filter overlay's UI state. Reset each time the overlay opens; the
@@ -701,6 +705,9 @@ pub struct FilterOverlayState {
     /// `/` on the Epics tab: narrows the tree by title. The overlay's own, not
     /// the board search.
     pub epic_query: String,
+    /// `z` on the Epics tab: epics whose subtree is folded away. Ignored while
+    /// a query stands.
+    pub folded_epics: std::collections::HashSet<EpicId>,
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,5 @@
 ---
 source: src/tui/tests/snapshots.rs
-assertion_line: 838
 expression: rendered
 ---
                                                                                                                   🔕  [N]
@@ -19,13 +18,13 @@ expression: rendered
  │    no subtasks           │ ╔ Board Filter ════════════════════════════════════════════╗
  ╰──────────────────────────╯ ║   Repos (include)  │  Epics ·2  │  Work packages         ║
  ╭──────────────────────────╮ ║                                                          ║
- │  ▎ #13 Dependabot        │ ║  ► [ ] #10 DB maintenance                                ║
- │    no subtasks           │ ║      [x] #11 Staging                                     ║
- ╰──────────────────────────╯ ║      [ ] #12 Prod                                        ║
-                              ║    [x] #14 Dispatch                                      ║
-                              ║      [-] #15 Learnings                                   ║
+ │  ▎ #13 Dependabot        │ ║  ► ▾[ ] #10 DB maintenance                               ║
+ │    no subtasks           │ ║       [x] #11 Staging                                    ║
+ ╰──────────────────────────╯ ║       [ ] #12 Prod                                       ║
+                              ║    ▾[x] #14 Dispatch                                     ║
+                              ║       [-] #15 Learnings                                  ║
                               ║                                                          ║
-                              ║  [Space] hide/show  [d] done  [/] search                 ║
+                              ║  [Space] hide/show  [z] fold  [d] done  [/] search       ║
                               ║  [Tab] next tab  [q/Esc] close                           ║
                               ║                                                          ║
                               ╚══════════════════════════════════════════════════════════╝

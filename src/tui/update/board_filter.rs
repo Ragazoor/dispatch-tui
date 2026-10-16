@@ -39,9 +39,16 @@ impl App {
                 && fuzzy_matches_lower(&e.title, &query)
         };
 
+        // A standing query shows every match, so folds are set aside.
+        let no_folds = std::collections::HashSet::new();
+        let folded = if query.is_empty() {
+            &overlay.folded_epics
+        } else {
+            &no_folds
+        };
         let mut rows = vec![];
         list_epic_subtree(
-            None, 0, false, &children, epics, hidden, &qualifies, &mut rows,
+            None, 0, false, &children, epics, hidden, folded, &qualifies, &mut rows,
         );
         rows
     }
@@ -105,6 +112,40 @@ impl App {
 
     pub(in crate::tui) fn handle_toggle_show_done_epics(&mut self) -> Vec<Command> {
         self.filter_overlay.show_done_epics = !self.filter_overlay.show_done_epics;
+        self.clamp_epic_cursor();
+        self.dirty = true;
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_toggle_filter_epic_fold(&mut self) -> Vec<Command> {
+        let rows = self.filter_epic_rows();
+        let Some(row) = rows.get(self.filter_overlay.epic_cursor) else {
+            return vec![];
+        };
+        if !row.has_children {
+            return vec![];
+        }
+        let folded = &mut self.filter_overlay.folded_epics;
+        if !folded.remove(&row.id) {
+            folded.insert(row.id);
+        }
+        self.clamp_epic_cursor();
+        self.dirty = true;
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_toggle_all_filter_epic_folds(&mut self) -> Vec<Command> {
+        if !self.filter_overlay.folded_epics.is_empty() {
+            self.filter_overlay.folded_epics.clear();
+        } else {
+            // Unfolded, every parent is listed with its children.
+            let parents = self
+                .filter_epic_rows()
+                .into_iter()
+                .filter(|r| r.has_children)
+                .map(|r| r.id);
+            self.filter_overlay.folded_epics.extend(parents);
+        }
         self.clamp_epic_cursor();
         self.dirty = true;
         vec![]
@@ -281,6 +322,7 @@ fn list_epic_subtree(
     children: &HashMap<Option<EpicId>, Vec<usize>>,
     epics: &[crate::models::Epic],
     hidden: &std::collections::HashSet<EpicId>,
+    folded: &std::collections::HashSet<EpicId>,
     qualifies: &dyn Fn(usize) -> bool,
     out: &mut Vec<FilterEpicRow>,
 ) {
@@ -308,10 +350,16 @@ fn list_epic_subtree(
             children,
             epics,
             hidden,
+            folded,
             qualifies,
             out,
         );
-        if qualifies(i) || out.len() > at {
+        let has_children = out.len() > at;
+        let is_folded = has_children && folded.contains(&e.id);
+        if is_folded {
+            out.truncate(at);
+        }
+        if qualifies(i) || has_children {
             out.insert(
                 at,
                 FilterEpicRow {
@@ -319,6 +367,8 @@ fn list_epic_subtree(
                     depth,
                     title: e.title.clone(),
                     mark,
+                    has_children,
+                    folded: is_folded,
                 },
             );
         }
