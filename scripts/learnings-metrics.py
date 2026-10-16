@@ -74,6 +74,37 @@ def store_metrics():
     }
     for k, v in m.items():
         print(f"{k}: {v}")
+    off_scope_metrics(L, R)
+
+
+def opt(v):
+    """A SpacetimeDB Option column: [0, value] is Some, [1, []] is None."""
+    return v[1] if isinstance(v, list) and len(v) == 2 and v[0] == 0 else None
+
+
+def off_scope_metrics(L, R):
+    """Share of repo/epic-scoped retrievals outside the task's scope union.
+
+    learnings.allium says retrieval returns user + the task's repo + the task's epic.
+    Before 2026-10-16 the ranker only left others unboosted. Rows on deleted tasks
+    cannot be judged and are skipped, so read this as a ratio, not a count.
+    """
+    by = {r["id"]: r for r in L}
+    tasks = {t["id"]: t for t in table("tasks")}
+    weeks = collections.defaultdict(lambda: [0, 0])
+    for r in R:
+        l, t = by.get(r["learning_id"]), tasks.get(r["task_id"])
+        if not l or not t or l["scope"] not in ("repo", "epic"):
+            continue
+        want = t["repo_path"] if l["scope"] == "repo" else str(t["epic_id"])
+        y, w, _ = datetime.date.fromisoformat(r["retrieved_at"][:10]).isocalendar()
+        c = weeks[f"{y}-W{w:02d}"]
+        c[0] += 1
+        c[1] += opt(l["scope_ref"]) != want
+    print("repo/epic-scoped retrievals outside the task's scope, per week (off/rows):")
+    for wk in sorted(weeks)[-4:]:
+        off, n = weeks[wk][1], weeks[wk][0]
+        print(f"  {wk}  {off:>5}/{n:<5} {100 * off // n}%")
 
 
 LEARNING_TOOLS = ("query_learnings", "record_learning", "rate_learning")

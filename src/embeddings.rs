@@ -164,31 +164,25 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     dot / (norm_a * norm_b)
 }
 
-/// Returns scope multiplier for a learning given current task context.
+/// Returns the scope multiplier for a learning given the current task context,
+/// or `None` when the learning is outside the task's scope union (user, the
+/// task's repo, the task's epic) and must not be retrieved at all.
 /// task_epic_id / task_repo are the current task's values.
 pub fn scope_multiplier_for(
     scope: LearningScope,
     scope_ref: Option<&str>,
     task_epic_id: Option<&str>,
     task_repo: Option<&str>,
-) -> f32 {
+) -> Option<f32> {
     match scope {
         LearningScope::Epic => {
-            if matches!((scope_ref, task_epic_id), (Some(a), Some(b)) if a == b) {
-                0.30
-            } else {
-                0.0
-            }
+            matches!((scope_ref, task_epic_id), (Some(a), Some(b)) if a == b).then_some(0.30)
         }
         LearningScope::Repo => {
-            if matches!((scope_ref, task_repo), (Some(a), Some(b)) if a == b) {
-                0.20
-            } else {
-                0.0
-            }
+            matches!((scope_ref, task_repo), (Some(a), Some(b)) if a == b).then_some(0.20)
         }
-        LearningScope::User => 0.10,
-        LearningScope::Task => 0.0,
+        LearningScope::User => Some(0.10),
+        LearningScope::Task => Some(0.0),
     }
 }
 
@@ -243,7 +237,7 @@ pub fn rag_rank_learnings<'a>(
                 learning.scope_ref.as_deref(),
                 params.task_epic_id,
                 params.task_repo,
-            );
+            )?;
             let tag_boost = if tag_set.is_empty() {
                 0.0
             } else {
@@ -376,6 +370,52 @@ mod tests {
         let high_cos = 0.55f32;
         let high_boost = 0.10f32;
         assert!(low_cos * (1.0 + low_boost) < high_cos * (1.0 + high_boost));
+    }
+
+    /// learnings.allium: QueryLearningsViaMcp. The scope union is a filter: an
+    /// entry for another repo or another epic is dropped however similar it is.
+    #[test]
+    fn rag_rank_learnings_drops_entries_outside_the_scope_union() {
+        let candidates: Vec<(Learning, Vec<f32>)> = vec![
+            (
+                make_test_learning(1, LearningScope::User, None),
+                vec![1.0, 0.0],
+            ),
+            (
+                make_test_learning(2, LearningScope::Repo, Some("my-repo")),
+                vec![1.0, 0.0],
+            ),
+            (
+                make_test_learning(3, LearningScope::Repo, Some("other-repo")),
+                vec![1.0, 0.0],
+            ),
+            (
+                make_test_learning(4, LearningScope::Epic, Some("7")),
+                vec![1.0, 0.0],
+            ),
+            (
+                make_test_learning(5, LearningScope::Epic, Some("8")),
+                vec![1.0, 0.0],
+            ),
+        ];
+        let rank = |epic: Option<&str>| {
+            rag_rank_learnings(
+                &candidates,
+                &RagRankParams {
+                    query_vec: &[1.0, 0.0],
+                    task_epic_id: epic,
+                    task_repo: Some("my-repo"),
+                    threshold: 0.0,
+                    tag_filter: &[],
+                    limit: 10,
+                },
+            )
+            .iter()
+            .map(|l| l.id.0)
+            .collect::<std::collections::BTreeSet<_>>()
+        };
+        assert_eq!(rank(Some("7")), [1, 2, 4].into());
+        assert_eq!(rank(None), [1, 2].into(), "no epic means no epic entries");
     }
 
     #[test]

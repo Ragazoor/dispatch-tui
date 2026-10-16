@@ -153,6 +153,12 @@ use "./core.allium" as core
 -- query_learnings(task_id, query?, tag_filter?, limit?)
 --   Returns approved learnings for the task's scope union ranked by semantic
 --   similarity to a query text (RAG-style retrieval).
+--   The union is a filter, not a boost: a repo-scoped entry whose scope_ref is
+--   not task.repo_path, and an epic-scoped entry whose scope_ref is not
+--   str(task.epic_id) (or any epic-scoped entry when the task has no epic), is
+--   never returned, however similar it is. Measured 2026-10-16: 47% of repo-scoped
+--   and 41% of epic-scoped query_learnings rows came from outside the union, and
+--   agents rated repo-scoped ones helped 2% of the time against 9% inside it.
 --   Entries with status in {rejected, archived} are excluded.
 --   Excludes task-scoped entries from the auto-retrieved set.
 --
@@ -174,7 +180,8 @@ use "./core.allium" as core
 --           + tag_boost
 --   where:
 --     - scope_multiplier is a fixed per-scope weight: epic = 0.30, repo = 0.20,
---       user = 0.10 (epic > repo > user)
+--       user = 0.10 (epic > repo > user). Only entries inside the union reach
+--       the ranking, so there is no weight for an out-of-scope entry.
 --     - upvote_boost is a monotonic function of upvote_count
 --     - tag_boost adds a fixed boost of 0.05 per matching tag, i.e.
 --       0.05 * |tags ∩ tag_filter|
@@ -603,7 +610,9 @@ rule QueryLearningsViaMcp {
         --   weights are fixed constants in src/embeddings.rs.
         --
         -- Retrieval unions: user + repo:<task.repo_path>
-        -- + epic:<task.epic_id> (if task has an epic). task-scoped learnings are excluded from
+        -- + epic:<task.epic_id> (if task has an epic). Entries outside the union are
+        -- excluded before ranking, never merely left unboosted (the same
+        -- ranking serves AugmentDispatchPromptWithLearnings). task-scoped learnings are excluded from
         -- applies_to_dispatch; agents can reach them by calling this tool with
         -- an explicit tag_filter matching a task scope (WP5 episodic ingestion).
         -- scope_priority order (highest first): epic, repo, user. kind=procedural
