@@ -205,30 +205,30 @@ nav.steps { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margi
 }
 .pick button[aria-pressed="true"] { border-color: var(--pc, var(--accent)); box-shadow: 0 0 0 1px var(--pc, var(--accent)); }
 .pick button i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; background: var(--pc); }
-.picture { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr); gap: 14px; align-items: start; }
-@media (max-width: 900px) { .picture { grid-template-columns: 1fr; } }
+.picture { display: grid; grid-template-columns: 1fr; gap: 14px; }
 .panel { background: var(--t-bg); color: var(--t-fg); border-radius: 10px; padding: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.25); font: 12px/1.4 ui-monospace, Menlo, monospace; }
-.picture > .panel:last-child { position: sticky; top: 12px; }
-@media (max-width: 900px) { .picture > .panel:last-child { position: static; } }
 .panel > h3 { margin: 0 0 10px; font: 600 13px ui-monospace, Menlo, monospace; color: var(--t-orange); }
 .panel > h3 span { color: var(--t-dim); font-weight: 400; }
-.tree { columns: 2 260px; column-gap: 10px; }
-.ebox { break-inside: avoid; border: 1px solid #4a4370; border-radius: 6px; padding: 7px 8px 8px; margin: 0 0 10px; background: rgba(160,147,199,.05); transition: opacity .15s, box-shadow .15s; }
-.ebox .ebox { margin: 8px 0 0; background: rgba(160,147,199,.07); }
-.ebox.loose { border-style: dashed; border-color: var(--t-line); background: transparent; }
-.ehead { display: flex; justify-content: space-between; gap: 8px; color: #d7d0f5; }
-.ehead .n { color: var(--t-dim); white-space: nowrap; }
-.ebar { height: 3px; background: var(--t-line); border-radius: 2px; margin: 4px 0 6px; overflow: hidden; }
-.ebar i { display: block; height: 100%; background: var(--t-green); }
-.chips { display: flex; flex-wrap: wrap; gap: 3px; }
-.chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 1px 6px 1px 5px; border-radius: 3px; background: var(--t-panel); color: var(--t-fg); font-size: 11px; transition: opacity .15s, box-shadow .15s; }
-.chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
-.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--sc); flex: none; }
-.picture.focus .chip, .picture.focus .ebox { opacity: .28; }
-.picture.focus .ebox.lit, .picture.focus .ebox.lit .chip, .picture.focus .ebox.holds { opacity: 1; }
-.picture.focus .ebox.holds > .ehead, .picture.focus .ebox.holds > .ebar, .picture.focus .ebox.holds > .chips > .chip:not(.lit) { opacity: .35; }
-.picture.focus .chip.lit { opacity: 1; box-shadow: 0 0 0 1.5px var(--pc); }
-.picture.focus .ebox.lit { box-shadow: 0 0 0 2px var(--pc); }
+.graph-scroll { overflow-x: auto; }
+#graph { display: block; margin: 0 auto; }
+#graph text { font: 12px ui-monospace, Menlo, monospace; fill: var(--t-fg); paint-order: stroke; stroke: var(--t-bg); stroke-width: 4px; stroke-linejoin: round; }
+#graph .n-root text { fill: var(--t-orange); font-weight: 700; font-size: 13px; }
+#graph .n-epic text { fill: #d7d0f5; }
+#graph .n-epic circle { fill: var(--t-bg); stroke: var(--t-purple); stroke-width: 2; }
+#graph .n-loose text { fill: var(--t-dim); }
+#graph .n-task text { font-size: 11px; }
+#graph .edge { fill: none; stroke: #3d4260; stroke-width: 1.2; }
+#graph .bracket { fill: none; stroke-width: 2; }
+#graph .plink { fill: none; stroke-width: 1.5; opacity: .3; }
+#graph .n-pkg { cursor: pointer; }
+#graph .n-pkg rect { fill: var(--t-panel); stroke-width: 1.5; }
+#graph .n-pkg text { fill: #f0dfb4; font-size: 12.5px; }
+#graph g, #graph path { transition: opacity .15s; }
+#graph.focus .n-task, #graph.focus .n-epic, #graph.focus .edge { opacity: .25; }
+#graph.focus .lit { opacity: 1 !important; }
+#graph.focus .plink, #graph.focus .bracket, #graph.focus .n-pkg { opacity: .1; }
+#graph.focus .plink.lit { stroke-width: 2.4; }
+#graph .n-task.lit text { fill: #fff; }
 .mini { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .mini h4 { margin: 0 0 4px; font: 11px ui-monospace, Menlo, monospace; color: var(--t-blue); text-align: center; letter-spacing: .05em; }
 .mini .t-card { font-size: 11px; padding: 3px 6px; white-space: normal; }
@@ -378,7 +378,7 @@ footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border
 
   <!-- ===================== step 2 ===================== -->
   <section id="step-2" hidden>
-    <p class="lede">The same board, all at once. There are two ways it organizes work, and they do different jobs.</p>
+    <p class="lede">The same board, all at once, as a graph. There are two ways it organizes work, and they do different jobs.</p>
     <div class="why">
       <div class="ep"><b>Epics: what the work is</b>An epic holds tasks and other epics. Every task lives in exactly one place in this tree, so the backlog never turns into one long list.</div>
       <div class="wpk"><b>Work packages: what you are doing now</b>A package links to tasks and epics wherever they live, like this week's release. It adds no new work and moves nothing. It is a second board over the same tasks.</div>
@@ -386,7 +386,7 @@ footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border
     <div class="stats" id="stats"></div>
     <div class="pick" id="pick"></div>
     <div class="picture" id="picture">
-      <div class="panel"><h3>The epic tree <span id="tree-sub"></span></h3><div class="tree" id="tree"></div></div>
+      <div class="panel"><h3>The epic tree <span id="tree-sub"></span></h3><div class="graph-scroll"><svg id="graph" role="img" aria-label="Tree of the example board: epics, sub-epics and tasks, with work packages linking into it"></svg></div></div>
       <div class="panel"><h3 id="mini-title"></h3><div id="mini"></div></div>
     </div>
     <div class="g-legend" id="legend"></div>
@@ -1157,6 +1157,7 @@ function showStep(n) {
   $("btn-next").disabled = n === 2;
   $("btn-next").hidden = n === 2;
   if (n === 2) drawGraph();
+  try { history.replaceState(null, "", n === 2 ? "#whole-picture" : location.pathname); } catch (_) {}
 }
 $("tab-1").onclick = () => showStep(1);
 $("tab-2").onclick = () => showStep(2);
@@ -1169,19 +1170,132 @@ const PKG_COLOR = ["#e2c178", "#e27878", "#89b8c2"];
 let picked = null;
 
 function drawGraph() {
-  const chip = t => `<span class="chip" data-task="${t.id}" style="--sc:${STATUS_COLOR[t.status]}" title="#${t.id} ${esc(t.title)} — ${t.status}${t.sub !== "none" ? " / " + t.sub.replace(/_/g, " ") : ""}"><span>${esc(t.title)}</span></span>`;
-  const box = id => {
-    const e = epics.get(id);
-    const [d, n] = epicProgress(id);
-    const kids = e.children.map(box).join("");
-    return `<div class="ebox" data-epic="${id}"><div class="ehead"><span>◆ ${esc(e.title)}</span><span class="n">${d}/${n}</span></div>` +
-      `<div class="ebar"><i style="width:${n ? (100 * d) / n : 0}%"></i></div>` +
-      `<div class="chips">${e.tasks.map(t => chip(tasks.get(t))).join("")}</div>${kids}</div>`;
+  const svg = $("graph");
+  const SVG = "http://www.w3.org/2000/svg";
+  const rowH = 15, topY = 16;
+  const X = { root: 14, epic: 120, sub: 300, task: 480 };
+  const leafEnd = X.task + 230, pkgX = leafEnd + 130, pkgW = 170;
+  svg.innerHTML = "";
+  const mk = (tag, attrs, parent = svg) => {
+    const n = document.createElementNS(SVG, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    parent.appendChild(n);
+    return n;
   };
+  const edges = mk("g", {}), links = mk("g", {}), nodes = mk("g", {});
+  const curve = (x1, y1, x2, y2) => `M ${x1} ${y1} C ${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2} ${y2}`;
+  const short = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
+
+  // Lay out leaves (tasks) top to bottom in tree order; a parent sits at the
+  // middle of its children.
+  let y = topY;
+  const taskY = new Map(), epicSpan = new Map(), epicNode = new Map();
+  const placeTask = (t, parentEl) => {
+    const g = mk("g", { class: "n-task", "data-task": t.id }, nodes);
+    mk("circle", { cx: X.task, cy: y, r: 4, fill: STATUS_COLOR[t.status] }, g);
+    mk("text", { x: X.task + 9, y: y + 4 }, g).textContent = short(t.title, 30);
+    mk("title", {}, g).textContent = `#${t.id} ${t.title} — ${t.status}${t.sub !== "none" ? " / " + t.sub.replace(/_/g, " ") : ""}`;
+    taskY.set(t.id, { y, g });
+    y += rowH;
+    return taskY.get(t.id).y;
+  };
+  const placeEpic = (id, depth) => {
+    const e = epics.get(id);
+    const x = depth === 1 ? X.epic : X.sub;
+    const start = y;
+    const kids = [];
+    for (const c of e.children) kids.push({ y: placeEpic(c, depth + 1), x: X.sub, kind: "epic", id: c });
+    for (const tid of e.tasks) kids.push({ y: placeTask(tasks.get(tid)), x: X.task, kind: "task", id: tid });
+    const end = y - rowH;
+    const my = kids.length ? (kids[0].y + kids[kids.length - 1].y) / 2 : start;
+    const g = mk("g", { class: "n-epic", "data-epic": id }, nodes);
+    mk("circle", { cx: x, cy: my, r: 5 }, g);
+    const [d, n] = epicProgress(id);
+    mk("text", { x: x + 10, y: my - 6 }, g).textContent = short(e.title, 20);
+    const sub = mk("text", { x: x + 10, y: my + 8, style: "fill:var(--t-dim);font-size:10.5px" }, g);
+    sub.textContent = `${d}/${n} done`;
+    for (const k of kids) {
+      const path = mk("path", { class: "edge", d: curve(x + 5, my, k.x - (k.kind === "task" ? 4 : 5), k.y), "data-under": id }, edges);
+      (k.kind === "task" ? taskY.get(k.id) : epicNode.get(k.id)).edge = path;
+    }
+    epicNode.set(id, { y: my, g, x });
+    epicSpan.set(id, [start, end]);
+    y += 6;
+    return my;
+  };
+  const tops = [];
+  for (const e of epics.values()) if (!e.parent) { tops.push({ kind: "epic", id: e.id, y: placeEpic(e.id, 1), x: X.epic }); }
+  // Tasks outside any epic hang straight off the board.
+  const looseStart = y;
   const loose = [...tasks.values()].filter(t => !t.epic);
-  $("tree").innerHTML = [...epics.values()].filter(e => !e.parent).map(e => box(e.id)).join("") +
-    `<div class="ebox loose"><div class="ehead"><span>Not in an epic</span><span class="n">${loose.length}</span></div><div class="chips" style="margin-top:6px">${loose.map(chip).join("")}</div></div>`;
-  $("tree-sub").textContent = `· ${epics.size} epics · ${tasks.size} tasks`;
+  const looseYs = loose.map(t => placeTask(t));
+  const looseMid = (looseYs[0] + looseYs[looseYs.length - 1]) / 2;
+  const lg = mk("g", { class: "n-epic n-loose" }, nodes);
+  mk("circle", { cx: X.epic, cy: looseMid, r: 5, style: "stroke:var(--t-dim);stroke-dasharray:2 2" }, lg);
+  mk("text", { x: X.epic - 6, y: looseMid - 10 }, lg).textContent = "not in an epic";
+  loose.forEach((t, i) => { taskY.get(t.id).edge = mk("path", { class: "edge", d: curve(X.epic + 5, looseMid, X.task - 4, looseYs[i]), style: "stroke-dasharray:3 3" }, edges); });
+  tops.push({ y: looseMid, x: X.epic });
+  const H = y + 10;
+
+  const rootY = (tops[0].y + tops[tops.length - 1].y) / 2;
+  const rg = mk("g", { class: "n-root" }, nodes);
+  mk("circle", { cx: X.root, cy: rootY, r: 6, fill: "var(--t-orange)" }, rg);
+  const rt = mk("text", { x: X.root - 4, y: rootY - 12 }, rg);
+  rt.textContent = "board";
+  for (const t of tops) {
+    const path = mk("path", { class: "edge", d: curve(X.root + 6, rootY, t.x - 5, t.y) }, edges);
+    if (t.id) epicNode.get(t.id).edge = path;
+  }
+
+  // Work packages: nodes on the right; a link per item. A linked epic gets a
+  // bracket over all of its tasks, so the link visibly covers the whole epic.
+  const pkgEls = new Map();
+  const span = (H - topY) / packages.length;
+  packages.forEach((p, i) => {
+    const color = PKG_COLOR[i % PKG_COLOR.length];
+    const py = topY + span * i + span / 2;
+    const lit = [];
+    for (const [kind, id] of p.links) {
+      let ty, x2;
+      if (kind === "task") {
+        const a = taskY.get(id);
+        ty = a.y; x2 = leafEnd;
+        lit.push(a.g);
+        const dash = mk("path", { class: "plink", d: `M ${X.task + 10 + short(tasks.get(id).title, 30).length * 6.6} ${ty} H ${leafEnd}`, stroke: color, "stroke-dasharray": "2 3" }, links);
+        lit.push(dash, a.edge);
+      } else {
+        const [a, b] = [Math.min(...subtreeTasks(id).map(t => taskY.get(t.id).y)), Math.max(...subtreeTasks(id).map(t => taskY.get(t.id).y))];
+        ty = (a + b) / 2; x2 = leafEnd + 8;
+        const br = mk("path", { class: "bracket", d: `M ${leafEnd} ${a - 5} H ${leafEnd + 8} V ${b + 5} H ${leafEnd}`, stroke: color }, links);
+        lit.push(br, epicNode.get(id).g);
+        for (const t of subtreeTasks(id)) lit.push(taskY.get(t.id).g);
+        // The epic's whole branch of the tree lights up with it.
+        const under = new Set([id]);
+        for (const t of subtreeTasks(id)) { under.add(t.epic); lit.push(taskY.get(t.id).edge); }
+        for (const e of under) if (e !== id) lit.push(epicNode.get(e).g, epicNode.get(e).edge);
+      }
+      for (let e = kind === "task" ? tasks.get(id).epic : epics.get(id).parent; e; e = epics.get(e).parent) {
+        lit.push(epicNode.get(e).g, epicNode.get(e).edge);
+      }
+      if (kind === "epic") lit.push(epicNode.get(id).edge);
+      lit.push(mk("path", { class: "plink", d: curve(pkgX, py, x2, ty), stroke: color }, links));
+    }
+    const g = mk("g", { class: "n-pkg", "data-pkg": p.id, tabindex: 0, role: "button" }, nodes);
+    mk("rect", { x: pkgX, y: py - 14, width: pkgW, height: 28, rx: 4, stroke: color }, g);
+    mk("text", { x: pkgX + 10, y: py + 4 }, g).textContent = "▣ " + p.title;
+    mk("title", {}, g).textContent = `${p.title}: ${p.description}`;
+    lit.push(g);
+    pkgEls.set(p.id, lit);
+    g.addEventListener("click", () => showPackage(picked === p.id ? null : p.id));
+    g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showPackage(picked === p.id ? null : p.id); } });
+  });
+  drawGraph.lit = pkgEls;
+
+  const W = pkgX + pkgW + 10;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", W);
+  svg.setAttribute("height", H);
+  $("tree-sub").textContent = `· ${epics.size} epics · ${tasks.size} tasks · ${packages.length} work packages`;
 
   $("pick").innerHTML = "Show a work package:" +
     `<button data-pkg="" aria-pressed="${picked === null}">None</button>` +
@@ -1195,7 +1309,8 @@ function drawGraph() {
     [all.filter(t => t.window).length, "agents running now"],
     [packages.length, "work packages"],
   ].map(([n, l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
-  $("legend").innerHTML = Object.entries(STATUS_COLOR).map(([s, c]) => `<span><i style="background:${c}"></i>${s}</span>`).join("");
+  $("legend").innerHTML = Object.entries(STATUS_COLOR).map(([s, c]) => `<span><i style="background:${c}"></i>${s}</span>`).join("") +
+    "<span>— solid lines: what holds what · coloured lines: what a work package links</span>";
   showPackage(picked);
 }
 
@@ -1207,26 +1322,19 @@ function epicPath(epicId) {
 
 function showPackage(id) {
   picked = id;
-  const pic = $("picture");
-  pic.querySelectorAll(".lit, .holds").forEach(n => n.classList.remove("lit", "holds"));
+  const svg = $("graph");
+  svg.querySelectorAll(".lit").forEach(n => n.classList.remove("lit"));
   $("pick").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String((b.dataset.pkg ? +b.dataset.pkg : null) === id)));
   const i = packages.findIndex(p => p.id === id);
   if (i < 0) {
-    pic.classList.remove("focus");
+    svg.classList.remove("focus");
     $("mini-title").innerHTML = "A work package";
-    $("mini").innerHTML = `<div class="empty-pkg">Pick a work package above.<br>Its tasks and epics light up in the tree, wherever they live,<br>and here you see them as one board.</div>`;
+    $("mini").innerHTML = `<div class="empty-pkg">Pick a work package above, or click one in the graph.<br>Its links light up in the tree, wherever the work lives,<br>and here you see the same items as one board.</div>`;
     return;
   }
   const p = packages[i];
-  pic.style.setProperty("--pc", PKG_COLOR[i]);
-  pic.classList.add("focus");
-  for (const [kind, lid] of p.links) {
-    const el = pic.querySelector(kind === "epic" ? `.ebox[data-epic="${lid}"]` : `.chip[data-task="${lid}"]`);
-    if (!el) continue;
-    el.classList.add("lit");
-    // Keep the boxes around a linked item readable, so you can see where it lives.
-    for (let up = el.parentElement.closest(".ebox"); up; up = up.parentElement.closest(".ebox")) up.classList.add("holds");
-  }
+  svg.classList.add("focus");
+  for (const n of drawGraph.lit.get(id) || []) n?.classList.add("lit");
   $("mini-title").innerHTML = `▣ ${esc(p.title)} <span>· ${esc(p.description)}</span>`;
   const cols = COLUMNS.map(c => ({ c, items: [] }));
   for (const item of packageItems(p)) {
@@ -1252,6 +1360,11 @@ $("pick").addEventListener("click", e => {
 });
 
 render();
+// Deep links: #whole-picture opens step 2, #whole-picture/<package id> with that package shown.
+{
+  const m = location.hash.match(/^#whole-picture(?:\/(\d+))?$/);
+  if (m) { if (m[1]) picked = +m[1]; showStep(2); }
+}
 })();
 </script>
 </body>

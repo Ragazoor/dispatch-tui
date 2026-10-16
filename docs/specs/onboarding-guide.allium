@@ -299,17 +299,21 @@ surface OnboardingGuidePage {
         -- answers to in that place is not left off it.
 
     @guarantee GraphShowsHowTheBoardOrganizesWork
-        -- The Graph step shows the same example data two ways side by side,
+        -- The Graph step draws the same example data as a node-link graph,
         -- to make the difference between the two groupings plain:
-        --   - the epic tree as nested boxes: each epic holds its own tasks
-        --     and its sub-epics, so every task visibly lives in one place;
-        --   - a chosen work package laid out as its own four-column board of
-        --     the tasks and epic cards it links, each task saying which epic
-        --     it comes from.
-        -- Choosing a package (an on-page button) lights up what it links in
-        -- the tree, wherever it lives, and dims the rest. With no package
-        -- chosen the tree shows plainly. It also gives a sense of how much
-        -- the board holds. It is not operated with keys.
+        --   - a tree from the board through each epic and sub-epic to every
+        --     task, so every task visibly lives in one place;
+        --   - the work packages as nodes beside it, each linking into the
+        --     tree: a line to each task it links, and to a bracket over all
+        --     of a linked epic's tasks.
+        -- Choosing a package (an on-page button, or the package's node)
+        -- lights up its links and the branches they land on, and dims the
+        -- rest. The chosen package is also laid out as its own four-column
+        -- board of the tasks and epic cards it links, each task saying
+        -- which epic it comes from. #whole-picture links straight to this
+        -- step, #whole-picture/<package id> with that package chosen. The
+        -- step also gives a sense of how much the board holds. It is not
+        -- operated with keys.
 
     @guarantee WalkthroughReadsWithoutJavaScript
         -- The page carries a plain-text walkthrough of the same tour in its
