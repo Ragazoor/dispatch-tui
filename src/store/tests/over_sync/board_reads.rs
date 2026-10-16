@@ -1,6 +1,6 @@
 //! Rows outside your subscriptions never reach the board —
 //! `nothing_is_read_through_to_the_local_store` is the structural half; the
-//! other half is what is ASKED for, in `tests::queries`.
+//! other half is what is ASKED for, in `sync::tests::queries`.
 
 use crate::store::{CreateTaskRequest, EpicRead, RepoConfigRead, Store, TaskCrud, TaskRead};
 

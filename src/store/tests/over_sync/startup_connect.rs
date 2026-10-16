@@ -5,8 +5,8 @@
 //! `IdentityConflictAtStartupAbortsIt`; `docs/specs/startup.allium`'s
 //! `AbortWhenTheStoreCannotBeReached`.
 
-use super::{accepted, refused, ScriptedConnector};
 use crate::store::{HostStore, IdentityCredentialStore, Store};
+use crate::sync::tests::{accepted, refused, ScriptedConnector};
 use crate::sync::{ConnectionStatus, SyncSession};
 use std::time::Instant;
 

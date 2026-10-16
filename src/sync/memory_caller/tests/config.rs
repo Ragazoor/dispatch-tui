@@ -154,7 +154,7 @@ async fn record_usage_event_prunes_beyond_the_cap() {
         caller.record_usage_event(usage_event(), 2).await.unwrap();
     }
     let total: i64 = rows
-        .usage_summary(&crate::store::UsageQuery::default())
+        .usage_summary(&crate::models::UsageQuery::default())
         .iter()
         .map(|s| s.count)
         .sum();

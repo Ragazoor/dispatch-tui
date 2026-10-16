@@ -35,8 +35,8 @@
 //! id"), so it stays doubly optional all the way through.
 
 use crate::models::TaskStatus;
+use crate::models::{CreateTaskRequest, TaskPatch};
 use crate::spacetime::bindings;
-use crate::store::{CreateTaskRequest, TaskPatch};
 
 /// The module's spelling of an empty label list. Not `""`: the column holds
 /// JSON, and [`super::decode`] reads `[]` for a task with no labels.
@@ -66,7 +66,7 @@ pub(crate) fn stamp(at: chrono::DateTime<chrono::Utc>) -> String {
 
 /// The `started_at` a subagent row carries: RFC 3339. That column is never compared across rows,
 /// so it has no need of [`stamp`]'s sortable format.
-pub(super) fn subagent_started_at(at: chrono::DateTime<chrono::Utc>) -> String {
+pub(crate) fn subagent_started_at(at: chrono::DateTime<chrono::Utc>) -> String {
     at.to_rfc3339()
 }
 
@@ -85,7 +85,7 @@ pub(super) fn verdict_inputs(
 
 /// The module's `record_notification` mode string for a write that reaches
 /// the store; `None` for [`NotificationWrite::Ignore`](crate::models::agent_events::NotificationWrite::Ignore), which never does.
-pub(super) fn notification_mode(write: crate::models::NotificationWrite) -> Option<&'static str> {
+pub(crate) fn notification_mode(write: crate::models::NotificationWrite) -> Option<&'static str> {
     use crate::models::NotificationWrite as W;
     match write {
         W::Ignore => None,
@@ -96,7 +96,7 @@ pub(super) fn notification_mode(write: crate::models::NotificationWrite) -> Opti
 }
 
 /// The module's spelling of "no epic": zero.
-pub(super) fn epic_ref(epic: Option<crate::models::EpicId>) -> i64 {
+pub(crate) fn epic_ref(epic: Option<crate::models::EpicId>) -> i64 {
     epic.map_or(0, |e| e.0)
 }
 
@@ -306,7 +306,7 @@ pub fn create_epic_row(
 }
 
 /// Translate an epic patch into the module's.
-pub fn epic_patch(patch: &crate::store::EpicPatch<'_>) -> bindings::EpicPatch {
+pub fn epic_patch(patch: &crate::models::EpicPatch<'_>) -> bindings::EpicPatch {
     bindings::EpicPatch {
         title: patch.title.map(str::to_string),
         description: patch.description.map(str::to_string),
@@ -415,7 +415,7 @@ pub fn feed_ingest_item(
 /// entirely by its own `scope`/`scope_ref`, not by who created it — see
 /// `docs/specs/learnings.allium`'s Storage Backend section.
 pub fn create_learning_row(
-    row: &crate::store::CreateLearningRow<'_>,
+    row: &crate::models::CreateLearningRow<'_>,
     now: &str,
 ) -> bindings::Learning {
     bindings::Learning {
@@ -445,7 +445,7 @@ pub fn create_learning_row(
 /// does not apply. `store::LearningPatch::embedding` is a single `Option<&[u8]>`
 /// (there is no "clear the embedding" caller), so `Some(bytes)` becomes
 /// `Some(Some(bytes))` — untouched stays `None`.
-pub fn learning_patch(patch: &crate::store::LearningPatch<'_>) -> bindings::LearningPatch {
+pub fn learning_patch(patch: &crate::models::LearningPatch<'_>) -> bindings::LearningPatch {
     bindings::LearningPatch {
         status: patch.status.map(|s| s.as_str().to_string()),
         summary: patch.summary.map(str::to_string),

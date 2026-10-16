@@ -4,12 +4,12 @@
 //! Also the other half of test 2: one user with two host ids owns both, and
 //! worktree gating still keys on host.
 
-use super::{accepted, ScriptedConnector};
 use crate::models::EpicId;
 use crate::store::{
     CreateTaskRequest, EpicCrud, HostStore, IdentityCredentialStore, Store, SubscriptionStore,
     TaskCrud,
 };
+use crate::sync::tests::{accepted, ScriptedConnector};
 use crate::sync::{StepOutcome, SubscriptionRequest, SyncSession};
 use std::sync::Arc;
 use std::time::Instant;
@@ -220,7 +220,7 @@ async fn a_subscription_follows_the_person_across_their_machines() {
 /// shared ownership moves a directory.
 #[tokio::test]
 async fn shared_ownership_does_not_make_another_machines_worktree_dispatchable() {
-    use crate::store::TaskPatch;
+    use crate::models::TaskPatch;
 
     let db = store().await;
     let (this_host, _) = db.ensure_host_identity().await.unwrap();

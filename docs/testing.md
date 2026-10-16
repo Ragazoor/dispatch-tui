@@ -83,7 +83,7 @@ required. A test whose subject is the host file itself uses
 unreadable host file) is injected with a replaced `host.json`. Reads answer
 from in-memory rows and are infallible by signature (no `Result`), so a read-error arm does not
 exist; a write fault is injected with a refusing
-`ReducerCaller` (see `RecordingCaller` in `src/sync/tests/writes.rs`).
+`ReducerCaller` (see `RecordingCaller` in `src/store/tests/over_sync/writes.rs`).
 
 ## Snapshot tests
 
@@ -113,6 +113,8 @@ rm src/dispatch/snapshots/*.snap.new                 # always clean up
 |---|---|
 | TUI key handling / message flow | `src/tui/tests/` |
 | The `Store` router, its ports, CRUD over the in-memory store | `src/store/tests/` |
+| A `Store` driven over the sync transport (its reducer calls, identity, subscriptions) | `src/store/tests/over_sync/` — `sync` itself may not name `store`, its tests included (`tests/module_layering.rs`) |
+| The sync session, connection state machine, decoders and encoders | `src/sync/tests/` |
 | A SpacetimeDB module change (table, column, reducer) | `spacetime/module/` tests and `tests/spacetime_module.rs`; mirror it in `src/sync/memory_caller/` |
 | Service-layer business rules | inline in `src/service/<domain>/` |
 | MCP JSON-RPC handler behaviour | `src/mcp/handlers/tests/` |

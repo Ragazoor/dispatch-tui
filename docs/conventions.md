@@ -82,10 +82,10 @@ Schema enum values may be added in a migration before all rows are upgraded. Nev
 
 **Row level — the decode-failure policy.** The board's rows arrive from the subscription (or from the in-memory store a test handle owns) and are decoded in `src/sync/decode.rs`; which reads tolerate an undecodable row is deliberate, not incidental:
 
-- **A row that fails to decode is dropped and counted, not fatal.** `SharedRows::upsert_task`, `upsert_epic` and the other `upsert_*` calls (`src/sync/rows.rs`) pass the failure to `drop_undecodable` (`src/store/decode.rs`), which logs it with a `tracing::warn!` and bumps the counter below. One corrupt row degrades the board instead of blanking it. A dropped task is remembered by id and epic (`undecodable_tasks`) so a delete pre-check can still count it.
+- **A row that fails to decode is dropped and counted, not fatal.** `SharedRows::upsert_task`, `upsert_epic` and the other `upsert_*` calls (`src/sync/rows.rs`) pass the failure to `drop_undecodable` (`src/sync/decode_support.rs`), which logs it with a `tracing::warn!` and bumps the counter below. One corrupt row degrades the board instead of blanking it. A dropped task is remembered by id and epic (`undecodable_tasks`) so a delete pre-check can still count it.
 - **Single-entity reads see only what decoded.** `get_task` and `list_epics` with `epic_id` answer from the decoded rows, so a dropped row reads as "not found"; the warning in the log and the counter are how a dropped row stays diagnosable.
 
-**Decode-fallback counter:** every field-level default and every row dropped by `drop_undecodable` bumps a process-wide `AtomicU64` exposed as `crate::store::decode_fallback_count()`. The value is included in the `tracing::warn!` (`count=N`) so the warns are greppable in aggregate, and the accessor lets tests and ad-hoc debugging detect slow-bleeding decode bugs without chasing log lines. It is monotonic and never reset — assert on deltas, since the test suite shares one process. When you add a new soft-fail branch, bump it via `store::bump_decode_fallback()` (or call `store::drop_undecodable` for a dropped row).
+**Decode-fallback counter:** every field-level default and every row dropped by `drop_undecodable` bumps a process-wide `AtomicU64` exposed as `crate::sync::decode_fallback_count()`. The value is included in the `tracing::warn!` (`count=N`) so the warns are greppable in aggregate, and the accessor lets tests and ad-hoc debugging detect slow-bleeding decode bugs without chasing log lines. It is monotonic and never reset — assert on deltas, since the test suite shares one process. When you add a new soft-fail branch, bump it via `sync::bump_decode_fallback()` (or call `sync::drop_undecodable` for a dropped row).
 
 ## Border parsing
 
@@ -215,7 +215,7 @@ tests use `Store::open_in_memory()`, the same `Store` over an in-memory
 `ReducerCaller` that runs the module's own reducer logic. A new shared read or
 write is its trait method and its body in `src/store/queries/` — and a reducer
 on `ReducerCaller` for a write. `every_store_mutation_reaches_the_transport`
-(`src/sync/tests/writes.rs`) calls every write once and fails when one sends
+(`src/store/tests/over_sync/writes.rs`) calls every write once and fails when one sends
 nothing.
 
 **Never shared:** the Host row (`HostStore`) and the user identity's
@@ -465,7 +465,7 @@ Two consequences for tests. `stop_pending_at` is stored at millisecond resolutio
 
 ## Reparenting an epic — the store's guards, no immutability
 
-`parent_epic_id` **is** mutable: `EpicPatch` declares it `nullable` (`src/store/mod.rs::EpicPatch`), `patch_epic` writes it (`src/store/queries/epics.rs::patch_epic`), `EpicService::update_epic` implements reparent-and-detach (`src/service/epics.rs::update_epic`), and the TUI has a reparent picker (`src/tui/ui/kanban/popups/reparent_epic.rs`). Since store-split M2 the guards are the store's, in the `patch_epic` reducer (`check_epic_patch` in the module crate), so every client gets them and a bare `patch_epic` call cannot skip them:
+`parent_epic_id` **is** mutable: `EpicPatch` declares it `nullable` (`src/models/patches.rs::EpicPatch`), `patch_epic` writes it (`src/store/queries/epics.rs::patch_epic`), `EpicService::update_epic` implements reparent-and-detach (`src/service/epics.rs::update_epic`), and the TUI has a reparent picker (`src/tui/ui/kanban/popups/reparent_epic.rs`). Since store-split M2 the guards are the store's, in the `patch_epic` reducer (`check_epic_patch` in the module crate), so every client gets them and a bare `patch_epic` call cannot skip them:
 
 1. **Cycle detection** — the reducer walks the proposed parent's ancestor chain and refuses if the epic being moved appears in it (self-parent included). The refusal reaches callers as `ServiceError::Validation` with the store's wording.
 2. **RepoGroup guard** — an auto-created `EpicOrigin::RepoGroup` sub-epic cannot be reparented *or* detached to root; either would orphan it outside its grouping root.

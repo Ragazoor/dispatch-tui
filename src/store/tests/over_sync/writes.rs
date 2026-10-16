@@ -2397,7 +2397,7 @@ async fn every_store_mutation_reaches_the_transport() {
     }
 
     db.create_epic("E", "", None).await.unwrap();
-    db.patch_epic(EpicId(1), &crate::store::EpicPatch::new().title("e"))
+    db.patch_epic(EpicId(1), &crate::models::EpicPatch::new().title("e"))
         .await
         .unwrap();
     db.recalculate_epic_status(EpicId(1)).await.unwrap();
@@ -2481,7 +2481,7 @@ async fn every_store_mutation_reaches_the_transport() {
         .await
         .unwrap();
 
-    db.create_learning(crate::store::CreateLearningRow {
+    db.create_learning(crate::models::CreateLearningRow {
         kind: crate::models::LearningKind::Landscape,
         summary: "a learning",
         detail: None,
@@ -2495,7 +2495,7 @@ async fn every_store_mutation_reaches_the_transport() {
     .unwrap();
     db.patch_learning(
         LearningId(1),
-        &crate::store::LearningPatch::new().summary("s"),
+        &crate::models::LearningPatch::new().summary("s"),
     )
     .await
     .unwrap();

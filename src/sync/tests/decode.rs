@@ -89,7 +89,7 @@ fn a_row_with_a_removed_status_is_dropped_quietly() {
 #[test]
 fn a_removed_status_does_not_count_as_a_decode_failure() {
     let shared = crate::sync::SharedRows::new();
-    let before = crate::store::decode_fallback_count();
+    let before = crate::sync::decode_fallback_count();
     let mut task = blank_task();
     task.status = "archived".into();
     for _ in 0..50 {
@@ -97,7 +97,7 @@ fn a_removed_status_does_not_count_as_a_decode_failure() {
     }
     // Other tests may bump the counter concurrently, but none of them can
     // account for fifty; one per archived row would.
-    assert!(crate::store::decode_fallback_count() - before < 50);
+    assert!(crate::sync::decode_fallback_count() - before < 50);
 }
 
 /// The rule is one predicate, shared with the import: anything not on the

@@ -250,7 +250,7 @@ entity BoardConnection {
         -- a property of the CODE rather than of a state: exactly one read path
         -- exists (`crate::store::BoardReads`, whose card reads are the store's
         -- own read traits), and the `Store` that implements it holds no handle
-        -- to any other store to reach through. `sync::tests::board_reads`
+        -- to any other store to reach through. `store::tests::over_sync::board_reads`
         -- asserts it directly, by standing a fully populated store beside one
         -- whose rows are empty and requiring every read of the second to
         -- answer empty.

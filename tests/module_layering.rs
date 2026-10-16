@@ -2,9 +2,9 @@
 //!
 //! Each rule names a source directory and the `crate::` modules it must not
 //! import. `feed` sits below `runtime` and `mcp`; `mcp` below `cli`; the
-//! storage and identity layers below `startup`; `sync` and `dispatch` below
-//! `service`; `cli` below `runtime`, sharing the store wiring
-//! (`store_connection`) with it instead. `agent_tree` is a feature of its own:
+//! storage and identity layers below `startup`; `sync` below `store`, which
+//! drives it; `sync` and `dispatch` below `service`; `cli` below `runtime`,
+//! sharing the store wiring (`store_connection`) with it instead. `agent_tree` is a feature of its own:
 //! `cli` is its entry point, so it never reaches back up into `cli`, nor across
 //! into the board's `tui` (both draw with the shared `palette`). A shared type both sides need belongs in a leaf module
 //! (`models`, `clock`, `embeddings`, …) that each depends on downward.
@@ -23,7 +23,7 @@ const RULES: &[(&str, &[&str])] = &[
     ("mcp", &["cli"]),
     ("host_file", &["startup"]),
     ("spacetime", &["startup"]),
-    ("sync", &["startup", "service"]),
+    ("sync", &["startup", "service", "store"]),
     ("store", &["startup"]),
     ("service", &["startup"]),
     ("dispatch", &["service"]),

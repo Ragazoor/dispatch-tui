@@ -53,6 +53,7 @@ pub const SHARED_DATABASE_NAME: &str = "dispatch";
 pub mod connection;
 pub mod connector;
 pub mod decode;
+mod decode_support;
 pub mod encode;
 pub mod identity;
 #[cfg(any(test, feature = "test-support"))]
@@ -73,12 +74,16 @@ pub use connection::{
 };
 pub use connector::{Accepted, ConnectError, StoreConnector, SubscriptionRequest};
 pub use decode::DecodeError;
+pub use decode_support::decode_fallback_count;
+pub(crate) use decode_support::{bump_decode_fallback, drop_undecodable, parse_datetime};
 pub use identity::{identity_conflict_message, settle_identity, IdentityVerdict};
 #[cfg(any(test, feature = "test-support"))]
 pub use memory_caller::{InjectedFault, MemoryReducerCaller};
 pub use rows::{HostRow, RepoBaseBranchRow, RepoPathRow, SharedRows};
 pub use sdk_connector::{SdkReducerCaller, SpacetimeSdkConnector};
-pub use session::{StepOutcome, SyncSession, SyncStore};
+pub use session::{
+    HostStore, IdentityCredentialStore, StepOutcome, SubscriptionStore, SyncSession, SyncStore,
+};
 pub use writes::{
     push_host_registration, ReducerCaller, ReducerOutcome, SettledIdentity, WriterIdentity,
 };

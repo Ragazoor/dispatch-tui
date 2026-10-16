@@ -6,22 +6,15 @@
 //! asserted by handing it an instant twenty minutes on rather than by being one
 //! — see `docs/testing.md`'s no-wall-clock-sleep rule.
 
-mod board_reads;
 mod connection;
 mod decode;
 mod dispatch_requests;
 mod encode;
-mod host_file_identity;
 mod identity;
 mod offline_connector;
 mod queries;
-mod reconnect;
 mod session_requests;
-mod settings_store_only;
-mod startup_connect;
-mod subscriptions;
 mod subtree;
-mod writes;
 
 use super::{Accepted, ConnectError, StoreConnector, SubscriptionRequest};
 use async_trait::async_trait;
@@ -59,25 +52,25 @@ impl ScriptedConnector {
 
     /// The credential presented on each attempt, in order. `None` is an install
     /// that had nothing stored yet.
-    pub(super) fn presented_tokens(&self) -> Vec<Option<String>> {
+    pub(crate) fn presented_tokens(&self) -> Vec<Option<String>> {
         self.calls.lock().unwrap().clone()
     }
 
-    pub(super) fn attempts(&self) -> usize {
+    pub(crate) fn attempts(&self) -> usize {
         self.calls.lock().unwrap().len()
     }
 
     /// Every subscription request made, in order.
-    pub(super) fn subscriptions(&self) -> Vec<SubscriptionRequest> {
+    pub(crate) fn subscriptions(&self) -> Vec<SubscriptionRequest> {
         self.subscriptions.lock().unwrap().clone()
     }
 
     /// Stand in for the transport noticing the socket die.
-    pub(super) fn drop_the_socket(&self, reason: &str) {
+    pub(crate) fn drop_the_socket(&self, reason: &str) {
         *self.dropped.lock().unwrap() = Some(reason.to_string());
     }
 
-    pub(super) fn disconnects(&self) -> usize {
+    pub(crate) fn disconnects(&self) -> usize {
         *self.disconnects.lock().unwrap()
     }
 }
@@ -124,18 +117,18 @@ pub(crate) fn refused(reason: &str) -> Result<Accepted, ConnectError> {
 /// Its own type rather than a flag on [`ScriptedConnector`], because the thing
 /// under test is what the session does with the CONNECTION afterwards, and a
 /// shared fake would let a later test turn the flag on without meaning to.
-pub(super) struct RefusingSubscriber {
+pub(crate) struct RefusingSubscriber {
     disconnects: Mutex<usize>,
 }
 
 impl RefusingSubscriber {
-    pub(super) fn new() -> Arc<Self> {
+    pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
             disconnects: Mutex::new(0),
         })
     }
 
-    pub(super) fn disconnects(&self) -> usize {
+    pub(crate) fn disconnects(&self) -> usize {
         *self.disconnects.lock().unwrap()
     }
 }

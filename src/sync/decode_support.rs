@@ -41,7 +41,7 @@ pub(crate) fn drop_undecodable(kind: &str, error: &dyn std::fmt::Display) {
 }
 
 /// Parse a stored timestamp: "YYYY-MM-DD HH:MM:SS", with optional fractional
-/// seconds. The store's rows carry this text, and `crate::sync::decode` reads
+/// seconds. The store's rows carry this text, and [`super::decode`] reads
 /// it back through here, so there is one parser for the one format.
 pub(crate) fn parse_datetime(s: &str) -> Result<DateTime<Utc>, String> {
     NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f")

@@ -1391,7 +1391,7 @@ fn a_task_created_in_done_is_stamped_as_completed() {
 // A handful of scenarios a unit test with a recording caller cannot check,
 // the same reason this file exists at all: whether the REAL module reproduces
 // `docs/specs/agent-health.allium`'s guarantees, not whether a mock assumed it
-// would. `src/sync/tests/writes.rs` covers the `Store`'s decoding far more
+// would. `src/store/tests/over_sync/writes.rs` covers the `Store`'s decoding far more
 // exhaustively; these are chosen to hit the module's own logic that decoding
 // can't reach, especially the no-primary-key dedupe hazard an adversarial
 // review of this task's plan flagged (`docs/plans/

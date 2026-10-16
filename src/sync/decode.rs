@@ -13,7 +13,7 @@
 //! - **The parsers are shared, not re-implemented.** Status, sub-status, tag,
 //!   wrap-up mode, tmux window, feed role and origin all go through the
 //!   `models` constructors, and timestamps through
-//!   [`crate::store::parse_datetime`]. What is written here is the field
+//!   [`super::parse_datetime`]. What is written here is the field
 //!   mapping and the sentinel undo — nothing that parses.
 //! - **The soft-fail policy is applied field by field.** A malformed
 //!   `tmux_window` is dropped with a warning and an unknown status is refused,
@@ -92,7 +92,7 @@ fn id(raw: i64) -> Option<i64> {
 fn timestamp(table: &str, row_id: i64, column: &str, raw: &str) -> Decoded<Option<DateTime<Utc>>> {
     match text(raw) {
         None => Ok(None),
-        Some(raw) => crate::store::parse_datetime(raw)
+        Some(raw) => super::parse_datetime(raw)
             .map(Some)
             .map_err(|e| DecodeError::new(table, row_id, format!("{column}: {e}"))),
     }
@@ -100,7 +100,7 @@ fn timestamp(table: &str, row_id: i64, column: &str, raw: &str) -> Decoded<Optio
 
 /// A required timestamp column.
 fn required_timestamp(table: &str, row_id: i64, column: &str, raw: &str) -> Decoded<DateTime<Utc>> {
-    crate::store::parse_datetime(raw)
+    super::parse_datetime(raw)
         .map_err(|e| DecodeError::new(table, row_id, format!("{column}: {e}")))
 }
 
@@ -215,11 +215,11 @@ fn tmux_window(raw: &str) -> Option<TmuxWindow> {
     match TmuxWindow::from_owned(raw.to_owned()) {
         Ok(window) => Some(window),
         Err(raw) => {
-            // Counted, not only logged. `store::decode_fallback_count` is the
+            // Counted, not only logged. `sync::decode_fallback_count` is the
             // process-wide gauge for "this board is quietly dropping data", and
             // a soft-fail that skipped it would leave that number reading zero
             // on the board's primary read path.
-            let count = crate::store::bump_decode_fallback();
+            let count = super::bump_decode_fallback();
             tracing::warn!(
                 count,
                 raw,
@@ -268,12 +268,12 @@ pub fn epic(row: &bindings::Epic) -> Decoded<Epic> {
         // newer binary must not take the epic and every task under it off the
         // board.
         feed_role: FeedRole::parse(&row.feed_role).unwrap_or_else(|| {
-            let count = crate::store::bump_decode_fallback();
+            let count = super::bump_decode_fallback();
             tracing::warn!(count, value = %row.feed_role, "unknown feed_role from the shared store; defaulting to none");
             FeedRole::None
         }),
         origin: EpicOrigin::parse(&row.origin).unwrap_or_else(|| {
-            let count = crate::store::bump_decode_fallback();
+            let count = super::bump_decode_fallback();
             tracing::warn!(count, value = %row.origin, "unknown epic origin from the shared store; defaulting to manual");
             EpicOrigin::Manual
         }),

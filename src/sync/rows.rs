@@ -45,8 +45,8 @@ use crate::models::{
     PollScopeId, SessionRequest, SessionRequestId, Task, TaskId, UsageSummary, WorkPackage,
     WorkPackageId, WorkPackageLink,
 };
+use crate::models::{LearningFilter, UsageQuery};
 use crate::spacetime::bindings;
-use crate::store::{LearningFilter, UsageQuery};
 
 use super::decode;
 
@@ -280,7 +280,7 @@ impl SharedRows {
                 true
             }),
             Err(e) => {
-                crate::store::drop_undecodable("task", &e);
+                super::drop_undecodable("task", &e);
                 // Dropped from the board, but remembered by id and epic so a
                 // delete pre-check can still count it.
                 self.write(|rows| {
@@ -311,7 +311,7 @@ impl SharedRows {
                 true
             }),
             Err(e) => {
-                crate::store::drop_undecodable("epic", &e);
+                super::drop_undecodable("epic", &e);
             }
         }
     }
@@ -386,7 +386,7 @@ impl SharedRows {
                 })
             }
             Err(e) => {
-                crate::store::drop_undecodable("learning", &e);
+                super::drop_undecodable("learning", &e);
             }
         }
     }
@@ -402,7 +402,7 @@ impl SharedRows {
                 true
             }),
             Err(e) => {
-                crate::store::drop_undecodable("learning retrieval", &e);
+                super::drop_undecodable("learning retrieval", &e);
             }
         }
     }
@@ -418,7 +418,7 @@ impl SharedRows {
                 true
             }),
             Err(e) => {
-                crate::store::drop_undecodable("usage event", &e);
+                super::drop_undecodable("usage event", &e);
             }
         }
     }
@@ -470,7 +470,7 @@ impl SharedRows {
                 true
             }),
             Err(e) => {
-                crate::store::drop_undecodable("work package", &e);
+                super::drop_undecodable("work package", &e);
             }
         }
     }
@@ -486,7 +486,7 @@ impl SharedRows {
                 true
             }),
             Err(e) => {
-                crate::store::drop_undecodable("work package link", &e);
+                super::drop_undecodable("work package link", &e);
             }
         }
     }
@@ -505,7 +505,7 @@ impl SharedRows {
                 true
             }),
             Err(e) => {
-                crate::store::drop_undecodable("dispatch request", &e);
+                super::drop_undecodable("dispatch request", &e);
                 self.write(|rows| rows.dispatch_requests.remove(&row.id).is_some());
             }
         }
@@ -525,7 +525,7 @@ impl SharedRows {
                 true
             }),
             Err(e) => {
-                crate::store::drop_undecodable("session request", &e);
+                super::drop_undecodable("session request", &e);
                 self.write(|rows| rows.session_requests.remove(&row.id).is_some());
             }
         }

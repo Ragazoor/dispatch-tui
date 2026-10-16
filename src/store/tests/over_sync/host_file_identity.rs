@@ -2,9 +2,9 @@
 //! Task #16755: adopting the identity the store hands out is ONE write of the
 //! host file (`host.allium: AdoptUserIdentity`, `HostFileIsWrittenWhole`).
 
-use super::{accepted, ScriptedConnector};
 use crate::host_file::{host_file_path, read_for_cli, resolve_for_launch};
 use crate::store::{HostStore, IdentityCredentialStore, Store};
+use crate::sync::tests::{accepted, ScriptedConnector};
 use crate::sync::SyncSession;
 use std::time::Instant;
 

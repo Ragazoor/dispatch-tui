@@ -4,9 +4,9 @@
 //! The SpacetimeDB Rust SDK has no auto-reconnect. Everything asserted here is
 //! behaviour this repo writes by hand, which is why it is asserted at all.
 
-use super::{accepted, refused, RefusingSubscriber, ScriptedConnector};
 use crate::models::EpicId;
 use crate::store::{EpicCrud, HostStore, IdentityCredentialStore, Store, SubscriptionStore};
+use crate::sync::tests::{accepted, refused, RefusingSubscriber, ScriptedConnector};
 use crate::sync::{ConnectionStatus, StepOutcome, SyncSession, RECONNECT_BACKOFF_BASE};
 use std::time::{Duration, Instant};
 

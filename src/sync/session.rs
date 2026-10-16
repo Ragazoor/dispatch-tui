@@ -22,7 +22,151 @@ use super::{
     settle_identity, BoardConnection, ConnectionEvent, ConnectionStatus, IdentityVerdict,
     StoreConnector, SubscriptionRequest,
 };
-use crate::store::{HostStore, IdentityCredentialStore, SubscriptionStore};
+
+// ---------------------------------------------------------------------------
+// HostStore — the `hosts` shared table
+// ---------------------------------------------------------------------------
+
+/// This install's entry in the host registry (`SharedTable::Hosts`) — see
+/// [`TaskStore`](crate::store::TaskStore). Its reads and writes stay on this
+/// machine; the shared registry gets a mirror (`sync.allium:
+/// RegisterHostOnConnect`).
+///
+/// Backed by this install's `host.json` (`host.allium:
+/// IdentityLivesInHostFile`), not by a store table.
+/// [`SettingsStore`](crate::store::SettingsStore)'s key/value accessors refuse
+/// the identity keys, so this trait is the only way to read or change them.
+///
+/// See `docs/specs/host.allium` (MintHostIdentity, RenameHost) and `core/Host`
+/// in `docs/specs/core.allium`.
+#[async_trait::async_trait]
+pub trait HostStore: Send + Sync {
+    /// This install's `Host` id, as the handle was built with it. Resolved
+    /// once per process before the handle exists (`host.allium:
+    /// MintHostIdentity` at a board's launch, the host file for a one-shot
+    /// command), so it cannot fail here. The claim's `is_locally_owned` reads
+    /// the same value, so the claim and the dispatch's host stamp agree
+    /// (`dispatch.allium: DispatchTask`).
+    fn host_id(&self) -> &str;
+
+    /// Mint this install's Host id if it does not already exist — an opaque
+    /// generated id, nothing else — and return the current `(id, label)`
+    /// either way. `label` is `None` until an operator names this machine via
+    /// `rename_host` (see `docs/specs/startup.allium`: `HostLabelPrompt`,
+    /// which asks for exactly that before the board's first launch draws).
+    ///
+    /// Idempotent by construction: the insert is `ON CONFLICT DO NOTHING`, so
+    /// a second call (or a race between several dispatch processes on first
+    /// run) never re-mints the id. Never call anything that mutates `id`
+    /// after this — `RenameHost` only ever touches the label.
+    async fn ensure_host_identity(&self) -> Result<(String, Option<String>)>;
+
+    /// Change this install's Host label. Rejects an empty (or
+    /// whitespace-only) string; the id is untouched.
+    async fn rename_host(&self, label: &str) -> Result<()>;
+
+    /// This install's UserIdentity — `core/Host.owner` for the local row — or
+    /// `None` if it has never connected to a shared store.
+    ///
+    /// `None` until the first connection settles one. Since the store became
+    /// mandatory (task #4916) a drawn board has always connected, but a
+    /// process that has not — a failed first attempt, a test — still sees
+    /// `None`, so every caller handles the absence rather than unwrapping it.
+    async fn user_identity(&self) -> Result<Option<String>>;
+
+    /// Store the identity a shared store issued.
+    ///
+    /// **Writes once.** A second call with a DIFFERENT identity leaves the
+    /// stored one alone rather than overwriting it — the decision about a
+    /// changed identity belongs to `crate::sync::settle_identity`, which
+    /// refuses it, and this method must not quietly do the opposite underneath.
+    ///
+    /// Rejects an empty identity. The CREDENTIAL that proves this identity is
+    /// deliberately not written here: it is local and secret, so it lives on
+    /// the other half of the seam — see
+    /// [`IdentityCredentialStore::set_user_identity_token`].
+    async fn adopt_user_identity(&self, identity: &str) -> Result<()>;
+
+    /// Adopt `identity` together with the `credential` that proves it, as ONE
+    /// write: on a handle that keeps its identity in the host file, one
+    /// whole-file replacement, so the file never holds the one without the
+    /// other (`host.allium: AdoptUserIdentity`). The owner keeps write-once
+    /// semantics; the credential is refreshed. Rejects an empty identity or
+    /// credential.
+    async fn adopt_user_identity_with_credential(
+        &self,
+        identity: &str,
+        credential: &str,
+    ) -> Result<()>;
+}
+
+// ---------------------------------------------------------------------------
+// IdentityCredentialStore — the local secret that proves the shared identity
+// ---------------------------------------------------------------------------
+
+/// The credential this install presents to prove it is
+/// [`HostStore::user_identity`]. Never routed to the store — see
+/// [`TaskStore`](crate::store::TaskStore).
+///
+/// **Deliberately not on [`HostStore`]**, although it is about the same
+/// identity. `HostStore` is the shared half, and a second backend implementing
+/// it is the shared store itself; a credential kept there is a credential every
+/// person on the board can read and use. There is no column for it in the
+/// SpacetimeDB module and it never travels in a snapshot, so the only honest
+/// place for it is here.
+///
+/// The split has a practical consequence worth knowing: adopting an identity is
+/// two writes on two halves, not one. They are not atomic, and they do not need
+/// to be — an identity with no credential presents as a conflict on the next
+/// connection, which is a state the system already refuses loudly.
+#[async_trait::async_trait]
+pub trait IdentityCredentialStore: Send + Sync {
+    /// The stored credential, or `None` on an install that has never connected.
+    async fn user_identity_token(&self) -> Result<Option<String>>;
+
+    /// Store or refresh the credential.
+    ///
+    /// Overwrites, unlike the identity it proves: refreshing the proof of the
+    /// SAME identity is ordinary. Rejects an empty credential — an identity
+    /// this install cannot prove again survives until the next connection and
+    /// then presents as a conflict, which is worse than not storing it.
+    async fn set_user_identity_token(&self, token: &str) -> Result<()>;
+}
+
+// ---------------------------------------------------------------------------
+// SubscriptionStore — the `subscriptions` shared table
+// ---------------------------------------------------------------------------
+
+/// Which epics a person follows (`SharedTable::Subscriptions`) — see
+/// [`TaskStore`](crate::store::TaskStore).
+///
+/// A subscription belongs to the PERSON, not the machine, which is why every
+/// method here takes a subscriber rather than reading the local host: following
+/// an epic on the desktop is already true on the laptop.
+///
+/// There is deliberately no method for subscribing to a user board. Your own
+/// needs no row — the identity implies it — and somebody else's is theirs. The
+/// absence is the enforcement: an operation that could be called and refused
+/// would be an operation whose refusal could be got wrong. See
+/// `docs/specs/sync.allium` (SubscribeToEpic) and `core/Subscription`.
+#[async_trait::async_trait]
+pub trait SubscriptionStore: Send + Sync {
+    /// The epic ids `subscriber` follows, ascending.
+    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<EpicId>>;
+
+    /// Follow `epic_id`. Idempotent: subscribing twice is subscribing.
+    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<()>;
+
+    /// Stop following `epic_id`. Returns whether a subscription was actually
+    /// removed, so a caller can refuse an unsubscribe from something
+    /// unfollowed — the asymmetry with `subscribe_to_epic` is deliberate and
+    /// `sync.allium: UnsubscribeFromEpic` says why.
+    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: EpicId) -> Result<bool>;
+}
+
+// ---------------------------------------------------------------------------
+// SyncStore — the three together
+// ---------------------------------------------------------------------------
 
 /// The store surface a sync session needs: who this install is, what proves it,
 /// and what it follows.

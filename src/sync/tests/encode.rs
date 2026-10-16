@@ -4,8 +4,8 @@
 //! compiler already checks: it is the two places the two sides disagree about
 //! how to say "nothing", and the one place a single field becomes two columns.
 
+use crate::models::{CreateTaskRequest, TaskPatch};
 use crate::models::{SubStatus, TaskStatus, TaskTag, TaskUrl, TmuxWindow, UrlType};
-use crate::store::{CreateTaskRequest, TaskPatch};
 use crate::sync::encode;
 
 /// A real timestamp in the format both stores write. Not "now": a placeholder
@@ -308,7 +308,7 @@ fn a_cleared_field_uses_the_sentinel_the_snapshot_declares() {
 
     // Epics: the one `Zero` column a patch can clear, and its string siblings.
     let cleared = encode::epic_patch(
-        &crate::store::EpicPatch::new()
+        &crate::models::EpicPatch::new()
             .parent_epic_id(None)
             .feed_interval_secs(None)
             .feed_command(None)

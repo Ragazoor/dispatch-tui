@@ -92,6 +92,12 @@ pub use url::{TaskUrl, UrlType};
 mod poll_owner;
 pub use poll_owner::PollScopeId;
 
+mod patches;
+pub use patches::{
+    CreateLearningRow, CreateTaskRequest, EpicPatch, LearningFilter, LearningPatch, TaskPatch,
+    UsageQuery,
+};
+
 mod poll_action;
 pub(crate) use poll_action::{decide_poll_action, PollAction};
 
