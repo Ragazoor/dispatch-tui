@@ -367,7 +367,8 @@ invariant AgentNameIsNotAnId {
 -- Migration order
 ------------------------------------------------------------
 --
--- Each step is one task under the epic created by task #77852. Each lands
+-- Each step is one task under epic #61441: A1 #90115, A2 #90116, A3 #90117,
+-- A4 #90118, A5 #90119. Each lands
 -- green on its own and marks itself landed here.
 --
 -- A1. The Agent row. Module tables for Agent and HandedOutAgentName, and
