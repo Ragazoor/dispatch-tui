@@ -180,7 +180,17 @@ fn status_line(app: &App) -> (Line<'static>, Style) {
         }
         InputMode::ConfirmDeleteEpic => hint_text(app, "Delete epic and subtasks? [y/n]", RED),
         InputMode::Help => hint("[?] or [Esc] to close help", CYAN),
-        InputMode::BoardFilter => hint("Filter repos: [1-9] toggle  [q/Esc] close", CYAN),
+        InputMode::BoardFilter => hint(
+            "Board filter: [Tab] next tab  [Space] toggle  [q/Esc] close",
+            CYAN,
+        ),
+        InputMode::BoardFilterSearch => hint(
+            format!(
+                "Search epics: {}_   [Enter] keep  [Esc] clear",
+                app.filter_overlay.epic_query
+            ),
+            CYAN,
+        ),
         InputMode::ConfirmDeleteRepoPath => {
             hint("Delete repo path? y to confirm, any key to cancel", YELLOW)
         }
@@ -289,6 +299,15 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
             ],
         );
     }
+    if let Some(badge) = hidden_badge(app.hidden_epics().len(), app.hidden_packages().len()) {
+        prepend(
+            &mut spans,
+            vec![Span::styled(
+                badge,
+                Style::default().fg(YELLOW).add_modifier(Modifier::BOLD),
+            )],
+        );
+    }
     if app.filter.lens.flattened() {
         prepend(
             &mut spans,
@@ -320,6 +339,22 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
         prepend(&mut spans, segment);
     }
     (Line::from(spans), Style::default())
+}
+
+/// `[hidden: 2 epics, 1 package] `, or `None` when nothing is hidden. Keeps a
+/// forgotten hide from reading as missing work (`board-layout.allium`, "Hidden
+/// Epics and Work Packages").
+fn hidden_badge(epics: usize, packages: usize) -> Option<String> {
+    let count = |n: usize, one: &str| match n {
+        0 => None,
+        1 => Some(format!("1 {one}")),
+        n => Some(format!("{n} {one}s")),
+    };
+    let parts: Vec<String> = [count(epics, "epic"), count(packages, "package")]
+        .into_iter()
+        .flatten()
+        .collect();
+    (!parts.is_empty()).then(|| format!("[hidden: {}] ", parts.join(", ")))
 }
 
 /// Build status bar hints when tasks are batch-selected.

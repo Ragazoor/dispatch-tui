@@ -52,6 +52,7 @@ impl App {
             InputMode::ReparentEpic(_) => N::BoardPickerReparentEpic,
             InputMode::Help => N::BoardHelp,
             InputMode::BoardFilter => N::BoardFilter,
+            InputMode::BoardFilterSearch => N::BoardFilterSearch,
             InputMode::ConfirmQuit => N::BoardConfirmQuit,
             InputMode::ConfirmDeleteTask(_) => N::BoardConfirmDeleteTask,
             InputMode::ConfirmBatchDelete => N::BoardConfirmBatchDelete,
@@ -245,6 +246,13 @@ impl App {
                 self.sync_board_selection();
                 vec![]
             }
+            N::BoardFilterSearch => match key.code {
+                // Typing is not an action; nothing is recorded.
+                KeyCode::Char(c) if !key_has_ctrl_or_alt(key) => self.update(Message::BoardFilter(
+                    crate::tui::messages::BoardFilterMessage::EpicQueryChar(c),
+                )),
+                _ => vec![],
+            },
             N::BoardText
             | N::BoardPickerRepoPath
             | N::BoardPickerBaseBranch
@@ -262,6 +270,14 @@ impl App {
     /// field and records nothing, like the typed characters it accompanies.
     fn run_text_edit(&mut self, ns: KeyNamespace, action: &str) -> Vec<Command> {
         use crate::tui::messages::InputMessage as I;
+        if ns == KeyNamespace::BoardFilterSearch {
+            if action == "text_backspace" {
+                return self.update(Message::BoardFilter(
+                    crate::tui::messages::BoardFilterMessage::EpicQueryBackspace,
+                ));
+            }
+            return vec![];
+        }
         if ns == KeyNamespace::BoardSearch {
             if action == "text_backspace" {
                 self.search.query.pop();
@@ -333,6 +349,7 @@ impl App {
                 self.run_text_mode(action, key, label)
             }
             N::BoardFilter => self.handle_key_board_filter(key, action, label),
+            N::BoardFilterSearch => self.handle_key_board_filter_search(action, label),
             N::BoardPickerTag => self.run_tag_picker(action, key, label),
             N::BoardPickerWrapUpMode => self.run_wrap_up_picker(action, key, label),
             N::BoardPickerQuickDispatch => self.run_quick_dispatch_picker(action, key, label),

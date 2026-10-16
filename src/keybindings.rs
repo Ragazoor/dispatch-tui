@@ -75,6 +75,7 @@ pub enum KeyNamespace {
     BoardError,
     BoardText,
     BoardFilter,
+    BoardFilterSearch,
     BoardPickerRepoPath,
     BoardPickerBaseBranch,
     BoardPickerTag,
@@ -108,7 +109,7 @@ pub enum KeyNamespace {
 impl KeyNamespace {
     /// Every namespace, in the order the spec's enum lists them. This is the
     /// order `list_keybindings` and the help overlay group by.
-    pub const ALL: [KeyNamespace; 35] = [
+    pub const ALL: [KeyNamespace; 36] = [
         Self::BoardNormal,
         Self::BoardDetail,
         Self::BoardSearch,
@@ -116,6 +117,7 @@ impl KeyNamespace {
         Self::BoardError,
         Self::BoardText,
         Self::BoardFilter,
+        Self::BoardFilterSearch,
         Self::BoardPickerRepoPath,
         Self::BoardPickerBaseBranch,
         Self::BoardPickerTag,
@@ -156,6 +158,7 @@ impl KeyNamespace {
             Self::BoardError => "board.error",
             Self::BoardText => "board.text",
             Self::BoardFilter => "board.filter",
+            Self::BoardFilterSearch => "board.filter_search",
             Self::BoardPickerRepoPath => "board.picker.repo_path",
             Self::BoardPickerBaseBranch => "board.picker.base_branch",
             Self::BoardPickerTag => "board.picker.tag",

@@ -608,6 +608,81 @@ impl FilterState {
 }
 
 // ---------------------------------------------------------------------------
+// FilterOverlayState — the board-filter overlay's tabs, cursors and epic query
+// ---------------------------------------------------------------------------
+
+/// One tab of the board-filter overlay, in Tab order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FilterTab {
+    #[default]
+    Repos,
+    Epics,
+    Packages,
+}
+
+impl FilterTab {
+    pub const ALL: [FilterTab; 3] = [FilterTab::Repos, FilterTab::Epics, FilterTab::Packages];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            FilterTab::Repos => "Repos",
+            FilterTab::Epics => "Epics",
+            FilterTab::Packages => "Work packages",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            FilterTab::Repos => FilterTab::Epics,
+            FilterTab::Epics => FilterTab::Packages,
+            FilterTab::Packages => FilterTab::Repos,
+        }
+    }
+
+    pub fn previous(self) -> Self {
+        match self {
+            FilterTab::Repos => FilterTab::Packages,
+            FilterTab::Epics => FilterTab::Repos,
+            FilterTab::Packages => FilterTab::Epics,
+        }
+    }
+}
+
+/// How an epic row on the Epics tab is marked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterEpicMark {
+    Shown,
+    /// On the hide-list itself: Space shows it again.
+    Hidden,
+    /// Hidden because an ancestor is: Space on it cannot bring it back.
+    HiddenByParent,
+}
+
+/// One row of the Epics tab's tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilterEpicRow {
+    pub id: EpicId,
+    pub depth: usize,
+    pub title: String,
+    pub mark: FilterEpicMark,
+}
+
+/// The board-filter overlay's UI state. Reset each time the overlay opens; the
+/// filters it edits live on [`FilterState`]. The Repos tab's cursor is
+/// `InputState.repo_cursor`, shared with the repo pickers that also list repos.
+#[derive(Debug, Clone, Default)]
+pub struct FilterOverlayState {
+    pub tab: FilterTab,
+    pub epic_cursor: usize,
+    pub package_cursor: usize,
+    /// `d` on the Epics tab: list done epics too.
+    pub show_done_epics: bool,
+    /// `/` on the Epics tab: narrows the tree by title. The overlay's own, not
+    /// the board search.
+    pub epic_query: String,
+}
+
+// ---------------------------------------------------------------------------
 // SearchState — live title/id search over the task board
 // ---------------------------------------------------------------------------
 

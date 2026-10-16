@@ -61,6 +61,8 @@ use "./observability.allium" as observability
 --                                                             work package's title, a
 --                                                             work package rename
 --   board_filter                 board.filter                 the board-filter overlay (`f`)
+--   board_filter_search          board.filter_search          typing the overlay's Epics-tab
+--                                                             title search (`/` there)
 --   board_picker_repo_path       board.picker.repo_path       repo-path field with candidate list
 --   board_picker_base_branch     board.picker.base_branch     base-branch field with candidate list
 --   board_picker_tag             board.picker.tag             tag step of task creation (also arms phoenix)
@@ -107,7 +109,8 @@ use "./observability.allium" as observability
 -- board.search carries only text_backspace [Backspace], records_usage false:
 -- the search bar has no caret, so it has no caret motion to bind.
 -- board.filter's Backspace/Delete is not text editing: it runs
--- repo_filter_delete_repo_path and stays recorded.
+-- repo_filter_delete_repo_path and stays recorded. board.filter_search carries
+-- only text_backspace [Backspace], records_usage false, like board.search.
 --
 -- The panes' rows (agent_tree.tree, agent_tree.commits, agent_tree.agents,
 -- agent_diff). The companion pane's three sections share the pane-wide keys
@@ -182,7 +185,7 @@ use "./observability.allium" as observability
 -- the omission shows up the first time anyone presses a key, not later.
 enum KeyNamespace {
     board_normal | board_detail | board_search | board_help | board_error |
-    board_text | board_filter |
+    board_text | board_filter | board_filter_search |
     board_picker_repo_path | board_picker_base_branch | board_picker_tag |
     board_picker_wrap_up_mode | board_picker_quick_dispatch |
     board_picker_move_to_epic | board_picker_reparent_epic |

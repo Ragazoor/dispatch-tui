@@ -1,5 +1,6 @@
 ---
 source: src/tui/tests/snapshots.rs
+assertion_line: 785
 expression: rendered
 ---
                                                                                                                   🔕  [N]
@@ -17,14 +18,15 @@ expression: rendered
                               │                           │                              │
                               │                           │                              │
                               │                           │                              │
-                              ╔ Repo Filter (include) ═══════════════════════════════════╗
+                              ╔ Board Filter ════════════════════════════════════════════╗
+                              ║   Repos (include)  │  Epics  │  Work packages            ║
                               ║                                                          ║
                               ║  ► [ ] /home/user/projects/alpha                         ║
                               ║  2. [ ] /home/user/projects/beta                         ║
                               ║  3. [ ] /home/user/projects/gamma                        ║
                               ║                                                          ║
                               ║  [j/k] navigate  [Space] toggle                          ║
-                              ║  [Tab] incl/excl  [q/Esc] close                          ║
+                              ║  [i] incl/excl  [Tab] next tab  [q/Esc] close            ║
                               ╚══════════════════════════════════════════════════════════╝
                               │                           │                              │
                               │                           │                              │
@@ -40,5 +42,4 @@ expression: rendered
                               │                           │                              │
                               │                           │                              │
                               │                           │                              │
-                              │                           │                              │
-Filter repos: [1-9] toggle  [q/Esc] close
+Board filter: [Tab] next tab  [Space] toggle  [q/Esc] close

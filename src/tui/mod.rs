@@ -219,6 +219,8 @@ pub struct App {
     pub(in crate::tui) agents: AgentTracking,
     pub(in crate::tui) select: SelectionState,
     pub(in crate::tui) filter: FilterState,
+    /// The board-filter overlay's own UI state: tab, cursors, epic query.
+    pub(in crate::tui) filter_overlay: FilterOverlayState,
     pub(in crate::tui) search: SearchState,
     /// Which sub-status sections the user has folded. A persisted preference —
     /// see [`SectionFoldState`].
@@ -340,6 +342,7 @@ impl App {
             agents: AgentTracking::new(),
             select: SelectionState::default(),
             filter: FilterState::default(),
+            filter_overlay: FilterOverlayState::default(),
             search: SearchState::default(),
             folds: SectionFoldState::default(),
             epic_folds: EpicFoldState::default(),

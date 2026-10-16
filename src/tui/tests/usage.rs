@@ -444,13 +444,13 @@ fn repo_filter_toggles_record() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
     app.handle_key(make_key(KeyCode::Char('f')));
-    assert_records(&mut app, KeyCode::Char('j'), "repo_filter_move_cursor", "j");
-    assert_records(&mut app, KeyCode::Char('k'), "repo_filter_move_cursor", "k");
+    assert_records(&mut app, KeyCode::Char('j'), "filter_move_cursor", "j");
+    assert_records(&mut app, KeyCode::Char('k'), "filter_move_cursor", "k");
     // Cursor position 0 is the first repo: the overlay has no "only active"
     // row, and no toggle-all key (board-layout.allium).
-    assert_records(&mut app, KeyCode::Char(' '), "repo_filter_toggle_repo", " ");
+    assert_records(&mut app, KeyCode::Char(' '), "filter_toggle_row", " ");
     assert_silent(&mut app, KeyCode::Char('a'));
-    assert_records(&mut app, KeyCode::Tab, "repo_filter_toggle_mode", "Tab");
+    assert_records(&mut app, KeyCode::Char('i'), "repo_filter_toggle_mode", "i");
     assert_records(&mut app, KeyCode::Char('1'), "repo_filter_toggle_repo", "1");
     // The former preset keys (task #4972) are inert, so record nothing.
     assert_silent(&mut app, KeyCode::Char('s'));
@@ -460,7 +460,7 @@ fn repo_filter_toggles_record() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string()];
     app.handle_key(make_key(KeyCode::Char('f')));
-    assert_records(&mut app, KeyCode::Char('q'), "repo_filter_close", "q");
+    assert_records(&mut app, KeyCode::Char('q'), "filter_close", "q");
 }
 
 #[test]

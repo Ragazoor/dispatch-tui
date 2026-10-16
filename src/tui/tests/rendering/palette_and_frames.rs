@@ -1214,7 +1214,7 @@ async fn repo_filter_overlay_stays_inside_a_narrow_board() {
     let buf = render_to_buffer(&mut app, 46, 18);
 
     assert!(
-        buffer_contains(&buf, "Repo Filter"),
+        buffer_contains(&buf, "Board Filter"),
         "the overlay title should be drawn"
     );
     // Double-line border corners: all four must be present, so the popup is

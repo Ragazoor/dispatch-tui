@@ -417,10 +417,29 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
             let mut app = make_app();
             // Nine repos so every digit 1-9 toggles one.
             app.board.repo_paths = (1..=9).map(|i| format!("/repo/r{i}")).collect();
+            app.board.epics = vec![make_epic(10), make_epic(11)];
             app.update(Message::BoardFilter(
                 crate::tui::messages::BoardFilterMessage::Start,
             ));
             assert_eq!(app.input.mode, InputMode::BoardFilter);
+            // The Epics-tab rows act only there; every other row acts on the
+            // Repos tab the overlay opens on.
+            if binding.action.starts_with("filter_") && binding.action.ends_with("_epics") {
+                app.filter_overlay.tab = crate::tui::types::FilterTab::Epics;
+            }
+            one(app)
+        }
+        N::BoardFilterSearch => {
+            let mut app = make_app();
+            app.board.epics = vec![make_epic(10)];
+            app.update(Message::BoardFilter(
+                crate::tui::messages::BoardFilterMessage::Start,
+            ));
+            app.filter_overlay.tab = crate::tui::types::FilterTab::Epics;
+            app.update(Message::BoardFilter(
+                crate::tui::messages::BoardFilterMessage::StartEpicSearch,
+            ));
+            assert_eq!(app.input.mode, InputMode::BoardFilterSearch);
             one(app)
         }
         N::BoardPickerRepoPath => one(draft_app(InputMode::InputRepoPath)),

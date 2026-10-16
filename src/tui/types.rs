@@ -362,6 +362,8 @@ pub enum InputMode {
     // Overlay modes
     Help,
     BoardFilter,
+    /// Typing the Epics tab's `/` title search inside the board filter.
+    BoardFilterSearch,
     ConfirmDeleteRepoPath,
     ConfirmQuit,
     ConfirmTrustRepo {

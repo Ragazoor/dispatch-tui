@@ -6,6 +6,7 @@
 //! enough to navigate quickly.
 
 mod agent;
+mod board_filter;
 mod budget;
 mod epics;
 mod feeds;
@@ -14,7 +15,6 @@ mod lifecycle;
 mod move_task;
 mod navigation;
 mod pr;
-mod board_filter;
 mod repo_sync;
 mod retry;
 mod selection;

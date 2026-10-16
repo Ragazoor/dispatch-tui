@@ -368,8 +368,8 @@ fn render_status_bar_repo_filter() {
     app.input.mode = InputMode::BoardFilter;
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
-        buffer_contains(&buf, "Filter repos"),
-        "RepoFilter mode should show 'Filter repos'"
+        buffer_contains(&buf, "Board filter:"),
+        "BoardFilter mode should show its status-bar hint"
     );
 }
 
@@ -380,8 +380,8 @@ fn render_board_filter_overlay_shows_title() {
     app.input.mode = InputMode::BoardFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
-        buffer_contains(&buf, "Repo Filter"),
-        "repo filter overlay should show 'Repo Filter' title"
+        buffer_contains(&buf, "Board Filter"),
+        "the board filter overlay should show its title"
     );
 }
 
@@ -613,14 +613,14 @@ fn toggle_repo_filter_mode_switches() {
 }
 
 #[test]
-fn tab_key_toggles_repo_filter_mode() {
+fn i_key_toggles_repo_filter_mode() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string()];
     app.input.mode = InputMode::BoardFilter;
     assert_eq!(app.filter.mode, RepoFilterMode::Include);
-    app.handle_key(make_key(KeyCode::Tab));
+    app.handle_key(make_key(KeyCode::Char('i')));
     assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
-    app.handle_key(make_key(KeyCode::Tab));
+    app.handle_key(make_key(KeyCode::Char('i')));
     assert_eq!(app.filter.mode, RepoFilterMode::Include);
 }
 

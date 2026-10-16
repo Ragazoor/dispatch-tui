@@ -377,7 +377,12 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "search_tasks",
         "Search the board with a live bar. A card matches when the query fuzzy-matches its title or is a digit prefix of its id (38 matches #38, #380; a leading # is optional). Epic cards match on their own title or id, or when a descendant the board would still show matches. Enter keeps the query, Esc in the bar restores the previous one, Esc on the board clears it",
     ),
-    normal(&["f"], None, "filter_repos", "Filter the board by repo path"),
+    normal(
+        &["f"],
+        None,
+        "open_board_filter",
+        "Open the board filter: choose which repos, epics and work packages the board shows",
+    ),
     normal(
         &["Tab"],
         None,
@@ -522,36 +527,91 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "text_cursor_word_right",
         "Move the caret one word right",
     ),
-    // ---- board.repo_filter ----
+    // ---- board.filter ----
     r(
         N::BoardFilter,
-        &["Enter", "Esc", "q"],
-        "repo_filter_close",
-        "Close the repo filter",
+        &["Enter", "q"],
+        "filter_close",
+        "Close the board filter",
     ),
     r(
         N::BoardFilter,
-        &["j", "Down", "k", "Up"],
-        "repo_filter_move_cursor",
-        "Move the cursor down (j, Down) or up (k, Up) the repo list",
-    ),
-    r(
-        N::BoardFilter,
-        &["Space", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
-        "repo_filter_toggle_repo",
-        "Toggle the repo under the cursor (Space) or the repo with that number (1-9) in the filter",
+        &["Esc"],
+        "filter_back",
+        "Clear the Epics tab's title search if one is set; otherwise close the board filter",
     ),
     r(
         N::BoardFilter,
         &["Tab"],
+        "filter_next_tab",
+        "Show the next tab: Repos, Epics, Work packages",
+    ),
+    r(
+        N::BoardFilter,
+        &["BackTab"],
+        "filter_previous_tab",
+        "Show the previous tab",
+    ),
+    r(
+        N::BoardFilter,
+        &["j", "Down", "k", "Up"],
+        "filter_move_cursor",
+        "Move the cursor down (j, Down) or up (k, Up) the current tab's list",
+    ),
+    r(
+        N::BoardFilter,
+        &["Space"],
+        "filter_toggle_row",
+        "Toggle the row under the cursor: include or exclude a repo, hide or show an epic (with its whole subtree) or a work package",
+    ),
+    r(
+        N::BoardFilter,
+        &["1", "2", "3", "4", "5", "6", "7", "8", "9"],
+        "repo_filter_toggle_repo",
+        "Repos tab: toggle the repo with that number in the filter",
+    ),
+    r(
+        N::BoardFilter,
+        &["i"],
         "repo_filter_toggle_mode",
-        "Switch the filter between including and excluding the toggled repos",
+        "Repos tab: switch the filter between including and excluding the toggled repos",
     ),
     r(
         N::BoardFilter,
         &["Backspace", "Delete"],
         "repo_filter_delete_repo_path",
-        "Delete the repo path under the cursor from the saved list, after a confirmation",
+        "Repos tab: delete the repo path under the cursor from the saved list, after a confirmation",
+    ),
+    r(
+        N::BoardFilter,
+        &["d"],
+        "filter_toggle_done_epics",
+        "Epics tab: list done epics too, or stop listing them",
+    ),
+    r(
+        N::BoardFilter,
+        &["/"],
+        "filter_search_epics",
+        "Epics tab: narrow the tree to epics whose title matches what you type",
+    ),
+    // ---- board.filter_search ----
+    r(
+        N::BoardFilterSearch,
+        &["Esc"],
+        "filter_search_cancel",
+        "Clear the epic title search and return to the list",
+    ),
+    r(
+        N::BoardFilterSearch,
+        &["Enter"],
+        "filter_search_commit",
+        "Keep the epic title search and return to the list",
+    ),
+    unrecorded(
+        N::BoardFilterSearch,
+        &["Backspace"],
+        "text_backspace",
+        "Delete the last character of the epic title search",
     ),
     // ---- BoardPickerRepoPath ----
     r(

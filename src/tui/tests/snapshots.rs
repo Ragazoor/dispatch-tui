@@ -803,6 +803,70 @@ fn snapshot_repo_filter_popup_cursor_on_repo() {
     insta::assert_snapshot!(rendered);
 }
 
+/// The Epics tab: an indented tree with two epics hidden on their own, a child
+/// hidden by its parent, and a done epic left out.
+#[test]
+fn snapshot_board_filter_epics_tab() {
+    use crate::models::{EpicId, TaskStatus};
+    use crate::tui::messages::BoardFilterMessage;
+    use crate::tui::Message;
+
+    let mut app = make_app();
+    let epic =
+        |id: i64, parent: Option<i64>, title: &str, status: TaskStatus| crate::models::Epic {
+            parent_epic_id: parent.map(EpicId),
+            title: title.to_string(),
+            status,
+            ..crate::tui::tests::helpers::make_epic(id)
+        };
+    app.board.epics = vec![
+        epic(10, None, "DB maintenance", TaskStatus::Running),
+        epic(11, Some(10), "Staging", TaskStatus::Backlog),
+        epic(12, Some(10), "Prod", TaskStatus::Backlog),
+        epic(13, None, "Dependabot", TaskStatus::Done),
+        epic(14, None, "Dispatch", TaskStatus::Running),
+    ];
+    app.filter.hidden_epics.insert(EpicId(11));
+    app.filter.hidden_epics.insert(EpicId(14));
+    app.board
+        .epics
+        .push(epic(15, Some(14), "Learnings", TaskStatus::Running));
+    app.update(Message::BoardFilter(BoardFilterMessage::Start));
+    app.update(Message::BoardFilter(BoardFilterMessage::SwitchTab(
+        crate::tui::types::MoveDirection::Forward,
+    )));
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+/// The Work packages tab with one package hidden.
+#[test]
+fn snapshot_board_filter_packages_tab() {
+    use crate::models::{WorkPackage, WorkPackageId};
+    use crate::tui::messages::BoardFilterMessage;
+    use crate::tui::Message;
+
+    let mut app = make_app();
+    let at = chrono::DateTime::from_timestamp(1_700_000_000, 0).expect("valid timestamp");
+    app.board.work_packages = (1..=3)
+        .map(|id| WorkPackage {
+            id: WorkPackageId(id),
+            title: format!("DB maintenance window {id}"),
+            description: String::new(),
+            created_by: None,
+            created_at: at,
+            updated_at: at,
+        })
+        .collect();
+    app.filter.hidden_packages.insert(WorkPackageId(2));
+    app.update(Message::BoardFilter(BoardFilterMessage::Start));
+    app.update(Message::BoardFilter(BoardFilterMessage::SwitchTab(
+        crate::tui::types::MoveDirection::Backward,
+    )));
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
 #[test]
 fn snapshot_top_row_budget_indicator_fresh() {
     use crate::models::budget::{BudgetSnapshot, BudgetWindow};

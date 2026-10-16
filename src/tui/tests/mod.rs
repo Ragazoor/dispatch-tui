@@ -15,6 +15,7 @@ mod epic_folds;
 mod epic_jump;
 mod epic_placement;
 mod epics;
+mod filter_overlay;
 mod help_overlay;
 mod helpers;
 mod input_handlers;

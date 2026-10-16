@@ -235,3 +235,23 @@ fn closing_the_filter_overlay_persists_both_hide_lists_sorted() {
     assert_eq!(saved("hidden_epics").as_deref(), Some("[2,9]"));
     assert_eq!(saved("hidden_packages").as_deref(), Some("[4]"));
 }
+
+#[test]
+fn the_status_bar_names_what_is_hidden() {
+    let mut app = tree_app();
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        !buffer_contains(&buf, "[hidden"),
+        "nothing hidden, no badge"
+    );
+
+    app.filter.hidden_epics.extend([EpicId(1), EpicId(2)]);
+    app.filter.hidden_packages.insert(WorkPackageId(7));
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(buffer_contains(&buf, "[hidden: 2 epics, 1 package]"));
+
+    app.filter.hidden_epics.remove(&EpicId(2));
+    app.filter.hidden_packages.clear();
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(buffer_contains(&buf, "[hidden: 1 epic]"));
+}
