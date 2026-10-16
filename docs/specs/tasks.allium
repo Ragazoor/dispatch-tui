@@ -675,7 +675,11 @@ rule ClearBuildOutputOfDoneTask {
         -- directory. A file called CACHEDIR.TAG without the signature does
         -- not count. A symlink is never followed and never removed, so the
         -- cleanup cannot reach outside the worktree. Nothing below the top
-        -- level is examined. Each such directory is removed whole; the rest
+        -- level is examined. Only a LINKED git worktree is touched: its .git
+        -- must be a regular file. A stored worktree path that is a home
+        -- directory, or a repository's own checkout (.git is a directory), is
+        -- refused and logged, because ~/.cache carries a CACHEDIR.TAG too.
+        -- Each such directory is removed whole; the rest
         -- of the worktree, its .git file and its branch are untouched.
         --
         -- == Every route into Done ==

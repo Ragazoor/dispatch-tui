@@ -43,8 +43,24 @@ fn has_signed_cachedir_tag(dir: &Path) -> bool {
 /// Remove every [`build_output_dirs`] entry of `worktree`. Best effort: a
 /// directory that cannot be removed is reported in `failed` and the rest are
 /// still removed. Blocking; run it off the board's thread.
+///
+/// Only a linked git worktree is touched: its `.git` must be a regular file (the
+/// `gitdir:` pointer). A task row's `worktree` is stored data, so a path that
+/// is a home directory, a plain directory or a repository's own checkout (whose
+/// `.git` is a directory) is refused rather than trusted.
 pub fn clear_build_output(worktree: &Path) -> BuildOutputCleared {
     let mut cleared = BuildOutputCleared::default();
+    let is_linked_worktree =
+        std::fs::symlink_metadata(worktree.join(".git")).is_ok_and(|m| m.file_type().is_file());
+    if !is_linked_worktree {
+        if worktree.exists() {
+            tracing::warn!(
+                worktree = %worktree.display(),
+                "not a linked git worktree, build output left alone"
+            );
+        }
+        return cleared;
+    }
     for dir in build_output_dirs(worktree) {
         match std::fs::remove_dir_all(&dir) {
             Ok(()) => cleared.removed.push(dir),

@@ -6,6 +6,11 @@ use std::path::Path;
 
 use super::super::build_output::{build_output_dirs, clear_build_output, CACHEDIR_TAG_SIGNATURE};
 
+/// Make `wt` look like a linked worktree: `.git` is a `gitdir:` file.
+fn linked(wt: &Path) {
+    fs::write(wt.join(".git"), b"gitdir: /somewhere\n").unwrap();
+}
+
 fn tagged_dir(worktree: &Path, name: &str) {
     let dir = worktree.join(name);
     fs::create_dir_all(dir.join("debug/deps")).unwrap();
@@ -56,6 +61,7 @@ fn a_symlinked_tagged_dir_is_neither_followed_nor_removed() {
     let outside = tempfile::tempdir().unwrap();
     tagged_dir(outside.path(), "target");
     let wt = tempfile::tempdir().unwrap();
+    linked(wt.path());
     std::os::unix::fs::symlink(outside.path().join("target"), wt.path().join("target")).unwrap();
 
     assert!(build_output_dirs(wt.path()).is_empty());
@@ -71,6 +77,7 @@ fn a_symlinked_tagged_dir_is_neither_followed_nor_removed() {
 #[test]
 fn clearing_removes_only_the_build_output() {
     let wt = tempfile::tempdir().unwrap();
+    linked(wt.path());
     tagged_dir(wt.path(), "target");
     fs::create_dir(wt.path().join("src")).unwrap();
     fs::write(wt.path().join("src/main.rs"), b"fn main() {}").unwrap();
@@ -100,6 +107,7 @@ fn a_missing_worktree_is_nothing_to_clear() {
 fn a_dir_that_cannot_be_removed_is_reported_not_fatal() {
     use std::os::unix::fs::PermissionsExt;
     let wt = tempfile::tempdir().unwrap();
+    linked(wt.path());
     tagged_dir(wt.path(), "target");
     tagged_dir(wt.path(), ".venv");
     // A read-only parent makes the files under it unlinkable for a non-root
@@ -117,4 +125,19 @@ fn a_dir_that_cannot_be_removed_is_reported_not_fatal() {
     assert_eq!(cleared.removed, vec![wt.path().join(".venv")]);
     assert_eq!(cleared.failed.len(), 1);
     assert_eq!(cleared.failed[0].0, wt.path().join("target"));
+}
+
+#[test]
+fn a_dir_that_is_not_a_linked_worktree_is_left_alone() {
+    let plain = tempfile::tempdir().unwrap();
+    tagged_dir(plain.path(), ".cache");
+    assert!(clear_build_output(plain.path()).removed.is_empty());
+    assert!(plain.path().join(".cache").exists());
+
+    // A repository's own checkout has a `.git` directory.
+    let checkout = tempfile::tempdir().unwrap();
+    fs::create_dir(checkout.path().join(".git")).unwrap();
+    tagged_dir(checkout.path(), "target");
+    assert!(clear_build_output(checkout.path()).removed.is_empty());
+    assert!(checkout.path().join("target").exists());
 }

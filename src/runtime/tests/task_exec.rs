@@ -1645,6 +1645,7 @@ async fn exec_clear_build_output_removes_tagged_dirs_only() {
     )
     .unwrap();
     std::fs::write(wt.path().join("Cargo.toml"), b"[package]\n").unwrap();
+    std::fs::write(wt.path().join(".git"), b"gitdir: /x\n").unwrap();
 
     rt.exec_clear_build_output(vec![(TaskId(1), wt.path().to_string_lossy().into_owned())])
         .await
