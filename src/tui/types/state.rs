@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use ratatui::widgets::ListState;
 
-use super::{ColumnAnchor, EpicDraft, InputMode, RepoFilterMode, TaskDraft};
+use super::{ColumnAnchor, EpicDraft, InputMode, Lens, RepoFilterMode, TaskDraft};
 use crate::models::{
     Epic, EpicId, Task, TaskId, TaskStatus, WorkPackage, WorkPackageId, WorkPackageLink,
 };
@@ -24,10 +24,6 @@ pub struct BoardState {
     /// surface BaseBranchPicker).
     pub(in crate::tui) repo_base_branches: HashMap<String, Vec<String>>,
     pub(in crate::tui) split: SplitState,
-    /// Flattened rendering mode: when true, epic cards are hidden and every
-    /// descendant task of the current view surfaces directly in its status
-    /// column. Preserved across navigation, session-scoped.
-    pub(in crate::tui) flattened: bool,
     /// This person's work packages, oldest first
     /// (`docs/specs/work-packages.allium`).
     pub(in crate::tui) work_packages: Vec<WorkPackage>,
@@ -579,7 +575,9 @@ impl SelectionState {
 pub struct FilterState {
     pub repos: HashSet<String>,
     pub mode: RepoFilterMode,
-    pub only_active: bool,
+    /// How the board is read; see [`Lens`]. Kept beside the filters because
+    /// its only-active half narrows the same task set they do.
+    pub lens: Lens,
 }
 
 impl FilterState {
@@ -593,9 +591,10 @@ impl FilterState {
         }
     }
 
-    /// Returns false when `only_active` is set and the task has no tmux window.
+    /// Returns false when the lens shows only active tasks and the task has no
+    /// tmux window.
     pub fn task_matches(&self, task: &crate::models::Task) -> bool {
-        !self.only_active || task.tmux_window.is_some()
+        !self.lens.only_active() || task.tmux_window.is_some()
     }
 }
 

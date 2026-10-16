@@ -357,12 +357,8 @@ fn test_selection_survives_flatten_toggle() {
         _ => panic!("expected task at cursor"),
     };
 
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::ToggleFlattened,
-    ));
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::ToggleFlattened,
-    ));
+    flip_flattened(&mut app);
+    flip_flattened(&mut app);
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     let post_id: TaskId = match &items[app.selection().row(0)] {

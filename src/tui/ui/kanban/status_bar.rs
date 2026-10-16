@@ -289,7 +289,7 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
             ],
         );
     }
-    if app.board.flattened {
+    if app.filter.lens.flattened() {
         prepend(
             &mut spans,
             vec![Span::styled(

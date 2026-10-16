@@ -213,7 +213,7 @@ fn folding_a_flattened_section_takes_its_decoration_with_it() {
 
     let mut app = App::new(vec![owned, orphan, running(3, SubStatus::Active)]);
     app.board.epics = vec![make_epic(10)];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
     app.folds
         .toggle(TaskStatus::Running, ColumnSection::NeedsInput);
 

@@ -29,15 +29,11 @@ fn epic_edited_splices_all_fields_including_feed_settings() {
 #[test]
 fn toggle_flattened_message_flips_state() {
     let mut app = App::new(vec![]);
-    assert!(!app.board.flattened);
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::ToggleFlattened,
-    ));
-    assert!(app.board.flattened);
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::ToggleFlattened,
-    ));
-    assert!(!app.board.flattened);
+    assert!(!app.filter.lens.flattened());
+    flip_flattened(&mut app);
+    assert!(app.filter.lens.flattened());
+    flip_flattened(&mut app);
+    assert!(!app.filter.lens.flattened());
 }
 
 #[test]
@@ -204,7 +200,7 @@ fn flattened_board_shows_running_subtasks_but_not_backlog() {
     running_subtask.epic_id = Some(EpicId(10));
     app.board.tasks = vec![standalone, backlog_subtask, running_subtask];
     app.board.epics = vec![make_epic(10)];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let ids = visible_task_ids(&app);
     // Standalone backlog task is always visible
@@ -228,7 +224,7 @@ fn flattened_board_is_recursive_through_nested_epics() {
     let mut t_leaf = make_task(2, TaskStatus::Running);
     t_leaf.epic_id = Some(EpicId(20));
     app.board.tasks = vec![t_root, t_leaf];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     // Backlog is NOT flattened: the root epic card shows, not the individual task
     let backlog = app.view().column_items_for_status(TaskStatus::Backlog);
@@ -258,7 +254,7 @@ fn flattened_board_hides_epic_cards_in_active_columns_only() {
     let mut child = make_epic(20);
     child.parent_epic_id = Some(EpicId(10));
     app.board.epics = vec![make_epic(10), child];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     // Running/Review columns: epic cards are hidden (tasks surface via EpicHeader)
     for status in [TaskStatus::Running, TaskStatus::Review] {
@@ -297,7 +293,7 @@ fn flattened_epic_view_shows_only_that_subtree() {
     let mut b = make_task(2, TaskStatus::Backlog);
     b.epic_id = Some(EpicId(20));
     app.board.tasks = vec![a, b];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new_for_epic(),
@@ -307,27 +303,6 @@ fn flattened_epic_view_shows_only_that_subtree() {
     let ids = visible_task_ids(&app);
     assert!(ids.contains(&TaskId(1)));
     assert!(!ids.contains(&TaskId(2)));
-}
-
-#[test]
-fn shift_f_key_toggles_flattened() {
-    let mut app = App::new(vec![]);
-    assert!(!app.board.flattened);
-    app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT));
-    assert!(app.board.flattened);
-    app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT));
-    assert!(!app.board.flattened);
-}
-
-#[test]
-fn shift_f_toggles_flattened_inside_epic_view() {
-    let mut app = App::new(vec![]);
-    app.board.epics = vec![make_epic(10)];
-    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
-        EpicId(10),
-    )));
-    app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT));
-    assert!(app.board.flattened);
 }
 
 #[test]
@@ -345,18 +320,14 @@ fn toggle_flattened_clamps_selection_in_backlog() {
 
     // Toggle flatten: backlog is excluded from flattening, so epic card stays.
     // Count stays 1 and row 0 remains valid.
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::ToggleFlattened,
-    ));
-    assert!(app.board.flattened);
+    flip_flattened(&mut app);
+    assert!(app.filter.lens.flattened());
     assert_eq!(app.selected_row()[0], 0);
 
     // Set row out-of-bounds, then toggle back to non-flat. Clamping still fires.
     app.selection_mut().set_row(1, 5);
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::ToggleFlattened,
-    ));
-    assert!(!app.board.flattened);
+    flip_flattened(&mut app);
+    assert!(!app.filter.lens.flattened());
     let count = app
         .view()
         .column_items_for_status(TaskStatus::Backlog)
@@ -369,30 +340,32 @@ fn toggle_flattened_clamps_selection_in_backlog() {
 fn flattened_survives_enter_and_exit_epic() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::ToggleFlattened,
-    ));
-    assert!(app.board.flattened);
+    flip_flattened(&mut app);
+    assert!(app.filter.lens.flattened());
 
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
         EpicId(10),
     )));
-    assert!(app.board.flattened, "flatten should persist into epic view");
+    assert!(
+        app.filter.lens.flattened(),
+        "flatten should persist into epic view"
+    );
 
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Exit));
-    assert!(app.board.flattened, "flatten should persist back to board");
+    assert!(
+        app.filter.lens.flattened(),
+        "flatten should persist back to board"
+    );
 }
 
 #[test]
 fn flattened_survives_refresh_tasks() {
     let mut app = App::new(vec![]);
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::ToggleFlattened,
-    ));
-    assert!(app.board.flattened);
+    flip_flattened(&mut app);
+    assert!(app.filter.lens.flattened());
 
     app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
         vec![make_task(1, TaskStatus::Backlog)],
     )));
-    assert!(app.board.flattened);
+    assert!(app.filter.lens.flattened());
 }

@@ -329,7 +329,6 @@ impl App {
                 repo_paths: Vec::new(),
                 repo_base_branches: HashMap::new(),
                 split: SplitState::default(),
-                flattened: false,
                 work_packages: Vec::new(),
                 work_package_links: Vec::new(),
             },
@@ -542,7 +541,7 @@ impl App {
     }
 
     pub fn filter_only_active(&self) -> bool {
-        self.filter.only_active
+        self.filter.lens.only_active()
     }
 
     /// Bootstrap-only carve-out: set during runtime startup from the saved

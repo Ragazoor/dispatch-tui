@@ -486,7 +486,7 @@ fn flat_view_epic_headers() {
     t2.epic_id = Some(EpicId(10));
     t2.sort_order = Some(20);
     app.board.tasks = vec![t1, t2];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
     app.selection_mut().set_column(2); // Running column
 
     let rendered = render_to_string(&mut app, 120, 40);
@@ -509,7 +509,7 @@ fn flat_view_nested_epic_header() {
     t1.epic_id = Some(EpicId(20));
     t1.sort_order = Some(10);
     app.board.tasks = vec![t1];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
     app.selection_mut().set_column(2); // Running column
 
     let rendered = render_to_string(&mut app, 120, 40);
@@ -529,7 +529,7 @@ fn flat_view_orphan_separator() {
     let mut t2 = make_task(2, TaskStatus::Running);
     t2.epic_id = None; // orphan — should trigger OrphanSeparator
     app.board.tasks = vec![t1, t2];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
     app.selection_mut().set_column(2); // Running column
 
     let rendered = render_to_string(&mut app, 120, 40);
@@ -548,7 +548,7 @@ fn flat_view_backlog_shows_epic_card() {
     let mut t1 = make_task(1, TaskStatus::Backlog);
     t1.epic_id = Some(EpicId(10));
     app.board.tasks = vec![t1];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
     app.selection_mut().set_column(1); // Backlog column
 
     let rendered = render_to_string(&mut app, 120, 40);
@@ -568,7 +568,7 @@ fn flat_view_done_shows_the_task_not_the_epic_card() {
     let mut t1 = make_task(1, TaskStatus::Done);
     t1.epic_id = Some(EpicId(10));
     app.board.tasks = vec![t1];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
     app.selection_mut().set_column(4); // Done column
 
     let rendered = render_to_string(&mut app, 120, 40);
@@ -612,7 +612,7 @@ fn flat_view_substatus_indicators_above_epic_headers() {
     t3.sort_order = Some(30);
 
     app.board.tasks = vec![t1, t2, t3];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
     app.selection_mut().set_column(2); // Running = nav col 2
 
     let rendered = render_to_string(&mut app, 120, 40);

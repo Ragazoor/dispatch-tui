@@ -57,7 +57,7 @@ fn flattened_board_respects_repo_filter() {
     out_repo.epic_id = Some(EpicId(10));
     out_repo.repo_path = "/excluded".to_string();
     app.board.tasks = vec![in_repo, out_repo];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
     app.filter.repos = vec!["/included".to_string()].into_iter().collect();
 
     let visible = app.view().tasks_for_current_view();
@@ -692,7 +692,7 @@ fn handle_key_repo_filter_routes_correctly() {
 fn filter_state_task_matches_only_active_false_always_passes() {
     use crate::tui::FilterState;
     let state = FilterState::default();
-    assert!(!state.only_active);
+    assert!(!state.lens.only_active());
     let mut t = make_task(1, TaskStatus::Running);
     t.tmux_window = None;
     assert!(state.task_matches(&t));
@@ -704,7 +704,7 @@ fn filter_state_task_matches_only_active_false_always_passes() {
 fn filter_state_task_matches_only_active_true_requires_tmux_window() {
     use crate::tui::FilterState;
     let state = FilterState {
-        only_active: true,
+        lens: crate::tui::types::Lens::Active,
         ..Default::default()
     };
 
@@ -730,17 +730,13 @@ fn handle_key_confirm_delete_repo_path_routes_correctly() {
 #[test]
 fn toggle_only_active_flips_flag() {
     let mut app = make_app();
-    assert!(!app.filter.only_active);
+    assert!(!app.filter.lens.only_active());
 
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::ToggleOnlyActive,
-    ));
-    assert!(app.filter.only_active);
+    flip_only_active(&mut app);
+    assert!(app.filter.lens.only_active());
 
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::ToggleOnlyActive,
-    ));
-    assert!(!app.filter.only_active);
+    flip_only_active(&mut app);
+    assert!(!app.filter.lens.only_active());
 }
 
 #[test]
@@ -831,51 +827,6 @@ fn repo_filter_overlay_repo_row_has_cursor_at_cursor_zero() {
 }
 
 // ---------------------------------------------------------------------------
-// Direct keybinding for only_active filter
-// ---------------------------------------------------------------------------
-
-#[test]
-fn shift_a_in_normal_mode_toggles_only_active() {
-    let mut app = make_app();
-    assert!(!app.filter.only_active);
-
-    app.handle_key(make_key(KeyCode::Char('A')));
-    assert!(app.filter.only_active);
-
-    app.handle_key(make_key(KeyCode::Char('A')));
-    assert!(!app.filter.only_active);
-}
-
-#[test]
-fn shift_a_does_not_toggle_only_active_in_repo_filter_mode() {
-    let mut app = make_app();
-    app.input.mode = InputMode::RepoFilter;
-
-    app.handle_key(make_key(KeyCode::Char('A')));
-    assert!(
-        !app.filter.only_active,
-        "A in repo filter mode must not toggle only_active"
-    );
-}
-
-#[test]
-fn shift_a_in_epic_view_toggles_only_active() {
-    let mut app = make_app();
-    app.board.epics = vec![make_epic(10)];
-    app.board.view_mode = crate::tui::types::ViewMode::Epic {
-        epic_id: EpicId(10),
-        selection: crate::tui::types::BoardSelection::new_for_epic(),
-        parent: Box::new(crate::tui::types::ViewMode::Board(
-            crate::tui::types::BoardSelection::new(),
-        )),
-    };
-
-    assert!(!app.filter.only_active);
-    app.handle_key(make_key(KeyCode::Char('A')));
-    assert!(app.filter.only_active);
-}
-
-// ---------------------------------------------------------------------------
 // Epic-in-epic: TUI navigation tests
 // ---------------------------------------------------------------------------
 
@@ -961,7 +912,7 @@ fn only_active_filter_hides_tasks_without_tmux_window() {
     let mut t3 = make_task(3, TaskStatus::Backlog);
     t3.tmux_window = None;
     app.board.tasks = vec![t1, t2, t3];
-    app.filter.only_active = true;
+    app.filter.lens = app.filter.lens.with_only_active(true);
 
     let visible = app.view().tasks_for_current_view();
     let ids: Vec<_> = visible.iter().map(|t| t.id.0).collect();
@@ -984,7 +935,7 @@ fn only_active_filter_off_shows_all_tasks() {
 #[test]
 fn status_bar_shows_active_badge_when_only_active_enabled() {
     let mut app = make_app();
-    app.filter.only_active = true;
+    app.filter.lens = app.filter.lens.with_only_active(true);
     app.input.mode = InputMode::Normal;
 
     let buf = render_to_buffer(&mut app, 120, 40);
@@ -997,7 +948,7 @@ fn status_bar_shows_active_badge_when_only_active_enabled() {
 #[test]
 fn status_bar_no_active_badge_when_only_active_disabled() {
     let mut app = make_app();
-    app.filter.only_active = false;
+    app.filter.lens = app.filter.lens.with_only_active(false);
     app.input.mode = InputMode::Normal;
 
     let buf = render_to_buffer(&mut app, 120, 40);
@@ -1020,7 +971,7 @@ fn only_active_filter_hides_epic_with_no_active_tasks() {
     t.tmux_window = None;
     app.board.epics = vec![epic];
     app.board.tasks = vec![t];
-    app.filter.only_active = true;
+    app.filter.lens = app.filter.lens.with_only_active(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -1039,7 +990,7 @@ fn only_active_filter_shows_epic_with_active_task() {
     t.tmux_window = Some(test_tmux_window("dispatch:1"));
     app.board.epics = vec![epic];
     app.board.tasks = vec![t];
-    app.filter.only_active = true;
+    app.filter.lens = app.filter.lens.with_only_active(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -1056,7 +1007,7 @@ fn only_active_filter_off_shows_epics_without_active_tasks() {
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Backlog;
     app.board.epics = vec![epic];
-    app.filter.only_active = false;
+    app.filter.lens = app.filter.lens.with_only_active(false);
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -1081,7 +1032,7 @@ fn only_active_filter_column_item_count_excludes_inactive_epics() {
 
     app.board.epics = vec![epic_active, epic_inactive];
     app.board.tasks = vec![t];
-    app.filter.only_active = true;
+    app.filter.lens = app.filter.lens.with_only_active(true);
 
     let count = app.view().column_item_count(TaskStatus::Backlog);
     assert_eq!(
@@ -1109,7 +1060,7 @@ fn only_active_filter_shows_root_epic_when_grandchild_task_is_active() {
 
     app.board.epics = vec![root_epic, sub_epic];
     app.board.tasks = vec![t];
-    app.filter.only_active = true;
+    app.filter.lens = app.filter.lens.with_only_active(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -1143,10 +1094,8 @@ fn filter_and_view_changes_reset_column_scroll_offsets() {
             crate::tui::messages::RepoFilterMessage::Toggle("/repo".to_string()),
         ));
     });
-    check("ToggleOnlyActive", |app| {
-        app.update(Message::RepoFilter(
-            crate::tui::messages::RepoFilterMessage::ToggleOnlyActive,
-        ));
+    check("CycleLens to active", |app| {
+        flip_only_active(app);
     });
     check("CloseRepoFilter", |app| {
         app.input.mode = InputMode::RepoFilter;
@@ -1159,10 +1108,8 @@ fn filter_and_view_changes_reset_column_scroll_offsets() {
             crate::tui::messages::RepoFilterMessage::ToggleMode,
         ));
     });
-    check("ToggleFlattened", |app| {
-        app.update(Message::Task(
-            crate::tui::messages::TaskMessage::ToggleFlattened,
-        ));
+    check("CycleLens to flat", |app| {
+        flip_flattened(app);
     });
 }
 

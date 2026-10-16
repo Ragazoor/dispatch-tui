@@ -84,11 +84,14 @@ impl App {
                 cmds.push(key_event(action, label));
                 cmds
             }
-            "filter_active" => keyed(
+            "cycle_lens_forward" => keyed(
                 self,
-                Message::RepoFilter(RepoFilterMessage::ToggleOnlyActive),
+                Message::Task(TaskMessage::CycleLens(MoveDirection::Forward)),
             ),
-            "toggle_flattened" => keyed(self, Message::Task(TaskMessage::ToggleFlattened)),
+            "cycle_lens_backward" => keyed(
+                self,
+                Message::Task(TaskMessage::CycleLens(MoveDirection::Backward)),
+            ),
             "toggle_help" => keyed(self, Message::System(SystemMessage::ToggleHelp)),
             "toggle_split_mode" => keyed(self, Message::Split(SplitMessage::Toggle)),
             "detach_tmux" => {

@@ -395,7 +395,7 @@ fn reparent_target_epics_excludes_only_active_filtered_epic() {
     inactive.epic_id = Some(EpicId(30));
     inactive.tmux_window = None; // no live session — what only_active filters on
     app.board.tasks = vec![active, inactive];
-    app.filter.only_active = true;
+    app.filter.lens = app.filter.lens.with_only_active(true);
 
     let ids = target_ids(&app, EpicId(10));
     assert_eq!(
@@ -486,7 +486,7 @@ fn flattened_board_surfaces_done_subtasks() {
     running_subtask.epic_id = Some(EpicId(10));
     app.board.tasks = vec![standalone, done_subtask, running_subtask];
     app.board.epics = vec![make_epic(10)];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let ids = visible_task_ids(&app);
     assert!(
@@ -512,7 +512,7 @@ fn flattened_board_drops_epic_cards_from_done() {
     let mut done_subtask = make_task(1, TaskStatus::Done);
     done_subtask.epic_id = Some(EpicId(10));
     app.board.tasks = vec![done_subtask];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Done);
     assert!(
@@ -546,7 +546,7 @@ fn flattened_epic_view_done_shows_the_whole_subtree() {
     let mut nested_running = make_task(3, TaskStatus::Running);
     nested_running.epic_id = Some(EpicId(20));
     app.board.tasks = vec![direct, nested, nested_running];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
     app.handle_enter_epic(EpicId(10));
 
     let ids = visible_task_ids(&app);

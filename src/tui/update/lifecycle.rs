@@ -461,13 +461,19 @@ impl App {
         vec![]
     }
 
-    pub(in crate::tui) fn handle_toggle_flattened(&mut self) -> Vec<Command> {
-        self.board.flattened = !self.board.flattened;
-        // Column item counts change when toggling (epics hidden / shown, and
-        // tasks from the subtree merged in / split out), so selection row
-        // indices may be out of bounds. Sync to follow the anchor.
+    /// Step the board lens one place (`board-layout.allium`: CycleLensForward,
+    /// CycleLensBackward).
+    pub(in crate::tui) fn handle_cycle_lens(&mut self, direction: MoveDirection) -> Vec<Command> {
+        self.filter.lens = match direction {
+            MoveDirection::Forward => self.filter.lens.next(),
+            MoveDirection::Backward => self.filter.lens.previous(),
+        };
+        // Column item counts change with the lens (epics hidden / shown, tasks
+        // from the subtree merged in / split out, idle tasks dropped), so
+        // selection row indices may be out of bounds. Sync to follow the anchor.
         self.sync_board_selection();
         self.reset_column_scroll();
+        self.dirty = true;
         vec![]
     }
 }

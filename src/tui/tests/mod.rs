@@ -1,6 +1,7 @@
 pub mod scenarios;
 pub mod snapshots;
 
+mod board_lens;
 mod budget;
 mod column_sections;
 mod commands;

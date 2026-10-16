@@ -74,14 +74,6 @@ impl App {
         vec![]
     }
 
-    pub(in crate::tui) fn handle_toggle_only_active(&mut self) -> Vec<Command> {
-        self.filter.only_active = !self.filter.only_active;
-        self.sync_board_selection();
-        self.reset_column_scroll();
-        self.dirty = true;
-        vec![]
-    }
-
     pub(in crate::tui) fn handle_start_delete_repo_path(&mut self) -> Vec<Command> {
         if self.board.repo_paths.is_empty() {
             return vec![];

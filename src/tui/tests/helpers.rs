@@ -236,3 +236,28 @@ pub(in crate::tui) fn first_bracket_fg(buf: &Buffer, row: u16) -> Option<Color> 
     }
     None
 }
+
+/// Step the lens forward (the Tab path) until flattening is flipped and
+/// only-active is unchanged — what the old `F` toggle did in one press.
+pub(in crate::tui) fn flip_flattened(app: &mut App) {
+    let target = app.filter.lens.with_flattened(!app.filter.lens.flattened());
+    cycle_lens_to(app, target);
+}
+
+/// Step the lens forward (the Tab path) until only-active is flipped and
+/// flattening is unchanged — what the old `A` toggle did in one press.
+pub(in crate::tui) fn flip_only_active(app: &mut App) {
+    let target = app
+        .filter
+        .lens
+        .with_only_active(!app.filter.lens.only_active());
+    cycle_lens_to(app, target);
+}
+
+fn cycle_lens_to(app: &mut App, target: crate::tui::types::Lens) {
+    while app.filter.lens != target {
+        app.update(Message::Task(crate::tui::messages::TaskMessage::CycleLens(
+            crate::tui::types::MoveDirection::Forward,
+        )));
+    }
+}

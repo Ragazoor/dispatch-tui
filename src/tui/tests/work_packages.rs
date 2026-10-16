@@ -180,7 +180,7 @@ fn a_package_whose_work_is_all_filtered_away_falls_back_to_backlog() {
     let mut app = App::new(vec![make_task(3, TaskStatus::Done)]);
     app.board.work_packages = vec![make_package(7, "W")];
     app.board.work_package_links = vec![link(7, task_item(3))];
-    app.filter.only_active = true;
+    app.filter.lens = app.filter.lens.with_only_active(true);
 
     assert_eq!(package_columns(&app, 7), vec![TaskStatus::Backlog]);
 }
@@ -341,7 +341,7 @@ fn a_linked_sub_epic_is_an_epic_card_in_the_package_view() {
 #[test]
 fn flattening_is_not_applied_in_a_package_view() {
     let mut app = board_with_package();
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
     enter_package(&mut app, 7);
 
     let running = app.view().column_items_for_status(TaskStatus::Running);

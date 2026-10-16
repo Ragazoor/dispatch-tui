@@ -236,7 +236,7 @@ fn flat_view_inserts_epic_header_before_group() {
     let mut t2 = make_task(2, TaskStatus::Running);
     t2.epic_id = Some(EpicId(10));
     app.board.tasks = vec![t1, t2];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Running);
     let selectable: Vec<_> = items.iter().filter(|i| i.is_selectable()).collect();
@@ -262,7 +262,7 @@ fn flat_view_header_sorts_before_its_tasks() {
     t.epic_id = Some(EpicId(10));
     t.sort_order = Some(100);
     app.board.tasks = vec![t];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Running);
     let header_pos = items
@@ -291,7 +291,7 @@ fn flat_view_standalone_task_interleaves_by_sort_order() {
     subtask.sort_order = Some(300);
 
     app.board.tasks = vec![standalone, subtask];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Running);
     // epic group comes first, orphan (no epic in board) sorts last with epic_sk = i64::MAX.
@@ -317,7 +317,7 @@ fn flat_view_two_epics_get_two_headers() {
     let mut tb = make_task(2, TaskStatus::Running);
     tb.epic_id = Some(EpicId(20));
     app.board.tasks = vec![ta, tb];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Running);
     let headers: Vec<_> = items
@@ -335,7 +335,7 @@ fn flat_view_no_header_when_epic_has_no_tasks_in_column() {
     let mut t = make_task(1, TaskStatus::Running);
     t.epic_id = Some(EpicId(10));
     app.board.tasks = vec![t];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let backlog = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -353,7 +353,7 @@ fn flat_view_orphan_task_treated_as_standalone() {
     let mut orphan = make_task(1, TaskStatus::Running);
     orphan.epic_id = Some(EpicId(99));
     app.board.tasks = vec![orphan];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Running);
     let selectable: Vec<_> = items.iter().filter(|i| i.is_selectable()).collect();
@@ -375,7 +375,7 @@ fn flat_view_tie_break_by_epic_id_when_sort_orders_equal() {
     let mut tb = make_task(2, TaskStatus::Running);
     tb.epic_id = Some(EpicId(20));
     app.board.tasks = vec![ta, tb];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Running);
     let headers: Vec<EpicId> = items
@@ -417,7 +417,7 @@ fn flat_view_selected_column_item_skips_headers() {
     let mut t = make_task(1, TaskStatus::Running);
     t.epic_id = Some(EpicId(10));
     app.board.tasks = vec![t];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     // Items are [SubstatusLabel, EpicHeader(10), Task(1)]. selected_row=0 should give Task(1).
     app.selection_mut().set_column(2); // Running = nav col 2
@@ -450,7 +450,7 @@ fn flat_view_review_substatus_label_precedes_epic_header() {
     t2.sub_status = SubStatus::Approved; // sorts first
 
     app.board.tasks = vec![t1, t2];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Review);
     // Expected: SubstatusLabel(approved), EpicHeader, Task(2),
@@ -515,7 +515,7 @@ fn flat_view_epic_repeated_across_substatus_groups() {
     t2.sub_status = SubStatus::Active; // priority 5
 
     app.board.tasks = vec![t1, t2];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Running);
     let epic_header_count = items
@@ -540,7 +540,7 @@ fn flat_view_backlog_no_substatus_labels() {
     t1.epic_id = Some(EpicId(10));
 
     app.board.tasks = vec![t1];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -783,7 +783,7 @@ fn append_only_marker_survives_a_flattened_epic_view() {
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
         EpicId(1),
     )));
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let buf = render_to_buffer(&mut app, 120, 30);
     let row = buffer_line(&buf, 0);
@@ -854,7 +854,7 @@ fn flat_view_emits_orphan_separator_between_epic_and_orphan_tasks() {
     let mut t2 = make_task(2, TaskStatus::Running);
     t2.epic_id = None; // orphan
     app.board.tasks = vec![t1, t2];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Running);
 
@@ -892,7 +892,7 @@ fn flat_view_no_orphan_separator_when_only_orphan_tasks() {
     let t2 = make_task(2, TaskStatus::Backlog);
     // both tasks have epic_id = None (make_task default)
     app.board.tasks = vec![t1, t2];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
 
@@ -929,7 +929,7 @@ fn flat_view_orphan_separator_resets_on_substatus_boundary() {
     t3.sub_status = SubStatus::Active;
 
     app.board.tasks = vec![t1, t2, t3];
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Running);
 

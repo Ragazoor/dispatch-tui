@@ -379,16 +379,16 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     normal(&["f"], None, "filter_repos", "Filter the board by repo path"),
     normal(
-        &["A"],
+        &["Tab"],
         None,
-        "filter_active",
-        "Toggle the filter that shows only tasks with an active tmux session",
+        "cycle_lens_forward",
+        "Step the board lens forward: everything, active (only tasks with a live session), flat (Running, Review and Done list every task as a plain card instead of grouping subtasks under their epic; Backlog is never flattened), flat + active, and back to everything",
     ),
     normal(
-        &["F"],
+        &["BackTab"],
         None,
-        "toggle_flattened",
-        "Toggle the flat view: in the Running, Review and Done columns show every task as a plain card instead of grouping subtasks under their epic. Backlog is never flattened",
+        "cycle_lens_backward",
+        "Step the board lens back: everything, flat + active, flat, active, and back to everything",
     ),
     normal(
         &["N"],

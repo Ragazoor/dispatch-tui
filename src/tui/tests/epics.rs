@@ -1,6 +1,6 @@
 use super::*;
 use crate::models::{test_tmux_window, EpicId, SubStatus, TaskId, TaskStatus};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
 use ratatui::style::{Color, Modifier};
 
 mod feed_trigger;

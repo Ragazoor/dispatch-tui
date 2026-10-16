@@ -33,7 +33,8 @@ pub enum TaskMessage {
     Delete(TaskId),
     OpenDetail(TaskId),
     CloseDetail,
-    ToggleFlattened,
+    /// Step the board lens forward (Tab) or back (BackTab).
+    CycleLens(MoveDirection),
     WindowGone(TaskId),
     Refresh(Vec<Task>),
     /// Splice a single fresh task into `app.board.tasks`.
@@ -137,7 +138,7 @@ impl TaskMessage {
             TaskMessage::Delete(id) => app.handle_delete_task(id),
             TaskMessage::OpenDetail(task_id) => app.handle_open_task_detail(task_id),
             TaskMessage::CloseDetail => app.handle_close_task_detail(),
-            TaskMessage::ToggleFlattened => app.handle_toggle_flattened(),
+            TaskMessage::CycleLens(direction) => app.handle_cycle_lens(direction),
             TaskMessage::WindowGone(id) => app.handle_window_gone(id),
             TaskMessage::Refresh(tasks) => app.handle_refresh_tasks(tasks),
             TaskMessage::Updated(task) => app.handle_task_updated(*task),

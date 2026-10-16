@@ -152,7 +152,7 @@ fn a_column_the_only_active_filter_emptied_loses_the_epic_card() {
         "unfiltered"
     );
 
-    app.filter.only_active = true;
+    app.filter.lens = app.filter.lens.with_only_active(true);
 
     assert_eq!(
         epic_columns(&app, 1),
@@ -249,7 +249,7 @@ fn sub_epic_cards_inside_an_epic_view_are_placed_per_column() {
 #[test]
 fn flattened_done_column_surfaces_descendant_tasks_and_drops_the_epic_card() {
     let mut app = app_with_epic_spread_over_all_columns();
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Done);
     assert!(
@@ -267,7 +267,7 @@ fn flattened_done_column_surfaces_descendant_tasks_and_drops_the_epic_card() {
 #[test]
 fn flattened_backlog_keeps_its_epic_cards() {
     let mut app = app_with_epic_spread_over_all_columns();
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -288,7 +288,7 @@ fn flattened_backlog_keeps_its_epic_cards() {
 fn flattened_mode_draws_no_card_for_an_epic_with_no_backlog_work() {
     let mut app = App::new(vec![epic_task(1, 1, TaskStatus::Done)]);
     app.board.epics.push(make_epic(1));
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     assert!(
         epic_columns(&app, 1).is_empty(),
@@ -392,7 +392,7 @@ fn an_only_active_change_invalidates_the_placement_cache() {
     let _ = app.cached_epic_stats();
     assert!(app.view().cached_placements().is_some(), "cache is warm");
 
-    app.filter.only_active = true;
+    app.filter.lens = app.filter.lens.with_only_active(true);
 
     assert!(
         app.view().cached_placements().is_none(),

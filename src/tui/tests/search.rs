@@ -325,7 +325,7 @@ fn epic_search_matches_task_hidden_by_only_active_is_not_a_dead_end() {
     active.tmux_window = Some(test_tmux_window("task-11"));
     let mut app = App::new(vec![matching, active]);
     app.board.epics = vec![make_epic_with_title(1, "Billing rework")];
-    app.filter.only_active = true;
+    app.filter.lens = app.filter.lens.with_only_active(true);
     app.search.query = "login".to_string();
     assert!(!app.view().epic_search_matches(EpicId(1)));
 }
@@ -512,7 +512,7 @@ fn search_on_epics_composes_with_only_active_filter() {
         make_epic_with_title(1, "Login redesign"),
         make_epic_with_title(2, "Billing rework"),
     ];
-    app.filter.only_active = true;
+    app.filter.lens = app.filter.lens.with_only_active(true);
     app.search.query = "login".to_string();
     // Both epics have an active subtask (only-active passes); only epic 1's
     // subtask also matches the query — proves the AND is real, not just
@@ -680,7 +680,7 @@ fn flattened_columns_build_no_search_index() {
     // question, so the pass must stay unbuilt even with a query live. Backlog
     // is exempt from flattening, so it still asks.
     let mut app = multi_column_searchable_board();
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
     let builds = count_index_builds(|| {
         for status in [TaskStatus::Running, TaskStatus::Review] {
             let _ = app

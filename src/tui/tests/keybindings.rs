@@ -188,7 +188,7 @@ fn app_for(binding: &KeyBinding) -> App {
             a.epic_id = Some(EpicId(10));
             let mut app = App::new(vec![a]);
             app.board.epics = vec![make_epic(10)];
-            app.board.flattened = true;
+            app.filter.lens = app.filter.lens.with_flattened(true);
             app.selection_mut().set_column(2);
             app.epic_folds.toggle(TaskStatus::Running, EpicId(10));
             app.selection_mut().set_row(2, 0);
@@ -199,7 +199,7 @@ fn app_for(binding: &KeyBinding) -> App {
         Some(C::OnFlattenedTaskCard) => {
             let mut app = app_with_running_task(|t| t.epic_id = Some(EpicId(10)));
             app.board.epics = vec![make_epic(10)];
-            app.board.flattened = true;
+            app.filter.lens = app.filter.lens.with_flattened(true);
             app
         }
         Some(C::OnUnflattenedTaskCard) => {

@@ -327,18 +327,17 @@ fn repo_filter_toggle_via_space_key_sets_dirty() {
 }
 
 #[test]
-fn repo_filter_toggle_only_active_sets_dirty() {
-    use crate::tui::messages::RepoFilterMessage;
-
+fn cycling_the_lens_sets_dirty() {
     let mut app = make_app();
-    app.input.mode = InputMode::RepoFilter;
     app.dirty = false;
 
-    app.update(Message::RepoFilter(RepoFilterMessage::ToggleOnlyActive));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::CycleLens(
+        crate::tui::types::MoveDirection::Forward,
+    )));
 
     assert!(
         app.dirty,
-        "toggling only-active must set dirty; got dirty=false"
+        "cycling the lens must set dirty; got dirty=false"
     );
 }
 

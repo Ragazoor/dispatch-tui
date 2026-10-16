@@ -200,7 +200,7 @@ fn flattened_done_groups_sort_by_their_newest_task() {
     ]);
     app.board.epics.push(make_epic(10));
     app.board.epics.push(make_epic(11));
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     assert_eq!(
         done_cards(&app),
@@ -226,7 +226,7 @@ fn a_flattened_group_is_keyed_on_the_direct_epic_not_the_subtree() {
     app.board.epics.push(make_epic(10));
     app.board.epics.push(sub);
     app.board.epics.push(make_epic(12));
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     assert_eq!(
         done_cards(&app),
@@ -244,7 +244,7 @@ fn a_flattened_group_ignores_the_epics_own_completion() {
     let mut epic = make_epic(10);
     epic.completed_at = Some(at(50));
     app.board.epics.push(epic);
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     assert_eq!(
         done_cards(&app),
@@ -264,7 +264,7 @@ fn a_flattened_done_orphan_ranks_by_its_own_completion() {
         done_at(3, Some(10), 200),
     ]);
     app.board.epics.push(make_epic(10));
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     assert_eq!(
         done_cards(&app),
@@ -288,7 +288,7 @@ fn a_flattened_orphan_still_sorts_last_outside_done() {
         },
     ]);
     app.board.epics.push(make_epic(10));
-    app.board.flattened = true;
+    app.filter.lens = app.filter.lens.with_flattened(true);
 
     let running: Vec<i64> = app
         .view()

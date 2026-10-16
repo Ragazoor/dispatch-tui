@@ -54,6 +54,76 @@ impl std::str::FromStr for RepoFilterMode {
 }
 
 // ---------------------------------------------------------------------------
+// Lens — how the board is read (`board-layout.allium`, "Board Lens")
+// ---------------------------------------------------------------------------
+
+/// The board's reading mode. The only state behind the only-active filter and
+/// flattening: both are derived from it, never set on their own. Tab steps it
+/// forward, BackTab back. Session-scoped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Lens {
+    #[default]
+    Everything,
+    Active,
+    Flat,
+    FlatActive,
+}
+
+impl Lens {
+    /// Whether only tasks with a live session are shown.
+    pub fn only_active(self) -> bool {
+        matches!(self, Lens::Active | Lens::FlatActive)
+    }
+
+    /// Whether the Running, Review and Done columns are flattened.
+    pub fn flattened(self) -> bool {
+        matches!(self, Lens::Flat | Lens::FlatActive)
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Lens::Everything => Lens::Active,
+            Lens::Active => Lens::Flat,
+            Lens::Flat => Lens::FlatActive,
+            Lens::FlatActive => Lens::Everything,
+        }
+    }
+
+    pub fn previous(self) -> Self {
+        match self {
+            Lens::Everything => Lens::FlatActive,
+            Lens::Active => Lens::Everything,
+            Lens::Flat => Lens::Active,
+            Lens::FlatActive => Lens::Flat,
+        }
+    }
+
+    /// The lens with the given switches. Lets a test say "flattened" without
+    /// naming which of the two flattened lenses it means.
+    #[cfg(test)]
+    pub fn from_switches(only_active: bool, flattened: bool) -> Self {
+        match (only_active, flattened) {
+            (false, false) => Lens::Everything,
+            (true, false) => Lens::Active,
+            (false, true) => Lens::Flat,
+            (true, true) => Lens::FlatActive,
+        }
+    }
+
+    /// This lens with flattening set to `on`, only-active unchanged.
+    #[cfg(test)]
+    pub fn with_flattened(self, on: bool) -> Self {
+        Self::from_switches(self.only_active(), on)
+    }
+
+    /// This lens with only-active set to `on`, flattening unchanged.
+    #[cfg(test)]
+    pub fn with_only_active(self, on: bool) -> Self {
+        Self::from_switches(on, self.flattened())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // EditKind / EditorOutcome — tags for the pop-out editor flow
 // ---------------------------------------------------------------------------
 

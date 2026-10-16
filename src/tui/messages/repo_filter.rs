@@ -12,7 +12,6 @@ pub enum RepoFilterMessage {
     MoveCursor(isize),
     StartDeleteRepoPath,
     DeleteRepoPath(String),
-    ToggleOnlyActive,
 }
 
 impl RepoFilterMessage {
@@ -23,7 +22,6 @@ impl RepoFilterMessage {
             RepoFilterMessage::Close => app.handle_close_repo_filter(),
             RepoFilterMessage::Toggle(path) => app.handle_toggle_repo_filter(path),
             RepoFilterMessage::ToggleMode => app.handle_toggle_repo_filter_mode(),
-            RepoFilterMessage::ToggleOnlyActive => app.handle_toggle_only_active(),
             RepoFilterMessage::MoveCursor(delta) => app.handle_move_repo_cursor(delta),
             RepoFilterMessage::StartDeleteRepoPath => app.handle_start_delete_repo_path(),
             RepoFilterMessage::DeleteRepoPath(path) => app.handle_delete_repo_path(path),

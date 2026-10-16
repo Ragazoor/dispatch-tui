@@ -43,7 +43,7 @@ impl<'a> BoardView<'a> {
     /// flattening would replace the linked epic cards with their contents
     /// (`work-packages.allium: PackageViewCards`).
     pub(in crate::tui) fn is_flattened_for_status(self, status: TaskStatus) -> bool {
-        self.board.flattened
+        self.filter.lens.flattened()
             && !status.is_unflattened()
             && !matches!(self.effective_view_mode(), BoardViewMode::Package { .. })
     }
@@ -116,7 +116,7 @@ impl<'a> BoardView<'a> {
                 // the subtree is worth walking only when some column will use
                 // it. With flattening off, every column takes the else arm and
                 // this stays `None`.
-                let subtree = self.board.flattened.then(|| {
+                let subtree = self.filter.lens.flattened().then(|| {
                     crate::models::descendant_task_ids(
                         current,
                         &self.board.epics,
@@ -315,7 +315,7 @@ impl<'a> BoardView<'a> {
         // and `epic_placements_cache` are both derived through them, so a
         // fingerprint blind to them would let a filter change serve a stale
         // board — the one hazard this fingerprint exists to catch.
-        let mut acc = fnv_fold(acc, self.filter.only_active as u64);
+        let mut acc = fnv_fold(acc, self.filter.lens as u64);
         acc = fnv_fold(acc, self.filter.mode as u64);
         acc = fnv_fold(acc, self.filter.repos.len() as u64);
         // Each repo is hashed on its own and the results combined with XOR, not
@@ -824,7 +824,7 @@ impl<'a> BoardView<'a> {
                 return active_matches;
             }
         }
-        if !self.filter.only_active {
+        if !self.filter.lens.only_active() {
             return true;
         }
         let epic_ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
@@ -1064,7 +1064,7 @@ impl App {
                 .map(|e| {
                     let epic_ids = crate::models::descendant_epic_ids_with_map(e.id, &children_map);
                     let repo_matches = epic_repo_matches_for_ids(tasks, filter, &epic_ids);
-                    let active_matches = if !filter.only_active {
+                    let active_matches = if !filter.lens.only_active() {
                         true
                     } else {
                         epic_active_matches_for_ids(tasks, &epic_ids)
