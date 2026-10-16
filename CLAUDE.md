@@ -16,7 +16,7 @@ cargo test
 cargo run -- tui
 ```
 
-**This repo has a verify command every dispatched agent must run green before declaring work complete — read it from `get_task`'s *Verify command* line, never from this file.** See "Verify Command" below.
+**This repo has a verify command every dispatched agent must run green before declaring work complete — read it from `get_task`'s *Verify command* line, never from this file.** You run it, not dispatch: `wrap_up` neither runs nor checks it. How it is stored and surfaced: [docs/reference.md](docs/reference.md) ("Verify Command"). **If it fails for a reason your change did not cause, including a broken `main`, do not wrap up past it alone and do not just stop.** Coordinate with the other agents and the board: look for a task already fixing it (`list_tasks`, `ListAgents`), and if there is none, propose a fix or create and dispatch a task for it.
 
 **Dispatch-spawned sessions do not run under Claude Code's sandbox** — see `SandboxDisabledForDockerAndUnixSockets` in `docs/specs/dispatch.allium`. If you've enabled the sandbox yourself outside of dispatch, see "Sandbox (historical)" in [docs/reference.md](docs/reference.md).
 
@@ -28,15 +28,9 @@ cargo run -- tui
 
 **Run `cargo test --no-fail-fast`.** Plain `cargo test` stops at the first failing target, so later targets never run. The live-store tests in `tests/spacetime_module.rs` can flake on a one-off transport error (`Connection reset by peer`, or `error sending request … connection error`); `Instance::publish` and `Instance::sql` each retry once on one, so a failure that survives is real.
 
-**Raw coverage includes generated bindings and the module crate.** Pass `--exclude-files 'src/spacetime/bindings/*' --exclude-files 'spacetime/module/*' --timeout 600`, as CI does, or the figure is not comparable to the floor.
+**Run it in the foreground. Warm it takes ~60s; a fresh worktree's first run took ~6 minutes**, past Claude Code's default 120s Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
 
-**`--data-dir` names a directory** (`DISPATCH_DATA_DIR`). The old `--db` flag is gone.
-
-**Warm, `cargo test --no-fail-fast` takes ~60s: the lib target ~5s (5,926 tests), `tests/spacetime_module.rs` ~45s. In a fresh worktree the first run, compile included, took ~6 minutes.** (Measured 2026-10-15: 22 cores, other agents building, warm `sccache`, `spacetime` on `PATH`; without `spacetime` the live-store tests skip.) Run it in the foreground — don't background it. A cold `cargo test` passes 120s, which is Claude Code's default Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
-
-**Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. Always pass `--engine llvm`: the default engine scores ~1.8 points lower than CI's floor assumes. With `spacetime` on `PATH` the live-store targets (`tests/spacetime_module.rs`, `tests/memory_caller_conformance.rs`) run under it too, as in CI; that is slower, not broken, and it is what timed the CI job out on 2026-10-09. Other caveats are in [docs/testing.md](docs/testing.md).
-
-Everything else about tests — the per-target command list, snapshot workflow, where a new test belongs, the no-wall-clock-sleep rule, coverage — is in [docs/testing.md](docs/testing.md).
+Everything else about tests — the per-target command list, snapshot workflow, where a new test belongs, the no-wall-clock-sleep rule, timings, coverage (always `--engine llvm`, plus CI's exclusions) — is in [docs/testing.md](docs/testing.md).
 
 **`main` moves while you work.** Before wrapping up, run `git log --oneline main..HEAD` **and** `git log --oneline HEAD..main`. If the second is non-empty, merge `main` into your branch and re-run the suite. Compare against local `main`, never `origin/main`, and skim new commits' content, not just their files. Why, and the traps: [docs/conventions.md](docs/conventions.md) ("`main` moves while you work").
 
@@ -51,8 +45,6 @@ The pre-push hook (`.githooks/pre-push`) runs `cargo fmt`, `cargo clippy --all-t
 **That `cargo fmt` step has no `--check`.** Pushing reformats your working tree in place, so a push can leave you with unstaged changes you did not make. Run `cargo fmt` yourself before committing and the step becomes a no-op.
 
 **Run the hook's `check-*.sh` scripts before committing, not only before pushing.** A wrap-up rebase lands your commits on `main` without a push, so the hook never runs; two of them (`check-no-test-sleep.sh`, `check-rustdoc-links.sh`) failed on committed `main` on 2026-10-14 this way.
-
-`check-doc-symbols.sh` also scans `///` and `//!` doc comments in `src/`, but not plain `//` comments; backticked lowercase module paths (`db::queries::f`) are checked too.
 
 Cite `path::symbol` (`src/feed/exec.rs::exec_feed_command`) rather than `file:NN` in docs: a symbol is checked against the real file, a line number only for existence. See "`file:NN` vs `path::symbol` citations" in `docs/conventions.md`.
 
@@ -76,23 +68,13 @@ Logs do not go to stderr — stderr belongs to the TUI. They append to `app.log`
 
 ## Store Layering
 
-`store::Store` is the board's one read/write handle (`TaskStore` and friends narrow it). It talks to the shared store through the `sync` adapters: `sync::writes` for reducer calls, `sync::sdk_connector` for the SpacetimeDB SDK. `spacetime/` holds the server lifecycle (`managed_store.rs`), generated `bindings/` and snapshot tooling. `sync/memory_caller/` is the in-memory test double, conformance-checked by `tests/memory_caller_conformance.rs`. See [docs/module-map.md](docs/module-map.md).
+The handles and adapters are summarised at the top of [docs/module-map.md](docs/module-map.md).
 
 **Direction of travel:** rules about shared data belong in the SpacetimeDB module's reducers; the TUI keeps only work that needs the operator's machine (git, tmux, claude, gh, local files). Don't add new data rules to `src/service/`. A data rule lives in `spacetime/module/src/`; mirror any change to it in `src/sync/memory_caller/` and cover the pair in `tests/memory_caller_conformance.rs`. `RULES_VERSION` (`spacetime/module/src/rules.rs`) and `BOARD_RULES_VERSION` (`src/sync/rules_gate.rs`) move together, by hand; the module constant says what warrants a bump. The target and its migration steps are in `docs/specs/store-split.allium` (epic #32769).
 
 ## External Dependencies
 
 **tmux**, **git**, **gh**, and **claude** must be on `PATH` at runtime. There is **no startup preflight** — nothing checks binary availability, so a missing binary surfaces as a failed shell command mid-operation. Per-binary detail (which module calls what, and the two load-bearing `claude` flags) is under "External Dependencies" in [docs/reference.md](docs/reference.md).
-
-Dispatched agents do not run under Claude Code's sandbox mode (see "Build & Test" above). `bubblewrap` and `socat` on `PATH` (`sudo dnf install bubblewrap socat` on Fedora) only matter if you re-enable the sandbox yourself — see `SandboxedAgentExecution` in `docs/specs/dispatch.allium`; if either is missing, Claude Code warns and silently falls back to running unsandboxed rather than failing to start.
-
-POSIX-only. Embeddings/RAG (`src/embeddings.rs`) run **locally** — `fastembed` does inference in-process, no API key, no per-call network I/O. The only network activity is a one-time model download on first init.
-
-## Verify Command
-
-Read it from `get_task`'s "Verify command" line, never from this file; how it is stored and surfaced is in [docs/reference.md](docs/reference.md) ("Verify Command").
-
-**You run it, not dispatch.** `wrap_up` does not run or check the verify command; run it in your worktree before you commit and wrap up (the wrap-up skill's Step 6). **If it fails for a reason your change did not cause, including a broken `main`, do not wrap up past it alone and do not just stop.** Coordinate with the other agents and the board: look for a task already fixing it (`list_tasks`, `ListAgents`), and if there is none, propose a fix or create and dispatch a task for it. Use judgement; there is no fixed procedure.
 
 ## Working With the User
 
@@ -102,9 +84,7 @@ The most important thing is to stay aligned with the user. The Allium specs in `
 - **Behaviour changes start in the spec.** Spec first, then tests, then code. This applies to UI and interaction behaviour too — that is a first-class Allium surface, not a prose note.
 - **Agreement gets recorded, in one of two places.** A decision about *what the system does* goes into the relevant `docs/specs/*.allium` file. A decision about *how to work in this repo* — a convention, a pitfall, a gotcha that would trip the next agent — goes into the knowledge base via `record_learning`. A decision that lives only in the conversation is lost the moment the session ends.
 
-## Allium Specification
-
-The Allium specs in `docs/specs/` are the **source of truth** for domain and interaction behaviour. Each filename names its domain — `tasks.allium`, `dispatch.allium`, `epics.allium`, `feeds.allium`, and so on; `core.allium` holds the shared domain model. Consult the relevant spec before changing core behaviour, and use the `allium:tend` and `allium:weed` skills to keep spec and code aligned.
+Each spec filename names its domain (`tasks.allium`, `dispatch.allium`, …); `core.allium` holds the shared domain model. The `allium:tend` and `allium:weed` skills keep spec and code aligned.
 
 ## MCP Tools for Agents
 
@@ -116,10 +96,8 @@ The `dispatch` MCP server's tool descriptions say what each tool does; call `too
 
 ## Agent Working Directory
 
-Dispatched agents always work from their worktree folder. Every prompt includes an instruction to stay in the worktree and not `cd` to the parent repo. The tmux window's *starting* cwd is test-covered: `src/dispatch/tests/agent_launch.rs::dispatch_agent_opens_tmux_window_in_worktree_not_parent_repo` asserts the window opens inside the task worktree, never the bare parent repo. Runtime `cd`-escape prevention — an agent later `cd`ing out of the worktree — remains prompt-instruction only, with no test asserting against it.
-
 <!-- allow-phantom-symbol: file_path names a Claude Code tool parameter, not a repo symbol -->
-**A second, easier way to leave the worktree: an absolute Read/Edit/Write `file_path` missing the `.worktrees/<id>-<slug>/` segment.** The parent repo's path and the worktree's path both look like valid absolute paths and differ only by that one segment, but using the former silently edits the parent checkout instead of the worktree — the tool reports success and even Read echoes the change back, so nothing looks wrong until a shell command (`git status`, `cargo build`) run against the *worktree* path shows no change. If the parent checkout has any auto-commit/snapshot tooling watching it, a stray edit like this can land on shared `main` before anyone notices. Always build `file_path` from the worktree's own absolute path (e.g. from `pwd`), never assume the parent repo's path with the task ID spliced in.
+**The easy way to leave the worktree is not `cd`: it is an absolute Read/Edit/Write `file_path` missing the `.worktrees/<id>-<slug>/` segment.** That path silently edits the parent checkout, and the tool reports success — even Read echoes the change back — until `git status` in the worktree shows nothing. Build `file_path` from the worktree's own absolute path (e.g. from `pwd`), never from the parent repo's path with the task ID spliced in.
 
 ## Documentation
 

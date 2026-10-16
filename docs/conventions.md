@@ -697,7 +697,7 @@ Two details worth knowing. The walk climbs to the root rather than reading one r
 
 ## No phantom symbol references in docs
 
-`./scripts/check-doc-symbols.sh` (pre-push) rejects a backticked snake_case identifier that occurs **nowhere in the code**. It covers `CLAUDE.md`, the topic files under `docs/`, `docs/specs/*.allium`, and the doc comments (`///`, `//!`) in `src/**/*.rs`. It exists because `check-doc-paths.sh` validates paths but never symbol names, which is how two phantom function names survived until #3806 removed them by hand.
+`./scripts/check-doc-symbols.sh` (pre-push) rejects a backticked snake_case identifier that occurs **nowhere in the code**. It covers `CLAUDE.md`, the topic files under `docs/`, `docs/specs/*.allium`, and the doc comments (`///`, `//!`) in `src/**/*.rs` — not plain `//` comments. Backticked lowercase module paths (`db::queries::f`) are checked too. It exists because `check-doc-paths.sh` validates paths but never symbol names, which is how two phantom function names survived until #3806 removed them by hand.
 
 It is a **phantom check, not a definition check** — it asks "does this identifier occur in the code at all", not "is this a function". Matching against `fn <name>` definitions drowns in false positives (struct fields, enum variants, config keys, test helpers). The accepted tradeoff is a false negative: a renamed symbol whose old name still occurs somewhere in the code passes.
 

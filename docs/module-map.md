@@ -6,6 +6,14 @@ share a job. It is deliberately *not* one row per file (there are over 200
 `.rs` files); if a file you need is not listed, its directory's row says where
 to look.
 
+**Store layering, in one paragraph.** `store::Store` is the board's one
+read/write handle (`TaskStore` and friends narrow it). It talks to the shared
+store through the `sync` adapters: `sync::writes` for reducer calls,
+`sync::sdk_connector` for the SpacetimeDB SDK. `spacetime/` holds the server
+lifecycle (`managed_store.rs`), generated `bindings/` and snapshot tooling.
+`sync/memory_caller/` is the in-memory test double, conformance-checked by
+`tests/memory_caller_conformance.rs`.
+
 | File | Responsibility |
 |------|---------------|
 | `src/main.rs` | CLI entry point (clap), subcommand dispatch (`tui`, `setup`, `verify-feed`, `repo`, …), global `--data-dir` flag, `app.log` tracing subscriber |

@@ -242,8 +242,9 @@ pub(super) fn tdd_instruction() -> &'static str {
 // update_tasks)" line here any more. Both tools reach the agent as real tool
 // schemas, and naming them again in prompt prose shadows that list: it states
 // no fact the schema lacks, and it goes stale the moment the tool set changes.
-// `get_task`'s own description now carries what the prose was standing in for —
-// what the response looks like and which of its lines matter.
+// Which of `get_task`'s response lines matter is the wrap-up skill's to say,
+// not the tool description's — see
+// `get_task_description_quotes_only_labels_the_renderer_emits`.
 
 /// One-line knowledge-base nudge for dispatched agents. The earlier
 /// seven-skill checkpoint list saw <2 invocations each across hundreds

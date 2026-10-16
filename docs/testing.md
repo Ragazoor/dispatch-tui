@@ -2,8 +2,8 @@
 
 Everything about running, writing, and placing tests in this repo. `CLAUDE.md`
 keeps only the facts that change what you type at the prompt or how you wait
-for it (the suite needs `tmux`; never pipe `cargo test` into `tail`; the lib
-target runs in ~10s, a cold full run in ~80s, so run it in the foreground);
+for it (the suite needs `tmux`; never pipe `cargo test` into `tail`; run it in
+the foreground, with an explicit timeout on a fresh worktree's first run);
 the rest lives here.
 
 ## Running tests
@@ -44,9 +44,14 @@ The sandbox has a second, less legible failure mode: a plain `grep`/`cargo` invo
 
 Pick that redirect target with care under the sandbox: bare `/tmp` is **not** writable, and neither `$TMPDIR` nor the session scratchpad path is reliably expanded in a sandboxed shell (both fail as `Permission denied` / `No such file or directory` *before* the suite runs, which looks nothing like a sandbox problem). `mkdir -p /tmp/claude-1000/<something>` first and redirect there, or disable the sandbox for the run.
 
-**The full suite takes ~20 seconds — run it in the foreground.** It used to take
-5 minutes, which is why so much of the advice you may have seen elsewhere is
-about managing a backgrounded run. Don't background it: the Bash tool's
+**Warm, `cargo test --no-fail-fast` takes ~60s — run it in the foreground.** The
+lib target is ~5s (5,926 tests) and `tests/spacetime_module.rs` ~45s. In a fresh
+worktree the first run, compile included, took ~6 minutes, which passes Claude
+Code's default 120s Bash timeout. (Measured 2026-10-15: 22 cores, other agents
+building, warm `sccache`, `spacetime` on `PATH`; without `spacetime` the
+live-store tests skip.) A warm run used to take 5 minutes, which is why so much of the
+advice you may have seen elsewhere is about managing a backgrounded run. Don't
+background it: the Bash tool's
 <!-- allow-phantom-symbol: names the harness's Bash tool parameter, not a code symbol -->
 `run_in_background` option buys nothing at this length and costs you the
 failure modes below.

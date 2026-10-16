@@ -18,22 +18,7 @@ package becomes a subtask in an epic, with a plan file attached.
 
 ## Step 1: Extract Review Findings
 
-Read the code review report from conversation context. Extract all findings from the severity sections:
-
-- 🚨 **Blockers** (Must Fix)
-- ⚠️ **High Priority** (Strongly Recommend Fixing)
-- 💡 **Medium Priority** (Consider for Follow-up)
-
-For each finding, extract:
-- **Severity** (blocker / high / medium)
-- **File references** (`file:line` format — some findings may reference multiple files or omit line numbers)
-- **Description** of the issue
-- **Suggestion** for the fix
-
-If no actionable findings exist (only Good Practices), inform the user:
-> "The code review found no actionable issues. Nothing to decompose."
-
-Then exit.
+Read the code review report from conversation context. For each actionable finding (blocker, high or medium), take its severity, its file references (`file:line`; some name several files or omit the line), the issue and the suggested fix. If nothing is actionable, tell the user there is nothing to decompose and stop.
 
 ## Step 2: Group into Work Packages
 
@@ -45,34 +30,9 @@ Group findings by the files they touch:
 4. Order work packages by maximum severity (blockers first, then high, then medium)
 5. Name each work package after its primary directory or module (e.g., "MCP Handler Cleanup", "TUI Rendering Improvements")
 
-## Step 3: Present Work Packages — MANDATORY
+## Step 3: Confirm the Work Packages
 
-**You MUST use the `AskUserQuestion` tool here.** Do NOT skip this step. Do NOT create tasks without user confirmation.
-
-Present a numbered list of work packages. For each, show:
-- Name and finding count by severity
-- File list
-- One-line summary
-
-Example:
-
-> Work packages from code review:
->
-> 1. **MCP Handler Cleanup** — 1 blocker, 2 high priority
->    Files: `src/mcp/handlers/tasks.rs`, `src/mcp/handlers/types.rs`
->    Fix error handling and add missing validation
->
-> 2. **TUI Rendering** — 3 medium priority
->    Files: `src/tui/ui.rs`, `src/tui/mod.rs`
->    Simplify complex rendering logic
->
-> 3. **Database Queries** — 1 high priority
->    Files: `src/db/queries.rs`
->    Fix N+1 query pattern
->
-> Confirm all (Enter), drop by number (e.g. "drop 2"), or merge (e.g. "merge 1 3")?
-
-Wait for the user's response. Apply any adjustments they request (dropping, merging, renaming).
+Nothing is created until the user confirms. Show a numbered list — each package's name, finding count by severity, files and a one-line summary — and ask with `AskUserQuestion` whether to confirm all, drop or merge some. Apply what they ask for. This confirmation is also why Step 6 sets `auto_run_plan`.
 
 ## Step 4: Resolve Repository Path
 
@@ -82,7 +42,7 @@ Resolve the main repository root (not a worktree path):
 git rev-parse --path-format=absolute --git-common-dir
 ```
 
-Strip the trailing `/.git` to get the main repo path. This is critical because `repo_path` on tasks must point to the main repo root so dispatch can create worktrees from it.
+Strip the trailing `/.git` to get the main repo path. `repo_path` on tasks must point to the main repo root so dispatch can create worktrees from it.
 
 ## Step 5: Create Epic
 
