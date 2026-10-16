@@ -221,10 +221,10 @@ impl App {
         repo_path: String,
     ) -> Vec<Command> {
         if self.is_dispatching(task_id)
-            || !self
+            || self
                 .board
                 .find_task(task_id)
-                .is_some_and(|t| t.status == TaskStatus::Backlog)
+                .is_none_or(|t| t.status != TaskStatus::Backlog)
         {
             return vec![];
         }

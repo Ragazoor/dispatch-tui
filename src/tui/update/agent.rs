@@ -490,10 +490,10 @@ impl App {
 
     pub(in crate::tui) fn handle_agent_crashed(&mut self, id: TaskId) -> Vec<Command> {
         // Only applies to Running tasks
-        if !self
+        if self
             .board
             .find_task(id)
-            .is_some_and(|t| t.status == TaskStatus::Running)
+            .is_none_or(|t| t.status != TaskStatus::Running)
         {
             return vec![];
         }
