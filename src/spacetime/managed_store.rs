@@ -582,6 +582,7 @@ impl SpacetimeManagedStore {
         self
     }
 
+    #[cfg(test)]
     pub fn with_timeouts(mut self, start: Duration, stop: Duration) -> Self {
         self.start_timeout = start;
         self.stop_timeout = stop;

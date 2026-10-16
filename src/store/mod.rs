@@ -8,6 +8,7 @@ mod queries;
 /// snapshot code (`src/spacetime/snapshot.rs`) gives the host registry's
 /// columns. Spelled inline there instead, a rename would silently match
 /// nothing rather than fail to compile.
+#[cfg(test)]
 pub(crate) use queries::{HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY};
 
 pub use crate::models::{

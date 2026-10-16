@@ -312,6 +312,7 @@ impl KeyContext {
 
 /// Which axis a context talks about. Contexts on different axes can always
 /// hold together; contexts on one axis overlap only where the table below says.
+#[cfg(test)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ContextAxis {
     /// Which view is showing, and whether a search is active.
@@ -326,6 +327,7 @@ enum ContextAxis {
     Zoom,
 }
 
+#[cfg(test)]
 impl KeyContext {
     fn axis(self) -> ContextAxis {
         use KeyContext::*;
@@ -354,6 +356,7 @@ impl KeyContext {
 /// (ContextsDoNotOverlapForAKey). Contexts on different axes can co-occur,
 /// except that a pane row never combines with a board context. Within one
 /// axis only the pairs listed here overlap; every other pair is exclusive.
+#[cfg(test)]
 pub fn contexts_overlap(a: KeyContext, b: KeyContext) -> bool {
     use KeyContext::*;
     if a == b {

@@ -4,7 +4,7 @@
 //! across a rebuild; it runs no git and draws nothing.
 
 use std::collections::{BTreeSet, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use tui_tree_widget::TreeState;
@@ -52,6 +52,7 @@ impl Notice {
         Self::Diff(text.into())
     }
 
+    #[cfg(test)]
     pub fn agent_list(text: impl Into<String>) -> Self {
         Self::AgentList(text.into())
     }
@@ -60,6 +61,7 @@ impl Notice {
         Self::AgentJump(text.into())
     }
 
+    #[cfg(test)]
     pub fn commit_list(text: impl Into<String>) -> Self {
         Self::CommitList(text.into())
     }
@@ -219,7 +221,8 @@ impl RenderState {
         ordered
     }
 
-    pub fn is_diff_open(&self, path: &Path) -> bool {
+    #[cfg(test)]
+    pub fn is_diff_open(&self, path: &std::path::Path) -> bool {
         self.open_diffs.contains(path)
     }
 

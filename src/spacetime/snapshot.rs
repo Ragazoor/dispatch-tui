@@ -363,6 +363,7 @@ impl SharedTable {
     /// dead `task_shells`, `todos` and `filter_presets`), which is why it
     /// lives here: nothing is assembled from a settings key for them the way
     /// `hosts` is, and the second element of each pair is unused.
+    #[cfg(test)]
     pub fn assembled_columns(self) -> &'static [(&'static str, &'static str)] {
         match self {
             SharedTable::Hosts => &[
@@ -444,6 +445,7 @@ impl SharedTable {
     /// (`spacetime-seed.allium: BackfillTaskOwner`).
     ///
     /// An exhaustive match, so an eleventh table cannot skip the question.
+    #[cfg(test)]
     pub fn module_only_columns(self) -> &'static [&'static str] {
         match self {
             // `owner` is the user board an epic-less task sits on

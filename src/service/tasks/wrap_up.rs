@@ -228,6 +228,7 @@ fn run_verify(
 impl TaskService {
     /// Override how long a `wrap_up` call waits for a verify run. Tests shorten
     /// it; production keeps [`WRAP_UP_VERIFY_WAIT`].
+    #[cfg(test)]
     pub fn with_verify_wait(mut self, wait: Duration) -> Self {
         self.verify_wait = wait;
         self
