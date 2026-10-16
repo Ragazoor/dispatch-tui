@@ -136,6 +136,18 @@ pub(in crate::tui) struct ReparentPickerState {
     pub(in crate::tui) items: Vec<tui_tree_widget::TreeItem<'static, String>>,
 }
 
+impl ReparentPickerState {
+    /// The id of the tree row the cursor is on, `None` before any selection.
+    pub(in crate::tui) fn selected_id(&self) -> Option<String> {
+        self.tree_state.borrow().selected().last().cloned()
+    }
+
+    /// Move the cursor one step in `nav`'s direction.
+    pub(in crate::tui) fn navigate(&self, nav: TreeNav) {
+        crate::tui::types::apply_tree_nav(&mut self.tree_state.borrow_mut(), nav);
+    }
+}
+
 /// State for the move-task-to-epic tree picker overlay (the `m` key on a task
 /// card). Mirrors [`ReparentPickerState`] but targets a task instead of an epic.
 pub(in crate::tui) struct MoveTaskPickerState {

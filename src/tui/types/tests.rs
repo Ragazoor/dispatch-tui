@@ -365,3 +365,59 @@ fn enter_repo_path_step_prefills_from_draft_and_resets_cursor() {
     assert_eq!(bare.buffer, "");
     assert_eq!(bare.mode, InputMode::InputRepoPath);
 }
+
+// -- SelectionState select-all --
+
+#[test]
+fn toggle_all_selects_everything_when_something_is_unselected() {
+    let mut sel = SelectionState::default();
+    sel.tasks.insert(TaskId(1));
+    sel.toggle_all(&[TaskId(1), TaskId(2)], &[EpicId(7)]);
+    assert_eq!(sel.tasks, HashSet::from([TaskId(1), TaskId(2)]));
+    assert_eq!(sel.epics, HashSet::from([EpicId(7)]));
+}
+
+#[test]
+fn toggle_all_deselects_only_the_given_ids_when_all_are_selected() {
+    let mut sel = SelectionState::default();
+    sel.tasks.extend([TaskId(1), TaskId(2), TaskId(3)]);
+    sel.epics.insert(EpicId(7));
+    sel.toggle_all(&[TaskId(1), TaskId(2)], &[EpicId(7)]);
+    assert_eq!(sel.tasks, HashSet::from([TaskId(3)]));
+    assert!(sel.epics.is_empty());
+}
+
+#[test]
+fn toggle_all_with_nothing_given_changes_nothing() {
+    let mut sel = SelectionState::default();
+    sel.tasks.insert(TaskId(1));
+    sel.toggle_all(&[], &[]);
+    assert_eq!(sel.tasks, HashSet::from([TaskId(1)]));
+}
+
+// -- ReparentPickerState --
+
+fn reparent_picker(ids: &[&str]) -> crate::tui::ReparentPickerState {
+    let items = ids
+        .iter()
+        .map(|id| tui_tree_widget::TreeItem::new_leaf(id.to_string(), id.to_string()))
+        .collect();
+    let mut tree_state = tui_tree_widget::TreeState::default();
+    tree_state.select_first();
+    crate::tui::ReparentPickerState {
+        epic_id: EpicId(1),
+        tree_state: std::cell::RefCell::new(tree_state),
+        items,
+    }
+}
+
+#[test]
+fn reparent_picker_selected_id_is_the_last_path_segment() {
+    let picker = reparent_picker(&["epic:2", "epic:3"]);
+    assert_eq!(picker.selected_id(), None);
+    picker
+        .tree_state
+        .borrow_mut()
+        .select(vec!["epic:3".to_string()]);
+    assert_eq!(picker.selected_id().as_deref(), Some("epic:3"));
+}

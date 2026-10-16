@@ -376,7 +376,7 @@ impl App {
 
     pub(in crate::tui) fn handle_reparent_navigate(&mut self, nav: TreeNav) -> Vec<Command> {
         if let Some(picker) = &self.interaction.reparent_picker {
-            crate::tui::types::apply_tree_nav(&mut picker.tree_state.borrow_mut(), nav);
+            picker.navigate(nav);
             self.dirty = true;
         }
         vec![]
@@ -392,7 +392,7 @@ impl App {
             .interaction
             .reparent_picker
             .as_ref()
-            .and_then(|p| p.tree_state.borrow().selected().last().cloned());
+            .and_then(|p| p.selected_id());
 
         let new_parent: Option<EpicId> = match selected_id.as_deref() {
             Some(s) if s != crate::tui::types::REPARENT_NO_PARENT_SENTINEL => s

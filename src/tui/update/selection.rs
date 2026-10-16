@@ -233,26 +233,7 @@ impl App {
                 | ColumnItem::OrphanSeparator => {}
             }
         }
-        if task_ids.is_empty() && epic_ids.is_empty() {
-            return vec![];
-        }
-        let all_tasks_selected = task_ids.iter().all(|id| self.select.tasks.contains(id));
-        let all_epics_selected = epic_ids.iter().all(|id| self.select.epics.contains(id));
-        if all_tasks_selected && all_epics_selected {
-            for id in &task_ids {
-                self.select.tasks.remove(id);
-            }
-            for id in &epic_ids {
-                self.select.epics.remove(id);
-            }
-        } else {
-            for id in task_ids {
-                self.select.tasks.insert(id);
-            }
-            for id in epic_ids {
-                self.select.epics.insert(id);
-            }
-        }
+        self.select.toggle_all(&task_ids, &epic_ids);
         vec![]
     }
 

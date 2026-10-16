@@ -539,6 +539,28 @@ impl SelectionState {
         }
     }
 
+    /// Select-all for one column: if every given item is already selected,
+    /// deselect exactly those; otherwise select them all. Items outside the
+    /// column keep their state. Given nothing, changes nothing.
+    pub(in crate::tui) fn toggle_all(&mut self, tasks: &[TaskId], epics: &[EpicId]) {
+        if tasks.is_empty() && epics.is_empty() {
+            return;
+        }
+        let all_selected = tasks.iter().all(|id| self.tasks.contains(id))
+            && epics.iter().all(|id| self.epics.contains(id));
+        if all_selected {
+            for id in tasks {
+                self.tasks.remove(id);
+            }
+            for id in epics {
+                self.epics.remove(id);
+            }
+        } else {
+            self.tasks.extend(tasks.iter().copied());
+            self.epics.extend(epics.iter().copied());
+        }
+    }
+
     pub fn has_selection(&self) -> bool {
         !self.tasks.is_empty() || !self.epics.is_empty()
     }

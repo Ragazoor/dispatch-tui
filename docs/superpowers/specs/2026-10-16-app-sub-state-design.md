@@ -1,4 +1,4 @@
-# App sub-state split — design note (draft, awaiting approval)
+# App sub-state split — design note (approved: option A)
 
 Task #77834, work package 9 of the 2026-10-14 review. Plan:
 `docs/plans/review-2026-10-14/wp-9-split-app-by-sub-state.md`.
@@ -79,7 +79,24 @@ move. Pick one:
   `Selection`, `Columns` wrappers around the existing structs. This adds a
   layer and moves few methods.
 
-## Before / after counts
+## Outcome of this pass
 
-Before: 318 `fn` in 25 `impl App` blocks (`grep -c 'fn ' src/tui/mod.rs` = 63
-in the main block). After: to be recorded when slices land.
+Moved, each with state-level tests written first:
+
+- `InputState::apply_default_branch`, `InputState::enter_repo_path_step`
+  (the `App` handler keeps only the status write).
+- `SelectionState::toggle_all` (select-all for a column).
+- `ReparentPickerState::selected_id` and `navigate`.
+
+`LayoutCache` already owns its invalidation (`LayoutCache::invalidate`).
+`App::invalidate_layout_cache` stays: about 60 callers, including tests and
+the invariant in `docs/invariants.md`, name it. Renaming it is churn with no
+state moved.
+
+Counts: before, 318 `fn` in 25 `impl App` blocks; after, unchanged
+(24 files with an `impl App` block by `grep -rc`). The moves pulled logic
+out of handlers but kept each handler as the `App` entry point, so the method
+count does not fall. A fall needs the `update` dispatch to call free
+functions over fields directly, which touches every handler's call site in
+`src/tui/messages/`. That is the next step if the count is to be the goal;
+it is left as a follow-up.

@@ -43,7 +43,7 @@ to look.
 | `src/palette.rs` | Tokyo Night color palette constants, shared by the board (`src/tui/`) and the agent-tree panes (`src/agent_tree/`) |
 | `src/tui/ui/input_form.rs` | Overlay renderer (input forms) |
 | `src/tui/types.rs` | `Message`, `Command` (a pure router over the per-domain enums in `src/tui/commands/`), `InputMode`, and the form drafts; re-exports the three submodules below |
-| `src/tui/types/state.rs` | The `*State` structs `App` holds (`BoardState`, `InputState`, `SplitState`, …), `AgentTracking`, `BoardSelection`, `ViewMode` |
+| `src/tui/types/state.rs` | The `*State` structs `App` holds (`BoardState`, `InputState`, `SplitState`, …), `AgentTracking`, `BoardSelection`, `ViewMode`; form-step, select-all and fold state transitions live on their own structs, not on `App` |
 | `src/tui/types/fold.rs` | `SectionFoldState`, `EpicFoldState` and their persisted settings keys |
 | `src/tui/types/layout.rs` | Per-frame layout: `ColumnItem`, `ColumnLayout`, `EpicPlacement`, `SubtaskStats`, `CardOrderKey`, `LayoutCache` |
 | `src/tui/tests/` | TUI unit and scenario tests, snapshots, helpers |
