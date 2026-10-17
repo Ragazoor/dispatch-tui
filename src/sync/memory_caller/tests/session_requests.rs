@@ -970,10 +970,10 @@ async fn a_restart_fails_only_this_hosts_running_rows() {
 
 // -- DeletingATaskFailsItsOpenSessionRequest -------------------------------------------
 
-/// Every task delete fails the task's open row "task deleted", through the
-/// same hook the dispatch rows use.
+/// Every task delete fails the task's open row, then removes all of the
+/// task's session rows, finished ones included.
 #[tokio::test]
-async fn deleting_a_task_fails_its_open_session_request() {
+async fn deleting_a_task_removes_its_session_rows() {
     let (caller, rows) = caller();
     let task = dispatched_task(&caller).await;
     let id = applied_id(wrap_up(&caller, task, "rebase").await);
@@ -997,14 +997,31 @@ async fn deleting_a_task_fails_its_open_session_request() {
     assert!(caller.delete_task(task).await.unwrap().won());
     assert!(caller.delete_task(finished_task).await.unwrap().won());
 
-    let row = rows.session_request(id).unwrap();
-    assert_eq!(row.state, SessionRequestState::Failed);
-    assert_eq!(row.reason.as_deref(), Some("task deleted"));
-    assert_eq!(
-        rows.session_request(finished).unwrap().state,
-        SessionRequestState::Done,
-        "a finished row is history and stays"
+    assert!(rows.session_request(id).is_none(), "the open row goes too");
+    assert!(
+        rows.session_request(finished).is_none(),
+        "a finished row goes with its task"
     );
+    assert!(rows.session_requests().is_empty());
+}
+
+/// A done wrap_up nobody consumed is a live token however old; a failed one
+/// of the same age is pruned by the next wrap-up request.
+#[tokio::test]
+async fn a_new_wrap_up_prunes_old_finished_rows_but_keeps_a_live_token() {
+    let (caller, rows, clock) = caller_with_clock();
+    let token_task = dispatched_task(&caller).await;
+    let token = token_for(&caller, token_task, "done").await;
+    let failed_task = dispatched_task(&caller).await;
+    let failed = applied_id(wrap_up(&caller, failed_task, "rebase").await);
+    assert!(caller.expire_session_request(failed).won());
+
+    clock.advance(chrono::Duration::days(15));
+    let next_task = dispatched_task(&caller).await;
+    applied_id(wrap_up(&caller, next_task, "rebase").await);
+
+    assert!(rows.session_request(failed).is_none(), "old and failed");
+    assert!(rows.session_request(token).is_some(), "a live exit token");
 }
 
 // -- D11 ---------------------------------------------------------------------------------

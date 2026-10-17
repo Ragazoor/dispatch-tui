@@ -314,6 +314,13 @@ rule DeleteEpic {
     -- is unknown, so it never counts as done.
     requires: epic.subtree_tasks.all(t => decodable(t) and t.status = done)
 
+    -- subtree_depth(epic): how many levels of sub-epics hang below epic (0
+    -- for an epic with none), counting each epic once, so a loop that got in
+    -- some other way still has a finite answer. A subtree deeper than the
+    -- store's recursive delete reaches is refused rather than deleted down to
+    -- that level, which would strand the rows below it (task #94222).
+    requires: subtree_depth(epic) <= core/config.max_epic_depth
+
     -- The epics this delete removes: the epic itself and every descendant.
     -- A feed epic among them is being reset, not pruned.
     let doomed_epics = epic.subtree_epics + epic
@@ -373,6 +380,15 @@ rule DeleteEpic {
         -- path; the reducer check is the one that actually holds against
         -- every board, not just the caller's own subscription.
         --
+        -- THE DEPTH GUARD IS THE REDUCER'S ALONE. delete_epic and
+        -- batch_delete refuse a subtree nested more than
+        -- core/config.max_epic_depth levels deep, with "epic <id>: cannot
+        -- delete a subtree nested more than 64 levels deep", before deleting
+        -- anything. Before task #94222 the recursive delete silently stopped
+        -- at that depth. The client pre-check does not measure depth, so such
+        -- a refusal comes after the subtree's teardown has run, as for the
+        -- reopen race below; a tree that deep is not one the board builds.
+        --
         -- PRE-CHECK BEFORE ANY SIDE EFFECT (task #8198), as for DeleteTask
         -- (tasks.allium). The subtree's teardown — every worktree, tmux
         -- window and branch — runs client-side
@@ -427,6 +443,11 @@ rule DeleteEpicRefused {
     -- Evaluated over the store's TRUE rows (DeleteEpic's pre-check), before
     -- any subtree teardown begins.
     requires: not epic.subtree_tasks.all(t => decodable(t) and t.status = done)
+
+    -- Not the arm for a subtree that is all done but nested too deep
+    -- (DeleteEpic's subtree_depth guard): the pre-check does not measure
+    -- depth, so that refusal comes from the store's reducer alone, after the
+    -- teardown, with the reducer's own wording.
 
     -- The refusal names what blocks the delete. The blocking task is the
     -- LOWEST-ID readable subtree task that is not done — not the first one a
@@ -652,9 +673,16 @@ rule UpdateEpicViaMcp {
     requires:
         if parent_epic_id != omitted and parent_epic_id != null:
             Epic.exists(parent_epic_id)
+    -- The store's cycle walk climbs at most core/config.max_ancestor_walk
+    -- hops above the proposed parent. A chain still going at that point is
+    -- already a loop or a corrupt tree, and the move is refused with the same
+    -- cycle error rather than waved through (task #94222; before it, a spent
+    -- walk accepted the move). ancestor_chain(p) counts p itself, so the
+    -- bound admits p plus max_ancestor_walk - 1 ancestors above it.
     requires:
         if parent_epic_id != omitted and parent_epic_id != null:
             not Epic.ancestor_chain(parent_epic_id).contains(epic.id)
+            and Epic.ancestor_chain(parent_epic_id).count <= core/config.max_ancestor_walk
 
     let prior_status = epic.status
 
@@ -1158,8 +1186,10 @@ rule ReportChainedDispatchFailure {
     -- (store-split.allium: HostRestartFailsInterrupted), so no other board
     -- raises it too.
     requires: request.host = core/local_host()
-    -- A subtask deleted under its request (reason "task deleted") has no
-    -- card to mark; deleting it was the operator's own act.
+    -- A subtask deleted under its request has no card to mark; deleting it
+    -- was the operator's own act. (Since task #94222 the delete also removes
+    -- the row, store-split.allium: DeletingATaskDeletesItsRequestRows, so
+    -- this board sees no "task deleted" failure to raise at all.)
     requires: exists request.task
 
     ensures: AutoDispatchFailed(

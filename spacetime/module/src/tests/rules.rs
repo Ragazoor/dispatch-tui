@@ -51,10 +51,92 @@ fn a_zero_parent_ends_the_walk() {
 }
 
 #[test]
-fn a_walk_that_meets_an_existing_loop_terminates() {
-    // 2 <-> 3 already loop; moving 1 under 2 must not spin forever.
+fn a_walk_that_meets_an_existing_loop_terminates_and_refuses() {
+    // 2 <-> 3 already loop; moving 1 under 2 must not spin forever, and must
+    // not be waved through once the hop cap is spent: the answer is the cycle
+    // error, not Ok.
     let parents = chain(&[(2, 3), (3, 2)]);
-    assert!(validate_epic_parent(1, 2, parents).is_ok());
+    assert_eq!(validate_epic_parent(1, 2, parents).unwrap_err(), CYCLE);
+}
+
+fn task_with(status: &str, sub_status: &str) -> Task {
+    Task {
+        id: 1,
+        status: status.into(),
+        sub_status: sub_status.into(),
+        ..blank_task()
+    }
+}
+
+#[test]
+fn a_write_that_moves_the_sub_status_to_an_illegal_one_is_refused() {
+    let prior = task_with("backlog", "none");
+    let row = task_with("backlog", "approved");
+    assert_eq!(
+        check_sub_status_write(Some(&prior), &row).unwrap_err(),
+        "sub_status 'approved' is not valid for status 'backlog'"
+    );
+}
+
+#[test]
+fn a_write_that_moves_the_sub_status_to_a_legal_one_passes() {
+    let prior = task_with("running", "active");
+    let row = task_with("running", "stale");
+    assert!(check_sub_status_write(Some(&prior), &row).is_ok());
+}
+
+#[test]
+fn a_write_that_leaves_the_sub_status_alone_is_not_judged() {
+    // A row already holding an odd pair stays writable for its other fields.
+    let prior = task_with("backlog", "approved");
+    let row = Task {
+        title: "renamed".into(),
+        ..prior.clone()
+    };
+    assert!(check_sub_status_write(Some(&prior), &row).is_ok());
+}
+
+#[test]
+fn an_insert_is_not_judged() {
+    assert!(check_sub_status_write(None, &task_with("backlog", "approved")).is_ok());
+}
+
+#[test]
+fn a_task_patch_naming_epic_id_is_refused() {
+    let row = task_with("backlog", "none");
+    let patch = TaskPatch {
+        epic_id: Some(7),
+        ..TaskPatch::default()
+    };
+    assert!(check_task_patch(&row, &patch)
+        .unwrap_err()
+        .contains("set_task_epic"));
+}
+
+fn subtree(edges: &[(i64, i64)]) -> impl Fn(i64) -> Vec<i64> {
+    let edges = edges.to_vec();
+    move |id| {
+        edges
+            .iter()
+            .filter(|(parent, _)| *parent == id)
+            .map(|(_, child)| *child)
+            .collect()
+    }
+}
+
+#[test]
+fn a_subtree_within_the_depth_cap_is_not_too_deep() {
+    assert!(!subtree_exceeds_depth(1, subtree(&[(1, 2), (2, 3)]), 2));
+}
+
+#[test]
+fn a_subtree_below_the_depth_cap_is_too_deep() {
+    assert!(subtree_exceeds_depth(1, subtree(&[(1, 2), (2, 3)]), 1));
+}
+
+#[test]
+fn a_looping_subtree_terminates() {
+    assert!(!subtree_exceeds_depth(1, subtree(&[(1, 2), (2, 1)]), 64));
 }
 
 #[test]

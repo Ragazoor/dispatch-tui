@@ -119,6 +119,8 @@ pub const DISPATCH_REASON_TIMED_OUT: &str = "timed out";
 pub const DISPATCH_REASON_HOST_RESTARTED: &str = "host restarted";
 /// A deleted task's reason (`DeletingATaskFailsItsOpenRequest`).
 pub const DISPATCH_REASON_TASK_DELETED: &str = "task deleted";
+/// A closed task's reason (`CloseFailsOpenRequests`).
+pub const DISPATCH_REASON_TASK_CLOSED: &str = "task closed";
 
 pub(crate) const MICROS_PER_SEC: i64 = 1_000_000;
 
@@ -502,9 +504,13 @@ pub(crate) fn fail_dispatch_request(
     Ok(())
 }
 
+/// Fail every open dispatch request of a task with `reason`.
+///
 /// `DeletingATaskFailsItsOpenRequest`: called by every path that deletes a
 /// task row, after the row is gone, so the release finds no task.
-pub(crate) fn fail_open_dispatch_requests_of(ctx: &ReducerContext, task_id: i64) {
+/// `CloseFailsOpenRequests`: called by `close_task` after the Done write, so
+/// the release finds a task that is no longer a bare claim and leaves it alone.
+pub(crate) fn fail_open_dispatch_requests_of(ctx: &ReducerContext, task_id: i64, reason: &str) {
     let open: Vec<DispatchRequest> = ctx
         .db
         .dispatch_requests()
@@ -515,7 +521,7 @@ pub(crate) fn fail_open_dispatch_requests_of(ctx: &ReducerContext, task_id: i64)
     for row in open {
         // The task row is already deleted, so the release (the only fallible
         // write) has nothing to write.
-        let _ = fail_dispatch_request(ctx, row, DISPATCH_REASON_TASK_DELETED);
+        let _ = fail_dispatch_request(ctx, row, reason);
     }
 }
 
@@ -568,6 +574,7 @@ pub(crate) fn create_dispatch_request(
     mode: &str,
     origin: &str,
 ) -> Result<(), String> {
+    prune_terminal_requests(ctx);
     let stamp = now(ctx);
     let task_id = task.id;
     let epic_id = task.epic_id;

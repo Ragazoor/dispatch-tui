@@ -709,8 +709,9 @@ async fn a_row_timed_out_under_the_host_is_torn_down_not_recorded() {
     assert!(worktree_dir.exists(), "the reused worktree is left on disk");
 }
 
-/// D8: deleting the task fails its open request "task deleted"; the host sees
-/// it and tears down what it made, so no agent runs for a task that is gone.
+/// D8: deleting the task fails its open request and removes its rows; the host
+/// sees the request go and tears down what it made, so no agent runs for a task
+/// that is gone.
 #[tokio::test]
 async fn a_task_deleted_under_the_host_is_torn_down() {
     let fx = fx();
@@ -754,8 +755,10 @@ async fn a_task_deleted_under_the_host_is_torn_down() {
         matches!(outcome, ServedDispatch::Failed(_)),
         "expected Failed, got {outcome:?}"
     );
-    let row = fx.row(id).await;
-    assert_eq!(row.reason.as_deref(), Some("task deleted"));
+    assert!(
+        fx.db.dispatch_request(id).await.is_none(),
+        "the request row went with its task"
+    );
     let calls = runner.inner.flattened_calls();
     assert!(
         calls.iter().any(|c| c.contains("kill-window")),

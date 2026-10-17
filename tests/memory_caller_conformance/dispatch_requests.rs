@@ -371,7 +371,7 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
         same_task(interrupted);
         same_task(waiting);
 
-        // -- DeletingATaskFailsItsOpenRequest -------------------------------------
+        // -- DeletingATaskFailsItsOpenRequest, then DeletingATaskDeletesItsRequestRows -----------------------------------
         // Only a done task may be deleted (`tasks.allium: DeleteTask`): moved
         // to done by hand while its request is still open.
         let done = || bindings::TaskPatch {
@@ -394,17 +394,9 @@ fn memory_caller_serves_dispatch_requests_like_the_real_module() {
             .is_some_and(|t| t.status == TaskStatus::Done));
         real.delete_task(waiting).await.unwrap().applied().unwrap();
         mem.delete_task(waiting).await.unwrap().applied().unwrap();
-        wait_for!(rows_real
-            .dispatch_request(pairs[1].0)
-            .is_some_and(|r| r.reason.is_some()));
-        same_request(pairs[1].0, pairs[1].1);
-        assert_eq!(
-            rows_mem
-                .dispatch_request(pairs[1].1)
-                .unwrap()
-                .reason
-                .as_deref(),
-            Some("task deleted")
-        );
+        // `DeletingATaskDeletesItsRequestRows`: failed in the same call, then
+        // gone with the task.
+        wait_for!(rows_real.dispatch_request(pairs[1].0).is_none());
+        assert!(rows_mem.dispatch_request(pairs[1].1).is_none());
     });
 }

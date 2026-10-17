@@ -65,7 +65,6 @@ macro_rules! apply_patch {
 
 mod agent;
 mod agent_state;
-mod names;
 mod blanks;
 mod config;
 mod dispatch_request;
@@ -73,8 +72,10 @@ mod feed;
 mod feed_ingest;
 mod grouping;
 mod learning;
+mod names;
 mod packages;
 mod pr_status;
+mod request_retention;
 mod rules;
 mod seed;
 mod sequence;
@@ -85,7 +86,6 @@ mod tasks_epics;
 
 pub use agent::*;
 pub use agent_state::*;
-pub use names::*;
 pub use blanks::*;
 pub use config::*;
 pub use dispatch_request::*;
@@ -93,8 +93,10 @@ pub use feed::*;
 pub use feed_ingest::*;
 pub use grouping::*;
 pub use learning::*;
+pub use names::*;
 pub use packages::*;
 pub use pr_status::*;
+pub use request_retention::*;
 pub use rules::*;
 pub use seed::*;
 pub use sequence::*;

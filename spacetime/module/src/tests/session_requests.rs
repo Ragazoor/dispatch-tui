@@ -1145,3 +1145,116 @@ fn leaving_running_clears_a_pending_stop_unless_the_patch_names_it() {
         "only a move out of running clears"
     );
 }
+
+// -- retention (store-split.allium: RequestRowsArePruned) -----------------------
+
+const OLD: &str = "2026-09-01 00:00:00.000";
+const CUTOFF: &str = "2026-10-01 00:00:00.000";
+
+fn old_failed_dispatch(id: i64, task_id: i64) -> DispatchRequest {
+    DispatchRequest {
+        id,
+        task_id,
+        state: "failed".into(),
+        finished_at: OLD.into(),
+        ..blank_dispatch_request()
+    }
+}
+
+fn old(mut row: SessionRequest) -> SessionRequest {
+    row.finished_at = OLD.into();
+    row
+}
+
+#[test]
+fn the_retention_cutoff_is_the_retention_window_before_now() {
+    // 2026-10-15 00:00:00 UTC.
+    let now_micros = 1_792_022_400_000_000_i64;
+    assert_eq!(
+        request_retention_cutoff(now_micros),
+        "2026-10-01 00:00:00.000"
+    );
+}
+
+#[test]
+fn an_old_terminal_dispatch_row_is_pruned_and_a_recent_or_open_one_is_not() {
+    let recent = DispatchRequest {
+        finished_at: "2026-10-09 00:00:00.000".into(),
+        ..old_failed_dispatch(2, 1)
+    };
+    let open = DispatchRequest {
+        state: "requested".into(),
+        finished_at: String::new(),
+        requested_at: OLD.into(),
+        ..old_failed_dispatch(3, 1)
+    };
+    let prunable = prunable_requests(CUTOFF, &[old_failed_dispatch(1, 1), recent, open], &[]);
+    assert_eq!(prunable.dispatch_ids, vec![1]);
+}
+
+#[test]
+fn an_old_terminal_session_row_other_than_a_live_token_is_pruned() {
+    let failed = old(session(1, "wrap_up", "rebase", "failed"));
+    let close = old(session(2, "close", "done", "done"));
+    let running = session(3, "wrap_up", "rebase", "running");
+    let prunable = prunable_requests(CUTOFF, &[], &[failed, close, running]);
+    assert_eq!(prunable.session_ids, vec![1, 2]);
+}
+
+#[test]
+fn a_done_wrap_up_nobody_consumed_is_a_live_token_and_stays() {
+    let token = old(done_wrap_up(1, "rebase", OLD));
+    let prunable = prunable_requests(CUTOFF, &[], &[token]);
+    assert!(prunable.session_ids.is_empty());
+}
+
+#[test]
+fn a_consumed_wrap_up_and_its_exit_row_go_together() {
+    let token = old(done_wrap_up(1, "rebase", OLD));
+    let exit = old(SessionRequest {
+        state: "done".into(),
+        ..consumed(2, 1)
+    });
+    let prunable = prunable_requests(CUTOFF, &[], &[token, exit]);
+    assert_eq!(prunable.session_ids, vec![1, 2]);
+}
+
+#[test]
+fn an_exit_row_stays_while_its_wrap_up_stays() {
+    // The exit row is what marks the token spent; pruning it alone would
+    // make the token valid again.
+    let token = done_wrap_up(1, "rebase", "2026-10-09 00:00:00.000");
+    let exit = old(SessionRequest {
+        state: "done".into(),
+        ..consumed(2, 1)
+    });
+    let prunable = prunable_requests(CUTOFF, &[], &[token, exit]);
+    assert!(prunable.session_ids.is_empty());
+}
+
+#[test]
+fn a_dispatch_row_that_voids_a_live_token_stays() {
+    let token = old(done_wrap_up(1, "rebase", "2026-08-01 00:00:00.000"));
+    let voiding = DispatchRequest {
+        state: "dispatched".into(),
+        finished_at: OLD.into(),
+        ..old_failed_dispatch(1, 1)
+    };
+    let prunable = prunable_requests(CUTOFF, &[voiding], &[token]);
+    assert!(prunable.dispatch_ids.is_empty());
+}
+
+#[test]
+fn a_superseded_done_wrap_up_is_no_token_and_is_pruned() {
+    let superseded = SessionRequest {
+        requested_at: "2026-08-01 00:00:00.000".into(),
+        ..old(done_wrap_up(1, "rebase", OLD))
+    };
+    let newest = old(done_wrap_up(2, "rebase", OLD));
+    let prunable = prunable_requests(CUTOFF, &[], &[superseded, newest]);
+    assert_eq!(
+        prunable.session_ids,
+        vec![1],
+        "only the newest is a live token"
+    );
+}

@@ -825,6 +825,7 @@ pub fn request_wrap_up(
     };
     validate_wrap_up_request(&task, &host, task_has_open_session_request(ctx, task_id))?;
 
+    prune_terminal_requests(ctx);
     let row = ctx.db.session_requests().insert(SessionRequest {
         requested_by: caller_identity(ctx),
         ..new_wrap_up_request(task_id, &host, &action, &now(ctx))
@@ -1005,6 +1006,8 @@ pub fn close_task(ctx: &ReducerContext, task_id: i64, host: String) -> Result<()
         closed.phoenix = false;
     }
     write_task(ctx, closed)?;
+    // store-split.allium: CloseFailsOpenRequests, for dispatch requests too.
+    fail_open_dispatch_requests_of(ctx, task_id, DISPATCH_REASON_TASK_CLOSED);
     close_agent_session(&mut AgentTables(ctx), task_id);
     recalculate_epic_chain(ctx, epic_id);
 

@@ -63,17 +63,25 @@ impl MemoryReducerCaller {
         let failed = module::failed_request_row(row, reason, &self.now());
         let stamp = failed.finished_at.clone();
         let task_id = failed.task_id;
+        // The release is the one write that can refuse; ask before the failed
+        // row is written, so a refusal leaves the request as it was.
+        let released = tables
+            .tasks
+            .get(&task_id)
+            .cloned()
+            .and_then(module::release_claim_after_failure)
+            .map(|released| module::Task {
+                updated_at: stamp,
+                ..released
+            });
+        if let Some(released) = &released {
+            Self::validate_task_write(tables, released)?;
+        }
         self.write_dispatch_request(tables, failed);
         if let Some(task) = tables.tasks.get(&task_id).cloned() {
             let epic_id = task.epic_id;
-            if let Some(released) = module::release_claim_after_failure(task) {
-                self.write_task(
-                    tables,
-                    module::Task {
-                        updated_at: stamp,
-                        ..released
-                    },
-                )?;
+            if let Some(released) = released {
+                self.write_task(tables, released)?;
                 // agents.allium: EndAgentWhenLaunchFails.
                 module::end_current_agent(
                     &mut self.agent_store(tables),
@@ -89,7 +97,12 @@ impl MemoryReducerCaller {
     /// Mirrors the module's `fail_open_dispatch_requests_of`
     /// (`DeletingATaskFailsItsOpenRequest`): called by every task delete,
     /// after the task row is gone.
-    pub(super) fn fail_open_dispatch_requests_of(&self, tables: &mut Tables, task_id: i64) {
+    pub(super) fn fail_open_dispatch_requests_of(
+        &self,
+        tables: &mut Tables,
+        task_id: i64,
+        reason: &str,
+    ) {
         let open: Vec<module::DispatchRequest> = tables
             .dispatch_requests
             .values()
@@ -97,7 +110,52 @@ impl MemoryReducerCaller {
             .cloned()
             .collect();
         for row in open {
-            let _ = self.fail_dispatch_request(tables, row, module::DISPATCH_REASON_TASK_DELETED);
+            let _ = self.fail_dispatch_request(tables, row, reason);
+        }
+    }
+
+    /// Mirrors the module's `delete_request_rows_of`
+    /// (`DeletingATaskDeletesItsRequestRows`): every request row of the task,
+    /// open ones already failed by the caller.
+    pub(super) fn delete_request_rows_of(&self, tables: &mut Tables, task_id: i64) {
+        let dispatches: Vec<i64> = tables
+            .dispatch_requests
+            .values()
+            .filter(|r| r.task_id == task_id)
+            .map(|r| r.id)
+            .collect();
+        for id in dispatches {
+            tables.dispatch_requests.remove(&id);
+            self.rows.remove_dispatch_request(id);
+        }
+        let sessions: Vec<i64> = tables
+            .session_requests
+            .values()
+            .filter(|r| r.task_id == task_id)
+            .map(|r| r.id)
+            .collect();
+        for id in sessions {
+            tables.session_requests.remove(&id);
+            self.rows.remove_session_request(id);
+        }
+    }
+
+    /// Mirrors the module's `prune_terminal_requests`
+    /// (`RequestRowsArePruned`): called by the requests that grow the tables.
+    pub(super) fn prune_terminal_requests(&self, tables: &mut Tables) {
+        let cutoff = module::request_retention_cutoff(self.clock.now().timestamp_micros());
+        let dispatches: Vec<module::DispatchRequest> =
+            tables.dispatch_requests.values().cloned().collect();
+        let sessions: Vec<module::SessionRequest> =
+            tables.session_requests.values().cloned().collect();
+        let prunable = module::prunable_requests(&cutoff, &dispatches, &sessions);
+        for id in prunable.dispatch_ids {
+            tables.dispatch_requests.remove(&id);
+            self.rows.remove_dispatch_request(id);
+        }
+        for id in prunable.session_ids {
+            tables.session_requests.remove(&id);
+            self.rows.remove_session_request(id);
         }
     }
 
@@ -150,6 +208,7 @@ impl MemoryReducerCaller {
         mode: &str,
         origin: &str,
     ) -> Result<i64, String> {
+        self.prune_terminal_requests(tables);
         let stamp = self.now();
         let task_id = task.id;
         let epic_id = task.epic_id;

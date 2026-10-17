@@ -504,6 +504,10 @@ rule ConfirmDone {
 --     core/Task.respawn_failed, rendered as a red ⚠ card indicator (see
 --     board-visuals.allium: "Phoenix marker"), and re-entering done retries.
 --
+-- The store enforces the receipt on its standalone respawn too: a respawn
+-- whose predecessor does not carry the flag is refused, writing nothing
+-- (store-split.allium: RespawnPhoenixSuccessorNeedsTheFlag).
+--
 -- Two properties fall out of this and neither should be re-derived some other
 -- way. A done -> review -> done round-trip cannot spawn a duplicate, because
 -- the first pass cleared the flag. And a failed respawn is never silent,
@@ -1665,9 +1669,13 @@ rule BatchDelete {
     -- the guidance. A task is written out below with DeleteTask's
     -- released-arm effects unconditionally; an epic still goes through
     -- DeleteEpic, whose teardown was never gated.
+    -- subtree_depth(e) is epics.allium DeleteEpic's black box: an epic
+    -- subtree nested deeper than the recursive delete reaches is refused,
+    -- by the batch_delete reducer only (the pre-check does not measure it).
     let all_pass =
         tasks.all(t => t.status = done)
         and epics.all(e => e.subtree_tasks.all(t => t.status = done))
+        and epics.all(e => subtree_depth(e) <= core/config.max_epic_depth)
 
     ensures:
         if all_pass:
@@ -2026,10 +2034,14 @@ rule EditTask {
 -- resulting state rather than adding a per-rule duty. A write supplying an
 -- explicit (status, sub_status) pair that is invalid is refused by the
 -- store's patch_task reducer before anything is applied (mcp-task-tools.allium:
--- UpdateTaskViaMcp). Nothing else backs the invariant up: the SQLite CHECK
--- constraint that once did went with SQLite (task #36865), and the store's
--- other sub_status writers (the batch sub_status patch, the feed upsert)
--- accept any sub_status string.
+-- UpdateTaskViaMcp). Since task #94222 the store also holds every OTHER writer
+-- to it at its one task write: a write that moves a task's sub_status must
+-- leave one legal for the status (store-split.allium:
+-- SubStatusMovesMustBeLegal), and the batch sub_status patch skips an entry
+-- that would not (BatchSubStatusPatchSkipsIllegalEntries). Only a move is
+-- judged, so a row already holding an odd pair stays writable for its other
+-- fields, and an insert is not judged. The SQLite CHECK constraint that once
+-- backed the invariant went with SQLite (task #36865).
 -- Exception: writes that set a specific sub_status override the default
 -- (e.g., HookNotification keeps status=running and sets
 -- sub_status=needs_input; FinishTaskConflict keeps the parent status and

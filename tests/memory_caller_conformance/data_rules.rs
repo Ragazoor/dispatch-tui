@@ -245,5 +245,36 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         wait_for!(rows_real.epic(EpicId(regrouped)).is_some());
         same_epic(regrouped);
         same_epic(root);
+
+        // -- epic_id moves through set_task_epic, never patch_task --------------
+        let by_patch = bindings::TaskPatch {
+            epic_id: Some(root),
+            ..blank_task_patch()
+        };
+        let why = refused(
+            real.patch_task(task, by_patch.clone()).await.unwrap(),
+            mem.patch_task(task, by_patch).await.unwrap(),
+        );
+        assert!(why.contains("set_task_epic"), "{why}");
+        same_task(task.0);
+
+        // -- the batch skips an entry the status does not allow ------------------
+        let batch = vec![(task, dispatch_tui::models::SubStatus::Approved)];
+        real.batch_patch_sub_status(batch.clone())
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        mem.batch_patch_sub_status(batch)
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        same_task(task.0);
+        assert_eq!(
+            rows_real.task(task).unwrap().sub_status,
+            SubStatus::None,
+            "backlog never holds approved"
+        );
     });
 }

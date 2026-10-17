@@ -22,9 +22,7 @@ impl MemoryReducerCaller {
         tables: &mut Tables,
         mut row: module::Task,
     ) -> Result<(), String> {
-        module::validate_task_ownership(row.epic_id, &row.owner)
-            .map_err(|why| format!("task {}: {why}", row.id))?;
-        module::validate_status("task", row.id, &row.status)?;
+        Self::validate_task_write(tables, &row)?;
         if row.status == DONE && row.completed_at.is_empty() {
             row.completed_at = self.now();
         }
@@ -38,6 +36,19 @@ impl MemoryReducerCaller {
         module::follow_task_write(&mut self.agent_store(tables), prior.as_ref(), &row);
         self.rows.upsert_task(&row.into());
         Ok(())
+    }
+
+    /// Every refusal [`Self::write_task`] can make, and nothing else.
+    ///
+    /// The module's reducer rolls its whole transaction back on an `Err`; this
+    /// double has no rollback (its writes reach `SharedRows` as they happen),
+    /// so a reducer body asks here BEFORE its first side effect whenever a
+    /// later `write_task` could refuse.
+    pub(super) fn validate_task_write(tables: &Tables, row: &module::Task) -> Result<(), String> {
+        module::validate_task_ownership(row.epic_id, &row.owner)
+            .map_err(|why| format!("task {}: {why}", row.id))?;
+        module::validate_status("task", row.id, &row.status)?;
+        module::check_sub_status_write(tables.tasks.get(&row.id), row)
     }
 
     pub(super) fn delete_task_row(&self, tables: &mut Tables, id: i64) {
@@ -128,6 +139,28 @@ impl MemoryReducerCaller {
             }
         }
         doomed
+    }
+
+    /// Mirrors the module's `validate_epic_deletable` depth check: a subtree
+    /// nested deeper than [`MAX_EPIC_DEPTH`] is refused, not half-deleted.
+    pub(super) fn subtree_too_deep(tables: &Tables, id: i64) -> Option<String> {
+        module::subtree_exceeds_depth(
+            id,
+            |epic| {
+                tables
+                    .epics
+                    .values()
+                    .filter(|e| e.parent_epic_id == epic)
+                    .map(|e| e.id)
+                    .collect()
+            },
+            MAX_EPIC_DEPTH,
+        )
+        .then(|| {
+            format!(
+                "epic {id}: cannot delete a subtree nested more than {MAX_EPIC_DEPTH} levels deep"
+            )
+        })
     }
 
     /// Mirrors the module's `first_undone_task_in`: the first non-`done`
@@ -231,14 +264,17 @@ impl MemoryReducerCaller {
         let caller_named_a_completion = patch.completed_at.is_some();
         let caller_named_stop_pending = patch.stop_pending.is_some();
         let session_patch = patch.clone();
-        let moved_to_epic = patch.epic_id;
-        let repo_changed_in_place = patch.epic_id.is_none()
-            && patch
-                .repo_path
-                .as_deref()
-                .is_some_and(|repo| repo != row.repo_path);
+        let repo_changed_in_place = patch
+            .repo_path
+            .as_deref()
+            .is_some_and(|repo| repo != row.repo_path);
 
         module::apply_task_patch(&mut row, patch);
+        // Before the first side effect below: a refused patch leaves nothing
+        // behind, as the module's rolled-back transaction does.
+        if let Err(why) = Self::validate_task_write(&tables, &row) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         // The session facts go to the current agent (agents.allium, A4).
         module::update_current_agent(&mut self.agent_store(&mut tables), id.0, |agent| {
             module::apply_session_patch(agent, &session_patch)
@@ -264,17 +300,13 @@ impl MemoryReducerCaller {
             row.phoenix = false;
         }
 
-        let now_in_epic = moved_to_epic.unwrap_or(was_in_epic);
         let status_changed = prior_status != row.status;
         if let Err(why) = self.write_task(&mut tables, row) {
             return Ok(ReducerOutcome::Refused(why));
         }
 
-        if status_changed || now_in_epic != was_in_epic {
+        if status_changed {
             self.recalculate_epic_chain(&mut tables, was_in_epic);
-            if now_in_epic != was_in_epic {
-                self.recalculate_epic_chain(&mut tables, now_in_epic);
-            }
         }
         if repo_changed_in_place {
             if let Err(why) = self.reroute_on_repo_change(&mut tables, id.0) {
@@ -401,6 +433,9 @@ impl MemoryReducerCaller {
         };
         // Mirrors the module's `delete_epic` guard (task #4971): every task
         // anywhere in the subtree must be `done`.
+        if let Some(why) = Self::subtree_too_deep(&tables, id) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let doomed = Self::collect_epic_subtree_ids(&tables, id);
         if let Some(undone_task_id) = Self::first_undone_task_in(&tables, &doomed) {
             return Ok(ReducerOutcome::Refused(format!(
@@ -430,6 +465,9 @@ impl MemoryReducerCaller {
         for &id in &epic_ids {
             if !tables.epics.contains_key(&id) {
                 continue;
+            }
+            if let Some(why) = Self::subtree_too_deep(&tables, id) {
+                return Ok(ReducerOutcome::Refused(why));
             }
             let doomed = Self::collect_epic_subtree_ids(&tables, id);
             if let Some(undone_task_id) = Self::first_undone_task_in(&tables, &doomed) {

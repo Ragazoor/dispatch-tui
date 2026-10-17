@@ -299,3 +299,26 @@ async fn patch_epic_applies_the_epic_patch_helper() {
         .unwrap();
     assert_eq!(rows.epic(epic_id).unwrap().title, "renamed");
 }
+
+#[tokio::test]
+async fn delete_epic_refuses_a_subtree_nested_past_the_depth_cap() {
+    let (caller, rows) = caller();
+    let root = caller.create_epic(blank_epic()).await.unwrap();
+    let mut parent = root;
+    for _ in 0..=MAX_EPIC_DEPTH {
+        parent = caller
+            .create_epic(bindings::Epic {
+                parent_epic_id: parent.0,
+                ..blank_epic()
+            })
+            .await
+            .unwrap();
+    }
+    let outcome = caller.delete_epic(root).await.unwrap();
+    assert!(
+        matches!(&outcome, ReducerOutcome::Refused(why) if why.contains("levels deep")),
+        "{outcome:?}"
+    );
+    assert!(rows.epic(root).is_some(), "nothing is half-deleted");
+    assert!(rows.epic(parent).is_some());
+}

@@ -444,8 +444,13 @@ async fn override_poll_owner_reassigns_an_existing_row() {
 #[tokio::test]
 async fn batch_patch_sub_status_updates_many_and_ignores_missing_ids() {
     let (caller, rows) = caller();
-    let a = caller.create_task(blank_task()).await.unwrap();
-    let b = caller.create_task(blank_task()).await.unwrap();
+    let running = bindings::Task {
+        status: "running".into(),
+        sub_status: "active".into(),
+        ..blank_task()
+    };
+    let a = caller.create_task(running.clone()).await.unwrap();
+    let b = caller.create_task(running).await.unwrap();
     caller
         .batch_patch_sub_status(vec![
             (a, SubStatus::Active),
@@ -480,6 +485,26 @@ async fn respawn_phoenix_successor_inserts_and_clears_the_predecessor_flag() {
     assert_ne!(successor_id, predecessor);
     assert!(!rows.task(predecessor).unwrap().phoenix);
     assert!(rows.has_task(successor_id));
+}
+
+#[tokio::test]
+async fn respawn_phoenix_successor_refuses_a_predecessor_without_the_flag() {
+    let (caller, rows) = caller();
+    let predecessor = bindings::Task {
+        status: DONE.into(),
+        phoenix: false,
+        ..blank_task()
+    };
+    let predecessor = caller.create_task(predecessor).await.unwrap();
+    let before = rows.tasks().len();
+    let outcome = caller
+        .respawn_phoenix_successor(predecessor, blank_task())
+        .await;
+    assert!(
+        outcome.is_err(),
+        "the flag is the receipt: no flag, no successor"
+    );
+    assert_eq!(rows.tasks().len(), before);
 }
 
 #[tokio::test]

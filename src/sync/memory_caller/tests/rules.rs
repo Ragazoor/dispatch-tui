@@ -83,6 +83,81 @@ async fn patch_task_judges_the_sub_status_against_the_status_it_moves_to() {
     );
 }
 
+/// A task that is already running, as a dispatch claim leaves it.
+async fn running_task(caller: &MemoryReducerCaller) -> TaskId {
+    caller
+        .create_task(bindings::Task {
+            status: "running".into(),
+            sub_status: "active".into(),
+            ..blank_task()
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn batch_patch_sub_status_skips_an_entry_that_is_illegal_for_the_status() {
+    let (caller, rows) = caller();
+    let backlog = caller.create_task(blank_task()).await.unwrap();
+    let running = running_task(&caller).await;
+    caller
+        .batch_patch_sub_status(vec![
+            (backlog, crate::models::SubStatus::Approved),
+            (running, crate::models::SubStatus::Stale),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.task(backlog).unwrap().sub_status,
+        crate::models::SubStatus::None,
+        "backlog never holds approved"
+    );
+    assert_eq!(
+        rows.task(running).unwrap().sub_status,
+        crate::models::SubStatus::Stale,
+        "a legal entry in the same batch still applies"
+    );
+}
+
+#[tokio::test]
+async fn record_pre_tool_use_refuses_a_sub_status_that_is_illegal_for_running() {
+    let (caller, rows) = caller();
+    let id = running_task(&caller).await;
+    let outcome = caller
+        .record_pre_tool_use(id, crate::models::SubStatus::Approved, at(TEST_STAMP))
+        .await
+        .unwrap();
+    assert_eq!(
+        refusal(outcome),
+        "sub_status 'approved' is not valid for status 'running'"
+    );
+    assert_eq!(
+        rows.task(id).unwrap().sub_status,
+        crate::models::SubStatus::Active
+    );
+}
+
+// -- epic_id through patch_task -------------------------------------------------
+
+#[tokio::test]
+async fn patch_task_refuses_epic_id_because_set_task_epic_owns_the_move() {
+    let (caller, rows) = caller();
+    let epic = caller.create_epic(blank_epic()).await.unwrap();
+    let id = caller.create_task(blank_task()).await.unwrap();
+    let outcome = caller
+        .patch_task(
+            id,
+            bindings::TaskPatch {
+                epic_id: Some(epic.0),
+                ..blank_task_patch()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(refusal(outcome).contains("set_task_epic"));
+    assert_eq!(rows.task(id).unwrap().epic_id, None);
+}
+
 // -- epic patch checks --------------------------------------------------------
 
 #[tokio::test]
@@ -421,4 +496,44 @@ async fn flatten_re_scopes_the_deleted_sub_epics_learnings_to_the_root() {
     caller.flatten_epic(root).await.unwrap();
     let kept = rows.learning(learning).expect("the learning survives");
     assert_eq!(kept.scope_ref.as_deref(), Some(root.0.to_string().as_str()));
+}
+
+// -- a refused patch leaves nothing behind ---------------------------------------
+
+#[tokio::test]
+async fn a_refused_patch_leaves_no_phoenix_successor_behind() {
+    let (caller, rows) = caller();
+    let epic = caller.create_epic(blank_epic()).await.unwrap();
+    // A running phoenix task in an epic: the patch below would respawn it.
+    let id = caller
+        .create_task(bindings::Task {
+            epic_id: epic.0,
+            owner: String::new(),
+            status: "running".into(),
+            sub_status: "active".into(),
+            phoenix: true,
+            ..blank_task()
+        })
+        .await
+        .unwrap();
+    let before = rows.tasks().len();
+    // Done respawns, but an owner on an epic task is refused by the write.
+    let outcome = caller
+        .patch_task(
+            id,
+            bindings::TaskPatch {
+                status: Some("done".into()),
+                sub_status: Some("none".into()),
+                owner: Some("bob".into()),
+                ..blank_task_patch()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(outcome, ReducerOutcome::Refused(_)), "{outcome:?}");
+    assert_eq!(rows.tasks().len(), before, "no successor was inserted");
+    assert!(
+        rows.task(id).unwrap().phoenix,
+        "the flag is still the receipt"
+    );
 }

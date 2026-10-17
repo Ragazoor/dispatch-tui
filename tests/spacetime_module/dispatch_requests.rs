@@ -578,8 +578,36 @@ fn deleting_a_task_fails_its_open_request_and_cancels_its_timer() {
     assert!(deleted.status.success(), "{}", describe(&deleted));
 
     assert!(no_rows(&instance, "SELECT id FROM tasks WHERE id = 1"));
+    // The request failed in the same reducer, then went with its task.
+    assert!(no_rows(
+        &instance,
+        "SELECT id FROM dispatch_requests WHERE task_id = 1"
+    ));
+    assert_eq!(timer_count(&instance, id.parse().unwrap()), "0");
+}
+
+/// `CloseFailsOpenRequests`: `close_task` fails the task's open dispatch
+/// request "task closed", as it fails an open session request, and cancels its
+/// timer.
+#[test]
+fn close_task_fails_the_tasks_open_dispatch_request() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    seed_dispatchable(&instance, &[(1, "", "", "")]);
+    request_dispatch(&instance, 1, "host-a", "user", "");
+    let id = request_column(&instance, "id", 1);
+
+    let closed = instance.call("close_task", &["1", "host-a"]);
+    assert!(closed.status.success(), "{}", describe(&closed));
+
     assert_eq!(request_column(&instance, "state", 1), "failed");
-    assert_eq!(request_column(&instance, "reason", 1), "task deleted");
+    assert_eq!(request_column(&instance, "reason", 1), "task closed");
+    assert_eq!(
+        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
+        "done"
+    );
     assert_eq!(timer_count(&instance, id.parse().unwrap()), "0");
 }
 
@@ -601,10 +629,7 @@ fn batch_delete_fails_the_open_requests_of_the_tasks_it_deletes() {
     let deleted = instance.call("batch_delete", &["[1, 2]", "[]"]);
     assert!(deleted.status.success(), "{}", describe(&deleted));
 
-    for task in [1, 2] {
-        assert_eq!(request_column(&instance, "state", task), "failed");
-        assert_eq!(request_column(&instance, "reason", task), "task deleted");
-    }
+    assert!(no_rows(&instance, "SELECT id FROM dispatch_requests"));
     assert!(no_rows(
         &instance,
         "SELECT request_id FROM dispatch_request_timeouts"
@@ -626,8 +651,7 @@ fn deleting_an_epic_fails_the_open_requests_of_its_subtree_tasks() {
     let deleted = instance.call("batch_delete", &["[]", "[1]"]);
     assert!(deleted.status.success(), "{}", describe(&deleted));
 
-    assert_eq!(request_column(&instance, "state", 1), "failed");
-    assert_eq!(request_column(&instance, "reason", 1), "task deleted");
+    assert!(no_rows(&instance, "SELECT id FROM dispatch_requests"));
     assert!(no_rows(
         &instance,
         "SELECT request_id FROM dispatch_request_timeouts"
@@ -676,8 +700,10 @@ fn a_feed_ingest_that_deletes_a_stale_task_fails_its_open_request() {
         &instance,
         &format!("SELECT id FROM tasks WHERE id = {task}")
     ));
-    assert_eq!(request_column(&instance, "state", task), "failed");
-    assert_eq!(request_column(&instance, "reason", task), "task deleted");
+    assert!(no_rows(
+        &instance,
+        &format!("SELECT id FROM dispatch_requests WHERE task_id = {task}")
+    ));
     assert!(no_rows(
         &instance,
         "SELECT request_id FROM dispatch_request_timeouts"

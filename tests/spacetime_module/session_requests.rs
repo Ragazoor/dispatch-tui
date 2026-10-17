@@ -959,11 +959,11 @@ fn deleting_a_task_fails_its_open_session_request_and_cancels_its_timer() {
     assert!(deleted.status.success(), "{}", describe(&deleted));
 
     assert!(no_rows(&instance, "SELECT id FROM tasks WHERE id = 1"));
-    assert_eq!(session_column(&instance, "state", 1, "wrap_up"), "failed");
-    assert_eq!(
-        session_column(&instance, "reason", 1, "wrap_up"),
-        "task deleted"
-    );
+    // The row failed in the same reducer, then went with its task.
+    assert!(no_rows(
+        &instance,
+        "SELECT id FROM session_requests WHERE task_id = 1"
+    ));
     assert_eq!(session_timer_count(&instance, &id), "0");
 }
 
@@ -984,11 +984,10 @@ fn batch_delete_fails_the_open_session_requests_of_the_tasks_it_deletes() {
 
     let deleted = instance.call("batch_delete", &["[1]", "[]"]);
     assert!(deleted.status.success(), "{}", describe(&deleted));
-    assert_eq!(session_column(&instance, "state", 1, "wrap_up"), "failed");
-    assert_eq!(
-        session_column(&instance, "reason", 1, "wrap_up"),
-        "task deleted"
-    );
+    assert!(no_rows(
+        &instance,
+        "SELECT id FROM session_requests WHERE task_id = 1"
+    ));
     assert_eq!(
         session_column(&instance, "state", 2, "wrap_up"),
         "requested"
@@ -996,11 +995,7 @@ fn batch_delete_fails_the_open_session_requests_of_the_tasks_it_deletes() {
 
     let deleted = instance.call("batch_delete", &["[]", "[1]"]);
     assert!(deleted.status.success(), "{}", describe(&deleted));
-    assert_eq!(session_column(&instance, "state", 2, "wrap_up"), "failed");
-    assert_eq!(
-        session_column(&instance, "reason", 2, "wrap_up"),
-        "task deleted"
-    );
+    assert!(no_rows(&instance, "SELECT id FROM session_requests"));
     assert!(no_rows(
         &instance,
         "SELECT request_id FROM session_request_timeouts"
@@ -1062,14 +1057,10 @@ fn a_feed_ingest_that_deletes_a_stale_task_fails_its_open_session_request() {
         &instance,
         &format!("SELECT id FROM tasks WHERE id = {task}")
     ));
-    assert_eq!(
-        session_column(&instance, "state", task, "wrap_up"),
-        "failed"
-    );
-    assert_eq!(
-        session_column(&instance, "reason", task, "wrap_up"),
-        "task deleted"
-    );
+    assert!(no_rows(
+        &instance,
+        &format!("SELECT id FROM session_requests WHERE task_id = {task}")
+    ));
     assert!(no_rows(
         &instance,
         "SELECT request_id FROM session_request_timeouts"

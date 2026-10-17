@@ -504,7 +504,9 @@ rule ProvisionDispatch {
         -- (ProvisioningStopsAtTheDeadline below), the module's backstop timer
         -- (DispatchRequestTimesOut) and a restart of this host
         -- (HostRestartFailsInterrupted). A task deleted under its request has
-        -- nothing to release (DeletingATaskFailsItsOpenRequest).
+        -- nothing to release (DeletingATaskFailsItsOpenRequest), and a task
+        -- closed under it is Done, which the release leaves alone
+        -- (store-split.allium: CloseFailsOpenRequests).
         --
         -- Only a FAILED REQUEST releases a claim, and no client calls a release
         -- of its own. A refused request wrote nothing and holds nothing, so
@@ -555,10 +557,12 @@ rule ProvisionDispatch {
         --
         -- == A row that fails under this host ==
         -- The row can fail while this host is still working: the module's
-        -- backstop timer (store-split.allium: DispatchRequestTimesOut), or the
-        -- task's deletion (DeletingATaskFailsItsOpenRequest). Either way the
-        -- module has finished the row, and this host's dispatched report,
-        -- if it sends one, is refused. The host learns that the row failed
+        -- backstop timer (store-split.allium: DispatchRequestTimesOut), the
+        -- task's close (CloseFailsOpenRequests), or the task's deletion
+        -- (DeletingATaskFailsItsOpenRequest, after which the row is deleted
+        -- too: DeletingATaskDeletesItsRequestRows). Either way the module has
+        -- finished the row, and this host's dispatched report, if it sends
+        -- one, is refused. The host learns that the row failed
         -- under it from that refused report, when its provisioning ends — it
         -- does not watch the row mid-attempt — and treats it as a provisioning
         -- failure after the fact: it applies the provisioning-failure rollback
@@ -568,7 +572,7 @@ rule ProvisionDispatch {
         -- already be requested again. The attempt itself is bounded by the
         -- row's deadline either way (ProvisioningStopsAtTheDeadline), and the
         -- backstop cannot fail the row before that deadline has passed, so in
-        -- practice only a task's deletion fails a row mid-attempt.
+        -- practice only a task's deletion or close fails a row mid-attempt.
         --
         -- == Provisioning-failure rollback ==
         -- "Dispatchable exactly as before" is a claim about disk state (and

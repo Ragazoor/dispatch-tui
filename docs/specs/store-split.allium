@@ -112,6 +112,15 @@
 --           rather than the data (an empty patch, the feed interval floor,
 --           the typed-url pair, a named epic's existence) stay at the
 --           service and MCP boundary. The version gate landed with it.
+--           WIDENED (task #94222): the sub-status check now sits on the
+--           module's one task write, so every writer that moves a sub_status
+--           is held to it, not only patch_task (SubStatusMovesMustBeLegal,
+--           BatchSubStatusPatchSkipsIllegalEntries); patch_task refuses an
+--           epic_id, leaving set_task_epic the only move
+--           (PatchTaskNeverMovesAnEpic); respawn_phoenix_successor wants the
+--           phoenix flag (RespawnPhoenixSuccessorNeedsTheFlag); and an epic
+--           delete refuses a subtree nested deeper than the recursive delete
+--           reaches (epics.allium: DeleteEpic).
 --       M3  Feed routing and reconcile move into the module; the TUI's feed
 --           runner posts raw items only.
 --           LANDED (task #53256): the ingest_feed reducer takes the parsed
@@ -155,7 +164,8 @@
 --             see W1 under M5. The kind column stays, with its one value.)
 --             A task holds at
 --             most one OPEN request (requested or provisioning) at a time;
---             finished rows (dispatched or failed) stay as history. Columns:
+--             finished rows (dispatched or failed) stay as history (bounded
+--             since task #94222: RequestRowsArePruned). Columns:
 --             id, task_id, kind, host, mode, origin, state, requested_at, claimed_at,
 --             finished_at, reason, worktree, tmux_window, reused_worktree,
 --             deadline (D4) and requested_by (D11). reused_worktree is the
@@ -346,7 +356,8 @@
 --             An optional column is stored as "" for absent, as in D1, and
 --             every timestamp comes from the module clock. A task holds at
 --             most one OPEN session request (requested or running) of either
---             kind; finished rows stay as history.
+--             kind; finished rows stay as history (bounded since task
+--             #94222: RequestRowsArePruned).
 --           - W2, the wrap_up flow. The MCP handler first runs the
 --             host-local checks, BEFORE writing anything: the task is
 --             wrappable, its worktree names a branch (rebase only), the
@@ -605,6 +616,12 @@
 --             request rows are kept, whether a starting board kills the window
 --             of a teardown row that failed while no board ran, and whether a
 --             board sees other machines' requests (the open questions below).
+--             The first is since decided (task #94222): a task's request rows
+--             go with the task (DeletingATaskDeletesItsRequestRows), and a
+--             finished row older than config.request_retention is pruned when
+--             a new request is written (RequestRowsArePruned). The same task
+--             had close_task fail an open dispatch request too
+--             (CloseFailsOpenRequests).
 --
 -- Design doc: 2026-10-10-tui-store-split-design.md under the superpowers
 -- specs directory (a dated snapshot; this spec is the record).
@@ -644,7 +661,9 @@ enum DispatchRequestOrigin { user | mcp | epic_chain | quick }
 ------------------------------------------------------------
 
 -- One request to dispatch one task, from the moment a client asks until the
--- host reports or the timer fails it, and kept afterwards as history. Stored
+-- host reports or the timer fails it, and kept afterwards as history until it
+-- is pruned (RequestRowsArePruned) or its task is deleted
+-- (DeletingATaskDeletesItsRequestRows). Stored
 -- as the module's dispatch_request table. An absent optional field below is
 -- stored as "" rather than as an Option; that is storage, not behaviour.
 entity DispatchRequest {
@@ -708,7 +727,9 @@ entity DispatchRequest {
 
 -- One wrap_up, exit_session (M5) or close (M7) request for one task, from the
 -- moment the module accepts it until it is done or failed, and kept afterwards
--- as history. Stored as the module's session_request table. An absent optional
+-- as history until it is pruned (RequestRowsArePruned) or its task is deleted
+-- (DeletingATaskDeletesItsRequestRows). Stored as the module's session_request
+-- table. An absent optional
 -- field below is stored as "" rather than as an Option; that is storage, not
 -- behaviour.
 entity SessionRequest {
@@ -845,11 +866,121 @@ config {
     -- As dispatch_request_backstop_grace: long enough for a live host's own
     -- stop at the deadline to land first.
     session_request_backstop_grace: Duration = 10.seconds
+
+    -- How long a finished request row, of either table, is kept for anyone to
+    -- read before RequestRowsArePruned may remove it. Measured from the row's
+    -- finished_at, or its requested_at when it never recorded one. The
+    -- module's REQUEST_RETENTION_DAYS.
+    request_retention: Duration = 14.days
 }
 
 ------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
+
+-- == Task data rules at the write seam (M2 follow-up, task #94222) ==
+
+-- sub_status_valid_for(sub_status, status) is the black box mcp-task-tools.allium
+-- (UpdateTaskViaMcp) names: the store's legality table, the pairs listed in
+-- core.allium under "Valid SubStatus values per parent status".
+
+rule SubStatusMovesMustBeLegal {
+    when: TaskWriteRequested(task, written)
+
+    -- task is the row as the store holds it, written the row the write would
+    -- leave. ONLY A MOVE IS JUDGED: a write that leaves sub_status as it was
+    -- passes whatever the pair, so a row already holding an odd pair (a
+    -- restore, an older board, a status move that left the old sub_status
+    -- behind) stays writable for its other fields.
+    requires:
+        written.sub_status = task.sub_status
+        or sub_status_valid_for(written.sub_status, written.status)
+
+    ensures: TaskRowWritten(task: task, written: written)
+
+    @guidance
+        -- THE ONE SEAM. Every module reducer that writes an existing task row
+        -- reaches the same write, and the check sits there, so no writer can
+        -- move a sub_status the status does not allow: patch_task, the
+        -- batch sub_status patch (BatchSubStatusPatchSkipsIllegalEntries
+        -- below), and the hook reducers record_pre_tool_use and
+        -- record_notification (agent-health.allium) among them. A refusal
+        -- reads "sub_status 'x' is not valid for status 'y'" and is decided
+        -- before anything is written.
+        --
+        -- patch_task ALSO judges an explicit sub_status that does not move, as
+        -- before (mcp-task-tools.allium: UpdateTaskViaMcp checks the named
+        -- sub_status against the status the row will hold). This rule adds
+        -- the writers that had no check.
+        --
+        -- AN INSERT IS NOT JUDGED (there is no prior row to move from): a seed
+        -- carries whatever the old store held, and every creating rule writes
+        -- core/SubStatus.default_for its status anyway.
+}
+
+rule BatchSubStatusPatchSkipsIllegalEntries {
+    when: SubStatusBatchPatched(updates)
+
+    ensures:
+        for update in updates:
+            if exists update.task
+               and (update.sub_status = update.task.sub_status
+                    or sub_status_valid_for(update.sub_status, update.task.status)):
+                update.task.sub_status = update.sub_status
+                update.task.updated_at = now
+
+    @guidance
+        -- batch_patch_sub_status. Each entry goes through the write seam
+        -- (SubStatusMovesMustBeLegal), but an entry it refuses is SKIPPED, not
+        -- fatal: the call succeeds and the other entries land. The batch is
+        -- built from a board snapshot that may be a poll behind, and one stale
+        -- entry must not undo its neighbours. A skipped entry leaves no trace,
+        -- and an entry naming a task that is gone is skipped as before. No
+        -- epic rollup: sub_status is not an input of the epic status.
+}
+
+rule PatchTaskNeverMovesAnEpic {
+    when: TaskPatchRequested(task, patch)
+
+    -- The epic move owns the owner, the repo-group routing and the
+    -- epic-exists check (epics.allium's routing note; set_task_epic), so a
+    -- patch that could change epic_id would skip all three.
+    requires: patch.epic_id = null
+
+    ensures: TaskPatchAccepted(task: task, patch: patch)
+
+    @guidance
+        -- patch_task refuses a patch that names epic_id at all, even one that
+        -- clears it (a detach), with "epic_id cannot
+        -- be changed by patch_task; use set_task_epic", and writes nothing.
+        -- set_task_epic is the ONLY way a task changes epic; it routes into a
+        -- repo-group sub-epic, sets the owner and rolls up both the old and
+        -- the new epic. No host patch names epic_id: update_tasks sends an
+        -- explicit epic_id as its own set_task_epic call
+        -- (mcp-task-tools.allium: UpdateTaskViaMcp).
+        --
+        -- With the epic fixed, patch_task rolls up the task's epic only when
+        -- the status moved, and still re-routes inside a grouped subtree when
+        -- repo_path changes.
+}
+
+rule RespawnPhoenixSuccessorNeedsTheFlag {
+    when: PhoenixSuccessorRequested(predecessor, successor)
+
+    -- tasks.allium's TheFlagIsTheReceipt, enforced: a predecessor without the
+    -- flag is not a phoenix task, or has already respawned.
+    requires: predecessor.phoenix
+
+    ensures: PhoenixSuccessorAccepted(predecessor: predecessor, successor: successor)
+
+    @guidance
+        -- The standalone respawn_phoenix_successor reducer. A refusal reads
+        -- "predecessor task <id> is not a phoenix task, or already respawned"
+        -- and writes nothing, so a repeated call cannot insert a second
+        -- successor. The in-transaction respawns (patch_task, close_task,
+        -- exit_session's close, a merged PR; tasks.allium: PhoenixRespawn)
+        -- were already gated on the flag.
+}
 
 -- == Dispatch requests (M4) ==
 
@@ -894,6 +1025,8 @@ rule RequestDispatch {
     ensures:
         if task.epic != null:
             RecalculateEpicStatus(task.epic)
+    -- Retention (task #94222), before the new row is written.
+    ensures: PruneRequestRows(at: now)
     ensures: DispatchRequest.created(
         task: task,
         kind: dispatch,
@@ -1130,11 +1263,17 @@ rule DeletingATaskFailsItsOpenRequest {
         -- deletes a task row (DeleteTask and BatchDelete in tasks.allium, and
         -- the stale-subtree delete inside ingest_feed, feeds.allium), not only
         -- the one this trigger names. At most one row matches
-        -- (OneOpenDispatchRequestPerTask). The host sees its row fail through
-        -- its subscription and tears down whatever it made (dispatch.allium:
-        -- ProvisionDispatch, "A row that fails under this host"); its later report,
-        -- if any, is refused. ReleaseClaimOfFailedRequest then finds no task
-        -- and does nothing.
+        -- (OneOpenDispatchRequestPerTask). ReleaseClaimOfFailedRequest then
+        -- finds no task and does nothing.
+        --
+        -- THE FAILED ROW IS NOT KEPT. The same transaction then deletes the
+        -- row (DeletingATaskDeletesItsRequestRows), so no reader ever sees it
+        -- failed "task deleted": the host's subscription sees the row
+        -- removed. The host learns of it as it always did, from its
+        -- dispatched report being refused when its provisioning ends, and
+        -- tears down whatever it made (dispatch.allium: ProvisionDispatch, "A
+        -- row that fails under this host"). The failure still matters inside
+        -- the transaction: it cancels the timer and runs the release.
 }
 
 rule ReleaseClaimOfFailedRequest {
@@ -1163,7 +1302,9 @@ rule ReleaseClaimOfFailedRequest {
         -- agent as launch_failed (agents.allium: EndAgentWhenLaunchFails).
         --
         -- The old release_backlog_claim, applied by the module to every
-        -- failure: a reported one, a timeout, a host restart. It is
+        -- failure: a reported one, a timeout, a host restart, a delete, a
+        -- close (CloseFailsOpenRequests; the task is already Done by then, so
+        -- nothing is released). It is
         -- conditional, as today: a task that was provisioned or moved on
         -- meanwhile is left alone rather than stomped back to backlog. The
         -- rollup runs in the module so no board has to recalculate an epic
@@ -1197,6 +1338,8 @@ rule RequestWrapUp {
     -- W1: at most one open session request per task, of either kind.
     requires: not SessionRequests.any(r => r.task = task and r.is_open)
 
+    -- Retention (task #94222), before the new row is written.
+    ensures: PruneRequestRows(at: now)
     ensures:
         if action = rebase:
             SessionRequest.created(
@@ -1523,11 +1666,102 @@ rule DeletingATaskFailsItsOpenSessionRequest {
         -- tasks.allium, the stale-subtree delete inside ingest_feed), and it
         -- cancels the request's timer. At most one row matches
         -- (OneOpenSessionRequestPerTask). A host still rebasing finds its
-        -- report refused. An exit_session or close row failed this way before
-        -- its teardown ran still has its window killed by its host
-        -- (pr-workflow.allium: KillWindowOfFailedExitSession): the close
-        -- already cleared the window from the task, so the delete itself does
-        -- not.
+        -- report refused.
+        --
+        -- THE FAILED ROW IS NOT KEPT. The same transaction deletes it
+        -- (DeletingATaskDeletesItsRequestRows), so the host's subscription
+        -- sees the row removed, never failed. An exit_session or close row
+        -- removed this way before its teardown ran therefore does NOT reach
+        -- pr-workflow.allium's KillWindowOfFailedExitSession, which fires on a
+        -- row seen failing, and the delete's own teardown has no window to
+        -- kill either, because the close already cleared it from the task.
+        -- The window survives (see the open question below).
+}
+
+rule DeletingATaskDeletesItsRequestRows {
+    when: DeleteTask(task)
+
+    ensures:
+        for request in DispatchRequests where task = task:
+            not exists request
+    ensures:
+        for request in SessionRequests where task = task:
+            not exists request
+
+    @guidance
+        -- Every request row of the task, finished or open, of both tables, in
+        -- the SAME reducer that deletes the task row and in every module
+        -- reducer that deletes one (DeleteTask and BatchDelete in
+        -- tasks.allium, the stale-subtree delete inside ingest_feed,
+        -- feeds.allium; an epic delete's subtree tasks among them). It runs
+        -- AFTER DeletingATaskFailsItsOpenRequest and
+        -- DeletingATaskFailsItsOpenSessionRequest, which cancel the open
+        -- rows' timers and run their releases; the deletion then removes
+        -- what they failed. Nothing reads a deleted task's requests: the
+        -- rows are history about a task that no longer exists, and every
+        -- board downloads every row on connect.
+}
+
+rule RequestRowsArePruned {
+    when: PruneRequestRows(at)
+
+    -- What check_exit_token still reads, and must outlive the prune (the
+    -- proviso the retention question set):
+    --   * a done wrap_up row no exit_session consumed is a live token;
+    let live_tokens = SessionRequests where kind = wrap_up and state = done
+        and not SessionRequests.any(r => r.kind = exit_session and r.wrap_up_request = this)
+    -- A finished row's age runs from finished_at, or from requested_at for a
+    -- row that never recorded one.
+    let cutoff = at - config.request_retention
+    let old_sessions = SessionRequests where not is_open
+        and (finished_at ?? requested_at) < cutoff
+    let old_dispatches = DispatchRequests where not is_open
+        and (finished_at ?? requested_at) < cutoff
+
+    --   * a wrap_up row goes when it is finished, old and not a live token;
+    let pruned_wrap_ups = old_sessions where kind = wrap_up
+        and not live_tokens.contains(this)
+
+    ensures:
+        for request in old_sessions:
+            --   * an exit_session row goes only with the wrap_up row it
+            --     consumed (alone, it would make that token valid again), or
+            --     when that wrap_up row is already gone; a close row goes
+            --     on age alone.
+            if (request.kind = wrap_up and pruned_wrap_ups.contains(request))
+               or (request.kind = exit_session
+                   and (pruned_wrap_ups.contains(request.wrap_up_request)
+                        or not exists request.wrap_up_request))
+               or request.kind = close:
+                not exists request
+    ensures:
+        for request in old_dispatches:
+            --   * a dispatched row finished at or after a live token's row
+            --     is what voids that token, and stays while the token lives.
+            if not (request.state = dispatched
+                    and live_tokens.any(t =>
+                        t.task = request.task and request.finished_at >= t.finished_at)):
+                not exists request
+
+    @guidance
+        -- Emitted by RequestDispatch (the epic chain's request included) and
+        -- RequestWrapUp, before the new row is written: the tables only grow
+        -- by a write, so pruning on that write bounds them with no schedule
+        -- of their own to keep alive. It sweeps BOTH tables, for every task
+        -- and every host, not only the requesting task's rows.
+        --
+        -- OPEN ROWS ARE NEVER PRUNED, whatever their age; their timers finish
+        -- them first.
+        --
+        -- THE PRUNE NEVER CHANGES A TOKEN'S VALIDITY. Every row
+        -- SessionRequest.is_valid_token reads for a live token is kept: the
+        -- token row itself, and any dispatched row that voids it. A consumed
+        -- token's wrap_up row and the exit_session row that consumed it go
+        -- together. "Live" here means unconsumed: an unconsumed done wrap_up
+        -- row a newer one has superseded is kept as well, so the prune never
+        -- decides supersession and cannot get it wrong.
+        --
+        -- The module's REQUEST_RETENTION_DAYS is config.request_retention.
 }
 
 -- == update_tasks' done-path close (M7) ==
@@ -1635,9 +1869,42 @@ rule RequestCloseTask {
         -- its host kills the window it names (pr-workflow.allium:
         -- KillWindowOfFailedExitSession). The failure is not D11-checked:
         -- the row may name a teammate's machine, and it is the close, not a
-        -- request for host work, that fails it.
+        -- request for host work, that fails it. An open DISPATCH request is
+        -- failed too (CloseFailsOpenRequests below).
         --
         -- The tool waits for nothing; its response text is unchanged.
+}
+
+rule CloseFailsOpenRequests {
+    when: CloseTaskRequested(task, host)
+
+    let open = DispatchRequests where task = task and is_open
+
+    ensures:
+        for request in open:
+            request.state = failed
+            request.finished_at = now
+            request.reason = "task closed"
+
+    @guidance
+        -- In the same close_task transaction as RequestCloseTask, which fails
+        -- the task's open SESSION request the same way; this rule is its
+        -- dispatch twin, as DeletingATaskFailsItsOpenRequest is
+        -- DeletingATaskFailsItsOpenSessionRequest's. At most one row matches
+        -- (OneOpenDispatchRequestPerTask). It cancels the row's timer.
+        --
+        -- AFTER THE DONE WRITE. The failure runs once the task is Done, so
+        -- ReleaseClaimOfFailedRequest finds a task that is no longer a bare
+        -- running claim and leaves it Done rather than putting it back in
+        -- backlog. Without this rule a task closed while its dispatch was
+        -- still provisioning could be reported dispatched, and
+        -- HostReportsDispatched would write a worktree, window and host onto
+        -- a Done task with an agent running in it. Now that report is refused,
+        -- and the host tears down what it made (dispatch.allium:
+        -- ProvisionDispatch, "A row that fails under this host").
+        --
+        -- Not D11-checked, as for the session row: the row may name a
+        -- teammate's machine, and it is the close that fails it.
 }
 
 ------------------------------------------------------------
@@ -1846,13 +2113,20 @@ invariant CloseRowsCarryNoTokenAndNoChain {
 -- owner" under M7: the host serving the teardown row; a row that fails before
 -- its host serves it leaves the PR open, accepted as built and flagged for
 -- user review).
+--
+-- Resolved in task #94222: the retention of finished request rows (a task's
+-- rows go with it, DeletingATaskDeletesItsRequestRows; a finished row older
+-- than config.request_retention is pruned on the next request write,
+-- RequestRowsArePruned, keeping every row a live exit token depends on), and
+-- close_task on a task with an open dispatch request (the close fails it
+-- "task closed", as a delete does: CloseFailsOpenRequests).
 
-open question "Retention of finished request rows (deferred past M7, and so beyond the store-split epic): dispatched and failed dispatch rows, and done and failed session rows, stay as history and their host's subscription delivers all of them. How long are they kept, and what removes them? A done wrap_up row that is still a valid exit token must outlive any cleanup."
+open question "Teardown window left alive by a task delete (task #94222): DeletingATaskDeletesItsRequestRows removes an exit_session or close row in the same transaction that fails it, so a host whose teardown had not yet run sees the row vanish rather than fail, KillWindowOfFailedExitSession never fires, and the delete's own teardown has no window to kill (the close already cleared it from the task). Before task #94222 the failed row stayed and its host killed the window. Should a host also kill the window of a teardown row it saw open and then sees removed, should the delete keep an open teardown row until its host has acted on it, or is a surviving window acceptable in this narrow case (a task deleted within the teardown's budget of its close)?"
 
-open question "Window left alive (W5, W7, W8; deferred past M7, and so beyond the store-split epic): an exit_session or close row the backstop fails because its board was closed or hung, or one the restart sweep fails, may leave the agent's tmux window alive on a task that is already Done or Review. The spec has the starting board kill the window of a row its own sweep failed, and a host kill the window of a row failed by deletion. Should a starting board also kill the windows of teardown rows that failed 'timed out' while it was not running (W8 otherwise treats them as history, as D12 does), or is a surviving window acceptable?"
+open question "A close failing a chained dispatch (task #94222): CloseFailsOpenRequests fails an open epic_chain dispatch request 'task closed', and epics.allium's ReportChainedDispatchFailure raises an auto-dispatch failure for every failed epic_chain row whose task still exists, so closing a subtask while its chained dispatch provisions shows the operator a chain failure for a close someone chose. Should ReportChainedDispatchFailure skip the 'task closed' reason, as it skips a deleted task?"
+
+open question "Window left alive (W5, W7, W8; deferred past M7, and so beyond the store-split epic): an exit_session or close row the backstop fails because its board was closed or hung, or one the restart sweep fails, may leave the agent's tmux window alive on a task that is already Done or Review. The spec has the starting board kill the window of a row its own sweep failed (a row failed by deletion is now removed with it, a separate open question above). Should a starting board also kill the windows of teardown rows that failed 'timed out' while it was not running (W8 otherwise treats them as history, as D12 does), or is a surviving window acceptable?"
 
 open question "Seeing other machines' requests (deferred past M7, and so beyond the store-split epic): a board's subscription delivers only request rows naming its own host. A teammate's board that shows the same task in a shared epic cannot see the request, so its UnprovisionedIndicator falls back to the claim stamp. Should boards also receive the open requests of every task they can see?"
-
-open question "M7, close_task on a task with an open DISPATCH request (not decided in M7): RequestCloseTask fails the task's open session request but not an open dispatch request. A task closed while its dispatch is still provisioning can then be reported dispatched, and HostReportsDispatched writes a worktree, window and host onto a Done task, with an agent running in it. The board-side close before M7 had the same gap. Should close_task also fail the task's open dispatch request ('task closed'), as a task delete does (D8), or refuse the close while one is open?"
 
 open question "M7, update_tasks' done path when close_task gets NO ANSWER (found by weed, not decided): the board treats a no-answer like a refusal and the tool replies that the task could NOT be moved to done and is still in its previous status. The close may in fact have landed. A retry is a done -> done re-close (no restamp, no respawn), but for a task with a pr-typed url it writes a second close row and runs gh pr close again. Should the tool settle a no-answer by re-reading the task, as exit_session settles its own no-answer by looking for the row (mcp-task-tools.allium: ExitSessionViaMcp), or is the 'try again' reply acceptable?"

@@ -119,7 +119,31 @@ pub fn validate_epic_parent(
             Some(id) => current = parent_of(id),
         }
     }
-    Ok(())
+    // The hop cap is spent: the chain above the proposed parent is already a
+    // loop or corrupt, and a move under it is not one to wave through.
+    Err(CYCLE.into())
+}
+
+/// Whether a node of `root`'s subtree sits deeper than `max` levels below it.
+///
+/// `children_of` answers an epic's direct sub-epics. A subtree this deep is
+/// refused by the delete's validation pass: the recursive delete stops at
+/// `max`, and stopping silently would strand the rows below it. Visited nodes
+/// are not walked twice, so a loop terminates.
+pub fn subtree_exceeds_depth(root: i64, children_of: impl Fn(i64) -> Vec<i64>, max: usize) -> bool {
+    let mut seen = std::collections::HashSet::from([root]);
+    let mut level = vec![root];
+    for _ in 0..=max {
+        level = level
+            .into_iter()
+            .flat_map(&children_of)
+            .filter(|id| seen.insert(*id))
+            .collect();
+        if level.is_empty() {
+            return false;
+        }
+    }
+    true
 }
 
 /// Refuse `feed_append_only` together with grouping or a feed role.
@@ -182,11 +206,34 @@ pub fn repo_name_from_path(repo_path: &str) -> String {
 /// checked: a status move that leaves a stale sub-status is the caller's to
 /// fix, as it was when the service made this check.
 pub fn check_task_patch(row: &Task, patch: &TaskPatch) -> Result<(), String> {
+    // The move owns the owner, the repo-group routing and the epic-exists
+    // check, so a patch that could change `epic_id` alone would skip all
+    // three. No host patch names it (`encode::task_patch` sends `None`).
+    if patch.epic_id.is_some() {
+        return Err("epic_id cannot be changed by patch_task; use set_task_epic".into());
+    }
     if let Some(sub_status) = &patch.sub_status {
         let status = patch.status.as_deref().unwrap_or(&row.status);
         validate_sub_status(status, sub_status)?;
     }
     Ok(())
+}
+
+/// The legality check [`write_task`] runs on every write: a row whose
+/// `sub_status` MOVES must hold one that is legal for its status.
+///
+/// Only a move is judged, for the reason `check_task_patch` gives: a status
+/// change that leaves the old sub-status behind is the caller's to fix, and a
+/// row already holding an odd pair (a restore, an older board) must stay
+/// writable for its other fields. An insert is not judged either: a seed
+/// carries whatever the old store held.
+pub fn check_sub_status_write(prior: Option<&Task>, row: &Task) -> Result<(), String> {
+    match prior {
+        Some(prior) if prior.sub_status != row.sub_status => {
+            validate_sub_status(&row.status, &row.sub_status)
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Every check `patch_epic` makes over a patch before applying it.
