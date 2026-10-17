@@ -50,7 +50,7 @@ Cite `path::symbol` (`src/feed/exec.rs::exec_feed_command`) rather than `file:NN
 
 ### CI
 
-CI runs Test, Clippy, Rustdoc links, Format, Coverage and Gate scripts (a mirror of the pre-push hook). Coverage is gated. Details: [docs/testing.md](docs/testing.md).
+CI runs Test, Clippy, Rustdoc links, Format, Coverage, release Build (per shipped target) and Gate scripts (a mirror of the pre-push hook). Coverage is gated. Details: [docs/testing.md](docs/testing.md).
 
 ## Running & Debugging Locally
 
