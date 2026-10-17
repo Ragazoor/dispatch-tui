@@ -938,14 +938,17 @@ rule ImportOldStore {
         -- store keeps CurrentAgentTracksWorktree. The agents the backfill
         -- creates are neither counted as imported rows nor reported.
         --
-        -- A4: a snapshot from before agents A4 carries the six session facts
-        -- on its Task rows and none on its Agent rows. seed_tasks keeps them
-        -- (every other task write blanks them), and the same backfill moves
-        -- them onto each task's current agent, points the task's imported
-        -- subagent entries at it and blanks the Task columns. A snapshot from
-        -- after A4 has them on the agents and blank on the tasks, so the
-        -- backfill finds nothing to move. A seeded ended agent that holds
-        -- subagents or a pending Stop is refused (EndedAgentHoldsNothing).
+        -- A4: the agents and task_subagents tables gained columns, so the
+        -- schema check refuses a snapshot or source store from before agents
+        -- A4, as it refuses any other column mismatch; nothing is written.
+        -- The facts of a store upgraded in place move through the same
+        -- backfill on its first connection after the publish (agents.allium:
+        -- BackfillCurrentAgents). seed_tasks keeps a Task row's six session
+        -- facts (every other task write blanks them), so a row carrying them
+        -- still reaches the backfill, which moves them onto the task's
+        -- current agent, points its subagent entries at it and blanks the
+        -- Task. A seeded ended agent that holds subagents or a pending Stop
+        -- is refused (EndedAgentHoldsNothing).
         --
         -- Seeded agent rows are checked against the agent invariants
         -- (seed_agents): a name that is empty or only digits, an ended row
