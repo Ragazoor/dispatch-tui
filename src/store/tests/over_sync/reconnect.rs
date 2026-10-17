@@ -368,3 +368,99 @@ async fn a_connection_that_cannot_subscribe_is_closed() {
         "a connection the board has given up on must not be left holding a socket"
     );
 }
+
+/// A [`Store`] whose identity adoption can be made to fail, to reach the
+/// post-accept error path no real store produces on demand.
+struct FlakyAdopt {
+    inner: Store,
+    fail: std::sync::atomic::AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl HostStore for FlakyAdopt {
+    fn host_id(&self) -> &str {
+        self.inner.host_id()
+    }
+    async fn ensure_host_identity(&self) -> anyhow::Result<(String, Option<String>)> {
+        self.inner.ensure_host_identity().await
+    }
+    async fn rename_host(&self, label: &str) -> anyhow::Result<()> {
+        self.inner.rename_host(label).await
+    }
+    async fn user_identity(&self) -> anyhow::Result<Option<String>> {
+        self.inner.user_identity().await
+    }
+    async fn adopt_user_identity(&self, identity: &str) -> anyhow::Result<()> {
+        self.inner.adopt_user_identity(identity).await
+    }
+    async fn adopt_user_identity_with_credential(
+        &self,
+        identity: &str,
+        credential: &str,
+    ) -> anyhow::Result<()> {
+        if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+            anyhow::bail!("disk full");
+        }
+        self.inner
+            .adopt_user_identity_with_credential(identity, credential)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl IdentityCredentialStore for FlakyAdopt {
+    async fn user_identity_token(&self) -> anyhow::Result<Option<String>> {
+        self.inner.user_identity_token().await
+    }
+    async fn set_user_identity_token(&self, token: &str) -> anyhow::Result<()> {
+        self.inner.set_user_identity_token(token).await
+    }
+}
+
+#[async_trait::async_trait]
+impl SubscriptionStore for FlakyAdopt {
+    async fn subscribed_epics(&self, subscriber: &str) -> anyhow::Result<Vec<EpicId>> {
+        self.inner.subscribed_epics(subscriber).await
+    }
+    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: EpicId) -> anyhow::Result<()> {
+        self.inner.subscribe_to_epic(subscriber, epic_id).await
+    }
+    async fn unsubscribe_from_epic(
+        &self,
+        subscriber: &str,
+        epic_id: EpicId,
+    ) -> anyhow::Result<bool> {
+        self.inner.unsubscribe_from_epic(subscriber, epic_id).await
+    }
+}
+
+/// An error after `Accepted` must not leave the board `Connected` with nothing
+/// subscribed: the connection is closed, the outage is retried, and the retry
+/// subscribes.
+#[tokio::test]
+async fn an_error_after_accept_is_an_outage_that_is_retried() {
+    let db = FlakyAdopt {
+        inner: store().await,
+        fail: std::sync::atomic::AtomicBool::new(true),
+    };
+    let connector = ScriptedConnector::new(vec![
+        accepted("user-a", "token-a"),
+        accepted("user-a", "token-a"),
+    ]);
+    let mut session = SyncSession::open("store.example", connector.clone());
+    let start = Instant::now();
+
+    assert_eq!(session.step(&db, start).await.unwrap(), StepOutcome::Failed);
+    assert_eq!(session.status(), ConnectionStatus::Disconnected);
+    assert_eq!(connector.disconnects(), 1);
+    assert!(connector.subscriptions().is_empty());
+
+    db.fail.store(false, std::sync::atomic::Ordering::SeqCst);
+    let due = start + RECONNECT_BACKOFF_BASE;
+    assert_eq!(session.step(&db, due).await.unwrap(), StepOutcome::Retrying);
+    assert_eq!(
+        session.step(&db, due).await.unwrap(),
+        StepOutcome::Connected
+    );
+    assert_eq!(connector.subscriptions().len(), 1);
+}

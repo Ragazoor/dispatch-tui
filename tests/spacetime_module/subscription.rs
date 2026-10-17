@@ -277,6 +277,117 @@ fn a_followed_epics_whole_sub_epic_tree_arrives_live() {
     });
 }
 
+/// Unfollowing one epic must not take another followed epic's deeper rows with
+/// it.
+///
+/// `sync.allium: AnUnfollowReassertsTheWholeAsk`. The replacing subscribe
+/// resets every widening handle, and the deeper levels come back only from
+/// insert callbacks; rows already in the SDK cache fire none. Epic 1 holds a
+/// grandchild (3) with a task, epic 9 is unfollowed, and the task in 3 must
+/// survive.
+#[test]
+fn unfollowing_one_epic_keeps_the_deep_rows_of_another() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = Instance::start("module-test");
+    let published = instance.publish(&module_path(), None);
+    assert!(published.status.success(), "{}", describe(&published));
+
+    let seeded = instance.call(
+        "seed_epics",
+        &[&serde_json::json!([
+            epic_json(1, "Followed", "backlog", 0),
+            epic_json(2, "Child", "backlog", 1),
+            epic_json(3, "Grandchild", "backlog", 2),
+            epic_json(9, "Unfollowed", "backlog", 0),
+        ])
+        .to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+    let seeded = instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([
+            task_json(1, "deep inside", "backlog", 3, "host-b"),
+            task_json(2, "in the unfollowed", "backlog", 9, "host-b"),
+        ])
+        .to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+
+    let rows = Arc::new(SharedRows::new());
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+
+    runtime.block_on(async {
+        let connector = SpacetimeSdkConnector::new(instance.database(), rows.clone());
+        let accepted = connector
+            .connect(&instance.host(), None)
+            .await
+            .unwrap_or_else(|e| panic!("connect: {e}"));
+        let ask =
+            |epics: Vec<i64>| SubscriptionRequest::new(accepted.identity.clone(), epics, "host-a");
+        connector
+            .subscribe(&ask(vec![1, 9]))
+            .await
+            .unwrap_or_else(|e| panic!("subscribe: {e}"));
+
+        let woken = rows.changed();
+        let wait_for = |want: fn(&SharedRows) -> bool| {
+            let rows = rows.clone();
+            let mut woken = woken.clone();
+            async move {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    while !want(&rows) {
+                        woken
+                            .changed()
+                            .await
+                            .expect("the subscription must deliver");
+                    }
+                })
+                .await
+            }
+        };
+
+        wait_for(|rows| rows.epics().len() == 4 && rows.tasks().len() == 2)
+            .await
+            .expect("cold start: both trees should arrive");
+
+        connector
+            .subscribe(&ask(vec![1]))
+            .await
+            .unwrap_or_else(|e| panic!("resubscribe: {e}"));
+
+        // Epic 9 and its task leave the view; the grandchild's task must be
+        // (or come back to be) the only one left. A widening is a round trip,
+        // so this waits on the rows rather than asserting at once.
+        wait_for(|rows| {
+            rows.epics().iter().all(|e| e.id.0 != 9)
+                && rows.epics().len() == 3
+                && rows.tasks().len() == 1
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "after the unfollow: epics {:?}, tasks {:?}",
+                rows.epics().iter().map(|e| e.id.0).collect::<Vec<_>>(),
+                rows.tasks()
+                    .iter()
+                    .map(|t| t.title.clone())
+                    .collect::<Vec<_>>()
+            )
+        });
+        let titles: Vec<String> = rows.tasks().iter().map(|t| t.title.clone()).collect();
+        assert_eq!(
+            titles,
+            vec!["deep inside".to_string()],
+            "a still-followed epic's depth-2 task must survive an unfollow"
+        );
+        let mut ids: Vec<i64> = rows.epics().iter().map(|e| e.id.0).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![1, 2, 3]);
+    });
+}
+
 /// **Tests 1 and 2 of Phase 10 (task #4914), against a real server.** A
 /// learning recorded on one host's board is retrievable and RAG-ranked from
 /// another's — and `rag_rank_learnings` produces the same ranking over rows

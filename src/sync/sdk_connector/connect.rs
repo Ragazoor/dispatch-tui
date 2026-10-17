@@ -179,6 +179,7 @@ impl StoreConnector for SpacetimeSdkConnector {
             .on_error(move |_ctx, error| on_error(Err(error.to_string())))
             .subscribe(queries);
         self.replace_subscription(handle);
+        self.reseed_widenings(&connection);
 
         match tokio::time::timeout(CONNECT_TIMEOUT, applied).await {
             Ok(Ok(Ok(()))) => Ok(()),

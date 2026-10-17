@@ -37,6 +37,29 @@ macro_rules! wire {
 }
 
 impl SpacetimeSdkConnector {
+    /// Re-ask for the sub-epic levels of epics this connection already holds,
+    /// after a replacing subscribe reset the walk. See [`reseed_queries`].
+    pub(super) fn reseed_widenings(&self, connection: &DbConnection) {
+        let known: Vec<(i64, i64)> = connection
+            .db()
+            .epics()
+            .iter()
+            .map(|epic| (epic.id, epic.parent_epic_id))
+            .collect();
+        let mut subtree = self.subtree.lock().unwrap_or_else(|e| e.into_inner());
+        let queries = reseed_queries(&mut subtree, &known);
+        if queries.is_empty() {
+            return;
+        }
+        let handle = connection
+            .subscription_builder()
+            .on_error(|_ctx, error| {
+                tracing::warn!("re-asking for sub-epics after a resubscribe failed: {error}");
+            })
+            .subscribe(queries);
+        subtree.widenings.push(handle);
+    }
+
     /// Point every subscribed table at [`Self::rows`].
     ///
     /// Registered once per connection, right after it is installed and BEFORE
@@ -272,6 +295,22 @@ pub(super) fn widen_queries(
     }
     let newly = subtree.cover.delivered(id, parent, known);
     newly.into_iter().flat_map(subtree_queries).collect()
+}
+
+/// The queries a replacing subscribe must add for epics the connection
+/// already holds.
+///
+/// `reset_subtree` ends every widening, and the deeper levels would otherwise
+/// come back only from `on_insert` callbacks — which rows already in the SDK
+/// cache never fire. So a still-followed epic's sub-epic tasks would vanish
+/// until reconnect. One pass is enough in any order: an epic under a covered
+/// parent covers its cached descendants too, so one met earlier is picked up
+/// then.
+pub(super) fn reseed_queries(subtree: &mut Subtree, known: &[(i64, i64)]) -> Vec<String> {
+    known
+        .iter()
+        .flat_map(|&(id, parent)| widen_queries(subtree, id, parent, known))
+        .collect()
 }
 
 /// Whether an epic update re-parented the epic, the only update that can

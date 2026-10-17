@@ -4,7 +4,9 @@
 //! store produces. What they decide — which queries a row widens the ask by —
 //! is a pure function of the cover and the rows already held, tested here.
 
-use super::wiring::{follow_queries, moved_under_new_parent, widen_queries, Subtree};
+use super::wiring::{
+    follow_queries, moved_under_new_parent, reseed_queries, widen_queries, Subtree,
+};
 
 #[test]
 fn an_epic_under_an_uncovered_parent_widens_nothing() {
@@ -60,4 +62,16 @@ fn following_pulls_in_descendants_already_held() {
 fn only_a_change_of_parent_widens_on_update() {
     assert!(moved_under_new_parent(1, 2));
     assert!(!moved_under_new_parent(2, 2));
+}
+
+#[test]
+fn a_replacing_subscribe_re_asks_for_cached_levels_under_a_followed_epic() {
+    let mut subtree = Subtree::default();
+    subtree.cover = crate::sync::subtree::SubtreeCover::new([1]);
+    // 3 is listed before its parent 2, to show order does not matter.
+    let queries = reseed_queries(&mut subtree, &[(3, 2), (2, 1), (1, 0), (9, 0)]);
+    assert!(subtree.cover.covers(2));
+    assert!(subtree.cover.covers(3));
+    assert!(!subtree.cover.covers(9));
+    assert!(!queries.is_empty());
 }

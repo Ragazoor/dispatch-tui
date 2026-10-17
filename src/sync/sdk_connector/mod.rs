@@ -114,11 +114,13 @@ impl SpacetimeSdkConnector {
         let mut slot = self.connection.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(previous) = slot.take() {
             let _ = previous.disconnect();
-            // Same reasoning as `disconnect` below: the rows were that
-            // connection's, and the new subscription re-delivers from scratch.
-            self.rows.clear();
         }
-        // Cleared on EVERY install, not only when one is replaced. Closing the
+        // Rows cleared on EVERY install, after the old connection is closed. Its
+        // late callbacks can land after `disconnect` cleared the rows, and
+        // the new subscription re-delivers from scratch, so anything here
+        // now is stale.
+        self.rows.clear();
+        // The drop slot likewise. Closing the
         // old connection fires its own `on_disconnect` on the SDK's thread, and
         // that report must not surface as an outage of the connection that just
         // succeeded — which would take the board down one step after it came up.

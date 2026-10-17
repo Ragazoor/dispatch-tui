@@ -426,36 +426,51 @@ impl SyncSession {
         // one as permission would sync on a board's first connection and never
         // again — a bug that reads as a network problem and is not one.
         let IdentityVerdict::Conflict { stored, offered } = verdict else {
-            if verdict.is_adoption() {
-                // ONE write: the owner and the credential that proves it
-                // land together, so a crash never leaves an identity this
-                // install cannot prove again (`host.allium: AdoptUserIdentity`).
-                store
-                    .adopt_user_identity_with_credential(&accepted.identity, &accepted.token)
-                    .await?;
+            // Everything from here to the subscribe is part of coming up. An
+            // error at ANY of these steps, not only the subscribe, leaves a
+            // connection that is `Connected` with no identity cached and
+            // nothing subscribed, and `reassert_on_shrink` never subscribes, so
+            // it would stay that way until restart. Each becomes an ordinary
+            // outage and is retried.
+            let up: std::result::Result<Vec<EpicId>, String> = async {
+                if verdict.is_adoption() {
+                    // ONE write: the owner and the credential that proves it
+                    // land together, so a crash never leaves an identity this
+                    // install cannot prove again (`host.allium: AdoptUserIdentity`).
+                    store
+                        .adopt_user_identity_with_credential(&accepted.identity, &accepted.token)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
+                let epics = store
+                    .subscribed_epics(&accepted.identity)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let request =
+                    build_subscription_request(store, accepted.identity.clone(), epics.clone())
+                        .await
+                        .map_err(|error| error.to_string())?;
+                self.connector
+                    .subscribe(&request)
+                    .await
+                    .map_err(|error| error.reason().to_string())?;
+                Ok(epics)
             }
-            let epics = store.subscribed_epics(&accepted.identity).await?;
-            let request =
-                build_subscription_request(store, accepted.identity.clone(), epics.clone()).await?;
-            if let Err(error) = self.connector.subscribe(&request).await {
-                // Subscribing is part of coming up. A connection that is
-                // accepted and then cannot be subscribed is not a working
-                // connection, so it becomes an ordinary outage and is retried,
-                // rather than sitting in `Connected` syncing nothing.
-                self.connection.apply(
-                    ConnectionEvent::Dropped {
-                        reason: error.reason().to_string(),
-                    },
-                    now,
-                );
-                // Closed, not merely abandoned. The socket underneath is live
-                // and its row callbacks are still firing, so a connection left
-                // installed goes on writing rows into a board whose status now
-                // says `disconnected` — and the next attempt would install a
-                // second connection beside it.
-                self.connector.disconnect().await;
-                return Ok(StepOutcome::Failed);
-            }
+            .await;
+            let epics = match up {
+                Ok(epics) => epics,
+                Err(reason) => {
+                    self.connection
+                        .apply(ConnectionEvent::Dropped { reason }, now);
+                    // Closed, not merely abandoned. The socket underneath is
+                    // live and its row callbacks are still firing, so a
+                    // connection left installed goes on writing rows into a
+                    // board whose status now says `disconnected` — and the
+                    // next attempt would install a second connection beside it.
+                    self.connector.disconnect().await;
+                    return Ok(StepOutcome::Failed);
+                }
+            };
             self.identity = accepted.identity;
             self.subscribed_epics = epics;
             return Ok(StepOutcome::Connected);

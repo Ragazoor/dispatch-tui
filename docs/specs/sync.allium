@@ -849,6 +849,12 @@ rule AnUnfollowReassertsTheWholeAsk {
         -- as fresh inserts. That is a bad trade for something that happens
         -- often and an acceptable one for an operator's deliberate unfollow.
         --
+        -- DEEPER LEVELS ARE RE-ASKED FROM THE CACHE. Rows the connection
+        -- already holds fire no insert when the replacement applies, so the
+        -- sub-epic walk cannot rediscover them from callbacks. The connector
+        -- re-seeds the walk from the epics it holds, so a still-followed
+        -- epic's sub-epic rows survive another epic being unfollowed.
+        --
         -- DOES NOT FIRE ON A FOLLOW. SubscriptionRemoved narrows StoreDeliversRow
         -- to a deletion; an added Subscription row is SubscriptionDelivered,
         -- which ASubscriptionRowWidensTheAsk already handles live and without a
