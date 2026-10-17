@@ -50,12 +50,38 @@ fn agent_launch_flags(
     agent_name: &str,
     worktree_path: &str,
     runner: &dyn ProcessRunner,
-) -> String {
-    format!(
-        "{DISPATCH_PLUGIN_DIR}{}{}",
-        session_name_flag(agent_name),
-        super::caller_identity::mcp_config_flag(runner, worktree_path, task_id)
-    )
+) -> LaunchFlags {
+    LaunchFlags {
+        base: format!("{DISPATCH_PLUGIN_DIR}{}", session_name_flag(agent_name)),
+        mcp_config: super::caller_identity::write_agent_mcp_config(runner, worktree_path, task_id)
+            .map(|p| p.to_string_lossy().into_owned()),
+    }
+}
+
+/// The flags of a task agent's `claude` command line, with the one value that
+/// can hold arbitrary characters — the MCP config path, which lives under the
+/// repo — kept raw so each launch site quotes it for its own shell layers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LaunchFlags {
+    /// Fixed flags (plugin dir, settings, session name); safe to splice anywhere.
+    pub(super) base: String,
+    /// Raw path of the caller-identity MCP config, when one was written.
+    pub(super) mcp_config: Option<String>,
+}
+
+impl LaunchFlags {
+    /// The flags as one command-line fragment under a single quoting layer, for
+    /// a command typed straight into the pane's shell (resume).
+    fn inline(&self) -> String {
+        match &self.mcp_config {
+            Some(path) => format!(
+                "{} --mcp-config {}",
+                self.base,
+                crate::process::shell_quote(path)
+            ),
+            None => self.base.clone(),
+        }
+    }
 }
 
 /// Width of the `dispatch agent-tree` companion pane, as a percentage of the
@@ -351,7 +377,8 @@ pub fn resync_agent_tree_pane(window: &TmuxWindow, runner: &dyn ProcessRunner) {
 /// It is passed as bash's `$0`, *after* the single-quoted script body rather
 /// than inside it: inside, it would sit under two quoting layers (the pane's
 /// shell strips the outer quotes, then bash parses what is left) and a path
-/// with a space would need escaping twice to survive both.
+/// with a space would need escaping twice to survive both. The MCP config path
+/// takes the same route as `$1`, because it holds repo-controlled text.
 ///
 /// The `--` before the prompt is normative, not tidiness
 /// (`PromptIsSeparatedFromTheLaunchFlags` in docs/specs/dispatch.allium).
@@ -360,10 +387,20 @@ pub fn resync_agent_tree_pane(window: &TmuxWindow, runner: &dyn ProcessRunner) {
 /// consumed as a second MCP configuration, resolved as a file path relative to
 /// the worktree, and the launch fails with "Invalid MCP configuration" before
 /// the agent starts.
-pub(super) fn prompt_launch_command(claude: &str, launch_flags: &str) -> String {
+pub(super) fn prompt_launch_command(claude: &str, flags: &LaunchFlags) -> String {
+    let base = &flags.base;
+    // The config path is a positional (`$1`) after the body, like `$0`, so it is
+    // quoted once, outside the body, and never inside it.
+    let (config_flag, config_arg) = match &flags.mcp_config {
+        Some(path) => (
+            " --mcp-config \"$1\"",
+            format!(" {}", crate::process::shell_quote(path)),
+        ),
+        None => ("", String::new()),
+    };
     format!(
         "bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt \
-         && \"$0\" {launch_flags} -- \"$prompt\"' {claude}"
+         && \"$0\" {base}{config_flag} -- \"$prompt\"' {claude}{config_arg}"
     )
 }
 
@@ -776,7 +813,7 @@ pub fn resume_agent(
     let launch_flags = agent_launch_flags(task_id, agent_name, worktree_path, runner);
     tmux::send_keys(
         &tmux_window,
-        &format!("{claude} {launch_flags} --continue"),
+        &format!("{claude} {} --continue", launch_flags.inline()),
         runner,
     )
     .context("failed to send resume keys to tmux window")?;

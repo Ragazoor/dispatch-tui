@@ -1592,11 +1592,12 @@ fn dispatch_launches_claude_with_the_per_task_mcp_config() {
     let calls = mock.recorded_calls();
     let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
     assert!(
-        launch.contains(&format!(
-            "--mcp-config {}",
-            admin.join("dispatch-mcp.json").display()
-        )),
-        "the launch must name the task's own MCP config, got: {launch}"
+        launch.contains("--mcp-config \"$1\"")
+            && launch.ends_with(&format!(
+                "claude {}",
+                admin.join("dispatch-mcp.json").display()
+            )),
+        "the launch must pass the task's own MCP config as `$1`, got: {launch}"
     );
     // Asserted on the composed command, not only on the flag builder: strict
     // mode could be added to this format string without the unit test noticing.
@@ -1686,7 +1687,10 @@ fn the_prompt_reaches_claude_as_an_operand_not_as_a_flag_value() {
     // The exact flag tail `agent_launch_flags` produces: the variadic one last.
     let cmd = prompt_launch_command(
         &crate::process::shell_quote(&stub.to_string_lossy()),
-        "--name task-42 --mcp-config /tmp/dispatch-mcp.json",
+        &LaunchFlags {
+            base: "--name task-42".to_string(),
+            mcp_config: Some("/tmp/dispatch-mcp.json".to_string()),
+        },
     );
     let out = std::process::Command::new("bash")
         .arg("-c")
@@ -2089,5 +2093,73 @@ fn provision_worktree_does_not_probe_a_start_point_the_fetch_already_proved() {
             .iter()
             .all(|(prog, args)| !(prog == "git" && args.contains(&"rev-parse".to_string()))),
         "a fetched origin/<base> is proven by the fetch; no probe belongs here: {calls:?}"
+    );
+}
+
+/// The MCP config path sits under the launch command's `bash -c '…'` body, where
+/// `shell_quote`'s own single quotes would close the body early. Run the real
+/// command with awkward paths and check the stub receives each path verbatim.
+#[test]
+fn an_mcp_config_path_with_shell_metacharacters_reaches_claude_verbatim() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for awkward in [
+        "My Projects/dispatch-mcp.json",
+        "it's here/$HOME/a\"b;c.json",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let stub = dir.path().join("claude-stub");
+        std::fs::write(&stub, "#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done\n").unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(dir.path().join(".claude-prompt"), "the prompt").unwrap();
+
+        let cmd = prompt_launch_command(
+            &crate::process::shell_quote(&stub.to_string_lossy()),
+            &LaunchFlags {
+                base: "--name task-42".to_string(),
+                mcp_config: Some(awkward.to_string()),
+            },
+        );
+        // The pane's shell strips the outer quoting, so run it through one.
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&cmd)
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "launcher failed for {awkward:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8(out.stdout).unwrap();
+        let argv: Vec<&str> = stdout.lines().collect();
+        assert_eq!(
+            argv,
+            vec![
+                "--name",
+                "task-42",
+                "--mcp-config",
+                awkward,
+                "--",
+                "the prompt"
+            ],
+            "path {awkward:?} must arrive as one verbatim argument"
+        );
+    }
+}
+
+#[test]
+fn a_launch_without_a_config_passes_no_positional_path() {
+    let cmd = prompt_launch_command(
+        "claude",
+        &LaunchFlags {
+            base: "--name task-42".to_string(),
+            mcp_config: None,
+        },
+    );
+    assert!(
+        !cmd.contains("--mcp-config") && !cmd.contains("$1"),
+        "got: {cmd}"
     );
 }

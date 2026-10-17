@@ -86,7 +86,8 @@ impl AgentBinaries {
     /// quoting would need the value escaped twice, and a site that got only one
     /// of the two layers right would look escaped while splitting at the first
     /// space; keeping the layer count at one everywhere removes that class of
-    /// mistake instead of encapsulating it.
+    /// mistake instead of encapsulating it. The MCP config path follows the same
+    /// rule: as `$1` in the launch command, and `shell_quote`d inline on resume.
     pub fn claude_quoted(&self) -> String {
         shell_quote(&self.claude)
     }

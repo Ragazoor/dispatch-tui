@@ -52,7 +52,13 @@ const CONFIG_FILE: &str = "dispatch-mcp.json";
 /// `None` on every failure, and the caller must then launch WITHOUT the flag:
 /// naming a file that does not exist would trade a silent loss of caller
 /// identity — the state the system was already in — for a broken launch.
-fn write_agent_mcp_config(
+///
+/// The path is returned raw: how to quote it depends on the launch site.
+///
+/// Deliberately no `--strict-mcp-config`: the per-task entry overrides the
+/// same-named user entry, and leaves every other MCP server the operator
+/// configured available to the agent.
+pub(super) fn write_agent_mcp_config(
     runner: &dyn ProcessRunner,
     worktree_path: &str,
     task_id: TaskId,
@@ -81,26 +87,6 @@ fn write_agent_mcp_config(
             );
             None
         }
-    }
-}
-
-/// The ` --mcp-config <path>` fragment naming this task's configuration, or an
-/// empty string when none could be written.
-///
-/// Deliberately no `--strict-mcp-config`: the per-task entry overrides the
-/// same-named user entry, and leaves every other MCP server the operator
-/// configured available to the agent.
-pub(super) fn mcp_config_flag(
-    runner: &dyn ProcessRunner,
-    worktree_path: &str,
-    task_id: TaskId,
-) -> String {
-    match write_agent_mcp_config(runner, worktree_path, task_id) {
-        Some(path) => format!(
-            " --mcp-config {}",
-            crate::process::shell_quote(&path.to_string_lossy())
-        ),
-        None => String::new(),
     }
 }
 
@@ -177,59 +163,18 @@ mod tests {
         );
     }
 
-    // -- mcp_config_flag --
-
     #[test]
-    fn no_config_contributes_no_flag() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(
-            mcp_config_flag(
-                &MockProcessRunner::new(vec![]),
-                dir.path().to_str().unwrap(),
-                TaskId(1)
-            ),
-            ""
-        );
-    }
-
-    #[test]
-    fn a_config_is_named_but_never_made_exclusive() {
-        let dir = tempfile::tempdir().unwrap();
-        let (worktree, admin) = make_linked_worktree(dir.path(), "42-fix-bug");
-        let mock = MockProcessRunner::new(vec![])
-            .with_claude_json(claude_json_with_dispatch_entry(dir.path()));
-
-        let flag = mcp_config_flag(&mock, &worktree, TaskId(1));
-
-        assert_eq!(
-            flag,
-            format!(
-                " --mcp-config {}",
-                admin.join("dispatch-mcp.json").display()
-            )
-        );
-        assert!(
-            !flag.contains("--strict-mcp-config"),
-            "strict mode would strip every other MCP server the operator configured"
-        );
-    }
-
-    #[test]
-    fn a_config_path_with_a_space_is_shell_quoted() {
-        // The flag is interpolated into a command string sent through tmux
-        // send-keys, so an unquoted space would split it into two arguments.
+    fn a_config_path_is_returned_raw_even_with_a_space() {
         let dir = tempfile::tempdir().unwrap();
         let spaced = dir.path().join("a b");
         std::fs::create_dir_all(&spaced).unwrap();
-        let (worktree, _admin) = make_linked_worktree(&spaced, "42-fix-bug");
+        let (worktree, admin) = make_linked_worktree(&spaced, "42-fix-bug");
         let mock = MockProcessRunner::new(vec![])
             .with_claude_json(claude_json_with_dispatch_entry(dir.path()));
 
-        let flag = mcp_config_flag(&mock, &worktree, TaskId(1));
-
-        assert!(
-            flag.starts_with(" --mcp-config '") && flag.ends_with('\''),
-            "a path with a space must survive as one shell word, got: {flag}"
+        assert_eq!(
+            write_agent_mcp_config(&mock, &worktree, TaskId(1)),
+            Some(admin.join("dispatch-mcp.json"))
         );
     }
 }

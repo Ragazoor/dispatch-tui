@@ -1,4 +1,4 @@
-use super::agents::prompt_launch_command;
+use super::agents::{prompt_launch_command, LaunchFlags};
 use super::mock_sequence::{
     pr_view_reply, DispatchScript, FinishRun, PrHead, Step, COMPANION_PANE_ID,
 };
