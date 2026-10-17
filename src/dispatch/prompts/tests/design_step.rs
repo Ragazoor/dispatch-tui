@@ -60,6 +60,10 @@ fn epic_section_names_no_mcp_tool() {
         "got: {text}"
     );
     assert!(
+        text.contains("needs help") && text.contains("similar problem"),
+        "the section must invite coordination, got: {text}"
+    );
+    assert!(
         !text.contains("task-<id>"),
         "siblings are reached by agent name now, got: {text}"
     );

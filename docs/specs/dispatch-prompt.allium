@@ -272,7 +272,10 @@ rule ComposeAgentPrompt {
         --                                    the epic id and title, and that
         --                                    sibling agents are reached
         --                                    with ListAgents/SendMessage
-        --                                    by agent name. Names no MCP
+        --                                    by agent name, and that it
+        --                                    should do so when it needs
+        --                                    help, preferring a sibling on
+        --                                    a similar problem. Names no MCP
         --                                    tool; see
         --                                    ThePromptNamesNoToolMerelyToSayItExists)
         --   <blank>
@@ -363,6 +366,12 @@ rule ComposeAgentPrompt {
         -- is a fact only the prompt can state. The section says where the
         -- names are shown without naming a tool: a tool name here would be
         -- the restatement this rule forbids.
+        --
+        -- The section also invites coordination: when the agent needs help,
+        -- or a running sibling in the epic works on a similar problem, it
+        -- should message that sibling rather than work alone. Agents default
+        -- to working alone; the invitation is the one behavioural nudge here,
+        -- and no schema carries it.
         --
         -- The agent's own name is a line in the shared task block ("Your agent
         -- name: <name>"), for every mode, epic or not.

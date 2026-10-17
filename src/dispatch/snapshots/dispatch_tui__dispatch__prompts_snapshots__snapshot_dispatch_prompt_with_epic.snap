@@ -11,6 +11,7 @@ Task:
 
 This task is part of epic #7: Auth overhaul
 Sibling agents are reached by their agent names, which each task's details and listing show. Find one with ListAgents and message it with SendMessage.
+Coordinate with agents already running. If your task needs help, or a sibling is working on a similar problem, message that agent. Do not hesitate to ask.
 
 If the task changes what the system does, design it spec-first: elicit the intended behaviour with `allium:elicit`, capture it in docs/specs/ with `allium:tend`, generate tests with `allium:propagate` and confirm they fail before you write any code, implement the minimum that makes them pass, then check spec and code agree with `allium:weed`.
 

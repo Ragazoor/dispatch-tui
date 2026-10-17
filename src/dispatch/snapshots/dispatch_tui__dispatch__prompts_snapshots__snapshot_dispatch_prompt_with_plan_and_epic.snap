@@ -11,6 +11,7 @@ Task:
 
 This task is part of epic #7: Auth overhaul
 Sibling agents are reached by their agent names, which each task's details and listing show. Find one with ListAgents and message it with SendMessage.
+Coordinate with agents already running. If your task needs help, or a sibling is working on a similar problem, message that agent. Do not hesitate to ask.
 
 Plan: /home/user/repo/docs/plans/fix-auth.md
 Read this file for the full implementation plan.

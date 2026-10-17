@@ -126,7 +126,9 @@ impl EpicContext {
         format!(
             "\n\nThis task is part of epic #{}: {}\n\
             Sibling agents are reached by their agent names, which each task's details and \
-            listing show. Find one with ListAgents and message it with SendMessage.",
+            listing show. Find one with ListAgents and message it with SendMessage.\n\
+            Coordinate with agents already running. If your task needs help, or a sibling is \
+            working on a similar problem, message that agent. Do not hesitate to ask.",
             self.epic_id, self.epic_title
         )
     }
