@@ -278,6 +278,51 @@ jobs:
           name: coverage-report
           path: coverage/cobertura.xml
 
+  # Builds the release binary on each shipped target, so a link failure shows
+  # up on the PR instead of in the Release Please run after merge. Keep the
+  # matrix, toolchain and cache key family in step with the `build` job in
+  # release-please.yml (its comments explain the runner choices). Nothing is
+  # packaged or uploaded here.
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            os: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: ${{ matrix.target }}
+
+      # See the Test job's cache step for why ~/.cache/ort.pyke.io is here.
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/ort.pyke.io
+            target
+          key: build-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            build-${{ matrix.target }}-
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Smoke test
+        run: ./target/${{ matrix.target }}/release/dispatch --version
+
   fmt:
     name: Format
     runs-on: ubuntu-latest
