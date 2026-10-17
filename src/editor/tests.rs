@@ -1005,3 +1005,16 @@ fn a_true_section_arms_the_flag() {
     );
     assert!(applied.phoenix);
 }
+
+#[test]
+fn resolve_editor_honours_quotes() {
+    assert_eq!(
+        resolve_editor(None, Some(r#""/opt/my editor/vim" -p"#)),
+        vec!["/opt/my editor/vim", "-p"]
+    );
+}
+
+#[test]
+fn resolve_editor_falls_back_on_unbalanced_quotes() {
+    assert_eq!(resolve_editor(None, Some(r#""vim"#)), vec![EDITOR_FALLBACK]);
+}

@@ -871,6 +871,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "shlex",
  "spacetimedb-sdk",
  "tempfile",
  "tokio",

@@ -110,6 +110,11 @@ pub fn merge_mcp_config(existing: Option<Value>, port: u16) -> MergeResult {
     };
 
     let servers = root.entry("mcpServers").or_insert_with(|| json!({}));
+    // A non-object `mcpServers` cannot hold the entry; replace it so the merge
+    // converges instead of reporting a change it never makes.
+    if !servers.is_object() {
+        *servers = json!({});
+    }
 
     if let Value::Object(servers_map) = servers {
         if servers_map.get(SERVER_NAME) == Some(&server_entry) {

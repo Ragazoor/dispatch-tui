@@ -98,7 +98,9 @@ fn remove_stale_recursive(
     for entry in fs::read_dir(dir).with_context(|| format!("Failed to read {}", dir.display()))? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_dir() {
+        // `file_type` does not follow symlinks: a symlink is unlinked as a
+        // stale entry, never walked into its target.
+        if entry.file_type()?.is_dir() {
             remove_stale_recursive(base, &path, embedded, changed)?;
             if fs::read_dir(&path)?.next().is_none() {
                 fs::remove_dir(&path)
@@ -164,7 +166,7 @@ fn has_stale_recursive(
     for entry in fs::read_dir(dir).with_context(|| format!("Failed to read {}", dir.display()))? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_dir() {
+        if entry.file_type()?.is_dir() {
             if has_stale_recursive(base, &path, embedded)? {
                 return Ok(true);
             }
@@ -614,12 +616,17 @@ fn install_unknown_provenance_script(
     // could set inconsistently, and no path that reads a yes out of silence.
     let approved = match confirmer {
         None => false,
-        Some(confirmer) => confirmer.confirm_dangerous(&format!(
+        Some(confirmer) => match confirmer.confirm_dangerous(&format!(
             "{} differs from the version dispatch ships. Overwrite it? \
              (the current file is saved to {})",
             path.display(),
             script_backup_path(&path).display()
-        ))?,
+        )) {
+            Ok(answer) => answer,
+            // An unanswerable prompt (closed stdin) is a failure of this
+            // script only: the run goes on and the manifest is still written.
+            Err(e) => return Ok(ShippedScriptReport::failed(name, path, e)),
+        },
     };
     if !approved {
         // No digest recorded: the provenance is still unknown, and recording

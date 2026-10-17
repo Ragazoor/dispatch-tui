@@ -939,3 +939,44 @@ fn installed_example_script_emits_empty_feed_item_array() {
         .expect("example script must emit a JSON array of FeedItem");
     assert!(parsed.is_empty(), "example script must emit [] by default");
 }
+
+/// A confirmer whose every prompt fails, like a closed stdin.
+struct FailingConfirmer;
+
+impl crate::setup::Confirmer for FailingConfirmer {
+    fn confirm(&self, _prompt: &str) -> Result<bool> {
+        anyhow::bail!("input closed")
+    }
+    fn confirm_dangerous(&self, _prompt: &str) -> Result<bool> {
+        anyhow::bail!("input closed")
+    }
+    fn prompt_text(&self, _prompt: &str, _default: &str) -> Result<String> {
+        anyhow::bail!("input closed")
+    }
+}
+
+#[test]
+fn install_shipped_feed_scripts_survives_a_failing_prompt_and_still_writes_the_manifest() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let edit = "#!/usr/bin/env bash\n# mine\necho '[]'\n";
+    let path = plant(data_dir.path(), "fetch-reviews.sh", edit);
+
+    let reports = install_shipped_feed_scripts(data_dir.path(), Some(&FailingConfirmer))
+        .expect("a prompt error must not abort the run");
+
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), edit);
+    assert_eq!(
+        report_for(&reports, "fetch-reviews.sh").outcome,
+        ShippedScriptOutcome::Failed
+    );
+    assert!(
+        scripts_dir(data_dir.path())
+            .join(SCRIPT_MANIFEST_NAME)
+            .exists(),
+        "the manifest must be written even when a prompt fails"
+    );
+    assert!(
+        manifest_map(data_dir.path()).len() >= SHIPPED_SCRIPTS.len() - 1,
+        "the other scripts' digests must be recorded"
+    );
+}

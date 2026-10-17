@@ -203,3 +203,12 @@ fn remove_mcp_config_noop_when_mcp_servers_missing() {
     let removed = remove_mcp_config(&path).unwrap();
     assert!(!removed, "missing mcpServers must be treated as no-op");
 }
+
+#[test]
+fn merge_mcp_config_replaces_a_non_object_mcp_servers() {
+    let result = merge_mcp_config(Some(json!({"mcpServers": "oops"})), DEFAULT_PORT);
+    assert!(result.changed);
+    assert!(result.value["mcpServers"]["dispatch"].is_object());
+    // A second pass is a no-op, so the user is not prompted every launch.
+    assert!(!merge_mcp_config(Some(result.value), DEFAULT_PORT).changed);
+}

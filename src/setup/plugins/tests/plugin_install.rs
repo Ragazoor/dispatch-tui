@@ -195,3 +195,25 @@ fn plugin_with_evals_embedded_needs_no_update_once_installed() {
     install_plugin_in(dir.path()).unwrap();
     assert!(!plugin_needs_update_in(dir.path()).unwrap());
 }
+
+/// A symlinked directory under the plugin root is unlinked, never walked:
+/// its target lives outside the plugin and is not ours to prune.
+#[cfg(unix)]
+#[test]
+fn install_does_not_delete_through_a_symlinked_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    write_all_plugin_files(dir.path());
+    let precious = outside.path().join("notes.txt");
+    fs::write(&precious, "keep me").unwrap();
+    let link = dir.path().join("skills").join("linked-skill");
+    std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+
+    install_plugin_in(dir.path()).unwrap();
+
+    assert!(precious.exists(), "the symlink target's files must survive");
+    assert!(
+        link.symlink_metadata().is_err(),
+        "the stale symlink itself is removed"
+    );
+}

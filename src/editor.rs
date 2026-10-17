@@ -21,14 +21,13 @@ pub const EDITOR_FALLBACK: &str = "vi";
 ///
 /// A value is treated as unset when it is empty or all whitespace: `export
 /// EDITOR=` is how a shell spells "no editor", and it would otherwise produce an
-/// unrunnable empty argv. The value is split on whitespace into argv and
+/// unrunnable empty argv. The value is split into argv with shell quoting rules (`shlex`) and
 /// executed directly, never through a shell, so `EDITOR="vim -p"` works and
-/// nothing in it is expanded, globbed or word-split by anything but this
-/// function.
+/// nothing in it is expanded or globbed; an unbalanced quote counts as unset.
 pub fn resolve_editor(visual: Option<&str>, editor: Option<&str>) -> Vec<String> {
     for candidate in [visual, editor] {
         let Some(value) = candidate else { continue };
-        let argv: Vec<String> = value.split_whitespace().map(str::to_string).collect();
+        let argv = shlex::split(value).unwrap_or_default();
         if !argv.is_empty() {
             return argv;
         }

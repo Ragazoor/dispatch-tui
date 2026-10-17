@@ -19,6 +19,7 @@ categories = ["command-line-utilities", "development-tools"]
 exclude = ["spacetime/module"]
 
 [dependencies]
+shlex = "1.3"
 ratatui = "0.29"
 crossterm = "0.28"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "fs", "io-util", "signal"] }

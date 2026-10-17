@@ -1,6 +1,7 @@
 //! The `Confirmer` seam: interactive yes/no prompts and a test fake.
 
 use super::*;
+use anyhow::bail;
 
 /// Seam over interactive prompts so the setup/uninstall orchestration flows
 /// (and, via [`prompt_text`](Confirmer::prompt_text), the startup host-label
@@ -33,15 +34,39 @@ impl StdinConfirmer {
         let hint = if default_yes { "[Y/n]" } else { "[y/N]" };
         eprint!("{prompt} {hint} ");
         std::io::stderr().flush()?;
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-        let trimmed = input.trim().to_lowercase();
-        Ok(match trimmed.as_str() {
-            "" => default_yes,
-            "y" | "yes" => true,
-            _ => false,
-        })
+        read_yes_no(&mut std::io::stdin().lock(), default_yes)
     }
+}
+
+/// Read one line and interpret it as yes/no. End of input is an error, never
+/// the default: a closed stdin or Ctrl-D is not an answer, so it must not
+/// consent to a rewrite.
+fn read_yes_no(reader: &mut impl std::io::BufRead, default_yes: bool) -> Result<bool> {
+    let mut input = String::new();
+    if reader.read_line(&mut input)? == 0 {
+        bail!("no answer: input closed before the prompt was answered");
+    }
+    let trimmed = input.trim().to_lowercase();
+    Ok(match trimmed.as_str() {
+        "" => default_yes,
+        "y" | "yes" => true,
+        _ => false,
+    })
+}
+
+/// Read one line of free text; empty input accepts `default`. End of input is
+/// an error for the same reason as in [`read_yes_no`].
+fn read_text(reader: &mut impl std::io::BufRead, default: &str) -> Result<String> {
+    let mut input = String::new();
+    if reader.read_line(&mut input)? == 0 {
+        bail!("no answer: input closed before the prompt was answered");
+    }
+    let trimmed = input.trim();
+    Ok(if trimmed.is_empty() {
+        default.to_string()
+    } else {
+        trimmed.to_string()
+    })
 }
 
 impl Confirmer for StdinConfirmer {
@@ -56,14 +81,7 @@ impl Confirmer for StdinConfirmer {
     fn prompt_text(&self, prompt: &str, default: &str) -> Result<String> {
         eprint!("{prompt} [{default}] ");
         std::io::stderr().flush()?;
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-        let trimmed = input.trim();
-        Ok(if trimmed.is_empty() {
-            default.to_string()
-        } else {
-            trimmed.to_string()
-        })
+        read_text(&mut std::io::stdin().lock(), default)
     }
 }
 
@@ -153,5 +171,31 @@ impl Confirmer for FakeConfirmer {
             .unwrap()
             .pop_front()
             .expect("FakeConfirmer: no text answer queued"))
+    }
+}
+
+#[cfg(test)]
+mod eof_tests {
+    use super::*;
+
+    #[test]
+    fn eof_is_not_consent() {
+        assert!(read_yes_no(&mut "".as_bytes(), true).is_err());
+        assert!(read_yes_no(&mut "".as_bytes(), false).is_err());
+        assert!(read_text(&mut "".as_bytes(), "host").is_err());
+    }
+
+    #[test]
+    fn empty_line_takes_the_default() {
+        assert!(read_yes_no(&mut "\n".as_bytes(), true).unwrap());
+        assert!(!read_yes_no(&mut "\n".as_bytes(), false).unwrap());
+        assert_eq!(read_text(&mut "\n".as_bytes(), "host").unwrap(), "host");
+    }
+
+    #[test]
+    fn explicit_answers() {
+        assert!(read_yes_no(&mut "Yes\n".as_bytes(), false).unwrap());
+        assert!(!read_yes_no(&mut "n\n".as_bytes(), true).unwrap());
+        assert_eq!(read_text(&mut "box\n".as_bytes(), "host").unwrap(), "box");
     }
 }
