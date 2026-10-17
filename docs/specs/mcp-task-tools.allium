@@ -247,6 +247,8 @@ rule UpdateTaskViaMcp {
     -- and is read from the true row, not a subscription view. The service
     -- passes the sub_status through. The refusal reads "sub_status 'x' is not
     -- valid for status 'y'" and reaches the caller as an invalid-params error.
+    -- The same table now binds every store writer that moves a sub_status,
+    -- not only this patch (store-split.allium: SubStatusMovesMustBeLegal).
     -- `sub_status_valid_for(sub_status, status)` is a black box naming the
     -- store's legality table, the pairs listed in core.allium under "Valid
     -- SubStatus values per parent status".
@@ -411,7 +413,10 @@ rule UpdateTaskViaMcp {
         -- epic_id (to a grouped root) and repo_path therefore lands where
         -- routing by the NEW repo_path puts it: the relink routes by the old
         -- repo, and the patch's repo change re-routes within that subtree.
-        -- The two are separate store transactions, not one.
+        -- The two are separate store transactions, not one. The epic_id never
+        -- rides in the patch: the store's patch_task refuses one, and
+        -- set_task_epic is the only move (store-split.allium:
+        -- PatchTaskNeverMovesAnEpic).
 }
 
 rule MarkTaskDoneViaMcp {
@@ -2133,4 +2138,4 @@ open question "update_tasks' typed-url contract is now to be stated by the schem
 
 open question "update_tasks naming a specific repo-group sub-epic in epic_id while also changing repo_path to a different repo: UpdateTaskViaMcp's ensures says the assignment is direct (route_target of a sub-epic is the sub-epic), but since store-split M2 the relink is written first and patch_task's repo change then re-routes the task to the sub-epic for the new repo, so the explicit sub-epic is overridden (and deleted if left empty). Before M2 the explicit sub-epic won. Which is intended: does an explicit sub-epic win over the new repo, or does the repo always decide inside a grouped subtree?"
 
-open question "update_tasks writes an explicit epic_id relink (set_task_epic) and the patch (patch_task) as two store transactions. The service writes the patch first unless the call also changes repo_path (then the relink goes first, so the repo change re-routes inside the new subtree). In that repo_path case a patch the store refuses (an illegal sub_status) still leaves the relink applied. Should the relink travel inside the patch (one transaction)?"
+open question "update_tasks writes an explicit epic_id relink (set_task_epic) and the patch (patch_task) as two store transactions. The service writes the patch first unless the call also changes repo_path (then the relink goes first, so the repo change re-routes inside the new subtree). In that repo_path case a patch the store refuses (an illegal sub_status) still leaves the relink applied. Should the relink and the patch become one transaction? Since task #94222 patch_task refuses epic_id outright (store-split.allium: PatchTaskNeverMovesAnEpic), so this now means a new combined reducer, not letting the relink ride in the patch."

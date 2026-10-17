@@ -597,10 +597,11 @@ async fn fail_interrupted_fails_only_this_hosts_provisioning_rows() {
 
 // -- DeletingATaskFailsItsOpenRequest -----------------------------------------
 
-/// Every task delete fails the task's open request "task deleted", in the same
-/// call: `delete_task` and `batch_delete` alike.
+/// Every task delete fails the task's open request, then drops all of the
+/// task's request rows, in the same call: `delete_task` and `batch_delete`
+/// alike. `store-split.allium: DeletingATaskDeletesItsRequestRows`.
 #[tokio::test]
-async fn deleting_a_task_fails_its_open_request() {
+async fn deleting_a_task_removes_its_request_rows() {
     let (caller, rows) = caller();
     let (single, single_req) = provisioning_request(&caller).await;
     let batched = caller.create_task(blank_task()).await.unwrap();
@@ -632,12 +633,56 @@ async fn deleting_a_task_fails_its_open_request() {
         .unwrap();
 
     for id in [single_req, batched_req] {
-        let row = rows
-            .dispatch_request(id)
-            .expect("finished rows stay as history");
-        assert_eq!(row.state, DispatchRequestState::Failed);
-        assert_eq!(row.reason.as_deref(), Some("task deleted"));
+        assert!(
+            rows.dispatch_request(id).is_none(),
+            "the rows go with their task"
+        );
     }
+    assert!(rows.dispatch_requests().is_empty());
+}
+
+/// Closing a task fails its open dispatch request "task closed", as it
+/// already fails its open session request.
+#[tokio::test]
+async fn close_task_fails_an_open_dispatch_request() {
+    let (caller, rows) = caller();
+    let (task, id) = provisioning_request(&caller).await;
+
+    caller
+        .close_task(task, HOST.into())
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
+
+    let row = rows.dispatch_request(id).unwrap();
+    assert_eq!(row.state, DispatchRequestState::Failed);
+    assert_eq!(row.reason.as_deref(), Some("task closed"));
+    assert_eq!(rows.task(task).unwrap().status, TaskStatus::Done);
+}
+
+// -- RequestRowsArePruned ------------------------------------------------------
+
+/// A finished row older than the retention window is dropped by the next
+/// request; a recent one and an open one are kept.
+#[tokio::test]
+async fn a_new_request_prunes_old_finished_dispatch_rows() {
+    let (caller, rows, clock) = caller_with_clock();
+    let old_task = caller.create_task(blank_task()).await.unwrap();
+    let old = request_id(request(&caller, old_task, HOST, "user", "dispatch").await);
+    assert!(caller.expire_dispatch_request(old).won());
+
+    clock.advance(chrono::Duration::days(15));
+    let recent_task = caller.create_task(blank_task()).await.unwrap();
+    let recent = request_id(request(&caller, recent_task, HOST, "user", "dispatch").await);
+    assert!(caller.expire_dispatch_request(recent).won());
+    clock.advance(chrono::Duration::days(1));
+    let next_task = caller.create_task(blank_task()).await.unwrap();
+    let next = request_id(request(&caller, next_task, HOST, "user", "dispatch").await);
+
+    assert!(rows.dispatch_request(old).is_none(), "15+ days old: pruned");
+    assert!(rows.dispatch_request(recent).is_some(), "1 day old: kept");
+    assert!(rows.dispatch_request(next).is_some(), "open: kept");
 }
 
 /// The double's rows carry the same vocabulary the module stores, so the board

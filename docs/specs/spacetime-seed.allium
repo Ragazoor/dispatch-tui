@@ -897,7 +897,9 @@ rule ImportOldStore {
         -- tasks, epics and learnings still link only because nothing is
         -- renumbered. That is also what makes an id collision the one thing an
         -- import cannot paper over: if the target already holds a task, epic or
-        -- learning with the SAME id but a DIFFERENT created_at, the two are
+        -- learning with the SAME id but a DIFFERENT created_at (an agent, usage
+        -- event, retired feed item, repo or base branch: a different identity
+        -- column, see identity_columns in src/spacetime/import.rs), the two are
         -- different things that share a number, and "keep the target's" would
         -- silently lose the source's. That is refused as id_conflict, before
         -- anything is written, naming the ids. (Same id and same created_at is

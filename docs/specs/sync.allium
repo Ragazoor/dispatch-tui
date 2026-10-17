@@ -385,7 +385,7 @@ config {
     -- transition rules, managed-epic provisioning in the module,
     -- store-split.allium: RequestCloseTask, X6). The module crate and the
     -- board both hold it.
-    rules_version: Integer = 6
+    rules_version: Integer = 9
 }
 
 ------------------------------------------------------------

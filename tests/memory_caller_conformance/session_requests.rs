@@ -560,13 +560,8 @@ fn memory_caller_serves_session_requests_like_the_real_module() {
         }
         real.delete_task(doomed).await.unwrap().applied().unwrap();
         mem.delete_task(doomed).await.unwrap().applied().unwrap();
-        wait_for!(rows_real
-            .session_request(r_doom)
-            .is_some_and(|r| r.reason.is_some()));
-        same_session(r_doom, m_doom);
-        assert_eq!(
-            rows_mem.session_request(m_doom).unwrap().reason.as_deref(),
-            Some("task deleted")
-        );
+        // Failed in the same call, then gone with the task.
+        wait_for!(rows_real.session_request(r_doom).is_none());
+        assert!(rows_mem.session_request(m_doom).is_none());
     });
 }

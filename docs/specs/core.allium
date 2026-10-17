@@ -251,7 +251,9 @@ enum ColumnSection {
 -- Valid SubStatus values per parent status (enforced by the store: its
 -- patch_task reducer refuses an explicit sub_status outside this table for the
 -- status the row will hold, before applying anything — see mcp-task-tools.allium:
--- UpdateTaskViaMcp):
+-- UpdateTaskViaMcp — and its one task write refuses any other writer's move of
+-- sub_status to a value outside it — see store-split.allium:
+-- SubStatusMovesMustBeLegal):
 --   backlog   : none
 --   running   : active | needs_input | stale | crashed | conflict
 --   review    : awaiting_review | changes_requested | approved | conflict | pr_closed | pr_unreachable
@@ -1591,6 +1593,18 @@ config {
     -- (see learnings.allium: ArchiveStaleLearning)
     stale_learning_cleanup_enabled: Boolean = true
     stale_learning_threshold: Duration = 90.days
+
+    -- How many levels below an epic the store's recursive delete reaches. An
+    -- epic delete (single or batch) refuses a subtree nested deeper rather
+    -- than stopping there and stranding the rows below (epics.allium:
+    -- DeleteEpic). The module's MAX_EPIC_DEPTH.
+    max_epic_depth: Integer = 64
+
+    -- How many hops up an ancestor chain the store's reparent cycle check
+    -- walks. A chain longer than this is already a loop or corrupt, and the
+    -- move is refused as a cycle (epics.allium: UpdateEpicViaMcp's
+    -- parent_epic_id check). The module's MAX_ANCESTOR_WALK.
+    max_ancestor_walk: Integer = 1024
 }
 
 ------------------------------------------------------------

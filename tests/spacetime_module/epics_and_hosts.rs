@@ -15,8 +15,8 @@ fn batch_patch_sub_status_applies_the_whole_batch_in_one_call() {
     instance.call(
         "seed_tasks",
         &[&serde_json::json!([
-            task_json(1, "a", "backlog", 1, ""),
-            task_json(2, "b", "backlog", 1, ""),
+            task_json(1, "a", "running", 1, ""),
+            task_json(2, "b", "running", 1, ""),
         ])
         .to_string()],
     );

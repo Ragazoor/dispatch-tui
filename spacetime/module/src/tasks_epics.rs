@@ -31,6 +31,14 @@ pub(crate) fn write_task_keeping_session_facts(
     validate_task_ownership(row.epic_id, &row.owner)
         .map_err(|why| format!("task {}: {why}", row.id))?;
     validate_status("task", row.id, &row.status)?;
+    let prior = if row.id != 0 {
+        ctx.db.tasks().id().find(row.id)
+    } else {
+        None
+    };
+    // THE ONE SEAM FOR SUB-STATUS LEGALITY. Every writer that moves a task's
+    // sub_status — the patch, the batch, the hook reducers — arrives here.
+    check_sub_status_write(prior.as_ref(), &row)?;
     // A TASK BORN IN DONE IS A COMPLETED TASK. `stamps_completion` covers every
     // TRANSITION into done, but a create is not a transition, and a Done card
     // with no `completed_at` sorts to the bottom of the column forever
@@ -44,11 +52,6 @@ pub(crate) fn write_task_keeping_session_facts(
         }
     } else {
         row
-    };
-    let prior = if row.id != 0 {
-        ctx.db.tasks().id().find(row.id)
-    } else {
-        None
     };
     if prior.is_some() {
         let row = ctx.db.tasks().id().update(row);
@@ -305,15 +308,13 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
     let caller_named_a_completion = patch.completed_at.is_some();
     let caller_named_stop_pending = patch.stop_pending.is_some();
     let session_patch = patch.clone();
-    let moved_to_epic = patch.epic_id;
-    // A repo change with no explicit relink re-routes within a grouped subtree.
-    // A patch that repeats the current repo (the editor sends it on every
-    // save) changes nothing to route.
-    let repo_changed_in_place = patch.epic_id.is_none()
-        && patch
-            .repo_path
-            .as_deref()
-            .is_some_and(|repo| repo != row.repo_path);
+    // A repo change re-routes within a grouped subtree. A patch that repeats
+    // the current repo (the editor sends it on every save) changes nothing to
+    // route.
+    let repo_changed_in_place = patch
+        .repo_path
+        .as_deref()
+        .is_some_and(|repo| repo != row.repo_path);
 
     apply_task_patch(&mut row, patch);
     // The session facts go to the current agent (`agents.allium`, A4).
@@ -344,25 +345,20 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
         row.phoenix = false;
     }
 
-    let now_in_epic = moved_to_epic.unwrap_or(was_in_epic);
     let status_changed = prior_status != row.status;
     write_task(ctx, row)?;
 
-    // ONLY WHEN THE DERIVATION'S INPUTS MOVED. `derive_epic_status` reads the
+    // ONLY WHEN THE DERIVATION'S INPUT MOVED. `derive_epic_status` reads the
     // child statuses and nothing else, so a patch that changes a url, a
     // sub-status or a timestamp cannot change any ancestor's answer — and
     // `patch_task` is the most frequent mutation on the board. Recalculating
     // unconditionally walked the whole ancestry, scanning tasks and epics at
     // each level, for every keystroke-driven write.
     //
-    // BOTH epics when it moved, and in that order. A task leaving one epic
-    // makes it possibly complete and makes the other possibly incomplete;
-    // recalculating only the destination leaves the source stuck open.
-    if status_changed || now_in_epic != was_in_epic {
+    // The epic never changes here: `check_task_patch` refuses `epic_id`, and
+    // `set_task_epic` owns the move.
+    if status_changed {
         recalculate_epic_chain(ctx, was_in_epic);
-        if now_in_epic != was_in_epic {
-            recalculate_epic_chain(ctx, now_in_epic);
-        }
     }
     if repo_changed_in_place {
         reroute_on_repo_change(ctx, id)?;
@@ -403,7 +399,7 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 }
 
 /// Every non-row side effect a task removal owes, beyond deleting the `tasks`
-/// row itself: live-session state, learning detachment/retrieval-cascade and failing the task's open dispatch request. SQLite gets most of
+/// row itself: live-session state, learning detachment/retrieval-cascade, failing the task's open requests and deleting all of its request rows. SQLite gets most of
 /// this for free from `ON DELETE CASCADE`/`SET NULL`; the module has no such
 /// mechanism, so every path that deletes a task row explicitly reproduces it
 /// by calling here — `delete_task` itself, `batch_delete`'s plain-task pass,
@@ -417,9 +413,12 @@ pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
     detach_learnings_from_task(ctx, task_id);
     delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, task_id);
     // store-split.allium: DeletingATaskFailsItsOpenRequest (D8).
-    fail_open_dispatch_requests_of(ctx, task_id);
+    fail_open_dispatch_requests_of(ctx, task_id, DISPATCH_REASON_TASK_DELETED);
     // store-split.allium: DeletingATaskFailsItsOpenSessionRequest (W9).
     fail_open_session_requests_of(ctx, task_id);
+    // store-split.allium: DeletingATaskDeletesItsRequestRows. After the two
+    // above, which cancel the open rows' timers.
+    delete_request_rows_of(ctx, task_id);
 }
 
 /// Move a task into an epic, out of one, or between two.
@@ -483,6 +482,11 @@ pub fn respawn_phoenix_successor(
     let Some(predecessor_row) = ctx.db.tasks().id().find(predecessor) else {
         return Err(format!("predecessor task {predecessor} not found"));
     };
+    if !predecessor_row.phoenix {
+        return Err(format!(
+            "predecessor task {predecessor} is not a phoenix task, or already respawned"
+        ));
+    }
     let epic_id = route_to_repo_group(ctx, successor.epic_id, &successor.repo_path);
     write_task(
         ctx,
@@ -508,6 +512,9 @@ pub fn respawn_phoenix_successor(
 /// batch, so it applies whole or not at all — `TaskCrud::batch_patch_sub_status`'s
 /// own doc comment already promises this shape.
 ///
+/// Each entry goes through [`write_task`], so the legality check holds here
+/// too; an illegal entry is skipped.
+///
 /// No recalculation: `sub_status` is derived board state, not a
 /// status/epic-linkage change (`TaskServiceApi::batch_patch_sub_status`'s doc
 /// comment states this explicitly), so it carries no
@@ -522,11 +529,18 @@ pub fn batch_patch_sub_status(
         let Some(row) = ctx.db.tasks().id().find(update.task_id) else {
             continue;
         };
-        ctx.db.tasks().id().update(Task {
-            sub_status: update.sub_status,
-            updated_at: stamp.clone(),
-            ..row
-        });
+        // An entry the status does not allow is skipped, not fatal: the batch
+        // is built from a board snapshot that may be a poll behind, and one
+        // stale entry must not undo its neighbours. A refusal is decided
+        // before `write_task` writes anything, so a skip leaves no trace.
+        let _ = write_task(
+            ctx,
+            Task {
+                sub_status: update.sub_status,
+                updated_at: stamp.clone(),
+                ..row
+            },
+        );
     }
     Ok(())
 }
@@ -772,6 +786,22 @@ pub(crate) fn validate_epic_deletable(
     ctx: &ReducerContext,
     id: i64,
 ) -> Result<std::collections::HashSet<i64>, String> {
+    if subtree_exceeds_depth(
+        id,
+        |epic| {
+            ctx.db
+                .epics()
+                .parent_epic_id()
+                .filter(&epic)
+                .map(|e| e.id)
+                .collect()
+        },
+        MAX_EPIC_DEPTH,
+    ) {
+        return Err(format!(
+            "epic {id}: cannot delete a subtree nested more than {MAX_EPIC_DEPTH} levels deep"
+        ));
+    }
     let doomed = collect_epic_subtree_ids(ctx, id);
     if let Some(undone_task_id) = first_undone_task_in(ctx, &doomed) {
         return Err(format!(
@@ -790,6 +820,10 @@ pub(crate) fn validate_epic_deletable(
 pub(crate) const MAX_EPIC_DEPTH: usize = 64;
 
 /// Recursively delete `id`'s sub-epics and their tasks, then `id` itself.
+///
+/// The depth guard below is a backstop: [`validate_epic_deletable`] already
+/// refuses a subtree deeper than [`MAX_EPIC_DEPTH`], so it never fires on a
+/// validated delete.
 ///
 /// Each removed task owes [`delete_task_side_effects`] the same as any other
 /// task removal — see that function's doc comment.

@@ -1057,15 +1057,20 @@ rule KillWindowOfFailedExitSession {
         -- Best effort, nothing reported: the row is already finished. Covers
         -- an exit_session row, or since M7 a close row (store-split.allium:
         -- RequestCloseTask), this host sees fail before its teardown landed:
-        -- the task's deletion (store-split.allium:
-        -- DeletingATaskFailsItsOpenSessionRequest), this board's own restart
-        -- sweep (HostRestartFailsInterruptedSessionRequests), the backstop
+        -- this board's own restart sweep (HostRestartFailsInterruptedSessionRequests), the backstop
         -- while this board was hung, a later close of the same task that
         -- failed the row ("task closed"), or a teardown that itself failed
         -- (one more attempt). The close already cleared the window from the
         -- task, so nothing else would ever kill it. It kills the window only:
         -- ClosePrOnDone's gh call is not retried here, so such a row leaves
         -- the PR open (store-split.allium, "ClosePrOnDone's owner").
+        --
+        -- NOT the task's deletion. Since task #94222 a delete fails the row
+        -- and deletes it in one transaction (store-split.allium:
+        -- DeletingATaskFailsItsOpenSessionRequest,
+        -- DeletingATaskDeletesItsRequestRows), so the host sees the row
+        -- removed, never failed, and its window survives; an open question
+        -- in store-split.allium asks whether that should change.
         --
         -- Only transitions this board SEES. A row the backstop failed while
         -- no board ran on this host is already failed in the starting board's

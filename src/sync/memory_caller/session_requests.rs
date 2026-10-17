@@ -101,6 +101,7 @@ impl MemoryReducerCaller {
             host,
             task_has_open_session_request(&tables, task_id),
         )?;
+        self.prune_terminal_requests(&mut tables);
         let id = self.write_session_request(
             &mut tables,
             module::SessionRequest {
@@ -310,6 +311,11 @@ impl MemoryReducerCaller {
             closed.phoenix = false;
         }
         self.write_task(&mut tables, closed)?;
+        self.fail_open_dispatch_requests_of(
+            &mut tables,
+            task_id,
+            module::DISPATCH_REASON_TASK_CLOSED,
+        );
         module::close_agent_session(&mut self.agent_store(&mut tables), task_id);
         self.recalculate_epic_chain(&mut tables, epic_id);
 

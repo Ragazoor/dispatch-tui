@@ -28,9 +28,11 @@ impl MemoryReducerCaller {
         self.detach_learnings_from_task(tables, task_id);
         self.delete_work_package_links_to(tables, module::WORK_PACKAGE_ITEM_TASK, task_id);
         // store-split.allium: DeletingATaskFailsItsOpenRequest (D8).
-        self.fail_open_dispatch_requests_of(tables, task_id);
+        self.fail_open_dispatch_requests_of(tables, task_id, module::DISPATCH_REASON_TASK_DELETED);
         // store-split.allium: DeletingATaskFailsItsOpenSessionRequest (W9).
         self.fail_open_session_requests_of(tables, task_id);
+        // store-split.allium: DeletingATaskDeletesItsRequestRows.
+        self.delete_request_rows_of(tables, task_id);
     }
 
     /// Recompute `live_subagents` from `task_subagents` and write it on the
@@ -489,13 +491,15 @@ impl MemoryReducerCaller {
             let Some(row) = tables.tasks.get(&update.task_id).cloned() else {
                 continue;
             };
-            let updated = module::Task {
-                sub_status: update.sub_status,
-                updated_at: stamp.clone(),
-                ..row
-            };
-            tables.tasks.insert(updated.id, updated.clone());
-            self.rows.upsert_task(&updated.into());
+            // As the module: an entry the status does not allow is skipped.
+            let _ = self.write_task(
+                &mut tables,
+                module::Task {
+                    sub_status: update.sub_status,
+                    updated_at: stamp.clone(),
+                    ..row
+                },
+            );
         }
         Ok(ReducerOutcome::Applied(vec![]))
     }
@@ -512,6 +516,11 @@ impl MemoryReducerCaller {
         let mut tables = self.lock();
         if !tables.tasks.contains_key(&predecessor) {
             return Err(anyhow::anyhow!("predecessor task {predecessor} not found"));
+        }
+        if tables.tasks.get(&predecessor).is_some_and(|t| !t.phoenix) {
+            return Err(anyhow::anyhow!(
+                "predecessor task {predecessor} is not a phoenix task, or already respawned"
+            ));
         }
         let epic_id =
             self.route_to_repo_group(&mut tables, successor.epic_id, &successor.repo_path);

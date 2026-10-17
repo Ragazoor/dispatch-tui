@@ -163,6 +163,16 @@ impl ProcessRunner for KillOnlyRunner {
     }
 }
 
+/// [`KillOnlyRunner`] that also remembers which programs it was asked for.
+struct RecordingKillRunner(std::sync::Mutex<Vec<String>>);
+
+impl ProcessRunner for RecordingKillRunner {
+    fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<Output> {
+        self.0.lock().unwrap().push(program.to_string());
+        KillOnlyRunner.run(program, args)
+    }
+}
+
 /// Spawns a shell one-liner instead of `spacetime start`.
 struct ShellSpawner(&'static str);
 
@@ -174,6 +184,18 @@ impl StoreSpawner for ShellSpawner {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
+    }
+}
+
+/// Spawns a shell one-liner and waits for it, so the child is already gone
+/// when the start begins to poll.
+struct ExitedSpawner(&'static str);
+
+impl StoreSpawner for ExitedSpawner {
+    fn spawn(&self, a: &str, d: &Path, l: &Path) -> std::io::Result<Child> {
+        let mut child = ShellSpawner(self.0).spawn(a, d, l)?;
+        child.wait()?;
+        Ok(child)
     }
 }
 
@@ -282,6 +304,43 @@ fn a_store_that_never_serves_fails_the_start_at_the_deadline_and_is_still_stoppa
         store.stop_managed_store(),
         "the launched process is tracked from the start"
     );
+}
+
+#[test]
+fn a_foreign_store_answering_does_not_make_a_dead_child_ready() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ports(
+        Arc::new(KillOnlyRunner),
+        Arc::new(ExitedSpawner("exit 3")),
+        ping_server(),
+        dir.path(),
+        TIMEOUT,
+    );
+
+    let error = store.start_managed_store().unwrap_err();
+    assert!(error.contains("exited with"), "{error}");
+}
+
+#[test]
+fn stopping_a_failed_start_signals_only_the_child_never_the_port() {
+    let runner = Arc::new(RecordingKillRunner(std::sync::Mutex::new(Vec::new())));
+    let dir = tempfile::tempdir().unwrap();
+    let store = ports(
+        runner.clone(),
+        Arc::new(ShellSpawner("exec sleep 300")),
+        free_address(),
+        dir.path(),
+        Duration::from_millis(200),
+    );
+    assert!(store.start_managed_store().is_err());
+
+    assert!(store.stop_spawned_store());
+    let programs = runner.0.lock().unwrap().clone();
+    assert!(
+        !programs.iter().any(|p| p == "ss" || p == "lsof"),
+        "{programs:?}"
+    );
+    assert!(programs.iter().any(|p| p == "kill"), "{programs:?}");
 }
 
 #[test]

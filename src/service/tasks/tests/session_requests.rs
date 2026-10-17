@@ -375,11 +375,10 @@ async fn an_underivable_branch_is_reported_failed_without_running_git() {
     assert_eq!(fx.row(id).await.state, SessionRequestState::Failed);
 }
 
-/// A task deleted between the request and the claim is reported failed "task
-/// deleted"; the module has already failed the row, so the report is refused
-/// and the row keeps the module's reason.
+/// A task deleted between the request and the claim takes its rows with it,
+/// so the claim is refused and no row is left behind.
 #[tokio::test]
-async fn a_row_whose_task_is_gone_keeps_the_task_deleted_reason() {
+async fn a_row_whose_task_is_gone_is_removed_and_its_claim_refused() {
     let fx = fx();
     let task = fx.running_task().await;
     let svc = fx.svc(MockProcessRunner::unused());
@@ -396,9 +395,9 @@ async fn a_row_whose_task_is_gone_keeps_the_task_deleted_reason() {
 
     assert!(
         matches!(served.outcome, SessionOutcome::ClaimRefused(_)),
-        "the module failed the row with the task: {served:?}"
+        "the module removed the row with the task: {served:?}"
     );
-    assert_eq!(fx.row(id).await.reason.as_deref(), Some("task deleted"));
+    assert!(fx.db.session_request(id).await.is_none());
 }
 
 /// A rebase conflict is reported failed with conflict = true and the reason
