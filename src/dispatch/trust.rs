@@ -56,8 +56,12 @@ pub(crate) fn trust_at(claude_json: &Path, repo_path: &str) -> Result<()> {
         .insert("hasTrustDialogAccepted".to_string(), Value::Bool(true));
     let updated =
         serde_json::to_string_pretty(&json).context("failed to serialize ~/.claude.json")?;
-    std::fs::write(claude_json, updated)
-        .with_context(|| format!("failed to write {}", claude_json.display()))?;
+    crate::atomic_write::write_bytes(
+        claude_json,
+        crate::atomic_write::Mode::KeepOr { default: 0o600 },
+        updated.as_bytes(),
+    )
+    .with_context(|| format!("failed to write {}", claude_json.display()))?;
     Ok(())
 }
 
@@ -153,5 +157,26 @@ mod tests {
         });
         std::fs::write(json_path(&dir), content.to_string()).unwrap();
         assert!(is_trusted_at(&json_path(&dir), "~/myrepo").unwrap());
+    }
+
+    #[test]
+    fn trust_at_keeps_key_order_and_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = json_path(&dir);
+        std::fs::write(&path, r#"{"zeta":1,"alpha":2}"#).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+        trust_at(&path, "/repo").unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.find("zeta").unwrap() < text.find("alpha").unwrap(),
+            "{text}"
+        );
+        assert!(
+            text.find("alpha").unwrap() < text.find("projects").unwrap(),
+            "{text}"
+        );
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(mode, 0o640);
     }
 }

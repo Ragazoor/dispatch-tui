@@ -186,6 +186,7 @@ async fn a_launch_with_a_named_host_file_never_opens_the_legacy_database() {
             label: Some("laptop".to_string()),
             user_identity: None,
             credential: None,
+            extra: Default::default(),
         },
     );
     let before = footprint(&data_dir);
@@ -216,6 +217,7 @@ async fn a_launch_with_a_named_host_file_never_opens_the_legacy_database() {
             label: Some("laptop".to_string()),
             user_identity: Some("c0ffee".to_string()),
             credential: Some("secret-token".to_string()),
+            extra: Default::default(),
         },
         "the identity the store handed out is adopted into the host file, with its credential"
     );

@@ -1097,6 +1097,7 @@ impl Store {
             label: None,
             user_identity: None,
             credential: None,
+            extra: Default::default(),
         };
         std::fs::write(&host_file, serde_json::to_vec(&identity)?)
             .context("writing the test host file")?;

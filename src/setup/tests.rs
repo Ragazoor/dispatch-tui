@@ -994,3 +994,25 @@ fn a_second_apply_reports_no_further_drift() {
         "ApplyIsIdempotent: the pair converges rather than flip-flopping: {drift:?}"
     );
 }
+
+#[test]
+fn write_json_file_keeps_key_order_and_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("claude.json");
+    std::fs::write(&path, r#"{"zeta":1,"alpha":2,"mid":3}"#).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let value = read_json_file(&path).unwrap().unwrap();
+    write_json_file(&path, &value).unwrap();
+    let keys: Vec<_> = read_json_file(&path)
+        .unwrap()
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    assert_eq!(keys, ["zeta", "alpha", "mid"]);
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(mode, 0o640);
+}

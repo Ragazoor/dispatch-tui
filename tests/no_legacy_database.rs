@@ -173,6 +173,7 @@ async fn one_shot_commands_with_a_host_file_never_touch_the_legacy_database() {
                 label: Some("laptop".to_string()),
                 user_identity: Some("c0ffee".to_string()),
                 credential: Some("token".to_string()),
+                extra: Default::default(),
             })
             .unwrap(),
         )

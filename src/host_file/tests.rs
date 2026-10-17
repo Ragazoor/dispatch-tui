@@ -31,6 +31,7 @@ fn named(id: &str, label: &str) -> HostIdentity {
         label: Some(label.to_string()),
         user_identity: None,
         credential: None,
+        extra: Default::default(),
     }
 }
 
@@ -253,6 +254,7 @@ fn adopting_a_user_identity_writes_it_and_its_credential_together() {
         label: Some("laptop".to_string()),
         user_identity: Some("c0ffee".to_string()),
         credential: Some("secret-token".to_string()),
+        extra: Default::default(),
     };
     assert_eq!(adopted, expected);
     assert_eq!(stored(dir.path()), expected);
@@ -375,4 +377,14 @@ fn a_cli_read_returns_the_stored_identity_without_writing() {
         before,
         "a one-shot command never writes the host file"
     );
+}
+
+#[test]
+fn an_unknown_field_survives_a_round_trip() {
+    let parsed: HostIdentity = serde_json::from_str(
+        r#"{"host_id":"h","label":null,"user_identity":null,"credential":null,"newer":{"a":1}}"#,
+    )
+    .unwrap();
+    let back = serde_json::to_value(&parsed).unwrap();
+    assert_eq!(back["newer"], serde_json::json!({"a": 1}));
 }

@@ -113,6 +113,10 @@ entity HostFile {
         -- damaged file. The private mode is set before the content is
         -- written, never afterwards, so the credential is never readable by
         -- anyone else for any length of time.
+        --
+        -- A field the file holds that this binary does not know is kept
+        -- through every rewrite, so an older binary never drops what a newer
+        -- one added.
 }
 
 ------------------------------------------------------------

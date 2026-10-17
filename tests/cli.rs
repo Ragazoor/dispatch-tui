@@ -41,6 +41,7 @@ fn write_host_file(dir: &Path) {
         label: Some("cli-test".to_string()),
         user_identity: Some("c0ffee".to_string()),
         credential: Some("token".to_string()),
+        extra: Default::default(),
     };
     std::fs::write(
         dispatch_tui::host_file::host_file_path(dir),

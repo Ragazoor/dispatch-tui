@@ -46,7 +46,11 @@ pub fn pin_store_identity(data_dir: &Path, identity: &str) -> bool {
     let Some(identity) = normalize_identity(identity) else {
         return false;
     };
-    match std::fs::write(store_pin_path(data_dir), format!("{identity}\n")) {
+    match crate::atomic_write::write_bytes(
+        &store_pin_path(data_dir),
+        crate::atomic_write::Mode::KeepOr { default: 0o644 },
+        format!("{identity}\n").as_bytes(),
+    ) {
         Ok(()) => true,
         Err(e) => {
             tracing::warn!("could not pin the store database identity beside the database: {e}");

@@ -10,7 +10,6 @@
 //! and is renamed over the old one. The private mode is therefore in force
 //! before any byte of the credential is written.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
@@ -26,7 +25,7 @@ pub const HOST_FILE_NAME: &str = "host.json";
 /// `host.allium` config `host_file_mode`: owner read/write only.
 pub const HOST_FILE_MODE: u32 = 0o600;
 
-/// The four fields the host file holds, and nothing else
+/// The four fields the host file holds, plus any a newer binary added
 /// (`host.allium: HostFile`).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct HostIdentity {
@@ -38,6 +37,10 @@ pub struct HostIdentity {
     pub user_identity: Option<String>,
     /// The credential that proves `user_identity` to the store.
     pub credential: Option<String>,
+    /// Fields a newer binary added. Kept so an older one rewriting the file
+    /// does not drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// `<data_dir>/host.json`.
@@ -65,24 +68,13 @@ fn write_whole(data_dir: &Path, identity: &HostIdentity) -> anyhow::Result<()> {
         .with_context(|| format!("create data directory {}", data_dir.display()))?;
     let path = host_file_path(data_dir);
     let bytes = serde_json::to_vec_pretty(identity).context("encode the host identity")?;
-    let mut temp = tempfile::Builder::new()
-        .prefix(".host.json.")
-        .tempfile_in(data_dir)
-        .with_context(|| format!("create a temporary file in {}", data_dir.display()))?;
-    // `tempfile` creates 0600 already, but the mode is a spec obligation
-    // (`HostFileIsPrivate`) and so is stated here rather than assumed.
-    std::fs::set_permissions(
-        temp.path(),
-        std::os::unix::fs::PermissionsExt::from_mode(HOST_FILE_MODE),
-    )
-    .context("restrict the temporary host file")?;
-    temp.write_all(&bytes).context("write the host identity")?;
-    temp.as_file()
-        .sync_all()
-        .context("flush the host identity")?;
-    temp.persist(&path)
-        .map_err(|e| e.error)
-        .with_context(|| format!("replace {}", path.display()))?;
+    // The mode is a spec obligation (`HostFileIsPrivate`), so it is fixed
+    // rather than inherited.
+    crate::atomic_write::write_bytes(
+        &path,
+        crate::atomic_write::Mode::Fixed(HOST_FILE_MODE),
+        &bytes,
+    )?;
     Ok(())
 }
 
@@ -133,6 +125,7 @@ pub fn resolve_for_launch(data_dir: &Path) -> Result<HostIdentity, StartupAbort>
         label: None,
         user_identity: None,
         credential: None,
+        extra: Default::default(),
     };
     write_whole(data_dir, &minted).map_err(unavailable)?;
     Ok(minted)
@@ -206,6 +199,7 @@ pub fn adopt_user_identity_once(data_dir: &Path, identity: &str) -> anyhow::Resu
         label: None,
         user_identity: None,
         credential: None,
+        extra: Default::default(),
     };
     set_owner_if_unset(&mut checked, identity)?;
     update(data_dir, |host| {

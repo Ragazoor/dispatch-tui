@@ -18,6 +18,7 @@ async fn a_cli_store_with_no_user_identity_refuses_and_writes_nothing() {
             label: Some("laptop".to_string()),
             user_identity: None,
             credential: None,
+            extra: Default::default(),
         })
         .unwrap(),
     )

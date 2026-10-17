@@ -674,11 +674,19 @@ fn write_snapshot(out: &str, snapshot: &dispatch_tui::spacetime::Snapshot) -> Re
             .context("Failed to encode the snapshot")?;
         writeln!(writer).context("Failed to write the snapshot")?;
     } else {
-        let file = std::fs::File::create(out).with_context(|| format!("Failed to write {out}"))?;
-        let mut writer = std::io::BufWriter::new(file);
-        serde_json::to_writer_pretty(&mut writer, snapshot)
-            .context("Failed to encode the snapshot")?;
-        writeln!(writer).context("Failed to write the snapshot")?;
+        // Temp file then rename: a failure mid-dump must not destroy the
+        // previous backup. Private: it is a whole board.
+        dispatch_tui::atomic_write::write_with(
+            std::path::Path::new(out),
+            dispatch_tui::atomic_write::Mode::Fixed(0o600),
+            |writer| {
+                serde_json::to_writer_pretty(&mut *writer, snapshot)
+                    .context("Failed to encode the snapshot")?;
+                writeln!(writer).context("Failed to write the snapshot")?;
+                Ok(())
+            },
+        )
+        .with_context(|| format!("Failed to write {out}"))?;
         eprintln!("Wrote {out}");
     }
     Ok(())
@@ -987,6 +995,19 @@ mod tests {
         let path = dir.path().join("missing").join("snap.json");
         let error = write_snapshot(path.to_str().unwrap(), &Snapshot::new(vec![])).unwrap_err();
         assert!(error.to_string().contains("Failed to write"), "{error}");
+    }
+
+    #[test]
+    fn a_snapshot_file_is_private_and_replaces_the_old_one_whole() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snap.json");
+        std::fs::write(&path, "old backup").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_snapshot(path.to_str().unwrap(), &Snapshot::new(vec![])).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[tokio::test]

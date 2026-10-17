@@ -188,7 +188,11 @@ pub fn recorded_store_server(data_dir: &std::path::Path) -> Option<String> {
 /// Record `address` beside `data_dir`, replacing whatever was there. True when
 /// the record was kept. `startup.allium`: `StoreAddressRecord.record_store_server`.
 pub fn record_store_server(data_dir: &std::path::Path, address: &str) -> bool {
-    match std::fs::write(store_record_path(data_dir), format!("{}\n", address.trim())) {
+    match crate::atomic_write::write_bytes(
+        &store_record_path(data_dir),
+        crate::atomic_write::Mode::KeepOr { default: 0o644 },
+        format!("{}\n", address.trim()).as_bytes(),
+    ) {
         Ok(()) => true,
         Err(e) => {
             tracing::warn!("could not record the store address beside the database: {e}");

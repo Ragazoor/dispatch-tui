@@ -4,6 +4,7 @@
 pub const DEFAULT_PORT: u16 = 3142;
 
 pub mod agent_tree;
+pub mod atomic_write;
 pub mod backoff;
 pub mod board_event;
 pub(crate) mod claude_paths;

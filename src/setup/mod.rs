@@ -131,7 +131,12 @@ pub(super) fn read_json_file(path: &std::path::Path) -> Result<Option<Value>> {
 
 pub(super) fn write_json_file(path: &std::path::Path, value: &Value) -> Result<()> {
     let content = serde_json::to_string_pretty(value).context("Failed to serialize JSON")?;
-    fs::write(path, content + "\n").with_context(|| format!("Failed to write {}", path.display()))
+    crate::atomic_write::write_bytes(
+        path,
+        crate::atomic_write::Mode::KeepOr { default: 0o600 },
+        (content + "\n").as_bytes(),
+    )
+    .with_context(|| format!("Failed to write {}", path.display()))
 }
 
 /// Whether `path` already holds exactly `content` — the single definition of "this
