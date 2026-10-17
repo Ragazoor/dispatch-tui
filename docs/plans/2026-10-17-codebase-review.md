@@ -216,6 +216,15 @@ Ordered by severity within each group. Paths are relative to the repo root.
     resize leaves `scroll` past the new max. Fix: count display width with
     word wrap; clamp and write back.
 
+32a. **`.worktrees/` never ignored in target repos** —
+    `src/dispatch/worktree.rs:576` (creates `<repo>/.worktrees`),
+    `src/git.rs:288` (`dirty_files`). *Plausible (verified: nothing writes
+    `info/exclude` and `parse_porcelain_files` does not filter it).* In a repo
+    whose own `.gitignore` lacks `.worktrees/`, `git status --porcelain`
+    shows `?? .worktrees/`, so every wrap_up rebase and repo sync is refused
+    as `DirtyPrimaryWorktree`. Fix: append `.worktrees/` to
+    `<git-common-dir>/info/exclude` idempotently when creating the root.
+
 ### Low
 
 33. `src/dispatch/worktree.rs:596` — `git worktree add -B` resets an existing
@@ -298,8 +307,9 @@ The specs do not say which the store is. Decide before fixing:
   consistent and guarded by `tests/module_layering.rs`. The in-memory double
   copies reducer bodies closely; the store/sync reviewer diffed the task,
   epic, dispatch-request and feed-ingest reducers and found no divergence.
-- Size: ~130k lines of production Rust across 812 files; ~20k lines in
-  `tests/`. Largest non-test files ~1,400–1,500 lines (`src/tmux.rs`,
+- Size: 812 Rust files. ~83k lines of non-test code in `src/` (excluding
+  generated bindings), ~130k lines of inline test code under `src/`, and ~20k
+  in `tests/` — test code is about 1.8× production. Largest non-test files ~1,400–1,500 lines (`src/tmux.rs`,
   `src/dispatch/worktree.rs`, `src/dispatch/mock_sequence.rs`).
 - Longest functions (~100–160 lines): `src/runtime/mod.rs::bootstrap_inner`,
   `run_tui`, `src/tui/ui/kanban/status_bar.rs::status_line`,
