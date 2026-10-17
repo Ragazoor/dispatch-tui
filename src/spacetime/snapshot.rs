@@ -303,8 +303,8 @@ impl SharedTable {
                 // Who created the row (`core.allium: Task.created_by`). An
                 // identity has no meaningful empty value, same as `owner`.
                 ("created_by", S),
-                // The task's short name (`core.allium: Task.alias`). An alias
-                // has no meaningful empty value; "" means not yet assigned.
+                // The retired task alias (`agents.allium`, step A5): blank and
+                // unread, kept because the store cannot drop a column.
                 ("alias", S),
             ],
             SharedTable::Epics => &[
@@ -477,8 +477,8 @@ impl SharedTable {
             SharedTable::Tasks => &[
                 "owner",
                 "created_by",
-                // Assigned by the module on write, so a snapshot taken before
-                // the column existed restores without one.
+                // Retired (A5) and never read, so a snapshot taken before the
+                // column existed restores without one.
                 "alias",
                 "live_shells",
                 "oldest_live_shell_started_at",

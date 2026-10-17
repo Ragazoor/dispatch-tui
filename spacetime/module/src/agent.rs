@@ -100,8 +100,7 @@ pub const AGENT_END_REASONS: [&str; 3] = [
 
 /// The first names an agent's name is drawn from (`agents.allium`, decision
 /// A11). Three to seven lowercase letters each, none a common English word or
-/// a tool name, and none an alias word ([`ALIAS_WORDS`]), so one string never
-/// names both an agent and a task's alias. Append-only in spirit: a stored
+/// a tool name. Append-only in spirit: a stored
 /// name is never recomputed, so editing the list changes only names not yet
 /// handed out.
 pub const AGENT_NAMES: &[&str] = &[
@@ -359,8 +358,8 @@ pub fn validate_seeded_agent(row: &Agent) -> Result<(), String> {
         AGENT_ENDED => true,
         other => return Err(format!("agent {id}: unknown state {other:?}")),
     };
-    // AgentNameIsNotAnId, by the alias rule every picked name already passes.
-    validate_alias(&row.name).map_err(|why| format!("agent {id}: {why}"))?;
+    // AgentNameIsNotAnId, by the format rule every picked name already passes.
+    validate_agent_name(&row.name).map_err(|why| format!("agent {id}: {why}"))?;
     if ended != AGENT_END_REASONS.contains(&row.end_reason.as_str()) {
         return Err(format!(
             "agent {id}: end reason {:?} does not fit state {}",

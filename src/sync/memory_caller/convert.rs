@@ -107,7 +107,6 @@ mirror!(
         host,
         owner,
         completed_at,
-        alias,
     }
 );
 

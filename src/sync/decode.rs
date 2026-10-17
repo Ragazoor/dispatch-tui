@@ -180,7 +180,6 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
         live_subagents: 0,
         stop_pending: false,
         completed_at: timestamp(T, row.id, "completed_at", &row.completed_at)?,
-        alias: row.alias.clone(),
     })
 }
 

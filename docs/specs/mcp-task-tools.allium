@@ -625,23 +625,18 @@ rule PrFinalisationReflectionNudge {
         -- unconditional (see learnings.allium: WrapUpRateLearningNudge).
 }
 
--- Anywhere an MCP tool takes a task id it also takes the task's alias, or the
--- name of one of its agents.
+-- Anywhere an MCP tool takes a task id it also takes the name of one of the
+-- task's agents.
 --
 -- `get_task`, `update_tasks`, `dispatch_task`, `wrap_up` and the rest resolve
--- the argument first: digits are an id, anything else is looked up as an alias
--- (core.allium: TaskAliasIsASecondName) and then as an agent name, current or
--- ended (agents.allium: AgentNameResolvesToTask). The two word lists start
--- disjoint, but an alias can be set to any word, so a word that is one task's
--- alias and a different task's agent name is refused as invalid params
--- (-32602), asking for the id, rather than resolved to one of them. A word
--- that is neither an alias nor an agent name is the same NotFound (-32001) an
--- unknown id gets. Results still
--- report the numeric id as well as the alias. `update_tasks` also takes
--- `alias` as a field, to rename.
+-- the argument first: digits are an id, anything else is looked up as an agent
+-- name, current or ended (agents.allium: AgentNameResolvesToTask). A word that
+-- is no agent's name is the same NotFound (-32001) an unknown id gets. Results
+-- still report the numeric id.
 --
--- Step A5 of agents.allium removes the alias half; the agent-name half stays.
-rule AliasResolvesToTaskId {
+-- Task aliases are gone (agents.allium, step A5): an old alias no longer
+-- resolves, and `update_tasks` has no `alias` field.
+rule TaskRefResolvesToTaskId {
     when: McpToolCalled(task_ref)
     ensures: TaskResolved(task_ref)
 }
@@ -944,10 +939,10 @@ rule GetTaskViaMcp {
         -- == The current agent ==
         -- A task with a current agent (agents.allium: AgentIdentity) gets one
         -- line, "Agent: <name> (live)" or "Agent: <name> (paused)", straight
-        -- after the Alias line: live when the agent holds a tmux window,
+        -- after the Description line: live when the agent holds a tmux window,
         -- paused when it does not. A task with no current agent has no such
         -- line, as an unset field has none. An ended agent is never shown: it
-        -- still resolves as a task_ref (AliasResolvesToTaskId), but it is not
+        -- still resolves as a task_ref (TaskRefResolvesToTaskId), but it is not
         -- the one working the task.
 }
 
@@ -976,7 +971,7 @@ rule ListTasksViaMcp {
     @guidance
         -- == each row names the current agent ==
         -- A row for a task with a current agent carries " agent:<name> (live)"
-        -- or " agent:<name> (paused)" after the title and alias, with the same
+        -- or " agent:<name> (paused)" after the title, with the same
         -- meaning as get_task's Agent line. A task with none shows nothing.
         -- == query is a text search over title and description ==
         -- query, when set, keeps only tasks that match it. It is split on

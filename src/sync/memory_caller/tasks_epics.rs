@@ -28,7 +28,6 @@ impl MemoryReducerCaller {
         if row.status == DONE && row.completed_at.is_empty() {
             row.completed_at = self.now();
         }
-        Self::ensure_alias(tables, &mut row)?;
         // The six live-session facts are the current agent's since A4.
         let mut row = module::without_session_facts(row);
         let id = Self::assign_id(row.id, &mut tables.next_task_id);
@@ -38,20 +37,6 @@ impl MemoryReducerCaller {
         // (agents.allium).
         module::follow_task_write(&mut self.agent_store(tables), prior.as_ref(), &row);
         self.rows.upsert_task(&row.into());
-        Ok(())
-    }
-
-    /// Mirrors the module's `ensure_alias`: assign a word to a task that has
-    /// none, and refuse an alias that is malformed or that another task holds.
-    fn ensure_alias(tables: &Tables, row: &mut module::Task) -> Result<(), String> {
-        let taken_by_other = |alias: &str| {
-            tables
-                .tasks
-                .values()
-                .any(|other| other.alias == alias && (other.id != row.id || row.id == 0))
-        };
-        let seed = tables.tasks.len() as u64;
-        row.alias = module::resolve_alias(row.id, &row.alias, seed, taken_by_other)?;
         Ok(())
     }
 

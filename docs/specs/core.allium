@@ -588,7 +588,6 @@ value TaskUrl {
 
 entity Task {
     title: String
-    alias: String  -- a short lowercase word a person can read at a glance, such as "scar". Assigned by the store on the first write of the task that finds it empty — in practice its creation, or for a task from before this field existed its next write of any kind — from a fixed word list, and unique among all tasks. Empty only while not yet assigned. The id stays the task's real identity; the alias is a second name for it (see TaskAliasIsASecondName below). The user can rename it; a rename keeps it unique and never touches the id. A task created before this field existed gets one at migration.
     description: String
     repo_path: String
     status: TaskStatus
@@ -757,30 +756,6 @@ entity Task {
     invariant HostTracksWorktree {
         (worktree != null implies host != null)
         and (host != null implies worktree != null)
-    }
-
-    -- The alias is a second name for the task, not a replacement for its id.
-    --
-    -- A five-digit id is hard for a person to scan; a word is easy. So the
-    -- agent tree shows the agent name (agent-tree.allium: AgentRowShowsAgentName) and
-    -- every place that takes a task id also takes its alias
-    -- (mcp-task-tools.allium: AliasResolvesToTaskId). The id stays the key:
-    -- window names (`task-<id>`) and stored references keep using it, so a
-    -- rename never breaks a link. A messaging session is named after its
-    -- agent instead (agents.allium: AgentSessionIsNamedAfterTheAgent).
-    --
-    -- Aliases are unique, so an alias always names one task. A rename to a
-    -- taken alias is refused, and so is a rename to a string that is only
-    -- digits, because that could be read as an id.
-    --
-    -- A task whose alias is still empty shows as `#<id>` wherever an alias
-    -- would show, so an old task is never nameless.
-    -- RETIRING: agents.allium (task #77852) replaces the alias with the
-    -- agent name, and step A5 removes this invariant. Until A5 lands it
-    -- stays authoritative.
-    invariant TaskAliasIsASecondName {
-        for a in Task: for b in Task:
-            (a.alias != "" and a.alias = b.alias) implies a = b
     }
 
     -- A task has an owner if and only if it has no epic.

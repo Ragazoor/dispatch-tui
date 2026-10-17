@@ -60,7 +60,7 @@
 --     same agent, under the same name.
 --   - A8, addressing. Wherever a tool takes a task id, it also takes an agent
 --     name, and the name resolves to that agent's task. This replaces alias
---     resolution (mcp-task-tools.allium: AliasResolvesToTaskId).
+--     resolution (mcp-task-tools.allium: TaskRefResolvesToTaskId).
 --   - A9, the session name. An agent is launched with its own name as the
 --     Claude Code session name (`--name ada`), so ListAgents and SendMessage
 --     address it by name. The tmux WINDOW keeps its `task-<id>` name: the
@@ -508,7 +508,11 @@ invariant AgentNameIsNotAnId {
 --     row, blank and unread, for the same reason as A4's. Do not remove it.
 --
 -- Landed: A1 (task #90115), A2 (task #90116), A3 (task #90117), A4 (task
--- #90118). A4's readers on the board see the facts through the task's
+-- #90118), A5 (task #90119). The migration is complete. A5 removed alias
+-- resolution, the alias field on update_tasks, the alias picker and
+-- TaskAliasIsASecondName; the word list the alias picker drew from is gone,
+-- and the agent-name picker keeps its own walk. Old aliases stop resolving.
+-- A4's readers on the board see the facts through the task's
 -- current agent, joined where the board's rows are read (the sync layer), so
 -- the board's Task model keeps the names `tmux_window`, `live_subagents` and
 -- the rest as derived views; nothing on the board writes them to the Task.

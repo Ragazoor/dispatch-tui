@@ -363,12 +363,6 @@ pub struct Task {
     /// `docs/specs/board-layout.allium`. Deliberately survives a move back out
     /// of Done: it records the last completion, not the current status.
     pub completed_at: Option<DateTime<Utc>>,
-    /// A short word naming the task for a person; see `core.allium:
-    /// TaskAliasIsASecondName`. Empty only for a task the store has not yet
-    /// given one (a row from before the column existed); callers that show it
-    /// fall back to the id when it is empty (see `src/agent_tree/render/agents.rs`
-    /// and `src/mcp/handlers/tasks/mod.rs`).
-    pub alias: String,
     pub base_branch: String,
     pub external_id: Option<String>,
     /// Free-form badges rendered on the kanban card alongside derived
@@ -704,7 +698,6 @@ impl Default for Task {
             tag: None,
             sort_order: None,
             completed_at: None,
-            alias: String::new(),
             base_branch: DEFAULT_BASE_BRANCH.to_string(),
             external_id: None,
             labels: Vec::new(),

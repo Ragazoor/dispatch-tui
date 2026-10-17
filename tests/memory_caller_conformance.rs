@@ -177,7 +177,6 @@ fn blank_task_patch() -> bindings::TaskPatch {
         host: None,
         owner: None,
         completed_at: None,
-        alias: None,
     }
 }
 

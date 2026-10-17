@@ -111,7 +111,7 @@ fn current(rows: &Rows, task_id: i64) -> Vec<&Agent> {
 // -- the name list (decision A11) ---------------------------------------------
 
 #[test]
-fn every_agent_name_is_short_unique_and_not_an_alias_word() {
+fn every_agent_name_is_short_and_unique() {
     let mut seen = std::collections::HashSet::new();
     for name in AGENT_NAMES {
         assert!(
@@ -119,8 +119,7 @@ fn every_agent_name_is_short_unique_and_not_an_alias_word() {
             "{name}"
         );
         assert!(seen.insert(*name), "duplicate name {name}");
-        assert!(!ALIAS_WORDS.contains(name), "{name} is also an alias word");
-        assert!(validate_alias(name).is_ok(), "{name}");
+        assert!(validate_agent_name(name).is_ok(), "{name}");
     }
     assert!(AGENT_NAMES.len() >= 500, "{}", AGENT_NAMES.len());
     for kept in ["ada", "linus", "grace"] {
@@ -483,12 +482,12 @@ fn a_task_row_holds_no_session_fact_after_a_write() {
     assert_eq!(written.worktree, pre_a4_live(1).worktree);
 }
 
-/// A4 moves the live-session facts onto the agent, so the version is 8. The
+/// A5 retires the task alias from `write_task`, so the version is 9. The
 /// board's own copy is pinned equal to this one by `src/sync/rules_gate.rs`'s
 /// test.
 #[test]
-fn the_rules_version_is_eight_for_agents_a4() {
-    assert_eq!(RULES_VERSION, 8);
+fn the_rules_version_is_nine_for_agents_a5() {
+    assert_eq!(RULES_VERSION, 9);
 }
 
 // -- seed_agents' row checks ----------------------------------------------------

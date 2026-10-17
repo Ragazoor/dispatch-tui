@@ -49,9 +49,6 @@ pub struct UpdateTaskParams {
     /// `None` = leave untouched; `Some(v)` = write `v`. Arms or disarms the
     /// recurrence; see `PhoenixRespawn` in `docs/specs/tasks.allium`.
     pub phoenix: Option<bool>,
-    /// `None` = leave untouched; `Some(v)` = rename. The store refuses a
-    /// malformed or taken alias (`core.allium: TaskAliasIsASecondName`).
-    pub alias: Option<String>,
 }
 
 impl UpdateTaskParams {
@@ -88,7 +85,6 @@ impl UpdateTaskParams {
             wrap_up_mode,
             auto_run_plan,
             phoenix,
-            alias,
         } = self;
 
         [
@@ -111,7 +107,6 @@ impl UpdateTaskParams {
             ("wrap_up_mode", wrap_up_mode.is_some()),
             ("auto_run_plan", auto_run_plan.is_some()),
             ("phoenix", phoenix.is_some()),
-            ("alias", alias.is_some()),
         ]
         .into_iter()
         .filter_map(|(name, is_set)| is_set.then_some(name))
@@ -141,7 +136,6 @@ impl UpdateTaskParams {
             wrap_up_mode: None,
             auto_run_plan: None,
             phoenix: None,
-            alias: None,
         }
     }
 
@@ -227,11 +221,6 @@ impl UpdateTaskParams {
 
     pub fn wrap_up_mode(mut self, mode: Option<WrapUpMode>) -> Self {
         self.wrap_up_mode = Some(mode);
-        self
-    }
-
-    pub fn alias(mut self, value: impl Into<String>) -> Self {
-        self.alias = Some(value.into());
         self
     }
 

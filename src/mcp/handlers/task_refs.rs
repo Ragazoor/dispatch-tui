@@ -1,41 +1,26 @@
-//! mcp-task-tools.allium: AliasResolvesToTaskId, agents.allium:
-//! AgentNameResolvesToTask.
+//! agents.allium: AgentNameResolvesToTask, mcp-task-tools.allium:
+//! TaskRefResolvesToTaskId.
 //!
-//! Every tool that takes a task id also takes the task's alias or the name of
-//! one of its agents, current or ended. Ids are parsed by the argument
-//! deserializers, which have no store to ask, so the word is swapped for its
-//! id here, once, before dispatch — no handler needs to know aliases or agent
-//! names exist. Step A5 of agents.allium removes the alias half.
+//! Every tool that takes a task id also takes the name of one of the task's
+//! agents, current or ended. Ids are parsed by the argument deserializers,
+//! which have no store to ask, so the name is swapped for its id here, once,
+//! before dispatch — no handler needs to know agent names exist.
 
 use serde_json::Value;
 
-use crate::models::{Agent, Task};
+use crate::models::Agent;
 
 /// The argument keys that name a task.
 const TASK_REF_KEYS: [&str; 2] = ["task_id", "task_ids"];
 
-/// A word that cannot be turned into one task id.
+/// A word that is no agent's name, so it names no task.
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum BadTaskRef {
-    /// Neither a task's alias nor an agent's name.
-    Unknown(String),
-    /// One task's alias and another task's agent name. The word lists start
-    /// disjoint, but `update_tasks` lets a person set an alias to any word, so
-    /// guessing would act on the wrong task.
-    Ambiguous(String),
-}
+pub(super) struct UnknownTaskRef(pub(super) String);
 
-impl BadTaskRef {
-    /// What the caller is told. An unknown word is a plain not-found.
+impl UnknownTaskRef {
+    /// What the caller is told: a plain not-found.
     pub(super) fn message(&self) -> String {
-        match self {
-            BadTaskRef::Unknown(word) => {
-                format!("No task has the alias or agent name '{word}'")
-            }
-            BadTaskRef::Ambiguous(word) => format!(
-                "'{word}' is one task's alias and another task's agent name; use the task id"
-            ),
-        }
+        format!("No task has the agent name '{}'", self.0)
     }
 }
 
@@ -59,37 +44,26 @@ pub(super) fn holds_name(args: &Value) -> bool {
     })
 }
 
-fn resolve_one(value: &mut Value, tasks: &[Task], agents: &[Agent]) -> Result<(), BadTaskRef> {
+fn resolve_one(value: &mut Value, agents: &[Agent]) -> Result<(), UnknownTaskRef> {
     let Value::String(s) = value else {
         return Ok(());
     };
     if is_id(s) {
         return Ok(());
     }
-    // The two word lists start disjoint (agents.allium, A11), but an alias can
-    // be set to any word, so a word naming two different tasks is refused
-    // rather than resolved by whichever list is asked first.
-    let by_alias = tasks.iter().find(|t| t.alias == *s).map(|t| t.id);
-    let by_agent = agents.iter().find(|a| a.name == *s).map(|a| a.task_id);
-    match (by_alias, by_agent) {
-        (Some(a), Some(b)) if a != b => Err(BadTaskRef::Ambiguous(std::mem::take(s))),
-        (Some(id), _) | (None, Some(id)) => {
-            *value = Value::from(id.0);
+    match agents.iter().find(|a| a.name == *s) {
+        Some(agent) => {
+            *value = Value::from(agent.task_id.0);
             Ok(())
         }
-        (None, None) => Err(BadTaskRef::Unknown(std::mem::take(s))),
+        None => Err(UnknownTaskRef(std::mem::take(s))),
     }
 }
 
-/// Replace every alias or agent name in the task-naming arguments with the
-/// task's id. Digits stay ids, so an unknown id still reaches the handler and
-/// fails there as it always did; a word that is no alias and no agent's name
-/// fails here the same way.
-pub(super) fn resolve_task_refs(
-    args: &mut Value,
-    tasks: &[Task],
-    agents: &[Agent],
-) -> Result<(), BadTaskRef> {
+/// Replace every agent name in the task-naming arguments with its task's id.
+/// Digits stay ids, so an unknown id still reaches the handler and fails there
+/// as it always did; a word that is no agent's name fails here the same way.
+pub(super) fn resolve_task_refs(args: &mut Value, agents: &[Agent]) -> Result<(), UnknownTaskRef> {
     let Value::Object(map) = args else {
         return Ok(());
     };
@@ -97,10 +71,10 @@ pub(super) fn resolve_task_refs(
         match map.get_mut(key) {
             Some(Value::Array(items)) => {
                 for item in items {
-                    resolve_one(item, tasks, agents)?;
+                    resolve_one(item, agents)?;
                 }
             }
-            Some(value) => resolve_one(value, tasks, agents)?,
+            Some(value) => resolve_one(value, agents)?,
             None => {}
         }
     }
@@ -112,21 +86,6 @@ mod tests {
     use super::*;
     use crate::models::{AgentEndReason, AgentId, AgentState, DispatchMode, TaskId};
     use serde_json::json;
-
-    fn tasks() -> Vec<Task> {
-        vec![
-            Task {
-                id: TaskId(65542),
-                alias: "scar".into(),
-                ..Default::default()
-            },
-            Task {
-                id: TaskId(7),
-                alias: "moss".into(),
-                ..Default::default()
-            },
-        ]
-    }
 
     fn agents() -> Vec<Agent> {
         vec![
@@ -184,74 +143,47 @@ mod tests {
     #[test]
     fn a_current_agent_name_becomes_its_tasks_id() {
         let mut args = json!({"task_id": "grace", "title": "x"});
-        resolve_task_refs(&mut args, &tasks(), &agents()).unwrap();
+        resolve_task_refs(&mut args, &agents()).unwrap();
         assert_eq!(args, json!({"task_id": 7, "title": "x"}));
     }
 
     #[test]
     fn an_ended_agent_name_still_resolves_to_its_task() {
-        let mut args = json!({"task_ids": ["ada", "linus", "moss"]});
-        resolve_task_refs(&mut args, &tasks(), &agents()).unwrap();
+        let mut args = json!({"task_ids": ["ada", "linus", "grace"]});
+        resolve_task_refs(&mut args, &agents()).unwrap();
         assert_eq!(args, json!({"task_ids": [65542, 65542, 7]}));
     }
 
     #[test]
-    fn a_word_that_is_one_tasks_alias_and_anothers_agent_name_is_ambiguous() {
-        let mut tasks = tasks();
-        tasks[1].alias = "ada".into(); // task 7's alias; "ada" is task 65542's agent
-        let mut args = json!({"task_id": "ada"});
-        assert_eq!(
-            resolve_task_refs(&mut args, &tasks, &agents()),
-            Err(BadTaskRef::Ambiguous("ada".into()))
-        );
-    }
-
-    #[test]
-    fn a_word_naming_the_same_task_twice_is_not_ambiguous() {
-        let mut tasks = tasks();
-        tasks[0].alias = "ada".into(); // task 65542's alias and its agent
-        let mut args = json!({"task_id": "ada"});
-        resolve_task_refs(&mut args, &tasks, &agents()).unwrap();
-        assert_eq!(args, json!({"task_id": 65542}));
-    }
-
-    #[test]
-    fn an_alias_becomes_its_id() {
-        let mut args = json!({"task_id": "scar", "title": "x"});
-        resolve_task_refs(&mut args, &tasks(), &agents()).unwrap();
-        assert_eq!(args, json!({"task_id": 65542, "title": "x"}));
-    }
-
-    #[test]
-    fn aliases_inside_task_ids_resolve_alongside_numbers_and_numeric_strings() {
-        let mut args = json!({"task_ids": ["scar", 7, "9"]});
-        resolve_task_refs(&mut args, &tasks(), &agents()).unwrap();
+    fn agent_names_inside_task_ids_resolve_alongside_numbers_and_numeric_strings() {
+        let mut args = json!({"task_ids": ["linus", 7, "9"]});
+        resolve_task_refs(&mut args, &agents()).unwrap();
         assert_eq!(args, json!({"task_ids": [65542, 7, "9"]}));
     }
 
     #[test]
-    fn an_unknown_alias_is_an_error_naming_it() {
+    fn an_unknown_name_is_an_error_naming_it() {
         let mut args = json!({"task_id": "nope"});
         assert_eq!(
-            resolve_task_refs(&mut args, &tasks(), &agents()),
-            Err(BadTaskRef::Unknown("nope".into()))
+            resolve_task_refs(&mut args, &agents()),
+            Err(UnknownTaskRef("nope".into()))
         );
     }
 
     #[test]
     fn numbers_and_numeric_strings_are_left_alone_even_when_unknown() {
         let mut args = json!({"task_id": 999999});
-        resolve_task_refs(&mut args, &tasks(), &agents()).unwrap();
+        resolve_task_refs(&mut args, &agents()).unwrap();
         assert_eq!(args, json!({"task_id": 999999}));
         let mut args = json!({"task_id": "999999"});
-        resolve_task_refs(&mut args, &tasks(), &agents()).unwrap();
+        resolve_task_refs(&mut args, &agents()).unwrap();
         assert_eq!(args, json!({"task_id": "999999"}));
     }
 
     #[test]
     fn other_argument_keys_are_not_touched() {
         let mut args = json!({"title": "scar", "description": "nope"});
-        resolve_task_refs(&mut args, &tasks(), &agents()).unwrap();
+        resolve_task_refs(&mut args, &agents()).unwrap();
         assert_eq!(args, json!({"title": "scar", "description": "nope"}));
     }
 
@@ -267,7 +199,7 @@ mod tests {
     #[test]
     fn non_object_arguments_pass_through() {
         let mut args = Value::Null;
-        resolve_task_refs(&mut args, &tasks(), &agents()).unwrap();
+        resolve_task_refs(&mut args, &agents()).unwrap();
         assert_eq!(args, Value::Null);
     }
 }

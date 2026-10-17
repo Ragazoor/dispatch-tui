@@ -172,7 +172,7 @@ mcp_tools! {
     async idempotent "update_tasks" => tasks::handle_update_tasks,
         "Update one or many tasks. Pass task_ids (one id updates one task) plus the fields to set: \
 status, sub_status, title, description, repo_path, plan_path, sort_order, url, url_type, tag, \
-epic_id, base_branch, wrap_up_mode, auto_run_plan, phoenix and alias. At least one field must be \
+epic_id, base_branch, wrap_up_mode, auto_run_plan, and phoenix. At least one field must be \
 provided; every field left out is untouched. Every named task is updated whatever its status; \
 pick many ids with list_tasks (epic_id, recursive, status, base_branch). With one id the reply is \
 \"Task N updated (fields)\" or an error. With several it is not atomic: one line per task, success \
@@ -743,19 +743,14 @@ async fn handle_tools_call(
     let tool_name = params.get("name").and_then(Value::as_str).unwrap_or("");
     let mut args = params.get("arguments").cloned().unwrap_or(Value::Null);
 
-    // An alias, or the name of one of its agents, is a second name for a task
-    // id (`AliasResolvesToTaskId`, `AgentNameResolvesToTask`); swap it for the
-    // id before any handler parses the arguments. The task and agent lists are
-    // read only when a call actually names one.
-    if super::aliases::holds_name(&args) {
-        let tasks = state.db.list_all().await;
+    // The name of one of a task's agents is a second name for its id
+    // (`AgentNameResolvesToTask`); swap it for the id before any handler
+    // parses the arguments. The agent list is read only when a call actually
+    // names one.
+    if super::task_refs::holds_name(&args) {
         let agents = state.db.list_agents().await;
-        if let Err(bad) = super::aliases::resolve_task_refs(&mut args, &tasks, &agents) {
-            let code = match bad {
-                super::aliases::BadTaskRef::Unknown(_) => super::types::NOT_FOUND_CODE,
-                super::aliases::BadTaskRef::Ambiguous(_) => INVALID_PARAMS,
-            };
-            return JsonRpcResponse::err(id, code, bad.message());
+        if let Err(bad) = super::task_refs::resolve_task_refs(&mut args, &agents) {
+            return JsonRpcResponse::err(id, super::types::NOT_FOUND_CODE, bad.message());
         }
     }
 

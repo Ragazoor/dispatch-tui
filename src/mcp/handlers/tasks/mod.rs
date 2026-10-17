@@ -153,12 +153,6 @@ mcp_args! {
         "type": "boolean",
         "description": "When true, completing this task automatically recreates it as a fresh backlog copy carrying the same settings, and the flag moves to that copy. A recurring task with no schedule — nothing dispatches the copy, you do."
     };
-
-    #[serde(default)]
-    optional alias: Option<String> = [set(alias)] {
-        "type": "string",
-        "description": "Rename the task's alias, the short word people see instead of its id. Lowercase letters, digits and hyphens; not only digits; must not already name another task."
-    };
 }
 
 /// The `update_tasks` input schema: `UpdateTaskArgs`' fields, with `task_ids` in place
@@ -369,9 +363,6 @@ fn format_task_detail(
         repo = task.repo_path,
         desc = task.description,
     );
-    if !task.alias.is_empty() {
-        text.push_str(&format!("\nAlias: {}", task.alias));
-    }
     if let Some(agent) = agent {
         text.push_str(&format!(
             "\nAgent: {} ({})",
@@ -471,11 +462,6 @@ fn format_task_line(
         Some(tag) => format!(" [{}]", tag.as_str()),
         None => String::new(),
     };
-    let alias_indicator = if t.alias.is_empty() {
-        String::new()
-    } else {
-        format!(" alias:{}", t.alias)
-    };
     let agent_indicator = agent.map_or(String::new(), |a| {
         format!(" agent:{} ({})", a.name, agent_state_label(a))
     });
@@ -497,10 +483,9 @@ fn format_task_line(
         format!(" | Goal: {goal}")
     };
     format!(
-        "- [{}] {}{}{} ({}/{}){}{} | Base: {}{}{}",
+        "- [{}] {}{} ({}/{}){}{} | Base: {}{}{}",
         t.id,
         t.title,
-        alias_indicator,
         agent_indicator,
         t.status.as_str(),
         t.sub_status.as_str(),
@@ -564,32 +549,6 @@ mod tests {
             .description("A description")
             .base_branch(base_branch)
             .build()
-    }
-
-    #[test]
-    fn format_task_detail_shows_the_alias_beside_the_id() {
-        let task = Task {
-            alias: "scar".into(),
-            ..make_task("main")
-        };
-        let output = format_task_detail(&task, None, &HashMap::new(), None, None);
-        assert!(output.contains("Alias: scar"), "{output}");
-    }
-
-    #[test]
-    fn format_task_detail_omits_an_unassigned_alias() {
-        let output = format_task_detail(&make_task("main"), None, &HashMap::new(), None, None);
-        assert!(!output.contains("Alias:"), "{output}");
-    }
-
-    #[test]
-    fn format_task_line_names_the_alias() {
-        let task = Task {
-            alias: "scar".into(),
-            ..make_task("main")
-        };
-        let line = super::format_task_line(&task, None, &HashMap::new(), "");
-        assert!(line.contains("alias:scar"), "{line}");
     }
 
     fn make_agent(window: Option<&str>) -> crate::models::Agent {

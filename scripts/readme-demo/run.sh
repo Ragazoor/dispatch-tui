@@ -146,10 +146,10 @@ mcp update_tasks '{"task_ids":[2,8,12],"status":"review"}' >/dev/null
 # Stage the agents: a worktree and a tmux window per card, then the hook
 # events a live agent would send.
 HOST=$(sql_rows "SELECT id FROM hosts")
-sql_rows "SELECT id, alias, repo_path FROM tasks WHERE status = 'running' OR status = 'review'" |
-    while IFS='|' read -r id alias repo; do
-        wt=$repo/.worktrees/$id-$alias
-        git -C "$repo" worktree add -q "$wt" -b "$id-$alias"
+sql_rows "SELECT id, repo_path FROM tasks WHERE status = 'running' OR status = 'review'" |
+    while IFS='|' read -r id repo; do
+        wt=$repo/.worktrees/$id-demo
+        git -C "$repo" worktree add -q "$wt" -b "$id-demo"
         tm new-window -d -t dispatch -n "task-$id" -c "$wt"
         sql "UPDATE tasks SET worktree = '$wt', tmux_window = 'task-$id', host = '$HOST' WHERE id = $id"
     done

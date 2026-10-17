@@ -37,7 +37,6 @@ pub struct TaskPatch {
     pub host: Option<String>,
     pub owner: Option<String>,
     pub completed_at: Option<String>,
-    pub alias: Option<String>,
 }
 
 impl __sdk::InModule for TaskPatch {

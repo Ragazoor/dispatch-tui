@@ -112,14 +112,11 @@ pub struct Task {
     /// backfilled.
     #[default("")]
     pub created_by: String,
-    /// A short word naming the task for a person (`core.allium:
-    /// TaskAliasIsASecondName`). Assigned by [`write_task`] on the first write
-    /// that finds it empty, so `""` only ever means "not yet assigned" — a row
-    /// that predates this column, or a create that left it to the store.
-    /// Indexed because every MCP tool resolves an alias to an id through it;
-    /// not a unique index, because rows awaiting an alias all hold `""`, and
-    /// uniqueness of the real ones is enforced in [`write_task`]. Appended last
-    /// for the reason `created_by` is.
+    /// The retired task alias (`agents.allium`, step A5). Blank and never
+    /// read or written: the store automigrates an appended column but not a
+    /// removed one, so the column stays. A row from before A5 may still hold
+    /// its old word; nothing looks at it. Its btree index stays too, so the
+    /// schema loses nothing automigration could refuse.
     #[index(btree)]
     #[default("")]
     pub alias: String,

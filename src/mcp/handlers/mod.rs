@@ -2,7 +2,6 @@
 // `mcp_args!` must be in scope before the modules that invoke it.
 #[macro_use]
 mod args;
-mod aliases;
 
 mod context;
 mod dispatch;
@@ -11,6 +10,7 @@ mod hooks;
 mod keybindings;
 mod learnings;
 mod managed_feeds;
+mod task_refs;
 mod tasks;
 mod types;
 mod work_packages;

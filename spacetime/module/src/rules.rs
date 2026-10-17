@@ -45,9 +45,11 @@ use super::*;
 ///    count, deferred Stop) are the current agent's, written by the hook
 ///    reducers, the claim, the close and `patch_task`; the Task columns are
 ///    never written (`agent.rs`, `agent_state.rs`).
+/// 9: agents A5 — `write_task` no longer assigns or checks a task alias, and
+///    `backfill_task_aliases` and the `alias` patch field are gone.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 8;
+pub const RULES_VERSION: i64 = 9;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///

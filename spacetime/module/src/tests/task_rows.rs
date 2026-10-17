@@ -263,7 +263,6 @@ fn every_field_of_a_task_patch_reaches_the_row() {
         host: Some(MARK.into()),
         owner: Some(MARK.into()),
         completed_at: Some(MARK.into()),
-        alias: Some(MARK.into()),
     };
     let session = patch.clone();
     apply_task_patch(&mut row, patch);
@@ -309,7 +308,6 @@ fn every_field_of_a_task_patch_reaches_the_row() {
     assert_eq!(row.host, MARK);
     assert_eq!(row.owner, MARK);
     assert_eq!(row.completed_at, MARK);
-    assert_eq!(row.alias, MARK);
     // created_at/updated_at are not patch fields; the reducer stamps them.
     assert_eq!(row.created_at, before.created_at);
 }

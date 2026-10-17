@@ -224,7 +224,6 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
         wrap_up_mode,
         auto_run_plan,
         phoenix,
-        alias,
     } = parsed;
 
     [
@@ -242,7 +241,6 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
         ("wrap_up_mode", wrap_up_mode.is_some()),
         ("auto_run_plan", auto_run_plan.is_some()),
         ("phoenix", phoenix.is_some()),
-        ("alias", alias.is_some()),
     ]
     .into_iter()
     .filter_map(|(name, is_set)| is_set.then_some(name))
@@ -652,7 +650,6 @@ mod tests {
             wrap_up_mode: None,
             auto_run_plan: None,
             phoenix: None,
-            alias: None,
         }
     }
 
@@ -763,13 +760,6 @@ mod tests {
                 "phoenix",
                 UpdateTaskArgs {
                     phoenix: Some(true),
-                    ..base_args()
-                },
-            ),
-            (
-                "alias",
-                UpdateTaskArgs {
-                    alias: Some("scar".into()),
                     ..base_args()
                 },
             ),

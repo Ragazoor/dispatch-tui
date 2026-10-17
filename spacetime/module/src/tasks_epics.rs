@@ -45,7 +45,6 @@ pub(crate) fn write_task_keeping_session_facts(
     } else {
         row
     };
-    let row = ensure_alias(ctx, row)?;
     let prior = if row.id != 0 {
         ctx.db.tasks().id().find(row.id)
     } else {
@@ -58,37 +57,6 @@ pub(crate) fn write_task_keeping_session_facts(
         follow_task_write(&mut AgentTables(ctx), prior.as_ref(), &row);
     } else {
         ctx.db.tasks().insert(row);
-    }
-    Ok(())
-}
-
-/// Give `row` an alias if it has none, and refuse one another task holds.
-///
-/// `core.allium: TaskAliasIsASecondName`. An empty alias is assigned from the
-/// word list, seeded by the clock so two tasks created together do not start at
-/// the same word; a non-empty one must be well-formed and unclaimed by any
-/// OTHER task (a task keeping its own alias across an update is not a clash).
-fn ensure_alias(ctx: &ReducerContext, row: Task) -> Result<Task, String> {
-    let taken_by_other = |alias: &str| {
-        ctx.db
-            .tasks()
-            .alias()
-            .filter(alias)
-            .any(|other| other.id != row.id || row.id == 0)
-    };
-    let seed = ctx.timestamp.to_micros_since_unix_epoch() as u64;
-    let alias = resolve_alias(row.id, &row.alias, seed, taken_by_other)?;
-    Ok(Task { alias, ..row })
-}
-
-/// Assign an alias to every task that has none. The migration for rows that
-/// predate the column: `write_task` fills one in on a task's next write, and
-/// this reaches the tasks nobody writes. Idempotent.
-#[spacetimedb::reducer]
-pub fn backfill_task_aliases(ctx: &ReducerContext) -> Result<(), String> {
-    let missing: Vec<Task> = ctx.db.tasks().alias().filter("").collect();
-    for row in missing {
-        write_task(ctx, row)?;
     }
     Ok(())
 }
@@ -213,7 +181,6 @@ pub struct TaskPatch {
     pub host: Patch<String>,
     pub owner: Patch<String>,
     pub completed_at: Patch<String>,
-    pub alias: Patch<String>,
 }
 
 /// The fields of an epic a patch may change.
@@ -265,7 +232,6 @@ pub fn apply_task_patch(row: &mut Task, patch: TaskPatch) {
         host,
         owner,
         completed_at,
-        alias,
     );
 }
 

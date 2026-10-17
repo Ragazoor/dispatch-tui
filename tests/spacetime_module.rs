@@ -224,7 +224,6 @@ fn empty_task_patch() -> serde_json::Value {
         "host",
         "owner",
         "completed_at",
-        "alias",
     ] {
         patch.insert(field.into(), serde_json::json!({"none": []}));
     }
@@ -577,8 +576,6 @@ fn register_host(instance: &Instance, host: &str, owner: &str) {
 mod agent_state;
 #[path = "spacetime_module/agents.rs"]
 mod agents;
-#[path = "spacetime_module/aliases.rs"]
-mod aliases;
 #[path = "spacetime_module/close_task.rs"]
 mod close_task;
 #[path = "spacetime_module/data_rules.rs"]
