@@ -308,7 +308,9 @@ async fn exec_pop_out_editor_is_noop_when_session_occupied() {
         cleanup_runner: None,
     });
 
-    rt.exec_pop_out_editor(&mut app, EditKind::Description { is_epic: false });
+    assert!(rt
+        .exec_pop_out_editor(&mut app, EditKind::Description { is_epic: false })
+        .is_none());
 
     // No tmux calls should have been issued.
     assert_eq!(mock.recorded_calls().len(), 0);
@@ -345,11 +347,14 @@ async fn exec_pop_out_editor_launches_the_resolved_editor_argv() {
     );
     let (rt, mut app) = runtime_with_runner(mock.clone()).await;
 
-    rt.exec_pop_out_editor(&mut app, EditKind::Description { is_epic: false });
+    rt.exec_pop_out_editor(&mut app, EditKind::Description { is_epic: false })
+        .unwrap()
+        .await
+        .unwrap();
 
     // calls[0] is `new_window_running`'s duplicate-name `list-windows`
-    // query; calls[1] is the create. Both issue synchronously, before the
-    // watcher thread starts.
+    // query; calls[1] is the create. Both issue on the blocking task, which the
+    // handle awaits.
     let calls = mock.recorded_calls();
     assert_eq!(calls[1].0, "tmux");
     let args = &calls[1].1;
@@ -368,6 +373,36 @@ async fn exec_pop_out_editor_launches_the_resolved_editor_argv() {
         args[args.len() - 1].ends_with(".md"),
         "the tempfile must be the final argv element; got {args:?}"
     );
+}
+
+/// The create now runs on the blocking task, so its failure reaches the board
+/// as a message and must still release the one-editor-at-a-time slot.
+#[tokio::test]
+async fn exec_pop_out_editor_reports_a_failed_create_and_frees_the_slot() {
+    let mock = Arc::new(
+        MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // list-windows (duplicate check)
+            MockProcessRunner::fail("create window failed"), // new-window
+        ])
+        .with_windows(&[]),
+    );
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let (tx, mut rx) = unbounded_channel();
+    let rt = editor_runtime(db, mock, tx);
+    let mut app = App::new(vec![]);
+
+    rt.exec_pop_out_editor(&mut app, EditKind::Description { is_epic: false })
+        .unwrap()
+        .await
+        .unwrap();
+
+    match rx.try_recv() {
+        Ok(crate::tui::Message::System(crate::tui::messages::SystemMessage::Error(m))) => {
+            assert!(m.contains("Failed to open editor window"), "got {m}");
+        }
+        other => panic!("expected an error message, got {other:?}"),
+    }
+    assert!(rt.editor_session.lock().unwrap().is_none());
 }
 
 async fn seed_task(db: &dyn crate::store::TaskStore) -> models::Task {

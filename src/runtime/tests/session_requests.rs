@@ -237,6 +237,43 @@ async fn a_session_row_held_back_for_an_unsettled_identity_is_served_once_it_set
     );
 }
 
+/// A failed exit_session row seen before the identity settles still owes its
+/// window a kill: the hold-back must not consume the tear-down.
+#[tokio::test]
+async fn a_tear_down_held_back_for_an_unsettled_identity_is_done_once_it_settles() {
+    let identity = Arc::new(SettledIdentity::default());
+    let runner = Arc::new(MockProcessRunner::new(vec![]).with_windows(&["task-10"]));
+    let r = session_rig_with_identity(runner.clone(), identity.clone()).await;
+    let exit_row = |state: &str| crate::spacetime::bindings::SessionRequest {
+        id: 5,
+        task_id: 10,
+        kind: "exit_session".into(),
+        action: "done".into(),
+        host: crate::store::MEMORY_HOST_ID.into(),
+        requested_by: "test-user".into(),
+        state: state.into(),
+        requested_at: "2026-10-12 12:00:00.000".into(),
+        claimed_at: String::new(),
+        finished_at: String::new(),
+        reason: String::new(),
+        pr_url: String::new(),
+        wrap_up_request: 0,
+        tmux_window: "task-10".into(),
+        chained_task: 0,
+        deadline: "2099-01-01 00:00:00.000".into(),
+    };
+
+    r.rows.upsert_session_request(&exit_row("running"));
+    join_all(r.rt.serve_session_requests().await).await;
+    r.rows.upsert_session_request(&exit_row("failed"));
+    join_all(r.rt.serve_session_requests().await).await;
+    assert_eq!(kill_calls(&runner), 0, "no settled identity, nothing done");
+
+    identity.settle("test-user");
+    join_all(r.rt.serve_session_requests().await).await;
+    assert_eq!(kill_calls(&runner), 1, "the held-back tear-down is done");
+}
+
 /// D11's second line: a row naming this host that its owner did not request is
 /// ignored — not claimed, not run — whatever let it in.
 #[tokio::test]

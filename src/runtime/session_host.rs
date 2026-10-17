@@ -68,10 +68,13 @@ impl SessionHost {
         let Some(owner) = self.database.own_identity().await else {
             tracing::warn!("this board has no settled identity yet; acting on no session requests");
             // Held back, not acted on: the next reload after the identity
-            // settles hands them out again.
+            // settles hands them out again, tear-downs included.
             let mut observer = self.observer();
             for row in &work.serve {
                 observer.release(row.id);
+            }
+            for row in &work.tear_down {
+                observer.reopen(row.id);
             }
             return Vec::new();
         };

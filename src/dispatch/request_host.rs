@@ -248,4 +248,11 @@ impl SessionRequestObserver {
     pub fn release(&mut self, id: SessionRequestId) {
         self.served.remove(&id);
     }
+
+    /// Forget that the tear-down of `id` was handed out, so the next
+    /// [`Self::observe`] that still sees it failed hands it out again. For a
+    /// tear-down that was not attempted.
+    pub fn reopen(&mut self, id: SessionRequestId) {
+        self.open_exits.insert(id);
+    }
 }

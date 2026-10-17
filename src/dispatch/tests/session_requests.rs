@@ -186,6 +186,22 @@ fn an_exit_session_row_seen_to_fail_is_torn_down_once() {
     assert!(observer.observe(&failed).tear_down.is_empty(), "only once");
 }
 
+/// A tear-down handed out but not acted on (no settled identity yet) is
+/// re-opened, so the next observation hands it out again.
+#[test]
+fn a_reopened_tear_down_is_handed_out_again() {
+    let mut observer = SessionRequestObserver::new(HOST);
+    observer.observe(&[exit(1, HOST, SessionRequestState::Running)]);
+
+    let failed = [exit(1, HOST, SessionRequestState::Failed)];
+    let work = observer.observe(&failed);
+    assert_eq!(ids(&work.tear_down), vec![1]);
+
+    observer.reopen(SessionRequestId(1));
+    assert_eq!(ids(&observer.observe(&failed).tear_down), vec![1]);
+    assert!(observer.observe(&failed).tear_down.is_empty(), "then once");
+}
+
 /// A row first seen already failed is history — this board was not running
 /// when it failed — and a row that is not an exit_session, has no window, or
 /// names another host is never torn down.

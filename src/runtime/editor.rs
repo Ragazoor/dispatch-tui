@@ -176,9 +176,13 @@ fn new_window_name() -> TmuxWindow {
 
 impl TuiRuntime {
     /// Entry point for `EditorCommand::PopOut`. Opens the editor in a new
-    /// tmux window, spawns a watcher task, and emits an
-    /// `EditorMessage::Result` when the editor exits.
-    pub(super) fn exec_pop_out_editor(&self, app: &mut App, kind: EditKind) {
+    /// tmux window on a blocking task, which then watches it and emits an
+    /// `EditorMessage::Result` when the editor exits. The handle is for tests.
+    pub(super) fn exec_pop_out_editor(
+        &self,
+        app: &mut App,
+        kind: EditKind,
+    ) -> Option<tokio::task::JoinHandle<()>> {
         // Enforce "one editor at a time".
         let mut guard = match self.editor_session.lock() {
             Ok(g) => g,
@@ -190,7 +194,7 @@ impl TuiRuntime {
                     EDITOR_ALREADY_OPEN_MSG.to_string(),
                 ),
             ));
-            return;
+            return None;
         }
 
         let (prefix, content) = initial_content_for(&kind);
@@ -204,19 +208,19 @@ impl TuiRuntime {
             Ok(f) => f,
             Err(e) => {
                 emit_pop_out_error(app, Self::db_error("creating editor tempfile", e));
-                return;
+                return None;
             }
         };
         if let Err(e) = std::io::Write::write_all(tmp.as_file_mut(), content.as_bytes()) {
             emit_pop_out_error(app, Self::db_error("writing editor tempfile", e));
-            return;
+            return None;
         }
 
         let (_file, temp_path) = match tmp.keep() {
             Ok(p) => p,
             Err(e) => {
                 emit_pop_out_error(app, Self::db_error("persisting editor tempfile", e.error));
-                return;
+                return None;
             }
         };
 
@@ -229,19 +233,6 @@ impl TuiRuntime {
         let cwd_str = cwd.to_string_lossy().into_owned();
         let temp_str = temp_path.to_string_lossy().into_owned();
 
-        let mut command: Vec<&str> = editor.iter().map(String::as_str).collect();
-        command.push(&temp_str);
-
-        if let Err(e) = tmux::new_window_running(&window_name, &cwd_str, &command, &*self.runner) {
-            let _ = std::fs::remove_file(&temp_path);
-            emit_pop_out_error(app, format!("Failed to open editor window: {e}"));
-            return;
-        }
-
-        // Best-effort: switch tmux focus to the editor window. Failing to
-        // switch isn't fatal — the window still exists.
-        let _ = tmux::select_window(&window_name, &*self.runner);
-
         *guard = Some(EditorSession {
             window_name: window_name.clone(),
             temp_path: Some(temp_path.clone()),
@@ -249,15 +240,31 @@ impl TuiRuntime {
         });
         drop(guard);
 
-        // Spawn the watcher on a blocking thread so it doesn't tie up the
-        // async runtime.
+        // Every tmux call below runs on a blocking thread: a wedged server
+        // would otherwise freeze the command-drain thread, and with it input
+        // and rendering. A failed create is reported through `msg_tx`.
         let runner = self.runner.clone();
         let msg_tx = self.msg_tx.clone();
         let session = self.editor_session.clone();
         let window = window_name;
         let path = temp_path;
         let kind_for_result = kind;
-        tokio::task::spawn_blocking(move || {
+        Some(tokio::task::spawn_blocking(move || {
+            let mut command: Vec<&str> = editor.iter().map(String::as_str).collect();
+            command.push(&temp_str);
+            if let Err(e) = tmux::new_window_running(&window, &cwd_str, &command, &*runner) {
+                // Dropping the session removes the tempfile.
+                clear_session_slot(&session);
+                let _ = msg_tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Failed to open editor window: {e}"),
+                )));
+                return;
+            }
+
+            // Best-effort: switch tmux focus to the editor window. Failing to
+            // switch isn't fatal — the window still exists.
+            let _ = tmux::select_window(&window, &*runner);
+
             let mut consecutive_failures = 0;
             let outcome = watch_editor(
                 || window_alive_with_bounded_retry(&window, &*runner, &mut consecutive_failures),
@@ -280,7 +287,7 @@ impl TuiRuntime {
                     outcome,
                 },
             ));
-        });
+        }))
     }
 
     /// Apply the editor result for the given [`EditKind`].

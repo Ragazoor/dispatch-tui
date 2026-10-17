@@ -571,6 +571,30 @@ fn list_all_window_names_empty_when_no_sessions() {
 }
 
 #[test]
+fn list_all_window_names_empty_when_cannot_connect() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail(
+        "error connecting to /tmp/tmux-1000/default (No such file or directory)",
+    )]);
+    assert!(list_all_window_names(&mock).unwrap().is_empty());
+}
+
+#[test]
+fn list_all_window_names_errors_on_other_failures() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("server exited unexpectedly")]);
+    let err = list_all_window_names(&mock).unwrap_err();
+    assert!(
+        err.to_string().contains("server exited unexpectedly"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn has_window_errors_when_the_listing_fails_for_another_reason() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("protocol version mismatch")]);
+    assert!(has_window(&TmuxWindow::for_task(crate::models::TaskId(1)), &mock).is_err());
+}
+
+#[test]
 fn list_all_window_names_issues_correct_args() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
     let _ = list_all_window_names(&mock).unwrap();

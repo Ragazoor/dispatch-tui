@@ -371,7 +371,7 @@ async fn dispatch_editor(
     use crate::tui::commands::EditorCommand::*;
     match cmd {
         PopOut(kind) => {
-            rt.exec_pop_out_editor(app, kind);
+            drop(rt.exec_pop_out_editor(app, kind));
             vec![]
         }
         FinalizeResult { kind, outcome } => {

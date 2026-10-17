@@ -370,12 +370,21 @@ pub fn kill_window_if_present(window: &TmuxWindow, runner: &dyn ProcessRunner) -
 /// Run a server-wide `list-*` query and collect its non-empty output lines.
 ///
 /// Shared by [`list_all_window_names`] and [`list_all_pane_ids`] so the
-/// non-obvious half of the contract — a failed call means "no server running",
-/// not an error — lives in one place.
+/// non-obvious half of the contract — "no server running" is an empty list,
+/// any other failure is an error — lives in one place.
+///
+/// Only the stderr tmux prints when there is no server to ask counts as empty.
+/// Reading every non-zero exit as "no windows" made a transient failure look
+/// like a live window had vanished, bypassing the retry and assume-present
+/// paths ([`has_window_or_assume_present`]).
 fn list_all(args: &[&str], runner: &dyn ProcessRunner) -> Result<Vec<String>> {
     let output = runner.run("tmux", args)?;
     if !output.status.success() {
-        return Ok(vec![]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if is_no_server(&stderr) {
+            return Ok(vec![]);
+        }
+        anyhow::bail!("tmux {} failed: {}", args.join(" "), stderr.trim());
     }
     let lines = String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -385,10 +394,19 @@ fn list_all(args: &[&str], runner: &dyn ProcessRunner) -> Result<Vec<String>> {
     Ok(lines)
 }
 
+/// Whether tmux's stderr says there is no server to talk to.
+fn is_no_server(stderr: &str) -> bool {
+    stderr.contains("no server running")
+        || stderr.contains("no sessions")
+        || stderr.contains("error connecting to")
+        || stderr.contains("failed to connect to server")
+}
+
 /// List the names of all tmux windows across all sessions.
 ///
 /// Uses `-a` so the query works whether the caller is inside or outside tmux.
-/// Returns an empty vec (not an error) when no tmux server is running.
+/// Returns an empty vec (not an error) when no tmux server is running; any
+/// other failure is an `Err`.
 pub fn list_all_window_names(runner: &dyn ProcessRunner) -> Result<Vec<String>> {
     list_all(&["list-windows", "-a", "-F", "#{window_name}"], runner)
 }
@@ -700,6 +718,17 @@ pub fn set_window_dispatch_dir(
     Ok(())
 }
 
+/// The tmux format [`ensure_split_hook`] tests before correcting a pane: true
+/// when the window carries `@dispatch_dir` *and* the new pane did not already
+/// start there.
+///
+/// Named rather than inlined so that a test can evaluate the real guard against
+/// a real pane (`display-message -p`) instead of restating it — whether a pane is
+/// selected for correction is the whole point of the hook, and a restated copy
+/// could agree with itself while disagreeing with what ships.
+pub const SPLIT_NEEDS_CORRECTION: &str =
+    "#{&&:#{@dispatch_dir},#{!=:#{pane_start_path},#{@dispatch_dir}}}";
+
 /// Install a single session-level `after-split-window` hook that reads the
 /// `@dispatch_dir` window option. If the option is set on the window being split
 /// *and* the new pane did not already start in that directory, the pane is
@@ -746,17 +775,6 @@ pub fn set_window_dispatch_dir(
 /// created pane. Pane routing is only observable against a real tmux server, so
 /// it is covered by tests/tmux_split_hook.rs rather than by this file's
 /// mock-level test.
-/// The tmux format [`ensure_split_hook`] tests before correcting a pane: true
-/// when the window carries `@dispatch_dir` *and* the new pane did not already
-/// start there.
-///
-/// Named rather than inlined so that a test can evaluate the real guard against
-/// a real pane (`display-message -p`) instead of restating it — whether a pane is
-/// selected for correction is the whole point of the hook, and a restated copy
-/// could agree with itself while disagreeing with what ships.
-pub const SPLIT_NEEDS_CORRECTION: &str =
-    "#{&&:#{@dispatch_dir},#{!=:#{pane_start_path},#{@dispatch_dir}}}";
-
 pub fn ensure_split_hook(runner: &dyn ProcessRunner) -> Result<()> {
     // if-shell -F only format-expands its test argument, NOT the branch command.
     // respawn-pane doesn't expand formats either, so we wrap it in run-shell -C
