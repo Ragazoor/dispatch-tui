@@ -32,22 +32,22 @@ config {
 rule DetachTmux {
     when: ConfirmDetachTmux(task)
 
-    requires: task.tmux_window != null
+    requires: current_agent(task).tmux_window != null
 
-    ensures: task.tmux_window = null
+    ensures: current_agent(task).tmux_window = null
     ensures:
         if task.sub_status in {stale, crashed}:
             task.sub_status = core/SubStatus.default_for(task.status)
     ensures:
         for entry in core/SubagentEntries where task = task:
             not exists entry
-        task.live_subagents = 0
-        if task.live_subagents = 0 and task.stop_pending and task.status = running:
+        current_agent(task).live_subagents = 0
+        if current_agent(task).live_subagents = 0 and current_agent(task).stop_pending and task.status = running:
             task.status = review
             task.sub_status = core/SubStatus.default_for(review)
-            task.last_pre_tool_use_at = null
-            task.last_notification_at = null
-            task.stop_pending = false
+            current_agent(task).last_pre_tool_use_at = null
+            current_agent(task).last_notification_at = null
+            current_agent(task).stop_pending = false
 
     @guidance
         -- Kills the tmux window for a task while preserving the
@@ -75,7 +75,7 @@ rule BatchDetachTmux {
     when: BatchDetachTmux(tasks)
 
     -- Filters to tasks that have a tmux window, then detaches all.
-    let detachable = tasks where tmux_window != null
+    let detachable = tasks where current_window != null
 
     requires: detachable.count > 0
 
@@ -113,7 +113,7 @@ rule ToggleSplitMode {
     ensures:
         if split_pane.active = true:
             ExitSplitMode()
-        else if task.tmux_window != null:
+        else if current_agent(task).tmux_window != null:
             -- Auto-pin: the selected task's existing window is joined into
             -- the dispatch window as the right pane.
             split_pane.in_flight = EntryInFlight.created()
@@ -219,7 +219,7 @@ rule ExitSplitMode {
     requires: split_pane.active = true
     requires: split_pane.pane != null
     requires: split_pane.pinned_task = null
-              or not has_window(name: split_pane.pinned_task.tmux_window.name)
+              or not has_window(name: current_agent(split_pane.pinned_task).tmux_window.name)
 
     let pinned = split_pane.pinned_task
 
@@ -231,7 +231,7 @@ rule ExitSplitMode {
         if pinned != null:
             -- The pinned agent is broken back out to a standalone tmux
             -- window under its original name. Its session is preserved.
-            TaskWindowRestored(task: pinned, window: pinned.tmux_window)
+            TaskWindowRestored(task: pinned, window: current_agent(pinned).tmux_window)
 
     @guidance
         -- Exit destroys the split-pane UI, not the agent. With a task pinned,
@@ -276,7 +276,7 @@ rule RefuseExitSplitModeOntoLiveWindow {
     requires: split_pane.active = true
     requires: split_pane.pane != null
     requires: split_pane.pinned_task != null
-    requires: has_window(name: split_pane.pinned_task.tmux_window.name)
+    requires: has_window(name: current_agent(split_pane.pinned_task).tmux_window.name)
 
     let pinned = split_pane.pinned_task
     let pane = split_pane.pane
@@ -630,7 +630,7 @@ rule SplitPaneClosedResets {
 
 rule SplitPaneRespawnOnWindowCleared {
     -- Fires whenever a lifecycle event clears a pinned task's tmux_window.
-    -- The trigger is the clearing of task.tmux_window, not the specific
+    -- The trigger is the clearing of current_agent(task).tmux_window, not the specific
     -- event type. This covers all paths:
     --   - ExitSession (agent closes its session → Done)
     --   - PrMerged (PR merged on GitHub → Done)
@@ -643,7 +643,7 @@ rule SplitPaneRespawnOnWindowCleared {
     -- NOT triggered by failure paths (FinishTaskConflict, PrFailed) —
     -- the pane should keep showing the agent session for inspection.
 
-    when: task: core/Task.tmux_window transitions_to null
+    when: agent: core/Agent.tmux_window transitions_to null
     requires: split_pane.active = true
     requires: split_pane.pinned_task = task
 
@@ -698,10 +698,10 @@ rule SplitPaneFocusBorder {
 --
 -- Priority order (first match wins):
 --   1. Task pinned in the split pane   -> focus that pane.
---   2. Split active, task.tmux_window != null
+--   2. Split active, current_agent(task).tmux_window != null
 --                                      -> swap the window into the pane
 --                                         (SwapSplitPane), no focus transfer.
---   3. task.tmux_window != null        -> jump to the window.
+--   3. current_agent(task).tmux_window != null        -> jump to the window.
 --   4. No window, routed by status     -> dispatch / resume / retry / hint.
 --
 -- Split mode never suppresses the windowless branches: a Backlog card is
@@ -726,13 +726,13 @@ rule JumpToAgentWindow {
             -- Priority 1: the task is pinned; its window was joined into the
             -- dispatch window via join-pane, so focus the pane directly.
             tmux_focus = split_pane.pane
-        else if split_pane.active = true and task.tmux_window != null:
+        else if split_pane.active = true and current_agent(task).tmux_window != null:
             -- Priority 2: split mode replaces the jump with an in-place swap.
             -- Specified by SwapSplitPane below; tmux focus stays on the TUI.
             SplitPaneSwapRequested(task: task)
-        else if task.tmux_window != null:
+        else if current_agent(task).tmux_window != null:
             -- Priority 3: jump to the standalone agent window.
-            tmux_focus = task.tmux_window
+            tmux_focus = current_agent(task).tmux_window
         else if task.status = backlog:
             -- Priority 4, Backlog: start the agent. Repo-trust confirmation
             -- (ConfirmTrustRepo) is preserved as a pre-dispatch gate.
@@ -764,7 +764,7 @@ rule JumpToAgentWindow {
         -- The tempting placement is next to the resume branch, beside
         -- no_worktree_to_resume, since Task.is_locally_owned is about who
         -- holds the worktree. That would be wrong, because priority 3 does not
-        -- read the worktree at all -- it reads task.tmux_window and focuses
+        -- read the worktree at all -- it reads current_agent(task).tmux_window and focuses
         -- it. tmux_window is a persisted field on a shared row, so a task
         -- another machine dispatched arrives here with it SET, naming a window
         -- that is alive on the owner's machine and absent from this one.
@@ -826,7 +826,7 @@ rule JumpToAgentWindow {
         --      This is the surface the retired [S] key used to provide.
         --
         --   3. Has a tmux window, split inactive: the normal jump calls tmux
-        --      select-window on task.tmux_window. Branches 2 and 3 both cover
+        --      select-window on current_agent(task).tmux_window. Branches 2 and 3 both cover
         --      Stale/Crashed tasks that still have a window — the window check
         --      wins over the problematic-status check, because a stale agent
         --      is usually just idle and looking at it is what the user wants.
@@ -911,7 +911,7 @@ rule JumpBackToTuiWindow {
 rule PinTaskInSplitPane {
     when: SplitPaneSwapRequested(task)
     requires: split_pane.active = true
-    requires: task.tmux_window != null
+    requires: current_agent(task).tmux_window != null
     requires: split_pane.in_flight = null
     -- The empty-pane case, and only that: with a task already pinned the
     -- request is SwapSplitPane's. The two rules share a trigger, so they must
@@ -968,7 +968,7 @@ rule PinTaskInSplitPane {
 rule SwapSplitPane {
     when: SplitPaneSwapRequested(task)
     requires: split_pane.active = true
-    requires: task.tmux_window != null
+    requires: current_agent(task).tmux_window != null
     requires: split_pane.pinned_task != task  -- no-op when already pinned
     requires: split_pane.in_flight = null
     -- The occupied case, and only that: see PinTaskInSplitPane above for the
@@ -1076,7 +1076,7 @@ rule SwapSplitPane {
 rule DeferSwapWhileSwapInFlight {
     when: SplitPaneSwapRequested(task)
     requires: split_pane.active = true
-    requires: task.tmux_window != null
+    requires: current_agent(task).tmux_window != null
     requires: split_pane.in_flight.kind = SwapInFlight
 
     -- Held, not queued: the newest request replaces whatever was waiting.

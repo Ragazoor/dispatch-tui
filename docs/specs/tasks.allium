@@ -333,7 +333,7 @@ rule MoveTaskForward {
     ensures: task.updated_at = now
     ensures:
         if was_running:
-            task.stop_pending = false
+            current_agent(task).stop_pending = false
 
     @guidance
         -- Manual movement (forward or backward) clears the task's agent
@@ -342,7 +342,7 @@ rule MoveTaskForward {
         -- card message flash. Nothing else is cleared — there is no
         -- separate tmux-output or crash-detection state.
         -- A move out of running also voids any deferred Stop
-        -- (task.stop_pending), because the bit belongs to the turn the task
+        -- (current_agent(task).stop_pending), because the bit belongs to the turn the task
         -- was running under. was_running reads the pre-move status; an
         -- ensures-block `if` would read the post-move one. See
         -- core/Task's PendingStopOnlyWhileRunning invariant for why every
@@ -372,11 +372,11 @@ rule MoveTaskBackward {
     -- Kill tmux window when moving backward, but preserve worktree for resume
     ensures: task.status = prev
     ensures: task.sub_status = core/SubStatus.default_for(prev)
-    ensures: task.tmux_window = null
+    ensures: current_agent(task).tmux_window = null
     ensures: task.updated_at = now
     ensures:
         if was_running:
-            task.stop_pending = false
+            current_agent(task).stop_pending = false
 
     @guidance
         -- Manual movement (forward or backward) clears the task's agent
@@ -413,12 +413,12 @@ rule ConfirmDone {
 
     ensures: task.status = done
     ensures: task.sub_status = core/SubStatus.default_for(done)
-    ensures: task.tmux_window = null
+    ensures: current_agent(task).tmux_window = null
     ensures: task.updated_at = now
     ensures: task.completed_at = now
     ensures:
         if was_running:
-            task.stop_pending = false
+            current_agent(task).stop_pending = false
 
     @guidance
         -- Confirmation prompt for the transition into Done. Used by
@@ -1048,7 +1048,7 @@ rule ReorderItem {
         -- A reorder, and every other board write that goes through the
         -- generic Persist (detach, epic moves, lifecycle moves, a window
         -- that went away), writes task.worktree, task.host and
-        -- task.tmux_window only when the operation means to. The board's copy
+        -- current_agent(task).tmux_window only when the operation means to. The board's copy
         -- of a task can be stale: a reorder pressed before the provisioned
         -- report reached this board sees no worktree, and sending that copy
         -- as a clear would wipe the store's pointer and, since
@@ -1500,7 +1500,7 @@ rule DeleteTask {
         else:
             task.status = done
             task.worktree = task.worktree
-            task.tmux_window = task.tmux_window
+            current_agent(task).tmux_window = current_agent(task).tmux_window
             task.host = task.host
 
     @guidance
@@ -1629,7 +1629,7 @@ rule DeleteTaskRefused {
 
     ensures:
         task.worktree = task.worktree
-        task.tmux_window = task.tmux_window
+        current_agent(task).tmux_window = current_agent(task).tmux_window
         task.host = task.host
         UserInformed(about: delete_refused, task: task)
 
@@ -1902,7 +1902,7 @@ rule EditTask {
             -- (store-split.allium, X2). See core/Task's
             -- PendingStopOnlyWhileRunning invariant.
             if prior = running and edited.status != running:
-                task.stop_pending = false
+                current_agent(task).stop_pending = false
         if edited.plan != "": task.plan_path = edited.plan
         else: task.plan_path = null
         if edited.tag != "": task.tag = edited.tag

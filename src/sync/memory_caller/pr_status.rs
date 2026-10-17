@@ -51,6 +51,13 @@ impl MemoryReducerCaller {
             let merged = next.status == "done";
             self.write_task(&mut tables, next)?;
             if merged {
+                // The merge took the window with it (agents.allium, A4).
+                module::update_current_agent(&mut self.agent_store(&mut tables), task.0, |agent| {
+                    module::Agent {
+                        tmux_window: String::new(),
+                        ..agent
+                    }
+                });
                 self.recalculate_epic_chain(&mut tables, epic_id);
             }
             Ok(())

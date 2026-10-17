@@ -178,6 +178,7 @@ async fn unfollow_keeps_a_claim_on_an_epic_still_covered_by_another_follow() {
 async fn subagent_start_increments_live_subagents() {
     let (caller, rows) = caller();
     let id = caller.create_task(blank_task()).await.unwrap();
+    caller.start_agent_for(id.0);
     let live = start_subagent(&caller, id, "agent-a", "session-1").await;
     assert_eq!(live, 1);
     assert_eq!(rows.task(id).unwrap().live_subagents, 1);
@@ -187,6 +188,7 @@ async fn subagent_start_increments_live_subagents() {
 async fn subagent_start_fences_out_a_stale_session() {
     let (caller, rows) = caller();
     let id = caller.create_task(blank_task()).await.unwrap();
+    caller.start_agent_for(id.0);
     start_subagent(&caller, id, "agent-a", "session-1").await;
     // A new session for the same task evicts every row from the old one.
     let live = start_subagent(&caller, id, "agent-b", "session-2").await;
@@ -198,6 +200,7 @@ async fn subagent_start_fences_out_a_stale_session() {
 async fn subagent_stop_drains_and_flips_a_pending_stop_to_review() {
     let (caller, rows) = caller();
     let id = caller.create_task(blank_task()).await.unwrap();
+    caller.start_agent_for(id.0);
     run(&caller, id).await;
     start_subagent(&caller, id, "agent-a", "session-1").await;
     // Live subagents means `try_record_stop` defers rather than flips.
@@ -233,6 +236,7 @@ async fn subagent_clear_drains_every_subagent_for_a_task() {
 async fn subagent_clear_and_void_pending_stop_clears_the_flag_without_flipping() {
     let (caller, rows) = caller();
     let id = caller.create_task(blank_task()).await.unwrap();
+    caller.start_agent_for(id.0);
     run(&caller, id).await;
     start_subagent(&caller, id, "agent-a", "session-1").await;
     caller.try_record_stop(id, at(TEST_STAMP)).await.unwrap();
@@ -277,11 +281,14 @@ async fn try_record_stop_flips_immediately_with_no_live_subagents() {
 async fn record_pre_tool_use_is_a_no_op_unless_running() {
     let (caller, rows) = caller();
     let id = caller.create_task(blank_task()).await.unwrap();
+    caller.start_agent_for(id.0);
+    // The claim stamps the new agent, so the guard is shown by the stamp not moving.
+    let claimed = rows.task(id).unwrap().last_pre_tool_use_at;
     caller
         .record_pre_tool_use(id, SubStatus::Active, at(TEST_STAMP))
         .await
         .unwrap();
-    assert_eq!(rows.task(id).unwrap().last_pre_tool_use_at, None);
+    assert_eq!(rows.task(id).unwrap().last_pre_tool_use_at, claimed);
 
     run(&caller, id).await;
     caller
@@ -320,6 +327,7 @@ async fn record_notification_raise_then_clear_round_trips() {
 async fn record_notification_raise_if_no_own_work_live_only_fires_when_idle() {
     let (caller, rows) = caller();
     let id = caller.create_task(blank_task()).await.unwrap();
+    caller.start_agent_for(id.0);
     run(&caller, id).await;
     start_subagent(&caller, id, "agent-a", "session-1").await;
 
@@ -347,6 +355,7 @@ async fn record_notification_raise_if_no_own_work_live_only_fires_when_idle() {
 async fn record_user_prompt_submit_resumes_from_review_and_voids_a_stale_pending_stop() {
     let (caller, rows) = caller();
     let id = caller.create_task(blank_task()).await.unwrap();
+    caller.start_agent_for(id.0);
     run(&caller, id).await;
     start_subagent(&caller, id, "agent-a", "session-1").await;
     caller

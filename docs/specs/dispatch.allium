@@ -1091,23 +1091,23 @@ rule ResumeTask {
 
     requires: task.status in {running, review, done}
     requires: task.worktree != null
-    requires: task.tmux_window = null
+    requires: current_agent(task).tmux_window = null
     -- The worktree is on ONE machine's disk (core/Task: HostTracksWorktree),
     -- and this rule reattaches to it. See the guidance below for why the other
     -- three preconditions do not already imply this one.
     requires: task.is_locally_owned
 
-    -- task.tmux_window = null is a persisted-field precondition, not proof
+    -- current_agent(task).tmux_window = null is a persisted-field precondition, not proof
     -- that no live tmux window exists: the field can go stale (a race, or a
     -- persist that never landed) while the window it used to name survives.
     -- Liveness is therefore re-checked live against tmux on the deterministic
     -- window name.
     let window_alive = has_window(name: "task-" + task.id)
 
-    ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
+    ensures: current_agent(task).tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
-    ensures: task.last_pre_tool_use_at = now
+    ensures: current_agent(task).last_pre_tool_use_at = now
     ensures:
         if not window_alive:
             AgentLaunched(task: task, mode: resume)
@@ -1118,7 +1118,7 @@ rule ResumeTask {
         -- failure is silent rather than loud.
         --
         -- Without the gate this rule asks only: is the status resumable, is
-        -- task.worktree non-null, and is task.tmux_window null? On a board
+        -- task.worktree non-null, and is current_agent(task).tmux_window null? On a board
         -- shared between machines, a task a TEAMMATE dispatched satisfies all
         -- three on YOUR machine. Its status is running. Its worktree field is
         -- non-null — it names a path, but a path on their disk, which means
@@ -1161,7 +1161,7 @@ rule ResumeTask {
         -- When a live window IS found under the deterministic name, resume
         -- does not spawn a second one: AgentLaunched does not fire, so no new
         -- window is created, no keys are sent, and no new companion pane is
-        -- spawned. task.tmux_window is still (re)pointed at the window so the
+        -- spawned. current_agent(task).tmux_window is still (re)pointed at the window so the
         -- task stops looking detached; reattachment itself then happens the
         -- normal way, through the existing "has a window" branch of Space (see
         -- split-pane.allium JumpToAgentWindow, priority 3) on the next
@@ -1198,11 +1198,11 @@ rule RetryResume {
     requires: task.is_locally_owned
 
     ensures:
-        if task.tmux_window != null:
-            OldTmuxWindow.killed(window: task.tmux_window)
+        if current_agent(task).tmux_window != null:
+            OldTmuxWindow.killed(window: current_agent(task).tmux_window)
     ensures: task.sub_status = active
-    ensures: task.last_pre_tool_use_at = now
-    ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
+    ensures: current_agent(task).last_pre_tool_use_at = now
+    ensures: current_agent(task).tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
     ensures: AgentLaunched(task: task, mode: resume)
 
     @guidance
@@ -1246,14 +1246,14 @@ rule RetryFresh {
     -- it again from scratch (DispatchTask), which is the correct sequence
     -- whether or not the same machine runs both halves.
     ensures: task.host = null
-    ensures: task.tmux_window = null
+    ensures: current_agent(task).tmux_window = null
     ensures: task.status = backlog
     ensures: task.sub_status = core/SubStatus.default_for(backlog)
     -- Leaving running voids any deferred Stop. Reachable here more than
     -- anywhere else: a crashed agent's task is still running, and retry-fresh
     -- is what a human does about it. See core/Task's
     -- PendingStopOnlyWhileRunning invariant.
-    ensures: task.stop_pending = false
+    ensures: current_agent(task).stop_pending = false
     -- The agent a fresh dispatch of this task would get: research for a
     -- research task without a plan, the standard one otherwise.
     ensures:

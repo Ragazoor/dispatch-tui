@@ -261,6 +261,12 @@ pub struct TaskSubagent {
     pub agent_id: String,
     pub session_id: String,
     pub started_at: String,
+    /// The `agents` row this entry belongs to (`core.allium:
+    /// SubagentEntry.agent`), `0` on a row written before A4 until the
+    /// backfill points it at its task's current agent. Appended after
+    /// `started_at` so the store can automigrate the table.
+    #[default(0)]
+    pub agent_row: i64,
 }
 
 #[spacetimedb::table(accessor = repo_paths, public)]

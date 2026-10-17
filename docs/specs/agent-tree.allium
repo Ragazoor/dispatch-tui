@@ -718,11 +718,11 @@ rule SplitAgentTreePaneOnAgentLaunch {
     -- epic auto-dispatch, resume and retry-resume.
     when: AgentLaunched(task, mode)
 
-    requires: task.tmux_window != null
+    requires: current_agent(task).tmux_window != null
     requires: task.worktree != null
 
     ensures: AgentTreePane.created(
-        window: task.tmux_window,
+        window: current_agent(task).tmux_window,
         task: task,
         root: task.worktree.path,
         status: shown,
@@ -1047,7 +1047,7 @@ rule DiscardAgentTreePaneOnWindowGone {
 
     @guidance
         -- Covers the crash path specifically: agent-health.allium's
-        -- DetectCrashedAgent deliberately leaves task.tmux_window set so the
+        -- DetectCrashedAgent deliberately leaves current_agent(task).tmux_window set so the
         -- retry prompt can still name the window, so the field-transition rule
         -- below would never fire for a crashed agent. The pane record must go
         -- anyway — the tmux pane it refers to no longer exists.
@@ -1057,7 +1057,7 @@ rule DiscardAgentTreePaneOnWindowCleared {
     -- Covers every lifecycle path that clears a task's window: wrap-up,
     -- PR merge, manual Review -> Done, delete, and the kill half of a
     -- retry-resume.
-    when: task: core/Task.tmux_window transitions_to null
+    when: agent: core/Agent.tmux_window transitions_to null
 
     let pane = AgentTreePane{task: task}
 
@@ -2280,7 +2280,7 @@ rule JumpToAgentWindow {
     -- not an error, so it neither switches nor raises a notice.
     requires: target != pane.task
 
-    ensures: AgentWindowSelected(window: target.tmux_window)
+    ensures: AgentWindowSelected(window: current_agent(target).tmux_window)
 
     @guidance
         -- The jump selects the window only. It does not move focus into the

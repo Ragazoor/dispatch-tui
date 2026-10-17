@@ -75,6 +75,7 @@ async fn dispatched_task(caller: &MemoryReducerCaller) -> TaskId {
 
 async fn dispatched_task_in(caller: &MemoryReducerCaller, row: bindings::Task) -> TaskId {
     let task = caller.create_task(row).await.unwrap();
+    caller.start_agent_for(task.0);
     caller
         .patch_task(
             task,

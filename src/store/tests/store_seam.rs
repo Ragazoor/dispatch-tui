@@ -48,7 +48,8 @@ async fn the_store_reaches_every_shared_table() {
         .unwrap();
     assert!(shared.get_task(task_id).await.is_some());
 
-    // task_subagents
+    // task_subagents (the entry belongs to the task's current agent)
+    shared.give_agent(task_id);
     let now = chrono::Utc::now();
     assert_eq!(
         shared

@@ -60,10 +60,7 @@ fn a_dispatch_request_claims_the_task_and_writes_a_requested_row() {
         "active"
     );
     assert_ne!(
-        column(
-            &instance,
-            "SELECT last_pre_tool_use_at FROM tasks WHERE id = 1"
-        ),
+        current_agent_column(&instance, "last_pre_tool_use_at", 1),
         "",
         "the claim stamps last_pre_tool_use_at"
     );
@@ -134,14 +131,8 @@ fn a_dispatch_request_clears_the_tasks_subagent_state() {
         &instance,
         "SELECT agent_id FROM task_subagents WHERE task_id = 1"
     ));
-    assert_eq!(
-        column(&instance, "SELECT live_subagents FROM tasks WHERE id = 1"),
-        "0"
-    );
-    assert_eq!(
-        column(&instance, "SELECT stop_pending FROM tasks WHERE id = 1"),
-        "false"
-    );
+    assert_eq!(current_agent_column(&instance, "live_subagents", 1), "0");
+    assert_eq!(current_agent_column(&instance, "stop_pending", 1), "false");
 }
 
 /// `DispatchClaimExclusive`, through the request reducer: the second request
@@ -310,10 +301,7 @@ fn a_dispatched_report_records_the_result_on_the_row_and_the_task() {
         column(&instance, "SELECT worktree FROM tasks WHERE id = 1"),
         "/wt/1-t"
     );
-    assert_eq!(
-        column(&instance, "SELECT tmux_window FROM tasks WHERE id = 1"),
-        "task-1"
-    );
+    assert_eq!(current_agent_column(&instance, "tmux_window", 1), "task-1");
     assert_eq!(
         column(&instance, "SELECT host FROM tasks WHERE id = 1"),
         "host-a"
@@ -464,12 +452,10 @@ fn a_failed_report_fails_the_row_and_releases_the_claim() {
         column(&instance, "SELECT sub_status FROM tasks WHERE id = 1"),
         "none"
     );
+    // The agent the claim started ends with the release, holding nothing.
     assert_eq!(
-        column(
-            &instance,
-            "SELECT last_pre_tool_use_at FROM tasks WHERE id = 1"
-        ),
-        ""
+        column(&instance, "SELECT state FROM agents WHERE task_id = 1"),
+        "ended"
     );
     assert_eq!(timer_count(&instance, id.parse().unwrap()), "0");
 

@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use super::answer::{awaiting_answer, fire};
 use super::outcome::{
-    flag_or_refused, generated_id, is_review, matches_create, matches_created_epic,
-    matches_created_learning, matches_created_work_package, outcome_of, outcome_with_ids,
-    subagent_drain_read_back, value_or_bail,
+    current_live_subagents, flag_or_refused, generated_id, is_review, matches_create,
+    matches_created_epic, matches_created_learning, matches_created_work_package, outcome_of,
+    outcome_with_ids, subagent_drain_read_back, value_or_bail,
 };
 use super::SpacetimeSdkConnector;
 use crate::models::{
@@ -463,11 +463,7 @@ impl ReducerCaller for SdkReducerCaller {
                     fire(
                         tx,
                         value_or_bail(result, "the subagent start", || {
-                            ctx.db
-                                .tasks()
-                                .id()
-                                .find(&task_id)
-                                .map_or(0, |t| t.live_subagents)
+                            current_live_subagents(ctx, task_id)
                         }),
                     );
                 },

@@ -594,7 +594,6 @@ entity Task {
     status: TaskStatus
     sub_status: SubStatus
     worktree: Worktree?
-    tmux_window: TmuxWindow?
     host: Host?           -- the machine holding this task's worktree; null means no machine holds one. Coupled to worktree, not to status — see HostTracksWorktree below
     owner: UserIdentity?  -- the person whose user board this task sits on; set exactly when the task has no epic. Orthogonal to `host` — see OwnerTracksUserBoardTask below
     created_by: UserIdentity?  -- who created this task; stamped once and never rewritten, regardless of epic membership. NOT the same question as `owner`: `owner` tracks which board the task sits on and is blanked the moment the task joins an epic, so it cannot answer "who made this?" for an epic task. `created_by` exists so sync.allium can subscribe a creator to their own creations, epic or not — see sync.allium's own-creations subscription. Null for a task created before this field existed, and never backfilled: unlike `owner`, there is no derivation that recovers a forgotten creator.
@@ -613,11 +612,10 @@ entity Task {
                                -- board-visuals.allium.
     base_branch: String = "main" -- the branch this task rebases onto / targets for PRs
     external_id: String?  -- stable identifier for tasks sourced from a feed epic (see feeds.allium); null for hand-created tasks. Unique per (epic, external_id) when set.
-    last_pre_tool_use_at: Timestamp?  -- wallclock of the most recent PreToolUse hook; null when the agent has never tooled (or after Stop)
-    last_notification_at: Timestamp?  -- wallclock of the most recent Notification hook; null when no notification is pending (or after Stop)
-    live_subagents: Integer = 0  -- count of subagents currently executing for this task; a denormalised count of SubagentEntry rows, rewritten alongside every mutation and clear point (see agent-health.allium)
-    stop_pending: Boolean = false  -- a Stop hook arrived while subagents were live; flip to review once they drain (see agent-health.allium: HookStop / HookSubagentStop). Cleared by any status write that leaves running — see PendingStopOnlyWhileRunning below
-    stop_pending_at: Timestamp?  -- when the Stop that stop_pending defers actually fired (the hook's event time, not its write time). Meaningful only while stop_pending holds; the clear points leave it alone because every reader gates on the bit. HookUserPromptSubmit compares against it to tell a Stop deferred by an earlier turn from one deferred by the turn now starting — see its guidance. Null while the bit is set means the Stop predates the field, and reads as "fired before any prompt"
+    -- The six live-session facts (the window, the two hook timestamps, the live
+    -- subagent count, the deferred Stop and its time) sit on the task's current
+    -- Agent since agents.allium step A4, not here. The stored Task row keeps
+    -- their six columns, never written: the store cannot drop a column.
     pr_learnings_gate_shown_at: Timestamp?  -- set once when the PrLearningsGate fires; null means the gate has never fired for this task
     wrap_up_mode: WrapUpMode?  -- preferred wrap-up path; null means decide at wrap-up time
     auto_run_plan: Boolean = false  -- when true and plan_path is set, build_prompt's
@@ -677,7 +675,10 @@ entity Task {
     has_plan: plan_path != null
     is_stale: sub_status = stale
     is_crashed: sub_status = crashed
-    is_detached: worktree != null and tmux_window = null
+    -- The window of the task's current agent, null when it has none or the
+    -- agent holds no window (the task's session is not running).
+    current_window: current_agent(this).tmux_window
+    is_detached: worktree != null and current_window = null
                  and status in {running, review}
     -- sub_status is deliberately not part of this condition, the same way it
     -- is not part of Parked's (see "Derived review sections" above): a caller
@@ -687,7 +688,7 @@ entity Task {
     -- provisioning), so there is nothing to resume. Mutually exclusive with
     -- is_detached, which requires a worktree.
     -- Surfaced on the card by UnprovisionedIndicator in dispatch.allium.
-    is_unprovisioned: worktree = null and tmux_window = null
+    is_unprovisioned: worktree = null and current_window = null
                       and status in {running, review}
     -- May THIS install act on the task's worktree and tmux window? True when
     -- no machine holds a worktree for it — there is nothing to conflict over —
@@ -718,35 +719,8 @@ entity Task {
     -- "Phoenix marker" in board-visuals.allium.
     respawn_failed: phoenix and status = done
 
-    -- live_subagents is a denormalised count of this task's SubagentEntry
-    -- rows (see SubagentEntry below); every mutation and clear point
-    -- rewrites both in the same write, so they cannot disagree (see
-    -- agent-health.allium: HookSubagentStart / HookSubagentStop and the
-    -- four clear points documented there).
-    invariant LiveSubagentCountMatchesEntries {
-        live_subagents = (SubagentEntries where task = this).count
-    }
-
-    -- A deferred Stop belongs to the turn the task was running when it
-    -- arrived. Only HookStop sets the bit, and it requires status =
-    -- running; every status write that leaves running clears it in the
-    -- same write (MoveTaskForward / MoveTaskBackward / ConfirmDone in
-    -- tasks.allium, UpdateTaskViaMcp in
-    -- mcp-task-tools.allium, ExitSession in pr-workflow.allium,
-    -- update_tasks' done-path close in store-split.allium's RequestCloseTask,
-    -- and the drain points in agent-health.allium). Since store-split M7 the
-    -- clear is the store module's, applied by patch_task to every patch that
-    -- leaves running and by both closes, never added by the board
-    -- (store-split.allium, X2). patch_task skips the clear only for a patch
-    -- that names stop_pending itself, which then wins; no board patch sets it
-    -- true (only HookStop's own write does), so that exception cannot keep a
-    -- Stop alive past running. So the bit cannot outlive the
-    -- status it was recorded under, and cannot be waiting for a task that
-    -- a later move puts back into running — where the next drain would
-    -- otherwise flip it straight back out of a status a human just chose.
-    invariant PendingStopOnlyWhileRunning {
-        stop_pending implies status = running
-    }
+    -- LiveSubagentCountMatchesEntries and PendingStopOnlyWhileRunning moved
+    -- to Agent with the fields they constrain (agents.allium step A4).
 
     -- A task has a host if and only if it has a worktree.
     --
@@ -840,18 +814,111 @@ entity Task {
     }
 }
 
+------------------------------------------------------------
+-- Agents (agents.allium)
+------------------------------------------------------------
+-- Moved here from agents.allium in step A4: SubagentEntry.agent and the Task
+-- derivations (is_detached, is_unprovisioned) refer to it, and agents.allium
+-- already depends on this file. The rules stay in agents.allium.
+
+-- Whether an agent's session can still be resumed.
+--   current -- it can: the worktree is there and no fresh launch has
+--              replaced it. Whether it is running right now is a separate,
+--              derived fact (is_live, below): a current agent without a
+--              window is paused, and a resume brings it back.
+--   ended   -- it never can again. Terminal.
+enum AgentState { current | ended }
+
+-- Why an agent ended. Recorded once, when it ends.
+--   replaced       -- a fresh launch started a new agent for the same task.
+--   worktree_gone  -- RetryFresh released the worktree its session lived in.
+--   launch_failed  -- its dispatch request failed before the host recorded a
+--                     worktree, and the claim was released (A12).
+enum AgentEndReason { replaced | worktree_gone | launch_failed }
+
+-- What kind of launch started an agent. A resume never starts one.
+enum AgentStartMode { dispatch | research | quick }
+
+entity Agent {
+    task: core/Task
+    name: String              -- picked by the store when the agent starts; never changes (A5)
+    host: core/Host           -- the machine its session runs on; the task's host when it started
+    start_mode: AgentStartMode
+    state: AgentState
+    started_at: Timestamp
+    ended_at: Timestamp when state = ended
+    end_reason: AgentEndReason when state = ended
+
+    -- The live-session facts, moved off Task by step A4. Each keeps the
+    -- meaning it had on Task, now read of the task's current agent.
+    tmux_window: TmuxWindow?
+    last_pre_tool_use_at: Timestamp?  -- wallclock of the most recent PreToolUse hook; null when the agent has never tooled (or after Stop)
+    last_notification_at: Timestamp?  -- wallclock of the most recent Notification hook; null when no notification is pending (or after Stop)
+    live_subagents: Integer = 0  -- count of subagents currently executing for this agent; a denormalised count of its SubagentEntry rows, rewritten alongside every mutation and clear point (see agent-health.allium)
+    stop_pending: Boolean = false  -- a Stop hook arrived while subagents were live; flip the task to review once they drain (see agent-health.allium: HookStop / HookSubagentStop). Cleared by any status write that leaves running — see PendingStopOnlyWhileRunning below
+    stop_pending_at: Timestamp?  -- when the Stop that stop_pending defers actually fired (the hook's event time, not its write time). Meaningful only while stop_pending holds; the clear points leave it alone because every reader gates on the bit. HookUserPromptSubmit compares against it to tell a Stop deferred by an earlier turn from one deferred by the turn now starting — see its guidance. Null while the bit is set means the Stop predates the field, and reads as "fired before any prompt"
+
+    transitions state {
+        current -> ended
+        terminal: ended
+    }
+
+    is_current: state = current
+    -- Live: it holds a window, so its session may be running. A current agent
+    -- that is not live is paused — wrap-up, exit_session, a move back to
+    -- backlog, a crash or a window killed off-board took its window, and
+    -- nothing ended it (A7). Derived from the window rather than stored, so a
+    -- resume that re-records a window still open in tmux (dispatch.allium:
+    -- ResumeTask with window_alive) needs no second write to say so.
+    is_live: is_current and tmux_window != null
+    is_paused: is_current and tmux_window = null
+
+    -- live_subagents is a denormalised count of this agent's SubagentEntry
+    -- rows; every mutation and clear point rewrites both in the same write,
+    -- so they cannot disagree (agent-health.allium: HookSubagentStart /
+    -- HookSubagentStop and the four clear points documented there).
+    invariant LiveSubagentCountMatchesEntries {
+        live_subagents = (SubagentEntries where agent = this).count
+    }
+
+    -- A deferred Stop belongs to the turn the task was running when it
+    -- arrived. Only HookStop sets the bit, and it requires the task's status
+    -- = running; every status write that leaves running clears it in the same
+    -- write (MoveTaskForward / MoveTaskBackward / ConfirmDone in
+    -- tasks.allium, UpdateTaskViaMcp in mcp-task-tools.allium, ExitSession in
+    -- pr-workflow.allium, update_tasks' done-path close in
+    -- store-split.allium's RequestCloseTask, and the drain points in
+    -- agent-health.allium). The clear is the store module's, applied by
+    -- patch_task to every patch that leaves running and by both closes, never
+    -- added by the board (store-split.allium, X2). patch_task skips the clear
+    -- only for a patch that names stop_pending itself, which then wins; no
+    -- board patch sets it true (only HookStop's own write does), so that
+    -- exception cannot keep a Stop alive past running.
+    invariant PendingStopOnlyWhileRunning {
+        stop_pending implies task.status = running
+    }
+
+    -- An ended agent holds nothing of the session: no window, no subagents,
+    -- no pending Stop.
+    invariant EndedAgentHoldsNothing {
+        state = ended implies
+            (tmux_window = null and live_subagents = 0 and stop_pending = false)
+    }
+}
+
 -- A live subagent, as reported by the SubagentStart/SubagentStop Claude
--- Code hooks. The table is the authority for Task.live_subagents, which
+-- Code hooks. The table is the authority for Agent.live_subagents, which
 -- is a denormalised count rewritten from it by every mutation and clear
 -- point (see agent-health.allium). started_at is retained for diagnostics
--- only; no rule branches on it.
+-- only; no rule branches on it. Belongs to the agent that was the task's
+-- current one when the hook fired; an agent that ends takes its entries with
+-- it (EndedAgentHoldsNothing).
 entity SubagentEntry {
-    task: Task
-    agent_id: String
+    agent: Agent
+    agent_id: String  -- the Claude Code subagent's own id, not an Agent
     session_id: String
     started_at: Timestamp
 }
-
 entity Epic {
     title: String
     description: String

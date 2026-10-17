@@ -239,8 +239,8 @@ rule MoveEpicForward {
     ensures:
         if next = done:
             epic.completed_at = now
-            for task in epic.subtasks where tmux_window != null:
-                task.tmux_window = null
+            for task in epic.subtasks where current_window != null:
+                current_agent(task).tmux_window = null
 
     @guidance
         -- Uses the same next() progression as tasks:
@@ -439,7 +439,7 @@ rule DeleteEpicRefused {
     ensures:
         for task in epic.subtree_tasks:
             task.worktree = task.worktree
-            task.tmux_window = task.tmux_window
+            current_agent(task).tmux_window = current_agent(task).tmux_window
         UserInformed(
             about: delete_refused,
             epic: epic,

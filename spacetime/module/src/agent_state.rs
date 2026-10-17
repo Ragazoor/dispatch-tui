@@ -217,15 +217,11 @@ pub fn override_poll_owner(
 /// simply touches zero rows.
 pub(crate) fn sync_subagent_count(ctx: &ReducerContext, task_id: i64) -> Result<i64, String> {
     let count = ctx.db.task_subagents().task_id().filter(&task_id).count() as i64;
-    if let Some(row) = ctx.db.tasks().id().find(task_id) {
-        write_task(
-            ctx,
-            Task {
-                live_subagents: count,
-                ..row
-            },
-        )?;
-    }
+    // On the task's current agent (`agents.allium`, A4); none, no write.
+    update_current_agent(&mut AgentTables(ctx), task_id, |agent| Agent {
+        live_subagents: count,
+        ..agent
+    });
     Ok(count)
 }
 
@@ -259,7 +255,10 @@ pub(crate) fn apply_pending_stop_if_drained(
     let Some(row) = ctx.db.tasks().id().find(task_id) else {
         return Ok(false);
     };
-    if row.status == RUNNING && row.stop_pending && row.live_subagents == 0 {
+    let Some(agent) = current_agent(&AgentTables(ctx), task_id) else {
+        return Ok(false);
+    };
+    if row.status == RUNNING && agent.stop_pending && agent.live_subagents == 0 {
         flip_to_review(ctx, row)?;
         Ok(true)
     } else {
@@ -274,17 +273,21 @@ pub(crate) fn apply_pending_stop_if_drained(
 /// makes this transition.
 pub(crate) fn flip_to_review(ctx: &ReducerContext, row: Task) -> Result<(), String> {
     let epic_id = row.epic_id;
+    let id = row.id;
     write_task(
         ctx,
         Task {
             status: REVIEW.into(),
             sub_status: AWAITING_REVIEW.into(),
-            last_pre_tool_use_at: String::new(),
-            last_notification_at: String::new(),
-            stop_pending: false,
             ..row
         },
     )?;
+    update_current_agent(&mut AgentTables(ctx), id, |agent| Agent {
+        last_pre_tool_use_at: String::new(),
+        last_notification_at: String::new(),
+        stop_pending: false,
+        ..agent
+    });
     recalculate_epic_chain(ctx, epic_id);
     Ok(())
 }
@@ -330,6 +333,10 @@ pub fn subagent_start(
     session_id: String,
     started_at: String,
 ) -> Result<(), String> {
+    // A hook for a task with no current agent writes no agent fact (A15).
+    let Some(owner) = current_agent(&AgentTables(ctx), task_id) else {
+        return Ok(());
+    };
     fence_subagent_session(ctx, task_id, &session_id);
     // Dedupe first, then insert fresh: an upsert by (task_id, agent_id).
     delete_subagent_entry(ctx, task_id, &agent_id);
@@ -338,6 +345,7 @@ pub fn subagent_start(
         agent_id,
         session_id,
         started_at,
+        agent_row: owner.id,
     });
     sync_subagent_count(ctx, task_id)?;
     Ok(())
@@ -383,15 +391,10 @@ pub fn subagent_clear_and_void_pending_stop(
 ) -> Result<(), String> {
     delete_all_subagents(ctx, task_id);
     sync_subagent_count(ctx, task_id)?;
-    if let Some(row) = ctx.db.tasks().id().find(task_id) {
-        write_task(
-            ctx,
-            Task {
-                stop_pending: false,
-                ..row
-            },
-        )?;
-    }
+    update_current_agent(&mut AgentTables(ctx), task_id, |agent| Agent {
+        stop_pending: false,
+        ..agent
+    });
     Ok(())
 }
 
@@ -415,17 +418,16 @@ pub fn try_record_stop(
     if row.status != RUNNING {
         return Err(format!("task {id} is not running"));
     }
-    if row.live_subagents == 0 {
+    // No current agent holds no subagents: the Stop flips at once (A15).
+    let live = current_agent(&AgentTables(ctx), id).map_or(0, |a| a.live_subagents);
+    if live == 0 {
         flip_to_review(ctx, row)?;
     } else {
-        write_task(
-            ctx,
-            Task {
-                stop_pending: true,
-                stop_pending_at,
-                ..row
-            },
-        )?;
+        update_current_agent(&mut AgentTables(ctx), id, |agent| Agent {
+            stop_pending: true,
+            stop_pending_at,
+            ..agent
+        });
     }
     Ok(())
 }
@@ -450,14 +452,11 @@ pub fn record_pre_tool_use(
     if row.status != RUNNING {
         return Ok(());
     }
-    write_task(
-        ctx,
-        Task {
-            sub_status,
-            last_pre_tool_use_at: at,
-            ..row
-        },
-    )
+    update_current_agent(&mut AgentTables(ctx), id, |agent| Agent {
+        last_pre_tool_use_at: at,
+        ..agent
+    });
+    write_task(ctx, Task { sub_status, ..row })
 }
 
 /// `HookNotification` in `docs/specs/agent-health.allium`. `mode` arrives
@@ -485,30 +484,42 @@ pub fn record_notification(
     if row.status != RUNNING {
         return Ok(());
     }
+    let stamp = |ctx: &ReducerContext, at: String| {
+        update_current_agent(&mut AgentTables(ctx), id, |agent| Agent {
+            last_notification_at: at,
+            ..agent
+        });
+    };
     match mode.as_str() {
-        "clear" => write_task(
-            ctx,
-            Task {
-                sub_status: ACTIVE.into(),
-                last_notification_at: String::new(),
-                ..row
-            },
-        ),
-        "raise" => write_task(
-            ctx,
-            Task {
-                sub_status: NEEDS_INPUT.into(),
-                last_notification_at: at,
-                ..row
-            },
-        ),
+        "clear" => {
+            stamp(ctx, String::new());
+            write_task(
+                ctx,
+                Task {
+                    sub_status: ACTIVE.into(),
+                    ..row
+                },
+            )
+        }
+        "raise" => {
+            stamp(ctx, at);
+            write_task(
+                ctx,
+                Task {
+                    sub_status: NEEDS_INPUT.into(),
+                    ..row
+                },
+            )
+        }
         "raise_if_no_own_work_live" => {
-            if row.live_subagents == 0 {
+            // Read at write time, from the agent's committed count.
+            let live = current_agent(&AgentTables(ctx), id).map_or(0, |a| a.live_subagents);
+            if live == 0 {
+                stamp(ctx, at);
                 write_task(
                     ctx,
                     Task {
                         sub_status: NEEDS_INPUT.into(),
-                        last_notification_at: at,
                         ..row
                     },
                 )
@@ -548,19 +559,21 @@ pub fn record_user_prompt_submit(
     }
     let resumed = row.status == REVIEW;
     let epic_id = row.epic_id;
-    let void_pending_stop = row.stop_pending
-        && (row.stop_pending_at.is_empty() || row.stop_pending_at.as_str() < prompt_at.as_str());
+    update_current_agent(&mut AgentTables(ctx), id, |agent| {
+        let void_pending_stop = agent.stop_pending
+            && (agent.stop_pending_at.is_empty()
+                || agent.stop_pending_at.as_str() < prompt_at.as_str());
+        Agent {
+            last_pre_tool_use_at: activity_at,
+            stop_pending: agent.stop_pending && !void_pending_stop,
+            ..agent
+        }
+    });
     write_task(
         ctx,
         Task {
             status: RUNNING.into(),
             sub_status: ACTIVE.into(),
-            last_pre_tool_use_at: activity_at,
-            stop_pending: if void_pending_stop {
-                false
-            } else {
-                row.stop_pending
-            },
             ..row
         },
     )?;

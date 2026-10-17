@@ -141,6 +141,10 @@ mod tests {
                 ended_at: Some(chrono::Utc::now()),
                 end_reason: Some(AgentEndReason::Replaced),
                 tmux_window: None,
+                last_pre_tool_use_at: None,
+                last_notification_at: None,
+                live_subagents: 0,
+                stop_pending: false,
             },
             Agent {
                 id: AgentId(2),
@@ -153,6 +157,10 @@ mod tests {
                 ended_at: None,
                 end_reason: None,
                 tmux_window: None,
+                last_pre_tool_use_at: None,
+                last_notification_at: None,
+                live_subagents: 0,
+                stop_pending: false,
             },
             Agent {
                 id: AgentId(3),
@@ -165,6 +173,10 @@ mod tests {
                 ended_at: None,
                 end_reason: None,
                 tmux_window: None,
+                last_pre_tool_use_at: None,
+                last_notification_at: None,
+                live_subagents: 0,
+                stop_pending: false,
             },
         ]
     }

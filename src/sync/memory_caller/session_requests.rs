@@ -234,7 +234,8 @@ impl MemoryReducerCaller {
             .cloned()
             .collect();
         let token_row = module::check_exit_token(task_id, token, &sessions, &dispatches)?;
-        module::validate_exit_session(&task, &token_row, action, pr_url)?;
+        let window = module::session_window(&self.agent_store(&mut tables), task_id);
+        module::validate_exit_session(&task, &window, &token_row, action, pr_url)?;
         // D11 (W11): the row names the task's host, so only its owner may ask.
         self.acting_for(&tables, &task.host)?;
         module::validate_no_open_session_request(
@@ -254,6 +255,7 @@ impl MemoryReducerCaller {
             closed.phoenix = false;
         }
         self.write_task(&mut tables, closed.clone())?;
+        module::close_agent_session(&mut self.agent_store(&mut tables), task_id);
         self.recalculate_epic_chain(&mut tables, epic_id);
 
         let chained = self.chain_next_subtask(&mut tables, &closed, &host);
@@ -263,6 +265,7 @@ impl MemoryReducerCaller {
                 requested_by: self.sender.clone(),
                 ..module::new_exit_session_request(
                     &task,
+                    &window,
                     token_row.id,
                     action,
                     pr_url,
@@ -288,6 +291,7 @@ impl MemoryReducerCaller {
             return Err(format!("task {task_id} no longer exists"));
         };
         let stamp = self.now();
+        let window = module::session_window(&self.agent_store(&mut tables), task_id);
         let open: Vec<module::SessionRequest> = tables
             .session_requests
             .values()
@@ -306,10 +310,13 @@ impl MemoryReducerCaller {
             closed.phoenix = false;
         }
         self.write_task(&mut tables, closed)?;
+        module::close_agent_session(&mut self.agent_store(&mut tables), task_id);
         self.recalculate_epic_chain(&mut tables, epic_id);
 
-        let row = module::new_close_request(&task, host, &stamp);
-        if module::close_has_host_work(&task) && self.acting_for(&tables, &row.host).is_ok() {
+        let row = module::new_close_request(&task, &window, host, &stamp);
+        if module::close_has_host_work(&task, &window)
+            && self.acting_for(&tables, &row.host).is_ok()
+        {
             self.write_session_request(
                 &mut tables,
                 module::SessionRequest {

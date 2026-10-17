@@ -127,6 +127,7 @@ fn memory_caller_serves_session_requests_like_the_real_module() {
         let dispatched = |task: TaskId| {
             let real = &real;
             let mem = &mem;
+            let instance = &instance;
             async move {
                 for caller in [real as &dyn ReducerCaller, mem as &dyn ReducerCaller] {
                     caller
@@ -136,8 +137,26 @@ fn memory_caller_serves_session_requests_like_the_real_module() {
                                 status: Some("running".into()),
                                 sub_status: Some("active".into()),
                                 worktree: Some(format!("/repo/.worktrees/{}-t", task.0)),
-                                tmux_window: Some(format!("task-{}", task.0)),
                                 host: Some("host-a".into()),
+                                ..blank_task_patch()
+                            },
+                        )
+                        .await
+                        .unwrap()
+                        .applied()
+                        .unwrap();
+                }
+                // The window is the current agent's since agents A4, and an
+                // agent comes from the backfill: a worktree and none.
+                let backfilled = instance.call("backfill_agents", &[]);
+                assert!(backfilled.status.success(), "{}", describe(&backfilled));
+                mem.backfill_agents().unwrap().applied().unwrap();
+                for caller in [real as &dyn ReducerCaller, mem as &dyn ReducerCaller] {
+                    caller
+                        .patch_task(
+                            task,
+                            bindings::TaskPatch {
+                                tmux_window: Some(format!("task-{}", task.0)),
                                 ..blank_task_patch()
                             },
                         )

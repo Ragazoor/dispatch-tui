@@ -33,8 +33,9 @@ impl MemoryReducerCaller {
         self.fail_open_session_requests_of(tables, task_id);
     }
 
-    /// Recompute `live_subagents` from `task_subagents` and write it, if the
-    /// task still exists. Mirrors the module's `sync_subagent_count`.
+    /// Recompute `live_subagents` from `task_subagents` and write it on the
+    /// task's current agent, if it has one. Mirrors the module's
+    /// `sync_subagent_count`.
     pub(super) fn sync_subagent_count(
         &self,
         tables: &mut Tables,
@@ -45,15 +46,12 @@ impl MemoryReducerCaller {
             .iter()
             .filter(|s| s.task_id == task_id)
             .count() as i64;
-        if let Some(row) = tables.tasks.get(&task_id).cloned() {
-            self.write_task(
-                tables,
-                module::Task {
-                    live_subagents: count,
-                    ..row
-                },
-            )?;
-        }
+        module::update_current_agent(&mut self.agent_store(tables), task_id, |agent| {
+            module::Agent {
+                live_subagents: count,
+                ..agent
+            }
+        });
         Ok(count)
     }
 
@@ -85,7 +83,10 @@ impl MemoryReducerCaller {
         let Some(row) = tables.tasks.get(&task_id).cloned() else {
             return Ok(false);
         };
-        if row.status == RUNNING && row.stop_pending && row.live_subagents == 0 {
+        let Some(agent) = module::current_agent(&self.agent_store(tables), task_id) else {
+            return Ok(false);
+        };
+        if row.status == RUNNING && agent.stop_pending && agent.live_subagents == 0 {
             self.flip_to_review(tables, row)?;
             Ok(true)
         } else {
@@ -102,17 +103,21 @@ impl MemoryReducerCaller {
         row: module::Task,
     ) -> Result<(), String> {
         let epic_id = row.epic_id;
+        let id = row.id;
         self.write_task(
             tables,
             module::Task {
                 status: REVIEW.into(),
                 sub_status: AWAITING_REVIEW.into(),
-                last_pre_tool_use_at: String::new(),
-                last_notification_at: String::new(),
-                stop_pending: false,
                 ..row
             },
         )?;
+        module::update_current_agent(&mut self.agent_store(tables), id, |agent| module::Agent {
+            last_pre_tool_use_at: String::new(),
+            last_notification_at: String::new(),
+            stop_pending: false,
+            ..agent
+        });
         self.recalculate_epic_chain(tables, epic_id);
         Ok(())
     }
@@ -122,7 +127,11 @@ impl MemoryReducerCaller {
     pub(super) fn drain_read_back(tables: &Tables, task_id: i64) -> DrainReadBack {
         match tables.tasks.get(&task_id) {
             Some(t) => DrainReadBack {
-                live: t.live_subagents,
+                live: tables
+                    .agents
+                    .values()
+                    .find(|a| a.task_id == task_id && a.state == module::AGENT_CURRENT)
+                    .map_or(0, |a| a.live_subagents),
                 is_review: t.status == REVIEW,
             },
             None => DrainReadBack::default(),
@@ -180,6 +189,10 @@ impl MemoryReducerCaller {
         let task_id = task_id.0;
         let started_at = encode::subagent_started_at(started_at);
         let mut tables = self.lock();
+        // A hook for a task with no current agent writes no agent fact (A15).
+        let Some(owner) = module::current_agent(&self.agent_store(&mut tables), task_id) else {
+            return Ok(0);
+        };
         Self::fence_subagent_session(&mut tables, task_id, &session_id);
         Self::delete_subagent_entry(&mut tables, task_id, &agent_id);
         tables.task_subagents.push(module::TaskSubagent {
@@ -187,6 +200,7 @@ impl MemoryReducerCaller {
             agent_id,
             session_id,
             started_at,
+            agent_row: owner.id,
         });
         self.sync_subagent_count(&mut tables, task_id)
             .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))
@@ -230,17 +244,12 @@ impl MemoryReducerCaller {
         if let Err(why) = self.sync_subagent_count(&mut tables, task_id) {
             return Ok(ReducerOutcome::Refused(why));
         }
-        if let Some(row) = tables.tasks.get(&task_id).cloned() {
-            if let Err(why) = self.write_task(
-                &mut tables,
-                module::Task {
-                    stop_pending: false,
-                    ..row
-                },
-            ) {
-                return Ok(ReducerOutcome::Refused(why));
+        module::update_current_agent(&mut self.agent_store(&mut tables), task_id, |agent| {
+            module::Agent {
+                stop_pending: false,
+                ..agent
             }
-        }
+        });
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
@@ -258,19 +267,20 @@ impl MemoryReducerCaller {
         if row.status != RUNNING {
             return Ok(None);
         }
-        if row.live_subagents == 0 {
+        // No current agent holds no subagents: the Stop flips at once (A15).
+        let live = module::current_agent(&self.agent_store(&mut tables), id)
+            .map_or(0, |a| a.live_subagents);
+        if live == 0 {
             self.flip_to_review(&mut tables, row)
                 .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
         } else {
-            self.write_task(
-                &mut tables,
-                module::Task {
+            module::update_current_agent(&mut self.agent_store(&mut tables), id, |agent| {
+                module::Agent {
                     stop_pending: true,
                     stop_pending_at,
-                    ..row
-                },
-            )
-            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+                    ..agent
+                }
+            });
         }
         Ok(Some(
             tables.tasks.get(&id).is_some_and(|t| t.status == REVIEW),
@@ -293,14 +303,13 @@ impl MemoryReducerCaller {
         if row.status != RUNNING {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
-        match self.write_task(
-            &mut tables,
-            module::Task {
-                sub_status,
+        module::update_current_agent(&mut self.agent_store(&mut tables), id, |agent| {
+            module::Agent {
                 last_pre_tool_use_at: at,
-                ..row
-            },
-        ) {
+                ..agent
+            }
+        });
+        match self.write_task(&mut tables, module::Task { sub_status, ..row }) {
             Ok(()) => Ok(ReducerOutcome::Applied(vec![])),
             Err(why) => Ok(ReducerOutcome::Refused(why)),
         }
@@ -321,24 +330,39 @@ impl MemoryReducerCaller {
         if row.status != RUNNING {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
-        let raised = |row: module::Task, at: String| module::Task {
+        let live = module::current_agent(&self.agent_store(&mut tables), id)
+            .map_or(0, |a| a.live_subagents);
+        let raised = |row: module::Task| module::Task {
             sub_status: NEEDS_INPUT.into(),
-            last_notification_at: at,
             ..row
+        };
+        let stamp = |this: &Self, tables: &mut Tables, at: String| {
+            module::update_current_agent(&mut this.agent_store(tables), id, |agent| {
+                module::Agent {
+                    last_notification_at: at,
+                    ..agent
+                }
+            });
         };
         let result = match mode {
             NotificationWrite::Ignore => Ok(()),
-            NotificationWrite::Clear => self.write_task(
-                &mut tables,
-                module::Task {
-                    sub_status: ACTIVE.into(),
-                    last_notification_at: String::new(),
-                    ..row
-                },
-            ),
-            NotificationWrite::Raise => self.write_task(&mut tables, raised(row, at)),
-            NotificationWrite::RaiseIfNoOwnWorkLive if row.live_subagents == 0 => {
-                self.write_task(&mut tables, raised(row, at))
+            NotificationWrite::Clear => {
+                stamp(self, &mut tables, String::new());
+                self.write_task(
+                    &mut tables,
+                    module::Task {
+                        sub_status: ACTIVE.into(),
+                        ..row
+                    },
+                )
+            }
+            NotificationWrite::Raise => {
+                stamp(self, &mut tables, at);
+                self.write_task(&mut tables, raised(row))
+            }
+            NotificationWrite::RaiseIfNoOwnWorkLive if live == 0 => {
+                stamp(self, &mut tables, at);
+                self.write_task(&mut tables, raised(row))
             }
             NotificationWrite::RaiseIfNoOwnWorkLive => Ok(()),
         };
@@ -368,21 +392,21 @@ impl MemoryReducerCaller {
         }
         let resumed = row.status == REVIEW;
         let epic_id = row.epic_id;
-        let void_pending_stop = row.stop_pending
-            && (row.stop_pending_at.is_empty()
-                || row.stop_pending_at.as_str() < prompt_at.as_str());
-        let stop_pending = if void_pending_stop {
-            false
-        } else {
-            row.stop_pending
-        };
+        module::update_current_agent(&mut self.agent_store(&mut tables), id, |agent| {
+            let void_pending_stop = agent.stop_pending
+                && (agent.stop_pending_at.is_empty()
+                    || agent.stop_pending_at.as_str() < prompt_at.as_str());
+            module::Agent {
+                last_pre_tool_use_at: activity_at,
+                stop_pending: agent.stop_pending && !void_pending_stop,
+                ..agent
+            }
+        });
         if let Err(why) = self.write_task(
             &mut tables,
             module::Task {
                 status: RUNNING.into(),
                 sub_status: ACTIVE.into(),
-                last_pre_tool_use_at: activity_at,
-                stop_pending,
                 ..row
             },
         ) {

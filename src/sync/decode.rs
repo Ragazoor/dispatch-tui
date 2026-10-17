@@ -139,7 +139,11 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
         repo_path: row.repo_path.clone(),
         status,
         worktree: text(&row.worktree).map(str::to_owned),
-        tmux_window: tmux_window(&row.tmux_window),
+        // The six live-session facts are the current agent's (agents A4): the
+        // stored Task row's columns are never written and never read here.
+        // `SharedRows` lays the agent's over this default when it hands the
+        // task out (`models::with_session_of`).
+        tmux_window: None,
         host: text(&row.host).map(str::to_owned),
         plan_path: text(&row.plan_path).map(str::to_owned),
         epic_id: id(row.epic_id).map(EpicId),
@@ -156,18 +160,8 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
         labels: labels(T, row.id, &row.labels)?,
         created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
         updated_at: required_timestamp(T, row.id, "updated_at", &row.updated_at)?,
-        last_pre_tool_use_at: timestamp(
-            T,
-            row.id,
-            "last_pre_tool_use_at",
-            &row.last_pre_tool_use_at,
-        )?,
-        last_notification_at: timestamp(
-            T,
-            row.id,
-            "last_notification_at",
-            &row.last_notification_at,
-        )?,
+        last_pre_tool_use_at: None,
+        last_notification_at: None,
         last_peer_message_sent_at: timestamp(
             T,
             row.id,
@@ -183,8 +177,8 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
         wrap_up_mode,
         auto_run_plan: row.auto_run_plan,
         phoenix: row.phoenix,
-        live_subagents: row.live_subagents,
-        stop_pending: row.stop_pending,
+        live_subagents: 0,
+        stop_pending: false,
         completed_at: timestamp(T, row.id, "completed_at", &row.completed_at)?,
         alias: row.alias.clone(),
     })
@@ -544,6 +538,20 @@ pub fn agent(row: &bindings::Agent) -> Decoded<Agent> {
         ended_at: timestamp(T, row.id, "ended_at", &row.ended_at)?,
         end_reason,
         tmux_window: tmux_window(&row.tmux_window),
+        last_pre_tool_use_at: timestamp(
+            T,
+            row.id,
+            "last_pre_tool_use_at",
+            &row.last_pre_tool_use_at,
+        )?,
+        last_notification_at: timestamp(
+            T,
+            row.id,
+            "last_notification_at",
+            &row.last_notification_at,
+        )?,
+        live_subagents: row.live_subagents,
+        stop_pending: row.stop_pending,
     })
 }
 

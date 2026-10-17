@@ -48,6 +48,26 @@ impl module::AgentStore for MemAgentStore<'_> {
             self.caller.rows.remove_agent(AgentId(id));
         }
     }
+    fn delete_subagent_entries_of(&mut self, task_id: i64) {
+        self.tables.task_subagents.retain(|e| e.task_id != task_id);
+    }
+    fn adopt_subagent_entries(&mut self, task_id: i64, agent_id: i64) {
+        for entry in self
+            .tables
+            .task_subagents
+            .iter_mut()
+            .filter(|e| e.task_id == task_id && e.agent_row == 0)
+        {
+            entry.agent_row = agent_id;
+        }
+    }
+    fn blank_task_session_facts(&mut self, task_id: i64) {
+        if let Some(task) = self.tables.tasks.get(&task_id).cloned() {
+            let task = module::without_session_facts(task);
+            self.tables.tasks.insert(task_id, task.clone());
+            self.caller.rows.upsert_task(&task.into());
+        }
+    }
     fn insert_handed_out_name(&mut self, row: module::HandedOutAgentName) {
         self.tables
             .handed_out_agent_names
@@ -76,6 +96,22 @@ impl MemoryReducerCaller {
         let tasks: Vec<module::Task> = tables.tasks.values().cloned().collect();
         module::backfill_agents_into(&mut self.agent_store(&mut tables), tasks);
         Ok(super::ReducerOutcome::Applied(vec![]))
+    }
+
+    /// Start a current agent for `task_id` as the dispatch claim does, without
+    /// the claim (`Store::give_agent`, the tests' way to give a task a
+    /// session). Does nothing for a task that does not exist.
+    pub fn start_agent_for(&self, task_id: i64) {
+        let mut tables = self.lock();
+        let Some(task) = tables.tasks.get(&task_id).cloned() else {
+            return;
+        };
+        module::start_agent_on_fresh_launch(
+            &mut self.agent_store(&mut tables),
+            &task,
+            &task.host,
+            "dispatch",
+        );
     }
 
     /// Every name the ledger holds, sorted: the conformance suite's view of a

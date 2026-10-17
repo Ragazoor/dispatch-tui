@@ -132,4 +132,9 @@ impl DispatchRequestStore for Store {
             .await?
             .applied()
     }
+
+    #[cfg(any(test, feature = "test-support"))]
+    fn give_agent(&self, task: TaskId) {
+        Store::give_agent(self, task);
+    }
 }

@@ -41,9 +41,13 @@ use super::*;
 /// 7: agents A1 — agent rows and the name ledger, started by the dispatch
 ///    claim, mirrored and ended by task writes, deleted with their task
 ///    (`agent.rs`).
+/// 8: agents A4 — the live-session facts (window, hook timestamps, subagent
+///    count, deferred Stop) are the current agent's, written by the hook
+///    reducers, the claim, the close and `patch_task`; the Task columns are
+///    never written (`agent.rs`, `agent_state.rs`).
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 7;
+pub const RULES_VERSION: i64 = 8;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///

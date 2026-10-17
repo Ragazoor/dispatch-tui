@@ -639,6 +639,7 @@ async fn cleanup_fixture_owning(
     )
     .await
     .unwrap();
+    db.give_agent(task.id);
     db.patch_task(
         task.id,
         &store::TaskPatch::new()
@@ -1047,6 +1048,7 @@ async fn review_task_with_pr(rt: &TuiRuntime, sub_status: models::SubStatus) -> 
     .await;
     let id = app.tasks()[0].id;
     let url = models::TaskUrl::new("https://github.com/org/repo/pull/42", models::UrlType::Pr);
+    rt.db_write().give_agent(id);
     rt.db_write()
         .patch_task(
             id,

@@ -230,14 +230,11 @@ pub fn choose_dispatch_mode(task: &Task, mode: &str) -> Result<&'static str, Str
         })
 }
 
-/// The claim's writes as `RequestDispatch` ensures them: today's claim plus
-/// the dispatch-claim subagent clear point (`agent-health.allium`).
+/// The claim's writes to the task as `RequestDispatch` ensures them. The
+/// dispatch-claim clear point and the activity stamp are the new agent's
+/// (`start_agent_on_fresh_launch`).
 pub fn apply_dispatch_claim(task: Task, now: &str) -> Task {
-    Task {
-        live_subagents: 0,
-        stop_pending: false,
-        ..claimed_task(task, now)
-    }
+    claimed_task(task, now)
 }
 
 /// `core.allium: LocalHostOwnerIsWrittenOnce`, as `register_host` enforces
@@ -399,12 +396,12 @@ pub fn dispatched_request_row(
     }
 }
 
-/// `HostReportsDispatched`'s writes to the task: the worktree, the window and
-/// the host paired with the worktree (`HostTracksWorktree`).
+/// `HostReportsDispatched`'s writes to the task: the worktree and the host
+/// paired with the worktree (`HostTracksWorktree`). The window is the current
+/// agent's, written beside it.
 pub fn apply_dispatched_to_task(task: Task, row: &DispatchRequest) -> Task {
     Task {
         worktree: row.worktree.clone(),
-        tmux_window: row.tmux_window.clone(),
         host: row.host.clone(),
         updated_at: row.finished_at.clone(),
         ..task
@@ -650,6 +647,11 @@ pub fn report_dispatch_provisioned(
     let row = dispatched_request_row(row, &worktree, &tmux_window, reused_worktree, &stamp);
     let epic_id = task.epic_id;
     write_task(ctx, apply_dispatched_to_task(task, &row))?;
+    // The window belongs to the agent the claim started (`agents.allium`, A4).
+    update_current_agent(&mut AgentTables(ctx), row.task_id, |agent| Agent {
+        tmux_window: row.tmux_window.clone(),
+        ..agent
+    });
     // The epic status rollup for the task's epic chain, in this reducer
     // (`HostReportsDispatched`).
     recalculate_epic_chain(ctx, epic_id);

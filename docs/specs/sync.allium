@@ -695,6 +695,14 @@ rule SubscribeToAgents {
         -- see. The HandedOutAgentName ledger is NOT asked for: only the
         -- module's picker reads it. Re-asserted on every connection, like the
         -- rest.
+        --
+        -- A4: the agent row also carries the live-session facts (window, hook
+        -- timestamps, subagent count, deferred Stop), and the stored task row
+        -- carries none of them. The board lays a task's current agent over the
+        -- task it hands out (models::with_session_of, applied in SharedRows),
+        -- so everything that reads a task's window or hook stamps reads the
+        -- agent through the task. A task whose agent row has not arrived yet
+        -- reads as having no session until it does.
 }
 
 rule ASubEpicOfAFollowedEpicIsAskedForToo {

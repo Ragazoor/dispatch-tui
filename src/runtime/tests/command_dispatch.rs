@@ -29,9 +29,12 @@ async fn drain(rt: &TuiRuntime, app: &mut App, cmd: Command) {
 }
 
 async fn seed(rt: &TuiRuntime, title: &str, status: models::TaskStatus) -> models::Task {
-    create_task_returning(&**rt.db_write(), title, "desc", "/repo", None, status)
+    let task = create_task_returning(&**rt.db_write(), title, "desc", "/repo", None, status)
         .await
-        .unwrap()
+        .unwrap();
+    // The session facts a hook writes are the current agent's (agents A4).
+    rt.db_write().give_agent(task.id);
+    task
 }
 
 // -----------------------------------------------------------------------

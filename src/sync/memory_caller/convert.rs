@@ -399,5 +399,10 @@ mirror!(
         ended_at,
         end_reason,
         tmux_window,
+        last_pre_tool_use_at,
+        last_notification_at,
+        live_subagents,
+        stop_pending,
+        stop_pending_at,
     }
 );

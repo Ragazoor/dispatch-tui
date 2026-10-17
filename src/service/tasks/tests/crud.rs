@@ -12,6 +12,7 @@ async fn running_task_with_window(
     params.epic_id = epic_id;
     let id = svc.create_task(params).await.unwrap();
     let window = crate::models::TmuxWindow::for_task(id);
+    db.give_agent(id);
     svc.update_task(
         UpdateTaskParams::for_task(id)
             .status(TaskStatus::Running)

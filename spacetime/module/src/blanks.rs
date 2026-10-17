@@ -249,5 +249,10 @@ pub fn blank_agent() -> Agent {
         ended_at: String::new(),
         end_reason: String::new(),
         tmux_window: String::new(),
+        last_pre_tool_use_at: String::new(),
+        last_notification_at: String::new(),
+        live_subagents: 0,
+        stop_pending: false,
+        stop_pending_at: String::new(),
     }
 }

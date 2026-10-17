@@ -408,8 +408,19 @@ fn timer_count(instance: &Instance, request: i64) -> String {
 fn running_task(instance: &Instance, id: i64) {
     let mut row = task_json(id, "t", "running", 0, "");
     row["owner"] = serde_json::json!("user-me");
+    // The hook facts are the current agent's (agents A4), and a task with a
+    // worktree gets one from the backfill.
+    row["worktree"] = serde_json::json!(format!("/wt/{id}-t"));
     let seeded = instance.call("seed_tasks", &[&serde_json::json!([row]).to_string()]);
     assert!(seeded.status.success(), "{}", describe(&seeded));
+    backfill_agents(instance);
+}
+
+/// `BackfillCurrentAgents`: a current agent for every task with a worktree and
+/// none, taking the session facts a seeded Task row still carries.
+fn backfill_agents(instance: &Instance) {
+    let backfilled = instance.call("backfill_agents", &[]);
+    assert!(backfilled.status.success(), "{}", describe(&backfilled));
 }
 
 /// A feed item, already resolved the way the client resolves one before
@@ -488,6 +499,8 @@ fn seed_wrappable(instance: &Instance, auto_dispatch: bool, tasks: &[(i64, &str,
         .collect();
     let seeded = instance.call("seed_tasks", &[&serde_json::json!(rows).to_string()]);
     assert!(seeded.status.success(), "{}", describe(&seeded));
+    // The window is the current agent's: the backfill moves it there.
+    backfill_agents(instance);
 }
 
 /// A session row's column, by the task and the kind (one such row per test).
@@ -506,6 +519,13 @@ fn session_timer_count(instance: &Instance, request: &str) -> String {
     column(
         instance,
         &format!("SELECT COUNT(*) AS n FROM session_request_timeouts WHERE request_id = {request}"),
+    )
+}
+
+fn current_agent_column(instance: &Instance, field: &str, task: i64) -> String {
+    column(
+        instance,
+        &format!("SELECT {field} FROM agents WHERE task_id = {task} AND state = 'current'"),
     )
 }
 

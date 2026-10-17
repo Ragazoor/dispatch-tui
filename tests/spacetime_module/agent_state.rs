@@ -44,10 +44,7 @@ fn a_repeated_subagent_start_for_the_same_agent_does_not_duplicate() {
         "1",
         "a repeated start for the same agent must replace, not duplicate, its row"
     );
-    assert_eq!(
-        column(&instance, "SELECT live_subagents FROM tasks WHERE id = 1"),
-        "1"
-    );
+    assert_eq!(current_agent_column(&instance, "live_subagents", 1), "1");
 }
 
 /// A second, distinct agent DOES raise the count — the dedupe above is keyed
@@ -69,17 +66,11 @@ fn two_different_subagents_both_count() {
         &["1", "agent-2", "session-1", "2026-09-19T10:00:00Z"],
     );
 
-    assert_eq!(
-        column(&instance, "SELECT live_subagents FROM tasks WHERE id = 1"),
-        "2"
-    );
+    assert_eq!(current_agent_column(&instance, "live_subagents", 1), "2");
 
     let stopped = instance.call("subagent_stop", &["1", "agent-1", "session-1"]);
     assert!(stopped.status.success(), "{}", describe(&stopped));
-    assert_eq!(
-        column(&instance, "SELECT live_subagents FROM tasks WHERE id = 1"),
-        "1"
-    );
+    assert_eq!(current_agent_column(&instance, "live_subagents", 1), "1");
 }
 
 /// `HookStop`: nothing live, so the Stop flips the task straight to `review`.
@@ -122,10 +113,7 @@ fn try_record_stop_defers_while_a_subagent_is_live_and_the_drain_applies_it() {
         "running",
         "a live subagent must withhold the flip"
     );
-    assert_eq!(
-        column(&instance, "SELECT stop_pending FROM tasks WHERE id = 1"),
-        "true"
-    );
+    assert_eq!(current_agent_column(&instance, "stop_pending", 1), "true");
 
     let drained = instance.call("subagent_stop", &["1", "agent-1", "session-1"]);
     assert!(drained.status.success(), "{}", describe(&drained));
@@ -134,10 +122,7 @@ fn try_record_stop_defers_while_a_subagent_is_live_and_the_drain_applies_it() {
         "review",
         "draining the last subagent must apply the deferred Stop"
     );
-    assert_eq!(
-        column(&instance, "SELECT stop_pending FROM tasks WHERE id = 1"),
-        "false"
-    );
+    assert_eq!(current_agent_column(&instance, "stop_pending", 1), "false");
 }
 
 /// A Stop against a task that is not `Running` is refused outright — the

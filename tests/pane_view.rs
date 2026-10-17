@@ -28,6 +28,7 @@ async fn seed_with(db: &Store, title: &str, status: TaskStatus, window: bool) ->
     if window {
         patch = patch.tmux_window(Some(&tmux));
     }
+    db.give_agent(id);
     db.patch_task(id, &patch).await.unwrap();
     id
 }

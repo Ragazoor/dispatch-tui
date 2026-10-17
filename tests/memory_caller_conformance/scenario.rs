@@ -578,6 +578,7 @@ fn memory_caller_matches_the_real_reducers() {
         let run = || bindings::TaskPatch {
             status: Some("running".into()),
             sub_status: Some("active".into()),
+            worktree: Some("/repo/.worktrees/scenario".into()),
             ..blank_task_patch()
         };
         real.patch_task(task_id_real, run()).await.unwrap();
@@ -586,6 +587,12 @@ fn memory_caller_matches_the_real_reducers() {
             .is_some_and(|t| t.status == TaskStatus::Running));
         mem.patch_task(task_id_mem, run()).await.unwrap();
         compare_task(task_id_real.0);
+        // The hook facts are the current agent's (agents A4), and an agent
+        // comes from the backfill: a worktree and none.
+        let backfilled = instance.call("backfill_agents", &[]);
+        assert!(backfilled.status.success(), "{}", describe(&backfilled));
+        mem.backfill_agents().unwrap().applied().unwrap();
+        wait_for!(rows_real.current_agent(task_id_real).is_some());
 
         let real_live = real
             .subagent_start(

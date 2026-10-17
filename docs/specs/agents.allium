@@ -27,8 +27,8 @@
 --           prompt text (dispatch-prompt.allium); the MCP tool contracts
 --           (mcp-task-tools.allium); the agent tree's agents section
 --           (agent-tree.allium); the subscription mechanics (sync.allium).
--- Dependencies: Task, Host, TmuxWindow, Worktree, SubagentEntry from
---               core.allium.
+-- Dependencies: Task, Host, TmuxWindow, Worktree, and (since A4) Agent,
+--               SubagentEntry and the agent enums from core.allium.
 --
 -- Decisions taken with the user (task #77852), recorded so they are not
 -- re-litigated:
@@ -86,86 +86,29 @@
 --     ReleaseClaimOfFailedRequest), the agent ends with end reason
 --     launch_failed (EndAgentWhenLaunchFails). It is ended, not deleted: it
 --     was handed a name, and the ledger keeps that name either way.
---   - A13, Agent stays in this spec for now. No other spec refers to Agent
---     in A1. It moves into core.allium when a later step (A2's prompt and
---     tool rules, A4's SubagentEntry.agent) makes another spec reference it.
---     A2 (task #90116) leaves it here: mcp-task-tools.allium and
---     dispatch-prompt.allium cite the rules by name, and the move is cheaper
---     in A4, when SubagentEntry.agent needs it in core as well.
+--   - A13, Agent stays in this spec until A4. It moved into core.allium in
+--     A4 (task #90118), when SubagentEntry.agent and the Task derivations
+--     is_detached and is_unprovisioned came to refer to it. The rules stay
+--     here.
+--
+-- Decisions taken with the user in step A4 (task #90118):
+--   - A14, SubStatusOwner. Task.sub_status stays one field on the Task. The
+--     session half of it (active, idle, needs_input, crashed) does not move
+--     onto the Agent. The hook rules keep writing it on the Task, deciding it
+--     from the current agent's facts. Splitting it is a step of its own, if it
+--     is ever wanted.
+--   - A15, a hook for a task with no current agent. A task in running or
+--     review always has one except while unprovisioned (never launched). A
+--     hook that arrives for a task with none writes no agent fact and starts
+--     none; the Task-side write (sub_status, status) happens as before.
+--   - A16, an agent that ends takes its SubagentEntry rows with it
+--     (EndedAgentHoldsNothing), so every entry belongs to a current agent.
 
 use "./core.allium" as core
 
 ------------------------------------------------------------
 -- Enumerations
 ------------------------------------------------------------
-
--- Whether an agent's session can still be resumed.
---   current -- it can: the worktree is there and no fresh launch has
---              replaced it. Whether it is running right now is a separate,
---              derived fact (is_live, below): a current agent without a
---              window is paused, and a resume brings it back.
---   ended   -- it never can again. Terminal.
-enum AgentState { current | ended }
-
--- Why an agent ended. Recorded once, when it ends.
---   replaced       -- a fresh launch started a new agent for the same task.
---   worktree_gone  -- RetryFresh released the worktree its session lived in.
---   launch_failed  -- its dispatch request failed before the host recorded a
---                     worktree, and the claim was released (A12).
-enum AgentEndReason { replaced | worktree_gone | launch_failed }
-
--- What kind of launch started an agent. A resume never starts one.
-enum AgentStartMode { dispatch | research | quick }
-
-------------------------------------------------------------
--- Entities
-------------------------------------------------------------
-
-entity Agent {
-    task: core/Task
-    name: String              -- picked by the store when the agent starts; never changes (A5)
-    host: core/Host           -- the machine its session runs on; the task's host when it started
-    start_mode: AgentStartMode
-    state: AgentState
-    started_at: Timestamp
-    ended_at: Timestamp when state = ended
-    end_reason: AgentEndReason when state = ended
-
-    -- The live-session facts. Today they sit on Task; step A4 moves them
-    -- here. Each keeps the meaning core.allium gives it on Task today.
-    -- Since A1 the stored row holds tmux_window only, mirrored from the task
-    -- (CurrentAgentMirrorsTheWindow). A4 appends the other five as columns:
-    -- the store automigrates an appended column, so adding them later costs
-    -- nothing.
-    tmux_window: core/TmuxWindow?
-    last_pre_tool_use_at: Timestamp?
-    last_notification_at: Timestamp?
-    live_subagents: Integer = 0
-    stop_pending: Boolean = false
-    stop_pending_at: Timestamp?
-
-    transitions state {
-        current -> ended
-        terminal: ended
-    }
-
-    is_current: state = current
-    -- Live: it holds a window, so its session may be running. A current agent
-    -- that is not live is paused — wrap-up, exit_session, a move back to
-    -- backlog, a crash or a window killed off-board took its window, and
-    -- nothing ended it (A7). Derived from the window rather than stored, so a
-    -- resume that re-records a window still open in tmux (dispatch.allium:
-    -- ResumeTask with window_alive) needs no second write to say so.
-    is_live: is_current and tmux_window != null
-    is_paused: is_current and tmux_window = null
-
-    -- An ended agent holds nothing of the session: no window, no subagents,
-    -- no pending Stop.
-    invariant EndedAgentHoldsNothing {
-        state = ended implies
-            (tmux_window = null and live_subagents = 0 and stop_pending = false)
-    }
-}
 
 -- The ledger of every agent name ever handed out (A4). One row per name,
 -- written in the same transaction that creates the agent, and never deleted:
@@ -208,24 +151,28 @@ rule StartAgentOnFreshLaunch {
             old.tmux_window = null
             old.live_subagents = 0
             old.stop_pending = false
+            not exists SubagentEntry{agent: old}
     let name = AgentNames.pick(taken: HandedOutAgentNames.names)
 
     ensures: HandedOutAgentName.created(name: name, handed_out_at: now)
-    ensures: Agent.created(
+    ensures: core/Agent.created(
         task: task,
         name: name,
         host: requester,
         start_mode: chosen_mode,
         state: current,
         started_at: now,
-        tmux_window: task.tmux_window
+        tmux_window: null,
+        last_pre_tool_use_at: now,
+        live_subagents: 0,
+        stop_pending: false
     )
 
     @guidance
-        -- The new agent normally starts without a window and turns live when
-        -- ProvisionDispatch records one for its task. It takes the task's
-        -- window at creation all the same, so CurrentAgentMirrorsTheWindow
-        -- holds from its first row. `chosen_mode` is the
+        -- The new agent starts without a window and turns live when
+        -- ProvisionDispatch records one for it (HostReportsDispatched). The
+        -- claim stamps last_pre_tool_use_at on it, so the dispatch watchdog
+        -- measures from the claim (agent-health.allium). `chosen_mode` is the
         -- mode RequestDispatch derives; a `quick` request starts a `quick`
         -- agent. `current_agent(task)` is the task's one agent with
         -- state = current, or null (OneCurrentAgentPerTask).
@@ -284,13 +231,13 @@ rule ResumeKeepsTheAgent {
 
     requires: exists agent
 
-    ensures: agent.tmux_window = task.tmux_window
+    ensures: ResumedAgent(agent: agent)
 
     @guidance
-        -- Kept by the store, not by the resume: every write of a task's
-        -- tmux_window updates its current agent's in the same transaction
-        -- (CurrentAgentMirrorsTheWindow), so the resume's own window write is
-        -- what brings the agent back. No resume path names the agent.
+        -- The resume's window write (dispatch.allium: ResumeTask, RetryResume)
+        -- lands on the current agent's window, since step A4 moved it there:
+        -- that write is what brings the agent back. No resume path names the
+        -- agent or starts another.
 }
 
 -- RetryFresh releases the worktree, so the session under it can never be
@@ -309,6 +256,7 @@ rule EndAgentWhenWorktreeGoes {
     ensures: agent.tmux_window = null
     ensures: agent.live_subagents = 0
     ensures: agent.stop_pending = false
+    ensures: not exists SubagentEntry{agent: agent}
 
     @guidance
         -- The store ends the agent on the task write that clears the
@@ -336,7 +284,7 @@ rule AgentsGoWithTheirTask {
     requires: task.status = done
 
     ensures:
-        for agent in Agents where task = task:
+        for agent in core/Agents where task = task:
             not exists agent
 
     @guidance
@@ -359,7 +307,7 @@ rule BackfillCurrentAgents {
         for t in core/Task where t.worktree != null and not exists current_agent(t):
             let name = AgentNames.pick(taken: HandedOutAgentNames.names)
             HandedOutAgentName.created(name: name, handed_out_at: now)
-            Agent.created(
+            core/Agent.created(
                 task: t,
                 name: name,
                 host: t.host,
@@ -370,6 +318,14 @@ rule BackfillCurrentAgents {
             )
 
     @guidance
+        -- A4: a store published before A4 still holds the six session facts
+        -- on its Task rows. The same pass copies them onto each task's
+        -- current agent, points the task's SubagentEntry rows at it, and
+        -- blanks them on the Task, so a later run finds nothing to copy and
+        -- cannot overwrite a newer agent fact with an older Task one. A task
+        -- with no current agent has its stale facts blanked and its entries
+        -- dropped. `store import` of a pre-A4 snapshot goes through the same
+        -- pass, since its Task rows carry the facts and its Agent rows do not.
         -- Two triggers. The module runs it on the first connection after a
         -- publish that changed its rules version, where it already re-stamps
         -- that version (spacetime/module/src/lib.rs::stamp_rules_version_on_connect),
@@ -405,7 +361,7 @@ rule AgentNameResolvesToTask {
 
     requires: not is_all_digits(task_ref)
 
-    let agent = Agent{name: task_ref}
+    let agent = core/Agent{name: task_ref}
 
     ensures:
         if exists agent:
@@ -453,7 +409,7 @@ surface AgentIdentity {
 -- At most one current agent per task (A2).
 invariant OneCurrentAgentPerTask {
     for t in core/Task:
-        (Agents where task = t and is_current).count <= 1
+        (core/Agents where task = t and is_current).count <= 1
 }
 
 -- A task has a current agent if and only if it has a worktree, except while
@@ -481,18 +437,14 @@ invariant CurrentAgentTracksWorktree {
                 (t.worktree != null or has_open_dispatch_request(t)))
 }
 
--- Until A4 moves the window off Task, the current agent's window mirrors its
--- task's, written in the same transaction.
-invariant CurrentAgentMirrorsTheWindow {
-    for a in Agents:
-        a.is_current implies a.tmux_window = a.task.tmux_window
-}
+-- A4 dropped CurrentAgentMirrorsTheWindow: the window lives on the agent only,
+-- and the Task row's window column is never written.
 
 -- A name is never handed out twice (A4). Every agent's name is in the
 -- ledger, and the ledger holds each name once. Because ledger rows are never
 -- deleted, a name freed by a deleted task stays taken.
 invariant AgentNameIsNeverReused {
-    for a in Agents:
+    for a in core/Agents:
         exists HandedOutAgentName{name: a.name}
 }
 
@@ -503,7 +455,7 @@ invariant HandedOutNamesAreUnique {
 
 -- An agent's name is never only digits, so it can never be read as a task id.
 invariant AgentNameIsNotAnId {
-    for a in Agents:
+    for a in core/Agents:
         not is_all_digits(a.name)
 }
 
@@ -555,12 +507,16 @@ invariant AgentNameIsNotAnId {
 --     and TaskAliasIsASecondName go. The `alias` column stays in the stored
 --     row, blank and unread, for the same reason as A4's. Do not remove it.
 --
--- Landed: A1 (task #90115), A2 (task #90116), A3 (task #90117).
+-- Landed: A1 (task #90115), A2 (task #90116), A3 (task #90117), A4 (task
+-- #90118). A4's readers on the board see the facts through the task's
+-- current agent, joined where the board's rows are read (the sync layer), so
+-- the board's Task model keeps the names `tmux_window`, `live_subagents` and
+-- the rest as derived views; nothing on the board writes them to the Task.
 
 ------------------------------------------------------------
 -- Open questions
 ------------------------------------------------------------
 
-open question "SubStatusOwner: Task.sub_status mixes facts about the work (stale, conflict, a PR's review state) with facts about the session (active, idle, needs_input, crashed). Should the session half move onto the Agent in A4, or stay on Task with the agent as its source?"
+-- Resolved in A4 (task #90118): SubStatusOwner, see decision A14.
 
 -- Resolved in A1 (task #90115): AgentNameList, see decision A11.

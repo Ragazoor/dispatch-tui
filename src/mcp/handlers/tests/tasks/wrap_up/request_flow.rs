@@ -349,6 +349,7 @@ async fn wrap_up_done_returns_exit_token() {
         })
         .await
         .unwrap();
+    db.give_agent(task_id);
     db.patch_task(
         task_id,
         &store::TaskPatch::new()

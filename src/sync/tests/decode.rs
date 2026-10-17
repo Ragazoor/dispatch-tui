@@ -238,6 +238,11 @@ fn agent_row() -> bindings::Agent {
         ended_at: "2026-10-16 11:00:00.000".into(),
         end_reason: "worktree_gone".into(),
         tmux_window: String::new(),
+        last_pre_tool_use_at: String::new(),
+        last_notification_at: String::new(),
+        live_subagents: 0,
+        stop_pending: false,
+        stop_pending_at: String::new(),
     }
 }
 

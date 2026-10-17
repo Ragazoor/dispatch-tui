@@ -21,7 +21,6 @@ pub fn apply_pr_status(task: Task, state: &str, review_decision: &str, now: &str
             return Some(Task {
                 status: DONE.into(),
                 sub_status: default_sub_status(DONE).into(),
-                tmux_window: String::new(),
                 completed_at: now.into(),
                 updated_at: now.into(),
                 ..task
@@ -104,6 +103,11 @@ pub fn report_pr_status(
     let merged = next.status == DONE;
     write_task(ctx, next)?;
     if merged {
+        // The merge took the window with it (`agents.allium`, A4: the agent's).
+        update_current_agent(&mut AgentTables(ctx), task_id, |agent| Agent {
+            tmux_window: String::new(),
+            ..agent
+        });
         recalculate_epic_chain(ctx, epic_id);
     }
     Ok(())

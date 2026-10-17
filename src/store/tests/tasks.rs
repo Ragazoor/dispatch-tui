@@ -309,6 +309,7 @@ async fn patch_task_round_trips_hook_event_timestamps() {
 
     let pre_tool = chrono::Utc::now();
     let notification = pre_tool - chrono::Duration::seconds(30);
+    db.give_agent(id);
     db.patch_task(
         id,
         &TaskPatch::new()
@@ -458,6 +459,7 @@ async fn patch_task_sets_dispatch_fields() {
     let patch = TaskPatch::new()
         .worktree(Some("/repo/.worktrees/1-my-task"))
         .tmux_window(Some(&window));
+    db.give_agent(id);
     db.patch_task(id, &patch).await.unwrap();
     let task = db.get_task(id).await.unwrap();
     assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/1-my-task"));
@@ -483,6 +485,7 @@ async fn patch_task_clears_dispatch_fields() {
     let patch = TaskPatch::new()
         .worktree(Some("/repo/.worktrees/1-my-task"))
         .tmux_window(Some(&window));
+    db.give_agent(id);
     db.patch_task(id, &patch).await.unwrap();
     let task = db.get_task(id).await.unwrap();
     assert!(task.worktree.is_some());
@@ -511,6 +514,7 @@ async fn patch_task_status_and_dispatch_together() {
         .status(TaskStatus::Running)
         .worktree(Some("/repo/.worktrees/1-my-task"))
         .tmux_window(Some(&window));
+    db.give_agent(id);
     db.patch_task(id, &patch).await.unwrap();
     let task = db.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running);

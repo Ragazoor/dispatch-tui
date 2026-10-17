@@ -11,6 +11,7 @@ pub struct TaskSubagent {
     pub agent_id: String,
     pub session_id: String,
     pub started_at: String,
+    pub agent_row: i64,
 }
 
 impl __sdk::InModule for TaskSubagent {
@@ -25,6 +26,7 @@ pub struct TaskSubagentCols {
     pub agent_id: __sdk::__query_builder::Col<TaskSubagent, String>,
     pub session_id: __sdk::__query_builder::Col<TaskSubagent, String>,
     pub started_at: __sdk::__query_builder::Col<TaskSubagent, String>,
+    pub agent_row: __sdk::__query_builder::Col<TaskSubagent, i64>,
 }
 
 impl __sdk::__query_builder::HasCols for TaskSubagent {
@@ -35,6 +37,7 @@ impl __sdk::__query_builder::HasCols for TaskSubagent {
             agent_id: __sdk::__query_builder::Col::new(table_name, "agent_id"),
             session_id: __sdk::__query_builder::Col::new(table_name, "session_id"),
             started_at: __sdk::__query_builder::Col::new(table_name, "started_at"),
+            agent_row: __sdk::__query_builder::Col::new(table_name, "agent_row"),
         }
     }
 }

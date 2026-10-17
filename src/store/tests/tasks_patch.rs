@@ -203,6 +203,7 @@ mod property_tests {
                 if let Some(ref u)  = url_typed   { p = p.url(u.as_ref()); }
                 if let Some(ref e)  = external_id { p = p.external_id(e.as_deref()); }
 
+                db.give_agent(id);
                 db.patch_task(id, &p).await.unwrap();
                 let after = db.get_task(id).await.unwrap();
 
@@ -415,6 +416,7 @@ async fn patch_task_all_fields_round_trip() {
         crate::models::UrlType::Pr,
     );
 
+    db.give_agent(id);
     db.patch_task(
         id,
         &TaskPatch::new()
@@ -601,6 +603,7 @@ async fn next_in_chain(db: &std::sync::Arc<Store>, epic: EpicId) -> Option<TaskI
         .await
         .unwrap();
     let window = crate::models::TmuxWindow::for_task(closing);
+    db.give_agent(closing);
     db.patch_task(
         closing,
         &TaskPatch::new()

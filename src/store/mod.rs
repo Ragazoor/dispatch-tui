@@ -375,6 +375,14 @@ pub trait DispatchRequestStore: DispatchRequestRead {
     async fn report_dispatch_failed(&self, id: DispatchRequestId, reason: &str) -> Result<bool>;
     /// `HostRestartFailsInterrupted`: fail this host's provisioning rows.
     async fn fail_interrupted_dispatch_requests(&self) -> Result<()>;
+
+    /// Give `task` a current agent, as the dispatch claim does
+    /// (`agents.allium: StartAgentOnFreshLaunch`), without the claim: the way
+    /// a test sets up a task whose session holds a window or hook facts. Since
+    /// agents A4 those facts live on the agent, so a patch that sets one needs
+    /// an agent to land on. Only an in-memory handle has one to give.
+    #[cfg(any(test, feature = "test-support"))]
+    fn give_agent(&self, task: TaskId);
 }
 
 // ---------------------------------------------------------------------------
@@ -1030,6 +1038,9 @@ pub struct Store {
     /// file in, removed with the handle.
     #[cfg(any(test, feature = "test-support"))]
     _memory_host_dir: Option<tempfile::TempDir>,
+    /// The in-memory store's own caller, for [`Store::give_agent`].
+    #[cfg(any(test, feature = "test-support"))]
+    memory_caller: Option<Arc<crate::sync::memory_caller::MemoryReducerCaller>>,
 }
 
 /// The host id an in-memory handle's writes and host file both carry, and so
@@ -1066,6 +1077,8 @@ impl Store {
             host_file_dir: data_dir.to_path_buf(),
             #[cfg(any(test, feature = "test-support"))]
             _memory_host_dir: None,
+            #[cfg(any(test, feature = "test-support"))]
+            memory_caller: None,
         }
     }
 
@@ -1107,20 +1120,44 @@ impl Store {
         use crate::sync as s;
         let rows = Arc::new(s::SharedRows::new());
         let clock: Arc<dyn crate::clock::Clock> = Arc::new(crate::clock::SystemClock);
-        let caller: Arc<dyn s::ReducerCaller> = Arc::new(
+        let memory = Arc::new(
             s::memory_caller::MemoryReducerCaller::new(rows.clone(), clock.clone())
                 .with_sender(MEMORY_USER_ID)
                 .with_registered_host(MEMORY_HOST_ID, MEMORY_USER_ID),
         );
+        let caller: Arc<dyn s::ReducerCaller> = memory.clone();
         let identity = Arc::new(s::SettledIdentity::default());
         identity.settle(MEMORY_USER_ID);
-        Self::new(
+        let mut db = Self::new(
             rows,
             caller,
             identity,
             clock,
             MEMORY_HOST_ID.to_string(),
             data_dir,
-        )
+        );
+        db.memory_caller = Some(memory);
+        db
+    }
+
+    /// Let [`Self::give_agent`] reach `caller`: for a test that builds its own
+    /// handle over a caller it holds on to, as the fault-injection ones do.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_memory_caller(
+        mut self,
+        caller: Arc<crate::sync::memory_caller::MemoryReducerCaller>,
+    ) -> Self {
+        self.memory_caller = Some(caller);
+        self
+    }
+
+    /// [`DispatchRequestStore::give_agent`] without the trait in scope.
+    #[cfg(any(test, feature = "test-support"))]
+    #[allow(clippy::expect_used)]
+    pub fn give_agent(&self, task: TaskId) {
+        self.memory_caller
+            .as_ref()
+            .expect("give_agent needs an in-memory handle")
+            .start_agent_for(task.0);
     }
 }

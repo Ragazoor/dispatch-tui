@@ -1037,6 +1037,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
         })
         .await
         .unwrap();
+    db.give_agent(task_id);
     db.patch_task(
         task_id,
         &store::TaskPatch::new()

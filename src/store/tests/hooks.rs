@@ -21,6 +21,7 @@ use chrono::Utc;
 /// turns on one of those still being null when the write under test runs.
 async fn running_task(db: &Store) -> Task {
     let task = make_task(db, "t").await;
+    db.give_agent(task.id);
     db.patch_task(
         task.id,
         &crate::store::TaskPatch::new().status(TaskStatus::Running),

@@ -476,6 +476,7 @@ pub fn check_exit_token(
 /// live window, and a pr close names its url.
 pub fn validate_exit_session(
     task: &Task,
+    window: &str,
     token: &SessionRequest,
     action: &str,
     pr_url: &str,
@@ -486,7 +487,7 @@ pub fn validate_exit_session(
             token.action
         ));
     }
-    if task.tmux_window.is_empty() {
+    if window.is_empty() {
         return Err(format!("task #{} has no active session", task.id));
     }
     if action == ACTION_PR && pr_url.trim().is_empty() {
@@ -503,10 +504,7 @@ pub fn validate_exit_session(
 /// with a pr-typed url, rebase or done -> done stamped complete. Both leave
 /// running, so both clear a deferred Stop.
 pub fn apply_session_close(task: Task, action: &str, pr_url: &str, now: &str) -> Task {
-    let was_running = task.status == RUNNING;
     let closed = Task {
-        tmux_window: String::new(),
-        stop_pending: task.stop_pending && !was_running,
         updated_at: now.into(),
         ..task
     };
@@ -534,6 +532,7 @@ pub fn apply_session_close(task: Task, action: &str, pr_url: &str, now: &str) ->
 /// BEFORE the close, so the window is the one the close cleared.
 pub fn new_exit_session_request(
     task: &Task,
+    window: &str,
     token_id: i64,
     action: &str,
     pr_url: &str,
@@ -553,7 +552,7 @@ pub fn new_exit_session_request(
             String::new()
         },
         wrap_up_request: token_id,
-        tmux_window: task.tmux_window.clone(),
+        tmux_window: window.into(),
         chained_task,
         deadline: session_request_deadline(SESSION_KIND_EXIT_SESSION, now),
         ..blank_session_request()
@@ -579,14 +578,19 @@ pub fn apply_done_close(task: Task, now: &str) -> Task {
 
 /// Whether a close has host work: a live window to kill or a pr-typed url to
 /// close (`RequestCloseTask`'s `needs_teardown`).
-pub fn close_has_host_work(task: &Task) -> bool {
-    !task.tmux_window.is_empty() || (!task.url.is_empty() && task.url_type == "pr")
+pub fn close_has_host_work(task: &Task, window: &str) -> bool {
+    !window.is_empty() || (!task.url.is_empty() && task.url_type == "pr")
 }
 
 /// `RequestCloseTask`'s close row. `task` is the task as it was BEFORE the
 /// close, so the window is the one the close cleared; the host is the task's
 /// own, else the caller's.
-pub fn new_close_request(task: &Task, caller_host: &str, now: &str) -> SessionRequest {
+pub fn new_close_request(
+    task: &Task,
+    window: &str,
+    caller_host: &str,
+    now: &str,
+) -> SessionRequest {
     SessionRequest {
         task_id: task.id,
         kind: SESSION_KIND_CLOSE.into(),
@@ -598,24 +602,22 @@ pub fn new_close_request(task: &Task, caller_host: &str, now: &str) -> SessionRe
         },
         state: SESSION_REQUESTED.into(),
         requested_at: now.into(),
-        tmux_window: task.tmux_window.clone(),
+        tmux_window: window.into(),
         deadline: session_request_deadline(SESSION_KIND_CLOSE, now),
         ..blank_session_request()
     }
 }
 
-/// `patch_task`'s transition rules that are not the patch's own fields (M7,
-/// X2): leaving running clears a deferred Stop
+/// `patch_task`'s transition rule that is not the patch's own fields (M7,
+/// X2): leaving running clears the current agent's deferred Stop
 /// (`core.allium: PendingStopOnlyWhileRunning`) unless the patch names
 /// `stop_pending` itself.
-pub fn apply_patch_status_rules(
+pub fn patch_voids_pending_stop(
     prior_status: &str,
+    new_status: &str,
     patch_named_stop_pending: bool,
-    row: &mut Task,
-) {
-    if prior_status == RUNNING && row.status != RUNNING && !patch_named_stop_pending {
-        row.stop_pending = false;
-    }
+) -> bool {
+    prior_status == RUNNING && new_status != RUNNING && !patch_named_stop_pending
 }
 
 /// `PhoenixRespawn`'s trigger for a close: the task entered Done from another
@@ -937,7 +939,8 @@ pub fn request_exit_session(
         .filter(&task_id)
         .collect();
     let token_row = check_exit_token(task_id, token, &sessions, &dispatches)?;
-    validate_exit_session(&task, &token_row, &action, &pr_url)?;
+    let window = session_window(&AgentTables(ctx), task_id);
+    validate_exit_session(&task, &window, &token_row, &action, &pr_url)?;
     // D11 (W11): the row names the task's host, whose board tears the window
     // down, so only that host's owner may ask.
     require_acting_for(ctx, &task.host)?;
@@ -959,12 +962,21 @@ pub fn request_exit_session(
         closed.phoenix = false;
     }
     write_task(ctx, closed.clone())?;
+    close_agent_session(&mut AgentTables(ctx), task_id);
     recalculate_epic_chain(ctx, epic_id);
 
     let chained = chain_next_subtask(ctx, &closed, &host);
     let row = ctx.db.session_requests().insert(SessionRequest {
         requested_by: caller_identity(ctx),
-        ..new_exit_session_request(&task, token_row.id, &action, &pr_url, chained, &stamp)
+        ..new_exit_session_request(
+            &task,
+            &window,
+            token_row.id,
+            &action,
+            &pr_url,
+            chained,
+            &stamp,
+        )
     });
     schedule_session_request_timer(ctx, &row);
     Ok(())
@@ -983,6 +995,7 @@ pub fn close_task(ctx: &ReducerContext, task_id: i64, host: String) -> Result<()
     };
     let stamp = now(ctx);
     fail_open_session_requests_for_close(ctx, task_id);
+    let window = session_window(&AgentTables(ctx), task_id);
 
     let epic_id = task.epic_id;
     let mut closed = apply_done_close(task.clone(), &stamp);
@@ -992,12 +1005,13 @@ pub fn close_task(ctx: &ReducerContext, task_id: i64, host: String) -> Result<()
         closed.phoenix = false;
     }
     write_task(ctx, closed)?;
+    close_agent_session(&mut AgentTables(ctx), task_id);
     recalculate_epic_chain(ctx, epic_id);
 
-    let row = new_close_request(&task, &host, &stamp);
+    let row = new_close_request(&task, &window, &host, &stamp);
     // D11, without erroring: a row naming a host makes that host's board act,
     // so only its owner may write one; a non-owner just gets no row.
-    if close_has_host_work(&task) && require_acting_for(ctx, &row.host).is_ok() {
+    if close_has_host_work(&task, &window) && require_acting_for(ctx, &row.host).is_ok() {
         let row = ctx.db.session_requests().insert(SessionRequest {
             requested_by: caller_identity(ctx),
             ..row

@@ -598,7 +598,7 @@ value ColumnSectionLayout {
     -- without one.
     section_of(task):
         if task.status = review and task.worktree != null
-            and task.tmux_window = null
+            and current_agent(task).tmux_window = null
             and not (task.url != null and task.url.url_type = pr): parked
         else if task.tag in {pr_review, dependabot, release_please}
             and task.sub_status = changes_requested: changes_requested_by_me

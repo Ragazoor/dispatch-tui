@@ -350,7 +350,7 @@ fn an_exit_session_applies_the_close_and_writes_the_teardown_row() {
 
     assert_eq!(task_column(&instance, "status", 1), "done");
     assert_eq!(task_column(&instance, "sub_status", 1), "none");
-    assert_eq!(task_column(&instance, "tmux_window", 1), "");
+    assert_eq!(current_agent_column(&instance, "tmux_window", 1), "");
     assert_eq!(task_column(&instance, "worktree", 1), "/wt/1-t");
     assert_eq!(task_column(&instance, "completed_at", 1).len(), 23);
     assert_eq!(
@@ -413,7 +413,7 @@ fn a_pr_exit_session_takes_the_task_to_review_with_the_url() {
     assert_eq!(task_column(&instance, "sub_status", 1), "awaiting_review");
     assert_eq!(task_column(&instance, "url", 1), url);
     assert_eq!(task_column(&instance, "url_type", 1), "pr");
-    assert_eq!(task_column(&instance, "tmux_window", 1), "");
+    assert_eq!(current_agent_column(&instance, "tmux_window", 1), "");
     assert_eq!(task_column(&instance, "completed_at", 1), "");
     assert_eq!(session_column(&instance, "pr_url", 1, "exit_session"), url);
 }
@@ -478,7 +478,7 @@ fn a_refused_exit_session_leaves_the_task_and_the_token_untouched() {
     }
     assert_eq!(session_count(&instance), rows_before);
     assert_eq!(task_column(&instance, "status", 1), "running");
-    assert_eq!(task_column(&instance, "tmux_window", 1), "task-1");
+    assert_eq!(current_agent_column(&instance, "tmux_window", 1), "task-1");
 
     let retried = request_exit_session(&instance, 1, &token, "pr", "https://x/pull/1");
     assert!(retried.status.success(), "{}", describe(&retried));
@@ -834,6 +834,7 @@ fn a_phoenix_task_respawns_with_a_done_close_but_not_a_pr_close() {
         .collect();
     let seeded = instance.call("seed_tasks", &[&serde_json::json!(rows).to_string()]);
     assert!(seeded.status.success(), "{}", describe(&seeded));
+    backfill_agents(&instance);
 
     let token = wrap_up_to_token(&instance, 2, "pr");
     assert!(

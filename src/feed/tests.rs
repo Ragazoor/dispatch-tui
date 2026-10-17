@@ -260,6 +260,7 @@ async fn tick_removed_task_tears_down_its_worktree() {
     .await
     .unwrap();
     let task = db.list_tasks_for_epic(epic.id).await.remove(0);
+    db.give_agent(task.id);
     db.patch_task(
         task.id,
         &TaskPatch::new()
@@ -353,6 +354,7 @@ async fn tick_partially_degraded_emission_does_not_delete_or_tear_down() {
         .into_iter()
         .find(|t| t.external_id.as_deref() == Some("pr-1"))
         .unwrap();
+    db.give_agent(live.id);
     db.patch_task(
         live.id,
         &TaskPatch::new()

@@ -441,6 +441,7 @@ mod feed_epic_trigger {
         .await
         .unwrap();
         let task = db.list_tasks_for_epic(epic_id).await.remove(0);
+        db.give_agent(task.id);
         db.patch_task(
             task.id,
             &store::TaskPatch::new()

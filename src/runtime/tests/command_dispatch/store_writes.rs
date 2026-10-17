@@ -131,6 +131,7 @@ async fn dispatch_task_delete_removes_the_row() {
 async fn dispatch_task_clear_worktree_pointer_clears_both_pointers() {
     let (rt, mut app) = test_runtime().await;
     let task = seed(&rt, "Torn down", models::TaskStatus::Running).await;
+    rt.db_write().give_agent(task.id);
     rt.db_write()
         .patch_task(
             task.id,

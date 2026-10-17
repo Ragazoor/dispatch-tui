@@ -70,6 +70,7 @@ async fn wrappable_task(db: &Arc<dyn store::TaskStore>) -> TaskId {
         .await
         .unwrap();
     let window = TmuxWindow::for_task(id);
+    db.give_agent(id);
     db.patch_task(
         id,
         &store::TaskPatch::new()
@@ -566,14 +567,17 @@ fn faultable_state() -> (
     let identity = Arc::new(SettledIdentity::default());
     identity.settle("test-user");
     let dir = tempfile::tempdir().unwrap();
-    let db: Arc<dyn store::TaskStore> = Arc::new(Store::new(
-        rows,
-        caller.clone(),
-        identity,
-        clock,
-        crate::store::MEMORY_HOST_ID.to_string(),
-        dir.keep().as_path(),
-    ));
+    let db: Arc<dyn store::TaskStore> = Arc::new(
+        Store::new(
+            rows,
+            caller.clone(),
+            identity,
+            clock,
+            crate::store::MEMORY_HOST_ID.to_string(),
+            dir.keep().as_path(),
+        )
+        .with_memory_caller(caller.clone()),
+    );
     let state = state_over_db(db.clone(), Duration::ZERO, 1);
     (state, db, caller)
 }

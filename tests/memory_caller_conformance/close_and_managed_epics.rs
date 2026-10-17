@@ -142,9 +142,30 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
             status: Some("running".into()),
             sub_status: Some("active".into()),
             worktree: Some(format!("/repo/.worktrees/{}-t", task.0)),
-            tmux_window: Some(format!("task-{}", task.0)),
             host: Some("host-a".into()),
             ..blank_task_patch()
+        };
+        // The window is the current agent's since agents A4, and an agent comes
+        // from the backfill (a worktree and none): so a task is patched
+        // running, backfilled on both sides, and only then given its window.
+        let running_with_window = |task: TaskId| {
+            let patch = &patch;
+            let instance = &instance;
+            let mem = &mem;
+            async move {
+                patch(task, running_on_host_a(task)).await;
+                let backfilled = instance.call("backfill_agents", &[]);
+                assert!(backfilled.status.success(), "{}", describe(&backfilled));
+                mem.backfill_agents().unwrap().applied().unwrap();
+                patch(
+                    task,
+                    bindings::TaskPatch {
+                        tmux_window: Some(format!("task-{}", task.0)),
+                        ..blank_task_patch()
+                    },
+                )
+                .await;
+            }
         };
 
         // -- A refusal: no such task --------------------------------------------------
@@ -173,7 +194,7 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
         })
         .await;
         wait_for!(rows_real.task(task).is_some());
-        patch(task, running_on_host_a(task)).await;
+        running_with_window(task).await;
         patch(
             task,
             bindings::TaskPatch {
@@ -276,7 +297,7 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
         // -- patch_task: out of running clears stop_pending; into Done respawns ------------
         let leaving = create(in_epic(0)).await;
         wait_for!(rows_real.task(leaving).is_some());
-        patch(leaving, running_on_host_a(leaving)).await;
+        running_with_window(leaving).await;
         patch(
             leaving,
             bindings::TaskPatch {

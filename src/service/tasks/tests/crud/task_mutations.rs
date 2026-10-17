@@ -128,6 +128,7 @@ async fn update_task_sets_worktree_and_tmux_window() {
         .await
         .unwrap();
 
+    db.give_agent(id);
     svc.update_task(
         UpdateTaskParams::for_task(id)
             .status(TaskStatus::Running)
@@ -158,6 +159,7 @@ async fn update_task_clears_worktree() {
         .unwrap();
 
     // Set worktree
+    db.give_agent(id);
     svc.update_task(
         UpdateTaskParams::for_task(id)
             .status(TaskStatus::Running)

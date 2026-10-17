@@ -805,6 +805,7 @@ async fn get_task_shows_all_fields() {
         "https://github.com/org/repo/pull/5",
         crate::models::UrlType::Pr,
     );
+    state.db_write().give_agent(task_id);
     state
         .db_write()
         .patch_task(

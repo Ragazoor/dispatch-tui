@@ -20,6 +20,7 @@ async fn wrap_up_done_recalculates_epic_status() {
         .await
         .unwrap();
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
+    db.give_agent(task_id);
     db.patch_task(
         task_id,
         &store::TaskPatch::new()
@@ -87,6 +88,7 @@ async fn wrap_up_pr_recalculates_epic_status() {
         .set_task_epic_id(task_id, Some(epic.id))
         .await
         .unwrap();
+    state.db_write().give_agent(task_id);
     state
         .db_write()
         .patch_task(

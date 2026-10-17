@@ -11,6 +11,7 @@ use dispatch_tui::store::Store;
 #[tokio::test]
 async fn hook_event_flow_drives_sub_status_and_lifecycle() {
     let db = Arc::new(Store::open_in_memory().unwrap());
+    let store = db.clone();
     // Inject a manually-advanced clock so hook-event timestamps land in distinct
     // seconds deterministically — no wall-clock sleeps. Timestamps persist at
     // one-second resolution, so each step below advances the clock by ≥1s.
@@ -29,7 +30,9 @@ async fn hook_event_flow_drives_sub_status_and_lifecycle() {
 
     // Running is the whole precondition: `record_hook_event` branches on
     // `status` and the timestamp fields only, never on worktree/tmux_window.
-    // How the task reached Running is not what this test covers.
+    // How the task reached Running is not what this test covers. The timestamp
+    // fields are the current agent's (agents A4), so it has one.
+    store.give_agent(id);
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
         .await
         .unwrap();

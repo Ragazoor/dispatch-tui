@@ -8,13 +8,16 @@ const PAST_TEARDOWN_DEADLINE: &str = "2026-10-10 12:00:30.000";
 const PAST_REBASE_DEADLINE: &str = "2026-10-10 12:02:00.000";
 
 /// A running task on `HOST_A` with a worktree and a live window.
+/// The window of the running task's current agent, which is where the live
+/// window sits since A4.
+const WINDOW: &str = "task-1";
+
 fn running_task() -> Task {
     Task {
         id: 1,
         status: "running".into(),
         sub_status: "active".into(),
         worktree: "/wt/1-t".into(),
-        tmux_window: "task-1".into(),
         host: HOST_A.into(),
         epic_id: 5,
         ..blank_task()
@@ -624,10 +627,11 @@ fn token(action: &str) -> SessionRequest {
 
 #[test]
 fn a_matching_action_and_a_live_window_are_accepted() {
-    assert!(validate_exit_session(&running_task(), &token("rebase"), "rebase", "").is_ok());
-    assert!(validate_exit_session(&running_task(), &token("done"), "done", "").is_ok());
+    assert!(validate_exit_session(&running_task(), WINDOW, &token("rebase"), "rebase", "").is_ok());
+    assert!(validate_exit_session(&running_task(), WINDOW, &token("done"), "done", "").is_ok());
     assert!(validate_exit_session(
         &running_task(),
+        WINDOW,
         &token("pr"),
         "pr",
         "https://github.com/acme/repo/pull/7"
@@ -639,7 +643,8 @@ fn a_matching_action_and_a_live_window_are_accepted() {
 /// closing as another.
 #[test]
 fn an_action_that_differs_from_the_tokens_is_refused_naming_both() {
-    let why = validate_exit_session(&running_task(), &token("rebase"), "pr", "u").unwrap_err();
+    let why =
+        validate_exit_session(&running_task(), WINDOW, &token("rebase"), "pr", "u").unwrap_err();
     assert_eq!(
             why,
             "exit token was issued for wrap_up(action=\"rebase\"), but exit_session was called with action=\"pr\""
@@ -648,18 +653,15 @@ fn an_action_that_differs_from_the_tokens_is_refused_naming_both() {
 
 #[test]
 fn a_task_with_no_window_has_no_active_session() {
-    let closed = Task {
-        tmux_window: String::new(),
-        ..running_task()
-    };
-    let why = validate_exit_session(&closed, &token("done"), "done", "").unwrap_err();
+    let why = validate_exit_session(&running_task(), "", &token("done"), "done", "").unwrap_err();
     assert_eq!(why, "task #1 has no active session");
 }
 
 #[test]
 fn a_pr_close_requires_a_pr_url() {
     for url in ["", "  "] {
-        let why = validate_exit_session(&running_task(), &token("pr"), "pr", url).unwrap_err();
+        let why =
+            validate_exit_session(&running_task(), WINDOW, &token("pr"), "pr", url).unwrap_err();
         assert_eq!(
             why, "pr_url is required for action 'pr' — pass the URL returned by `gh pr create`",
             "{url:?}"
@@ -670,13 +672,10 @@ fn a_pr_close_requires_a_pr_url() {
 /// The checks run in the order the spec lists them: action, window, url.
 #[test]
 fn the_refusals_come_in_the_specs_order() {
-    let closed = Task {
-        tmux_window: String::new(),
-        ..running_task()
-    };
-    let why = validate_exit_session(&closed, &token("rebase"), "pr", "").unwrap_err();
+    let closed = running_task();
+    let why = validate_exit_session(&closed, "", &token("rebase"), "pr", "").unwrap_err();
     assert!(why.contains("exit token was issued"), "{why}");
-    let why = validate_exit_session(&closed, &token("pr"), "pr", "").unwrap_err();
+    let why = validate_exit_session(&closed, "", &token("pr"), "pr", "").unwrap_err();
     assert!(why.contains("no active session"), "{why}");
 }
 
@@ -692,21 +691,11 @@ fn an_open_session_request_refuses_a_close() {
 #[test]
 fn a_rebase_or_done_close_takes_the_task_to_done() {
     for action in ["rebase", "done"] {
-        let closed = apply_session_close(
-            Task {
-                stop_pending: true,
-                ..running_task()
-            },
-            action,
-            "",
-            LATER,
-        );
+        let closed = apply_session_close(running_task(), action, "", LATER);
         assert_eq!(closed.status, "done", "{action}");
         assert_eq!(closed.sub_status, "none", "{action}");
-        assert_eq!(closed.tmux_window, "", "{action}");
         assert_eq!(closed.completed_at, LATER, "{action}");
         assert_eq!(closed.updated_at, LATER, "{action}");
-        assert!(!closed.stop_pending, "{action}");
         assert_eq!(
             closed.worktree, "/wt/1-t",
             "the worktree survives the close"
@@ -726,25 +715,10 @@ fn a_pr_close_takes_the_task_to_review_with_the_url() {
     );
     assert_eq!(closed.status, "review");
     assert_eq!(closed.sub_status, "awaiting_review");
-    assert_eq!(closed.tmux_window, "");
     assert_eq!(closed.url, "https://github.com/acme/repo/pull/7");
     assert_eq!(closed.url_type, "pr");
     assert_eq!(closed.completed_at, "");
     assert_eq!(closed.updated_at, LATER);
-}
-
-/// Both branches leave running, so both clear a deferred Stop; a close
-/// from review has none to clear and does not touch the flag.
-#[test]
-fn the_deferred_stop_is_cleared_only_when_the_close_leaves_running() {
-    let reviewing = Task {
-        status: "review".into(),
-        sub_status: "awaiting_review".into(),
-        stop_pending: true,
-        ..running_task()
-    };
-    let closed = apply_session_close(reviewing, "done", "", LATER);
-    assert!(closed.stop_pending);
 }
 
 /// pr_url is ignored for rebase and done.
@@ -759,7 +733,15 @@ fn a_done_close_ignores_a_pr_url() {
 
 #[test]
 fn an_exit_session_row_names_the_token_window_host_and_chained_subtask() {
-    let row = new_exit_session_request(&running_task(), 10, "pr", "https://x/pull/1", 42, NOW);
+    let row = new_exit_session_request(
+        &running_task(),
+        WINDOW,
+        10,
+        "pr",
+        "https://x/pull/1",
+        42,
+        NOW,
+    );
     assert_eq!(row.task_id, 1);
     assert_eq!(row.kind, "exit_session");
     assert_eq!(row.action, "pr");
@@ -779,7 +761,15 @@ fn an_exit_session_row_names_the_token_window_host_and_chained_subtask() {
 /// pr_url is recorded only for action pr; no chained subtask is 0.
 #[test]
 fn an_exit_session_row_records_the_pr_url_only_for_pr() {
-    let row = new_exit_session_request(&running_task(), 10, "done", "https://x/pull/1", 0, NOW);
+    let row = new_exit_session_request(
+        &running_task(),
+        WINDOW,
+        10,
+        "done",
+        "https://x/pull/1",
+        0,
+        NOW,
+    );
     assert_eq!(row.pr_url, "");
     assert_eq!(row.chained_task, 0);
 }
@@ -865,7 +855,6 @@ fn the_successor_inherits_the_configuration_and_none_of_the_run() {
     assert_eq!(next.sort_order, None);
     for empty in [
         &next.worktree,
-        &next.tmux_window,
         &next.url,
         &next.url_type,
         &next.completed_at,
@@ -948,7 +937,6 @@ fn pr_task(sub_status: &str) -> Task {
         sub_status: sub_status.into(),
         url: "https://github.com/acme/repo/pull/7".into(),
         url_type: "pr".into(),
-        tmux_window: "task-1".into(),
         epic_id: 5,
         ..blank_task()
     }
@@ -959,7 +947,6 @@ fn a_merged_pr_takes_the_task_to_done() {
     let done = apply_pr_status(pr_task("approved"), "MERGED", "APPROVED", LATER).unwrap();
     assert_eq!(done.status, "done");
     assert_eq!(done.sub_status, "none");
-    assert_eq!(done.tmux_window, "");
     assert_eq!(done.completed_at, LATER);
     assert_eq!(done.updated_at, LATER);
 }
@@ -1063,20 +1050,12 @@ fn a_close_row_has_host_work_like_an_exit_session_row() {
 }
 
 #[test]
-fn a_done_close_of_a_running_task_stamps_completion_and_clears_window_and_stop() {
-    let closed = apply_done_close(
-        Task {
-            stop_pending: true,
-            ..running_task()
-        },
-        LATER,
-    );
+fn a_done_close_of_a_running_task_stamps_completion() {
+    let closed = apply_done_close(running_task(), LATER);
     assert_eq!(closed.status, "done");
     assert_eq!(closed.sub_status, "none");
-    assert_eq!(closed.tmux_window, "");
     assert_eq!(closed.completed_at, LATER);
     assert_eq!(closed.updated_at, LATER);
-    assert!(!closed.stop_pending);
 }
 
 /// A done -> done re-close is no transition: completed_at is kept.
@@ -1086,40 +1065,35 @@ fn a_done_to_done_reclose_keeps_completed_at() {
         status: "done".into(),
         sub_status: "none".into(),
         completed_at: NOW.into(),
-        tmux_window: "task-1".into(),
         ..running_task()
     };
     let closed = apply_done_close(done, LATER);
     assert_eq!(closed.completed_at, NOW);
     assert_eq!(closed.updated_at, LATER);
-    assert_eq!(closed.tmux_window, "");
 }
 
 #[test]
 fn a_close_needs_a_teardown_only_for_a_window_or_a_pr_url() {
-    assert!(close_has_host_work(&running_task()));
-    let no_window = Task {
-        tmux_window: String::new(),
-        ..running_task()
-    };
-    assert!(!close_has_host_work(&no_window));
+    assert!(close_has_host_work(&running_task(), WINDOW));
+    let no_window = running_task();
+    assert!(!close_has_host_work(&no_window, ""));
     let with_pr = Task {
         url: "https://github.com/a/b/pull/1".into(),
         url_type: "pr".into(),
         ..no_window.clone()
     };
-    assert!(close_has_host_work(&with_pr));
+    assert!(close_has_host_work(&with_pr, ""));
     let other_url = Task {
         url: "https://example.com".into(),
         url_type: "issue".into(),
         ..no_window
     };
-    assert!(!close_has_host_work(&other_url));
+    assert!(!close_has_host_work(&other_url, ""));
 }
 
 #[test]
 fn a_close_row_carries_the_window_read_and_no_token_chain_or_pr_url() {
-    let row = new_close_request(&running_task(), HOST_B, NOW);
+    let row = new_close_request(&running_task(), WINDOW, HOST_B, NOW);
     assert_eq!(row.kind, "close");
     assert_eq!(row.action, "done");
     assert_eq!(row.host, HOST_A, "the task's own host wins");
@@ -1136,12 +1110,11 @@ fn a_close_row_carries_the_window_read_and_no_token_chain_or_pr_url() {
 fn a_close_row_falls_back_to_the_callers_host_when_the_task_has_none() {
     let hostless = Task {
         host: String::new(),
-        tmux_window: String::new(),
         url: "https://github.com/a/b/pull/1".into(),
         url_type: "pr".into(),
         ..running_task()
     };
-    let row = new_close_request(&hostless, HOST_B, NOW);
+    let row = new_close_request(&hostless, "", HOST_B, NOW);
     assert_eq!(row.host, HOST_B);
     assert_eq!(row.tmux_window, "");
 }
@@ -1164,37 +1137,11 @@ fn a_close_row_is_not_an_exit_token_consumer() {
 
 #[test]
 fn leaving_running_clears_a_pending_stop_unless_the_patch_names_it() {
-    let mut row = Task {
-        status: "review".into(),
-        stop_pending: true,
-        ..running_task()
-    };
-    apply_patch_status_rules("running", false, &mut row);
-    assert!(!row.stop_pending);
-
-    let mut named = Task {
-        status: "review".into(),
-        stop_pending: true,
-        ..running_task()
-    };
-    apply_patch_status_rules("running", true, &mut named);
-    assert!(named.stop_pending);
-
-    let mut stays = Task {
-        stop_pending: true,
-        ..running_task()
-    };
-    apply_patch_status_rules("running", false, &mut stays);
-    assert!(stays.stop_pending);
-
-    let mut from_review = Task {
-        status: "done".into(),
-        stop_pending: true,
-        ..running_task()
-    };
-    apply_patch_status_rules("review", false, &mut from_review);
+    assert!(patch_voids_pending_stop("running", "review", false));
+    assert!(!patch_voids_pending_stop("running", "review", true));
+    assert!(!patch_voids_pending_stop("running", "running", false));
     assert!(
-        from_review.stop_pending,
+        !patch_voids_pending_stop("review", "done", false),
         "only a move out of running clears"
     );
 }

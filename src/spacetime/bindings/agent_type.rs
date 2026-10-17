@@ -17,6 +17,11 @@ pub struct Agent {
     pub ended_at: String,
     pub end_reason: String,
     pub tmux_window: String,
+    pub last_pre_tool_use_at: String,
+    pub last_notification_at: String,
+    pub live_subagents: i64,
+    pub stop_pending: bool,
+    pub stop_pending_at: String,
 }
 
 impl __sdk::InModule for Agent {
@@ -37,6 +42,11 @@ pub struct AgentCols {
     pub ended_at: __sdk::__query_builder::Col<Agent, String>,
     pub end_reason: __sdk::__query_builder::Col<Agent, String>,
     pub tmux_window: __sdk::__query_builder::Col<Agent, String>,
+    pub last_pre_tool_use_at: __sdk::__query_builder::Col<Agent, String>,
+    pub last_notification_at: __sdk::__query_builder::Col<Agent, String>,
+    pub live_subagents: __sdk::__query_builder::Col<Agent, i64>,
+    pub stop_pending: __sdk::__query_builder::Col<Agent, bool>,
+    pub stop_pending_at: __sdk::__query_builder::Col<Agent, String>,
 }
 
 impl __sdk::__query_builder::HasCols for Agent {
@@ -53,6 +63,17 @@ impl __sdk::__query_builder::HasCols for Agent {
             ended_at: __sdk::__query_builder::Col::new(table_name, "ended_at"),
             end_reason: __sdk::__query_builder::Col::new(table_name, "end_reason"),
             tmux_window: __sdk::__query_builder::Col::new(table_name, "tmux_window"),
+            last_pre_tool_use_at: __sdk::__query_builder::Col::new(
+                table_name,
+                "last_pre_tool_use_at",
+            ),
+            last_notification_at: __sdk::__query_builder::Col::new(
+                table_name,
+                "last_notification_at",
+            ),
+            live_subagents: __sdk::__query_builder::Col::new(table_name, "live_subagents"),
+            stop_pending: __sdk::__query_builder::Col::new(table_name, "stop_pending"),
+            stop_pending_at: __sdk::__query_builder::Col::new(table_name, "stop_pending_at"),
         }
     }
 }

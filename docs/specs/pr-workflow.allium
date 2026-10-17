@@ -349,7 +349,7 @@ rule PrMerged {
 
     ensures: task.status = done
     ensures: task.sub_status = core/SubStatus.default_for(done)
-    ensures: task.tmux_window = null
+    ensures: current_agent(task).tmux_window = null
     ensures: task.updated_at = now
     ensures: task.completed_at = now
     ensures:
@@ -395,7 +395,7 @@ rule PrClosed {
     @guidance
         -- Fires when PR status polling detects a closed (not merged) PR.
         -- Unlike PrMerged, this is NOT a terminal transition: task.status
-        -- stays review, and task.tmux_window / task.worktree / task.completed_at
+        -- stays review, and current_agent(task).tmux_window / task.worktree / task.completed_at
         -- are all left untouched — a closed PR doesn't end the task, it just
         -- flags that a human should decide what to do next (reopen the PR,
         -- push a new one, complete and delete the task).
@@ -761,7 +761,7 @@ rule ExitSession {
     let was_running = task.status = running
 
     ensures:
-        task.tmux_window = null
+        current_agent(task).tmux_window = null
         if action = pr:
             task.status = review
             task.sub_status = core/SubStatus.default_for(review)
@@ -771,7 +771,7 @@ rule ExitSession {
             task.sub_status = core/SubStatus.default_for(done)
             task.completed_at = now
         if was_running:
-            task.stop_pending = false
+            current_agent(task).stop_pending = false
         task.updated_at = now
 
     -- The epic status rollup for the closed task's epic chain, in the same
@@ -914,7 +914,7 @@ rule ExitSession {
         --     exit_session(action="pr")) is rejected with an error naming both
         --     actions — this stops an agent from doing one thing and closing as
         --     another.
-        --   • task.tmux_window must be non-null. If it is already null, some
+        --   • current_agent(task).tmux_window must be non-null. If it is already null, some
         --     other path (TUI, crash detection, a prior close) already tore the
         --     session down; the call reports "task #<id> has no active
         --     session" and the /wrap-up skill treats it as success, not a
@@ -932,7 +932,7 @@ rule ExitSession {
         --   • pr            → task.status = review, task.url = TaskUrl(pr_url,
         --                      url_type = pr) — this branch does not enter
         --                      done, so task.completed_at is untouched
-        -- Both branches leave running, so both clear task.stop_pending in the
+        -- Both branches leave running, so both clear current_agent(task).stop_pending in the
         -- same write (core/Task's PendingStopOnlyWhileRunning). What they do
         -- NOT clear is the task's core/SubagentEntry rows or its
         -- live_subagents count — so this, the most common way a dispatched

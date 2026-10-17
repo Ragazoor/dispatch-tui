@@ -1,4 +1,3 @@
-
 use super::*;
 
 /// The store's spelling of "absent", named so the assertions below read as
@@ -233,52 +232,64 @@ fn every_field_of_a_task_patch_reaches_the_row() {
     row.id = 7;
     let before = row.clone();
 
-    apply_task_patch(
-        &mut row,
-        TaskPatch {
-            title: Some(MARK.into()),
-            description: Some(MARK.into()),
-            repo_path: Some(MARK.into()),
-            status: Some(DONE.into()),
-            worktree: Some(MARK.into()),
-            tmux_window: Some(MARK.into()),
-            plan_path: Some(MARK.into()),
-            epic_id: Some(9),
-            sub_status: Some(MARK.into()),
-            tag: Some(MARK.into()),
-            sort_order: Some(Some(3)),
-            base_branch: Some(MARK.into()),
-            external_id: Some(MARK.into()),
-            labels: Some("[\"x\"]".into()),
-            last_pre_tool_use_at: Some(MARK.into()),
-            last_notification_at: Some(MARK.into()),
-            wrap_up_mode: Some(MARK.into()),
-            url: Some(MARK.into()),
-            url_type: Some(MARK.into()),
-            pr_learnings_gate_shown_at: Some(MARK.into()),
-            auto_run_plan: Some(true),
-            live_subagents: Some(2),
-            stop_pending: Some(true),
-            stop_pending_at: Some(MARK.into()),
-            last_peer_message_sent_at: Some(MARK.into()),
-            last_peer_message_received_at: Some(MARK.into()),
-            phoenix: Some(true),
-            host: Some(MARK.into()),
-            owner: Some(MARK.into()),
-            completed_at: Some(MARK.into()),
-            alias: Some(MARK.into()),
-        },
-    );
+    let patch = TaskPatch {
+        title: Some(MARK.into()),
+        description: Some(MARK.into()),
+        repo_path: Some(MARK.into()),
+        status: Some(DONE.into()),
+        worktree: Some(MARK.into()),
+        tmux_window: Some(MARK.into()),
+        plan_path: Some(MARK.into()),
+        epic_id: Some(9),
+        sub_status: Some(MARK.into()),
+        tag: Some(MARK.into()),
+        sort_order: Some(Some(3)),
+        base_branch: Some(MARK.into()),
+        external_id: Some(MARK.into()),
+        labels: Some("[\"x\"]".into()),
+        last_pre_tool_use_at: Some(MARK.into()),
+        last_notification_at: Some(MARK.into()),
+        wrap_up_mode: Some(MARK.into()),
+        url: Some(MARK.into()),
+        url_type: Some(MARK.into()),
+        pr_learnings_gate_shown_at: Some(MARK.into()),
+        auto_run_plan: Some(true),
+        live_subagents: Some(2),
+        stop_pending: Some(true),
+        stop_pending_at: Some(MARK.into()),
+        last_peer_message_sent_at: Some(MARK.into()),
+        last_peer_message_received_at: Some(MARK.into()),
+        phoenix: Some(true),
+        host: Some(MARK.into()),
+        owner: Some(MARK.into()),
+        completed_at: Some(MARK.into()),
+        alias: Some(MARK.into()),
+    };
+    let session = patch.clone();
+    apply_task_patch(&mut row, patch);
 
     // The id is not patchable and must be untouched.
     assert_eq!(row.id, before.id);
-    // Everything else moved.
+    // Everything else moved, but the six session facts: those are the
+    // current agent's since A4 and `patch_task` applies them there.
+    assert_eq!(row.tmux_window, "");
+    assert_eq!(row.last_pre_tool_use_at, "");
+    assert_eq!(row.last_notification_at, "");
+    assert_eq!(row.live_subagents, 0);
+    assert!(!row.stop_pending);
+    assert_eq!(row.stop_pending_at, "");
+    let agent = apply_session_patch(blank_agent(), &session);
+    assert_eq!(agent.tmux_window, MARK);
+    assert_eq!(agent.last_pre_tool_use_at, MARK);
+    assert_eq!(agent.last_notification_at, MARK);
+    assert_eq!(agent.live_subagents, 2);
+    assert!(agent.stop_pending);
+    assert_eq!(agent.stop_pending_at, MARK);
     assert_eq!(row.title, MARK);
     assert_eq!(row.description, MARK);
     assert_eq!(row.repo_path, MARK);
     assert_eq!(row.status, DONE);
     assert_eq!(row.worktree, MARK);
-    assert_eq!(row.tmux_window, MARK);
     assert_eq!(row.plan_path, MARK);
     assert_eq!(row.epic_id, 9);
     assert_eq!(row.sub_status, MARK);
@@ -287,16 +298,11 @@ fn every_field_of_a_task_patch_reaches_the_row() {
     assert_eq!(row.base_branch, MARK);
     assert_eq!(row.external_id, MARK);
     assert_eq!(row.labels, "[\"x\"]");
-    assert_eq!(row.last_pre_tool_use_at, MARK);
-    assert_eq!(row.last_notification_at, MARK);
     assert_eq!(row.wrap_up_mode, MARK);
     assert_eq!(row.url, MARK);
     assert_eq!(row.url_type, MARK);
     assert_eq!(row.pr_learnings_gate_shown_at, MARK);
     assert!(row.auto_run_plan);
-    assert_eq!(row.live_subagents, 2);
-    assert!(row.stop_pending);
-    assert_eq!(row.stop_pending_at, MARK);
     assert_eq!(row.last_peer_message_sent_at, MARK);
     assert_eq!(row.last_peer_message_received_at, MARK);
     assert!(row.phoenix);

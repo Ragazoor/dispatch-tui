@@ -212,7 +212,8 @@ async fn a_task_with_no_agent_shows_none() {
 }
 
 /// agent-tree.allium: AgentRowShowsAgentName. The pane view carries the current
-/// agent's name, and nothing for a live task with no current agent.
+/// agent's name. A task with no current agent is no live agent at all: since
+/// agents A4 the window is the agent's, so there is nothing to list.
 #[tokio::test]
 async fn the_pane_view_carries_the_current_agents_name() {
     use axum::extract::State;
@@ -225,19 +226,28 @@ async fn the_pane_view_carries_the_current_agents_name() {
         .create_task(CreateTaskRequest::fixture("N", "/repo"))
         .await
         .unwrap();
-    for id in [named, nameless] {
-        let window = crate::models::test_tmux_window(&format!("task-{}", id.0));
-        state
-            .db_write()
-            .patch_task(
-                id,
-                &crate::store::TaskPatch::new()
-                    .status(crate::models::TaskStatus::Running)
-                    .tmux_window(Some(&window)),
-            )
-            .await
-            .unwrap();
-    }
+    let window = crate::models::test_tmux_window(&format!("task-{}", named.0));
+    state
+        .db_write()
+        .patch_task(
+            named,
+            &crate::store::TaskPatch::new()
+                .status(crate::models::TaskStatus::Running)
+                .tmux_window(Some(&window)),
+        )
+        .await
+        .unwrap();
+    // Without an agent a window cannot be recorded at all.
+    let refused = state
+        .db_write()
+        .patch_task(
+            nameless,
+            &crate::store::TaskPatch::new()
+                .status(crate::models::TaskStatus::Running)
+                .tmux_window(Some(&window)),
+        )
+        .await;
+    assert!(refused.is_err(), "a window needs an agent to hold it");
 
     let Json(view) = crate::mcp::handlers::handle_pane_view(
         State(state.clone()),
@@ -248,5 +258,5 @@ async fn the_pane_view_carries_the_current_agents_name() {
 
     let by_id = |id| view.live_agents.iter().find(|a| a.id == id).unwrap();
     assert_eq!(by_id(named).agent_name, name);
-    assert_eq!(by_id(nameless).agent_name, "");
+    assert!(view.live_agents.iter().all(|a| a.id != nameless));
 }

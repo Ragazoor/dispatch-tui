@@ -21,6 +21,7 @@ async fn dispatch_task_clear_subagents_drops_the_live_count() {
     )
     .await
     .unwrap();
+    h.rt.db_write().give_agent(task.id);
     h.rt.task_svc
         .record_subagent_event(
             task.id,

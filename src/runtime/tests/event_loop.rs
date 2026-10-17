@@ -150,6 +150,7 @@ async fn apply_loop_event_tick_triggers_window_sweep() {
         .await
         .unwrap();
     // Give the task a live tmux window so the tick has something to sweep.
+    db.give_agent(id);
     db.patch_task(
         id,
         &crate::store::TaskPatch::new().tmux_window(Some(&test_tmux_window("dispatch:1"))),

@@ -16,7 +16,8 @@ pub fn seed_tasks(ctx: &ReducerContext, rows: Vec<Task>) -> Result<(), String> {
         if row.id == 0 {
             return Err("seed_tasks needs each task's real id, not a generated one".into());
         }
-        write_task(ctx, row)?;
+        // The session facts of a pre-A4 snapshot are kept for the backfill.
+        write_task_keeping_session_facts(ctx, row)?;
     }
     Ok(())
 }

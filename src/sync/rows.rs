@@ -168,9 +168,40 @@ struct Rows {
     /// agents A1. Arrive unfiltered (`sync.allium: SubscribeToAgents`),
     /// current and ended alike.
     agents: BTreeMap<i64, Agent>,
+    /// `task id -> id of its current agent`, kept in step with `agents` on
+    /// every insert and remove. Every task read lays the current agent's
+    /// session facts over the task (`models::with_session_of`), so the lookup
+    /// must not scan.
+    current_agent_by_task: BTreeMap<i64, i64>,
 }
 
 impl Rows {
+    /// Drop `agent` from the current-agent index, if it is what it holds.
+    fn index_agent_out(&mut self, agent: i64) {
+        if let Some(old) = self.agents.get(&agent) {
+            if self.current_agent_by_task.get(&old.task_id.0) == Some(&agent) {
+                self.current_agent_by_task.remove(&old.task_id.0);
+            }
+        }
+    }
+
+    /// `task` as the board shows it: with its current agent's session facts.
+    fn view(&self, task: &Task) -> Task {
+        let agent = self
+            .current_agent_by_task
+            .get(&task.id.0)
+            .and_then(|id| self.agents.get(id));
+        crate::models::with_session_of(task, agent)
+    }
+
+    /// The window of `task`'s current agent, without cloning anything.
+    fn current_window_of(&self, task: TaskId) -> bool {
+        self.current_agent_by_task
+            .get(&task.0)
+            .and_then(|id| self.agents.get(id))
+            .is_some_and(|a| a.tmux_window.is_some())
+    }
+
     fn is_empty(&self) -> bool {
         self.tasks.is_empty()
             && self.epics.is_empty()
@@ -521,18 +552,29 @@ impl SharedRows {
     pub fn upsert_agent(&self, row: &bindings::Agent) {
         match decode::agent(row) {
             Ok(agent) => self.write(|rows| {
+                rows.index_agent_out(agent.id.0);
+                if agent.is_current() {
+                    rows.current_agent_by_task
+                        .insert(agent.task_id.0, agent.id.0);
+                }
                 rows.agents.insert(agent.id.0, agent);
                 true
             }),
             Err(e) => {
                 super::drop_undecodable("agent", &e);
-                self.write(|rows| rows.agents.remove(&row.id).is_some());
+                self.write(|rows| {
+                    rows.index_agent_out(row.id);
+                    rows.agents.remove(&row.id).is_some()
+                });
             }
         }
     }
 
     pub fn remove_agent(&self, id: AgentId) {
-        self.write(|rows| rows.agents.remove(&id.0).is_some());
+        self.write(|rows| {
+            rows.index_agent_out(id.0);
+            rows.agents.remove(&id.0).is_some()
+        });
     }
 
     /// A session request row (store-split M5). An undecodable one is dropped,
@@ -575,11 +617,16 @@ impl SharedRows {
     /// Every task, ordered as `TaskRead::list_all` orders them:
     /// `COALESCE(sort_order, id) ASC, id ASC`.
     pub fn tasks(&self) -> Vec<Task> {
-        self.read(|rows| sorted_by_key(rows.tasks.values(), Task::sort_key))
+        self.read(|rows| {
+            sorted_by_key(rows.tasks.values(), Task::sort_key)
+                .iter()
+                .map(|t| rows.view(t))
+                .collect()
+        })
     }
 
     pub fn task(&self, id: TaskId) -> Option<Task> {
-        self.read(|rows| rows.tasks.get(&id.0).cloned())
+        self.read(|rows| rows.tasks.get(&id.0).map(|t| rows.view(t)))
     }
 
     /// Tasks under one epic, in the same order.
@@ -589,6 +636,9 @@ impl SharedRows {
                 rows.tasks.values().filter(|t| t.epic_id == Some(epic)),
                 Task::sort_key,
             )
+            .iter()
+            .map(|t| rows.view(t))
+            .collect()
         })
     }
 
@@ -619,9 +669,9 @@ impl SharedRows {
                 .values()
                 .filter(|t| {
                     matches!(t.status, TaskStatus::Running | TaskStatus::Review)
-                        && t.tmux_window.is_some()
+                        && rows.current_window_of(t.id)
                 })
-                .cloned()
+                .map(|t| rows.view(t))
                 .collect()
         })
     }
@@ -632,7 +682,7 @@ impl SharedRows {
             rows.tasks
                 .values()
                 .find(|t| t.plan_path.as_deref() == Some(plan))
-                .cloned()
+                .map(|t| rows.view(t))
         })
     }
 
@@ -646,7 +696,7 @@ impl SharedRows {
                 .filter(|t| t.epic_id.is_some())
                 .collect();
             out.sort_by_key(|t| (t.epic_id.map(|e| e.0), t.sort_key()));
-            out.into_iter().cloned().collect()
+            out.into_iter().map(|t| rows.view(t)).collect()
         })
     }
 
@@ -727,9 +777,9 @@ impl SharedRows {
     /// subscription holds it (`agents.allium: OneCurrentAgentPerTask`).
     pub fn current_agent(&self, task: TaskId) -> Option<Agent> {
         self.read(|rows| {
-            rows.agents
-                .values()
-                .find(|a| a.task_id == task && a.is_current())
+            rows.current_agent_by_task
+                .get(&task.0)
+                .and_then(|id| rows.agents.get(id))
                 .cloned()
         })
     }

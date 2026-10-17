@@ -48,14 +48,17 @@ async fn session_rig_with_identity(
             .with_registered_host("other-host", "test-user"),
     );
     let host_dir = tempfile::tempdir().unwrap();
-    let db = Arc::new(Store::new(
-        rows.clone(),
-        caller.clone(),
-        identity,
-        clock,
-        crate::store::MEMORY_HOST_ID.to_string(),
-        host_dir.path(),
-    ));
+    let db = Arc::new(
+        Store::new(
+            rows.clone(),
+            caller.clone(),
+            identity,
+            clock,
+            crate::store::MEMORY_HOST_ID.to_string(),
+            host_dir.path(),
+        )
+        .with_memory_caller(caller.clone()),
+    );
     let (tx, msgs) = mpsc::unbounded_channel();
     let rt = make_runtime(db.clone(), tx, runner).await;
     SessionRig {
@@ -91,6 +94,7 @@ impl SessionRig {
         )
         .await
         .unwrap();
+        self.db.give_agent(task.id);
         self.db
             .patch_task(
                 task.id,

@@ -881,14 +881,14 @@ rule RequestDispatch {
     -- The claim, as today: one write, conditional on the checks above.
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
-    ensures: task.last_pre_tool_use_at = now
+    ensures: current_agent(task).last_pre_tool_use_at = now
     -- The dispatch-claim subagent clear point (agent-health.allium), moved
     -- into the same transaction as the claim.
     ensures:
         for entry in core/SubagentEntries where task = task:
             not exists entry
-    ensures: task.live_subagents = 0
-    ensures: task.stop_pending = false
+    ensures: current_agent(task).live_subagents = 0
+    ensures: current_agent(task).stop_pending = false
     -- The epic status rollup for the claimed task's epic chain, in the same
     -- transaction, as every later move of the request does.
     ensures:
@@ -990,7 +990,7 @@ rule HostReportsDispatched {
     -- host is written with worktree because core/Task's HostTracksWorktree
     -- invariant pairs the two.
     ensures: request.task.worktree = worktree
-    ensures: request.task.tmux_window = tmux_window
+    ensures: current_agent(request.task).tmux_window = tmux_window
     ensures: request.task.host = request.host
     -- The epic status rollup for the task's epic chain, in the same reducer.
     ensures:
@@ -1149,7 +1149,7 @@ rule ReleaseClaimOfFailedRequest {
         if still_claimed:
             task.status = backlog
             task.sub_status = core/SubStatus.default_for(backlog)
-            task.last_pre_tool_use_at = null
+            current_agent(task).last_pre_tool_use_at = null
     -- The epic status rollup for the task's epic chain, in the same reducer,
     -- whether or not the release applied. Every failure reaches it: a
     -- reported one, the backstop, a host restart. A deleted task has no chain
@@ -1392,7 +1392,7 @@ rule RequestExitSession {
     requires: not DispatchRequests.any(d =>
         d.task = task and d.state = dispatched and d.finished_at >= token.finished_at)
     requires: action = token.action
-    requires: task.tmux_window != null
+    requires: current_agent(task).tmux_window != null
     requires: action = pr implies (pr_url != null and pr_url != "")
     -- D11 (W11): the row names the task's host, whose board tears the window
     -- down, so only that host's owner may ask.
@@ -1401,7 +1401,7 @@ rule RequestExitSession {
     -- running for this task (a second wrap_up the agent started) holds it.
     requires: not SessionRequests.any(r => r.task = task and r.is_open)
 
-    let window = task.tmux_window
+    let window = current_agent(task).tmux_window
     let recorded_pr_url = if action = pr: pr_url else: null
 
     ensures:
@@ -1445,7 +1445,7 @@ rule RequestExitSession {
         --     token's row finished (a dispatched request of the task whose
         --     finished_at is not earlier, W3): "invalid exit token";
         --   - action differs from the token's: an error naming both actions;
-        --   - task.tmux_window is null: "task #<id> has no active session",
+        --   - current_agent(task).tmux_window is null: "task #<id> has no active session",
         --     which the /wrap-up skill treats as success, as today;
         --   - action pr without a pr_url: "pr_url is required for action
         --     'pr'";
@@ -1548,7 +1548,7 @@ rule RequestCloseTask {
     let was_already_done = task.status = done
     -- Bound before the ensures, because the close clears the window and the
     -- row must name the window as this transaction read it.
-    let window = task.tmux_window
+    let window = current_agent(task).tmux_window
     let has_pr_url = task.url != null and task.url.url_type = pr
     -- The machine the window is on: the task's own host, or the caller's
     -- when the task has none (a task never dispatched, with a PR linked by
@@ -1573,12 +1573,12 @@ rule RequestCloseTask {
     ensures:
         task.status = done
         task.sub_status = core/SubStatus.default_for(done)
-        task.tmux_window = null
+        current_agent(task).tmux_window = null
         task.updated_at = now
         if not was_already_done:
             task.completed_at = now
         if was_running:
-            task.stop_pending = false
+            current_agent(task).stop_pending = false
 
     -- The epic status rollup, in the same transaction.
     ensures:
@@ -1661,7 +1661,7 @@ rule ReportPrStatus {
             if state.upper = "MERGED":
                 task.status = done
                 task.sub_status = core/SubStatus.default_for(done)
-                task.tmux_window = null
+                current_agent(task).tmux_window = null
                 task.completed_at = now
                 task.updated_at = now
                 -- the epic rollup and the phoenix successor follow, as for

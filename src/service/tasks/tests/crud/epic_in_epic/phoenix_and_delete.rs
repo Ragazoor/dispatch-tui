@@ -97,6 +97,7 @@ async fn the_successor_inherits_the_operators_settings_and_none_of_the_run() {
         .await
         .unwrap();
     let id = phoenix_task(&db, Some(epic.id)).await;
+    db.give_agent(id);
     svc.update_task(
         UpdateTaskParams::for_task(id)
             .status(TaskStatus::Running)
@@ -274,6 +275,7 @@ async fn a_skipped_respawn_does_not_contaminate_the_close_result() {
     db.patch_task(id, &store::TaskPatch::new().external_id(Some("pr-42")))
         .await
         .unwrap();
+    db.give_agent(id);
     svc.update_task(
         UpdateTaskParams::for_task(id)
             .status(TaskStatus::Running)

@@ -7,6 +7,8 @@ use super::*;
 /// hook arrives at a Running task already in NeedsInput / Active.
 async fn create_running_task(svc: &TaskService, sub_status: SubStatus) -> TaskId {
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+    // The hook facts are the current agent's (agents A4).
+    svc.db.give_agent(id);
     svc.update_task(
         UpdateTaskParams::for_task(id)
             .status(TaskStatus::Running)
@@ -144,6 +146,7 @@ async fn record_hook_event_pre_tool_use_stamps_and_clears_needs_input() {
     let svc = task_svc(&db);
     let id = create_running_task(&svc, SubStatus::NeedsInput).await;
     let earlier = chrono::Utc::now() - chrono::Duration::seconds(30);
+    db.give_agent(id);
     db.patch_task(
         id,
         &crate::store::TaskPatch::new().last_notification_at(Some(earlier)),
@@ -213,6 +216,7 @@ async fn record_hook_event_notification_resolve_kinds_clear_needs_input() {
         let db = test_db().await;
         let svc = task_svc(&db);
         let id = create_running_task(&svc, SubStatus::NeedsInput).await;
+        db.give_agent(id);
         db.patch_task(
             id,
             &crate::store::TaskPatch::new().last_notification_at(Some(chrono::Utc::now())),
@@ -330,6 +334,7 @@ async fn record_hook_event_suppressed_idle_prompt_does_not_clobber_needs_input()
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = create_running_task(&svc, SubStatus::NeedsInput).await;
+    db.give_agent(id);
     db.patch_task(
         id,
         &crate::store::TaskPatch::new().last_notification_at(Some(chrono::Utc::now())),
@@ -380,6 +385,7 @@ async fn record_hook_event_notification_auth_success_does_not_clobber_needs_inpu
     let svc = task_svc(&db);
     let id = create_running_task(&svc, SubStatus::NeedsInput).await;
     let stamped = chrono::Utc::now();
+    db.give_agent(id);
     db.patch_task(
         id,
         &crate::store::TaskPatch::new().last_notification_at(Some(stamped)),
@@ -405,6 +411,7 @@ async fn record_hook_event_stop_transitions_to_review_and_clears_stamps() {
     let svc = task_svc(&db);
     let id = create_running_task(&svc, SubStatus::Active).await;
     let now = chrono::Utc::now();
+    db.give_agent(id);
     db.patch_task(
         id,
         &crate::store::TaskPatch::new()
@@ -1119,6 +1126,7 @@ async fn subagent_start_never_drains_a_pending_stop() {
     let id = create_running_task(&svc, SubStatus::Active).await;
     // The stranded state directly, rather than reproducing the interleaving via
     // hook events — this test is about the subagent arm, not how it got there.
+    db.give_agent(id);
     db.patch_task(id, &crate::store::TaskPatch::new().stop_pending(true))
         .await
         .unwrap();

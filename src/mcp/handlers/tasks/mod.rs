@@ -604,6 +604,10 @@ mod tests {
             ended_at: None,
             end_reason: None,
             tmux_window: window.map(|w| crate::models::TmuxWindow::parse(w).unwrap()),
+            last_pre_tool_use_at: None,
+            last_notification_at: None,
+            live_subagents: 0,
+            stop_pending: false,
         }
     }
 

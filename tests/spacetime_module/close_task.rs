@@ -26,9 +26,9 @@ fn close_task_applies_the_done_close_and_writes_a_close_row() {
 
     assert_eq!(task_column(&instance, "status", 1), "done");
     assert_eq!(task_column(&instance, "sub_status", 1), "none");
-    assert_eq!(task_column(&instance, "tmux_window", 1), "");
+    assert_eq!(current_agent_column(&instance, "tmux_window", 1), "");
     assert_eq!(task_column(&instance, "completed_at", 1).len(), 23);
-    assert_eq!(task_column(&instance, "stop_pending", 1), "false");
+    assert_eq!(current_agent_column(&instance, "stop_pending", 1), "false");
     assert_eq!(
         column(&instance, "SELECT status FROM epics WHERE id = 1"),
         "done"
@@ -136,7 +136,7 @@ fn close_task_on_a_teammates_host_closes_without_a_row() {
     let closed = close_task(&instance, 1, "host-a");
     assert!(closed.status.success(), "{}", describe(&closed));
     assert_eq!(task_column(&instance, "status", 1), "done");
-    assert_eq!(task_column(&instance, "tmux_window", 1), "");
+    assert_eq!(current_agent_column(&instance, "tmux_window", 1), "");
     assert_eq!(session_count(&instance), "0");
 }
 
@@ -271,14 +271,14 @@ fn patch_task_leaving_running_clears_stop_pending() {
     set_task_field(&instance, 2, "stop_pending", serde_json::json!(true));
 
     set_task_field(&instance, 1, "status", serde_json::json!("review"));
-    assert_eq!(task_column(&instance, "stop_pending", 1), "false");
+    assert_eq!(current_agent_column(&instance, "stop_pending", 1), "false");
 
     let mut patch = empty_task_patch();
     patch["status"] = serde_json::json!({"some": "review"});
     patch["stop_pending"] = serde_json::json!({"some": true});
     let out = instance.call("patch_task", &["2", &patch.to_string()]);
     assert!(out.status.success(), "{}", describe(&out));
-    assert_eq!(task_column(&instance, "stop_pending", 2), "true");
+    assert_eq!(current_agent_column(&instance, "stop_pending", 2), "true");
 }
 
 /// X2: a patch into Done from another status respawns a phoenix task, in the

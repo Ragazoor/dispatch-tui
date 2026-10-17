@@ -290,6 +290,7 @@ async fn create_running_task_with_window_in(
         .worktree(Some(worktree.as_str()))
         .host(Some(crate::store::MEMORY_HOST_ID))
         .tmux_window(Some(&window));
+    state.db_write().give_agent(task_id);
     state.db_write().patch_task(task_id, &patch).await.unwrap();
     task_id
 }

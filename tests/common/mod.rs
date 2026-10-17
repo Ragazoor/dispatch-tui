@@ -121,6 +121,8 @@ pub async fn seed_running_task(
     use dispatch_tui::store::{TaskCrud, TaskPatch};
 
     let id = seed_task(db, title).await;
+    // The hook facts are the current agent's (agents A4).
+    db.give_agent(id);
     db.patch_task(
         id,
         &TaskPatch::new()

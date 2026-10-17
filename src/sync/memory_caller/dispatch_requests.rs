@@ -238,6 +238,13 @@ impl MemoryReducerCaller {
             module::dispatched_request_row(row, worktree, tmux_window, reused_worktree, &stamp);
         let epic_id = task.epic_id;
         self.write_task(&mut tables, module::apply_dispatched_to_task(task, &row))?;
+        // The window belongs to the agent the claim started (agents.allium, A4).
+        module::update_current_agent(&mut self.agent_store(&mut tables), row.task_id, |agent| {
+            module::Agent {
+                tmux_window: row.tmux_window.clone(),
+                ..agent
+            }
+        });
         self.recalculate_epic_chain(&mut tables, epic_id);
         self.write_dispatch_request(&mut tables, row);
         Ok(vec![])

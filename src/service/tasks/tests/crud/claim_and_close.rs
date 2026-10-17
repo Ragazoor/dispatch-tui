@@ -353,6 +353,7 @@ async fn a_request_clears_leftover_subagents_without_flipping() {
     db.subagent_start(id, "stale", "old-session", chrono::Utc::now())
         .await
         .unwrap();
+    db.give_agent(id);
     db.patch_task(id, &crate::store::TaskPatch::new().stop_pending(true))
         .await
         .unwrap();

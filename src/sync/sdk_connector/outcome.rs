@@ -5,20 +5,32 @@ use anyhow::anyhow;
 
 use crate::models::TaskStatus;
 use crate::spacetime::bindings;
-use crate::spacetime::bindings::TasksTableAccess as _;
+use crate::spacetime::bindings::{AgentsTableAccess as _, TasksTableAccess as _};
 use crate::sync::writes::{DrainReadBack, ReducerOutcome, StoreRefusal};
+use spacetimedb_sdk::Table as _;
+
+/// `live_subagents` of the task's current agent, `0` when it has none (agents
+/// A4: the count is the agent's, not the task row's).
+pub(super) fn current_live_subagents(ctx: &bindings::ReducerEventContext, task_id: i64) -> i64 {
+    ctx.db
+        .agents()
+        .iter()
+        .find(|a| a.task_id == task_id && a.state == "current")
+        .map_or(0, |a| a.live_subagents)
+}
 
 /// `[live, task_is_now_in_review]` off the task the drain acted on, shared by
 /// every reducer whose answer is that shape (`subagent_stop`/`subagent_clear`).
-/// `live` is `live_subagents`; giving both the identical slot layout is what
-/// lets one function serve them rather than two near-duplicates.
+/// `live` is the current agent's `live_subagents`; giving both the identical
+/// slot layout is what lets one function serve them rather than two
+/// near-duplicates.
 pub(super) fn subagent_drain_read_back(
     ctx: &bindings::ReducerEventContext,
     task_id: i64,
 ) -> DrainReadBack {
     match ctx.db.tasks().id().find(&task_id) {
         Some(t) => DrainReadBack {
-            live: t.live_subagents,
+            live: current_live_subagents(ctx, task_id),
             is_review: is_review(&t.status),
         },
         None => DrainReadBack::default(),

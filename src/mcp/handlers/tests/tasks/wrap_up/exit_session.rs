@@ -271,6 +271,7 @@ async fn exit_session_full_flow_rebase() {
     )
     .await;
     let task_id = create_wrappable_task(&db).await;
+    db.give_agent(task_id);
     db.patch_task(
         task_id,
         &store::TaskPatch::new().tmux_window(Some(&test_tmux_window("task-1"))),
@@ -332,6 +333,7 @@ async fn wrap_up_second_call_overwrites_token() {
     )
     .await;
     let task_id = create_wrappable_task(&db).await;
+    db.give_agent(task_id);
     db.patch_task(
         task_id,
         &store::TaskPatch::new().tmux_window(Some(&test_tmux_window("task-1"))),
@@ -476,6 +478,7 @@ async fn wrap_up_rebase_does_not_kill_window() {
         .host(Some(crate::store::MEMORY_HOST_ID))
         .worktree(Some("/repo/.worktrees/task-rebase"))
         .tmux_window(Some(&window));
+    state.db_write().give_agent(task_id);
     state.db_write().patch_task(task_id, &patch).await.unwrap();
 
     // wrap_up calls finish_task which runs git commands. With MockProcessRunner
@@ -696,6 +699,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
         .await
         .unwrap();
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
+    db.give_agent(task_id);
     db.patch_task(
         task_id,
         &crate::store::TaskPatch::new()
@@ -778,6 +782,7 @@ async fn wrap_up_done_defers_done_transition_to_exit_session() {
         })
         .await
         .unwrap();
+    db.give_agent(task_id);
     db.patch_task(
         task_id,
         &store::TaskPatch::new()

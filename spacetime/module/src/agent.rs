@@ -5,7 +5,7 @@
 //! `StartAgentOnFreshLaunch`, `EndAgentWhenLaunchFails`,
 //! `ResumeKeepsTheAgent`, `EndAgentWhenWorktreeGoes`, `AgentsGoWithTheirTask`,
 //! `BackfillCurrentAgents` and the invariants `OneCurrentAgentPerTask`,
-//! `CurrentAgentTracksWorktree`, `CurrentAgentMirrorsTheWindow`,
+//! `CurrentAgentTracksWorktree`,
 //! `AgentNameIsNeverReused` and `AgentNameIsNotAnId`.
 //!
 //! Every rule is written ONCE, generic over [`AgentStore`]: the module runs it
@@ -14,8 +14,9 @@
 //! are plain row operations, so the two stores cannot disagree about a
 //! decision (`spacetime-memory-store.allium: ReducerConformance`).
 //!
-//! In A1 the live-session facts stay on the task; an agent row holds only the
-//! window, mirrored from its task by [`follow_task_write`].
+//! Since A4 (task #90118) the live-session facts live on the agent: the window,
+//! the two hook timestamps, the live-subagent count and the deferred Stop. The
+//! Task row keeps their six columns, never written.
 
 use super::*;
 
@@ -49,9 +50,20 @@ pub struct Agent {
     pub ended_at: String,
     /// [`AGENT_END_REASONS`] once ended, `""` while current.
     pub end_reason: String,
-    /// The task's window while current (`CurrentAgentMirrorsTheWindow`), `""`
-    /// once ended. A4 appends the other five live-session columns after it.
+    /// The window its session runs in, `""` while paused and once ended.
     pub tmux_window: String,
+    // The other five live-session columns, appended by A4. Each carries a
+    // default so the store can automigrate a table that already holds rows.
+    #[default("")]
+    pub last_pre_tool_use_at: String,
+    #[default("")]
+    pub last_notification_at: String,
+    #[default(0)]
+    pub live_subagents: i64,
+    #[default(false)]
+    pub stop_pending: bool,
+    #[default("")]
+    pub stop_pending_at: String,
 }
 
 /// One name ever handed out to an agent (`agents.allium: HandedOutAgentName`).
@@ -169,14 +181,7 @@ pub fn pick_agent_name(seed: u64, is_handed_out: impl Fn(&str) -> bool) -> Strin
 }
 
 /// `Agent.created(...)` as every rule that starts one writes it.
-pub fn new_agent(
-    task_id: i64,
-    name: &str,
-    host: &str,
-    start_mode: &str,
-    tmux_window: &str,
-    now: &str,
-) -> Agent {
+pub fn new_agent(task_id: i64, name: &str, host: &str, start_mode: &str, now: &str) -> Agent {
     Agent {
         task_id,
         name: name.into(),
@@ -184,19 +189,134 @@ pub fn new_agent(
         start_mode: start_mode.into(),
         state: AGENT_CURRENT.into(),
         started_at: now.into(),
-        tmux_window: tmux_window.into(),
         ..blank_agent()
     }
 }
 
 /// What ending an agent writes (`EndedAgentHoldsNothing`): the state, the
-/// stamp, the reason, and no window.
+/// stamp, the reason, and no window, no subagents and no pending Stop. The
+/// hook timestamps stay, as history nothing reads.
 pub fn ended_agent(agent: Agent, reason: &str, now: &str) -> Agent {
     Agent {
         state: AGENT_ENDED.into(),
         ended_at: now.into(),
         end_reason: reason.into(),
         tmux_window: String::new(),
+        live_subagents: 0,
+        stop_pending: false,
+        ..agent
+    }
+}
+
+/// Whether `task` still carries any of the six session facts A4 moved off it:
+/// a row from a store published before A4, or an old snapshot.
+pub fn task_holds_session_facts(task: &Task) -> bool {
+    !task.tmux_window.is_empty()
+        || !task.last_pre_tool_use_at.is_empty()
+        || !task.last_notification_at.is_empty()
+        || task.live_subagents != 0
+        || task.stop_pending
+        || !task.stop_pending_at.is_empty()
+}
+
+/// `task` with the six session facts blanked: what the Task row holds since A4.
+pub fn without_session_facts(task: Task) -> Task {
+    Task {
+        tmux_window: String::new(),
+        last_pre_tool_use_at: String::new(),
+        last_notification_at: String::new(),
+        live_subagents: 0,
+        stop_pending: false,
+        stop_pending_at: String::new(),
+        ..task
+    }
+}
+
+/// Whether a patch names any of the six session facts.
+pub fn patch_names_session_facts(patch: &TaskPatch) -> bool {
+    patch.tmux_window.is_some()
+        || patch.last_pre_tool_use_at.is_some()
+        || patch.last_notification_at.is_some()
+        || patch.live_subagents.is_some()
+        || patch.stop_pending.is_some()
+        || patch.stop_pending_at.is_some()
+}
+
+/// A patch that SETS a session fact for a task with no current agent has
+/// nowhere to put it, and is refused. One that only clears (a blank, a zero,
+/// `false`) is a no-op, as clearing what is not there always is
+/// (`agents.allium`, decision A15).
+pub fn check_session_patch(has_current_agent: bool, patch: &TaskPatch) -> Result<(), String> {
+    let sets = patch.tmux_window.as_deref().is_some_and(|v| !v.is_empty())
+        || patch
+            .last_pre_tool_use_at
+            .as_deref()
+            .is_some_and(|v| !v.is_empty())
+        || patch
+            .last_notification_at
+            .as_deref()
+            .is_some_and(|v| !v.is_empty())
+        || patch.live_subagents.is_some_and(|v| v != 0)
+        || patch.stop_pending == Some(true)
+        || patch
+            .stop_pending_at
+            .as_deref()
+            .is_some_and(|v| !v.is_empty());
+    if sets && !has_current_agent {
+        return Err("the task has no current agent to hold the session fact".into());
+    }
+    Ok(())
+}
+
+/// The window of `task_id`'s current agent, `""` when it has none or the
+/// agent holds no window (`core.allium: Task.current_window`).
+pub fn session_window<S: AgentStore + ?Sized>(store: &S, task_id: i64) -> String {
+    current_agent(store, task_id)
+        .map(|a| a.tmux_window)
+        .unwrap_or_default()
+}
+
+/// What a close writes to the task's current agent: the window cleared, and a
+/// deferred Stop with it (both leave running).
+pub fn close_agent_session<S: AgentStore + ?Sized>(store: &mut S, task_id: i64) {
+    update_current_agent(store, task_id, |agent| Agent {
+        tmux_window: String::new(),
+        stop_pending: false,
+        ..agent
+    });
+}
+
+/// Apply the session half of a patch to the agent that holds it.
+pub fn apply_session_patch(agent: Agent, patch: &TaskPatch) -> Agent {
+    Agent {
+        tmux_window: patch.tmux_window.clone().unwrap_or(agent.tmux_window),
+        last_pre_tool_use_at: patch
+            .last_pre_tool_use_at
+            .clone()
+            .unwrap_or(agent.last_pre_tool_use_at),
+        last_notification_at: patch
+            .last_notification_at
+            .clone()
+            .unwrap_or(agent.last_notification_at),
+        live_subagents: patch.live_subagents.unwrap_or(agent.live_subagents),
+        stop_pending: patch.stop_pending.unwrap_or(agent.stop_pending),
+        stop_pending_at: patch
+            .stop_pending_at
+            .clone()
+            .unwrap_or(agent.stop_pending_at),
+        ..agent
+    }
+}
+
+/// `agent` carrying the session facts `task` still holds (the backfill).
+pub fn with_session_facts_of(agent: Agent, task: &Task) -> Agent {
+    Agent {
+        tmux_window: task.tmux_window.clone(),
+        last_pre_tool_use_at: task.last_pre_tool_use_at.clone(),
+        last_notification_at: task.last_notification_at.clone(),
+        live_subagents: task.live_subagents,
+        stop_pending: task.stop_pending,
+        stop_pending_at: task.stop_pending_at.clone(),
         ..agent
     }
 }
@@ -204,10 +324,8 @@ pub fn ended_agent(agent: Agent, reason: &str, now: &str) -> Agent {
 /// What a task write owes the task's current agent.
 #[derive(Debug, PartialEq, Eq)]
 pub enum AgentFollowUp {
-    /// Nothing changed that an agent mirrors.
+    /// Nothing changed that an agent follows.
     Nothing,
-    /// The window changed: copy it (`CurrentAgentMirrorsTheWindow`).
-    MirrorWindow(String),
     /// The worktree was cleared: end the agent (`EndAgentWhenWorktreeGoes`).
     End,
 }
@@ -220,8 +338,6 @@ pub fn agent_follow_up(prior: Option<&Task>, row: &Task) -> AgentFollowUp {
     };
     if !prior.worktree.is_empty() && row.worktree.is_empty() {
         AgentFollowUp::End
-    } else if prior.tmux_window != row.tmux_window {
-        AgentFollowUp::MirrorWindow(row.tmux_window.clone())
     } else {
         AgentFollowUp::Nothing
     }
@@ -254,6 +370,11 @@ pub fn validate_seeded_agent(row: &Agent) -> Result<(), String> {
     if ended && !row.tmux_window.is_empty() {
         return Err(format!("agent {id}: an ended agent holds no window"));
     }
+    if ended && (row.live_subagents != 0 || row.stop_pending) {
+        return Err(format!(
+            "agent {id}: an ended agent holds no subagents and no pending Stop"
+        ));
+    }
     Ok(())
 }
 
@@ -275,6 +396,14 @@ pub trait AgentStore {
     fn insert_agent(&mut self, row: Agent);
     fn update_agent(&mut self, row: Agent);
     fn delete_agent(&mut self, id: i64);
+    /// Delete every `SubagentEntry` of `task_id` (`EndedAgentHoldsNothing`:
+    /// they all belong to its current agent, or to none).
+    fn delete_subagent_entries_of(&mut self, task_id: i64);
+    /// Point every entry of `task_id` not yet owned by an agent at `agent_id`.
+    fn adopt_subagent_entries(&mut self, task_id: i64, agent_id: i64);
+    /// Blank the six session facts on `task_id`'s Task row, bypassing the
+    /// task write seam: the backfill's own write.
+    fn blank_task_session_facts(&mut self, task_id: i64);
     fn insert_handed_out_name(&mut self, row: HandedOutAgentName);
     /// The transaction's timestamp, in the store's spelling.
     fn now(&self) -> String;
@@ -310,17 +439,16 @@ fn hand_out_agent_name<S: AgentStore + ?Sized>(store: &mut S, task_id: i64) -> S
 
 /// Start a new current agent for `task`, with a fresh name and the task's
 /// window.
-fn create_agent<S: AgentStore + ?Sized>(store: &mut S, task: &Task, host: &str, start_mode: &str) {
-    let name = hand_out_agent_name(store, task.id);
+fn create_agent<S: AgentStore + ?Sized>(
+    store: &mut S,
+    task_id: i64,
+    host: &str,
+    start_mode: &str,
+    shape: impl FnOnce(Agent) -> Agent,
+) {
+    let name = hand_out_agent_name(store, task_id);
     let now = store.now();
-    store.insert_agent(new_agent(
-        task.id,
-        &name,
-        host,
-        start_mode,
-        &task.tmux_window,
-        &now,
-    ));
+    store.insert_agent(shape(new_agent(task_id, &name, host, start_mode, &now)));
 }
 
 /// End `task_id`'s current agent, if it has one, for `reason`.
@@ -328,6 +456,7 @@ pub fn end_current_agent<S: AgentStore + ?Sized>(store: &mut S, task_id: i64, re
     if let Some(agent) = current_agent(store, task_id) {
         let now = store.now();
         store.update_agent(ended_agent(agent, reason, &now));
+        store.delete_subagent_entries_of(task_id);
     }
 }
 
@@ -341,25 +470,40 @@ pub fn start_agent_on_fresh_launch<S: AgentStore + ?Sized>(
     start_mode: &str,
 ) {
     end_current_agent(store, task.id, AGENT_END_REPLACED);
-    create_agent(store, task, requester, start_mode);
+    // The claim stamps the new agent's activity, so the dispatch watchdog
+    // measures from the claim (`agent-health.allium`, `DispatchTask`).
+    let claimed_at = store.now();
+    create_agent(store, task.id, requester, start_mode, |agent| Agent {
+        last_pre_tool_use_at: claimed_at,
+        ..agent
+    });
 }
 
 /// What every task write owes the task's current agent, decided by
-/// [`agent_follow_up`]: `CurrentAgentMirrorsTheWindow` and
-/// `EndAgentWhenWorktreeGoes`. Called by the one task write seam on each side,
+/// [`agent_follow_up`]: `EndAgentWhenWorktreeGoes`. Called by the one task write seam on each side,
 /// after the row is stored.
 pub fn follow_task_write<S: AgentStore + ?Sized>(store: &mut S, prior: Option<&Task>, row: &Task) {
     match agent_follow_up(prior, row) {
         AgentFollowUp::Nothing => {}
         AgentFollowUp::End => end_current_agent(store, row.id, AGENT_END_WORKTREE_GONE),
-        AgentFollowUp::MirrorWindow(window) => {
-            if let Some(agent) = current_agent(store, row.id) {
-                store.update_agent(Agent {
-                    tmux_window: window,
-                    ..agent
-                });
-            }
+    }
+}
+
+/// Change the task's current agent with `change`, if it has one: the one way a
+/// session fact is written (`agents.allium`, step A4). Returns whether there
+/// was an agent to change, so a caller can tell a hook that found none
+/// (decision A15).
+pub fn update_current_agent<S: AgentStore + ?Sized>(
+    store: &mut S,
+    task_id: i64,
+    change: impl FnOnce(Agent) -> Agent,
+) -> bool {
+    match current_agent(store, task_id) {
+        Some(agent) => {
+            store.update_agent(change(agent));
+            true
         }
+        None => false,
     }
 }
 
@@ -372,16 +516,36 @@ pub fn delete_agents_of<S: AgentStore + ?Sized>(store: &mut S, task_id: i64) {
 }
 
 /// `BackfillCurrentAgents`: give every task in `tasks` that has a worktree and
-/// no current agent one, with a fresh name. Idempotent.
+/// no current agent one, with a fresh name; move the session facts a Task row
+/// still holds onto its current agent and blank them there; point its
+/// subagent entries at that agent. Idempotent: a second run finds the Task
+/// facts blank and the entries owned.
 pub fn backfill_agents_into<S: AgentStore + ?Sized>(
     store: &mut S,
     tasks: impl IntoIterator<Item = Task>,
 ) {
     for task in tasks {
-        if task.worktree.is_empty() || current_agent(store, task.id).is_some() {
-            continue;
+        let holds = task_holds_session_facts(&task);
+        if current_agent(store, task.id).is_none() && !task.worktree.is_empty() {
+            create_agent(
+                store,
+                task.id,
+                &task.host,
+                AGENT_BACKFILL_START_MODE,
+                |agent| with_session_facts_of(agent, &task),
+            );
+        } else if holds {
+            update_current_agent(store, task.id, |agent| with_session_facts_of(agent, &task));
         }
-        create_agent(store, &task, &task.host, AGENT_BACKFILL_START_MODE);
+        match current_agent(store, task.id) {
+            Some(agent) => store.adopt_subagent_entries(task.id, agent.id),
+            // Facts and entries of a session nothing holds: dropped.
+            None if holds => store.delete_subagent_entries_of(task.id),
+            None => {}
+        }
+        if holds {
+            store.blank_task_session_facts(task.id);
+        }
     }
 }
 
@@ -413,6 +577,32 @@ impl AgentStore for AgentTables<'_> {
     }
     fn delete_agent(&mut self, id: i64) {
         self.0.db.agents().id().delete(id);
+    }
+    fn delete_subagent_entries_of(&mut self, task_id: i64) {
+        delete_all_subagents(self.0, task_id);
+    }
+    fn adopt_subagent_entries(&mut self, task_id: i64, agent_id: i64) {
+        for row in self
+            .0
+            .db
+            .task_subagents()
+            .task_id()
+            .filter(&task_id)
+            .filter(|e| e.agent_row == 0)
+            .collect::<Vec<_>>()
+        {
+            // No primary key: delete and re-insert is the update.
+            self.0.db.task_subagents().delete(row.clone());
+            self.0.db.task_subagents().insert(TaskSubagent {
+                agent_row: agent_id,
+                ..row
+            });
+        }
+    }
+    fn blank_task_session_facts(&mut self, task_id: i64) {
+        if let Some(task) = self.0.db.tasks().id().find(task_id) {
+            self.0.db.tasks().id().update(without_session_facts(task));
+        }
     }
     fn insert_handed_out_name(&mut self, row: HandedOutAgentName) {
         self.0.db.handed_out_agent_names().insert(row);

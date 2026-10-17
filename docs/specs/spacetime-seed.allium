@@ -938,6 +938,15 @@ rule ImportOldStore {
         -- store keeps CurrentAgentTracksWorktree. The agents the backfill
         -- creates are neither counted as imported rows nor reported.
         --
+        -- A4: a snapshot from before agents A4 carries the six session facts
+        -- on its Task rows and none on its Agent rows. seed_tasks keeps them
+        -- (every other task write blanks them), and the same backfill moves
+        -- them onto each task's current agent, points the task's imported
+        -- subagent entries at it and blanks the Task columns. A snapshot from
+        -- after A4 has them on the agents and blank on the tasks, so the
+        -- backfill finds nothing to move. A seeded ended agent that holds
+        -- subagents or a pending Stop is refused (EndedAgentHoldsNothing).
+        --
         -- Seeded agent rows are checked against the agent invariants
         -- (seed_agents): a name that is empty or only digits, an ended row
         -- that holds a window or lacks an end reason, a current row with an

@@ -16,6 +16,18 @@ use super::*;
 /// Upserts by id, which is what makes a re-seed a no-op. An id of zero means
 /// "generate one", so it can only be an insert.
 pub(crate) fn write_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
+    // The six live-session facts are the current agent's since A4: the Task
+    // row never holds one, whatever the caller built it from.
+    write_task_keeping_session_facts(ctx, without_session_facts(row))
+}
+
+/// [`write_task`] without blanking the six session facts: for `seed_tasks`
+/// alone, so a pre-A4 snapshot's facts reach the store for
+/// `backfill_agents` to move onto the tasks' agents.
+pub(crate) fn write_task_keeping_session_facts(
+    ctx: &ReducerContext,
+    row: Task,
+) -> Result<(), String> {
     validate_task_ownership(row.epic_id, &row.owner)
         .map_err(|why| format!("task {}: {why}", row.id))?;
     validate_status("task", row.id, &row.status)?;
@@ -41,8 +53,8 @@ pub(crate) fn write_task(ctx: &ReducerContext, row: Task) -> Result<(), String> 
     };
     if prior.is_some() {
         let row = ctx.db.tasks().id().update(row);
-        // `agents.allium`: CurrentAgentMirrorsTheWindow and
-        // EndAgentWhenWorktreeGoes, in the same transaction as the write.
+        // `agents.allium`: EndAgentWhenWorktreeGoes, in the same transaction
+        // as the write.
         follow_task_write(&mut AgentTables(ctx), prior.as_ref(), &row);
     } else {
         ctx.db.tasks().insert(row);
@@ -169,6 +181,9 @@ pub struct TaskPatch {
     pub repo_path: Patch<String>,
     pub status: Patch<String>,
     pub worktree: Patch<String>,
+    /// The six session facts below (the window, the two hook timestamps, the
+    /// subagent count, the deferred Stop and its time) are the task's CURRENT
+    /// AGENT's since A4: `patch_task` applies them there, never to the Task.
     pub tmux_window: Patch<String>,
     pub plan_path: Patch<String>,
     pub epic_id: Patch<i64>,
@@ -231,7 +246,6 @@ pub fn apply_task_patch(row: &mut Task, patch: TaskPatch) {
         repo_path,
         status,
         worktree,
-        tmux_window,
         plan_path,
         epic_id,
         sub_status,
@@ -240,16 +254,11 @@ pub fn apply_task_patch(row: &mut Task, patch: TaskPatch) {
         base_branch,
         external_id,
         labels,
-        last_pre_tool_use_at,
-        last_notification_at,
         wrap_up_mode,
         url,
         url_type,
         pr_learnings_gate_shown_at,
         auto_run_plan,
-        live_subagents,
-        stop_pending,
-        stop_pending_at,
         last_peer_message_sent_at,
         last_peer_message_received_at,
         phoenix,
@@ -323,11 +332,13 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
     };
     // Before anything is applied: a refused patch leaves the row untouched.
     check_task_patch(&row, &patch)?;
+    check_session_patch(current_agent(&AgentTables(ctx), id).is_some(), &patch)?;
     let was_in_epic = row.epic_id;
     let prior_status = row.status.clone();
     // Read before `apply_patch!` consumes the patch's fields.
     let caller_named_a_completion = patch.completed_at.is_some();
     let caller_named_stop_pending = patch.stop_pending.is_some();
+    let session_patch = patch.clone();
     let moved_to_epic = patch.epic_id;
     // A repo change with no explicit relink re-routes within a grouped subtree.
     // A patch that repeats the current repo (the editor sends it on every
@@ -339,6 +350,10 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
             .is_some_and(|repo| repo != row.repo_path);
 
     apply_task_patch(&mut row, patch);
+    // The session facts go to the current agent (`agents.allium`, A4).
+    update_current_agent(&mut AgentTables(ctx), id, |agent| {
+        apply_session_patch(agent, &session_patch)
+    });
 
     // The completion stamp is the store's, not the caller's, unless the caller
     // named one explicitly. A client that computed it from its own clock would
@@ -351,7 +366,12 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
     // to add on top of a patch. A move out of running clears a deferred Stop
     // unless the patch names it; a move into Done respawns a phoenix task (the
     // flag is the receipt, so a repeat patch cannot respawn twice).
-    apply_patch_status_rules(&prior_status, caller_named_stop_pending, &mut row);
+    if patch_voids_pending_stop(&prior_status, &row.status, caller_named_stop_pending) {
+        update_current_agent(&mut AgentTables(ctx), id, |agent| Agent {
+            stop_pending: false,
+            ..agent
+        });
+    }
     if should_respawn_phoenix(&prior_status, &row)
         && respawn_phoenix_successor_of(ctx, &row, &now(ctx))
     {
@@ -918,10 +938,6 @@ pub(crate) fn claimed_task(task: Task, now: &str) -> Task {
     Task {
         status: RUNNING.into(),
         sub_status: ACTIVE.into(),
-        // Seeded so the dispatch watchdog measures from the claim rather than
-        // from whenever the agent first says something. An unseeded claim looks
-        // like a task that has been silent since the epoch.
-        last_pre_tool_use_at: now.into(),
         updated_at: now.into(),
         ..task
     }
@@ -934,7 +950,6 @@ pub(crate) fn released_task(task: Task) -> Task {
     Task {
         status: BACKLOG.into(),
         sub_status: "none".into(),
-        last_pre_tool_use_at: String::new(),
         ..task
     }
 }

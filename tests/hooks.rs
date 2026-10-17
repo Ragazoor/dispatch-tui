@@ -296,6 +296,8 @@ async fn hook_peer_message_trajectory_is_written_by_the_board() {
 async fn every_hook_kind_fails_when_the_board_is_down_and_writes_nothing() {
     let board = spawn_board().await;
     let (id, task_id) = seed(&board, "No board").await;
+    // The agent's claim stamped its activity; a dropped hook must not move it.
+    let before = board.task(id).await.last_pre_tool_use_at;
     let dead = dead_port().await;
 
     for args in [
@@ -329,8 +331,8 @@ async fn every_hook_kind_fails_when_the_board_is_down_and_writes_nothing() {
     }
 
     let task = board.task(id).await;
-    assert!(
-        task.last_pre_tool_use_at.is_none(),
+    assert_eq!(
+        task.last_pre_tool_use_at, before,
         "a dropped event must not reach the database by any other route"
     );
     assert_eq!(task.live_subagents, 0);

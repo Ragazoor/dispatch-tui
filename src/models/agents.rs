@@ -9,7 +9,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{DispatchMode, TaskId, TmuxWindow};
+use super::{DispatchMode, Task, TaskId, TmuxWindow};
 use crate::define_id_newtype;
 use crate::define_str_enum;
 
@@ -55,7 +55,41 @@ pub struct Agent {
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     pub end_reason: Option<AgentEndReason>,
+    // The live-session facts, moved off the task by agents A4. Each keeps the
+    // meaning `core.allium` gives it. `stop_pending_at` is not carried: only
+    // the module compares it, and it does so as a string.
     pub tmux_window: Option<TmuxWindow>,
+    pub last_pre_tool_use_at: Option<DateTime<Utc>>,
+    pub last_notification_at: Option<DateTime<Utc>>,
+    pub live_subagents: i64,
+    pub stop_pending: bool,
+}
+
+/// `task` as the board shows it: the six live-session facts read off its
+/// current agent (agents A4). The stored Task row holds none of them, so the
+/// board's `Task` keeps the field names as a derived view, and every reader of
+/// `task.tmux_window`, `is_detached` and the rest reads the agent without
+/// knowing it. A task with no current agent has no session: no window, no
+/// hook timestamps, no subagents, no pending Stop.
+pub fn with_session_of(task: &Task, agent: Option<&Agent>) -> Task {
+    let mut task = task.clone();
+    match agent {
+        Some(agent) => {
+            task.tmux_window = agent.tmux_window.clone();
+            task.last_pre_tool_use_at = agent.last_pre_tool_use_at;
+            task.last_notification_at = agent.last_notification_at;
+            task.live_subagents = agent.live_subagents;
+            task.stop_pending = agent.stop_pending;
+        }
+        None => {
+            task.tmux_window = None;
+            task.last_pre_tool_use_at = None;
+            task.last_notification_at = None;
+            task.live_subagents = 0;
+            task.stop_pending = false;
+        }
+    }
+    task
 }
 
 impl Agent {

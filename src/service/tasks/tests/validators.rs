@@ -26,6 +26,7 @@ async fn update_task_worktree_set_persists() {
         })
         .await
         .unwrap();
+    db.give_agent(id);
     svc.update_task(
         UpdateTaskParams::for_task(id)
             .status(TaskStatus::Running)
@@ -53,6 +54,7 @@ async fn update_task_worktree_clear_sets_null() {
         .await
         .unwrap();
     // First set a value
+    db.give_agent(id);
     svc.update_task(
         UpdateTaskParams::for_task(id)
             .status(TaskStatus::Running)

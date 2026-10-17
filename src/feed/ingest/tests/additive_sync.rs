@@ -50,6 +50,7 @@ async fn additive_role_routed_sync_keeps_a_task_absent_from_the_emission() {
         .into_iter()
         .find(|t| t.external_id.as_deref() == Some("pr-1"))
         .unwrap();
+    db.give_agent(live.id);
     db.patch_task(
         live.id,
         &TaskPatch::new()

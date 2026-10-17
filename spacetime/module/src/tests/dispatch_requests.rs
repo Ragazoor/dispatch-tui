@@ -1,4 +1,3 @@
-
 use super::*;
 
 const HOST_A: &str = "host-a";
@@ -231,18 +230,13 @@ fn quick_is_never_derived() {
 /// The claim's writes, as `RequestDispatch` ensures them.
 #[test]
 fn the_request_claims_the_task() {
-    let task = Task {
-        live_subagents: 3,
-        stop_pending: true,
-        ..backlog_task()
-    };
-    let claimed = apply_dispatch_claim(task, NOW);
+    let claimed = apply_dispatch_claim(backlog_task(), NOW);
     assert_eq!(claimed.status, "running");
     // core/SubStatus.default_for(running)
     assert_eq!(claimed.sub_status, "active");
-    assert_eq!(claimed.last_pre_tool_use_at, NOW);
-    assert_eq!(claimed.live_subagents, 0);
-    assert!(!claimed.stop_pending);
+    // The activity stamp and the subagent clear point are the new agent's
+    // (`start_agent_on_fresh_launch`), not the Task's.
+    assert_eq!(claimed.last_pre_tool_use_at, "");
     assert_eq!(claimed.id, 1);
 }
 
@@ -406,7 +400,7 @@ fn a_repeat_of_the_dispatched_report_is_recognised() {
 /// The writes today's post-provision patch made: worktree, window, and the
 /// host paired with the worktree (`HostTracksWorktree`).
 #[test]
-fn a_dispatched_report_writes_the_tasks_worktree_window_and_host() {
+fn a_dispatched_report_writes_the_tasks_worktree_and_host_and_the_window_goes_to_the_agent() {
     let running = apply_dispatch_claim(backlog_task(), NOW);
     let row = dispatched_request_row(
         request("provisioning", HOST_A),
@@ -417,7 +411,8 @@ fn a_dispatched_report_writes_the_tasks_worktree_window_and_host() {
     );
     let task = apply_dispatched_to_task(running, &row);
     assert_eq!(task.worktree, "/wt/1-task");
-    assert_eq!(task.tmux_window, "task-1");
+    assert_eq!(task.tmux_window, "", "the window is the agent's");
+    assert_eq!(row.tmux_window, "task-1");
     assert_eq!(task.host, HOST_A);
     assert_eq!(task.status, "running");
 }

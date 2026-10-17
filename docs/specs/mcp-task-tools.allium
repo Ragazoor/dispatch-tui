@@ -256,7 +256,7 @@ rule UpdateTaskViaMcp {
         -- store-split M7 the module's patch_task applies this clear in the
         -- same write (store-split.allium, X2); the board adds nothing.
         if status != null and status != running and prior_status = running:
-            task.stop_pending = false
+            current_agent(task).stop_pending = false
     ensures:
         if url != null:
             if url = "":
@@ -1569,7 +1569,7 @@ rule ExitSessionViaMcp {
         --     the task that finished after the token's row did
         --     (store-split.allium, W3) → "invalid exit token"; an
         --     action that differs from the row's → an error naming both
-        --     actions; task.tmux_window already null → "task #<id> has no
+        --     actions; current_agent(task).tmux_window already null → "task #<id> has no
         --     active session", which the /wrap-up skill treats as success
         --     (some other path already tore the session down; on a normal
         --     double-close the token has also been consumed, so a retry hits

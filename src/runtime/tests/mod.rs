@@ -474,6 +474,7 @@ async fn task_with_store_pointers(
     .await;
     let id = app.tasks()[0].id;
     let window = models::TmuxWindow::for_task(id);
+    rt.db_write().give_agent(id);
     rt.db_write()
         .patch_task(
             id,
@@ -570,6 +571,7 @@ async fn exec_persist_task_does_not_overwrite_last_pre_tool_use_at() {
 
     // Simulate the hook CLI writing a fresh PreToolUse timestamp directly.
     let hook_ts = chrono::Utc::now();
+    rt.db_write().give_agent(id);
     rt.db_write()
         .patch_task(
             id,
@@ -774,6 +776,7 @@ async fn exec_persist_task_write_back_does_not_clobber_fresher_board_fields() {
     // A hook wrote a fresh PreToolUse stamp and a refresh has already brought
     // it into the board.
     let hook_ts = chrono::Utc::now();
+    rt.db_write().give_agent(id);
     rt.db_write()
         .patch_task(
             id,
@@ -882,6 +885,7 @@ async fn exec_seed_activity_writes_only_timestamp() {
     )
     .await;
     let id = app.tasks()[0].id;
+    rt.db_write().give_agent(id);
     rt.db_write()
         .patch_task(
             id,

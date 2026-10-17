@@ -57,6 +57,7 @@ async fn route_routed_moves_task_preserving_state() {
     let task = db.list_tasks_for_epic(team).await.remove(0);
 
     // Simulate in-flight dispatched work on the task.
+    db.give_agent(task.id);
     db.patch_task(
         task.id,
         &TaskPatch::new()
@@ -197,6 +198,7 @@ async fn moved_task_is_never_reported_as_removed() {
         .into_iter()
         .find(|t| t.external_id.as_deref() == Some("pr-1"))
         .expect("pr-1 landed in Team Reviews");
+    db.give_agent(task.id);
     db.patch_task(
         task.id,
         &TaskPatch::new()
@@ -280,6 +282,7 @@ async fn absent_task_with_worktree_is_reported_as_removed() {
 
     let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
     let task = db.list_tasks_for_epic(team).await.remove(0);
+    db.give_agent(task.id);
     db.patch_task(
         task.id,
         &TaskPatch::new()
@@ -324,6 +327,7 @@ async fn flat_sync_reports_removed_task_with_worktree() {
         .unwrap();
 
     let task = db.list_tasks_for_epic(epic.id).await.remove(0);
+    db.give_agent(task.id);
     db.patch_task(
         task.id,
         &TaskPatch::new()
@@ -390,6 +394,7 @@ async fn route_routed_rescues_flat_task_stranded_on_parent() {
     let stranded = db.list_tasks_for_epic(parent.id).await.remove(0);
 
     // Simulate in-flight dispatched work on the stranded task.
+    db.give_agent(stranded.id);
     db.patch_task(
         stranded.id,
         &TaskPatch::new()

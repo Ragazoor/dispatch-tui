@@ -29,11 +29,13 @@ impl MemoryReducerCaller {
             row.completed_at = self.now();
         }
         Self::ensure_alias(tables, &mut row)?;
+        // The six live-session facts are the current agent's since A4.
+        let mut row = module::without_session_facts(row);
         let id = Self::assign_id(row.id, &mut tables.next_task_id);
         row.id = id;
         let prior = tables.tasks.insert(id, row.clone());
-        // Mirrors the module's `write_task`: CurrentAgentMirrorsTheWindow and
-        // EndAgentWhenWorktreeGoes (agents.allium).
+        // Mirrors the module's `write_task`: EndAgentWhenWorktreeGoes
+        // (agents.allium).
         module::follow_task_write(&mut self.agent_store(tables), prior.as_ref(), &row);
         self.rows.upsert_task(&row.into());
         Ok(())
@@ -235,10 +237,15 @@ impl MemoryReducerCaller {
         if let Err(why) = module::check_task_patch(&row, &patch) {
             return Ok(ReducerOutcome::Refused(why));
         }
+        let has_agent = module::current_agent(&self.agent_store(&mut tables), id.0).is_some();
+        if let Err(why) = module::check_session_patch(has_agent, &patch) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let was_in_epic = row.epic_id;
         let prior_status = row.status.clone();
         let caller_named_a_completion = patch.completed_at.is_some();
         let caller_named_stop_pending = patch.stop_pending.is_some();
+        let session_patch = patch.clone();
         let moved_to_epic = patch.epic_id;
         let repo_changed_in_place = patch.epic_id.is_none()
             && patch
@@ -247,13 +254,24 @@ impl MemoryReducerCaller {
                 .is_some_and(|repo| repo != row.repo_path);
 
         module::apply_task_patch(&mut row, patch);
+        // The session facts go to the current agent (agents.allium, A4).
+        module::update_current_agent(&mut self.agent_store(&mut tables), id.0, |agent| {
+            module::apply_session_patch(agent, &session_patch)
+        });
 
         if !caller_named_a_completion && module::stamps_completion(&prior_status, &row.status) {
             row.completed_at = self.now();
         }
         row.updated_at = self.now();
         // store-split.allium X2: the module's two transition rules on a patch.
-        module::apply_patch_status_rules(&prior_status, caller_named_stop_pending, &mut row);
+        if module::patch_voids_pending_stop(&prior_status, &row.status, caller_named_stop_pending) {
+            module::update_current_agent(&mut self.agent_store(&mut tables), id.0, |agent| {
+                module::Agent {
+                    stop_pending: false,
+                    ..agent
+                }
+            });
+        }
         let stamp = self.now();
         if module::should_respawn_phoenix(&prior_status, &row)
             && self.respawn_phoenix_successor_of(&mut tables, &row, &stamp)

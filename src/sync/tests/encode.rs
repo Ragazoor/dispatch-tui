@@ -201,12 +201,27 @@ fn a_tmux_window_encodes_the_way_the_decoder_reads_it() {
     let patch = encode::task_patch(&TaskPatch::new().tmux_window(Some(&window)));
     let encoded = patch.tmux_window.clone().unwrap();
 
-    let row = crate::spacetime::bindings::Task {
+    // The window is the current agent's since agents A4, so it is the agent
+    // row's decoder that reads it back.
+    let row = crate::spacetime::bindings::Agent {
+        id: 1,
+        task_id: 1,
+        name: "ada".into(),
+        host: "me".into(),
+        start_mode: "dispatch".into(),
+        state: "current".into(),
+        started_at: NOW.into(),
+        ended_at: String::new(),
+        end_reason: String::new(),
         tmux_window: encoded,
-        ..encode::create_task_row(&a_request(), "me", "me", NOW)
+        last_pre_tool_use_at: String::new(),
+        last_notification_at: String::new(),
+        live_subagents: 0,
+        stop_pending: false,
+        stop_pending_at: String::new(),
     };
     assert_eq!(
-        crate::sync::decode::task(&row).unwrap().tmux_window,
+        crate::sync::decode::agent(&row).unwrap().tmux_window,
         Some(window)
     );
 }
