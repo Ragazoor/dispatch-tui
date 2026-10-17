@@ -9,7 +9,7 @@ use crate::models::{
 use crate::store::LearningFilter;
 
 use super::types::{
-    deserialize_flexible_id, deserialize_optional_flexible_i64, fetch_caller_task, parse_args,
+    deserialize_flexible_id, deserialize_optional_flexible_i64, parse_args,
     service_err_to_response, JsonRpcResponse,
 };
 
@@ -138,9 +138,11 @@ pub(super) async fn handle_record_learning(
     };
 
     let task_id = parsed.task_id;
-    let task = match fetch_caller_task(&*state.db, &id, task_id).await {
+    // The target task, not the caller: a typo'd id gets the standard not-found
+    // answer rather than "Unknown caller task".
+    let task = match state.task_svc.get_task(task_id).await {
         Ok(t) => t,
-        Err(resp) => return resp,
+        Err(e) => return service_err_to_response(id, e),
     };
 
     let scope_ref = match resolve_scope_ref(&task, parsed.scope, parsed.scope_ref) {
@@ -216,7 +218,7 @@ pub(super) async fn handle_query_learnings(
     };
 
     let task_id = parsed.task_id;
-    let limit = parsed.limit.unwrap_or(50).min(50) as usize;
+    let limit = parsed.limit.unwrap_or(50).clamp(1, 50) as usize;
 
     let ranked = match state
         .learning_svc

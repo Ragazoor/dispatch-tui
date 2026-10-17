@@ -29,8 +29,46 @@ async fn an_unknown_word_is_not_found_like_an_unknown_id() {
         Some(json!({"name": "get_task", "arguments": {"task_id": "nope"}})),
     )
     .await;
-    let err = resp.error.expect("an unknown word must be an error");
-    assert_eq!(err.code, super::super::super::types::NOT_FOUND_CODE);
+    // A tool failure, like an unknown id: an `isError` result, no protocol code.
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+    assert_eq!(resp.result.as_ref().unwrap()["isError"], json!(true));
+}
+
+#[tokio::test]
+async fn omitted_or_null_arguments_mean_no_arguments() {
+    let state = test_state().await;
+    for params in [
+        json!({"name": "list_tasks"}),
+        json!({"name": "list_tasks", "arguments": null}),
+    ] {
+        let resp = call(&state, "tools/call", Some(params.clone())).await;
+        assert!(resp.error.is_none(), "{params}: {:?}", resp.error);
+        assert!(
+            resp.result.as_ref().unwrap()["isError"].as_bool() != Some(true),
+            "{params}: {}",
+            extract_response_text(&resp)
+        );
+    }
+}
+
+#[tokio::test]
+async fn limit_accepts_a_numeric_string_and_rejects_zero() {
+    let state = test_state().await;
+    let ok = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "list_tasks", "arguments": {"limit": "5"}})),
+    )
+    .await;
+    assert_ne!(ok.result.as_ref().unwrap()["isError"].as_bool(), Some(true));
+    let zero = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "list_tasks", "arguments": {"limit": 0}})),
+    )
+    .await;
+    let rejected = zero.error.is_some() || zero.result.as_ref().unwrap()["isError"] == json!(true);
+    assert!(rejected, "limit 0 must be refused");
 }
 
 /// A task with a current agent, by way of a dispatch claim. Returns the id and

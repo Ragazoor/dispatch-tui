@@ -1,4 +1,10 @@
-use axum::{body::Body, extract::Request, http::HeaderMap, middleware::Next, response::Response};
+use axum::{
+    body::Body,
+    extract::Request,
+    http::{header, HeaderMap, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
+};
 
 use crate::mcp::identity::{CallerIdentity, IdentityError, HEADER_KIND, HEADER_TASK_ID};
 
@@ -25,6 +31,39 @@ pub async fn extract_caller_identity(
 
     let result: Result<CallerIdentity, IdentityError> = CallerIdentity::from_headers(task_id, kind);
     req.extensions_mut().insert(result);
+    next.run(req).await
+}
+
+/// Whether a `Host` value (`host[:port]`) or an `Origin` value
+/// (`scheme://host[:port]`) names this machine's loopback interface.
+fn is_loopback(value: &str) -> bool {
+    let authority = value.split_once("://").map_or(value, |(_, rest)| rest);
+    let authority = authority.split('/').next().unwrap_or("");
+    let host = match authority.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(""),
+        None => authority.split(':').next().unwrap_or(""),
+    };
+    matches!(
+        host.to_ascii_lowercase().as_str(),
+        "127.0.0.1" | "localhost" | "::1"
+    )
+}
+
+/// Refuse a request whose `Host` or `Origin` is not loopback — the defence
+/// against DNS rebinding (`AgentPortRejectsNonLoopbackOrigins` in
+/// `docs/specs/mcp-task-tools.allium`). Runs before identity extraction, so a
+/// rejected request never reaches a handler. A missing header passes: a
+/// browser always sends `Host`, and local clients may omit `Origin`.
+pub async fn require_loopback_origin(req: Request<Body>, next: Next) -> Response {
+    let headers = req.headers();
+    let foreign = |name| {
+        headers
+            .get(name)
+            .is_some_and(|v| !v.to_str().is_ok_and(is_loopback))
+    };
+    if foreign(header::HOST) || foreign(header::ORIGIN) {
+        return (StatusCode::FORBIDDEN, "non-loopback Host or Origin").into_response();
+    }
     next.run(req).await
 }
 
@@ -115,5 +154,75 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = body_of(resp).await;
         assert!(body.contains("Err(Conflict)"), "got {body}");
+    }
+
+    fn guarded() -> Router {
+        Router::new()
+            .route("/mcp", post(|| async { "ok" }))
+            .layer(middleware::from_fn(require_loopback_origin))
+    }
+
+    async fn status_with(header_name: &str, value: &str) -> StatusCode {
+        guarded()
+            .oneshot(
+                Request::post("/mcp")
+                    .header(header_name, value)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    #[tokio::test]
+    async fn foreign_host_is_rejected() {
+        assert_eq!(
+            status_with("host", "evil.example").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            status_with("host", "evil.example:3142").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            status_with("host", "127.0.0.1.evil.example").await,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    #[tokio::test]
+    async fn foreign_origin_is_rejected() {
+        assert_eq!(
+            status_with("origin", "http://evil.example").await,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    #[tokio::test]
+    async fn loopback_host_and_origin_pass() {
+        for (name, value) in [
+            ("host", "127.0.0.1"),
+            ("host", "127.0.0.1:3142"),
+            ("host", "localhost:3142"),
+            ("host", "[::1]:3142"),
+            ("origin", "http://localhost:3142"),
+            ("origin", "http://127.0.0.1:3142"),
+        ] {
+            assert_eq!(
+                status_with(name, value).await,
+                StatusCode::OK,
+                "{name}: {value}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_host_and_origin_pass() {
+        let resp = guarded()
+            .oneshot(Request::post("/mcp").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 }

@@ -148,6 +148,38 @@ rule ToolsAdvertiseAnnotations {
         -- every_argument_carries_a_description in src/mcp/handlers/tests/mod.rs.
 }
 
+-- == The agent port answers loopback callers only ==
+--
+-- A web page can rebind a hostname it controls to 127.0.0.1 and then reach the
+-- agent port same-origin, with no CORS preflight to stop it. Caller identity is
+-- a client-supplied header, so the port itself must refuse such a request.
+-- This covers /mcp, the hook path and the pane-view path.
+
+rule AgentPortRejectsNonLoopbackOrigins {
+    when: AgentPortRequest(host?, origin?)
+
+    -- host and origin are the request's Host and Origin headers; "loopback"
+    -- means the hostname is 127.0.0.1, localhost or [::1], with or without a
+    -- port (the hook client sends Host "127.0.0.1" with no port). A request
+    -- with no Host header is allowed: a browser always sends one.
+    ensures:
+        if (host != null and not loopback(host)) or (origin != null and not loopback(origin)):
+            RequestRejected(status: 403)
+
+    @guidance
+        -- The check runs before caller identity is read, so a rejected request
+        -- never reaches a handler. A per-board bearer token is a possible
+        -- follow-up and is not part of this rule.
+}
+
+-- == MCP tool failures share one shape ==
+--
+-- Every failure after a tools/call is accepted, including an unresolvable
+-- agent name in the arguments, comes back as a result with isError: true and
+-- the message as text. A tool can never return a JSON-RPC error code. Only an
+-- unreadable request (bad identity) is a JSON-RPC error. A missing or null
+-- `arguments` means an empty object.
+
 -- == MCP Task Tools ==
 
 -- UpdateTaskViaMcp is the per-task rule behind the one update tool,

@@ -12,8 +12,9 @@ use crate::service::{FieldUpdate, UpdateTaskParams};
 pub(super) use super::types::{
     deserialize_flexible_id, deserialize_nullable_flexible_id, deserialize_nullable_wrap_up_mode,
     deserialize_optional_flexible_i64, deserialize_optional_flexible_id,
-    deserialize_optional_url_type, fetch_caller_task, parse_args, service_err_to_response,
-    FlexibleId, JsonRpcResponse, StatusFilter, INTERNAL_ERROR, INVALID_PARAMS,
+    deserialize_optional_limit, deserialize_optional_url_type, fetch_caller_task, parse_args,
+    service_err_to_response, tool_error, FlexibleId, JsonRpcResponse, StatusFilter, INTERNAL_ERROR,
+    INVALID_PARAMS,
 };
 
 mod crud;
@@ -197,7 +198,7 @@ pub(super) struct ListTasksArgs {
     pub(super) base_branch: Option<String>,
     #[serde(default)]
     pub(super) query: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_limit")]
     pub(super) limit: Option<std::num::NonZeroUsize>,
 }
 

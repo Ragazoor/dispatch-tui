@@ -367,7 +367,11 @@ async fn update_task_done_failed_close_leaves_the_task_unchanged() {
     let before = fx.db.get_task(closing).await.unwrap();
 
     let resp = fx.close_via_update_task(closing).await;
-    assert!(resp.error.is_none(), "still a successful response");
+    assert_eq!(
+        resp.result.as_ref().and_then(|r| r["isError"].as_bool()),
+        Some(true),
+        "a failed close is a tool error, not a success-shaped result"
+    );
     assert!(
         extract_response_text(&resp).contains("could NOT be moved to done"),
         "response must not claim success: {}",

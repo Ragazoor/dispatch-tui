@@ -240,7 +240,10 @@ fn router_over(state: McpState) -> Router {
         .route("/mcp", post(handlers::handle_mcp))
         // Claude Code hooks deliver here rather than opening the database
         // themselves — see `HookDelivery` in `docs/specs/agent-health.allium`.
-        .route(crate::hooks::wire::HOOK_PATH, post(handlers::handle_hook))
+        .route(
+            crate::hooks::wire::HOOK_PATH,
+            post(handlers::handle_hook_body),
+        )
         // The companion panes read here instead of opening the store
         // themselves -- `PanesReadThroughTheBoard` in `docs/specs/agent-tree.allium`.
         .route(
@@ -249,6 +252,10 @@ fn router_over(state: McpState) -> Router {
         )
         .layer(axum::middleware::from_fn(
             middleware::extract_caller_identity,
+        ))
+        // Outermost: a rejected origin never reaches identity or a handler.
+        .layer(axum::middleware::from_fn(
+            middleware::require_loopback_origin,
         ))
         .with_state(state)
 }
@@ -335,5 +342,50 @@ mod services_tests {
         assert!(Arc::ptr_eq(&state.task_svc, &services.tasks));
         assert!(Arc::ptr_eq(&state.epic_svc, &services.epics));
         assert!(Arc::ptr_eq(&state.learning_svc, &services.learnings));
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::*;
+    use axum::{body::Body, http::Request, http::StatusCode};
+    use tower::util::ServiceExt;
+
+    fn app() -> Router {
+        let db: Arc<dyn store::TaskStore> = Arc::new(store::Store::open_in_memory().unwrap());
+        router(
+            McpDeps {
+                db,
+                runner: crate::process::MockProcessRunner::unused(),
+                embedding_service: EmbeddingService::new_test(),
+                data_dir: std::env::temp_dir(),
+            },
+            None,
+        )
+    }
+
+    /// The guard sits on the real router, ahead of every route
+    /// (`AgentPortRejectsNonLoopbackOrigins`).
+    #[tokio::test]
+    async fn every_route_rejects_a_foreign_host_and_origin() {
+        for path in [
+            "/mcp",
+            crate::hooks::wire::HOOK_PATH,
+            crate::hooks::wire::PANE_VIEW_PATH,
+        ] {
+            for (name, value) in [("host", "evil.example"), ("origin", "http://evil.example")] {
+                let resp = app()
+                    .oneshot(
+                        Request::post(path)
+                            .header(name, value)
+                            .header("content-type", "application/json")
+                            .body(Body::from("{}"))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{path} with {name}");
+            }
+        }
     }
 }

@@ -9,8 +9,8 @@ use crate::service::{CreateEpicParams, UpdateEpicParams};
 use super::types::{
     deserialize_flexible_id, deserialize_nullable_flexible_i64, deserialize_nullable_flexible_id,
     deserialize_nullable_string, deserialize_optional_flexible_i64,
-    deserialize_optional_flexible_id, parse_args, reject_alongside, service_err_to_response,
-    JsonRpcResponse,
+    deserialize_optional_flexible_id, deserialize_optional_limit, parse_args, reject_alongside,
+    service_err_to_response, JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ pub(super) struct ListEpicsArgs {
     pub(super) recursive: Option<bool>,
     #[serde(default)]
     pub(super) query: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_limit")]
     pub(super) limit: Option<std::num::NonZeroUsize>,
 }
 

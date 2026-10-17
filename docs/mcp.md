@@ -87,6 +87,12 @@ MCP handlers in `src/mcp/handlers/` return JSON-RPC error objects using two code
 
 Use `JsonRpcResponse::err(id, -32602, msg)` for anything the caller can fix; use `-32603` for anything they can't.
 
+These codes never reach a client through `tools/call`: `handle_tools_call` re-wraps every tool failure, including an agent name that resolves to no task, as an `isError` result carrying the message. Only a missing or malformed caller identity is a JSON-RPC error there (`-32600`). A `tools/call` that omits `arguments` is treated as `{}`.
+
+## Loopback only
+
+The agent port rejects (HTTP 403) any request whose `Host` or `Origin` is not `127.0.0.1`, `localhost` or `[::1]`, on `/mcp`, the hook path and the pane-view path. This stops a DNS-rebinding page from calling tools. See `AgentPortRejectsNonLoopbackOrigins` in `docs/specs/mcp-task-tools.allium`.
+
 ## Context resources
 
 The server offers read-only context as MCP resources (`resources/list`, `resources/read`), declared beside `tools` in `initialize` (no `subscribe`, no `listChanged`, no skills extension). Logic lives in `src/mcp/handlers/context.rs`; the behaviour is `McpContextResources` in `docs/specs/mcp-task-tools.allium`.

@@ -36,6 +36,24 @@ fn pr_gate_reminder(task_id: TaskId) -> String {
     )
 }
 
+/// The route handler: decodes the body itself so one the board cannot read
+/// (a newer hook binary's event, say) still gets a JSON `Failed` outcome. The
+/// extractor's own 422 would surface as an error in the agent's terminal.
+pub async fn handle_hook_body(
+    State(state): State<Arc<McpState>>,
+    body: axum::body::Bytes,
+) -> Json<HookResponse> {
+    match serde_json::from_slice::<HookRequest>(&body) {
+        Ok(request) => handle_hook(State(state), Json(request)).await,
+        Err(e) => {
+            tracing::warn!("undecodable hook body: {e}");
+            Json(HookResponse::Observed(ObserveOutcome::Failed {
+                reason: format!("the board could not read the hook request: {e}"),
+            }))
+        }
+    }
+}
+
 pub async fn handle_hook(
     State(state): State<Arc<McpState>>,
     Json(request): Json<HookRequest>,

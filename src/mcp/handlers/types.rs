@@ -150,7 +150,8 @@ impl<'de> serde::de::Visitor<'de> for FlexibleI64Visitor {
     }
 
     fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<i64, E> {
-        v.parse::<i64>()
+        v.trim()
+            .parse::<i64>()
             .map_err(|_| E::custom(format!("invalid integer string: {v}")))
     }
 }
@@ -187,6 +188,25 @@ where
         }
     }
     deserializer.deserialize_option(OptFlexI64)
+}
+
+/// A positive `limit`, as an integer or a numeric string like the other
+/// integer arguments. Zero and negatives are rejected.
+pub(super) fn deserialize_optional_limit<'de, D>(
+    deserializer: D,
+) -> Result<Option<std::num::NonZeroUsize>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    match deserialize_optional_flexible_i64(deserializer)? {
+        None => Ok(None),
+        Some(n) => usize::try_from(n)
+            .ok()
+            .and_then(std::num::NonZeroUsize::new)
+            .map(Some)
+            .ok_or_else(|| D::Error::custom(format!("limit must be at least 1, got {n}"))),
+    }
 }
 
 /// Generic nullable deserializer for `Option<Option<T>>` fields where T: Deserialize.

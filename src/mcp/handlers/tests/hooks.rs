@@ -96,3 +96,19 @@ async fn a_pane_keypress_is_recorded_as_keybinding_usage() {
     assert_eq!(rows[0].action, "navigate_half_page");
     assert!(notify_rx.try_recv().is_err(), "no refresh for usage");
 }
+
+/// A body the board cannot decode (an event a newer hook binary added) is a
+/// JSON `Failed` outcome, not an HTTP 422 the agent would see.
+#[tokio::test]
+async fn undecodable_hook_body_answers_a_failed_outcome() {
+    use crate::hooks::wire::{HookResponse, ObserveOutcome};
+    let state = test_state().await;
+    let body = axum::body::Bytes::from_static(
+        br#"{"hook":"observe","event":"from_the_future","task_id":1}"#,
+    );
+    let Json(resp) = crate::mcp::handlers::handle_hook_body(State(state), body).await;
+    assert!(
+        matches!(resp, HookResponse::Observed(ObserveOutcome::Failed { .. })),
+        "{resp:?}"
+    );
+}

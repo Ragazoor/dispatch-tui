@@ -10,8 +10,9 @@ use crate::service::{
 };
 
 use super::{
-    fetch_caller_task, parse_args, service_err_to_response, CreateTaskWithEpicArgs, GetTaskArgs,
-    JsonRpcResponse, ListTasksArgs, QueryUsageArgs, StatusFilter, UpdateTaskArgs, INVALID_PARAMS,
+    fetch_caller_task, parse_args, service_err_to_response, tool_error, CreateTaskWithEpicArgs,
+    GetTaskArgs, JsonRpcResponse, ListTasksArgs, QueryUsageArgs, StatusFilter, UpdateTaskArgs,
+    INVALID_PARAMS,
 };
 
 async fn handle_update_task(
@@ -302,23 +303,28 @@ async fn handle_mark_task_done(
     if let Some(epic_id) = task.epic_id {
         state.notify_epic_changed(epic_id);
     }
-    let text = match closed {
+    match closed {
         Err(e) => {
             tracing::warn!(
                 task_id = task_id.0,
                 "update_tasks done: the close failed: {e}"
             );
-            format!(
-                "Task #{} could NOT be moved to done — the close did not take effect. \
-                 The task is still in its previous status; try again.",
-                task_id.0
+            tool_error(
+                id,
+                format!(
+                    "Task #{} could NOT be moved to done — the close did not take effect. \
+                     The task is still in its previous status; try again.",
+                    task_id.0
+                ),
             )
         }
         // No chain runs on this path, so unlike exit_session's, this response
         // never names a next subtask.
-        Ok(()) => format!("Task #{} marked done.", task_id.0),
-    };
-    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
+        Ok(()) => JsonRpcResponse::ok(
+            id,
+            json!({"content": [{"type": "text", "text": format!("Task #{} marked done.", task_id.0)}]}),
+        ),
+    }
 }
 
 /// The refusal text for a `create_task` call that omitted `epic_id`

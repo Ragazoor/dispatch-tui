@@ -252,7 +252,7 @@ usually the right answer.",
         };
 
     async read_only "list_tasks" => tasks::handle_list_tasks,
-        "List tasks on the kanban board. Filters are ANDed. When called by a dispatched agent, results auto-scope to the agent's epic and exclude the agent's own task; passing explicit epic_id/repo_paths disables auto-scoping. When called from a non-dispatched session, no auto-scoping. Output includes each task's base branch, its url under its own type label — 'PR', 'Issue', 'Security Alert' or 'Link', with the number appended where there is one — and the plan goal, when available.",
+        "List tasks on the kanban board. Filters are ANDed. When called by a dispatched agent, results auto-scope to the agent's epic and exclude the agent's own task; passing explicit epic_id/repo_paths disables the epic auto-scoping, but your own task is still excluded. When called from a non-dispatched session, no auto-scoping. Output includes each task's base branch, its url under its own type label — 'PR', 'Issue', 'Security Alert' or 'Link', with the number appended where there is one — and the plan goal, when available.",
         {
             "type": "object",
             "properties": {
@@ -603,7 +603,7 @@ Pass command=null to clear it.",
                     "description": "Absolute path to the repository root (e.g. the task's repo_path)"
                 },
                 "command": {
-                    "type": "string",
+                    "type": ["string", "null"],
                     "description": "Single-line shell command to run for verification. Omit or pass null to clear."
                 }
             },
@@ -741,22 +741,31 @@ async fn handle_tools_call(
 
     let params = params.unwrap_or(Value::Null);
     let tool_name = params.get("name").and_then(Value::as_str).unwrap_or("");
-    let mut args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    // MCP lets a caller omit `arguments`; a missing or null one is "no arguments".
+    let mut args = match params.get("arguments") {
+        None | Some(Value::Null) => json!({}),
+        Some(v) => v.clone(),
+    };
 
     // The name of one of a task's agents is a second name for its id
     // (`AgentNameResolvesToTask`); swap it for the id before any handler
     // parses the arguments. The agent list is read only when a call actually
     // names one.
-    if super::task_refs::holds_name(&args) {
+    let resolution = if super::task_refs::holds_name(&args) {
         let agents = state.db.list_agents().await;
-        if let Err(bad) = super::task_refs::resolve_task_refs(&mut args, &agents) {
-            return JsonRpcResponse::err(id, super::types::NOT_FOUND_CODE, bad.message());
-        }
-    }
+        super::task_refs::resolve_task_refs(&mut args, &agents)
+    } else {
+        Ok(())
+    };
 
     let start = std::time::Instant::now();
     let start_utc = Utc::now();
-    let resp = dispatch_tool(state, id, identity, tool_name, args.clone()).await;
+    // A name that resolves to nothing is a tool failure like any other: it is
+    // recorded below and answered as an `isError` result, not a protocol error.
+    let resp = match resolution {
+        Ok(()) => dispatch_tool(state, id, identity, tool_name, args.clone()).await,
+        Err(bad) => tool_error(id, bad.message()),
+    };
 
     if let CallerIdentity::Task(task_id) = identity {
         let duration_ms = start.elapsed().as_millis() as u64;
@@ -790,7 +799,13 @@ async fn handle_tools_call(
             CallerIdentity::Session => crate::models::UsageActor::Human,
         };
         let db = Arc::clone(&state.db);
-        let tool = tool_name.to_string();
+        // Only registered names are recorded as themselves; a caller-supplied
+        // unknown name would otherwise mint a usage row per distinct string.
+        let tool = if TOOL_NAMES.contains(&tool_name) {
+            tool_name.to_string()
+        } else {
+            "unknown".to_string()
+        };
         let bg_done = state.test_hooks.bg_write_done_tx.clone();
         tokio::spawn(async move {
             crate::service::record_usage_event_logged(
