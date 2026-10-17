@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::models::{completed_at_for_status_transition, Epic, EpicId, Task, TaskStatus};
+use crate::models::{Epic, EpicId, Task, TaskStatus};
 use crate::store::{self, EpicPatch};
 
 use super::{validate_feed_interval, FieldUpdate, ServiceError};
@@ -166,23 +166,11 @@ fn count_progress(tasks: &[&Task]) -> (usize, usize) {
 
 pub struct EpicService {
     pub db: Arc<dyn store::TaskAndEpicStore>,
-    clock: Arc<dyn crate::clock::Clock>,
 }
 
 impl EpicService {
     pub fn new(db: Arc<dyn store::TaskStore>) -> Self {
-        Self {
-            db: db.clone(),
-            clock: Arc::new(crate::clock::SystemClock),
-        }
-    }
-
-    /// Override the clock used for the Done-transition completion stamp.
-    /// Tests inject a `FixedClock` for determinism; mirrors
-    /// `TaskService::with_clock`.
-    pub fn with_clock(mut self, clock: Arc<dyn crate::clock::Clock>) -> Self {
-        self.clock = clock;
-        self
+        Self { db: db.clone() }
     }
 
     /// Materialise the managed feed-epic tree from already-read settings.
@@ -214,31 +202,27 @@ impl EpicService {
             })?;
         }
 
+        // One write: the sort order and feed fields ride in the create row, so
+        // a failure cannot leave a half-configured epic and a retry cannot
+        // duplicate it.
         let epic = self
             .db
-            .create_epic(&params.title, &params.description, params.parent_epic_id)
+            .create_epic_configured(
+                &params.title,
+                &params.description,
+                params.parent_epic_id,
+                &store::EpicBirth {
+                    sort_order: params.sort_order,
+                    feed_command: params.feed_command.as_deref(),
+                    feed_interval_secs: params.feed_interval_secs,
+                },
+            )
             .await?;
 
         // The module's `create_epic` recalculates the parent in the same
         // transaction (a Done parent with a freshly-attached Backlog child
         // regresses right away; store-split.allium X3).
-
-        // The insert above only carries title/description/parent, so anything
-        // else the caller supplied needs a follow-up write.
-        let patch = EpicPatch {
-            sort_order: params.sort_order.map(Some),
-            feed_command: params.feed_command.as_deref().map(Some),
-            feed_interval_secs: params.feed_interval_secs.map(Some),
-            ..EpicPatch::new()
-        };
-        if !patch.has_changes() {
-            return Ok(epic);
-        }
-
-        self.db.patch_epic(epic.id, &patch).await?;
-        // Re-read so the returned Epic reflects the follow-up write rather
-        // than the pre-patch insert result.
-        self.get_epic(epic.id).await
+        Ok(epic)
     }
 
     pub async fn get_epic(&self, epic_id: EpicId) -> Result<Epic, ServiceError> {
@@ -389,19 +373,15 @@ impl EpicService {
         // the request, and the not-found answer.
         let mut patch = Self::base_patch(&params);
 
-        // The prior epic's status, to detect a transition INTO Done for the
-        // completion-stamp rule.
-        if let Some(new_status) = params.status {
-            if let Some(prior_epic) = existing.as_ref() {
-                if let Some(at) = completed_at_for_status_transition(
-                    prior_epic.status,
-                    new_status,
-                    self.clock.now(),
-                ) {
-                    patch = patch.completed_at(Some(at));
-                }
-            }
-        }
+        // A transition into Done is stamped by the module's `patch_epic`, not
+        // here: a stale cached status or the board clock must not decide it.
+        // `base_patch` forwards `params.completed_at` only when the caller
+        // named one (a manual Done reorder), and the module lets that win.
+        let entering_done = params.status == Some(TaskStatus::Done)
+            && params.completed_at.is_none()
+            && existing
+                .as_ref()
+                .is_some_and(|e| e.status != TaskStatus::Done);
 
         match params.parent_epic_id {
             Some(Some(new_parent_id)) => {
@@ -415,13 +395,17 @@ impl EpicService {
             None => {}
         }
 
-        // Captured before the write so the caller can learn what this call
-        // wrote to completed_at (including the Done-transition stamp above)
-        // without a second DB round-trip. See `UpdateEpicResult`.
-        let completed_at_after_write = patch.completed_at;
         // `patch_epic` recalculates the epic and its ancestors, and the parent
         // it left, in the same transaction (store-split.allium X3).
         self.db.patch_epic(epic_id, &patch).await?;
+
+        // What this call wrote to completed_at. A stamp the module chose is
+        // read back rather than computed. See `UpdateEpicResult`.
+        let completed_at_after_write = if entering_done {
+            self.db.get_epic(epic_id).await.map(|e| e.completed_at)
+        } else {
+            patch.completed_at
+        };
 
         Ok(UpdateEpicResult {
             epic_id,

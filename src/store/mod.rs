@@ -525,6 +525,14 @@ pub trait EpicRead: Send + Sync {
     async fn list_all_tasks_with_epic_id(&self) -> Vec<Task>;
 }
 
+/// The optional fields an epic can be created with.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct EpicBirth<'a> {
+    pub sort_order: Option<i64>,
+    pub feed_command: Option<&'a str>,
+    pub feed_interval_secs: Option<i64>,
+}
+
 /// Epic mutations, layered on top of the read surface. The
 /// module's reducers own the epic rollup (store-split M7); reachable only by the service
 /// layer and the sanctioned feed subsystem — non-service consumers hold
@@ -540,6 +548,19 @@ pub trait EpicCrud: EpicRead {
         title: &str,
         description: &str,
         parent_epic_id: Option<EpicId>,
+    ) -> Result<Epic> {
+        self.create_epic_configured(title, description, parent_epic_id, &EpicBirth::default())
+            .await
+    }
+    /// [`EpicCrud::create_epic`] with the fields a caller may set at birth,
+    /// carried in the one create row. A follow-up patch would leave a
+    /// half-configured epic if it failed, and a retry would duplicate it.
+    async fn create_epic_configured(
+        &self,
+        title: &str,
+        description: &str,
+        parent_epic_id: Option<EpicId>,
+        birth: &EpicBirth<'_>,
     ) -> Result<Epic>;
     /// `epics.allium: ProvisionManagedEpics`, decided in the module in one
     /// transaction (store-split M7, X4). `None` is a disabled feed: nothing is

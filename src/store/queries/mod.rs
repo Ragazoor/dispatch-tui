@@ -130,6 +130,11 @@ impl Store {
         } else {
             self.subtree_feed_tasks(epic_id)
         };
+        // Deliberately NOT `require_identity`: a feed sync is best-effort and
+        // must not be refused because this install has never connected to a
+        // shared store. An unsettled identity stamps an honestly empty
+        // `created_by` (`feeds.allium: IngestFeedEmission`); pinned by
+        // `feed_upsert_with_no_settled_identity_still_applies_with_an_empty_created_by`.
         let created_by = self
             .identity
             .user()

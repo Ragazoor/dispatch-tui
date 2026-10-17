@@ -278,19 +278,45 @@ pub fn create_epic_row(
     created_by: &str,
     now: &str,
 ) -> bindings::Epic {
+    create_epic_row_with(
+        title,
+        description,
+        parent_epic_id,
+        None,
+        None,
+        None,
+        created_by,
+        now,
+    )
+}
+
+/// [`create_epic_row`] carrying the optional birth configuration, so an epic
+/// is created fully formed in one write. `feed_command: None` and
+/// `feed_interval_secs: None` are the row's `""` and `0`.
+#[allow(clippy::too_many_arguments)]
+pub fn create_epic_row_with(
+    title: &str,
+    description: &str,
+    parent_epic_id: Option<crate::models::EpicId>,
+    sort_order: Option<i64>,
+    feed_command: Option<&str>,
+    feed_interval_secs: Option<i64>,
+    created_by: &str,
+    now: &str,
+) -> bindings::Epic {
     bindings::Epic {
         id: 0,
         title: title.to_string(),
         description: description.to_string(),
         status: TaskStatus::Backlog.as_str().to_string(),
         plan_path: String::new(),
-        sort_order: None,
+        sort_order,
         created_at: now.to_string(),
         updated_at: now.to_string(),
         auto_dispatch: false,
         parent_epic_id: parent_epic_id.map(|e| e.0).unwrap_or(0),
-        feed_command: String::new(),
-        feed_interval_secs: 0,
+        feed_command: feed_command.unwrap_or_default().to_string(),
+        feed_interval_secs: feed_interval_secs.unwrap_or(0),
         group_by_repo: false,
         feed_role: crate::models::FeedRole::None.as_str().to_string(),
         origin: crate::models::EpicOrigin::Manual.as_str().to_string(),

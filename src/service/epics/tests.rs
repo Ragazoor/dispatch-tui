@@ -379,27 +379,49 @@ async fn update_epic_sets_group_by_repo() {
     assert!(updated.group_by_repo);
 }
 
-fn epic_svc_with_clock(db: Arc<Store>, clock: Arc<dyn crate::clock::Clock>) -> EpicService {
-    EpicService::new(db.clone()).with_clock(clock)
+/// A caller who names `completed_at` (a manual Done reorder) keeps it: the
+/// service forwards it and the module honours it over its own stamp.
+#[tokio::test]
+async fn update_epic_entering_done_keeps_an_explicit_completed_at() {
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let epic = db.create_epic("Test", "", None).await.unwrap();
+    let svc = EpicService::new(db.clone());
+    let named = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+
+    let result = svc
+        .update_epic(UpdateEpicParams {
+            status: Some(TaskStatus::Done),
+            completed_at: Some(Some(named)),
+            ..UpdateEpicParams::for_epic(epic.id)
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        db.get_epic(epic.id).await.unwrap().completed_at,
+        Some(named)
+    );
+    assert_eq!(result.completed_at_after_write, Some(Some(named)));
 }
 
 #[tokio::test]
 async fn update_epic_entering_done_stamps_completed_at() {
     let db = Arc::new(Store::open_in_memory().unwrap());
     let epic = db.create_epic("Test", "", None).await.unwrap();
-    let now = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
-    let clock = Arc::new(crate::clock::FixedClock::new(now));
-    let svc = epic_svc_with_clock(db.clone(), clock);
+    let svc = EpicService::new(db.clone());
 
-    svc.update_epic(UpdateEpicParams {
-        status: Some(TaskStatus::Done),
-        ..UpdateEpicParams::for_epic(epic.id)
-    })
-    .await
-    .unwrap();
+    let result = svc
+        .update_epic(UpdateEpicParams {
+            status: Some(TaskStatus::Done),
+            ..UpdateEpicParams::for_epic(epic.id)
+        })
+        .await
+        .unwrap();
 
+    // The module stamps it (store-split.allium X2 twin); the service reads it back.
     let updated = db.get_epic(epic.id).await.unwrap();
-    assert_eq!(updated.completed_at, Some(now));
+    assert!(updated.completed_at.is_some());
+    assert_eq!(result.completed_at_after_write, Some(updated.completed_at));
     assert_eq!(
         updated.sort_order, None,
         "the status transition must not touch sort_order"

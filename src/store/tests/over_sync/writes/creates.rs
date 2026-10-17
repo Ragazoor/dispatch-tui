@@ -340,6 +340,40 @@ async fn a_new_epic_is_born_in_backlog() {
     assert_eq!(created.status, TaskStatus::Backlog);
 }
 
+/// An epic born with a sort order and a feed is ONE write: the fields ride in
+/// the create row, so a failure cannot leave a half-configured epic behind and
+/// a retry cannot duplicate it.
+#[tokio::test]
+async fn an_epic_born_with_feed_fields_is_one_write() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    let created = writer
+        .create_epic_configured(
+            "Feed",
+            "why",
+            None,
+            &crate::store::EpicBirth {
+                sort_order: Some(42),
+                feed_command: Some("gh api x"),
+                feed_interval_secs: Some(300),
+            },
+        )
+        .await
+        .unwrap();
+
+    let sent = caller.sent();
+    assert_eq!(sent.len(), 1, "expected a single write, got {sent:?}");
+    let Sent::CreateEpic(row) = &sent[0] else {
+        panic!("expected a create");
+    };
+    assert_eq!(row.sort_order, Some(42));
+    assert_eq!(row.feed_command, "gh api x");
+    assert_eq!(row.feed_interval_secs, 300);
+    assert_eq!(created.sort_order, Some(42));
+    assert_eq!(created.feed_command.as_deref(), Some("gh api x"));
+    assert_eq!(created.feed_interval_secs, Some(300));
+}
+
 /// An epic create carries the creator's identity, the same as a task's does —
 /// `core.allium: Epic.created_by`. Unlike a task, an epic has no `owner` field
 /// at all, so this is the ONLY way `sync.allium`'s `own_creations`

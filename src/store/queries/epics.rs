@@ -35,11 +35,12 @@ impl super::super::EpicRead for Store {
 
 #[async_trait::async_trait]
 impl super::super::EpicCrud for Store {
-    async fn create_epic(
+    async fn create_epic_configured(
         &self,
         title: &str,
         description: &str,
         parent_epic_id: Option<EpicId>,
+        birth: &super::super::EpicBirth<'_>,
     ) -> Result<Epic> {
         // `sync.allium: CreatesRequireASettledIdentity` — an epic has no
         // `owner` at all, so `created_by` is the only way `own_creations` can
@@ -49,7 +50,16 @@ impl super::super::EpicCrud for Store {
             .require_identity("there is no name to stamp on a new epic; it was not created")
             .await?;
         let now = self.now();
-        let row = encode::create_epic_row(title, description, parent_epic_id, &identity, &now);
+        let row = encode::create_epic_row_with(
+            title,
+            description,
+            parent_epic_id,
+            birth.sort_order,
+            birth.feed_command,
+            birth.feed_interval_secs,
+            &identity,
+            &now,
+        );
         let id = self.caller.create_epic(row.clone()).await?;
         // THE ROW AS SENT, WITH THE ID FILLED IN, rather than a read-back.
         //
