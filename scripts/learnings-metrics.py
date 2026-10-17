@@ -82,6 +82,11 @@ def opt(v):
     return v[1] if isinstance(v, list) and len(v) == 2 and v[0] == 0 else None
 
 
+def repo_ref_covers(ref, repo):
+    """Mirror of `repo_ref_covers` in src/embeddings.rs: equal, or a parent directory."""
+    return ref == repo or repo.startswith(ref.rstrip("/") + "/")
+
+
 def off_scope_metrics(L, R):
     """Share of repo/epic-scoped retrievals outside the task's scope union.
 
@@ -96,11 +101,15 @@ def off_scope_metrics(L, R):
         l, t = by.get(r["learning_id"]), tasks.get(r["task_id"])
         if not l or not t or l["scope"] not in ("repo", "epic"):
             continue
-        want = t["repo_path"] if l["scope"] == "repo" else str(t["epic_id"])
+        ref = opt(l["scope_ref"])
+        if l["scope"] == "repo":
+            inside = repo_ref_covers(ref, t["repo_path"])
+        else:
+            inside = ref == str(t["epic_id"])
         y, w, _ = datetime.date.fromisoformat(r["retrieved_at"][:10]).isocalendar()
         c = weeks[f"{y}-W{w:02d}"]
         c[0] += 1
-        c[1] += opt(l["scope_ref"]) != want
+        c[1] += not inside
     print("repo/epic-scoped retrievals outside the task's scope, per week (off/rows):")
     for wk in sorted(weeks)[-4:]:
         off, n = weeks[wk][1], weeks[wk][0]
@@ -147,44 +156,41 @@ def mistakes_metrics():
         print(f"  {len(tasks):>4} tasks  {method}: {msg}")
 
 
-LEARNING_TOOLS = ("query_learnings", "record_learning", "rate_learning")
+def user_scope_metrics():
+    """User-scoped injection rows no agent rated helped, per week.
 
-
-def trajectory_events():
-    for f in glob.glob(TRAJ):
-        for line in open(f):
-            try:
-                yield json.loads(line)
-            except ValueError:
-                continue
-
-
-def error_text(e):
-    r = e.get("result")
-    return r["error"] if isinstance(r, dict) and isinstance(r.get("error"), str) else None
-
-
-def mistakes_metrics():
-    weeks = collections.defaultdict(lambda: collections.Counter())
-    classes = collections.defaultdict(set)
-    recent = (datetime.datetime.now() - datetime.timedelta(days=14)).strftime("%Y-%m-%d")
-    for e in trajectory_events():
-        err = error_text(e)
-        if e["method"] in LEARNING_TOOLS:
-            y, w, _ = datetime.date.fromisoformat(e["timestamp"][:10]).isocalendar()
-            c = weeks[f"{y}-W{w:02d}"]
-            c[e["method"]] += 1
-            c[e["method"] + " bad"] += bool(err and err.startswith("Invalid arguments"))
-        if err and e["timestamp"][:10] >= recent:
-            classes[(e["method"], re.sub(r"\d+", "N", err)[:90])].add(e["task_id"])
-    print("learnings-tool calls refused for their arguments, per week (bad/calls):")
-    print("  week      " + "  ".join(f"{t:>16}" for t in LEARNING_TOOLS))
+    Injected entries are rated at wrap-up almost by default, so an injection row without
+    a `helped` verdict is the best "this did not apply here" signal there is. User scope
+    is the only scope that spans repos, so this is where repo-specific facts leak. Read it
+    with the top-30 share: a few entries cause most of it.
+    """
+    L, R, tasks = table("learnings"), table("learning_retrievals"), {t["id"]: t for t in table("tasks")}
+    scope = {r["id"]: r["scope"] for r in L}
+    helped = {
+        (e["task_id"], (e.get("args") or {}).get("learning_id"))
+        for e in trajectory_events()
+        if e["method"] == "rate_learning" and (e.get("args") or {}).get("verdict") == "helped"
+    }
+    weeks = collections.defaultdict(lambda: [0, 0])
+    per_entry = collections.Counter()
+    for r in R:
+        if r["source"] != "prompt_injection" or scope.get(r["learning_id"]) != "user":
+            continue
+        if r["task_id"] not in tasks:
+            continue
+        y, w, _ = datetime.date.fromisoformat(r["retrieved_at"][:10]).isocalendar()
+        c = weeks[f"{y}-W{w:02d}"]
+        c[0] += 1
+        if (r["task_id"], r["learning_id"]) not in helped:
+            c[1] += 1
+            per_entry[r["learning_id"]] += 1
+    print("user-scoped injection rows with no helped verdict, per week (unhelped/rows):")
     for wk in sorted(weeks)[-4:]:
-        c = weeks[wk]
-        print(f"  {wk}  " + "  ".join(f"{c[t + ' bad']:>7}/{c[t]:<8}" for t in LEARNING_TOOLS))
-    print(f"errors hit by the most distinct tasks since {recent}:")
-    for (method, msg), tasks in sorted(classes.items(), key=lambda kv: -len(kv[1]))[:8]:
-        print(f"  {len(tasks):>4} tasks  {method}: {msg}")
+        n, bad = weeks[wk]
+        print(f"  {wk}  {bad:>5}/{n:<5} {100 * bad // n}%")
+    total = sum(per_entry.values())
+    top = sum(v for _, v in per_entry.most_common(30))
+    print(f"  top-30 entries cause {100 * top // max(total, 1)}% of the unhelped rows ({total} rows)")
 
 
 def pr_metrics():
@@ -215,5 +221,6 @@ def pr_metrics():
 if __name__ == "__main__":
     store_metrics()
     mistakes_metrics()
+    user_scope_metrics()
     if "--prs" in sys.argv:
         pr_metrics()

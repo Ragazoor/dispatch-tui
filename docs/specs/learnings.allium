@@ -67,11 +67,21 @@ use "./core.allium" as core
 -- When retrieving learnings for a dispatch (list_learnings_for_dispatch_rag), the
 -- runtime unions all learnings that match any of the task's contextual anchors:
 --
---   scope     scope_ref must equal          included when
+--   scope     scope_ref must match          included when
 --   --------  ----------------------------  --------------------------------
 --   user      null (no qualifier)           always
---   repo      task.repo_path               always (every task has a repo_path)
+--   repo      task.repo_path, or a parent   always (every task has a repo_path)
+--             directory of it
 --   epic      str(task.epic_id)            task belongs to an epic
+--
+-- A repo scope_ref matches a repo_path that equals it, or that lies under it at
+-- a path separator (repo_path starts with scope_ref + "/"; a trailing "/" on
+-- scope_ref is ignored). "/work/terraform/gcp" covers every repo below it and
+-- not "/work/terraform/gcp-old". This lets one entry serve a family of repos
+-- that share a parent directory. Measured 2026-10-17: 86% of the user-scoped
+-- injections no agent rated helped came from 30 entries, mostly Kognic
+-- Terraform facts reaching unrelated repos, because user was the only scope
+-- that spans more than one repo.
 --
 -- task-scoped learnings (scope = task) are excluded from auto-injection into
 -- dispatch prompts. They capture task-specific outcomes and must be
@@ -154,7 +164,8 @@ use "./core.allium" as core
 --   Returns approved learnings for the task's scope union ranked by semantic
 --   similarity to a query text (RAG-style retrieval).
 --   The union is a filter, not a boost: a repo-scoped entry whose scope_ref is
---   not task.repo_path, and an epic-scoped entry whose scope_ref is not
+--   neither task.repo_path nor a parent directory of it (see Scope Model), and
+--   an epic-scoped entry whose scope_ref is not
 --   str(task.epic_id) (or any epic-scoped entry when the task has no epic), is
 --   never returned, however similar it is. Measured 2026-10-16: 47% of repo-scoped
 --   and 41% of epic-scoped query_learnings rows came from outside the union, and
@@ -609,7 +620,7 @@ rule QueryLearningsViaMcp {
         --   upvote_count, and tag_boost = 0.05 * |tags ∩ tag_filter|. These
         --   weights are fixed constants in src/embeddings.rs.
         --
-        -- Retrieval unions: user + repo:<task.repo_path>
+        -- Retrieval unions: user + repo:<task.repo_path or a parent directory of it>
         -- + epic:<task.epic_id> (if task has an epic). Entries outside the union are
         -- excluded before ranking, never merely left unboosted (the same
         -- ranking serves AugmentDispatchPromptWithLearnings). task-scoped learnings are excluded from

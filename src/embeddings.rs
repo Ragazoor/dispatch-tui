@@ -179,11 +179,22 @@ pub fn scope_multiplier_for(
             matches!((scope_ref, task_epic_id), (Some(a), Some(b)) if a == b).then_some(0.30)
         }
         LearningScope::Repo => {
-            matches!((scope_ref, task_repo), (Some(a), Some(b)) if a == b).then_some(0.20)
+            matches!((scope_ref, task_repo), (Some(a), Some(b)) if repo_ref_covers(a, b))
+                .then_some(0.20)
         }
         LearningScope::User => Some(0.10),
         LearningScope::Task => Some(0.0),
     }
+}
+
+/// A repo `scope_ref` covers a repo path that equals it or lies under it at a
+/// path separator, so one entry can serve repos sharing a parent directory.
+fn repo_ref_covers(scope_ref: &str, repo: &str) -> bool {
+    let parent = scope_ref.trim_end_matches('/');
+    repo == scope_ref
+        || repo
+            .strip_prefix(parent)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 pub fn upvote_boost(upvote_count: i64) -> f32 {
@@ -370,6 +381,22 @@ mod tests {
         let high_cos = 0.55f32;
         let high_boost = 0.10f32;
         assert!(low_cos * (1.0 + low_boost) < high_cos * (1.0 + high_boost));
+    }
+
+    /// learnings.allium: Scope Model. A repo scope_ref matches the task's repo_path
+    /// when equal or when it is a parent directory at a path separator.
+    #[test]
+    fn repo_scope_ref_matches_the_repo_or_a_parent_directory() {
+        let m = |scope_ref: &str, repo: &str| {
+            scope_multiplier_for(LearningScope::Repo, Some(scope_ref), None, Some(repo)).is_some()
+        };
+        assert!(m("/w/tf/gcp/a", "/w/tf/gcp/a"));
+        assert!(m("/w/tf/gcp", "/w/tf/gcp/a"));
+        assert!(m("/w/tf/gcp/", "/w/tf/gcp/a"));
+        assert!(!m("/w/tf/gcp", "/w/tf/gcp-old/a"));
+        assert!(!m("/w/tf/gcp", "/w/tf/gcpa"));
+        assert!(!m("/w/tf/gcp/a", "/w/tf/gcp"));
+        assert!(!m("/w/tf/gcp", "/w/other/a"));
     }
 
     /// learnings.allium: QueryLearningsViaMcp. The scope union is a filter: an
