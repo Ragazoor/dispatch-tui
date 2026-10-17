@@ -68,7 +68,7 @@ fastembed = { version = "5", default-features = false, features = [
     "ort-download-binaries-rustls-tls",
     "hf-hub-rustls-tls",
 ] }
-spacetimedb-sdk = "2.10.1"
+spacetimedb-sdk = "2.12"
 # `MemoryReducerCaller` (src/sync/memory_caller.rs) reuses this crate's pure,
 # ctx-free helpers (derive_epic_status, apply_task_patch, stamps_completion,
 # validate_task_ownership) rather than re-deriving their logic natively — see

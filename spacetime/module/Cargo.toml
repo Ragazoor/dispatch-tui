@@ -26,7 +26,7 @@ description = "SpacetimeDB module holding dispatch's shared domain"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-spacetimedb = "2.10"
+spacetimedb = "2.12"
 
 # Formatting only, never a clock. `default-features = false` drops `clock`,
 # which reads the host's wall time and does not exist on wasm; the module's

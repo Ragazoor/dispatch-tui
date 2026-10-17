@@ -93,17 +93,17 @@ jobs:
       # exists to prevent. `spacetime version install`
       # is also what actually pins the version: the CLI this installer
       # fetches is whatever its own bundled updater currently resolves to,
-      # not necessarily 2.10.1, so pinning has to happen as an explicit step
+      # not necessarily 2.12.0, so pinning has to happen as an explicit step
       # rather than an env var read by the installer script. Pinned to the
       # version the rest of the repo is built and checked against (see
-      # Cargo.toml's spacetimedb-sdk = "2.10.1", spacetime/module/Cargo.toml's
-      # spacetimedb = "2.10", and docs/reference.md) rather than "latest", so
+      # Cargo.toml's spacetimedb-sdk = "2.12", spacetime/module/Cargo.toml's
+      # spacetimedb = "2.12", and docs/reference.md) rather than "latest", so
       # a new SpacetimeDB release can't fail this job out from under an
       # unrelated PR.
       - name: Pin and verify the spacetime CLI version
         run: |
-          spacetime version install 2.10.1 --use -y
-          spacetime --version | tee /dev/stderr | grep -q 'spacetimedb tool version 2\.10\.1;'
+          spacetime version install 2.12.0 --use -y
+          spacetime --version | tee /dev/stderr | grep -q 'spacetimedb tool version 2\.12\.0;'
 
       - name: Run tests
         run: cargo test --target x86_64-unknown-linux-gnu
@@ -217,8 +217,8 @@ jobs:
 
       - name: Pin and verify the spacetime CLI version
         run: |
-          spacetime version install 2.10.1 --use -y
-          spacetime --version | tee /dev/stderr | grep -q 'spacetimedb tool version 2\.10\.1;'
+          spacetime version install 2.12.0 --use -y
+          spacetime --version | tee /dev/stderr | grep -q 'spacetimedb tool version 2\.12\.0;'
 
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin --locked --version 0.37.5
