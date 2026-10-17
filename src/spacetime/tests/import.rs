@@ -312,6 +312,29 @@ async fn a_different_task_under_the_same_id_is_refused_and_nothing_is_written() 
     assert!(rows(&target, SharedTable::Epics).await.is_empty());
 }
 
+/// The same refusal for a table with no `created_at`: an agent id taken by a
+/// different agent must not be read as "already there".
+#[tokio::test]
+async fn a_different_agent_under_the_same_id_is_refused_and_nothing_is_written() {
+    let source = snapshot_of_a_populated_board().await;
+    let target = store_for(&source);
+    let mut other = by_id(&rows_of(&source, SharedTable::Agents), 1).clone();
+    other.insert("name".into(), Value::from("not-ada"));
+    target
+        .upsert_rows(SharedTable::Agents, &[other])
+        .await
+        .unwrap();
+
+    let refusal = import_old_store(&target, &source, OPERATOR)
+        .await
+        .unwrap_err()
+        .into_refusal();
+
+    assert_eq!(refusal.reason, RefusalReason::IdConflict);
+    assert!(refusal.detail.contains("agents"), "{}", refusal.detail);
+    assert!(rows(&target, SharedTable::Tasks).await.is_empty());
+}
+
 fn rows_of(snapshot: &Snapshot, table: SharedTable) -> Vec<Row> {
     snapshot.extract(table).unwrap().rows.clone()
 }

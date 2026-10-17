@@ -216,22 +216,34 @@ async fn missing_rows(
     Ok(missing)
 }
 
-/// Same key, different `created_at`: two different things sharing a number.
-/// Only tables that carry the column can say; the rest are taken as the same.
-fn differs_in_creation(table: SharedTable, existing: &Row, incoming: &Row) -> bool {
-    if !matches!(
-        table,
+/// The columns that never change once a row exists, so a difference in any of
+/// them means two different things share one key. Tables with a `created_at`
+/// use it; the others use the fields that name what the row is about.
+fn identity_columns(table: SharedTable) -> &'static [&'static str] {
+    match table {
         SharedTable::Tasks
-            | SharedTable::Epics
-            | SharedTable::Learnings
-            | SharedTable::WorkPackages
-    ) {
-        return false;
+        | SharedTable::Epics
+        | SharedTable::Learnings
+        | SharedTable::WorkPackages => &["created_at"],
+        SharedTable::Agents => &["name", "task_id", "started_at"],
+        SharedTable::UsageEvents => &["recorded_at", "category", "action", "actor"],
+        SharedTable::RetiredFeedItems => &["feed_epic_id", "external_id"],
+        SharedTable::RepoPaths => &["path"],
+        SharedTable::RepoBaseBranches => &["repo_path", "branch"],
+        _ => &[],
     }
-    match (existing.get("created_at"), incoming.get("created_at")) {
-        (Some(a), Some(b)) if !a.is_null() && !b.is_null() => a != b,
-        _ => false,
-    }
+}
+
+/// Same key, different identity columns: two different things sharing a
+/// number. Tables with no such columns, and columns either side leaves null,
+/// cannot say and are taken as the same.
+fn differs_in_creation(table: SharedTable, existing: &Row, incoming: &Row) -> bool {
+    identity_columns(table).iter().any(|column| {
+        match (existing.get(*column), incoming.get(*column)) {
+            (Some(a), Some(b)) if !a.is_null() && !b.is_null() => a != b,
+            _ => false,
+        }
+    })
 }
 
 fn row_key_display(table: SharedTable, row: &Row) -> String {

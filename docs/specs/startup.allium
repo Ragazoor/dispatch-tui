@@ -480,6 +480,12 @@ contract ManagedStoreHost {
     -- through the CLI.
     stop_managed_store: () -> Boolean
 
+    -- Like stop_managed_store, but for the store process this board spawned
+    -- and nothing else: it never looks at the port. Used when a start fails,
+    -- because the port may then be held by another board's healthy store
+    -- (two boards starting together), which is not this board's to stop.
+    stop_spawned_store: () -> Boolean
+
     -- Whether the managed store's own log records, since this board took the
     -- store on (adopted it or started it), that it could not write its commit
     -- log (a full disk, say). A store in that state keeps its process and its
@@ -1585,6 +1591,11 @@ rule StartTheManagedStoreWhenNothingAnswers {
         -- launch aborts (StopTheManagedStoreWhenStartupAborts). Otherwise a
         -- slow store would come up a moment after the abort, detached and
         -- unowned.
+        --
+        -- A FAILED START STOPS ONLY THE CHILD IT SPAWNED (stop_spawned_store),
+        -- and an answer on the port counts as ready only while that child is
+        -- alive. Otherwise the loser of two boards starting together would
+        -- either report success for the other board's store or kill it.
         --
         -- NO RETRY. As with the first connection, a store that did not come up
         -- is better answered now, with its own error attached, than behind a

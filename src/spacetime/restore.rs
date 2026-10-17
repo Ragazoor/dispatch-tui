@@ -2,8 +2,9 @@
 //! afterwards.
 //!
 //! Spec: `docs/specs/spacetime-seed.allium` — the `RestoreSnapshot`,
-//! `BurnIdSequences` and five `Refuse*` rules (`RefuseSeedingANonEmptyStore`
-//! is `SeedSharedStore`'s, in `seed.rs`, not one of these five).
+//! `BurnIdSequences` and five `Refuse*` rules. A restore does not refuse a
+//! non-empty store: it makes the store equal the snapshot, which is what
+//! recovery wants (`RefuseSeedingANonEmptyStore` went with `SeedSharedStore`).
 
 use super::snapshot::{Refusal, RefusalReason, SharedTable, Snapshot, SNAPSHOT_FORMAT_VERSION};
 use super::snapshot_target::SnapshotTarget;

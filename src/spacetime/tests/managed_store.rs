@@ -41,6 +41,7 @@ enum Call {
     DatabaseExists,
     Publish,
     Stop,
+    StopSpawned,
     FailedToSave,
 }
 
@@ -101,10 +102,18 @@ impl ManagedStorePorts for FakePorts {
         self.log(Call::Stop);
         self.stop_in_time
     }
+    fn stop_spawned_store(&self) -> bool {
+        self.log(Call::StopSpawned);
+        self.stop_in_time
+    }
     fn managed_store_failed_to_save(&self) -> bool {
         self.log(Call::FailedToSave);
         self.failed_to_save
     }
+}
+
+fn stops(ports: &FakePorts) -> usize {
+    ports.count(Call::Stop) + ports.count(Call::StopSpawned)
 }
 
 struct FakeHashes {
@@ -390,6 +399,20 @@ fn a_start_abort_says_so_when_the_store_did_not_stop_in_time() {
 }
 
 #[test]
+fn a_stop_that_timed_out_is_reported_again_by_the_exit_that_follows() {
+    let mut fake = FakePorts::new(ManagedAddressState::NothingListening);
+    fake.start = Err("did not serve HTTP within 15s".into());
+    fake.stop_in_time = false;
+    let ports = Arc::new(fake);
+    let hashes = Arc::new(FakeHashes::new(Some(EMBEDDED)));
+    let managed = store(&ports, &hashes);
+
+    assert!(managed.bring_up().is_err());
+    assert!(!managed.stop_on_exit(), "the first stop's result stands");
+    assert_eq!(ports.count(Call::StopSpawned) + ports.count(Call::Stop), 1);
+}
+
+#[test]
 fn a_store_that_does_not_start_aborts_with_its_error_and_is_still_stopped() {
     let mut fake = FakePorts::new(ManagedAddressState::NothingListening);
     fake.start = Err("did not serve HTTP within 15s".into());
@@ -409,9 +432,14 @@ fn a_store_that_does_not_start_aborts_with_its_error_and_is_still_stopped() {
         "held from the moment the start is attempted"
     );
     assert_eq!(
-        ports.count(Call::Stop),
+        ports.count(Call::StopSpawned),
         1,
         "a slow store must not come up unowned"
+    );
+    assert_eq!(
+        ports.count(Call::Stop),
+        0,
+        "a failed start must not signal whatever else holds the port"
     );
     assert_eq!(ports.count(Call::Publish), 0);
 }
@@ -679,13 +707,13 @@ proptest! {
         let managed = store(&ports, &hashes);
 
         match managed.bring_up() {
-            Err(_) if managed.held_by_this_board() => prop_assert_eq!(ports.count(Call::Stop), 1),
-            Err(_) => prop_assert_eq!(ports.count(Call::Stop), 0),
+            Err(_) if managed.held_by_this_board() => prop_assert_eq!(stops(&ports), 1),
+            Err(_) => prop_assert_eq!(stops(&ports), 0),
             Ok(_) => {
                 prop_assert!(managed.held_by_this_board());
-                prop_assert_eq!(ports.count(Call::Stop), 0);
+                prop_assert_eq!(stops(&ports), 0);
                 managed.stop_on_exit();
-                prop_assert_eq!(ports.count(Call::Stop), 1);
+                prop_assert_eq!(stops(&ports), 1);
             }
         }
         prop_assert_eq!(

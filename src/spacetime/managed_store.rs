@@ -42,7 +42,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::process::ProcessRunner;
@@ -297,6 +297,10 @@ pub trait ManagedStorePorts: Send + Sync {
     fn publish_embedded_module(&self) -> ModulePublishOutcome;
     /// True when it stopped within the stop timeout.
     fn stop_managed_store(&self) -> bool;
+    /// Like [`Self::stop_managed_store`] but for the store this board spawned
+    /// only: it never looks at the port, so another board's store there is
+    /// left alone. True when it stopped within the stop timeout.
+    fn stop_spawned_store(&self) -> bool;
     /// Whether the store's log records a failed commit-log write since this
     /// board took the store on. Reads the log only.
     fn managed_store_failed_to_save(&self) -> bool;
@@ -671,11 +675,10 @@ impl ManagedStorePorts for SpacetimeManagedStore {
 
         let deadline = Instant::now() + self.start_timeout;
         loop {
-            if probe_address(&self.layout.address, PROBE_TIMEOUT)
-                == ManagedAddressState::StoreAnswering
-            {
-                return Ok(());
-            }
+            // The answer only counts while our own child is alive: another
+            // board's store on the port would otherwise pass for ours.
+            let answering = probe_address(&self.layout.address, PROBE_TIMEOUT)
+                == ManagedAddressState::StoreAnswering;
             if let Some(child) = lock(&self.child).as_mut() {
                 if let Ok(Some(status)) = child.try_wait() {
                     return Err(format!(
@@ -683,6 +686,9 @@ impl ManagedStorePorts for SpacetimeManagedStore {
                         self.layout.log_path.display()
                     ));
                 }
+            }
+            if answering {
+                return Ok(());
             }
             if Instant::now() >= deadline {
                 return Err(format!(
@@ -739,8 +745,23 @@ impl ManagedStorePorts for SpacetimeManagedStore {
     /// wait -- bounded by the stop timeout -- for all of them to be gone. The
     /// CLI has no stop command.
     fn stop_managed_store(&self) -> bool {
+        self.stop(true)
+    }
+
+    /// SIGTERM to the store this board spawned and to nothing else.
+    fn stop_spawned_store(&self) -> bool {
+        self.stop(false)
+    }
+}
+
+impl SpacetimeManagedStore {
+    fn stop(&self, scan_port: bool) -> bool {
         let mut tracked = lock(&self.child).take();
-        let mut pids = self.listening_pids();
+        let mut pids = if scan_port {
+            self.listening_pids()
+        } else {
+            Vec::new()
+        };
         if let Some(child) = &tracked {
             if !pids.contains(&child.id()) {
                 pids.push(child.id());
@@ -791,9 +812,10 @@ pub struct ManagedStore {
     hashes: Arc<dyn ModuleHashRecord>,
     embedded_hash: String,
     held: AtomicBool,
-    /// Set by the first stop, so an abort inside `bring_up` followed by the
-    /// exit path (or a signal racing a quit) stops the store once.
-    stopped: AtomicBool,
+    /// The first stop's result, so an abort inside `bring_up` followed by the
+    /// exit path (or a signal racing a quit) stops the store once and every
+    /// later call reports that same result.
+    stopped: OnceLock<bool>,
 }
 
 impl ManagedStore {
@@ -807,7 +829,7 @@ impl ManagedStore {
             hashes,
             embedded_hash: embedded_hash.into(),
             held: AtomicBool::new(false),
-            stopped: AtomicBool::new(false),
+            stopped: OnceLock::new(),
         }
     }
 
@@ -826,15 +848,14 @@ impl ManagedStore {
         Self::new(Arc::new(ports), hashes, embedded_module_hash())
     }
 
-    fn stop_once(&self) -> bool {
-        if self.stopped.swap(true, Ordering::SeqCst) {
-            return true;
-        }
-        let in_time = self.ports.stop_managed_store();
-        if !in_time {
-            tracing::warn!("the managed store did not stop within its timeout");
-        }
-        in_time
+    fn stop_once(&self, stop: impl FnOnce() -> bool) -> bool {
+        *self.stopped.get_or_init(|| {
+            let in_time = stop();
+            if !in_time {
+                tracing::warn!("the managed store did not stop within its timeout");
+            }
+            in_time
+        })
     }
 
     /// Probe, adopt or start, check the module, publish if needed. Every abort
@@ -849,7 +870,9 @@ impl ManagedStore {
                 // unowned a moment after the abort.
                 self.held.store(true, Ordering::SeqCst);
                 if let Err(reason) = self.ports.start_managed_store() {
-                    let stopped = self.stop_once();
+                    // Only the child this board just spawned: the port may be
+                    // held by another board's healthy store.
+                    let stopped = self.stop_once(|| self.ports.stop_spawned_store());
                     return Err(StartupAbort::ManagedStoreDidNotStart { reason, stopped });
                 }
             }
@@ -865,7 +888,7 @@ impl ManagedStore {
         {
             let outcome = self.ports.publish_embedded_module();
             if let Err(abort) = after_publish(&outcome) {
-                self.stop_once();
+                self.stop_once(|| self.ports.stop_managed_store());
                 return Err(abort);
             }
             // A hash names only a module the store runs, so it is recorded
@@ -909,7 +932,7 @@ impl ManagedStore {
         if !self.held_by_this_board() {
             return true;
         }
-        self.stop_once()
+        self.stop_once(|| self.ports.stop_managed_store())
     }
 
     /// `StopTheManagedStoreWhenStartupAborts`, for an abort discovered after
