@@ -18,9 +18,10 @@ use crate::store::{RemovedFeedTask, TaskStore};
 
 pub(crate) use cycle::{FeedCycle, FeedCycleOutcome};
 pub(crate) use exec::degraded_partial_emission;
-pub(crate) use exec::{
-    degraded_empty_emission, exec_feed_command, resolve_base_branches, FEED_COMMAND_TIMEOUT,
-};
+pub(crate) use exec::{degraded_empty_emission, exec_feed_command, resolve_base_branches};
+// `pub`: the `verify-feed` CLI (a separate bin crate) runs the same bounded
+// command execution as the runtime.
+pub use exec::{run_feed_command_bounded, FEED_COMMAND_TIMEOUT};
 pub(crate) use guard::FeedSyncGuard;
 pub(crate) use ingest::{ingest_emission, FeedItemWithTarget, SyncMode};
 // `pub`, unlike the `pub(crate)` re-exports above: the `verify-feed` CLI in

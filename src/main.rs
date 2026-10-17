@@ -492,10 +492,16 @@ fn cmd_verify_feed(command: String) -> Result<()> {
     // inside FeedItem's Deserialize impl, so a subscriber installed afterwards
     // would miss it.
     init_stderr_warn_subscriber();
-    let output = std::process::Command::new("sh")
-        .args(["-c", &command])
-        .output()
-        .context("failed to spawn command")?;
+    // The runtime's own bounds: timeout, process-group kill, stdout cap.
+    let output = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()?
+        .block_on(dispatch_tui::feed::run_feed_command_bounded(
+            &command,
+            dispatch_tui::feed::FEED_COMMAND_TIMEOUT,
+        ))
+        .map_err(|e| anyhow::anyhow!("verify-feed: {e}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         eprintln!(
@@ -530,11 +536,13 @@ fn cmd_verify_feed(command: String) -> Result<()> {
     match dispatch_tui::feed::parse_feed_items(&output.stdout) {
         Ok(items) => {
             if items.is_empty() {
+                // The runtime reconciles a clean empty emission, so this is
+                // valid; warn because it can also mean a misconfigured command.
                 eprintln!(
-                    "verify-feed: command produced 0 items \
-                     (empty feed — likely a misconfigured feed command)"
+                    "verify-feed: warning: command produced 0 items \
+                     (empty feed — check the feed command is configured)"
                 );
-                std::process::exit(1);
+                return Ok(());
             }
             println!("{:<52} {:<55} {:<10} STATUS", "EXTERNAL_ID", "TITLE", "TAG");
             for item in &items {

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use tokio::io::AsyncReadExt;
+
 use crate::git::detect_default_branch;
 use crate::process::ProcessRunner;
 
@@ -45,7 +47,7 @@ impl ProcessRunner for AlwaysFailRunner {
 /// before it is killed and reaped. See core.allium config `feed_command_timeout`
 /// and feeds.allium `FeedCommandFailure` bucket 7 / `SerialisedFeedCycle`'s
 /// bounded-cost note.
-pub(crate) const FEED_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+pub const FEED_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Maximum number of characters of a feed command's stderr that are logged and
 /// carried on [`FeedOutput`]. A verbose script must not be able to write
@@ -66,6 +68,106 @@ pub(crate) struct FeedOutput {
     pub(crate) stderr: String,
 }
 
+/// Upper bound on the stdout a feed command may produce. A feed emission is a
+/// JSON array of tasks; anything past this is a runaway, not a feed.
+pub(crate) const MAX_FEED_STDOUT_BYTES: usize = 32 * 1024 * 1024;
+
+/// SIGKILL every process in the group `pid` leads. `pid` is the `sh -c` spawned
+/// with `process_group(0)`, so its pid is the group id. Goes through `kill(1)`
+/// rather than libc to keep the crate free of `unsafe`.
+fn kill_process_group(pid: Option<u32>) {
+    let Some(pid) = pid else { return };
+    let _ = std::process::Command::new("kill")
+        .args(["-KILL", "--", &format!("-{pid}")])
+        .output();
+}
+
+/// Run `cmd` under `sh -c` with the feed bounds: `timeout`, a process-group
+/// kill and a stdout cap. Shared by the runtime ([`exec_feed_command`]) and the
+/// `verify-feed` CLI so both enforce the same limits. Logs nothing; the caller
+/// reports the `Err` text.
+pub async fn run_feed_command_bounded(
+    cmd: &str,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    // Bounded so a command that never exits cannot hold its epic's
+    // feed-cycle claim (feeds.allium: SerialisedFeedCycle) for the life of
+    // the process. `run_bounded` (src/process.rs), the repo's one
+    // kill-on-timeout primitive, only covers SYNCHRONOUS `ProcessRunner`
+    // children spawned via `std::process::Command` and so cannot be reused
+    // here directly — `tokio::time::timeout` is the async counterpart.
+    //
+    // The command runs in its own process group so a timeout (or an oversized
+    // stdout) can kill the whole pipeline: `kill_on_drop` alone reaches only
+    // the `sh -c`, and `gh | jq` children would survive every timeout.
+    let mut child = match tokio::process::Command::new("sh")
+        .args(["-c", cmd])
+        .process_group(0)
+        .kill_on_drop(true)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(err) => return Err(format!("{err:#}")),
+    };
+    let pid = child.id();
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+
+    let run = async {
+        let read_stdout = async {
+            let mut buf = Vec::new();
+            if let Some(pipe) = stdout_pipe {
+                // One byte past the cap tells "exactly at the cap" from "over".
+                pipe.take(MAX_FEED_STDOUT_BYTES as u64 + 1)
+                    .read_to_end(&mut buf)
+                    .await?;
+            }
+            if buf.len() > MAX_FEED_STDOUT_BYTES {
+                // Stop the writer so the other reads reach EOF now rather
+                // than at the timeout.
+                kill_process_group(pid);
+            }
+            Ok::<_, std::io::Error>(buf)
+        };
+        let read_stderr = async {
+            let mut buf = Vec::new();
+            if let Some(pipe) = stderr_pipe {
+                pipe.take(MAX_FEED_STDOUT_BYTES as u64)
+                    .read_to_end(&mut buf)
+                    .await?;
+            }
+            Ok::<_, std::io::Error>(buf)
+        };
+        let (stdout, stderr, status) = tokio::join!(read_stdout, read_stderr, child.wait());
+        Ok::<_, std::io::Error>(std::process::Output {
+            status: status?,
+            stdout: stdout?,
+            stderr: stderr?,
+        })
+    };
+    let result = tokio::time::timeout(timeout, run).await;
+
+    let output = match result {
+        Ok(Ok(o)) => o,
+        Ok(Err(err)) => return Err(format!("{err:#}")),
+        Err(_elapsed) => {
+            kill_process_group(pid);
+            return Err(format!("command timed out after {timeout:?}"));
+        }
+    };
+
+    if output.stdout.len() > MAX_FEED_STDOUT_BYTES {
+        return Err(format!(
+            "command wrote more than {MAX_FEED_STDOUT_BYTES} bytes to stdout"
+        ));
+    }
+
+    Ok(output)
+}
+
 /// Execute the feed shell command.
 ///
 /// On success returns stdout plus any stderr the command wrote while exiting 0,
@@ -81,33 +183,9 @@ pub(crate) async fn exec_feed_command(
     epic_title: &str,
     timeout: Duration,
 ) -> Result<FeedOutput, String> {
-    // Bounded so a command that never exits cannot hold its epic's
-    // feed-cycle claim (feeds.allium: SerialisedFeedCycle) for the life of
-    // the process. `run_bounded` (src/process.rs), the repo's one
-    // kill-on-timeout primitive, only covers SYNCHRONOUS `ProcessRunner`
-    // children spawned via `std::process::Command` and so cannot be reused
-    // here directly — `tokio::time::timeout` + `kill_on_drop(true)` is the
-    // async counterpart: dropping the timed-out future drops the `Child`,
-    // and `kill_on_drop` is what turns that drop into a kill (reaped by
-    // tokio's orphan-reaper task) rather than an orphaned process.
-    let result = tokio::time::timeout(
-        timeout,
-        tokio::process::Command::new("sh")
-            .args(["-c", cmd])
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await;
-
-    let output = match result {
-        Ok(Ok(o)) => o,
-        Ok(Err(err)) => {
-            let msg = format!("{err:#}");
-            tracing::warn!(epic_id, epic_title, "feed: failed to spawn command: {msg}");
-            return Err(msg);
-        }
-        Err(_elapsed) => {
-            let msg = format!("command timed out after {timeout:?}");
+    let output = match run_feed_command_bounded(cmd, timeout).await {
+        Ok(o) => o,
+        Err(msg) => {
             tracing::warn!(epic_id, epic_title, "feed: {msg}");
             return Err(msg);
         }

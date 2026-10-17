@@ -47,15 +47,14 @@ if [[ ${#GH_TOKENS[@]} -eq 0 ]]; then
   exit 1
 fi
 
-# NOTE: per_page=100 is the GitHub REST API maximum per request. Repos with
-# more than 100 open Dependabot alerts will be silently truncated. For full
-# pagination use:
-#   gh api --paginate "/repos/$repo/dependabot/alerts?state=open&per_page=100"
+# Every page is fetched: this feed syncs in Reconcile mode, so a truncated list
+# would delete the tasks (and worktrees) of every alert past the cut. A failure
+# on any page fails the whole repo (pipefail) rather than emitting a partial list.
 
 for repo in "${REPOS[@]}"; do
   result=""
   for token in "${GH_TOKENS[@]}"; do
-    if result=$(GH_TOKEN="$token" gh api "/repos/$repo/dependabot/alerts?state=open&per_page=100" 2>/dev/null); then
+    if result=$(GH_TOKEN="$token" gh api --paginate "/repos/$repo/dependabot/alerts?state=open&per_page=100" 2>/dev/null | jq -s 'add // []'); then
       break
     fi
     result=""

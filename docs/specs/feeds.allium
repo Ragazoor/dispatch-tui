@@ -493,13 +493,15 @@ rule VerifyFeed {
     -- stdout, and validates that it parses as Vec<FeedItem>. On success
     -- it prints a table of (external_id, title, tag, status) and exits 0.
     -- On failure (non-zero exit, parse failure including missing or
-    -- unknown tag) it prints the error to stderr and exits 1.
+    -- unknown tag, or running past feed_command_timeout, after which the
+    -- whole process group is killed) it prints the error to stderr and
+    -- exits 1.
     --
-    -- An emission that PARSES but contains ZERO items is ALSO a failure
-    -- (exit 1), on the assumption that an empty feed indicates a
-    -- misconfigured command (e.g. fetch-cve.sh with no repos configured)
-    -- rather than a genuine absence of work. This is the third failure
-    -- mode alongside the two above.
+    -- An emission that PARSES but contains ZERO items is NOT a failure: the
+    -- runtime treats a clean empty emission as valid (it reconciles), so
+    -- the validator must accept what the runtime accepts. It prints a
+    -- warning to stderr that an empty feed may mean a misconfigured command
+    -- (e.g. fetch-cve.sh with no repos configured) and exits 0.
     --
     -- An item carrying an UNRECOGNISED `signals` value is NOT a failure:
     -- the signal is dropped per the FeedItem.signals contract, the item

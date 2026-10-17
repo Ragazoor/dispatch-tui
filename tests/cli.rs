@@ -443,10 +443,10 @@ fn hook_subagent_unknown_action_is_rejected_by_clap() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn verify_feed_empty_array_fails() {
-    // An empty feed almost always means the command is misconfigured
-    // (e.g. fetch-cve.sh with no repos). Treat it as a failure so the
-    // operator notices, rather than silently passing.
+async fn verify_feed_empty_array_warns_and_succeeds() {
+    // The runtime treats a clean empty emission as valid, so the validator
+    // must too; it still warns, since an empty feed can mean a misconfigured
+    // command (e.g. fetch-cve.sh with no repos).
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
@@ -458,13 +458,13 @@ async fn verify_feed_empty_array_fails() {
         .output()
         .unwrap();
     assert!(
-        !out.status.success(),
-        "Expected failure when feed command returns an empty array"
+        out.status.success(),
+        "Expected success when feed command returns an empty array"
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("0 items") || stderr.contains("empty"),
-        "Expected empty-feed error message, got stderr: {stderr}"
+        "Expected empty-feed warning, got stderr: {stderr}"
     );
 }
 

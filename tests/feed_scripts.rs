@@ -223,3 +223,53 @@ fn fetch_dependabot_reads_release_bot_authors_only_for_the_overlap_check() {
         "fetch-dependabot.sh must never emit the release-please tag"
     );
 }
+
+/// Runs `scripts/fetch-log-warnings.sh` against a log with the given content
+/// and returns (exit status success, stdout, stderr).
+fn run_log_warnings(log: &str) -> (bool, String, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("fetch-log-warnings.sh");
+    std::fs::write(&script, repo_file("scripts/fetch-log-warnings.sh")).unwrap();
+    let log_path = dir.path().join("app.log");
+    std::fs::write(&log_path, log).unwrap();
+    std::fs::write(
+        dir.path().join("log-warnings.conf"),
+        format!("LOG_FILE={}\nREPO_URL=\n", log_path.display()),
+    )
+    .unwrap();
+    let out = std::process::Command::new("bash")
+        .arg(&script)
+        .output()
+        .unwrap();
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// A log with no WARN/ERROR lines is a clean run: `grep` exits 1 on no
+/// match, which under `pipefail` used to fail the whole script.
+#[test]
+fn log_warnings_feed_succeeds_with_an_empty_array_on_a_clean_log() {
+    let (ok, stdout, stderr) =
+        run_log_warnings("2026-10-17T10:00:00Z  INFO dispatch::x: all good\n");
+    assert!(ok, "clean log must exit 0, stderr: {stderr}");
+    assert_eq!(stdout.trim(), "[]");
+}
+
+#[test]
+fn log_warnings_feed_still_emits_items_for_warnings() {
+    let (ok, stdout, stderr) =
+        run_log_warnings("2026-10-17T10:00:00Z  WARN dispatch::x: something odd\n");
+    assert!(ok, "stderr: {stderr}");
+    assert!(stdout.contains("something odd"), "got: {stdout}");
+}
+
+/// The CVE feed syncs in Reconcile mode, so a page-1-only fetch would delete
+/// every task past alert 100.
+#[test]
+fn cve_feed_paginates_dependabot_alerts() {
+    let code = feed_script_code("scripts/fetch-cve.sh");
+    assert!(code.contains("--paginate"), "fetch-cve.sh must paginate");
+}

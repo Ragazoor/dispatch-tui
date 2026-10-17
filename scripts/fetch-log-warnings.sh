@@ -110,7 +110,9 @@ fi
 # 72% of the bytes were sample text for lines that were never quoted. This
 # shape holds flat at a few MB on the same input, and the full re-scan — which
 # is what makes archive-as-suppression work — is kept.
-grep -aE " ($LEVELS) " -- "$LOG_FILE" \
+# grep exits 1 when nothing matches. That is a clean log, not a failure, so only
+# an exit above 1 (a real read error) may fail the pipeline under pipefail.
+{ grep -aE " ($LEVELS) " -- "$LOG_FILE" || [ $? -eq 1 ]; } \
 | awk -v samples="$SAMPLES" '
 {
     gsub(/\t/, " ")

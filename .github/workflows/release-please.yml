@@ -37,6 +37,40 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+  # A release must only ship a commit CI has passed. release-please runs on the
+  # same push as ci.yml, so this waits for that run and fails if it fails.
+  ci-gate:
+    name: CI passed
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ needs.release-please.outputs.sha }}
+    steps:
+      - name: Wait for CI on the release commit
+        run: |
+          for _ in $(seq 1 120); do
+            run=$(gh run list --workflow ci.yml --repo "$GITHUB_REPOSITORY" \
+              --commit "$SHA" --event push --json status,conclusion --limit 1 \
+              --jq '.[0] // empty')
+            if [ -n "$run" ]; then
+              status=$(jq -r .status <<<"$run")
+              conclusion=$(jq -r .conclusion <<<"$run")
+              if [ "$status" = completed ]; then
+                [ "$conclusion" = success ] && exit 0
+                echo "CI for $SHA concluded: $conclusion" >&2
+                exit 1
+              fi
+            fi
+            sleep 30
+          done
+          echo "timed out waiting for CI on $SHA" >&2
+          exit 1
+
   # Lives in this file, not in an `on: release` workflow: a release created
   # with GITHUB_TOKEN triggers no other workflow.
   #
@@ -56,11 +90,12 @@ jobs:
   # it, and the `publish` job publishes it last.
   build:
     name: Build ${{ matrix.target }}
-    needs: release-please
+    needs: [release-please, ci-gate]
     if: >-
       always() &&
       (github.event_name == 'workflow_dispatch' ||
-       needs.release-please.outputs.release_created == 'true')
+       (needs.release-please.outputs.release_created == 'true' &&
+        needs.ci-gate.result == 'success'))
     strategy:
       fail-fast: false
       matrix:

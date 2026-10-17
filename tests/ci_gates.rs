@@ -164,3 +164,42 @@ fn ci_coverage_job_sets_a_test_timeout() {
         "tarpaulin --timeout {secs} is too short for the live-store tests"
     );
 }
+
+/// A release must not ship a commit CI has not passed: the build job has to
+/// depend on a gate that waits for ci.yml on the release SHA.
+#[test]
+fn release_build_waits_for_ci_on_the_release_sha() {
+    let wf = repo_file(".github/workflows/release-please.yml");
+    assert!(
+        wf.contains("gh run list --workflow ci.yml"),
+        "release-please.yml needs a job that reads ci.yml's result for the release SHA"
+    );
+    assert!(
+        wf.contains("needs: [release-please, ci-gate]"),
+        "the build job must depend on the ci-gate job"
+    );
+    assert!(
+        wf.contains("needs.ci-gate.result == 'success'"),
+        "a release build must require the gate to have succeeded"
+    );
+}
+
+/// Third-party actions are pinned by commit SHA, and the coverage tool by
+/// version, so a moved tag or a new release cannot change what CI runs.
+#[test]
+fn ci_workflow_pins_actions_by_sha_and_tarpaulin_by_version() {
+    let ci = repo_file(".github/workflows/ci.yml");
+    for line in ci.lines().filter(|l| l.contains("uses:")) {
+        let spec = line.split("uses:").nth(1).unwrap().trim();
+        let (_, rev) = spec.split_once('@').expect("uses: must name a revision");
+        let rev = rev.split_whitespace().next().unwrap();
+        assert!(
+            rev.len() == 40 && rev.chars().all(|c| c.is_ascii_hexdigit()),
+            "ci.yml action not pinned to a commit SHA: {line}"
+        );
+    }
+    assert!(
+        ci.contains("cargo install cargo-tarpaulin --locked --version"),
+        "cargo-tarpaulin must be installed with --locked --version"
+    );
+}

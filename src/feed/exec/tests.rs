@@ -243,6 +243,53 @@ async fn exec_feed_command_returns_err_when_it_exceeds_the_deadline() {
     );
 }
 
+/// Whether `pid` is still a live process. A zombie counts as gone: the
+/// orphan is reparented to init, which reaps it.
+fn pid_alive(pid: i32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .map(|stat| !stat.contains(") Z "))
+        .unwrap_or(false)
+}
+
+/// `kill_on_drop` kills only the `sh -c` itself; a pipeline's children
+/// (`gh | jq`) must die with it. The command forks a grandchild `sleep`,
+/// records its pid and waits, so the timeout fires with the grandchild alive.
+#[tokio::test]
+async fn exec_feed_command_timeout_kills_grandchildren() {
+    let dir = tempfile::tempdir().unwrap();
+    let pid_file = dir.path().join("pid");
+    let cmd = format!("sleep 300 & echo $! > {}; wait", pid_file.display());
+    exec_feed_command(&cmd, 10, "test-epic", Duration::from_millis(500))
+        .await
+        .expect_err("must time out");
+    let pid: i32 = std::fs::read_to_string(&pid_file)
+        .expect("grandchild pid recorded")
+        .trim()
+        .parse()
+        .unwrap();
+    // SIGKILL was sent before `exec_feed_command` returned; the kernel only
+    // needs to finish tearing the process down, so yield rather than sleep.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if !pid_alive(pid) {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("grandchild {pid} outlived the feed timeout");
+}
+
+/// A runaway command must not buffer unbounded stdout.
+#[tokio::test]
+async fn exec_feed_command_fails_when_stdout_exceeds_the_cap() {
+    let bytes = MAX_FEED_STDOUT_BYTES + 1024;
+    let cmd = format!("head -c {bytes} /dev/zero");
+    let err = exec_feed_command(&cmd, 10, "test-epic", TEST_CMD_TIMEOUT)
+        .await
+        .expect_err("oversized stdout must fail");
+    assert!(err.contains("stdout"), "got: {err}");
+}
+
 // --- degraded_empty_emission (feeds.allium: DegradedEmptyEmission) ---
 
 #[test]

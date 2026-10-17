@@ -13,7 +13,7 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # `wasm32-unknown-unknown` is needed here too, not only by the `gates`
       # job's own module build: `spacetime publish -p <module_path>` (used by
@@ -25,7 +25,7 @@ jobs:
       # the CLI (below) stops these tests from skipping only to have them
       # fail outright on the build step instead.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.96.0
+        uses: dtolnay/rust-toolchain@d86e0fa8f147d6539442c26a61ebba8becc19489 # 1.96.0
         with:
           targets: x86_64-unknown-linux-gnu,wasm32-unknown-unknown
 
@@ -45,7 +45,7 @@ jobs:
       # `spacetimedb` crate tree from cold. `**/Cargo.lock` in the key already
       # covers the module's own lockfile.
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
@@ -112,17 +112,17 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.96.0
+        uses: dtolnay/rust-toolchain@d86e0fa8f147d6539442c26a61ebba8becc19489 # 1.96.0
         with:
           targets: x86_64-unknown-linux-gnu
           components: clippy
 
       # See the Test job's cache step for why ~/.cache/ort.pyke.io is here.
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
@@ -142,16 +142,16 @@ jobs:
     name: Rustdoc links
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.96.0
+        uses: dtolnay/rust-toolchain@d86e0fa8f147d6539442c26a61ebba8becc19489 # 1.96.0
         with:
           targets: x86_64-unknown-linux-gnu
 
       # See the Test job's cache step for why ~/.cache/ort.pyke.io is here.
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
@@ -172,18 +172,18 @@ jobs:
     name: Coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # wasm32 for the same reason as the Test job: the live-store tests below
       # build the module inside `spacetime publish -p`.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.96.0
+        uses: dtolnay/rust-toolchain@d86e0fa8f147d6539442c26a61ebba8becc19489 # 1.96.0
         with:
           targets: x86_64-unknown-linux-gnu,wasm32-unknown-unknown
 
       # See the Test job's cache step for why ~/.cache/ort.pyke.io is here.
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
@@ -221,7 +221,7 @@ jobs:
           spacetime --version | tee /dev/stderr | grep -q 'spacetimedb tool version 2\.10\.1;'
 
       - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked --version 0.37.5
 
       # One tarpaulin run, two outputs. This used to be two invocations — one
       # for the XML artifact, a second `--skip-clean` pass purely to print the
@@ -273,7 +273,7 @@ jobs:
       # exactly the run whose per-file numbers someone needs to read.
       - name: Upload coverage artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: coverage-report
           path: coverage/cobertura.xml
@@ -327,10 +327,10 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.96.0
+        uses: dtolnay/rust-toolchain@d86e0fa8f147d6539442c26a61ebba8becc19489 # 1.96.0
         with:
           components: rustfmt
 
@@ -349,7 +349,7 @@ jobs:
     name: Gate scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Validate path references in docs
         run: ./scripts/check-doc-paths.sh
@@ -404,7 +404,7 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: Cache the SpacetimeDB module build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
