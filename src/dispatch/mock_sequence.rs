@@ -215,6 +215,9 @@ pub(crate) enum Step {
     /// `git pull --no-rebase origin <base>` in the repo root — only when the
     /// origin probe found a remote.
     Pull,
+    /// `git merge --abort` in the repo root — after any pull that failed, since
+    /// a pull that stopped on a conflict leaves the primary checkout mid-merge.
+    PullAbort,
     /// `git rebase <base>` in the worktree.
     Rebase,
     /// `git status --porcelain` in the *worktree*, read mid-rebase to name the
@@ -281,6 +284,7 @@ impl Step {
                 program == "git" && has("status") && has("--porcelain")
             }
             Step::Pull => program == "git" && has("pull"),
+            Step::PullAbort => program == "git" && has("merge") && has("--abort"),
             // The abort is a `rebase` too, and `--abort` is the whole difference.
             Step::Rebase => program == "git" && has("rebase") && !has("--abort"),
             Step::RebaseAbort => program == "git" && has("rebase") && has("--abort"),
@@ -479,6 +483,7 @@ impl Finish {
     fn scope_of(step: Step) -> Scope {
         match step {
             Step::CurrentBranch | Step::DirtyCheck | Step::OriginProbe | Step::Pull => Scope::Repo,
+            Step::PullAbort => Scope::Repo,
             Step::Rebase | Step::ConflictStatus | Step::RebaseAbort => Scope::Worktree,
             // The fast-forward is the repo root's own merge, not the worktree's.
             Step::FastForward => Scope::Repo,
@@ -525,6 +530,7 @@ impl Finish {
             RemoteOutcome::Present => {
                 steps.push(Step::Pull);
                 if !self.pull.is_ok() {
+                    steps.push(Step::PullAbort);
                     return steps;
                 }
             }
@@ -580,7 +586,7 @@ impl Finish {
                 _ => unreachable!("ConflictStatus is only emitted for a conflicting rebase"),
             },
             // Best-effort cleanup whose result `finish_task` discards.
-            Step::RebaseAbort => (None, MockProcessRunner::ok()),
+            Step::RebaseAbort | Step::PullAbort => (None, MockProcessRunner::ok()),
             Step::FastForward => self
                 .fast_forward
                 .response(failure_stderr(Step::FastForward)),
@@ -1465,7 +1471,11 @@ fn failure_stderr(step: Step) -> &'static str {
         // read and the porcelain reads only ever succeed or fail to spawn, and
         // the abort's result `finish_task` discards outright. Left unreachable
         // rather than given invented prose that would read as configuration.
-        Step::CurrentBranch | Step::DirtyCheck | Step::ConflictStatus | Step::RebaseAbort => {
+        Step::CurrentBranch
+        | Step::DirtyCheck
+        | Step::ConflictStatus
+        | Step::RebaseAbort
+        | Step::PullAbort => {
             unreachable!("{step:?} has no failing-exit shape")
         }
         Step::Pull => "fatal: unable to access remote",

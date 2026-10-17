@@ -681,6 +681,10 @@ rule ProvisionDispatch {
         --   * present, and resolving to a DIRECTORY — REUSED. `git worktree
         --     add` is skipped and the agent is launched there. A symlink to a
         --     real directory qualifies; it is followed for this question only.
+        --   * present, resolving to a directory that holds no `.git` — a husk,
+        --     not a worktree — ABORTS the same way. Reusing it would point
+        --     every `git -C` at the PARENT repository, so the reuse fast-forward
+        --     would run in the primary checkout.
         --   * present, and anything else — a dangling symlink, a regular file,
         --     a link to a file, a socket, a device, or a target that cannot be
         --     stat'd at all — ABORTS, on the same terms as the unreadable case
@@ -689,6 +693,12 @@ rule ProvisionDispatch {
         --     is what tells "something else is in the way" apart from "the
         --     target could not be reached". The list is illustrative; the rule
         --     is that only a directory is reusable.
+        --
+        -- Creating the `.worktrees` root also adds `.worktrees/` to the repo's
+        -- `info/exclude` (idempotently), so the worktrees never make the
+        -- primary checkout read as dirty. A fresh add uses `-b`: an existing
+        -- branch is reset (`-B`) only when the start point already contains it,
+        -- and otherwise the dispatch aborts rather than lose unpushed commits.
         --
         -- The abort is what the second question is FOR. Skipping
         -- `git worktree add` is the whole of the reuse path, so a path that

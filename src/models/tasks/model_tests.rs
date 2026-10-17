@@ -791,3 +791,14 @@ fn release_please_task_wrap_up_block_is_review_tag() {
 fn default_base_branch_is_main() {
     assert_eq!(DEFAULT_BASE_BRANCH, "main");
 }
+
+#[test]
+fn slugify_caps_length_on_a_char_boundary_without_trailing_dash() {
+    let long = "word ".repeat(40);
+    let slug = slugify(&long);
+    assert!(slug.chars().count() <= 50, "{slug}");
+    assert!(!slug.ends_with('-'), "{slug}");
+    let cjk = slugify(&"漢".repeat(200));
+    assert!(cjk.len() <= 200, "{} bytes", cjk.len());
+    assert!(!cjk.is_empty());
+}

@@ -175,7 +175,7 @@ pub fn detect_default_branch(repo_path: &str, runner: &dyn ProcessRunner) -> Str
         if output.status.success() {
             let refname = String::from_utf8_lossy(&output.stdout).trim().to_string();
             // e.g. "refs/remotes/origin/master" → "master"
-            if let Some(branch) = refname.rsplit('/').next() {
+            if let Some(branch) = refname.strip_prefix("refs/remotes/origin/") {
                 if !branch.is_empty() {
                     return branch.to_string();
                 }
@@ -269,14 +269,19 @@ pub(crate) fn current_branch(
     repo_path: &str,
     runner: &dyn ProcessRunner,
 ) -> std::result::Result<String, String> {
-    git_in(
+    match git_checked(
         runner,
         repo_path,
         &["rev-parse", "--abbrev-ref", "HEAD"],
         SUBPROCESS_TIMEOUT,
-    )
-    .map(|output| crate::process::stdout_str(&output))
-    .map_err(|e| format!("Failed to check current branch: {e}"))
+    ) {
+        Ok(output) => Ok(crate::process::stdout_str(&output)),
+        Err(GitFailure::Spawn(e)) => Err(format!("Failed to check current branch: {e}")),
+        Err(GitFailure::Exit(output)) => Err(format!(
+            "Failed to check current branch: {}",
+            stderr_str(&output)
+        )),
+    }
 }
 
 /// Every dirty or untracked path in the repo's working tree, empty when clean.
@@ -289,14 +294,19 @@ pub(crate) fn dirty_files(
     repo_path: &str,
     runner: &dyn ProcessRunner,
 ) -> std::result::Result<Vec<String>, String> {
-    git_in(
+    match git_checked(
         runner,
         repo_path,
         &["status", "--porcelain"],
         SUBPROCESS_TIMEOUT,
-    )
-    .map(|output| parse_porcelain_files(&output))
-    .map_err(|e| format!("Failed to check working tree status: {e}"))
+    ) {
+        Ok(output) => Ok(parse_porcelain_files(&output)),
+        Err(GitFailure::Spawn(e)) => Err(format!("Failed to check working tree status: {e}")),
+        Err(GitFailure::Exit(output)) => Err(format!(
+            "Failed to check working tree status: {}",
+            stderr_str(&output)
+        )),
+    }
 }
 
 /// Splits every `git status --porcelain` line into its two-character status

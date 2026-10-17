@@ -68,7 +68,7 @@ pub struct FinishContext<'a> {
     /// [`crate::process::SUBPROCESS_TIMEOUT`] in production; pass a short
     /// duration in tests, mirroring `provision_worktree` in
     /// [`crate::dispatch::worktree`]. Without this seam a test proving the
-    /// bound exists would have to wait out the real 60s bound to go red.
+    /// bound exists would have to wait out the real production bound to go red.
     pub timeout: Duration,
 }
 
@@ -108,7 +108,7 @@ pub fn finish_task_with_abort_runner(
     let worktree = &expand_tilde(worktree);
 
     check_primary_worktree(repo_path, base_branch, runner)?;
-    pull_base(repo_path, base_branch, runner, timeout)?;
+    pull_base(repo_path, base_branch, runner, abort_runner, timeout)?;
     rebase_branch(worktree, branch, base_branch, runner, abort_runner, timeout)?;
     fast_forward_base(repo_path, branch, base_branch, runner, timeout)
 }
@@ -146,11 +146,12 @@ fn check_primary_worktree(
 /// Step 3: pull the latest base branch (skip if no remote configured). A probe
 /// that could not be run at all is *not* "no remote": it means git could not be
 /// spawned, which is a failure worth naming rather than a licence to skip the
-/// pull and rebase anyway.
+/// pull and rebase anyway. A failed pull is aborted, through `abort_runner`.
 fn pull_base(
     repo_path: &str,
     base_branch: &str,
     runner: &dyn ProcessRunner,
+    abort_runner: &dyn ProcessRunner,
     timeout: Duration,
 ) -> FinishResult {
     let has_remote =
@@ -165,11 +166,19 @@ fn pull_base(
         timeout,
     ) {
         Ok(_) => Ok(()),
-        Err(GitFailure::Spawn(e)) => Err(FinishError::Other(format!("Failed to pull: {e}"))),
-        Err(GitFailure::Exit(output)) => Err(FinishError::Other(format!(
-            "Failed to pull {base_branch}: {}",
-            stderr_str(&output)
-        ))),
+        // A pull that stopped on a conflict, or was killed at the bound, leaves
+        // the primary checkout mid-merge; abort it as the rebase path does.
+        Err(GitFailure::Spawn(e)) => {
+            abort(abort_runner, repo_path, "merge", timeout);
+            Err(FinishError::Other(format!("Failed to pull: {e}")))
+        }
+        Err(GitFailure::Exit(output)) => {
+            abort(abort_runner, repo_path, "merge", timeout);
+            Err(FinishError::Other(format!(
+                "Failed to pull {base_branch}: {}",
+                stderr_str(&output)
+            )))
+        }
     }
 }
 

@@ -534,6 +534,7 @@ fn worktree_is_reusable(path: &std::path::Path) -> Result<bool> {
              is not a directory",
             path.display()
         );
+        ensure_is_worktree(path)?;
         return Ok(true);
     }
     // Follows the link deliberately, and only here: this asks about the
@@ -547,7 +548,7 @@ fn worktree_is_reusable(path: &std::path::Path) -> Result<bool> {
     // reached at all (a dangling link, a loop, an unreadable chain), and that
     // error is the whole of what the operator needs.
     match fs::metadata(path) {
-        Ok(metadata) if metadata.is_dir() => Ok(true),
+        Ok(metadata) if metadata.is_dir() => ensure_is_worktree(path).map(|()| true),
         Ok(_) => anyhow::bail!(
             "refusing to dispatch into {}: something is already there, and it \
              is not a directory",
@@ -561,9 +562,52 @@ fn worktree_is_reusable(path: &std::path::Path) -> Result<bool> {
     }
 }
 
+/// A directory is a worktree only when it holds git's `.git` pointer. A husk
+/// without one would make every `git -C <husk>` discover the PARENT repo, so a
+/// merge meant for the worktree would run in the primary checkout.
+fn ensure_is_worktree(path: &std::path::Path) -> Result<()> {
+    anyhow::ensure!(
+        path.join(".git").symlink_metadata().is_ok(),
+        "refusing to dispatch into {}: it is a directory but not a git worktree \
+         (no .git inside). Remove it or run `git worktree prune`, then retry",
+        path.display()
+    );
+    Ok(())
+}
+
+/// Keep `.worktrees/` out of the primary checkout's `git status`.
+///
+/// A target repo's own `.gitignore` need not mention it, and then every
+/// worktree makes `?? .worktrees/` show up, so wrap_up and sync refuse the
+/// checkout as dirty. `info/exclude` is local to the clone and never committed.
+/// Idempotent and best-effort: a repo whose `.git` is not a directory (itself a
+/// linked worktree) is left alone.
+pub(super) fn ensure_worktrees_excluded(repo_path: &str) {
+    const RULE: &str = ".worktrees/";
+    let info = std::path::Path::new(repo_path).join(".git").join("info");
+    if !info.parent().is_some_and(|git_dir| git_dir.is_dir()) {
+        return;
+    }
+    let exclude = info.join("exclude");
+    let existing = fs::read_to_string(&exclude).unwrap_or_default();
+    if existing.lines().any(|line| line.trim() == RULE) {
+        return;
+    }
+    let mut updated = existing;
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str(RULE);
+    updated.push('\n');
+    let written = fs::create_dir_all(&info).and_then(|()| fs::write(&exclude, updated));
+    if let Err(error) = written {
+        tracing::warn!(%error, repo_path, "could not exclude .worktrees/ from git status");
+    }
+}
+
 /// Create the `.worktrees` root and run `git worktree add` for a worktree that
 /// does not exist yet.
-fn add_worktree(
+pub(super) fn add_worktree(
     runner: &dyn ProcessRunner,
     repo_path: &str,
     worktree_path: &str,
@@ -578,6 +622,7 @@ fn add_worktree(
     // an empty `.worktrees/` on every aborted dispatch.
     fs::create_dir_all(worktrees_root(repo_path))
         .context("failed to create .worktrees directory")?;
+    ensure_worktrees_excluded(repo_path);
 
     // A `.git/worktrees/<name>` record whose directory is gone still
     // claims the branch, and makes the add below fail with "'<branch>' is
@@ -593,11 +638,40 @@ fn add_worktree(
     // `StaleAdminRecordIsPrunedBeforeWorktreeAdd` in docs/specs/dispatch.allium.
     prune_worktrees(runner, repo_path, timeout);
 
-    let mut args = vec!["worktree", "add", worktree_path, "-B", worktree_name];
-    if let Some(sp) = start_ref {
-        args.push(sp);
+    // `-b`, not `-B`: `-B` silently resets an existing branch, and one left by
+    // an earlier dispatch may hold commits that were never pushed.
+    let add = |flag: &str| {
+        let mut args = vec!["worktree", "add", worktree_path, flag, worktree_name];
+        if let Some(sp) = start_ref {
+            args.push(sp);
+        }
+        git_checked(runner, repo_path, &args, timeout)
+    };
+    let output = match add("-b") {
+        Ok(_) => return Ok(()),
+        Err(GitFailure::Spawn(e)) => return Err(e.context("failed to run git worktree add")),
+        Err(GitFailure::Exit(output)) => output,
+    };
+    let stderr = stderr_str(&output);
+    if !stderr.contains("already exists") {
+        anyhow::bail!("git worktree add failed: {stderr}");
     }
-    match git_checked(runner, repo_path, &args, timeout) {
+    // The branch exists. Resetting it to the start point loses nothing only
+    // when it is already contained in it; otherwise refuse.
+    let start = start_ref.unwrap_or("HEAD");
+    let contained = git_checked(
+        runner,
+        repo_path,
+        &["merge-base", "--is-ancestor", worktree_name, start],
+        timeout,
+    )
+    .is_ok();
+    anyhow::ensure!(
+        contained,
+        "refusing to reset branch {worktree_name}: it holds unpushed commits \
+         that {start} does not contain. Merge or delete it, then retry"
+    );
+    match add("-B") {
         Ok(_) => Ok(()),
         Err(GitFailure::Spawn(e)) => Err(e.context("failed to run git worktree add")),
         Err(GitFailure::Exit(output)) => {

@@ -4,7 +4,7 @@ use super::*;
 /// path a [`DispatchScript::dispatch`] shape scripts.
 fn provisioned_repo(slug: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".worktrees").join(slug)).unwrap();
+    crate::dispatch::tests::create_worktree_dir(dir.path().join(".worktrees").join(slug));
     dir
 }
 
@@ -250,7 +250,7 @@ async fn dispatch_task_trust_and_dispatch_abandons_on_a_trust_write_failure() {
 async fn dispatch_task_trust_and_quick_dispatch_grants_trust_then_dispatches() {
     let dir = tempfile::tempdir().unwrap();
     let repo_path = dir.path().to_str().unwrap().to_string();
-    std::fs::create_dir_all(dir.path().join(".worktrees/1-quick-one")).unwrap();
+    crate::dispatch::tests::create_worktree_dir(dir.path().join(".worktrees/1-quick-one"));
     let (_claude_dir, claude_json_path) = tempfile_claude_json_path();
     let mut h = harness(
         DispatchScript::dispatch()
@@ -338,7 +338,7 @@ async fn dispatch_task_check_trust_and_dispatch_proceeds_when_already_trusted() 
 async fn dispatch_task_quick_dispatch_proceeds_when_already_trusted() {
     let dir = tempfile::tempdir().unwrap();
     let repo_path = dir.path().to_str().unwrap().to_string();
-    std::fs::create_dir_all(dir.path().join(".worktrees/1-quick-one")).unwrap();
+    crate::dispatch::tests::create_worktree_dir(dir.path().join(".worktrees/1-quick-one"));
     let (_claude_dir, claude_json_path) = tempfile_claude_json_path();
     crate::dispatch::trust_at(&claude_json_path, &repo_path).unwrap();
     let mut h = harness(

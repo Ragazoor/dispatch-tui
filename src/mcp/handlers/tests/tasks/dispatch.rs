@@ -216,12 +216,11 @@ impl ChainFixture {
             .unwrap();
         // Mocked git never creates the worktree directory; pre-create it so
         // provisioning takes the "reuse existing worktree" branch.
-        std::fs::create_dir_all(
+        crate::dispatch::tests::create_worktree_dir(
             std::path::Path::new(&self.repo_path)
                 .join(".worktrees")
                 .join(format!("{}-{}", id.0, crate::models::slugify(title))),
-        )
-        .unwrap();
+        );
         id
     }
 

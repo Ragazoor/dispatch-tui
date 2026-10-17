@@ -61,6 +61,30 @@ fn detect_default_branch_returns_remote_head_when_set() {
 }
 
 #[test]
+fn detect_default_branch_keeps_a_slash_in_the_branch_name() {
+    let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+        b"refs/remotes/origin/release/2024\n",
+    )]);
+    assert_eq!(detect_default_branch("/repo", &runner), "release/2024");
+}
+
+#[test]
+fn dirty_files_fails_closed_when_git_status_exits_non_zero() {
+    let runner =
+        MockProcessRunner::new(vec![MockProcessRunner::fail("fatal: not a git repository")]);
+    let err = dirty_files("/repo", &runner).unwrap_err();
+    assert!(err.contains("not a git repository"), "got: {err}");
+}
+
+#[test]
+fn current_branch_fails_closed_when_git_exits_non_zero() {
+    let runner =
+        MockProcessRunner::new(vec![MockProcessRunner::fail("fatal: not a git repository")]);
+    let err = current_branch("/repo", &runner).unwrap_err();
+    assert!(err.contains("not a git repository"), "got: {err}");
+}
+
+#[test]
 fn detect_default_branch_falls_back_when_origin_head_missing() {
     let runner = MockProcessRunner::new(vec![MockProcessRunner::fail(
         "fatal: ref refs/remotes/origin/HEAD is not a symbolic ref",

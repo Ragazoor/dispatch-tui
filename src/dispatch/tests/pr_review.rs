@@ -704,6 +704,27 @@ fn provision_worktree_aborts_on_a_regular_file_at_the_worktree_path() {
     );
 }
 
+/// A leftover directory with no `.git` inside is not a worktree. Reusing it
+/// would run `git -C <husk> merge` and git would discover the PARENT repo, so
+/// the merge would land in the primary checkout. It refuses instead.
+#[test]
+fn provision_worktree_refuses_a_directory_that_is_not_a_git_worktree() {
+    let (_dir, repo_path) = make_test_repo();
+    let husk = std::path::Path::new(&repo_path).join(".worktrees/42-fix-bug");
+    std::fs::create_dir_all(&husk).unwrap();
+
+    let mock = MockProcessRunner::new(vec![]);
+    let task = make_task(&repo_path);
+    let err = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT).unwrap_err();
+
+    assert!(
+        format!("{err:#}").contains("not a git worktree"),
+        "the message must say why: {err:#}"
+    );
+    assert!(mock.recorded_calls().is_empty(), "nothing may run");
+    assert!(husk.is_dir(), "the husk is left for the operator");
+}
+
 /// The usable half of `PresenceIsNotYetReuse`: a symlink to a REAL directory
 /// is followed for the usability question and reused like any other directory.
 #[test]
@@ -713,6 +734,7 @@ fn provision_worktree_reuses_a_symlink_that_resolves_to_a_directory() {
     std::fs::create_dir_all(&worktrees_root).unwrap();
     let real = dir.path().join("elsewhere");
     std::fs::create_dir_all(&real).unwrap();
+    std::fs::write(real.join(".git"), "gitdir: /nowhere\n").unwrap();
     std::os::unix::fs::symlink(&real, worktrees_root.join("42-fix-bug")).unwrap();
 
     let mock = MockProcessRunner::new(vec![

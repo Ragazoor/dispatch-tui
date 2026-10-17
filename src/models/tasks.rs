@@ -920,11 +920,16 @@ pub struct ResumeResult {
 // slugify
 // ---------------------------------------------------------------------------
 
+/// Longest slug, in chars. 50 chars of CJK is 150 bytes, under the 255-byte
+/// file name limit even with the `<id>-` prefix.
+const SLUG_MAX_CHARS: usize = 50;
+
 /// Convert an arbitrary string into a URL/filesystem-safe slug.
 /// - Lowercased
 /// - Non-alphanumeric characters replaced with `-`
 /// - Consecutive dashes collapsed to one
 /// - Leading/trailing dashes trimmed
+/// - Capped at [`SLUG_MAX_CHARS`] chars
 /// - Returns `"task"` if the result would be empty
 pub fn slugify(input: &str) -> String {
     let lower = input.to_lowercase();
@@ -943,7 +948,9 @@ pub fn slugify(input: &str) -> String {
         }
     }
 
-    // Trim trailing dash
+    // Cap the length (directory names and tmux windows are limited), on a char
+    // boundary: slugs keep non-ASCII letters, so a byte cut could split one.
+    let slug: String = slug.chars().take(SLUG_MAX_CHARS).collect();
     let slug = slug.trim_end_matches('-').to_string();
 
     if slug.is_empty() {

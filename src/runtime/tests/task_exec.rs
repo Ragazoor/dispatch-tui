@@ -90,7 +90,7 @@ async fn finish_task_creation_emits_save_repo_path_and_save_base_branch() {
 async fn exec_quick_dispatch_does_not_record_base_branch_history() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().to_str().unwrap();
-    std::fs::create_dir_all(format!("{repo}/.worktrees/1-quick-task")).unwrap();
+    crate::dispatch::tests::create_worktree_dir(format!("{repo}/.worktrees/1-quick-task"));
 
     let db = test_db().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -221,7 +221,7 @@ async fn exec_dispatch_sends_dispatched_message() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().to_str().unwrap();
     // Create .worktrees/ and fake worktree directory so file writes succeed
-    std::fs::create_dir_all(format!("{repo}/.worktrees/1-test-task")).unwrap();
+    crate::dispatch::tests::create_worktree_dir(format!("{repo}/.worktrees/1-test-task"));
 
     let db = test_db().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -277,7 +277,7 @@ async fn exec_dispatch_sends_dispatched_message() {
 async fn exec_dispatch_agent_routes_research_mode_to_the_research_agent() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().to_str().unwrap();
-    std::fs::create_dir_all(format!("{repo}/.worktrees/1-test-task")).unwrap();
+    crate::dispatch::tests::create_worktree_dir(format!("{repo}/.worktrees/1-test-task"));
 
     let db = test_db().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -1241,7 +1241,7 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().to_str().unwrap();
     // Pre-create worktree directory so provision_worktree skips git worktree add
-    std::fs::create_dir_all(format!("{repo}/.worktrees/1-my-task")).unwrap();
+    crate::dispatch::tests::create_worktree_dir(format!("{repo}/.worktrees/1-my-task"));
 
     let db = test_db().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -1295,7 +1295,7 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
 async fn exec_quick_dispatch_sets_base_branch_to_repo_default() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().to_str().unwrap();
-    std::fs::create_dir_all(format!("{repo}/.worktrees/1-quick-task")).unwrap();
+    crate::dispatch::tests::create_worktree_dir(format!("{repo}/.worktrees/1-quick-task"));
 
     let db = test_db().await;
     let (tx, _rx) = mpsc::unbounded_channel();
@@ -1332,7 +1332,7 @@ async fn exec_quick_dispatch_sets_base_branch_to_repo_default() {
 async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().to_str().unwrap();
-    std::fs::create_dir_all(format!("{repo}/.worktrees/1-epic-task")).unwrap();
+    crate::dispatch::tests::create_worktree_dir(format!("{repo}/.worktrees/1-epic-task"));
 
     let db = test_db().await;
     let epic = db.create_epic("My Epic", "epic desc", None).await.unwrap();

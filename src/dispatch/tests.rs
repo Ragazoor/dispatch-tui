@@ -132,12 +132,20 @@ fn make_test_repo() -> (tempfile::TempDir, String) {
 /// need the same precondition, and a second copy of it would mean the day
 /// `.worktrees/` moves, one of the two silently starts exercising the
 /// fresh-worktree branch instead.
+/// Create a directory that passes for a linked worktree: it holds the `.git`
+/// pointer, which is what separates a worktree from a husk on the reuse path.
+pub(crate) fn create_worktree_dir(path: impl AsRef<std::path::Path>) {
+    let path = path.as_ref();
+    std::fs::create_dir_all(path).unwrap();
+    std::fs::write(path.join(".git"), "gitdir: /nowhere\n").unwrap();
+}
+
 pub(crate) fn make_test_repo_with_worktree(
     slug: &str,
 ) -> (tempfile::TempDir, String, std::path::PathBuf) {
     let (dir, repo_path) = make_test_repo();
     let worktree_dir = dir.path().join(".worktrees").join(slug);
-    std::fs::create_dir_all(&worktree_dir).unwrap();
+    create_worktree_dir(&worktree_dir);
     (dir, repo_path, worktree_dir)
 }
 
@@ -452,6 +460,7 @@ mod pr_status;
 mod process_runner;
 mod reused_branch;
 mod session_requests;
+mod worktree_safety;
 
 // Helpers other test files (here and in `mock_sequence`) reach through this module.
 pub(in crate::dispatch) use finish_and_guards::run_finish;

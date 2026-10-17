@@ -330,10 +330,23 @@ fn push_base(repo: &str, base_branch: &str, runner: &dyn ProcessRunner) -> Resul
     ) {
         Ok(_) => Ok(()),
         Err(GitFailure::Spawn(e)) => Err(SyncError::Other(format!("Failed to run git push: {e}"))),
-        Err(GitFailure::Exit(output)) => Err(SyncError::PushRejected {
-            stderr: stderr_str(&output),
-        }),
+        Err(GitFailure::Exit(output)) => {
+            let stderr = stderr_str(&output);
+            // Only a rejection means origin moved and a retry can succeed;
+            // an auth, network or hook failure would fail the same way again.
+            if is_push_rejection(&stderr) {
+                Err(SyncError::PushRejected { stderr })
+            } else {
+                Err(SyncError::Other(format!("git push failed: {stderr}")))
+            }
+        }
     }
+}
+
+fn is_push_rejection(stderr: &str) -> bool {
+    ["rejected", "non-fast-forward", "fetch first"]
+        .iter()
+        .any(|marker| stderr.contains(marker))
 }
 
 // ---------------------------------------------------------------------------

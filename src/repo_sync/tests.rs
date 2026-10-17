@@ -628,6 +628,21 @@ fn sync_repo_merge_failure_without_unmerged_paths_reports_other() {
 // ---------------------------------------------------------------------
 
 #[test]
+fn sync_repo_push_failure_that_is_not_a_rejection_is_not_retryable() {
+    let mock = MockProcessRunner::new(responses(vec![
+        MockProcessRunner::ok(),                      // fetch
+        MockProcessRunner::ok_with_stdout(b"3\t0\n"), // rev-list: ahead 3
+        MockProcessRunner::fail("fatal: Authentication failed for 'https://example/'"), // push
+    ]));
+    let err = sync_repo(REPO, BASE, &mock).unwrap_err();
+    assert!(
+        matches!(err, SyncError::Other(ref m) if m.contains("Authentication failed")),
+        "an auth failure must carry git's output as Other, got: {err}"
+    );
+    assert!(!err.retryable());
+}
+
+#[test]
 fn sync_repo_push_rejection_is_reported_as_retryable() {
     let mock = MockProcessRunner::new(responses(vec![
         MockProcessRunner::ok(),                                            // fetch
