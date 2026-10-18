@@ -375,6 +375,9 @@ jobs:
       - name: Self-test the no-test-sleep checker
         run: bash ./scripts/test-check-no-test-sleep.sh
 
+      - name: Self-test the commit-message checker
+        run: bash ./scripts/test-check-commit-msg.sh
+
       # fetch-reviews.sh feeds the review board; its self-test drives it against
       # a stub `gh`, so it needs no network and no credentials.
       - name: Self-test the fetch-reviews feed script

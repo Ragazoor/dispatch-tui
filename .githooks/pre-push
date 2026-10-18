@@ -37,6 +37,9 @@ echo "no-test-sleep..."
 echo "no-test-sleep self-test..."
 bash ./scripts/test-check-no-test-sleep.sh
 
+echo "commit-msg self-test..."
+bash ./scripts/test-check-commit-msg.sh
+
 echo "fetch-reviews..."
 bash ./scripts/test-fetch-reviews.sh
 

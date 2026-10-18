@@ -1,0 +1,5 @@
+#!/bin/sh
+set -e
+
+# $1 is the path of the file holding the commit message.
+exec ./scripts/check-commit-msg.sh "$1"

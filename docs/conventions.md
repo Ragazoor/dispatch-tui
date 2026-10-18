@@ -746,6 +746,12 @@ Until that lands, **grep the moved name across four surfaces, not one**: `src/`,
 
 The costliest uncaught shape is the **prose split**: a backticked symbol with its file in parentheses, `` `TmuxWindow::task_id` (src/models/tmux_window.rs) ``. Both halves pass independently — the path exists, the symbol resolves *somewhere* — but nothing ties them together, so moving the symbol leaves the citation stale with both checkers fully green. #4215 hit exactly this: the same rename left three `path::symbol` citations that the checker caught immediately, and two parenthesized-prose ones that survived a clean run of both gates and were only found by review. When you move a symbol, `grep` its bare name across `docs/` — a green hook is not evidence that prose citations followed it.
 
+## Conventional commits
+
+Commit subjects take the form `<type>[(scope)][!]: <description>`, with `<type>` one of `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf`, `ci`, `build`, `style`, `revert`. `!` (or a `BREAKING CHANGE:` footer) marks a breaking change. release-please reads the subjects on `main` to choose the next version and write the changelog, so a subject it cannot parse is a change it ignores.
+
+`.githooks/commit-msg` runs `scripts/check-commit-msg.sh` on every commit once `core.hooksPath` is set (see "First-time setup" in `CLAUDE.md`). Merge commits, `Revert "..."` and `fixup!`/`squash!`/`amend!` subjects pass unchecked. `scripts/test-check-commit-msg.sh` is the checker's self-test and runs in the pre-push hook and in CI. CI does not check the messages themselves: like every hook, `commit-msg` is local and `--no-verify` skips it. Commits made before the hook existed are not rewritten.
+
 ## `main` moves while you work
 
 Other agents land on `main` during your session. Other agents land on it during your session, so

@@ -42,6 +42,8 @@ A fresh clone must point git at the tracked hooks once: `git config core.hooksPa
 
 The pre-push hook (`.githooks/pre-push`) runs `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `check-rustdoc-links.sh` (rustdoc `[`Item`]` links in `src/`; its own CI job), the three doc checkers (`check-doc-paths.sh`, `check-doc-symbols.sh`, `check-doc-headings.sh`, each with a self-test), `check-no-test-sleep.sh`, `test-fetch-reviews.sh` and the spacetime module check. `cargo test` is not part of the hook; run it yourself before pushing. To exempt a deliberate citation, annotate it with `allow-phantom-symbol: <why>` or `allow-phantom-heading: <why>`.
 
+**Commit subjects must be Conventional Commits** (`feat(tui): ...`, `fix: ...`; types `feat fix docs chore refactor test perf ci build style revert`). The tracked `.githooks/commit-msg` hook rejects anything else, so a commit that does not parse fails at `git commit` — write the subject in this form from the start. release-please builds versions and the changelog from them. Merge, `Revert "..."` and `fixup!`/`squash!` subjects are exempt. Details: [docs/conventions.md](docs/conventions.md) ("Conventional commits").
+
 **That `cargo fmt` step has no `--check`.** Pushing reformats your working tree in place, so a push can leave you with unstaged changes you did not make. Run `cargo fmt` yourself before committing and the step becomes a no-op.
 
 **Run the hook's `check-*.sh` scripts before committing, not only before pushing.** A wrap-up rebase lands your commits on `main` without a push, so the hook never runs; two of them (`check-no-test-sleep.sh`, `check-rustdoc-links.sh`) failed on committed `main` on 2026-10-14 this way.
