@@ -312,6 +312,13 @@ surface StandInFidelity {
         -- `spacetime` FAILS the suite instead of skipping it, the same rule
         -- the real-tmux suites follow, so a broken install step cannot
         -- report green with nothing run.
+        --
+        -- The suite stays on a live instance after the reducer tests moved
+        -- to the in-memory store (epic #69634). It compares MemoryReducerCaller
+        -- with the real module through the SDK; the in-memory reducer crate
+        -- cannot link the board crate, and moving the real side in-memory
+        -- would drop the SDK half of the comparison. See docs/testing.md,
+        -- "What stays live".
 }
 
 surface MemoryStoreCallSurface {

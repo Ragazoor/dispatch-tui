@@ -207,6 +207,12 @@ Coverage is not in the pre-push hook; every *other* CI gate is, and `tests/ci_ga
 - **Scheduled reducers.** The in-memory host does not fire timers. A backstop test advances the clock, then calls `expire_dispatch_request` or `expire_session_request` with the timer row as the module's own scheduler, as the live host would. Called as a client, they refuse.
 - **Only `pub` items are reachable** from `tests/`. Go through the reducers.
 - **Not covered.** Publish and automigration stay in `tests/spacetime_module.rs`; the in-memory store does not exercise either. Store-side changes still need the live-store tests whenever a rule moves into a reducer.
+- **What stays live, and why (audit, task #98318).** Every remaining live-instance user needs something the in-memory store cannot give: a published module, the SDK connection, or a real process. None can move.
+  - `tests/spacetime_module/publish.rs`: publish and automigration, the store's own judgement.
+  - `tests/spacetime_module/subscription.rs` and `mutations.rs`: the SDK's row callbacks and subscription delivery (`src/sync/sdk_connector/`). The reducer a test calls is already covered in `spacetime/module-tests/`; what the live test adds is that the row reaches `SharedRows`.
+  - `tests/spacetime_module/data_rules.rs`: a board connecting to a store upgraded by a plain publish. Needs publish plus the SDK handshake.
+  - `src/spacetime/tests/managed_store_real.rs`: starts, adopts and stops a real `spacetime` process.
+  - `tests/memory_caller_conformance.rs` **stays live.** It diffs the hand-written `MemoryReducerCaller` (`src/sync/memory_caller/`) against the real module through `SdkReducerCaller`. `module-tests` is a separate crate that cannot depend on the board crate, so it cannot host the memory caller. Moving the real-module side in-memory would drop the SDK path, and the SDK path is half of what the diff checks. `module-tests` proves the reducers; the conformance suite proves the board's stand-in matches them. Both are needed.
 - **No restamp.** The crate lives outside `spacetime/module/src`, so adding or editing its tests does not change the `module.wasm` source stamp.
 
 Two root-level tests watch the module from outside:
