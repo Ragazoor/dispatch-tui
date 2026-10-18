@@ -375,10 +375,6 @@ fn request_column(instance: &Instance, field: &str, task: i64) -> String {
     )
 }
 
-fn request_count(instance: &Instance) -> String {
-    column(instance, "SELECT COUNT(*) AS n FROM dispatch_requests")
-}
-
 /// `request_dispatch(task_id, requester, origin, mode)`; `mode` "" derives.
 fn request_dispatch(
     instance: &Instance,
@@ -390,15 +386,6 @@ fn request_dispatch(
     instance.call(
         "request_dispatch",
         &[&task.to_string(), requester, origin, mode],
-    )
-}
-
-fn timer_count(instance: &Instance, request: i64) -> String {
-    column(
-        instance,
-        &format!(
-            "SELECT COUNT(*) AS n FROM dispatch_request_timeouts WHERE request_id = {request}"
-        ),
     )
 }
 
@@ -592,8 +579,6 @@ mod mutations;
 mod poll_owner;
 #[path = "spacetime_module/publish.rs"]
 mod publish;
-#[path = "spacetime_module/session_requests.rs"]
-mod session_requests;
 #[path = "spacetime_module/settings.rs"]
 mod settings;
 #[path = "spacetime_module/subscription.rs"]
