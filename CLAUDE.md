@@ -4,7 +4,7 @@ Terminal kanban board for dispatching Claude Code agents into isolated git workt
 
 **Stack**: Rust (2021 edition), ratatui TUI, SpacetimeDB shared store, Axum HTTP/MCP server, tokio async runtime.
 
-**Live data is in SpacetimeDB, not `tasks.db`.** `tasks.db` is a leftover and not authoritative; query tasks through the MCP tools (`list_tasks`, `get_task`). See "Where the live data is" in [docs/reference.md](docs/reference.md).
+**Live data is in SpacetimeDB.** Dispatch has no SQLite; query tasks through the MCP tools (`list_tasks`, `get_task`). See "Where the live data is" in [docs/reference.md](docs/reference.md).
 
 `AGENTS.md` is a symlink to this file. Edit `CLAUDE.md`.
 
