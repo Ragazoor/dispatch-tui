@@ -175,10 +175,12 @@ pub(crate) fn window_target(window: &str, runner: &dyn ProcessRunner) -> Result<
     if is_resolved_target(window) {
         return Ok(window.to_string());
     }
-    // A failed query means there are no windows to match — no server running,
-    // or tmux unreachable. Same soft-fail as `list_all_window_names`, whose
-    // `-a` rationale this shares: works inside or outside tmux, and finds
-    // windows living in a session other than the current one.
+    // "No server running" means there are no windows to match, so the lookup
+    // reads as absent. Any other failure is an error: calling it absent would
+    // send callers down the absent-window path on a transient hiccup. Same
+    // split as `list_all_window_names`, whose `-a` rationale this shares: works
+    // inside or outside tmux, and finds windows living in a session other than
+    // the current one.
     let filter = window_filter(window);
     let output = runner.run(
         "tmux",
@@ -187,6 +189,10 @@ pub(crate) fn window_target(window: &str, runner: &dyn ProcessRunner) -> Result<
     let listing = if output.status.success() {
         String::from_utf8_lossy(&output.stdout).into_owned()
     } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !is_no_server(&stderr) {
+            bail!("tmux list-panes failed: {}", stderr.trim());
+        }
         String::new()
     };
 
@@ -227,11 +233,11 @@ pub(crate) fn window_target(window: &str, runner: &dyn ProcessRunner) -> Result<
 /// nobody has written yet. tmux is happy to let two windows share a name;
 /// the spec says why it must not, and what a duplicate costs.
 ///
-/// A failed existence query reads as "no live window" and the caller proceeds:
-/// a tmux hiccup must not block a dispatch, and the operation itself then
-/// fails anyway if the server really is unreachable.
+/// A failed existence query is an error, not "no live window": proceeding
+/// blind could create the very duplicate this guard exists to stop. "No server
+/// running" is not a failure here — [`has_window`] reads it as an empty list.
 fn refuse_duplicate_window_name(name: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()> {
-    if has_window(name, runner).unwrap_or(false) {
+    if has_window(name, runner)? {
         bail!(
             "a tmux window named '{name}' already exists — a second window under that name \
              would make every operation on it ambiguous, leaving that task unreachable"
@@ -395,10 +401,16 @@ fn list_all(args: &[&str], runner: &dyn ProcessRunner) -> Result<Vec<String>> {
 }
 
 /// Whether tmux's stderr says there is no server to talk to.
+///
+/// `error connecting to <socket> (…)` counts only when the socket is missing or
+/// refusing; a permission failure means a server may be running that we cannot
+/// reach, which must not read as an empty list.
 fn is_no_server(stderr: &str) -> bool {
     stderr.contains("no server running")
         || stderr.contains("no sessions")
-        || stderr.contains("error connecting to")
+        || (stderr.contains("error connecting to")
+            && (stderr.contains("No such file or directory")
+                || stderr.contains("Connection refused")))
         || stderr.contains("failed to connect to server")
 }
 
@@ -957,9 +969,8 @@ pub fn current_window_name(pane: Option<&str>, runner: &dyn ProcessRunner) -> Re
 /// that already has one, so it backstops every caller — including the ones
 /// nobody has written yet.
 ///
-/// A failed existence query reads as "no such window" and the rename proceeds:
-/// same soft-fail default [`list_all_window_names`] gives every other caller,
-/// and the rename itself then fails if the server really is unreachable.
+/// A failed existence query is an error and the rename does not proceed; only
+/// "no server running" reads as "no such window".
 pub fn rename_window(
     target: &str,
     new_name: &TmuxWindow,

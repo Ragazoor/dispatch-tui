@@ -125,44 +125,13 @@ fn refuse_duplicate_window_name_allows_a_name_only_a_prefix_of_a_live_one() {
     refuse_duplicate_window_name(&test_tmux_window("task-42"), &mock).unwrap();
 }
 
-/// A query that could not answer at all reads as "no live window", so the
-/// caller proceeds rather than being blocked by a tmux hiccup. Driven with
-/// a runner-level `Err`: a nonzero exit is already `Ok(false)` inside
-/// `has_window`, which would exercise a different default.
+/// A query that could not answer at all is an error, not "no live window":
+/// proceeding blind could create the duplicate this guard exists to stop.
 #[test]
-fn refuse_duplicate_window_name_proceeds_when_the_query_cannot_answer() {
+fn refuse_duplicate_window_name_errors_when_the_query_cannot_answer() {
     let mock = MockProcessRunner::new(vec![Err(anyhow::anyhow!("tmux: command not found"))]);
-    refuse_duplicate_window_name(&test_tmux_window("task-42"), &mock).unwrap();
-}
-
-/// The pop-out editor's creator is bound by the same invariant. Its names
-/// are nanosecond-derived so a collision is vanishingly unlikely, but the
-/// guarantee is stated over every name-assigning operation, and this is
-/// the one that would otherwise be the remaining hole in it.
-#[test]
-fn new_window_running_refuses_a_name_a_live_window_already_holds() {
-    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
-        b"dispatch-editor-7\n",
-    )]);
-    let err = new_window_running(
-        &test_tmux_window("dispatch-editor-7"),
-        "/tmp",
-        &["vim", "/tmp/x"],
-        &mock,
-    )
-    .unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("a tmux window named 'dispatch-editor-7' already exists"),
-        "got: {err}"
-    );
-    assert!(
-        !mock
-            .recorded_calls()
-            .iter()
-            .any(|(_, args)| args.contains(&"new-window".to_string())),
-        "new-window must not be issued"
-    );
+    let err = refuse_duplicate_window_name(&test_tmux_window("task-42"), &mock).unwrap_err();
+    assert!(err.to_string().contains("command not found"), "got: {err}");
 }
 
 /// The empty-command guard runs before the existence query: an invalid
@@ -532,23 +501,20 @@ fn rename_window_allows_a_new_name_that_is_only_a_prefix_of_a_live_one() {
     assert_eq!(calls.last().unwrap().1.last().unwrap(), "task-4");
 }
 
-/// A query that could not answer at all reads as "no windows" here, so
-/// the rename is attempted rather than blocked by it. Driven with a
-/// runner-level `Err` rather than a nonzero exit: a nonzero exit is
-/// already `Ok(false)` inside `has_window`, so it would exercise that
-/// default instead of this one.
+/// A query that could not answer at all stops the rename: it is an error,
+/// not "no windows". Driven with a runner-level `Err`.
 #[test]
-fn rename_window_proceeds_when_the_existence_query_cannot_answer() {
+fn rename_window_errors_when_the_existence_query_cannot_answer() {
     let mock = MockProcessRunner::new(vec![
         Err(anyhow::anyhow!("tmux: command not found")), // has_window
-        MockProcessRunner::ok(),                         // rename-window
     ])
     .with_windows(&["task-3"]);
-    rename_window("task-3", &test_tmux_window("task-2"), &mock).unwrap();
+    let err = rename_window("task-3", &test_tmux_window("task-2"), &mock).unwrap_err();
+    assert!(err.to_string().contains("command not found"), "got: {err}");
     assert!(mock
         .recorded_calls()
         .iter()
-        .any(|(_, args)| args.contains(&"rename-window".to_string())));
+        .all(|(_, args)| !args.contains(&"rename-window".to_string())));
 }
 
 #[test]

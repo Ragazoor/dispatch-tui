@@ -253,7 +253,11 @@ impl TuiRuntime {
             let mut command: Vec<&str> = editor.iter().map(String::as_str).collect();
             command.push(&temp_str);
             if let Err(e) = tmux::new_window_running(&window, &cwd_str, &command, &*runner) {
-                // Dropping the session removes the tempfile.
+                // No window was created, so a name the failure points at (a
+                // duplicate-name refusal) may belong to a window that was
+                // already there. Disarm the kill; dropping the session still
+                // removes the tempfile.
+                disarm_window_cleanup(&session);
                 clear_session_slot(&session);
                 let _ = msg_tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
                     format!("Failed to open editor window: {e}"),
@@ -502,6 +506,14 @@ fn saved_text(outcome: EditorOutcome) -> Option<String> {
 
 /// Best-effort clear of the session slot. Logs if the mutex is poisoned but
 /// keeps going so the watcher doesn't leave the slot stuck populated.
+/// Stop the session in `slot` killing its tmux window on drop.
+fn disarm_window_cleanup(slot: &Arc<Mutex<Option<EditorSession>>>) {
+    let mut g = slot.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(session) = g.as_mut() {
+        session.cleanup_runner = None;
+    }
+}
+
 fn clear_session_slot(slot: &Arc<Mutex<Option<EditorSession>>>) {
     match slot.lock() {
         Ok(mut g) => {

@@ -591,7 +591,7 @@ fn pane_id_for_window_fails_on_empty_output() {
 
 #[test]
 fn pane_id_for_window_fails_on_nonzero_exit() {
-    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such window")])
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no server running")])
         .with_queued_window_lookup();
     let err = pane_id_for_window(&test_tmux_window("task-42"), &mock).unwrap_err();
     assert!(

@@ -405,6 +405,43 @@ async fn exec_pop_out_editor_reports_a_failed_create_and_frees_the_slot() {
     assert!(rt.editor_session.lock().unwrap().is_none());
 }
 
+/// A create that fails (a duplicate-name refusal, say) never made a window, so
+/// freeing the slot must not issue a kill-window against that name: it could
+/// belong to a window that was already there.
+#[tokio::test]
+async fn a_failed_create_does_not_kill_a_window_by_that_name() {
+    let mock = Arc::new(
+        MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),                     // list-windows (duplicate check)
+            MockProcessRunner::fail("duplicate window"), // new-window
+        ])
+        .with_queued_window_lookup(),
+    );
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let (tx, _rx) = unbounded_channel();
+    let rt = editor_runtime(db, mock.clone(), tx);
+    let mut app = App::new(vec![]);
+
+    rt.exec_pop_out_editor(&mut app, EditKind::Description { is_epic: false })
+        .unwrap()
+        .await
+        .expect("the blocking task must not panic on a stray cleanup call");
+
+    assert!(rt.editor_session.lock().unwrap().is_none());
+    let calls = mock.recorded_calls();
+    assert!(
+        calls
+            .iter()
+            .all(|(_, args)| !args.iter().any(|a| a == "kill-window")),
+        "no kill-window after a failed create, got: {calls:?}"
+    );
+    assert_eq!(
+        calls.len(),
+        2,
+        "only the check and the create, got: {calls:?}"
+    );
+}
+
 async fn seed_task(db: &dyn crate::store::TaskStore) -> models::Task {
     let id = db
         .create_task(CreateTaskRequest {

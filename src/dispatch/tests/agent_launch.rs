@@ -1291,26 +1291,16 @@ fn resume_agent_reattaches_to_live_window_without_creating_duplicate() {
 }
 
 #[test]
-fn resume_agent_has_window_runner_error_falls_back_to_creating_a_window() {
-    // When runner.run() itself returns Err (e.g. tmux not installed), has_window
-    // propagates the error and resume_agent falls back to its pre-existing
-    // unconditional-create behaviour rather than treating the task as reattached.
-    let mock = MockProcessRunner::new(vec![
-        Err(anyhow::anyhow!("tmux not installed")), // has_window → runner error
-        MockProcessRunner::ok(),                    // tmux list-windows (duplicate-name check)
-        MockProcessRunner::ok(),                    // tmux new-window
-        MockProcessRunner::ok(),                    // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(),                    // tmux set-hook
-        MockProcessRunner::ok(),                    // tmux send-keys -l
-        MockProcessRunner::ok(),                    // tmux send-keys Enter
-        MockProcessRunner::ok_with_stdout(COMPANION_PANE_ID), // tmux split-window
-        MockProcessRunner::ok(),                    // tmux set-option (companion role)
-    ]);
+fn resume_agent_has_window_runner_error_aborts_resume() {
+    // When runner.run() itself returns Err (e.g. tmux not installed), the
+    // liveness check cannot answer, so resume_agent errors instead of creating
+    // a window that might duplicate a live one.
+    let mock = MockProcessRunner::new(vec![Err(anyhow::anyhow!("tmux not installed"))]);
 
     let result = resume_agent(TaskId(42), "atlas", "/repo/.worktrees/42-fix-bug", &mock);
     assert!(
-        result.is_ok(),
-        "a has_window query failure should fall back to creating a new window: {result:?}"
+        result.is_err(),
+        "a has_window query failure must abort resume: {result:?}"
     );
 }
 
@@ -2166,5 +2156,23 @@ fn a_launch_without_a_config_passes_no_positional_path() {
     assert!(
         !cmd.contains("--mcp-config") && !cmd.contains("$1"),
         "got: {cmd}"
+    );
+}
+
+#[test]
+fn resume_agent_errors_when_the_liveness_check_fails() {
+    // A failed list-windows is not "no live window": creating one blind could
+    // duplicate a live agent. Nothing after the check may run.
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail(
+        "error connecting to /tmp/tmux-1000/default (Operation not permitted)",
+    )]);
+    let result = resume_agent(TaskId(42), "agent", "/repo/.worktrees/42-fix-bug", &mock);
+    assert!(result.is_err(), "a failed liveness check must abort resume");
+    let calls = mock.recorded_calls();
+    assert!(
+        calls
+            .iter()
+            .all(|(_, args)| !args.iter().any(|a| a == "new-window")),
+        "no window may be created after a failed check, got: {calls:?}"
     );
 }

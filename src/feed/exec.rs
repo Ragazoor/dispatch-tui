@@ -74,12 +74,14 @@ pub(crate) const MAX_FEED_STDOUT_BYTES: usize = 32 * 1024 * 1024;
 
 /// SIGKILL every process in the group `pid` leads. `pid` is the `sh -c` spawned
 /// with `process_group(0)`, so its pid is the group id. Goes through `kill(1)`
-/// rather than libc to keep the crate free of `unsafe`.
-fn kill_process_group(pid: Option<u32>) {
+/// rather than libc to keep the crate free of `unsafe`; the spawn is async so
+/// it never blocks the runtime thread.
+async fn kill_process_group(pid: Option<u32>) {
     let Some(pid) = pid else { return };
-    let _ = std::process::Command::new("kill")
+    let _ = tokio::process::Command::new("kill")
         .args(["-KILL", "--", &format!("-{pid}")])
-        .output();
+        .output()
+        .await;
 }
 
 /// Run `cmd` under `sh -c` with the feed bounds: `timeout`, a process-group
@@ -121,23 +123,41 @@ pub async fn run_feed_command_bounded(
             let mut buf = Vec::new();
             if let Some(pipe) = stdout_pipe {
                 // One byte past the cap tells "exactly at the cap" from "over".
-                pipe.take(MAX_FEED_STDOUT_BYTES as u64 + 1)
+                if let Err(err) = pipe
+                    .take(MAX_FEED_STDOUT_BYTES as u64 + 1)
                     .read_to_end(&mut buf)
-                    .await?;
+                    .await
+                {
+                    // The pipe is dead; stop the writer so the other reads
+                    // reach EOF now rather than at the timeout.
+                    kill_process_group(pid).await;
+                    return Err(err);
+                }
             }
             if buf.len() > MAX_FEED_STDOUT_BYTES {
                 // Stop the writer so the other reads reach EOF now rather
                 // than at the timeout.
-                kill_process_group(pid);
+                kill_process_group(pid).await;
             }
             Ok::<_, std::io::Error>(buf)
         };
         let read_stderr = async {
             let mut buf = Vec::new();
             if let Some(pipe) = stderr_pipe {
-                pipe.take(MAX_FEED_STDOUT_BYTES as u64)
+                // One byte past the cap tells "exactly at the cap" from "over".
+                if let Err(err) = pipe
+                    .take(MAX_FEED_STDOUT_BYTES as u64 + 1)
                     .read_to_end(&mut buf)
-                    .await?;
+                    .await
+                {
+                    kill_process_group(pid).await;
+                    return Err(err);
+                }
+            }
+            if buf.len() > MAX_FEED_STDOUT_BYTES {
+                // Past the cap the pipe is no longer drained; stop the writer
+                // rather than leave it running until the deadline.
+                kill_process_group(pid).await;
             }
             Ok::<_, std::io::Error>(buf)
         };
@@ -154,7 +174,7 @@ pub async fn run_feed_command_bounded(
         Ok(Ok(o)) => o,
         Ok(Err(err)) => return Err(format!("{err:#}")),
         Err(_elapsed) => {
-            kill_process_group(pid);
+            kill_process_group(pid).await;
             return Err(format!("command timed out after {timeout:?}"));
         }
     };
@@ -162,6 +182,12 @@ pub async fn run_feed_command_bounded(
     if output.stdout.len() > MAX_FEED_STDOUT_BYTES {
         return Err(format!(
             "command wrote more than {MAX_FEED_STDOUT_BYTES} bytes to stdout"
+        ));
+    }
+
+    if output.stderr.len() > MAX_FEED_STDOUT_BYTES {
+        return Err(format!(
+            "command wrote more than {MAX_FEED_STDOUT_BYTES} bytes to stderr"
         ));
     }
 

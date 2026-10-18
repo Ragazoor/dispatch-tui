@@ -290,6 +290,22 @@ async fn exec_feed_command_fails_when_stdout_exceeds_the_cap() {
     assert!(err.contains("stdout"), "got: {err}");
 }
 
+/// A command that floods stderr past the cap and then lingers must be killed
+/// at the cap, not left to run until the deadline.
+#[tokio::test]
+async fn exec_feed_command_kills_the_group_when_stderr_exceeds_the_cap() {
+    let bytes = MAX_FEED_STDOUT_BYTES + 1024;
+    let cmd = format!("head -c {bytes} /dev/zero >&2; sleep 30");
+    let err = exec_feed_command(&cmd, 10, "test-epic", Duration::from_secs(20))
+        .await
+        .expect_err("oversized stderr must fail");
+    assert!(err.contains("stderr"), "got: {err}");
+    assert!(
+        !err.contains("timed out"),
+        "must not wait for the deadline: {err}"
+    );
+}
+
 // --- degraded_empty_emission (feeds.allium: DegradedEmptyEmission) ---
 
 #[test]

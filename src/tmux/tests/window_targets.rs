@@ -193,3 +193,43 @@ fn pane_id_of_window_in_session_reports_absent_when_the_session_is_gone() {
         "a session that is not there has no board window to retire"
     );
 }
+
+#[test]
+fn window_target_errors_on_a_transient_lookup_failure() {
+    // A failure that is not "no server" must not read as an absent window,
+    // or callers would take the absent-window path (skip kill, re-dispatch).
+    let mock = queued(vec![MockProcessRunner::fail(
+        "error connecting to /tmp/tmux-1000/default (Operation not permitted)",
+    )]);
+    let err = window_target("task-42", &mock).unwrap_err();
+    assert!(!is_window_absent_error(&err), "got: {err}");
+    assert!(
+        err.to_string().contains("Operation not permitted"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn is_no_server_rejects_permission_failures() {
+    assert!(is_no_server("no server running on /tmp/tmux-1000/default"));
+    assert!(is_no_server(
+        "error connecting to /tmp/tmux-1000/default (No such file or directory)"
+    ));
+    assert!(!is_no_server(
+        "error connecting to /tmp/tmux-1000/default (Permission denied)"
+    ));
+    assert!(!is_no_server(
+        "error connecting to /tmp/tmux-1000/default (Operation not permitted)"
+    ));
+}
+
+#[test]
+fn refuse_duplicate_window_name_surfaces_a_query_failure() {
+    let mock = queued(vec![MockProcessRunner::fail("server exited unexpectedly")]);
+    let name = test_tmux_window("task-42");
+    let err = refuse_duplicate_window_name(&name, &mock).unwrap_err();
+    assert!(
+        err.to_string().contains("server exited unexpectedly"),
+        "got: {err}"
+    );
+}

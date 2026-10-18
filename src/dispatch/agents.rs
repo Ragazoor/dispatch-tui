@@ -772,8 +772,8 @@ pub async fn fetch_verify_command(
 /// returns immediately without creating a second one, sending keys, or
 /// spawning a companion pane — reattachment then happens the normal way, via
 /// the existing "has a window" branch of Space on the next keypress. A query
-/// failure falls back to the unconditional-create behaviour this function
-/// always had, rather than risking a task left with no live agent behind it.
+/// failure is returned as an error: creating blind could duplicate a live
+/// window, and the caller can retry.
 /// See `docs/specs/dispatch.allium`'s `ResumeTask` rule.
 ///
 /// This function is **synchronous** and should be called via
@@ -786,7 +786,9 @@ pub fn resume_agent(
 ) -> Result<ResumeResult> {
     let tmux_window = TmuxWindow::for_task(task_id);
 
-    if tmux::has_window(&tmux_window, runner).unwrap_or(false) {
+    if tmux::has_window(&tmux_window, runner)
+        .context("failed to check for a live tmux window before resume")?
+    {
         tracing::info!(
             task_id = task_id.0,
             %tmux_window,
