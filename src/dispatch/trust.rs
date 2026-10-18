@@ -33,6 +33,10 @@ pub(crate) fn is_trusted_at(claude_json: &Path, repo_path: &str) -> Result<bool>
 
 /// The path-parameterised half of granting trust. See [`is_trusted_at`] for
 /// why this takes the path rather than resolving it itself.
+///
+/// Read-modify-write with no lock: the file is read just before the write, so
+/// the window is only the in-memory edit, but a write Claude Code makes inside
+/// it is still lost. Atomic replacement protects readers, not concurrent writers.
 pub(crate) fn trust_at(claude_json: &Path, repo_path: &str) -> Result<()> {
     let mut json: Value = if claude_json.exists() {
         let content = std::fs::read_to_string(claude_json)

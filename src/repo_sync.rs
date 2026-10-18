@@ -343,8 +343,10 @@ fn push_base(repo: &str, base_branch: &str, runner: &dyn ProcessRunner) -> Resul
     }
 }
 
+/// `[rejected]` is git's stale-ref refusal; `[remote rejected]` is the remote
+/// refusing (a hook, a protected branch) and fails the same way on retry.
 fn is_push_rejection(stderr: &str) -> bool {
-    ["rejected", "non-fast-forward", "fetch first"]
+    ["[rejected]", "non-fast-forward", "fetch first"]
         .iter()
         .any(|marker| stderr.contains(marker))
 }

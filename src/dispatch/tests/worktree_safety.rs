@@ -113,3 +113,47 @@ fn add_worktree_reuses_an_existing_branch_that_is_behind_the_start_point() {
         git(Path::new(&repo), &["rev-parse", "main"])
     );
 }
+
+#[test]
+fn ensure_worktrees_excluded_finds_the_git_dir_of_a_repo_with_a_git_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    let git_dir = dir.path().join("elsewhere.git");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(
+        &repo,
+        &[
+            "init",
+            "-q",
+            "--initial-branch=main",
+            "--separate-git-dir",
+            git_dir.to_str().unwrap(),
+            ".",
+        ],
+    );
+    assert!(repo.join(".git").is_file());
+
+    ensure_worktrees_excluded(repo.to_str().unwrap());
+
+    let exclude = std::fs::read_to_string(git_dir.join("info/exclude")).unwrap();
+    assert!(exclude.lines().any(|l| l == ".worktrees/"), "{exclude}");
+}
+
+#[test]
+fn ensure_worktrees_excluded_keeps_existing_rules_and_leaves_no_temp_file() {
+    let (_dir, repo) = repo();
+    let info = format!("{repo}/.git/info");
+    std::fs::create_dir_all(&info).unwrap();
+    std::fs::write(format!("{info}/exclude"), "*.log").unwrap();
+
+    ensure_worktrees_excluded(&repo);
+
+    let exclude = std::fs::read_to_string(format!("{info}/exclude")).unwrap();
+    assert_eq!(exclude, "*.log\n.worktrees/\n");
+    let leftovers: Vec<_> = std::fs::read_dir(&info)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .filter(|n| n.to_string_lossy().starts_with(".atomic-write."))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}

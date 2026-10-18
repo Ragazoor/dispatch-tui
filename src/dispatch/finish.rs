@@ -168,17 +168,27 @@ fn pull_base(
         Ok(_) => Ok(()),
         // A pull that stopped on a conflict, or was killed at the bound, leaves
         // the primary checkout mid-merge; abort it as the rebase path does.
-        Err(GitFailure::Spawn(e)) => {
-            abort(abort_runner, repo_path, "merge", timeout);
-            Err(FinishError::Other(format!("Failed to pull: {e}")))
-        }
-        Err(GitFailure::Exit(output)) => {
-            abort(abort_runner, repo_path, "merge", timeout);
-            Err(FinishError::Other(format!(
-                "Failed to pull {base_branch}: {}",
-                stderr_str(&output)
+        Err(failure) => {
+            let message = match &failure {
+                GitFailure::Spawn(e) => format!("Failed to pull: {e}"),
+                GitFailure::Exit(output) => {
+                    format!("Failed to pull {base_branch}: {}", stderr_str(output))
+                }
+            };
+            Err(FinishError::Other(with_abort_failure(
+                message,
+                crate::git::abort_merge_if_in_progress(abort_runner, repo_path, timeout),
             )))
         }
+    }
+}
+
+/// `message`, plus the `git merge --abort` failure when there was one: the
+/// checkout is then still mid-merge, which the operator must be told.
+fn with_abort_failure(message: String, abort_failure: Option<String>) -> String {
+    match abort_failure {
+        Some(failure) => format!("{message}; `git merge --abort` also failed: {failure}"),
+        None => message,
     }
 }
 

@@ -661,6 +661,39 @@ fn sync_repo_push_rejection_is_reported_as_retryable() {
 }
 
 #[test]
+fn sync_repo_push_failures_that_a_retry_cannot_fix_are_not_retryable() {
+    for stderr in [
+        "! [remote rejected] main -> main (pre-receive hook declined)",
+        "! [remote rejected] main -> main (protected branch hook declined)",
+        "fatal: unable to access 'https://example/': Could not resolve host: example",
+        "ssh: connect to host example port 22: Connection timed out",
+    ] {
+        let mock = MockProcessRunner::new(responses(vec![
+            MockProcessRunner::ok(),                      // fetch
+            MockProcessRunner::ok_with_stdout(b"3\t0\n"), // rev-list: ahead 3
+            MockProcessRunner::fail(stderr),              // push
+        ]));
+        let err = sync_repo(REPO, BASE, &mock).unwrap_err();
+        assert!(
+            matches!(err, SyncError::Other(ref m) if m.contains(stderr)),
+            "{stderr:?} must be Other, got: {err}"
+        );
+        assert!(!err.retryable(), "{stderr:?} must not be retryable");
+    }
+}
+
+#[test]
+fn sync_repo_push_non_fast_forward_is_retryable() {
+    let mock = MockProcessRunner::new(responses(vec![
+        MockProcessRunner::ok(),
+        MockProcessRunner::ok_with_stdout(b"3\t0\n"),
+        MockProcessRunner::fail("! [rejected] main -> main (non-fast-forward)"),
+    ]));
+    let err = sync_repo(REPO, BASE, &mock).unwrap_err();
+    assert!(err.retryable(), "got: {err}");
+}
+
+#[test]
 fn sync_error_is_retryable_only_for_a_rejected_push() {
     let not_retryable = [
         SyncError::NoRemote,

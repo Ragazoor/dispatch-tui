@@ -72,11 +72,12 @@ value SyncFailureReport {
     detail: String   -- the branch found and expected, the dirty or conflicted
                      -- paths, or git's own message — see ReportRepoSyncFailure
 
-    -- Retrying the same action is the fix for the cause that dominates a
-    -- rejected push: origin moved between the fetch and the push. A credential
-    -- or hook rejection arrives by the same route and will be rejected again —
-    -- git's verbatim output is what tells the operator which they are looking
-    -- at. Every other cause needs the operator to change something first.
+    -- Retrying the same action is the fix for a rejected push: origin moved
+    -- between the fetch and the push, so the next sync fetches and merges the
+    -- new commits first. A push refused for any other reason (credentials,
+    -- network, a declined hook, a protected branch) would be refused again, so
+    -- it is `other`, not push_rejected. Every other cause needs the operator to
+    -- change something first.
     retryable: failure = push_rejected
 }
 
@@ -233,16 +234,17 @@ enum SyncFailure {
                             -- unmerged (unrelated histories, a bad ref) reports
                             -- `other` instead, because an empty conflict list
                             -- would misstate the remedy
-    | push_rejected         -- `git push` exited non-zero, whatever the reason:
-                            -- origin moved between the fetch and the push, or a
-                            -- credential or pre-receive hook refused it. They
-                            -- arrive by the same route, and only git's own
-                            -- output distinguishes them, so that output is
-                            -- reported verbatim. A push that cannot be *run* at
-                            -- all reports `other`
+    | push_rejected         -- `git push` was refused because origin moved
+                            -- between the fetch and the push: git's output
+                            -- names a non-fast-forward rejection. Only this
+                            -- push failure is retryable. Any other failed push
+                            -- (credentials, network, a hook that declined it,
+                            -- a protected branch) or a push that cannot be
+                            -- *run* at all reports `other`
     | other                 -- any other git failure: a failed fetch, a merge
-                            -- that failed with nothing unmerged, or a git
-                            -- command that could not be run at all
+                            -- that failed with nothing unmerged, a push that
+                            -- failed for any reason but origin moving, or a
+                            -- git command that could not be run at all
 }
 
 ------------------------------------------------------------
@@ -531,15 +533,14 @@ rule ReportRepoSyncFailure {
         --   dirty_primary_worktree  -> the checkout path and its dirty files
         --   merge_conflict          -> the conflicted paths, read before the
         --                              merge was aborted
-        --   push_rejected           -> git's own rejection output, verbatim:
-        --                              it is the only thing that says whether
-        --                              origin moved or a credential or hook
-        --                              refused the push
+        --   push_rejected           -> git's own rejection output, verbatim
         --   no_remote               -> the underlying message
         --   other                   -> the underlying message: a failed fetch, a
         --                              merge that failed with nothing unmerged,
-        --                              or the reason a git command could not be
-        --                              run at all
+        --                              git's verbatim output from a push
+        --                              refused for any reason but origin
+        --                              moving, or the reason a git command
+        --                              could not be run at all
         --
         -- In the TUI a failure goes to the error popup, never the status bar:
         -- the status bar is for outcomes the user does not have to act on, and
@@ -549,19 +550,20 @@ rule ReportRepoSyncFailure {
         -- No task or repository state is mutated. Every precondition failure and
         -- every merge conflict — the merge is aborted — leaves the repository
         -- exactly as the operation found it, so retrying once the cause is
-        -- cleared is safe. The one exception is push_rejected on a diverged
-        -- repository: the merge has already been committed locally and stays
-        -- there. That is precisely why retrying the same action is the fix — the
-        -- merge is never repeated, only the publishing step is.
+        -- cleared is safe. The one exception is a failed push on a diverged
+        -- repository (push_rejected, or `other` from the push step): the merge
+        -- has already been committed locally and stays there. That is why
+        -- retrying is safe — the merge is never repeated, only the publishing
+        -- step is.
         --
         -- No refresh follows a failure. RepoSyncFinished is ensured by a
         -- completed SyncRepo, not by a failed one, so RefreshRepoSyncStateAfterSync
         -- does not fire here. For every failure that leaves the repository as it
         -- found it, that is exactly right: there is nothing new to measure. The
-        -- push_rejected-on-a-diverged-repo exception is the one case where the
+        -- failed-push-on-a-diverged-repo exception is the one case where the
         -- displayed measurement goes stale — the local merge commit has moved
         -- ahead beyond the count the indicator still shows — and it is left
-        -- deliberately: the retry the failure asks for measures it anew, and so
+        -- deliberately: the next sync attempt measures it anew, and so
         -- does the next dispatch or rebase in that repository. The indicator
         -- understating ahead is a strictly smaller nag than the truth, never a
         -- claim of cleanliness (UnmeasuredIsNeverPresentedAsClean is untouched:

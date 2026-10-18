@@ -36,6 +36,15 @@ pub fn run_uninstall(yes: bool, purge: bool, data_dir: &Path) -> Result<()> {
     run_uninstall_in(&paths, &StdinConfirmer, yes, purge)
 }
 
+/// A prompt that could not be answered (closed stdin, Ctrl-D) is a decline:
+/// nothing is removed on no answer, and that is not an error of the uninstall.
+fn answer_or_decline(answer: Result<bool>) -> bool {
+    answer.unwrap_or_else(|error| {
+        eprintln!("{error:#}; treating it as no.");
+        false
+    })
+}
+
 /// Injectable core of [`run_uninstall`]. Takes the target filesystem locations
 /// and a confirmer so the removal decision matrix can be exercised
 /// deterministically in tests.
@@ -47,7 +56,7 @@ pub(super) fn run_uninstall_in(
 ) -> Result<()> {
     print_uninstall_plan(paths, purge);
 
-    if !yes && !confirmer.confirm("\nContinue?")? {
+    if !yes && !answer_or_decline(confirmer.confirm("\nContinue?")) {
         println!("Aborted.");
         return Ok(());
     }
@@ -189,7 +198,7 @@ pub(super) fn purge_data_dir(data_dir: &Path, confirmer: &dyn Confirmer) -> Resu
         "\n  This forgets this machine's identity: a later launch mints a new one, and tasks \
          stamped with the old host id stop being this machine's. This cannot be undone."
     );
-    if !confirmer.confirm_dangerous("Remove this machine's host file and log?")? {
+    if !answer_or_decline(confirmer.confirm_dangerous("Remove this machine's host file and log?")) {
         println!("Kept host file and log.");
         return Ok(false);
     }

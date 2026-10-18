@@ -348,12 +348,17 @@ fn provision_worktree_git_add_fails_returns_error() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(),                                // git worktree prune
         MockProcessRunner::fail("fatal: not a git repository"), // git worktree add
+        MockProcessRunner::fail(""), // git rev-parse --verify: no such branch
     ]);
 
     let task = make_task(&repo_path);
     let result = provision_worktree(&task, &mock, &mock, None, SUBPROCESS_TIMEOUT);
 
-    assert!(result.is_err(), "git worktree add failure should propagate");
+    let err = result.expect_err("git worktree add failure should propagate");
+    assert!(
+        format!("{err:#}").contains("not a git repository"),
+        "the add's own error is the one reported: {err:#}"
+    );
 }
 
 #[test]

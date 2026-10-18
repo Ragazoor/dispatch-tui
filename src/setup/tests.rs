@@ -301,6 +301,48 @@ fn run_uninstall_in_statusline_file_missing_is_a_noop() {
     assert!(!paths.statusline_path.exists());
 }
 
+/// A confirmer whose input is closed: every prompt fails as `read_yes_no` does
+/// at end of input.
+struct ClosedInputConfirmer;
+
+impl Confirmer for ClosedInputConfirmer {
+    fn confirm(&self, _prompt: &str) -> Result<bool> {
+        anyhow::bail!("no answer: input closed before the prompt was answered")
+    }
+    fn confirm_dangerous(&self, _prompt: &str) -> Result<bool> {
+        anyhow::bail!("no answer: input closed before the prompt was answered")
+    }
+    fn prompt_text(&self, _prompt: &str, _default: &str) -> Result<String> {
+        anyhow::bail!("no answer: input closed before the prompt was answered")
+    }
+}
+
+#[test]
+fn run_uninstall_in_treats_closed_input_as_a_decline() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = uninstall_layout(dir.path());
+
+    run_uninstall_in(&paths, &ClosedInputConfirmer, false, false).unwrap();
+
+    assert!(
+        paths.plugin_path.exists(),
+        "no answer must leave the plugin dir untouched"
+    );
+}
+
+#[test]
+fn purge_treats_closed_input_as_a_decline_and_keeps_the_host_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = uninstall_layout(dir.path());
+    fs::create_dir_all(&paths.data_dir).unwrap();
+    let host_file = crate::host_file::host_file_path(&paths.data_dir);
+    fs::write(&host_file, "{}").unwrap();
+
+    run_uninstall_in(&paths, &ClosedInputConfirmer, true, true).unwrap();
+
+    assert!(host_file.exists(), "no answer must not forget the identity");
+}
+
 #[test]
 fn run_uninstall_in_aborts_when_declined() {
     let dir = tempfile::tempdir().unwrap();

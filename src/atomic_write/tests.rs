@@ -48,3 +48,20 @@ fn a_failing_writer_leaves_the_original_and_no_temp_file() {
     let entries: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
     assert_eq!(entries.len(), 1, "temp file left behind");
 }
+
+#[test]
+fn a_symlinked_target_stays_a_symlink_and_the_real_file_is_updated() {
+    let dir = tempfile::tempdir().unwrap();
+    let other = dir.path().join("other");
+    std::fs::create_dir(&other).unwrap();
+    let real = other.join("real");
+    let link = dir.path().join("link");
+    std::fs::write(&real, "old").unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    write_bytes(&link, Mode::KeepOr { default: 0o600 }, b"new").unwrap();
+    assert_eq!(std::fs::read_to_string(&real).unwrap(), "new");
+    assert!(std::fs::symlink_metadata(&link)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+}

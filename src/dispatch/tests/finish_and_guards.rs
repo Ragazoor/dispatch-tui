@@ -67,6 +67,26 @@ fn finish_task_rebase_conflict() {
 }
 
 #[test]
+fn finish_task_pull_failure_without_a_merge_in_progress_does_not_abort() {
+    let (calls, result) = run_finish(&DispatchScript::finish().pull_fails_leaving_no_merge());
+    assert!(matches!(result.unwrap_err(), FinishError::Other(_)));
+    assert!(
+        !calls.iter().any(|c| c.1.contains(&"--abort".to_string())),
+        "no merge was in progress, so there is nothing to abort: {calls:?}"
+    );
+}
+
+#[test]
+fn finish_task_reports_a_failed_merge_abort() {
+    let (_calls, result) = run_finish(&DispatchScript::finish().pull_fails_and_merge_abort_fails());
+    let message = result.unwrap_err().to_string();
+    assert!(
+        message.contains("merge --abort"),
+        "the failed abort must be named: {message}"
+    );
+}
+
+#[test]
 fn finish_task_pull_fails() {
     let (_calls, result) = run_finish(&DispatchScript::finish().pull_fails());
     assert!(matches!(result.unwrap_err(), FinishError::Other(_)));

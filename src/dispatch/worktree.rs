@@ -575,19 +575,33 @@ fn ensure_is_worktree(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// The directory holding `info/exclude` for the repo at `repo`: `.git` itself,
+/// or where a `.git` file points (`gitdir:`, then its `commondir` when it is a
+/// linked worktree's admin dir). Read from disk so no process runs.
+fn git_common_dir(repo: &std::path::Path) -> Option<std::path::PathBuf> {
+    let dot_git = repo.join(".git");
+    if dot_git.is_dir() {
+        return Some(dot_git);
+    }
+    let git_dir = crate::worktree_admin::worktree_admin_dir(&repo.to_string_lossy())?;
+    match fs::read_to_string(git_dir.join("commondir")) {
+        Ok(common) => Some(git_dir.join(common.trim())),
+        Err(_) => Some(git_dir),
+    }
+}
+
 /// Keep `.worktrees/` out of the primary checkout's `git status`.
 ///
 /// A target repo's own `.gitignore` need not mention it, and then every
 /// worktree makes `?? .worktrees/` show up, so wrap_up and sync refuse the
 /// checkout as dirty. `info/exclude` is local to the clone and never committed.
-/// Idempotent and best-effort: a repo whose `.git` is not a directory (itself a
-/// linked worktree) is left alone.
+/// Idempotent and best-effort.
 pub(super) fn ensure_worktrees_excluded(repo_path: &str) {
     const RULE: &str = ".worktrees/";
-    let info = std::path::Path::new(repo_path).join(".git").join("info");
-    if !info.parent().is_some_and(|git_dir| git_dir.is_dir()) {
+    let Some(common_dir) = git_common_dir(std::path::Path::new(repo_path)) else {
         return;
-    }
+    };
+    let info = common_dir.join("info");
     let exclude = info.join("exclude");
     let existing = fs::read_to_string(&exclude).unwrap_or_default();
     if existing.lines().any(|line| line.trim() == RULE) {
@@ -599,7 +613,15 @@ pub(super) fn ensure_worktrees_excluded(repo_path: &str) {
     }
     updated.push_str(RULE);
     updated.push('\n');
-    let written = fs::create_dir_all(&info).and_then(|()| fs::write(&exclude, updated));
+    let written = fs::create_dir_all(&info)
+        .map_err(anyhow::Error::from)
+        .and_then(|()| {
+            crate::atomic_write::write_bytes(
+                &exclude,
+                crate::atomic_write::Mode::KeepOr { default: 0o644 },
+                updated.as_bytes(),
+            )
+        });
     if let Err(error) = written {
         tracing::warn!(%error, repo_path, "could not exclude .worktrees/ from git status");
     }
@@ -638,8 +660,6 @@ pub(super) fn add_worktree(
     // `StaleAdminRecordIsPrunedBeforeWorktreeAdd` in docs/specs/dispatch.allium.
     prune_worktrees(runner, repo_path, timeout);
 
-    // `-b`, not `-B`: `-B` silently resets an existing branch, and one left by
-    // an earlier dispatch may hold commits that were never pushed.
     let add = |flag: &str| {
         let mut args = vec!["worktree", "add", worktree_path, flag, worktree_name];
         if let Some(sp) = start_ref {
@@ -647,17 +667,28 @@ pub(super) fn add_worktree(
         }
         git_checked(runner, repo_path, &args, timeout)
     };
+    // `-b`, not `-B`: `-B` silently resets an existing branch, and one left by
+    // an earlier dispatch may hold commits that were never pushed.
     let output = match add("-b") {
         Ok(_) => return Ok(()),
         Err(GitFailure::Spawn(e)) => return Err(e.context("failed to run git worktree add")),
         Err(GitFailure::Exit(output)) => output,
     };
-    let stderr = stderr_str(&output);
-    if !stderr.contains("already exists") {
-        anyhow::bail!("git worktree add failed: {stderr}");
+    // Ask git whether the branch exists rather than parsing the failure
+    // message, which is localised.
+    let branch_ref = format!("refs/heads/{worktree_name}");
+    let branch_exists = git_checked(
+        runner,
+        repo_path,
+        &["rev-parse", "--verify", "--quiet", &branch_ref],
+        timeout,
+    )
+    .is_ok();
+    if !branch_exists {
+        anyhow::bail!("git worktree add failed: {}", stderr_str(&output));
     }
-    // The branch exists. Resetting it to the start point loses nothing only
-    // when it is already contained in it; otherwise refuse.
+    // Resetting it to the start point loses nothing only when it is already
+    // contained in it; otherwise refuse.
     let start = start_ref.unwrap_or("HEAD");
     let contained = git_checked(
         runner,

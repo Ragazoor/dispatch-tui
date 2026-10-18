@@ -132,6 +132,31 @@ pub(crate) fn abort(runner: &dyn ProcessRunner, dir: &str, operation: &str, time
     let _ = git_in(runner, dir, &[operation, "--abort"], timeout);
 }
 
+/// `git merge --abort`, but only when a merge is in progress (`MERGE_HEAD`
+/// exists): a pull that failed on auth or network left nothing to abort, and
+/// blindly aborting turns that into a second, misleading failure.
+///
+/// Returns a description of the abort's failure, if it ran and failed, for the
+/// caller to report beside the error that made the abort necessary.
+pub(crate) fn abort_merge_if_in_progress(
+    runner: &dyn ProcessRunner,
+    dir: &str,
+    timeout: Duration,
+) -> Option<String> {
+    // `--quiet` makes a missing ref a silent non-zero exit, so any failure of
+    // the probe reads as "no merge in progress".
+    git_checked(
+        runner,
+        dir,
+        &["rev-parse", "--quiet", "--verify", "MERGE_HEAD"],
+        timeout,
+    )
+    .ok()?;
+    git_checked(runner, dir, &["merge", "--abort"], timeout)
+        .err()
+        .map(|failure| failure.detail())
+}
+
 /// Abort a `rebase` or `merge` that stopped on a conflict, returning the
 /// conflicted paths.
 ///

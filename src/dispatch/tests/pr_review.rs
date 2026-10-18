@@ -1436,7 +1436,10 @@ fn dispatch_fails_fast_if_git_fails() {
     let script = DispatchScript::dispatch()
         .fresh_worktree()
         .fails_at(Step::WorktreeAdd);
-    let mock = script.runner();
+    // After a failed add, one `rev-parse --verify` asks whether the branch exists.
+    let mut responses = script.responses();
+    responses.push((None, MockProcessRunner::fail("")));
+    let mock = MockProcessRunner::new_with_delays(responses);
 
     let task = make_task(&repo_path);
     let result = dispatch_agent(
@@ -1451,9 +1454,9 @@ fn dispatch_fails_fast_if_git_fails() {
     let calls = mock.recorded_calls();
     assert_eq!(
         calls.len(),
-        4,
-        "only git fetch + rev-list + worktree prune + worktree add should have \
-         been called (no detect_default_branch)"
+        5,
+        "only git fetch + rev-list + worktree prune + worktree add + branch probe \
+         should have been called (no detect_default_branch)"
     );
 }
 

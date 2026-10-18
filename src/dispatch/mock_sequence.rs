@@ -215,7 +215,12 @@ pub(crate) enum Step {
     /// `git pull --no-rebase origin <base>` in the repo root — only when the
     /// origin probe found a remote.
     Pull,
-    /// `git merge --abort` in the repo root — after any pull that failed, since
+    /// `git rev-parse -q --verify MERGE_HEAD` in the repo root — after any pull
+    /// that failed, to learn whether it left a merge in progress. Scripted as
+    /// "yes": a pull that stopped on a conflict is the case the abort exists for.
+    PullMergeProbe,
+    /// `git merge --abort` in the repo root — after a failed pull that left a
+    /// merge in progress, since
     /// a pull that stopped on a conflict leaves the primary checkout mid-merge.
     PullAbort,
     /// `git rebase <base>` in the worktree.
@@ -284,6 +289,7 @@ impl Step {
                 program == "git" && has("status") && has("--porcelain")
             }
             Step::Pull => program == "git" && has("pull"),
+            Step::PullMergeProbe => program == "git" && has("rev-parse") && has("MERGE_HEAD"),
             Step::PullAbort => program == "git" && has("merge") && has("--abort"),
             // The abort is a `rebase` too, and `--abort` is the whole difference.
             Step::Rebase => program == "git" && has("rebase") && !has("--abort"),
@@ -460,6 +466,10 @@ struct Finish {
     dirty: &'static [&'static str],
     remote: RemoteOutcome,
     pull: CallOutcome,
+    /// Whether a failed pull left a merge in progress (`MERGE_HEAD` exists).
+    pull_leaves_merge: bool,
+    /// Whether the `merge --abort` that follows exits non-zero.
+    merge_abort_fails: bool,
     rebase: RebaseOutcome,
     fast_forward: CallOutcome,
 }
@@ -483,7 +493,7 @@ impl Finish {
     fn scope_of(step: Step) -> Scope {
         match step {
             Step::CurrentBranch | Step::DirtyCheck | Step::OriginProbe | Step::Pull => Scope::Repo,
-            Step::PullAbort => Scope::Repo,
+            Step::PullMergeProbe | Step::PullAbort => Scope::Repo,
             Step::Rebase | Step::ConflictStatus | Step::RebaseAbort => Scope::Worktree,
             // The fast-forward is the repo root's own merge, not the worktree's.
             Step::FastForward => Scope::Repo,
@@ -530,7 +540,10 @@ impl Finish {
             RemoteOutcome::Present => {
                 steps.push(Step::Pull);
                 if !self.pull.is_ok() {
-                    steps.push(Step::PullAbort);
+                    steps.push(Step::PullMergeProbe);
+                    if self.pull_leaves_merge {
+                        steps.push(Step::PullAbort);
+                    }
                     return steps;
                 }
             }
@@ -586,6 +599,13 @@ impl Finish {
                 _ => unreachable!("ConflictStatus is only emitted for a conflicting rebase"),
             },
             // Best-effort cleanup whose result `finish_task` discards.
+            Step::PullMergeProbe if self.pull_leaves_merge => (None, MockProcessRunner::ok()),
+            // `rev-parse -q --verify` of a missing ref prints nothing, exits 1.
+            Step::PullMergeProbe => (None, MockProcessRunner::fail("")),
+            Step::PullAbort if self.merge_abort_fails => (
+                None,
+                MockProcessRunner::fail("fatal: There is no merge to abort (MERGE_HEAD missing)."),
+            ),
             Step::RebaseAbort | Step::PullAbort => (None, MockProcessRunner::ok()),
             Step::FastForward => self
                 .fast_forward
@@ -740,6 +760,8 @@ impl DispatchScript {
             dirty: &[],
             remote: RemoteOutcome::Present,
             pull: CallOutcome::Ok,
+            pull_leaves_merge: true,
+            merge_abort_fails: false,
             rebase: RebaseOutcome::Plain(CallOutcome::Ok),
             fast_forward: CallOutcome::Ok,
         });
@@ -820,6 +842,23 @@ impl DispatchScript {
     /// The pull exits non-zero.
     pub(crate) fn pull_fails(mut self) -> Self {
         self.finish_mut().pull = CallOutcome::Fails;
+        self
+    }
+
+    /// The pull exits non-zero without leaving a merge behind (an auth or
+    /// network failure), so nothing needs aborting.
+    pub(crate) fn pull_fails_leaving_no_merge(mut self) -> Self {
+        let finish = self.finish_mut();
+        finish.pull = CallOutcome::Fails;
+        finish.pull_leaves_merge = false;
+        self
+    }
+
+    /// The pull leaves a merge in progress and the `merge --abort` itself fails.
+    pub(crate) fn pull_fails_and_merge_abort_fails(mut self) -> Self {
+        let finish = self.finish_mut();
+        finish.pull = CallOutcome::Fails;
+        finish.merge_abort_fails = true;
         self
     }
 
@@ -1475,6 +1514,7 @@ fn failure_stderr(step: Step) -> &'static str {
         | Step::DirtyCheck
         | Step::ConflictStatus
         | Step::RebaseAbort
+        | Step::PullMergeProbe
         | Step::PullAbort => {
             unreachable!("{step:?} has no failing-exit shape")
         }

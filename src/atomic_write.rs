@@ -3,6 +3,10 @@
 //! The new content goes to a temporary file in the same directory and is
 //! renamed over the target, so a reader never sees a half-written file and a
 //! crash leaves the old one intact.
+//!
+//! This protects readers, not concurrent writers: a caller that reads, edits
+//! and writes back can still lose another process's write made in between.
+//! Callers narrow that window by reading immediately before they write.
 
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -24,12 +28,23 @@ pub enum Mode {
 
 /// Replace `path` with whatever `fill` writes, atomically.
 ///
+/// A symlinked `path` keeps its link: the file it points at is replaced.
+///
 /// `fill` failing leaves `path` untouched and no temporary file behind.
 pub fn write_with(
     path: &Path,
     mode: Mode,
     fill: impl FnOnce(&mut dyn Write) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
+    let resolved;
+    let path = match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            resolved = std::fs::canonicalize(path)
+                .with_context(|| format!("resolve the symlink {}", path.display()))?;
+            resolved.as_path()
+        }
+        _ => path,
+    };
     let dir = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
