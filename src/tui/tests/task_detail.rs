@@ -324,3 +324,49 @@ fn zoom_after_scrolling_to_end_keeps_last_line_visible() {
         );
     }
 }
+
+#[test]
+fn last_line_sits_on_bottom_body_row_at_max_scroll() {
+    let mut app = make_app_with_task();
+    app.board.tasks[0].description = (1..=40)
+        .map(|i| format!("row-{i:02}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
+    ));
+    render_to_buffer(&mut app, 100, 30);
+    if let ViewMode::TaskDetail {
+        scroll, max_scroll, ..
+    } = &mut app.board.view_mode
+    {
+        *scroll = *max_scroll;
+    }
+    let buf = render_to_buffer(&mut app, 100, 30);
+    let lines: Vec<String> = (0..30).map(|y| buffer_line(&buf, y)).collect();
+    let last = lines
+        .iter()
+        .position(|l| l.contains("row-40"))
+        .expect("last line visible");
+    let border = lines
+        .iter()
+        .position(|l| l.contains("j/k scroll"))
+        .expect("bottom border with hints");
+    assert_eq!(
+        last + 1,
+        border,
+        "last line must sit directly above the bottom border:\n{}",
+        lines.join("\n")
+    );
+}
+
+#[test]
+fn short_terminal_renders_task_detail_without_panic() {
+    let mut app = make_app_with_task();
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
+    ));
+    for h in 0..8 {
+        render_to_buffer(&mut app, 40, h);
+    }
+}

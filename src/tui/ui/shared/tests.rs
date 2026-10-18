@@ -196,3 +196,12 @@ fn empty_segments_never_exceed_budget() {
     let out = fair_truncate_segments(&["", ""], 1, " › ");
     assert!(out.chars().count() <= 1);
 }
+
+#[test]
+fn push_hint_spans_embeds_key_in_non_ascii_label() {
+    // 'é' is two bytes; slicing the label at byte 1 would panic.
+    let mut spans = Vec::new();
+    push_hint_spans(&mut spans, "é", "énorme", Color::Red, Style::default());
+    assert_eq!(spans[0].content, "[é]");
+    assert_eq!(spans[1].content, "norme  ");
+}

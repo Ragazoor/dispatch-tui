@@ -457,10 +457,10 @@ pub(in crate::tui::ui) fn push_hint_spans(
     let mut key_chars = key.chars();
     let key_char = key_chars.next();
     let key_is_single = key_char.is_some() && key_chars.next().is_none();
+    let mut label_chars = label.chars();
+    let label_first = label_chars.next();
     let can_embed = key_is_single
-        && label
-            .chars()
-            .next()
+        && label_first
             .zip(key_char)
             .is_some_and(|(l, k)| l.eq_ignore_ascii_case(&k));
 
@@ -469,7 +469,7 @@ pub(in crate::tui::ui) fn push_hint_spans(
         Style::default().fg(key_color).add_modifier(Modifier::BOLD),
     ));
     let label_text = if can_embed {
-        format!("{}  ", &label[1..])
+        format!("{}  ", label_chars.as_str())
     } else {
         format!(" {label}  ")
     };

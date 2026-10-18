@@ -512,3 +512,22 @@ fn wrapped_line_count_wraps_prose_at_word_boundaries() {
     // but "aaaa bbbb cccc" (14 bytes, width 7) needs 3 lines, not 2.
     assert_eq!(wrapped_line_count("aaaa bbbb cccc", 7), 3);
 }
+
+#[test]
+fn render_scroll_indicators_tolerates_empty_and_one_row_areas() {
+    use ratatui::{backend::TestBackend, Terminal};
+    let mut terminal = Terminal::new(TestBackend::new(10, 5)).unwrap();
+    let mut state = ratatui::widgets::ListState::default().with_offset(1);
+    for (inner, col) in [
+        (Rect::new(0, 0, 0, 0), Rect::new(0, 0, 0, 0)),
+        (Rect::new(0, 0, 5, 1), Rect::new(0, 0, 5, 1)),
+        (Rect::new(0, 0, 5, 0), Rect::new(0, 0, 5, 1)),
+    ] {
+        terminal
+            .draw(|f| {
+                super::columns::render_scroll_indicators(f, &state, &[1, 1, 1], inner, col, MUTED)
+            })
+            .unwrap();
+    }
+    state.select(None);
+}

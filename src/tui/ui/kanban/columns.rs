@@ -405,7 +405,7 @@ pub(super) fn render_columns(frame: &mut Frame, app: &mut App, data: ColumnsData
 /// Draw ▲ / ▼ scroll indicators at the right edge of a column when content
 /// overflows the visible area. Called after `render_stateful_widget` so the
 /// `ListState` offset has already been updated by ratatui for this frame.
-fn render_scroll_indicators(
+pub(super) fn render_scroll_indicators(
     frame: &mut Frame,
     list_state: &ListState,
     item_heights: &[usize],

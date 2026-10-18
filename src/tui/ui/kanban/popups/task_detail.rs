@@ -94,7 +94,7 @@ pub(in crate::tui::ui::kanban) fn render_task_detail_overlay(
     let header_height = header_lines.len() as u16 + 1; // +1 for separator line
 
     // ── Compute body area and scroll clamping ────────────────────────────────
-    let body_height = overlay_area.height.saturating_sub(2 + header_height + 1); // borders(2) + header + separator(1)
+    let body_height = overlay_area.height.saturating_sub(2 + header_height); // borders(2) + header (its height already includes the separator)
     let body_width = overlay_area.width.saturating_sub(2) as usize;
 
     let desc_wrapped = wrapped_line_count(&task.description, body_width);
