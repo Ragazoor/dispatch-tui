@@ -141,3 +141,177 @@ fn respawning_from_a_task_that_is_not_a_phoenix_is_refused() {
     assert!(why.contains("is not a phoenix task"), "{why}");
     assert_eq!(store.db().tasks().iter().count(), 1, "no successor written");
 }
+
+fn blank_learning(id: i64, summary: &str, source_task_id: Option<i64>) -> Learning {
+    Learning {
+        id,
+        kind: "pitfall".into(),
+        summary: summary.into(),
+        detail: None,
+        scope: "repo".into(),
+        scope_ref: None,
+        tags: "[]".into(),
+        status: "approved".into(),
+        source_task_id,
+        upvote_count: 0,
+        last_upvoted_at: None,
+        created_at: "2026-09-19 10:00:00".into(),
+        updated_at: "2026-09-19 10:00:00".into(),
+        embedding: None,
+    }
+}
+
+fn retrieval(id: i64, task_id: i64, learning_id: i64) -> LearningRetrieval {
+    LearningRetrieval {
+        id,
+        task_id,
+        learning_id,
+        source: "prompt_injection".into(),
+        retrieved_at: "2026-09-19 10:00:00".into(),
+    }
+}
+
+fn usage_event(action: &str) -> UsageEvent {
+    UsageEvent {
+        id: 0,
+        recorded_at: "2026-09-26 10:00:00".into(),
+        category: "keybinding".into(),
+        action: action.into(),
+        detail: None,
+        actor: "human".into(),
+    }
+}
+
+#[test]
+fn finishing_an_epic_stamps_a_completion_and_reopening_keeps_it() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "E", false);
+    let id = store.create("alice", epic_task("t", epic, "running"));
+    assert_eq!(store.epic(epic).completed_at, "");
+
+    store.advance_secs(30);
+    store
+        .call("alice", |ctx| patch_task(ctx, id, status_patch("done")))
+        .expect("patch_task");
+    let stamped = store.epic(epic).completed_at;
+    assert_eq!(stamped, "2026-10-10 12:00:30.000");
+
+    store.advance_secs(30);
+    store
+        .call("alice", |ctx| patch_task(ctx, id, status_patch("running")))
+        .expect("patch_task");
+    assert_eq!(store.epic(epic).status, "backlog");
+    assert_eq!(
+        store.epic(epic).completed_at,
+        stamped,
+        "a regression must not clear the last completion"
+    );
+}
+
+#[test]
+fn two_hosts_patching_different_fields_of_one_task_converge() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "E", false);
+    let id = store.create("alice", epic_task("original", epic, "backlog"));
+
+    let rename = TaskPatch {
+        title: Some("renamed by host-a".into()),
+        ..TaskPatch::default()
+    };
+    store
+        .call("alice", |ctx| patch_task(ctx, id, rename))
+        .expect("patch_task");
+    let move_it = TaskPatch {
+        worktree: Some("/wt/host-b".into()),
+        ..TaskPatch::default()
+    };
+    store
+        .call("bob", |ctx| patch_task(ctx, id, move_it))
+        .expect("patch_task");
+
+    assert_eq!(
+        store.task(id).title,
+        "renamed by host-a",
+        "host B's write must not revert a field it never named"
+    );
+    assert_eq!(store.task(id).worktree, "/wt/host-b");
+}
+
+#[test]
+fn a_task_created_in_done_is_stamped_as_completed() {
+    let store = Store::new();
+    store.advance_secs(1);
+    let done = Task {
+        status: "done".into(),
+        ..user_task("born finished", "alice")
+    };
+    let born = store.create("alice", done);
+    assert_eq!(store.task(born).completed_at, "2026-10-10 12:00:01.000");
+}
+
+#[test]
+fn deleting_a_task_detaches_its_learnings_and_cascades_their_retrievals() {
+    let store = Store::new();
+    let id = store.create("alice", user_task("source", "alice"));
+    store
+        .call("alice", |ctx| patch_task(ctx, id, status_patch("done")))
+        .expect("patch_task");
+    store
+        .call("alice", |ctx| {
+            seed_learnings(ctx, vec![blank_learning(1, "A learning", Some(id))])
+        })
+        .expect("seed_learnings");
+    store
+        .call("alice", |ctx| {
+            seed_learning_retrievals(ctx, vec![retrieval(1, id, 1)])
+        })
+        .expect("seed_learning_retrievals");
+
+    store
+        .call("alice", |ctx| delete_task(ctx, id))
+        .expect("delete_task");
+
+    let learning = store.db().learnings().id().find(1).expect("it survives");
+    assert_eq!(learning.source_task_id, None, "detached from its task");
+    assert_eq!(store.db().learning_retrievals().iter().count(), 0);
+}
+
+#[test]
+fn deleting_a_learning_cascades_its_retrievals_and_refuses_when_missing() {
+    let store = Store::new();
+    store
+        .call("alice", |ctx| {
+            seed_learnings(ctx, vec![blank_learning(1, "A learning", None)])
+        })
+        .expect("seed_learnings");
+    store
+        .call("alice", |ctx| {
+            seed_learning_retrievals(ctx, vec![retrieval(1, 7, 1)])
+        })
+        .expect("seed_learning_retrievals");
+
+    store
+        .call("alice", |ctx| delete_learning(ctx, 1))
+        .expect("delete_learning");
+    assert_eq!(store.db().learnings().iter().count(), 0);
+    assert_eq!(store.db().learning_retrievals().iter().count(), 0);
+
+    let refused = store.call("alice", |ctx| delete_learning(ctx, 1));
+    assert!(refused.is_err(), "a missing id is refused, not a no-op");
+}
+
+#[test]
+fn recording_usage_events_prunes_beyond_the_cap() {
+    let store = Store::new();
+    for i in 1..=5 {
+        store
+            .call("alice", |ctx| {
+                record_usage_event(ctx, usage_event(&format!("action_{i}")), 3)
+            })
+            .expect("record_usage_event");
+    }
+    let actions: Vec<String> = store.db().usage_events().iter().map(|e| e.action).collect();
+    assert_eq!(actions.len(), 3, "the table never exceeds the cap");
+    assert!(!actions.contains(&"action_1".to_string()), "oldest pruned");
+    assert!(actions.contains(&"action_5".to_string()), "newest kept");
+}

@@ -426,29 +426,6 @@ fn task_column(instance: &Instance, field: &str, task: i64) -> String {
     )
 }
 
-fn blank_epic_patch_json() -> serde_json::Value {
-    let mut patch = serde_json::Map::new();
-    for field in [
-        "title",
-        "description",
-        "status",
-        "plan_path",
-        "sort_order",
-        "auto_dispatch",
-        "parent_epic_id",
-        "feed_command",
-        "feed_interval_secs",
-        "group_by_repo",
-        "feed_role",
-        "origin",
-        "feed_append_only",
-        "completed_at",
-    ] {
-        patch.insert(field.into(), serde_json::json!({"none": []}));
-    }
-    serde_json::Value::Object(patch)
-}
-
 /// Register `host` in the host registry with `owner`, which a new host must
 /// name (`store-split.allium`, D11).
 fn register_host(instance: &Instance, host: &str, owner: &str) {
@@ -462,12 +439,8 @@ mod agent_state;
 mod agents;
 #[path = "spacetime_module/data_rules.rs"]
 mod data_rules;
-#[path = "spacetime_module/epics_and_hosts.rs"]
-mod epics_and_hosts;
 #[path = "spacetime_module/feeds.rs"]
 mod feeds;
-#[path = "spacetime_module/managed_epics.rs"]
-mod managed_epics;
 #[path = "spacetime_module/mutations.rs"]
 mod mutations;
 #[path = "spacetime_module/poll_owner.rs"]
@@ -478,5 +451,3 @@ mod publish;
 mod settings;
 #[path = "spacetime_module/subscription.rs"]
 mod subscription;
-#[path = "spacetime_module/work_packages.rs"]
-mod work_packages;
