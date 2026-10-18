@@ -3,6 +3,7 @@
 # spacetime/module/README.md), so the leading-slash rule above does not reach
 # its build output.
 /spacetime/module/target
+/spacetime/module-tests/target
 /.worktrees
 # tarpaulin output: `--output-dir coverage/` (the CI invocation), the default
 # drop point for a local `--out Html` run, and the raw profiles the llvm engine

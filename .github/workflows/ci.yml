@@ -409,8 +409,16 @@ jobs:
           path: |
             ~/.cargo/registry
             spacetime/module/target
-          key: spacetime-module-${{ runner.os }}-${{ hashFiles('spacetime/module/Cargo.lock') }}
+            spacetime/module-tests/target
+          key: spacetime-module-${{ runner.os }}-${{ hashFiles('spacetime/module/Cargo.lock', 'spacetime/module-tests/Cargo.lock') }}
           restore-keys: spacetime-module-${{ runner.os }}-
+
+      # The in-memory reducer tests (`spacetime/module-tests`) build V8, which
+      # needs a C++ compiler and the system OpenSSL's headers (the script sets
+      # OPENSSL_NO_VENDOR=1). The Ubuntu image usually ships both; installing
+      # them keeps that from being an accident of the image.
+      - name: Install the C++ toolchain and OpenSSL headers
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq g++ libssl-dev pkg-config
 
       - name: Build and test the SpacetimeDB module
         run: bash ./scripts/check-spacetime-module.sh

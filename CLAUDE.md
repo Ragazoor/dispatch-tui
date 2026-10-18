@@ -20,7 +20,7 @@ cargo run -- tui
 
 **Dispatch-spawned sessions do not run under Claude Code's sandbox** — see `SandboxDisabledForDockerAndUnixSockets` in `docs/specs/dispatch.allium`. If you've enabled the sandbox yourself outside of dispatch, see "Sandbox (historical)" in [docs/reference.md](docs/reference.md).
 
-**`spacetime/module/` is a separate wasm crate.** Root `cargo test` does not cover it; its checks, the committed `module.wasm` and the client bindings are in [docs/testing.md](docs/testing.md) ("SpacetimeDB module and CI details"). Rebuild with `./scripts/build-managed-module.sh` after a module change, and regenerate bindings with `./scripts/regenerate-spacetime-bindings.sh`.
+**`spacetime/module/` is a separate wasm crate.** Root `cargo test` does not cover it; its checks, the committed `module.wasm` and the client bindings are in [docs/testing.md](docs/testing.md) ("SpacetimeDB module and CI details"). Reducers have in-memory tests in `spacetime/module-tests/` (own crate, needs `gcc-c++` and `openssl-devel`). Rebuild with `./scripts/build-managed-module.sh` after a module change, and regenerate bindings with `./scripts/regenerate-spacetime-bindings.sh`.
 
 **The full suite needs `tmux` on `PATH`.** Without it the `tmux_*` targets print `skipping: tmux not available on PATH` and pass, so a green local run isn't proof they ran.
 

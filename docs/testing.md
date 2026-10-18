@@ -120,7 +120,7 @@ rm src/dispatch/snapshots/*.snap.new                 # always clean up
 | The `Store` router, its ports, CRUD over the in-memory store | `src/store/tests/` |
 | A `Store` driven over the sync transport (its reducer calls, identity, subscriptions) | `src/store/tests/over_sync/` — `sync` itself may not name `store`, its tests included (`tests/module_layering.rs`) |
 | The sync session, connection state machine, decoders and encoders | `src/sync/tests/` |
-| A SpacetimeDB module change (table, column, reducer) | `spacetime/module/` tests and `tests/spacetime_module.rs`; mirror it in `src/sync/memory_caller/` |
+| A SpacetimeDB module change (table, column, reducer) | `spacetime/module/` tests, `spacetime/module-tests/tests/` and `tests/spacetime_module.rs`; mirror it in `src/sync/memory_caller/` |
 | Service-layer business rules | inline in `src/service/<domain>/`, or a sibling `tests` file once past ~200 lines (`src/service/learnings/learning_tests.rs`) |
 | MCP JSON-RPC handler behaviour | `src/mcp/handlers/tests/` |
 | Full task/epic lifecycle | `tests/` (integration tests) |
@@ -198,7 +198,16 @@ Coverage is not in the pre-push hook; every *other* CI gate is, and `tests/ci_ga
 
 ## SpacetimeDB module and CI details
 
-**`spacetime/module/` is outside the workspace.** `cargo test` and `cargo clippy --all-targets` stop at the root package. The module is its own crate for wasm32. `./scripts/check-spacetime-module.sh` builds it and runs its unit tests. The pre-push hook and CI both run that script. It needs `sudo dnf install rust-std-static-wasm32-unknown-unknown`.
+**`spacetime/module/` is outside the workspace.** `cargo test` and `cargo clippy --all-targets` stop at the root package. The module is its own crate for wasm32. `./scripts/check-spacetime-module.sh` checks it for wasm, runs its unit tests, then runs the in-memory reducer tests (below). The pre-push hook and CI both run that script. It needs `sudo dnf install rust-std-static-wasm32-unknown-unknown gcc-c++ openssl-devel`.
+
+**Reducer tests run against SpacetimeDB's in-memory store.** `spacetime/module-tests/` is a separate crate that compiles the module's own `src/lib.rs` as a plain rlib with `spacetimedb`'s `test-utils` feature. Its `tests/` call the real reducers as a named client inside one transaction (the harness in `spacetime/module-tests/tests/common/mod.rs`), read the tables back, and move `TestClock` by hand. A reducer's decision stays a pure-function test in `spacetime/module/src/tests/`; a test belongs in `module-tests` when it needs the table writes, the transaction, the caller's identity or a timer.
+
+- **Why a separate crate.** `test-utils` links V8, which cannot link into the module's `cdylib`, and cargo builds every crate type even for a path dependency. The crate has its own `Cargo.lock`, a cold build of several minutes and about 6 GB in `spacetime/module-tests/target`. A warm run takes seconds.
+- **Build environment.** A C++ compiler and the system OpenSSL headers, with `OPENSSL_NO_VENDOR=1` (the script sets it). The two ICU crates are capped at `~2.1` in its `Cargo.toml` because V8's date library fails against 2.3; drop the cap when upstream moves.
+- **Scheduled reducers.** The in-memory host does not fire timers. A backstop test advances the clock, then calls `expire_dispatch_request` or `expire_session_request` with the timer row as the module's own scheduler, as the live host would. Called as a client, they refuse.
+- **Only `pub` items are reachable** from `tests/`. Go through the reducers.
+- **Not covered.** Publish and automigration stay in `tests/spacetime_module.rs`; the in-memory store does not exercise either. Store-side changes still need the live-store tests whenever a rule moves into a reducer.
+- **No restamp.** The crate lives outside `spacetime/module/src`, so adding or editing its tests does not change the `module.wasm` source stamp.
 
 Two root-level tests watch the module from outside:
 

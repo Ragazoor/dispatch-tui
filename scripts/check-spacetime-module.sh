@@ -10,7 +10,7 @@
 # all: it could stop compiling, and every check in the repo would still be
 # green. This is that gate.
 #
-# Two checks, because they fail differently:
+# Three checks, because they fail differently:
 #
 #   1. `cargo check --target wasm32-unknown-unknown` — the target it is actually
 #      published for. A dependency or an API that works on the host and not on
@@ -18,6 +18,13 @@
 #   2. `cargo test` on the HOST target — the module's own unit tests, which
 #      cover the validators (`validate_task_ownership`). They need a test
 #      harness to link against, which is why the crate is `cdylib` + `rlib`.
+#
+#   3. `cargo test` in `spacetime/module-tests/` - the module's reducers run
+#      against SpacetimeDB 2.12's in-memory store (feature `test-utils`), so a
+#      reducer's table writes, transaction and scheduled backstop are covered
+#      without a server. It is a separate crate because V8, which `test-utils`
+#      links, cannot link into the module's `cdylib`; it compiles the module's
+#      own `src/lib.rs` as a plain rlib. See `docs/testing.md`.
 #
 # Not covered here: publishing against a live SpacetimeDB instance. That needs
 # the `spacetime` binary and a running server, and lives in
@@ -27,9 +34,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 MODULE_DIR="spacetime/module"
+TESTS_DIR="spacetime/module-tests"
 
 if [ ! -f "$MODULE_DIR/Cargo.toml" ]; then
   echo "error: no module crate at $MODULE_DIR" >&2
+  exit 1
+fi
+if [ ! -f "$TESTS_DIR/Cargo.toml" ]; then
+  echo "error: no in-memory test crate at $TESTS_DIR" >&2
   exit 1
 fi
 
@@ -57,3 +69,19 @@ fi
 
 echo "spacetime module: cargo test"
 (cd "$MODULE_DIR" && cargo test)
+
+# V8 (via `test-utils`) needs a C++ compiler, and its build wants the system
+# OpenSSL rather than a vendored build (`OPENSSL_NO_VENDOR=1`, which needs
+# `openssl-devel`). A missing compiler is reported, not skipped, for the same
+# reason as the wasm target above.
+if ! command -v c++ >/dev/null 2>&1; then
+  cat >&2 <<'MSG'
+error: no C++ compiler on PATH; the in-memory reducer tests build V8.
+  Fedora:  sudo dnf install gcc-c++ openssl-devel
+  Debian:  sudo apt-get install g++ libssl-dev pkg-config
+MSG
+  exit 1
+fi
+
+echo "spacetime module: in-memory reducer tests"
+(cd "$TESTS_DIR" && OPENSSL_NO_VENDOR=1 cargo test)

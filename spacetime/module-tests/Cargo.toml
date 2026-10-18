@@ -1,0 +1,28 @@
+[package]
+name = "dispatch-spacetime-module-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "In-memory reducer tests for the SpacetimeDB module (2.12 test-utils)"
+
+# Compiles the module's own `src/lib.rs` as a plain rlib, so the in-memory
+# store (`spacetimedb` feature `test-utils`) can run the real reducers. It must
+# be a separate crate: the module is `cdylib` + `rlib`, V8 (pulled in by
+# `test-utils`) cannot link into a shared object (`R_X86_64_TPOFF32`), and cargo
+# builds every crate type even for a path dependency.
+#
+# Its own workspace root, for the same reason as the module's: a worktree under
+# `.worktrees/` would otherwise bind to the parent checkout's workspace.
+[workspace]
+
+[lib]
+name = "dispatch_spacetime_module"
+path = "../module/src/lib.rs"
+
+[dependencies]
+spacetimedb = { version = "2.12", features = ["test-utils"] }
+chrono = { version = "0.4", default-features = false }
+# `temporal_rs 0.1.2` (via V8) needs the 2.1 ICU family; the resolver picks 2.3
+# and compilation fails. Drop these two once upstream moves.
+icu_calendar = "~2.1"
+icu_locale = "~2.1"

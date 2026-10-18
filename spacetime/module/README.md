@@ -11,7 +11,9 @@ it. Two things at the root still watch it from the outside:
 it to SQLite, and `tests/spacetime_module.rs` publishes it into a throwaway
 instance when `spacetime` is on `PATH`. Compiling and unit-testing the crate
 itself is `./scripts/check-spacetime-module.sh`, which the pre-push hook and CI
-both run.
+both run. That script also runs `../module-tests/`, a sibling crate that
+compiles this crate's `src/lib.rs` and runs the real reducers against
+SpacetimeDB's in-memory store (`docs/testing.md`).
 
 It is also its own workspace root (`[workspace]` in `Cargo.toml`). Excluding it
 from the dispatch workspace stops cargo binding it there but does not stop cargo

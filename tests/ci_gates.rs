@@ -203,3 +203,25 @@ fn ci_workflow_pins_actions_by_sha_and_tarpaulin_by_version() {
         "cargo-tarpaulin must be installed with --locked --version"
     );
 }
+
+/// The in-memory reducer tests (`spacetime/module-tests`) build V8, which needs
+/// a C++ compiler and the system OpenSSL headers. The gate script is what runs
+/// them in the hook and in CI, so both the script and the CI job must carry the
+/// environment, or the step fails on a clean runner and nowhere else.
+#[test]
+fn ci_builds_the_in_memory_reducer_tests_with_their_toolchain() {
+    let ci = repo_file(".github/workflows/ci.yml");
+    let script = repo_file("scripts/check-spacetime-module.sh");
+    assert!(
+        script.contains("spacetime/module-tests") && script.contains("OPENSSL_NO_VENDOR=1"),
+        "check-spacetime-module.sh must run spacetime/module-tests with OPENSSL_NO_VENDOR=1"
+    );
+    assert!(
+        ci.contains("g++ libssl-dev"),
+        "CI must install a C++ compiler and the OpenSSL headers before the module gate"
+    );
+    assert!(
+        ci.contains("spacetime/module-tests/target"),
+        "CI must cache the test crate's own target dir: it is ~6 GB and minutes to build cold"
+    );
+}
