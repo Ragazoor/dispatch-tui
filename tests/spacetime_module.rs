@@ -580,8 +580,6 @@ mod agents;
 mod close_task;
 #[path = "spacetime_module/data_rules.rs"]
 mod data_rules;
-#[path = "spacetime_module/dispatch_requests.rs"]
-mod dispatch_requests;
 #[path = "spacetime_module/epics_and_hosts.rs"]
 mod epics_and_hosts;
 #[path = "spacetime_module/feeds.rs"]

@@ -17,15 +17,10 @@ pub(crate) fn delete_agent_state_for(ctx: &ReducerContext, task_id: i64) {
     {
         ctx.db.task_shells().delete(row);
     }
-    for row in ctx
-        .db
-        .task_subagents()
-        .task_id()
-        .filter(&task_id)
-        .collect::<Vec<_>>()
-    {
-        ctx.db.task_subagents().delete(row);
-    }
+    // By index, not row by row: `Table::delete(row)` on a table with no primary
+    // key reaches the host through a path the in-memory test store does not
+    // back, so the test crate could not run this.
+    ctx.db.task_subagents().task_id().delete(&task_id);
 }
 
 // -- Hosts and subscriptions ------------------------------------------------
@@ -310,15 +305,10 @@ pub(crate) fn delete_subagent_entry(ctx: &ReducerContext, task_id: i64, agent_id
 
 /// Delete every `task_subagents` row for `task_id`.
 pub(crate) fn delete_all_subagents(ctx: &ReducerContext, task_id: i64) {
-    for row in ctx
-        .db
-        .task_subagents()
-        .task_id()
-        .filter(&task_id)
-        .collect::<Vec<_>>()
-    {
-        ctx.db.task_subagents().delete(row);
-    }
+    // By index, not row by row: `Table::delete(row)` on a table with no primary
+    // key reaches the host through a path the in-memory test store does not
+    // back, so the test crate could not run this.
+    ctx.db.task_subagents().task_id().delete(&task_id);
 }
 
 /// `HookSubagentStart` in `docs/specs/agent-health.allium`. `started_at` is
