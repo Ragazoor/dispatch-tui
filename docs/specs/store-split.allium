@@ -962,6 +962,18 @@ rule PatchTaskNeverMovesAnEpic {
         -- With the epic fixed, patch_task rolls up the task's epic only when
         -- the status moved, and still re-routes inside a grouped subtree when
         -- repo_path changes.
+        --
+        -- set_task_epic holds the epic-exists check: a non-zero epic_id that
+        -- names no epic is refused with "task <id>: epic <n> does not exist"
+        -- and writes nothing, so no task is written with a dangling epic.
+        --
+        -- Decision (task #98310): tightening a refusal inside a rule the module
+        -- already owns (this check, the epic_id refusal, the sub-status check,
+        -- close_task) is not a RULES_VERSION bump. The version records who
+        -- enforces a rule, and the board enforces none of these.
+        --
+        -- The repo-group sweep deletes a sub-epic only when it holds no task and
+        -- no child, so validate_epic_deletable has nothing to refuse there.
 }
 
 rule RespawnPhoenixSuccessorNeedsTheFlag {

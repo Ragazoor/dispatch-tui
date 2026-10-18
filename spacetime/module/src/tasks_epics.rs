@@ -441,6 +441,11 @@ pub fn set_task_epic(
     let Some(task) = ctx.db.tasks().id().find(id) else {
         return Ok(());
     };
+    // The epic-exists check `patch_task` leaves to this reducer (see
+    // `check_task_patch`): a missing epic would be written as a dangling id.
+    if epic_id != 0 && ctx.db.epics().id().find(epic_id).is_none() {
+        return Err(format!("task {id}: epic {epic_id} does not exist"));
+    }
     // Routed first, then compared: a task already in the per-repo sub-epic of
     // the grouped root it is "moved" onto is where it belongs.
     let epic_id = route_to_repo_group(ctx, epic_id, &task.repo_path);

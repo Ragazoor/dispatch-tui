@@ -350,6 +350,12 @@ impl MemoryReducerCaller {
         let Some(task) = tables.tasks.get(&id.0).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
+        if epic_id != 0 && !tables.epics.contains_key(&epic_id) {
+            return Ok(ReducerOutcome::Refused(format!(
+                "task {}: epic {epic_id} does not exist",
+                id.0
+            )));
+        }
         // Routed first, then compared, as the module does.
         let epic_id = self.route_to_repo_group(&mut tables, epic_id, &task.repo_path);
         let was_in = task.epic_id;

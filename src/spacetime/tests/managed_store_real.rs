@@ -221,7 +221,7 @@ fn ping_server() -> String {
             let mut buf = [0u8; 1024];
             let _ = stream.read(&mut buf);
             let _ = stream
-                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+                .write_all(b"HTTP/1.1 200 OK\r\naccess-control-allow-origin: *\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
         }
     });
     address

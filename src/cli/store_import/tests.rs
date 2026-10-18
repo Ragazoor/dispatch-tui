@@ -58,7 +58,7 @@ impl StoreSpawner for FakeSpawner {
                     let Ok(mut stream) = stream else { continue };
                     let mut buf = [0u8; 512];
                     let _ = stream.read(&mut buf);
-                    let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+                    let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\n\r\n");
                 }
             });
         }

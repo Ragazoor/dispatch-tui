@@ -113,7 +113,10 @@ fn delete_if_empty_repo_group(ctx: &ReducerContext, epic_id: i64) {
     if epic.parent_epic_id != 0 {
         rescope_learnings(ctx, epic_id, epic.parent_epic_id);
     }
-    // The one the delete reducer runs, over a subtree of just this epic.
+    // The one the delete reducer runs, over a subtree of just this epic. The
+    // guards above leave no tasks and no children, so the subtree is this one
+    // epic and `validate_epic_deletable`'s depth and undone-task checks have
+    // nothing to refuse.
     let doomed = collect_epic_subtree_ids(ctx, epic_id);
     delete_epic_subtree_with_feed_cleanup(ctx, epic_id, &doomed);
 }

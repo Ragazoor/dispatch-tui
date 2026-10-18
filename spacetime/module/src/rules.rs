@@ -206,9 +206,9 @@ pub fn repo_name_from_path(repo_path: &str) -> String {
 /// checked: a status move that leaves a stale sub-status is the caller's to
 /// fix, as it was when the service made this check.
 pub fn check_task_patch(row: &Task, patch: &TaskPatch) -> Result<(), String> {
-    // The move owns the owner, the repo-group routing and the epic-exists
-    // check, so a patch that could change `epic_id` alone would skip all
-    // three. No host patch names it (`encode::task_patch` sends `None`).
+    // The move (`set_task_epic`) owns the owner, the repo-group routing and
+    // the epic-exists check, so a patch that could change `epic_id` alone
+    // would skip all three. No host patch names it (`encode::task_patch` sends `None`).
     if patch.epic_id.is_some() {
         return Err("epic_id cannot be changed by patch_task; use set_task_epic".into());
     }

@@ -920,12 +920,25 @@ fn a_port_nothing_listens_on_probes_as_nothing_listening() {
 
 #[test]
 fn a_server_answering_the_store_ping_probes_as_a_store() {
-    let address = serve(Some(
-        b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-    ));
+    let address = serve(Some(STORE_PING));
     assert_eq!(
         probe_address(&address, PROBE),
         ManagedAddressState::StoreAnswering
+    );
+}
+
+/// What a real store answers `GET /v1/ping` with: an empty 200 carrying the
+/// CORS headers its HTTP layer adds.
+const STORE_PING: &[u8] = b"HTTP/1.1 200 OK\r\nvary: origin, access-control-request-method, access-control-request-headers\r\naccess-control-allow-origin: *\r\ncontent-length: 0\r\n\r\n";
+
+#[test]
+fn any_other_server_answering_200_to_the_ping_probes_as_something_else() {
+    let address = serve(Some(
+        b"HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: 5\r\nconnection: close\r\n\r\nhello",
+    ));
+    assert_eq!(
+        probe_address(&address, PROBE),
+        ManagedAddressState::HeldBySomethingElse
     );
 }
 

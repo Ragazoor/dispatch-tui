@@ -238,6 +238,8 @@ enum HttpReply {
     /// time.
     NotHttp,
     Status(u16),
+    /// A 200 whose headers carry the store's HTTP-layer signature.
+    StoreOk,
 }
 
 /// One `GET path`, written by hand: the question is "does anything answer, and
@@ -259,7 +261,7 @@ fn http_get(address: &str, path: &str, timeout: Duration) -> HttpReply {
     }
     let mut seen = Vec::new();
     let mut chunk = [0u8; 256];
-    while !seen.windows(2).any(|w| w == b"\r\n") && seen.len() < 1024 {
+    while !seen.windows(4).any(|w| w == b"\r\n\r\n") && seen.len() < 2048 {
         match stream.read(&mut chunk) {
             Ok(0) | Err(_) => break,
             Ok(n) => seen.extend_from_slice(&chunk[..n]),
@@ -271,17 +273,32 @@ fn http_get(address: &str, path: &str, timeout: Duration) -> HttpReply {
         words.next(),
         words.next().and_then(|c| c.parse::<u16>().ok()),
     ) {
-        (Some(version), Some(code)) if version.starts_with("HTTP/") => HttpReply::Status(code),
+        (Some(version), Some(code)) if version.starts_with("HTTP/") => {
+            if code == 200 && has_store_signature(&text) {
+                HttpReply::StoreOk
+            } else {
+                HttpReply::Status(code)
+            }
+        }
         _ => HttpReply::NotHttp,
     }
 }
 
+/// Whether an HTTP reply head is what the store's HTTP layer produces for a
+/// ping: an empty body and the CORS headers it adds to every answer. Another
+/// server's bare 200 has neither, so it is not adopted as a store.
+fn has_store_signature(head: &str) -> bool {
+    let head = head.to_ascii_lowercase();
+    head.contains("\ncontent-length: 0") && head.contains("\naccess-control-allow-origin:")
+}
+
 /// What answers on `address` (`host:port`), deciding within `timeout`. A store
-/// is something that answers `GET /v1/ping` with HTTP 200.
+/// is something that answers `GET /v1/ping` with an empty HTTP 200 carrying
+/// the store's CORS headers; any other answer is something else.
 pub fn probe_address(address: &str, timeout: Duration) -> ManagedAddressState {
     match http_get(address, "/v1/ping", timeout) {
         HttpReply::NotListening => ManagedAddressState::NothingListening,
-        HttpReply::Status(200) => ManagedAddressState::StoreAnswering,
+        HttpReply::StoreOk => ManagedAddressState::StoreAnswering,
         HttpReply::Status(_) | HttpReply::NotHttp => ManagedAddressState::HeldBySomethingElse,
     }
 }
@@ -703,7 +720,10 @@ impl ManagedStorePorts for SpacetimeManagedStore {
 
     fn managed_database_exists(&self) -> bool {
         let path = format!("/v1/database/{MANAGED_DATABASE_NAME}");
-        http_get(&self.layout.address, &path, PROBE_TIMEOUT) == HttpReply::Status(200)
+        matches!(
+            http_get(&self.layout.address, &path, PROBE_TIMEOUT),
+            HttpReply::Status(200) | HttpReply::StoreOk
+        )
     }
 
     fn publish_embedded_module(&self) -> ModulePublishOutcome {
