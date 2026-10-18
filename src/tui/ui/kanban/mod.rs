@@ -519,19 +519,21 @@ fn render_input_form_panel(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new("").block(block), area);
 }
 
+/// Rows `text` occupies when rendered by a `Paragraph` with `Wrap { trim: false }`.
+///
+/// Asks ratatui itself, so display cells and word-boundary wrapping match the
+/// widget that draws the text.
 pub(super) fn wrapped_line_count(text: &str, width: usize) -> usize {
+    let Ok(width) = u16::try_from(width) else {
+        return text.lines().count();
+    };
     if width == 0 {
         return 0;
     }
-    text.lines()
-        .map(|line| {
-            if line.is_empty() {
-                1
-            } else {
-                line.len().div_ceil(width)
-            }
-        })
-        .sum()
+    let lines: Vec<Line> = text.lines().map(Line::from).collect();
+    Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .line_count(width)
 }
 
 fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {

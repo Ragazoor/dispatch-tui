@@ -19,13 +19,23 @@ impl App {
         key: KeyEvent,
         label: &str,
     ) -> Vec<Command> {
-        if let Some(cmds) = self.run_normal_board(b, key, label) {
-            return cmds;
-        }
-        if let Some(cmds) = self.run_normal_epic(b, label) {
-            return cmds;
-        }
-        self.run_normal_task(b, label).unwrap_or_default()
+        self.try_run_normal(b, key, label).unwrap_or_else(|| {
+            tracing::warn!(action = b.action, "board.normal action has no handler arm");
+            Vec::new()
+        })
+    }
+
+    /// [`Self::run_normal`] without the fallback: `None` when no handler arm
+    /// claims the action.
+    pub(in crate::tui) fn try_run_normal(
+        &mut self,
+        b: &KeyBinding,
+        key: KeyEvent,
+        label: &str,
+    ) -> Option<Vec<Command>> {
+        self.run_normal_board(b, key, label)
+            .or_else(|| self.run_normal_epic(b, label))
+            .or_else(|| self.run_normal_task(b, label))
     }
 
     /// Board-wide actions: navigation, reordering, selection, folding, filters, search and view toggles.
@@ -353,7 +363,7 @@ impl App {
         vec![]
     }
 
-    /// `'D'` — quick-dispatch: immediate for 1 repo, picker for multiple, error for none.
+    /// `'D'` — quick-dispatch: immediate for 1 repo, picker otherwise (including none).
     fn handle_key_quick_dispatch_trigger(&mut self) -> Vec<Command> {
         let epic_id = self.current_epic_id();
         self.input.pending_epic_id = epic_id;

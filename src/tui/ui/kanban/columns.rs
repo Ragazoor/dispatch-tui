@@ -435,11 +435,13 @@ fn render_scroll_indicators(
     let buf = frame.buffer_mut();
 
     if has_above {
-        buf[(x, col_area.top())].set_symbol("▲").set_style(style);
+        if let Some(cell) = buf.cell_mut((x, col_area.top())) {
+            cell.set_symbol("▲").set_style(style);
+        }
     }
     if has_below {
-        buf[(x, inner.bottom().saturating_sub(1))]
-            .set_symbol("▼")
-            .set_style(style);
+        if let Some(cell) = buf.cell_mut((x, inner.bottom().saturating_sub(1))) {
+            cell.set_symbol("▼").set_style(style);
+        }
     }
 }

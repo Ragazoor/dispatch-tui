@@ -74,7 +74,7 @@ pub(in crate::tui::ui::kanban) fn render_task_detail_overlay(
     app: &mut App,
     area: Rect,
 ) {
-    let (task_id, scroll, zoomed) = match &app.board.view_mode {
+    let (task_id, mut scroll, zoomed) = match &app.board.view_mode {
         ViewMode::TaskDetail {
             task_id,
             scroll,
@@ -98,15 +98,20 @@ pub(in crate::tui::ui::kanban) fn render_task_detail_overlay(
     let body_width = overlay_area.width.saturating_sub(2) as usize;
 
     let desc_wrapped = wrapped_line_count(&task.description, body_width);
-    let new_max_scroll = desc_wrapped.saturating_sub(body_height as usize) as u16;
+    let new_max_scroll =
+        u16::try_from(desc_wrapped.saturating_sub(body_height as usize)).unwrap_or(u16::MAX);
+    // Zoom or resize can shrink the range under the current scroll: clamp it,
+    // render with the clamped value and write it back.
+    scroll = scroll.min(new_max_scroll);
 
     if let ViewMode::TaskDetail {
-        ref mut max_scroll, ..
+        scroll: ref mut stored_scroll,
+        ref mut max_scroll,
+        ..
     } = app.board.view_mode
     {
-        if *max_scroll != new_max_scroll {
-            *max_scroll = new_max_scroll;
-        }
+        *max_scroll = new_max_scroll;
+        *stored_scroll = scroll;
     }
 
     // ── Block with hints ─────────────────────────────────────────────────────

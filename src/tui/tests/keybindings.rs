@@ -1220,3 +1220,20 @@ fn h_with_nothing_to_move_records_nothing() {
     let cmds = press(&mut app, "H");
     assert!(recorded(&cmds).is_empty(), "{:?}", recorded(&cmds));
 }
+
+#[test]
+fn every_board_normal_action_has_a_handler_arm() {
+    use crate::keybindings::{bindings_in, KeyNamespace};
+    let mut missing = Vec::new();
+    for b in bindings_in(KeyNamespace::BoardNormal) {
+        let mut app = App::new(vec![]);
+        let key = make_key(KeyCode::Char('x'));
+        if app.try_run_normal(b, key, "x").is_none() {
+            missing.push(b.action);
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "actions with no handler arm: {missing:?}"
+    );
+}

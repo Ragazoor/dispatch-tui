@@ -282,3 +282,45 @@ fn j_key_inert_when_no_description_and_max_scroll_zero() {
     app.handle_key(make_key(KeyCode::Char('j')));
     assert!(matches!(&app.board.view_mode, ViewMode::TaskDetail { scroll, .. } if *scroll == 0));
 }
+
+// ── scroll clamping on render ────────────────────────────────────────────────
+
+#[test]
+fn zoom_after_scrolling_to_end_keeps_last_line_visible() {
+    let mut app = make_app_with_task();
+    app.board.tasks[0].description = (1..=40)
+        .map(|i| format!("row-{i:02}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
+    ));
+    // Small terminal: render, then scroll to the end.
+    render_to_buffer(&mut app, 100, 30);
+    if let ViewMode::TaskDetail {
+        scroll, max_scroll, ..
+    } = &mut app.board.view_mode
+    {
+        *scroll = *max_scroll;
+    }
+    // Zoom grows the overlay, so the range shrinks under the stored scroll.
+    app.handle_key(make_key(KeyCode::Char('z')));
+    let buf = render_to_buffer(&mut app, 100, 30);
+    let text = (0..30)
+        .map(|y| buffer_line(&buf, y))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.contains("row-40"),
+        "last line must stay visible:\n{text}"
+    );
+    if let ViewMode::TaskDetail {
+        scroll, max_scroll, ..
+    } = &app.board.view_mode
+    {
+        assert!(
+            scroll <= max_scroll,
+            "scroll {scroll} past max {max_scroll}"
+        );
+    }
+}

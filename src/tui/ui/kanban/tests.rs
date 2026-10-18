@@ -497,3 +497,18 @@ fn epic_header_row_reserves_width_for_a_longer_id() {
         "a wider id prefix must leave less room for the title text: short id showed {short_visible} title chars, long id showed {long_visible} (short row: {short_row:?}, long row: {long_row:?})"
     );
 }
+
+#[test]
+fn wrapped_line_count_counts_cells_not_bytes() {
+    // Six two-byte chars, six cells: fits one line of width 6.
+    assert_eq!(wrapped_line_count("åäöåäö", 6), 1);
+    // Three double-width CJK chars take six cells: two lines at width 4.
+    assert_eq!(wrapped_line_count("日本語", 4), 2);
+}
+
+#[test]
+fn wrapped_line_count_wraps_prose_at_word_boundaries() {
+    // Byte arithmetic says 11 / 6 -> 2 lines; word wrapping at width 6 gives 2,
+    // but "aaaa bbbb cccc" (14 bytes, width 7) needs 3 lines, not 2.
+    assert_eq!(wrapped_line_count("aaaa bbbb cccc", 7), 3);
+}
