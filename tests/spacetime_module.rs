@@ -31,7 +31,7 @@
 mod common;
 
 use common::spacetime_instance::{
-    column, describe, instance_tests_should_run, is_transport_error, module_path, no_rows,
+    column, describe, instance_tests_should_run, is_transport_error, module_path,
     spacetime_available_or_skip, spacetime_command, Instance, COVERAGE_ENV_VARS,
 };
 use dispatch_tui::process::{ProcessRunner, RealProcessRunner};
@@ -189,47 +189,6 @@ fn only_transport_errors_are_retried() {
     assert!(!is_transport_error(""));
 }
 
-/// An empty patch, to be filled by the caller. Every field named, because a
-/// missing one is a deserialisation failure rather than a `None`.
-fn empty_task_patch() -> serde_json::Value {
-    let mut patch = serde_json::Map::new();
-    for field in [
-        "title",
-        "description",
-        "repo_path",
-        "status",
-        "worktree",
-        "tmux_window",
-        "plan_path",
-        "epic_id",
-        "sub_status",
-        "tag",
-        "sort_order",
-        "base_branch",
-        "external_id",
-        "labels",
-        "last_pre_tool_use_at",
-        "last_notification_at",
-        "wrap_up_mode",
-        "url",
-        "url_type",
-        "pr_learnings_gate_shown_at",
-        "auto_run_plan",
-        "live_subagents",
-        "stop_pending",
-        "stop_pending_at",
-        "last_peer_message_sent_at",
-        "last_peer_message_received_at",
-        "phoenix",
-        "host",
-        "owner",
-        "completed_at",
-    ] {
-        patch.insert(field.into(), serde_json::json!({"none": []}));
-    }
-    serde_json::Value::Object(patch)
-}
-
 /// A blank epic row, as `seed_epics` and `create_epic` both take it.
 fn epic_json(id: i64, title: &str, status: &str, parent: i64) -> serde_json::Value {
     serde_json::json!({
@@ -254,43 +213,11 @@ fn epic_json(id: i64, title: &str, status: &str, parent: i64) -> serde_json::Val
     })
 }
 
-/// A patch that sets one string column.
-fn patch_setting(field: &str, value: &str) -> serde_json::Value {
-    let mut patch = empty_task_patch();
-    patch[field] = serde_json::json!({"some": value});
-    patch
-}
-
 fn published_instance() -> Instance {
     let instance = Instance::start("module-test");
     let published = instance.publish(&module_path(), None);
     assert!(published.status.success(), "{}", describe(&published));
     instance
-}
-
-/// A `learnings` row, JSON-encoded for `seed_learnings`'s CLI call — a real
-/// id and an explicit `source_task_id`, unlike `learning_json` in `subscription.rs` (which
-/// `create_learning` always overwrites to 0/none on the way in).
-fn seeded_learning_json(id: i64, summary: &str, source_task_id: Option<i64>) -> serde_json::Value {
-    serde_json::json!({
-        "id": id,
-        "kind": "convention",
-        "summary": summary,
-        "detail": {"none": []},
-        "scope": "user",
-        "scope_ref": {"none": []},
-        "tags": "[]",
-        "status": "approved",
-        "source_task_id": match source_task_id {
-            Some(t) => serde_json::json!({"some": t}),
-            None => serde_json::json!({"none": []}),
-        },
-        "upvote_count": 0,
-        "last_upvoted_at": {"none": []},
-        "created_at": "2026-09-19 10:00:00",
-        "updated_at": "2026-09-19 10:00:00",
-        "embedding": {"none": []},
-    })
 }
 
 /// A task row owned by `host`, in `epic`, at `status`.
@@ -348,18 +275,6 @@ fn register_own_hosts(instance: &Instance) {
     register_host(instance, "host-b", &me);
 }
 
-/// A host owned by a SECOND identity, "teammate" — somebody else's machine,
-/// registered by the teammate as theirs. The teammate's CLI logs in on its
-/// first call, so a throwaway call (refused: a new host must name its owner)
-/// comes first to make their identity known. Returns the teammate's identity.
-fn register_teammates_host(instance: &Instance, host: &str) -> String {
-    instance.call_as("teammate", "register_host", &["scratch", "", ""]);
-    let them = instance.identity_as("teammate");
-    let owned = instance.call_as("teammate", "register_host", &[host, "", &them]);
-    assert!(owned.status.success(), "{}", describe(&owned));
-    them
-}
-
 /// A running task with no live subagents or shells and no deferred Stop —
 /// the ordinary "task exists" seed these tests build on.
 fn running_task(instance: &Instance, id: i64) {
@@ -378,38 +293,6 @@ fn running_task(instance: &Instance, id: i64) {
 fn backfill_agents(instance: &Instance) {
     let backfilled = instance.call("backfill_agents", &[]);
     assert!(backfilled.status.success(), "{}", describe(&backfilled));
-}
-
-/// A feed item, already resolved the way the client resolves one before
-/// sending — see `FeedTaskUpsertItem`'s doc comment in the module.
-/// Wrap plain feed items as `ingest_feed` takes them: no signals.
-fn ingest_items(items: &serde_json::Value) -> serde_json::Value {
-    serde_json::Value::Array(
-        items
-            .as_array()
-            .expect("feed items are an array")
-            .iter()
-            .map(|item| serde_json::json!({ "item": item, "signals": [] }))
-            .collect(),
-    )
-}
-
-fn feed_item_json(external_id: &str, title: &str, status: &str) -> serde_json::Value {
-    serde_json::json!({
-        "external_id": external_id,
-        "title": title,
-        "description": "",
-        "repo_path": "/repo",
-        "status": status,
-        "sub_status": "none",
-        "base_branch": "main",
-        "tag": "chore",
-        "labels": "[]",
-        "sort_order": {"none": []},
-        "url": "",
-        "url_type": "",
-        "wrap_up_mode": "",
-    })
 }
 
 fn current_agent_column(instance: &Instance, field: &str, task: i64) -> String {
@@ -439,15 +322,11 @@ mod agent_state;
 mod agents;
 #[path = "spacetime_module/data_rules.rs"]
 mod data_rules;
-#[path = "spacetime_module/feeds.rs"]
-mod feeds;
 #[path = "spacetime_module/mutations.rs"]
 mod mutations;
 #[path = "spacetime_module/poll_owner.rs"]
 mod poll_owner;
 #[path = "spacetime_module/publish.rs"]
 mod publish;
-#[path = "spacetime_module/settings.rs"]
-mod settings;
 #[path = "spacetime_module/subscription.rs"]
 mod subscription;
