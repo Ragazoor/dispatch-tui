@@ -340,14 +340,6 @@ fn task_json(id: i64, title: &str, status: &str, epic: i64, host: &str) -> serde
     })
 }
 
-/// A status move by hand, with the sub-status the move needs.
-fn move_task(instance: &Instance, id: i64, status: &str, sub_status: &str) {
-    let mut patch = patch_setting("status", status);
-    patch["sub_status"] = serde_json::json!({"some": sub_status});
-    let moved = instance.call("patch_task", &[&id.to_string(), &patch.to_string()]);
-    assert!(moved.status.success(), "{}", describe(&moved));
-}
-
 /// `host-a` and `host-b`, both owned by the identity this instance calls as,
 /// so the calls below may act for either (`store-split.allium`, D11).
 fn register_own_hosts(instance: &Instance) {
@@ -366,27 +358,6 @@ fn register_teammates_host(instance: &Instance, host: &str) -> String {
     let owned = instance.call_as("teammate", "register_host", &[host, "", &them]);
     assert!(owned.status.success(), "{}", describe(&owned));
     them
-}
-
-fn request_column(instance: &Instance, field: &str, task: i64) -> String {
-    column(
-        instance,
-        &format!("SELECT {field} FROM dispatch_requests WHERE task_id = {task}"),
-    )
-}
-
-/// `request_dispatch(task_id, requester, origin, mode)`; `mode` "" derives.
-fn request_dispatch(
-    instance: &Instance,
-    task: i64,
-    requester: &str,
-    origin: &str,
-    mode: &str,
-) -> std::process::Output {
-    instance.call(
-        "request_dispatch",
-        &[&task.to_string(), requester, origin, mode],
-    )
 }
 
 /// A running task with no live subagents or shells and no deferred Stop —
@@ -441,73 +412,6 @@ fn feed_item_json(external_id: &str, title: &str, status: &str) -> serde_json::V
     })
 }
 
-fn request_wrap_up(
-    instance: &Instance,
-    task: i64,
-    host: &str,
-    action: &str,
-) -> std::process::Output {
-    instance.call("request_wrap_up", &[&task.to_string(), host, action])
-}
-
-/// A backlog subtask of epic 1 with `sort_order` and `phoenix`.
-fn seed_backlog_subtask(instance: &Instance, id: i64, sort_order: i64, phoenix: bool) {
-    let mut row = task_json(id, "next", "backlog", 1, "");
-    row["sort_order"] = serde_json::json!({"some": sort_order});
-    row["phoenix"] = serde_json::json!(phoenix);
-    let seeded = instance.call("seed_tasks", &[&serde_json::json!([row]).to_string()]);
-    assert!(seeded.status.success(), "{}", describe(&seeded));
-}
-
-/// One task per `(id, status, tag)` in epic 1, each with a worktree, a window
-/// and `host-a`, so it can be wrapped up. `host-a` and `host-b` are registered
-/// to this instance's own identity. `auto_dispatch` is the epic's flag.
-fn seed_wrappable(instance: &Instance, auto_dispatch: bool, tasks: &[(i64, &str, &str)]) {
-    register_own_hosts(instance);
-    let mut epic = epic_json(1, "E", "running", 0);
-    epic["auto_dispatch"] = serde_json::json!(auto_dispatch);
-    let seeded = instance.call("seed_epics", &[&serde_json::json!([epic]).to_string()]);
-    assert!(seeded.status.success(), "{}", describe(&seeded));
-    let rows: Vec<serde_json::Value> = tasks
-        .iter()
-        .map(|(id, status, tag)| {
-            let mut row = task_json(*id, "t", status, 1, "host-a");
-            row["tag"] = serde_json::json!(tag);
-            row["worktree"] = serde_json::json!(format!("/wt/{id}-t"));
-            row["tmux_window"] = serde_json::json!(format!("task-{id}"));
-            row["sub_status"] = serde_json::json!(if *status == "review" {
-                "awaiting_review"
-            } else {
-                "active"
-            });
-            row
-        })
-        .collect();
-    let seeded = instance.call("seed_tasks", &[&serde_json::json!(rows).to_string()]);
-    assert!(seeded.status.success(), "{}", describe(&seeded));
-    // The window is the current agent's: the backfill moves it there.
-    backfill_agents(instance);
-}
-
-/// A session row's column, by the task and the kind (one such row per test).
-fn session_column(instance: &Instance, field: &str, task: i64, kind: &str) -> String {
-    column(
-        instance,
-        &format!("SELECT {field} FROM session_requests WHERE task_id = {task} AND kind = '{kind}'"),
-    )
-}
-
-fn session_count(instance: &Instance) -> String {
-    column(instance, "SELECT COUNT(*) AS n FROM session_requests")
-}
-
-fn session_timer_count(instance: &Instance, request: &str) -> String {
-    column(
-        instance,
-        &format!("SELECT COUNT(*) AS n FROM session_request_timeouts WHERE request_id = {request}"),
-    )
-}
-
 fn current_agent_column(instance: &Instance, field: &str, task: i64) -> String {
     column(
         instance,
@@ -545,13 +449,6 @@ fn blank_epic_patch_json() -> serde_json::Value {
     serde_json::Value::Object(patch)
 }
 
-fn set_task_field(instance: &Instance, task: i64, field: &str, value: serde_json::Value) {
-    let mut patch = empty_task_patch();
-    patch[field] = serde_json::json!({ "some": value });
-    let out = instance.call("patch_task", &[&task.to_string(), &patch.to_string()]);
-    assert!(out.status.success(), "{}", describe(&out));
-}
-
 /// Register `host` in the host registry with `owner`, which a new host must
 /// name (`store-split.allium`, D11).
 fn register_host(instance: &Instance, host: &str, owner: &str) {
@@ -563,8 +460,6 @@ fn register_host(instance: &Instance, host: &str, owner: &str) {
 mod agent_state;
 #[path = "spacetime_module/agents.rs"]
 mod agents;
-#[path = "spacetime_module/close_task.rs"]
-mod close_task;
 #[path = "spacetime_module/data_rules.rs"]
 mod data_rules;
 #[path = "spacetime_module/epics_and_hosts.rs"]

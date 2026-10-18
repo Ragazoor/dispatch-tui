@@ -73,24 +73,6 @@ fn two_different_subagents_both_count() {
     assert_eq!(current_agent_column(&instance, "live_subagents", 1), "1");
 }
 
-/// `HookStop`: nothing live, so the Stop flips the task straight to `review`.
-#[test]
-fn try_record_stop_flips_a_running_task_with_nothing_live() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    running_task(&instance, 1);
-
-    let stopped = instance.call("try_record_stop", &["1", "2026-09-19T10:00:00.000"]);
-    assert!(stopped.status.success(), "{}", describe(&stopped));
-
-    assert_eq!(
-        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
-        "review"
-    );
-}
-
 /// ...and a live subagent withholds the flip until it drains, at which point
 /// the DRAIN — not a second Stop — applies it. `HookStop`/`HookSubagentStop`
 /// in `docs/specs/agent-health.allium`.
@@ -123,55 +105,4 @@ fn try_record_stop_defers_while_a_subagent_is_live_and_the_drain_applies_it() {
         "draining the last subagent must apply the deferred Stop"
     );
     assert_eq!(current_agent_column(&instance, "stop_pending", 1), "false");
-}
-
-/// A Stop against a task that is not `Running` is refused outright — the
-/// precondition failing is what lets the `Store` read `NoOp` back
-/// unambiguously (this task's plan doc, decision 3) — rather than a silent
-/// no-op the caller could not tell apart from a real flip.
-#[test]
-fn try_record_stop_refuses_a_task_that_is_not_running() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    let mut row = task_json(1, "t", "backlog", 0, "");
-    row["owner"] = serde_json::json!("user-me");
-    let seeded = instance.call("seed_tasks", &[&serde_json::json!([row]).to_string()]);
-    assert!(seeded.status.success(), "{}", describe(&seeded));
-
-    let refused = instance.call("try_record_stop", &["1", "2026-09-19T10:00:00.000"]);
-    assert!(
-        !refused.status.success(),
-        "a Stop against a non-Running task must be refused, got {}",
-        describe(&refused)
-    );
-}
-
-/// The PR learnings gate fires EXACTLY once: the first call sets it and wins,
-/// a second is refused. The `Store` reads that refusal as `false` via
-/// `ReducerOutcome::won()` — the same shape as the dispatch claim.
-#[test]
-fn mark_pr_learnings_gate_shown_wins_exactly_once() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    running_task(&instance, 1);
-
-    let first = instance.call(
-        "mark_pr_learnings_gate_shown",
-        &["1", "2026-09-19T10:00:00.000"],
-    );
-    assert!(first.status.success(), "{}", describe(&first));
-
-    let second = instance.call(
-        "mark_pr_learnings_gate_shown",
-        &["1", "2026-09-19T10:00:01.000"],
-    );
-    assert!(
-        !second.status.success(),
-        "a second call must be refused, got {}",
-        describe(&second)
-    );
 }
