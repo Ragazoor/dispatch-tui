@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    extract::Request,
+    extract::{Request, State},
     http::{header, HeaderMap, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -34,34 +34,83 @@ pub async fn extract_caller_identity(
     next.run(req).await
 }
 
-/// Whether a `Host` value (`host[:port]`) or an `Origin` value
-/// (`scheme://host[:port]`) names this machine's loopback interface.
-fn is_loopback(value: &str) -> bool {
-    let authority = value.split_once("://").map_or(value, |(_, rest)| rest);
-    let authority = authority.split('/').next().unwrap_or("");
-    let host = match authority.strip_prefix('[') {
-        Some(rest) => rest.split(']').next().unwrap_or(""),
-        None => authority.split(':').next().unwrap_or(""),
+/// Split a `Host` value (`host[:port]`) or an `Origin` value
+/// (`scheme://host[:port]`) into its lowercased host and optional port.
+///
+/// Strict: an authority carrying userinfo (`localhost:1@evil.com`), a path
+/// that is not empty, or a port that is not plain digits yields `None`.
+/// `Origin: null` has no authority and so yields `None` too.
+fn parse_authority(value: &str) -> Option<(String, Option<u16>)> {
+    let authority = match value.split_once("://") {
+        Some((scheme, rest))
+            if scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https") =>
+        {
+            rest
+        }
+        Some(_) => return None,
+        None => value,
     };
-    matches!(
-        host.to_ascii_lowercase().as_str(),
-        "127.0.0.1" | "localhost" | "::1"
-    )
+    if authority.is_empty() || authority.contains(['/', '?', '#', '@', '\\']) {
+        return None;
+    }
+    let (host, port) = match authority.strip_prefix('[') {
+        Some(rest) => {
+            let (host, after) = rest.split_once(']')?;
+            (host, after.strip_prefix(':'))
+        }
+        None => match authority.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (authority, None),
+        },
+    };
+    let port = match port {
+        None => None,
+        Some(p) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => {
+            Some(p.parse::<u16>().ok()?)
+        }
+        Some(_) => return None,
+    };
+    Some((host.to_ascii_lowercase(), port))
 }
 
-/// Refuse a request whose `Host` or `Origin` is not loopback — the defence
-/// against DNS rebinding (`AgentPortRejectsNonLoopbackOrigins` in
-/// `docs/specs/mcp-task-tools.allium`). Runs before identity extraction, so a
-/// rejected request never reaches a handler. A missing header passes: a
-/// browser always sends `Host`, and local clients may omit `Origin`.
-pub async fn require_loopback_origin(req: Request<Body>, next: Next) -> Response {
-    let headers = req.headers();
-    let foreign = |name| {
-        headers
-            .get(name)
-            .is_some_and(|v| !v.to_str().is_ok_and(is_loopback))
+/// Whether `value` names this machine's loopback interface on the bound
+/// port. `bound` of `None` accepts any port (test routers have no listener).
+/// `require_port` is set for `Origin`, which a browser always sends with the
+/// port, so a missing one means the default port, not ours. `Host` may omit
+/// it: the hook client sends `127.0.0.1` bare.
+fn is_loopback(value: &str, bound: Option<u16>, require_port: bool) -> bool {
+    let Some((host, port)) = parse_authority(value) else {
+        return false;
     };
-    if foreign(header::HOST) || foreign(header::ORIGIN) {
+    if !matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1") {
+        return false;
+    }
+    match (bound, port) {
+        (None, _) => true,
+        (Some(b), Some(p)) => b == p,
+        (Some(_), None) => !require_port,
+    }
+}
+
+/// Refuse a request whose `Host` or `Origin` is not loopback on the bound
+/// port — the defence against DNS rebinding and cross-origin pages
+/// (`AgentPortRejectsNonLoopbackOrigins` in `docs/specs/mcp-task-tools.allium`).
+/// Runs before identity extraction, so a rejected request never reaches a
+/// handler. A missing header passes: a browser always sends `Host`, and local
+/// clients may omit `Origin`.
+pub async fn require_loopback_origin(
+    State(bound): State<Option<u16>>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    let headers = req.headers();
+    let foreign = |name, require_port| {
+        headers.get(name).is_some_and(|v| {
+            !v.to_str()
+                .is_ok_and(|v| is_loopback(v, bound, require_port))
+        })
+    };
+    if foreign(header::HOST, false) || foreign(header::ORIGIN, true) {
         return (StatusCode::FORBIDDEN, "non-loopback Host or Origin").into_response();
     }
     next.run(req).await
@@ -159,7 +208,10 @@ mod tests {
     fn guarded() -> Router {
         Router::new()
             .route("/mcp", post(|| async { "ok" }))
-            .layer(middleware::from_fn(require_loopback_origin))
+            .layer(middleware::from_fn_with_state(
+                Some(3142u16),
+                require_loopback_origin,
+            ))
     }
 
     async fn status_with(header_name: &str, value: &str) -> StatusCode {
@@ -208,6 +260,43 @@ mod tests {
             ("host", "[::1]:3142"),
             ("origin", "http://localhost:3142"),
             ("origin", "http://127.0.0.1:3142"),
+        ] {
+            assert_eq!(
+                status_with(name, value).await,
+                StatusCode::OK,
+                "{name}: {value}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn origin_edge_cases_are_rejected() {
+        for (name, value) in [
+            ("origin", "null"),
+            ("origin", "http://localhost.:3142"),
+            ("origin", "http://localhost:9999"),
+            ("origin", "http://localhost"),
+            ("origin", "http://localhost:3142@evil.example"),
+            ("origin", "http://localhost:x@evil.com"),
+            ("origin", "http://localhost:3142.evil.example"),
+            ("origin", "ftp://localhost:3142"),
+            ("host", "localhost.:3142"),
+            ("host", "localhost:9999"),
+            ("host", "localhost:3142@evil.example"),
+        ] {
+            assert_eq!(
+                status_with(name, value).await,
+                StatusCode::FORBIDDEN,
+                "{name}: {value}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn upper_case_loopback_passes() {
+        for (name, value) in [
+            ("host", "LOCALHOST:3142"),
+            ("origin", "HTTP://LocalHost:3142"),
         ] {
             assert_eq!(
                 status_with(name, value).await,

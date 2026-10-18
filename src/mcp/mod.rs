@@ -231,10 +231,12 @@ pub fn router_with_bg_done(
 ) -> Router {
     let mut state = McpState::new(deps, notify_tx);
     state.test_hooks.bg_write_done_tx = bg_write_done_tx;
-    router_over(state)
+    router_over(state, None)
 }
 
-fn router_over(state: McpState) -> Router {
+/// `bound_port` is the port the guard holds `Host` and `Origin` to; `None`
+/// (test routers, which have no listener) accepts any.
+fn router_over(state: McpState, bound_port: Option<u16>) -> Router {
     let state = Arc::new(state);
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))
@@ -254,7 +256,8 @@ fn router_over(state: McpState) -> Router {
             middleware::extract_caller_identity,
         ))
         // Outermost: a rejected origin never reaches identity or a handler.
-        .layer(axum::middleware::from_fn(
+        .layer(axum::middleware::from_fn_with_state(
+            bound_port,
             middleware::require_loopback_origin,
         ))
         .with_state(state)
@@ -286,7 +289,11 @@ pub async fn serve_on(
     services: Services,
     notify_tx: mpsc::UnboundedSender<BoardEvent>,
 ) -> anyhow::Result<()> {
-    let app = router_over(McpState::with_services(deps, services, Some(notify_tx)));
+    let bound_port = listener.local_addr()?.port();
+    let app = router_over(
+        McpState::with_services(deps, services, Some(notify_tx)),
+        Some(bound_port),
+    );
     axum::serve(listener, app).await?;
     Ok(())
 }

@@ -788,7 +788,10 @@ async fn create_task_unknown_caller_identity_returns_error() {
     .await;
     assert!(is_error(&resp));
     let msg = error_message(&resp);
-    assert!(msg.to_lowercase().contains("caller"), "got {msg}");
+    assert!(
+        msg.contains("99999") && msg.contains("not found"),
+        "got {msg}"
+    );
 }
 
 #[tokio::test]

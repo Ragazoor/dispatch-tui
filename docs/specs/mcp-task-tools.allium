@@ -159,9 +159,14 @@ rule AgentPortRejectsNonLoopbackOrigins {
     when: AgentPortRequest(host?, origin?)
 
     -- host and origin are the request's Host and Origin headers; "loopback"
-    -- means the hostname is 127.0.0.1, localhost or [::1], with or without a
-    -- port (the hook client sends Host "127.0.0.1" with no port). A request
-    -- with no Host header is allowed: a browser always sends one.
+    -- means the authority parses strictly (no userinfo, path or non-numeric
+    -- port; scheme http or https for an origin) and the hostname is 127.0.0.1,
+    -- localhost or [::1], case-insensitively and with no trailing dot. Any port
+    -- present must be the port the board is bound to. A Host may omit the port
+    -- (the hook client sends Host "127.0.0.1"); an Origin may not, since a
+    -- browser always sends it and a missing one means the default port. "null"
+    -- is not loopback. A request with no Host header is allowed: a browser
+    -- always sends one.
     ensures:
         if (host != null and not loopback(host)) or (origin != null and not loopback(origin)):
             RequestRejected(status: 403)
@@ -172,12 +177,19 @@ rule AgentPortRejectsNonLoopbackOrigins {
         -- follow-up and is not part of this rule.
 }
 
+-- == The hook path takes JSON only ==
+--
+-- A cross-origin text/plain POST needs no preflight, so a body on the hook
+-- path that is not declared application/json (charset parameters allowed) is
+-- refused with 415 and never applied.
+
 -- == MCP tool failures share one shape ==
 --
 -- Every failure after a tools/call is accepted, including an unresolvable
 -- agent name in the arguments, comes back as a result with isError: true and
 -- the message as text. A tool can never return a JSON-RPC error code. Only an
--- unreadable request (bad identity) is a JSON-RPC error. A missing or null
+-- unreadable request (bad identity) is a JSON-RPC error. This includes a
+-- task_id that names no task ("Task N not found"). A missing or null
 -- `arguments` means an empty object.
 
 -- == MCP Task Tools ==

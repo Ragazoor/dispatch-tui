@@ -505,9 +505,10 @@ pub(super) fn reject_alongside(
 // Caller task lookup helper
 // ---------------------------------------------------------------------------
 
-/// Fetch the task identified by `caller_id` from the DB, mapping errors to
-/// JSON-RPC responses. Used by handlers that resolve the caller task for
-/// context inheritance (project_id, epic_id, etc.).
+/// Fetch the task identified by `caller_id` from the DB, mapping a miss to a
+/// tool-error result that names the id. Used by handlers that resolve the
+/// caller task for context inheritance (project_id, epic_id, etc.) and by
+/// `exit_session`, whose `task_id` argument is a caller-supplied target.
 pub(super) async fn fetch_caller_task(
     db: &dyn crate::store::TaskReadStore,
     id: &Option<serde_json::Value>,
@@ -515,10 +516,9 @@ pub(super) async fn fetch_caller_task(
 ) -> Result<crate::models::Task, JsonRpcResponse> {
     match db.get_task(caller_id).await {
         Some(task) => Ok(task),
-        None => Err(JsonRpcResponse::err(
+        None => Err(tool_error(
             id.clone(),
-            NOT_FOUND_CODE,
-            format!("Unknown caller task {}", caller_id.0),
+            format!("Task {} not found", caller_id.0),
         )),
     }
 }
@@ -703,10 +703,12 @@ mod fetch_caller_task_tests {
         let db = Store::open_in_memory().unwrap();
 
         let result = fetch_caller_task(&db, &Some(json!(1)), TaskId(99999)).await;
-        let err_resp = result.unwrap_err();
-        let err = err_resp.error.unwrap();
-        assert_eq!(err.code, super::NOT_FOUND_CODE);
-        assert!(err.message.contains("99999"), "got: {}", err.message);
+        let resp = result.unwrap_err();
+        assert!(resp.error.is_none(), "must be a tool error, not JSON-RPC");
+        let result = resp.result.unwrap();
+        assert_eq!(result["isError"], true);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("99999"), "got: {text}");
     }
 }
 

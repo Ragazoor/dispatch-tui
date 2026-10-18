@@ -106,9 +106,50 @@ async fn undecodable_hook_body_answers_a_failed_outcome() {
     let body = axum::body::Bytes::from_static(
         br#"{"hook":"observe","event":"from_the_future","task_id":1}"#,
     );
-    let Json(resp) = crate::mcp::handlers::handle_hook_body(State(state), body).await;
+    let resp = crate::mcp::handlers::handle_hook_body(State(state), json_headers(), body).await;
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let parsed: HookResponse = serde_json::from_slice(&bytes).unwrap();
     assert!(
-        matches!(resp, HookResponse::Observed(ObserveOutcome::Failed { .. })),
-        "{resp:?}"
+        matches!(
+            parsed,
+            HookResponse::Observed(ObserveOutcome::Failed { .. })
+        ),
+        "{parsed:?}"
     );
+}
+
+fn json_headers() -> axum::http::HeaderMap {
+    let mut h = axum::http::HeaderMap::new();
+    h.insert(
+        axum::http::header::CONTENT_TYPE,
+        "application/json; charset=utf-8".parse().unwrap(),
+    );
+    h
+}
+
+/// A cross-origin `text/plain` POST needs no preflight, so the hook route
+/// refuses anything not declared JSON — and never applies the event.
+#[tokio::test]
+async fn non_json_hook_post_is_refused() {
+    let state = test_state().await;
+    let body = axum::body::Bytes::from_static(
+        br#"{"hook":"observe","event":"event","task_id":1,"kind":"pre_tool_use"}"#,
+    );
+    for headers in [axum::http::HeaderMap::new(), {
+        let mut h = axum::http::HeaderMap::new();
+        h.insert(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain".parse().unwrap(),
+        );
+        h
+    }] {
+        let resp =
+            crate::mcp::handlers::handle_hook_body(State(state.clone()), headers, body.clone())
+                .await;
+        assert_eq!(
+            resp.status(),
+            axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE
+        );
+    }
 }

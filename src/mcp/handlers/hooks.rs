@@ -8,7 +8,12 @@
 
 use std::sync::Arc;
 
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{
+    extract::State,
+    http::{header, HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+    Json,
+};
 
 use crate::hooks::wire::{
     Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, PaneAgent, PaneTask,
@@ -39,19 +44,44 @@ fn pr_gate_reminder(task_id: TaskId) -> String {
 /// The route handler: decodes the body itself so one the board cannot read
 /// (a newer hook binary's event, say) still gets a JSON `Failed` outcome. The
 /// extractor's own 422 would surface as an error in the agent's terminal.
+///
+/// A body that is not declared `application/json` is refused with 415 before
+/// it is read: a cross-origin `text/plain` POST needs no preflight, so
+/// without this a web page could forge `observe` events.
 pub async fn handle_hook_body(
     State(state): State<Arc<McpState>>,
+    headers: HeaderMap,
     body: axum::body::Bytes,
-) -> Json<HookResponse> {
+) -> Response {
+    if !is_json_content_type(&headers) {
+        return (
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "hook requests must be application/json",
+        )
+            .into_response();
+    }
     match serde_json::from_slice::<HookRequest>(&body) {
-        Ok(request) => handle_hook(State(state), Json(request)).await,
+        Ok(request) => handle_hook(State(state), Json(request))
+            .await
+            .into_response(),
         Err(e) => {
             tracing::warn!("undecodable hook body: {e}");
             Json(HookResponse::Observed(ObserveOutcome::Failed {
                 reason: format!("the board could not read the hook request: {e}"),
             }))
+            .into_response()
         }
     }
+}
+
+/// Whether the `Content-Type` is `application/json` (parameters such as
+/// `charset` ignored).
+fn is_json_content_type(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(';').next())
+        .is_some_and(|m| m.trim().eq_ignore_ascii_case("application/json"))
 }
 
 pub async fn handle_hook(
