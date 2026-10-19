@@ -573,8 +573,12 @@ impl App {
                 mode: crate::models::DrainMode::NoDrain,
             },
         ));
+        let heading = self
+            .board
+            .find_task(id)
+            .map_or_else(|| format!("Task #{id}"), Task::heading);
         self.status
-            .set(format!("Task {id} agent crashed - press d to retry",));
+            .set(format!("{heading} agent crashed - press d to retry"));
 
         if self.notifications_enabled {
             if let Some(task) = self.board.find_task(id) {
