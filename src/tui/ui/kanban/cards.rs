@@ -533,7 +533,10 @@ fn task_card_prefix_width(task: &Task, flash_received: bool, flash_sent: bool) -
     // select(2) + stripe(1) + " <lead> "(lead_len+2) + flash glyphs (" ✉"/" ➤",
     // 2 each) + the phoenix marker + the card's own chrome. Agent names are
     // lowercase ASCII, so their character count is their rendered width.
-    let lead_len = card_lead(task).chars().count();
+    let lead_len = match &task.agent_name {
+        Some(name) => name.chars().count(),
+        None => task.id.0.unsigned_abs().max(1).ilog10() as usize + 2,
+    };
     let flash_width = if flash_received { 2 } else { 0 } + if flash_sent { 2 } else { 0 };
     let phoenix_width = if task.phoenix {
         PHOENIX_MARKER_WIDTH
@@ -541,16 +544,6 @@ fn task_card_prefix_width(task: &Task, flash_received: bool, flash_sent: bool) -
         0
     };
     2 + 1 + 2 + lead_len + flash_width + phoenix_width + CARD_CHROME_WIDTH
-}
-
-/// The word a task card's line 1 leads with: the current agent's name, or
-/// `#<id>` with no current agent (`board-visuals.allium:
-/// CardLeadsWithTheAgentName`).
-fn card_lead(task: &Task) -> String {
-    match &task.agent_name {
-        Some(name) => name.clone(),
-        None => format!("#{}", task.id),
-    }
 }
 
 /// Whether the task has a live received / sent message flash.
@@ -602,7 +595,7 @@ fn card_title_line<'a>(
     let mut line1_spans = vec![
         Span::styled(select_prefix.to_string(), title_style),
         Span::styled(stripe_char, stripe_style),
-        Span::styled(format!(" {} ", card_lead(task)), Style::default().fg(MUTED)),
+        Span::styled(format!(" {} ", task.lead()), Style::default().fg(MUTED)),
         Span::styled(title_text.to_string(), title_style),
     ];
     if has_message_flash {

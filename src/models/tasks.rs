@@ -407,15 +407,40 @@ pub struct Task {
     pub agent_name: Option<String>,
 }
 
+/// The word that names a task to a person: its current agent's name, or
+/// `#<id>` with none. The board card and the agent-tree row both lead with
+/// it (`board-visuals.allium: CardLeadsWithTheAgentName`,
+/// `agent-tree.allium: AgentRowShowsAgentName`).
+pub fn task_lead(id: TaskId, agent_name: Option<&str>) -> String {
+    match agent_name {
+        Some(name) => name.to_string(),
+        None => format!("#{id}"),
+    }
+}
+
+/// How the TUI heads a task: `<agent name> · Task #<id>`, or `Task #<id>`
+/// with no current agent (or no task in hand).
+pub fn task_heading(id: TaskId, agent_name: Option<&str>) -> String {
+    match agent_name {
+        Some(name) => format!("{name} · Task #{id}"),
+        None => format!("Task #{id}"),
+    }
+}
+
 impl Task {
-    /// How the TUI heads a task: `<agent name> · Task #<id>`, or `Task #<id>`
-    /// with no current agent. The detail popup's title and the desktop
-    /// notifications (`board-visuals.allium: CardLeadsWithTheAgentName`).
+    /// [`task_lead`] for this task.
+    pub fn lead(&self) -> String {
+        task_lead(self.id, self.agent_name.as_deref())
+    }
+
+    /// [`task_heading`] for this task: the detail popup's title.
     pub fn heading(&self) -> String {
-        match &self.agent_name {
-            Some(name) => format!("{name} · Task #{}", self.id),
-            None => format!("Task #{}", self.id),
-        }
+        task_heading(self.id, self.agent_name.as_deref())
+    }
+
+    /// A desktop notification's title: the heading, then the task's title.
+    pub fn notification_title(&self) -> String {
+        format!("{}: {}", self.heading(), self.title)
     }
 
     /// The card's generic ordering key: its `sort_order`, or its id when that

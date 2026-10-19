@@ -111,7 +111,7 @@ impl App {
                 self.agents.notified_needs_input.insert(new_task.id);
                 cmds.push(Command::System(
                     crate::tui::commands::SystemCommand::SendNotification {
-                        title: format!("{}: {}", new_task.heading(), new_task.title),
+                        title: new_task.notification_title(),
                         body: "Agent needs your input".to_string(),
                         urgent: true,
                     },
@@ -125,7 +125,7 @@ impl App {
                 self.agents.notified_review.insert(new_task.id);
                 cmds.push(Command::System(
                     crate::tui::commands::SystemCommand::SendNotification {
-                        title: format!("{}: {}", new_task.heading(), new_task.title),
+                        title: new_task.notification_title(),
                         body: "Ready for review".to_string(),
                         urgent: false,
                     },
@@ -573,23 +573,20 @@ impl App {
                 mode: crate::models::DrainMode::NoDrain,
             },
         ));
-        let heading = self
-            .board
-            .find_task(id)
-            .map_or_else(|| format!("Task #{id}"), Task::heading);
+        let task = self.board.find_task(id);
+        let heading = task.map_or_else(|| crate::models::task_heading(id, None), Task::heading);
+        let notification = task.map(Task::notification_title);
         self.status
             .set(format!("{heading} agent crashed - press d to retry"));
 
-        if self.notifications_enabled {
-            if let Some(task) = self.board.find_task(id) {
-                cmds.push(Command::System(
-                    crate::tui::commands::SystemCommand::SendNotification {
-                        title: format!("{}: {}", task.heading(), task.title),
-                        body: "Agent crashed".to_string(),
-                        urgent: true,
-                    },
-                ));
-            }
+        if let Some(title) = notification.filter(|_| self.notifications_enabled) {
+            cmds.push(Command::System(
+                crate::tui::commands::SystemCommand::SendNotification {
+                    title,
+                    body: "Agent crashed".to_string(),
+                    urgent: true,
+                },
+            ));
         }
         cmds
     }

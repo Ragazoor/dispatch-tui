@@ -38,11 +38,10 @@ impl AgentRow {
     /// current agent
     /// (`agent-tree.allium: AgentRowShowsAgentName`).
     pub fn label(&self) -> String {
-        if self.agent_name.is_empty() {
-            format!("#{}", self.id)
-        } else {
-            self.agent_name.clone()
-        }
+        crate::models::task_lead(
+            self.id,
+            Some(self.agent_name.as_str()).filter(|name| !name.is_empty()),
+        )
     }
 }
 

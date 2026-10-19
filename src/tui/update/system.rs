@@ -1,6 +1,6 @@
 //! System / status / editor / quick-dispatch / misc handlers.
 
-use crate::models::{EpicId, TaskId, DEFAULT_BASE_BRANCH, DEFAULT_QUICK_TASK_TITLE};
+use crate::models::{EpicId, Task, TaskId, DEFAULT_BASE_BRANCH, DEFAULT_QUICK_TASK_TITLE};
 
 use super::super::types::*;
 use super::super::App;
@@ -294,11 +294,10 @@ impl App {
         self.agents.auto_dispatch_failed.insert(task_id, reason);
 
         if self.notifications_enabled {
-            let title = self
-                .board
-                .find_task(task_id)
-                .map(|t| format!("{}: {}", t.heading(), t.title))
-                .unwrap_or_else(|| format!("Task #{}: ", task_id.0));
+            let title = self.board.find_task(task_id).map_or_else(
+                || crate::models::task_heading(task_id, None),
+                Task::notification_title,
+            );
             vec![Command::System(
                 crate::tui::commands::SystemCommand::SendNotification {
                     title,
