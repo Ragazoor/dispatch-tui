@@ -396,3 +396,51 @@ fn stale_card_without_timestamp_omits_minutes() {
     assert!(text.contains("stale"), "got {text:?}");
     assert!(!text.contains('m'), "got {text:?}");
 }
+
+// board-visuals.allium: CardLeadsWithTheAgentName. Line 1 leads with the
+// current agent's name, and with `#<id>` only when the task has no agent.
+
+fn title_line_text(task: &Task) -> String {
+    line_text(&card_title_line(
+        task,
+        "a title",
+        false,
+        false,
+        Color::Reset,
+        (false, false),
+    ))
+}
+
+#[test]
+fn a_card_with_a_current_agent_leads_with_its_name_and_not_the_id() {
+    let mut task = make_task(98332, TaskStatus::Running);
+    task.agent_name = Some("paivi".into());
+
+    let text = title_line_text(&task);
+
+    assert!(text.contains(" paivi a title"), "{text:?}");
+    assert!(!text.contains("98332"), "{text:?}");
+}
+
+#[test]
+fn a_card_without_a_current_agent_leads_with_the_id() {
+    let task = make_task(98332, TaskStatus::Backlog);
+
+    let text = title_line_text(&task);
+
+    assert!(text.contains(" #98332 a title"), "{text:?}");
+}
+
+/// The title's budget is what the lead leaves: a five-letter name costs the
+/// same as `#` plus a four-digit id.
+#[test]
+fn the_title_budget_follows_the_lead_word_not_the_id() {
+    let mut named = make_task(1, TaskStatus::Running);
+    named.agent_name = Some("paivi".into());
+    let numbered = make_task(1234, TaskStatus::Running);
+
+    assert_eq!(
+        task_card_prefix_width(&named, false, false),
+        task_card_prefix_width(&numbered, false, false)
+    );
+}

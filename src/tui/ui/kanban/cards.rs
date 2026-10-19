@@ -530,16 +530,27 @@ fn phoenix_marker(task: &Task) -> &'static str {
 /// `PHOENIX_MARKER_WIDTH`). Splitting them across the call site is how the two
 /// measures get confused.
 fn task_card_prefix_width(task: &Task, flash_received: bool, flash_sent: bool) -> usize {
-    // select(2) + stripe(1) + " #NNN "(id_len+3) + flash glyphs (" ✉"/" ➤",
-    // 2 each) + the phoenix marker + the card's own chrome.
-    let id_len = task.id.0.unsigned_abs().max(1).ilog10() as usize + 1;
+    // select(2) + stripe(1) + " <lead> "(lead_len+2) + flash glyphs (" ✉"/" ➤",
+    // 2 each) + the phoenix marker + the card's own chrome. Agent names are
+    // lowercase ASCII, so their character count is their rendered width.
+    let lead_len = card_lead(task).chars().count();
     let flash_width = if flash_received { 2 } else { 0 } + if flash_sent { 2 } else { 0 };
     let phoenix_width = if task.phoenix {
         PHOENIX_MARKER_WIDTH
     } else {
         0
     };
-    2 + 1 + 3 + id_len + flash_width + phoenix_width + CARD_CHROME_WIDTH
+    2 + 1 + 2 + lead_len + flash_width + phoenix_width + CARD_CHROME_WIDTH
+}
+
+/// The word a task card's line 1 leads with: the current agent's name, or
+/// `#<id>` with no current agent (`board-visuals.allium:
+/// CardLeadsWithTheAgentName`).
+fn card_lead(task: &Task) -> String {
+    match &task.agent_name {
+        Some(name) => name.clone(),
+        None => format!("#{}", task.id),
+    }
 }
 
 /// Whether the task has a live received / sent message flash.
@@ -562,7 +573,7 @@ fn message_flashes(task: &Task, app: &App) -> (bool, bool) {
     (has_message_flash, has_message_flash_sent)
 }
 
-/// Line 1 of a task card: select prefix, stripe, id, title, flash glyphs and
+/// Line 1 of a task card: select prefix, stripe, lead word, title, flash glyphs and
 /// the phoenix marker. The title is bold when the card is batch-selected or
 /// under the cursor.
 fn card_title_line<'a>(
@@ -591,7 +602,7 @@ fn card_title_line<'a>(
     let mut line1_spans = vec![
         Span::styled(select_prefix.to_string(), title_style),
         Span::styled(stripe_char, stripe_style),
-        Span::styled(format!(" #{} ", task.id), Style::default().fg(MUTED)),
+        Span::styled(format!(" {} ", card_lead(task)), Style::default().fg(MUTED)),
         Span::styled(title_text.to_string(), title_style),
     ];
     if has_message_flash {

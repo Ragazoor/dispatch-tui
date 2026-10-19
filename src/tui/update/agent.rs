@@ -111,7 +111,7 @@ impl App {
                 self.agents.notified_needs_input.insert(new_task.id);
                 cmds.push(Command::System(
                     crate::tui::commands::SystemCommand::SendNotification {
-                        title: format!("Task #{}: {}", new_task.id.0, new_task.title),
+                        title: format!("{}: {}", new_task.heading(), new_task.title),
                         body: "Agent needs your input".to_string(),
                         urgent: true,
                     },
@@ -125,7 +125,7 @@ impl App {
                 self.agents.notified_review.insert(new_task.id);
                 cmds.push(Command::System(
                     crate::tui::commands::SystemCommand::SendNotification {
-                        title: format!("Task #{}: {}", new_task.id.0, new_task.title),
+                        title: format!("{}: {}", new_task.heading(), new_task.title),
                         body: "Ready for review".to_string(),
                         urgent: false,
                     },
@@ -580,7 +580,7 @@ impl App {
             if let Some(task) = self.board.find_task(id) {
                 cmds.push(Command::System(
                     crate::tui::commands::SystemCommand::SendNotification {
-                        title: format!("Task #{}: {}", task.id.0, task.title),
+                        title: format!("{}: {}", task.heading(), task.title),
                         body: "Agent crashed".to_string(),
                         urgent: true,
                     },

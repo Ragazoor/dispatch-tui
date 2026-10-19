@@ -139,7 +139,7 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
         repo_path: row.repo_path.clone(),
         status,
         worktree: text(&row.worktree).map(str::to_owned),
-        // The six live-session facts are the current agent's (agents A4): the
+        // The live-session facts are the current agent's (agents A4): the
         // stored Task row's columns are never written and never read here.
         // `SharedRows` lays the agent's over this default when it hands the
         // task out (`models::with_session_of`).
@@ -179,6 +179,8 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
         phoenix: row.phoenix,
         live_subagents: 0,
         stop_pending: false,
+        // The current agent's name too, laid over the same way.
+        agent_name: None,
         completed_at: timestamp(T, row.id, "completed_at", &row.completed_at)?,
     })
 }

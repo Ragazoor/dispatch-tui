@@ -430,7 +430,8 @@ use "./core.allium" as core
 -- == Card stripe ==
 --
 -- Every card carries a one-quarter left block (▎ U+258E) immediately
--- left of the id, in the column's identity colour on a task card and in
+-- left of the card's lead word (a task card's agent name or id, an epic
+-- card's id), in the column's identity colour on a task card and in
 -- PURPLE on an epic card ("Epic cards"). The cursor card
 -- uses the same glyph as every other card. The earlier behaviour — the
 -- cursor card swapping in a half block (▌ U+258C) while resting cards
@@ -1574,12 +1575,26 @@ surface TaskCard {
         -- the title budget.
 
     @guarantee StripeCarriesTheLiteralIdentityToken
-        -- A one-quarter left block (▎ U+258E) immediately left of the id, in
+        -- A one-quarter left block (▎ U+258E) immediately left of the lead
+        -- word (CardLeadsWithTheAgentName), in
         -- chrome.task_card_stripe_colour. The cursor card uses the same glyph
         -- as every other card; the superseded half block (▌ U+258C) is gone,
         -- so stripe weight no longer moves with the cursor. The stripe is an
         -- accent, not the identity carrier — at two pixels wide it echoes the
         -- header label for a reader already oriented.
+
+    @guarantee CardLeadsWithTheAgentName
+        -- Line 1 reads `<lead> <title>`, where the lead is the name of the
+        -- task's current agent (agents.allium), in muted grey. A name is the
+        -- word a person scans fastest, and it is the word a peer addresses
+        -- the agent by. A task with no current agent — a Backlog card, a Done
+        -- card whose agent has ended — leads with `#<id>` instead. This is
+        -- the same rule as agent-tree.allium's AgentRowShowsAgentName, so a
+        -- task reads the same in both places. The title's budget is what the
+        -- lead leaves, so a name and an id of equal length clip the title
+        -- alike. The task detail popup's title and the desktop
+        -- notifications head the task with both: `<name> · Task #<id>`, or
+        -- `Task #<id>` alone with no current agent.
 
     @guarantee CursorIsTheFrameAndTheBoldTitleIsReinforcement
         -- The cursor card's frame is cursor_white and its title is bold; its

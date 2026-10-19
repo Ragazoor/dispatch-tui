@@ -121,6 +121,40 @@ fn task_updated_fires_review_notification_on_transition() {
     );
 }
 
+/// The notification heads the task the way the board does: the current
+/// agent's name, then the id (board-visuals.allium: CardLeadsWithTheAgentName).
+#[test]
+fn review_notification_title_leads_with_the_agent_name() {
+    let mut app = make_app();
+    app.set_notifications_enabled(true);
+    let mut updated = app
+        .board
+        .tasks
+        .iter()
+        .find(|t| t.id == TaskId(1))
+        .cloned()
+        .expect("task 1 fixture");
+    updated.status = TaskStatus::Review;
+    updated.sub_status = SubStatus::default_for(TaskStatus::Review);
+    updated.agent_name = Some("paivi".into());
+    let expected = format!("paivi · Task #1: {}", updated.title);
+
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(
+        Box::new(updated),
+    )));
+
+    let titles: Vec<&String> = cmds
+        .iter()
+        .filter_map(|c| match c {
+            crate::tui::Command::System(
+                crate::tui::commands::SystemCommand::SendNotification { title, .. },
+            ) => Some(title),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(titles, vec![&expected]);
+}
+
 #[test]
 fn task_updated_flashes_sent_on_new_peer_message_sent_timestamp() {
     let mut app = make_app();

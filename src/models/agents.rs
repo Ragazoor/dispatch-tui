@@ -65,7 +65,7 @@ pub struct Agent {
     pub stop_pending: bool,
 }
 
-/// `task` as the board shows it: the six live-session facts read off its
+/// `task` as the board shows it: the live-session facts and the name read off its
 /// current agent (agents A4). The stored Task row holds none of them, so the
 /// board's `Task` keeps the field names as a derived view, and every reader of
 /// `task.tmux_window`, `is_detached` and the rest reads the agent without
@@ -80,6 +80,7 @@ pub fn with_session_of(task: &Task, agent: Option<&Agent>) -> Task {
             task.last_notification_at = agent.last_notification_at;
             task.live_subagents = agent.live_subagents;
             task.stop_pending = agent.stop_pending;
+            task.agent_name = Some(agent.name.clone());
         }
         None => {
             task.tmux_window = None;
@@ -87,6 +88,7 @@ pub fn with_session_of(task: &Task, agent: Option<&Agent>) -> Task {
             task.last_notification_at = None;
             task.live_subagents = 0;
             task.stop_pending = false;
+            task.agent_name = None;
         }
     }
     task

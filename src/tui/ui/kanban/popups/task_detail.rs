@@ -117,7 +117,7 @@ pub(in crate::tui::ui::kanban) fn render_task_detail_overlay(
     // ── Block with hints ─────────────────────────────────────────────────────
     let hint_style = Style::default().fg(MUTED);
     let block = rounded_block(BORDER)
-        .title(format!(" Task #{task_id} "))
+        .title(format!(" {} ", task.heading()))
         .title_bottom(Line::from(Span::styled(
             " j/k scroll · z zoom · q/Esc/Enter close ",
             hint_style,

@@ -402,9 +402,22 @@ pub struct Task {
     /// Running -> Review flip was deferred. The last `SubagentStop` to drain
     /// the count performs it. See `HookStop` in `docs/specs/agent-health.allium`.
     pub stop_pending: bool,
+    /// The name of the task's current agent, `None` with no current agent.
+    /// The card's lead word (`board-visuals.allium: CardLeadsWithTheAgentName`).
+    pub agent_name: Option<String>,
 }
 
 impl Task {
+    /// How the TUI heads a task: `<agent name> · Task #<id>`, or `Task #<id>`
+    /// with no current agent. The detail popup's title and the desktop
+    /// notifications (`board-visuals.allium: CardLeadsWithTheAgentName`).
+    pub fn heading(&self) -> String {
+        match &self.agent_name {
+            Some(name) => format!("{name} · Task #{}", self.id),
+            None => format!("Task #{}", self.id),
+        }
+    }
+
     /// The card's generic ordering key: its `sort_order`, or its id when that
     /// is null. The one place that spells the fallback out.
     ///
@@ -712,6 +725,7 @@ impl Default for Task {
             phoenix: false,
             live_subagents: 0,
             stop_pending: false,
+            agent_name: None,
         }
     }
 }

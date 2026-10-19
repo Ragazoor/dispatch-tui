@@ -297,11 +297,11 @@ impl App {
             let title = self
                 .board
                 .find_task(task_id)
-                .map(|t| t.title.clone())
-                .unwrap_or_default();
+                .map(|t| format!("{}: {}", t.heading(), t.title))
+                .unwrap_or_else(|| format!("Task #{}: ", task_id.0));
             vec![Command::System(
                 crate::tui::commands::SystemCommand::SendNotification {
-                    title: format!("Task #{}: {title}", task_id.0),
+                    title,
                     body: "Epic auto-dispatch failed — chain stopped".to_string(),
                     // Urgent, unlike a task becoming reviewable: nothing further
                     // happens on this epic until a human acts.

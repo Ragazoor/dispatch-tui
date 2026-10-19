@@ -224,3 +224,23 @@ async fn the_pane_view_carries_the_current_agents_name() {
     assert_eq!(by_id(named).agent_name, name);
     assert!(view.live_agents.iter().all(|a| a.id != nameless));
 }
+
+/// The board's task carries its current agent's name, for the card's lead
+/// word (board-visuals.allium: CardLeadsWithTheAgentName); with no current
+/// agent it carries none.
+#[tokio::test]
+async fn the_boards_task_carries_its_current_agents_name() {
+    let state = test_state().await;
+    let (id, name) = task_with_agent(&state).await;
+    let bare = state
+        .db_write()
+        .create_task(CreateTaskRequest::fixture("U", "/repo"))
+        .await
+        .unwrap();
+
+    let tasks = state.db.list_all().await;
+    let of = |want| tasks.iter().find(|t| t.id == want).unwrap();
+
+    assert_eq!(of(id).agent_name.as_deref(), Some(name.as_str()));
+    assert_eq!(of(bare).agent_name, None);
+}
