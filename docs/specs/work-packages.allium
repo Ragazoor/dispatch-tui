@@ -48,6 +48,7 @@ use "./core.allium" as core
 entity WorkPackage {
     title: String               -- non-empty after trimming
     description: String         -- free text, may be empty; holds the plan for the window
+    sort_order: Integer?        -- manual ordering of the package's card, and nothing else; lower sorts first via sort_order ?? id (null falls back to the package id). Written by ReorderPackage and by the update_work_package tool
     created_by: core/UserIdentity    -- stamped once, never rewritten; required (a create with no settled identity is refused); the board subscribes to its own creator's packages only
     created_at: Timestamp
     updated_at: Timestamp
@@ -104,19 +105,62 @@ rule CreateWorkPackage {
 }
 
 rule UpdateWorkPackage {
-    when: UpdateWorkPackage(package, title?, description?)
+    when: UpdateWorkPackage(package, title?, description?, sort_order?)
 
     requires: title = null or title.trim() != ""
 
     ensures:
         if title != null: package.title = title.trim()
         if description != null: package.description = description
+        if sort_order != null: package.sort_order = sort_order
         package.updated_at = now
 
     @guidance
         -- Renaming from the board is `e` on a package card
         -- (RenamePackageFromBoard). The description is edited through the
-        -- update_work_package MCP tool only.
+        -- update_work_package MCP tool only. sort_order is written by
+        -- ReorderPackage (J/K) and by that tool; there is no way to clear it.
+}
+
+-- J/K on a package card moves it among the package cards of its column.
+-- Packages sort as one block above every epic and task card, and they have
+-- their own key, so the swap runs over the package block only: the epic and
+-- task cards below it keep a key space of their own (tasks.allium:
+-- ReorderItem) and a package never trades keys with one of them.
+rule ReorderPackage {
+    when: ReorderPackage(package, direction)
+    -- direction: +1 (down) or -1 (up)
+
+    let cards = package_cards(column_of(package))
+    let target_index = index_of(cards, package) + direction
+
+    requires: target_index >= 0
+    requires: target_index < cards.count
+
+    let target = element_at(cards, target_index)
+    let package_eff = package.sort_order ?? package.id
+    let target_eff = target.sort_order ?? target.id
+
+    ensures:
+        if package_eff = target_eff:
+            -- Equal effective keys: offset the moved package by direction.
+            package.sort_order = package_eff + direction
+            target.sort_order = target_eff
+        else:
+            package.sort_order = target_eff
+            target.sort_order = package_eff
+        package.updated_at = now
+        target.updated_at = now
+
+    @guidance
+        -- A package has no completed_at, so Done has no completion key to
+        -- swap: a package card orders by sort_order ?? id ascending in
+        -- every column, Backlog and Done alike.
+        -- No-op at the edge of the package block: J on the last package
+        -- card and K on the first do nothing, and the cursor does not move
+        -- onto an epic or task card. Both written keys are persisted.
+        -- The render (PackageCardPlacement), this rule and the
+        -- update_work_package tool all read the same key.
 }
 
 rule LinkItem {
@@ -138,7 +182,7 @@ rule LinkItem {
 }
 
 rule DeleteWorkPackageViaMcp {
-    when: McpUpdateWorkPackage(package, delete, title?, description?,
+    when: McpUpdateWorkPackage(package, delete, title?, description?, sort_order?,
                                link_task_ids?, unlink_task_ids?,
                                link_epic_ids?, unlink_epic_ids?)
 
@@ -148,7 +192,7 @@ rule DeleteWorkPackageViaMcp {
     -- call that sets delete with any other field is invalid params (-32602)
     -- and nothing is written. The same rule as update_tasks with
     -- status="done" (mcp-task-tools.allium).
-    requires: title = null and description = null
+    requires: title = null and description = null and sort_order = null
               and link_task_ids = null and unlink_task_ids = null
               and link_epic_ids = null and unlink_epic_ids = null
 
@@ -246,8 +290,9 @@ rule PackageCardPlacement {
         -- deduplicated: a task that is both linked and inside a linked epic
         -- counts once.
         -- Within a column, package cards sort above every epic and task card,
-        -- in package id order (oldest first). They do not sit in a column
-        -- section.
+        -- by sort_order ?? id ascending (so in package id order, oldest
+        -- first, until one is reordered with J/K: ReorderPackage). They do
+        -- not sit in a column section.
         -- A search query also narrows packages by their own title: a package
         -- whose title matches the query keeps its card even when no linked
         -- work matches, mirroring board_search_filter's own-match clause for
@@ -262,7 +307,8 @@ rule PackageCardPlacement {
         -- holds and how many of them are done; "no items" when it holds none.
         -- A package card is a view onto work counted elsewhere, so the
         -- column header's card count does not include it, select-all and
-        -- multi-select skip it, and H/L and J/K reordering do nothing on it.
+        -- multi-select skip it, and H/L do nothing on it. J/K moves it among
+        -- the package cards only (ReorderPackage).
         -- The status bar on a package card offers Space open, e rename and
         -- x delete.
         -- Computed on every render rather than cached: the placement reads
@@ -441,10 +487,10 @@ rule DeletePackageFromBoard {
 --   list_work_packages(work_package_id?)
 --       read_only. Every package the board holds, i.e. the caller's own
 --       (or the one named): id, title, description (omitted when empty),
---       created_at, updated_at, and its linked items, each with
+--       sort_order (omitted when unset), created_at, updated_at, and its linked items, each with
 --       kind, id, title and status. A link whose item this board does not
 --       hold is left out.
---   update_work_package(work_package_id, title?, description?,
+--   update_work_package(work_package_id, title?, description?, sort_order?,
 --                       link_task_ids?, unlink_task_ids?, link_epic_ids?,
 --                       unlink_epic_ids?, delete?)
 --       destructive. Applies UpdateWorkPackage, then every unlink, then every

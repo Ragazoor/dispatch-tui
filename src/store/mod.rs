@@ -600,12 +600,14 @@ pub trait WorkPackageRead: Send + Sync {
 pub trait WorkPackageCrud: WorkPackageRead {
     /// Create a package stamped with this board's identity; answers its id.
     async fn create_work_package(&self, title: &str, description: &str) -> Result<WorkPackageId>;
-    /// Change the title and/or description; `None` leaves a field alone.
+    /// Change the title, description and/or manual order; `None` leaves a
+    /// field alone.
     async fn patch_work_package(
         &self,
         id: WorkPackageId,
         title: Option<&str>,
         description: Option<&str>,
+        sort_order: Option<i64>,
     ) -> Result<()>;
     /// Delete the package and its links; the linked items stay.
     async fn delete_work_package(&self, id: WorkPackageId) -> Result<()>;

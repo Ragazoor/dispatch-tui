@@ -48,6 +48,15 @@ impl TuiRuntime {
                     })
                     .await,
             ),
+            WorkPackageCommand::SetSortOrder { id, sort_order } => (
+                "reordering work package",
+                self.work_package_svc
+                    .update_work_package(UpdateWorkPackageParams {
+                        sort_order: Some(sort_order),
+                        ..UpdateWorkPackageParams::for_package(id)
+                    })
+                    .await,
+            ),
             WorkPackageCommand::Delete(id) => (
                 "deleting work package",
                 self.work_package_svc.delete_work_package(id).await,

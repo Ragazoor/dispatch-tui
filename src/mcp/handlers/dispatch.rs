@@ -380,7 +380,7 @@ create_epic instead.",
         "List work packages with their linked items. Read-only. With no arguments it lists every \
 package; pass work_package_id for one. Each package shows its title, description and every linked \
 task or epic with its id, status and title. A package has no status of its own: read progress from \
-the items.",
+the items. A package's sort order is shown when it has been set.",
         {
             "type": "object",
             "properties": {
@@ -389,7 +389,7 @@ the items.",
         };
 
     async destructive "update_work_package" => work_packages::handle_update_work_package,
-        "Update a work package in place: rename it with title, rewrite description, and change \
+        "Update a work package in place: rename it with title, rewrite description, set sort_order (lower values show first among the package cards), and change \
 its links with link_task_ids, unlink_task_ids, link_epic_ids and unlink_epic_ids. Unlinks apply \
 before links, linking an item already linked and unlinking one not linked are both silent, and \
 the tasks and epics themselves are never changed. Every id is checked before anything is written, \
@@ -402,6 +402,7 @@ has served its purpose: its linked tasks and epics stay where they are, with the
                 "work_package_id": { "type": "integer", "description": "The work package ID" },
                 "title": { "type": "string", "description": "New title. Must not be blank." },
                 "description": { "type": "string", "description": "New description." },
+                "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
                 "link_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing tasks to link." },
                 "unlink_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of tasks to unlink." },
                 "link_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing epics to link." },

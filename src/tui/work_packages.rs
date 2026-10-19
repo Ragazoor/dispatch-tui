@@ -122,11 +122,21 @@ impl<'a> BoardView<'a> {
     where
         'a: 'p,
     {
-        self.board.work_packages.iter().filter(move |p| {
-            placements
-                .get(&p.id)
-                .is_some_and(|pl| pl.appears_in(status))
-        })
+        // Ordered by `WorkPackage::sort_key`, the key a J/K reorder swaps
+        // (`work-packages.allium: ReorderPackage`); the id breaks a tie so
+        // two packages sharing a key keep a stable order.
+        let mut cards: Vec<&'a WorkPackage> = self
+            .board
+            .work_packages
+            .iter()
+            .filter(|p| {
+                placements
+                    .get(&p.id)
+                    .is_some_and(|pl| pl.appears_in(status))
+            })
+            .collect();
+        cards.sort_by_key(|p| (p.sort_key(), p.id.0));
+        cards.into_iter()
     }
 
     /// How many of `package`'s linked items are done, out of how many the

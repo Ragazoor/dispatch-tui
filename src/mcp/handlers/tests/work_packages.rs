@@ -171,6 +171,40 @@ async fn update_work_package_refuses_an_item_in_both_lists() {
 }
 
 #[tokio::test]
+async fn update_work_package_sets_sort_order_and_list_shows_it() {
+    let state = test_state().await;
+    tool(&state, "create_work_package", json!({"title": "W"})).await;
+    let id = only_package(&state).await;
+
+    let resp = tool(
+        &state,
+        "update_work_package",
+        json!({"work_package_id": id.0, "sort_order": 42}),
+    )
+    .await;
+
+    assert!(extract_response_text(&resp).contains("sort_order"));
+    assert_eq!(state.db.list_work_packages().await[0].sort_order, Some(42));
+    let listed = tool(&state, "list_work_packages", json!({})).await;
+    assert!(extract_response_text(&listed).contains("Sort order: 42"));
+}
+
+#[tokio::test]
+async fn delete_work_package_refuses_a_sort_order_alongside() {
+    let state = test_state().await;
+    tool(&state, "create_work_package", json!({"title": "W"})).await;
+    let id = only_package(&state).await;
+    let resp = tool(
+        &state,
+        "update_work_package",
+        json!({"work_package_id": id.0, "delete": true, "sort_order": 1}),
+    )
+    .await;
+    assert_error(&resp, "sort_order");
+    assert_eq!(state.db.list_work_packages().await.len(), 1);
+}
+
+#[tokio::test]
 async fn update_work_package_with_no_field_is_refused() {
     let state = test_state().await;
     tool(&state, "create_work_package", json!({"title": "W"})).await;

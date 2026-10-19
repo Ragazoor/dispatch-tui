@@ -16,10 +16,21 @@ pub struct WorkPackage {
     pub id: WorkPackageId,
     pub title: String,
     pub description: String,
+    /// Manual card order; see [`Self::sort_key`].
+    pub sort_order: Option<i64>,
     /// Who created it; `None` when the store holds no name.
     pub created_by: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl WorkPackage {
+    /// The key package cards order by in every column, ascending: the manual
+    /// `sort_order`, falling back to the id (`work-packages.allium:
+    /// ReorderPackage`). Same shape as `Epic::sort_key`.
+    pub fn sort_key(&self) -> i64 {
+        self.sort_order.unwrap_or(self.id.0)
+    }
 }
 
 /// What a link points at: one task or one epic.

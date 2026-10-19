@@ -39,13 +39,15 @@ impl super::super::WorkPackageCrud for Store {
         id: WorkPackageId,
         title: Option<&str>,
         description: Option<&str>,
+        sort_order: Option<i64>,
     ) -> Result<()> {
-        if title.is_none() && description.is_none() {
+        if title.is_none() && description.is_none() && sort_order.is_none() {
             return Ok(());
         }
         let patch = bindings::WorkPackagePatch {
             title: title.map(str::to_string),
             description: description.map(str::to_string),
+            sort_order,
         };
         self.caller.patch_work_package(id, patch).await?.applied()
     }

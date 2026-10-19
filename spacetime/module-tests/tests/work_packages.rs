@@ -13,6 +13,7 @@ fn package_row(title: &str) -> WorkPackage {
         id: 0,
         title: title.into(),
         description: String::new(),
+        sort_order: None,
         created_by: "user-a".into(),
         created_at: "2026-10-09 10:00:00".into(),
         updated_at: "2026-10-09 10:00:00".into(),
@@ -80,6 +81,7 @@ fn patching_a_work_package_refuses_a_missing_package_and_a_blank_title() {
     let patch = |title: Option<&str>, description: Option<&str>| WorkPackagePatch {
         title: title.map(Into::into),
         description: description.map(Into::into),
+        sort_order: None,
     };
 
     let missing = store.call("alice", |ctx| {
@@ -99,6 +101,46 @@ fn patching_a_work_package_refuses_a_missing_package_and_a_blank_title() {
     let row = store.db().work_packages().id().find(id).expect("row");
     assert_eq!(row.title, "Window 1");
     assert_eq!(row.description, "the plan");
+}
+
+/// `work-packages.allium: UpdateWorkPackage`: a sort order is written when
+/// given and left alone by a patch that omits it.
+#[test]
+fn patching_a_work_package_writes_the_sort_order_and_omitting_it_keeps_it() {
+    let store = Store::new();
+    let id = new_package(&store, "Window 1");
+    assert_eq!(
+        store.db().work_packages().id().find(id).expect("row").sort_order,
+        None
+    );
+
+    store
+        .call("alice", |ctx| {
+            patch_work_package(
+                ctx,
+                id,
+                WorkPackagePatch {
+                    sort_order: Some(3),
+                    ..Default::default()
+                },
+            )
+        })
+        .expect("a sort order change");
+    store
+        .call("alice", |ctx| {
+            patch_work_package(
+                ctx,
+                id,
+                WorkPackagePatch {
+                    description: Some("plan".into()),
+                    ..Default::default()
+                },
+            )
+        })
+        .expect("a description change");
+
+    let row = store.db().work_packages().id().find(id).expect("row");
+    assert_eq!((row.sort_order, row.description.as_str()), (Some(3), "plan"));
 }
 
 /// `work-packages.allium: LinkItem` / `UnlinkItem`: both idempotent; a link

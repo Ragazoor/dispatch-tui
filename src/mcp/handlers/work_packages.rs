@@ -47,6 +47,8 @@ struct UpdateWorkPackageArgs {
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
+    sort_order: Option<i64>,
+    #[serde(default)]
     link_task_ids: Vec<FlexibleId<TaskId>>,
     #[serde(default)]
     unlink_task_ids: Vec<FlexibleId<TaskId>>,
@@ -149,6 +151,9 @@ fn format_view(view: &WorkPackageView) -> String {
     if !p.description.is_empty() {
         out.push_str(&format!("\nDescription: {}", p.description));
     }
+    if let Some(order) = p.sort_order {
+        out.push_str(&format!("\nSort order: {order}"));
+    }
     out.push_str(&format!(
         "\nCreated: {}\nUpdated: {}",
         p.created_at.format("%Y-%m-%d %H:%M:%S UTC"),
@@ -187,6 +192,7 @@ pub(super) async fn handle_update_work_package(
     let named = [
         ("title", parsed.title.is_some()),
         ("description", parsed.description.is_some()),
+        ("sort_order", parsed.sort_order.is_some()),
         ("link_task_ids", !parsed.link_task_ids.is_empty()),
         ("unlink_task_ids", !parsed.unlink_task_ids.is_empty()),
         ("link_epic_ids", !parsed.link_epic_ids.is_empty()),
@@ -206,6 +212,7 @@ pub(super) async fn handle_update_work_package(
         id: package_id,
         title: parsed.title,
         description: parsed.description,
+        sort_order: parsed.sort_order,
         link: items(parsed.link_task_ids, parsed.link_epic_ids),
         unlink: items(parsed.unlink_task_ids, parsed.unlink_epic_ids),
     };

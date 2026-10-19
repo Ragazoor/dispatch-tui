@@ -855,6 +855,7 @@ fn snapshot_board_filter_packages_tab() {
             id: WorkPackageId(id),
             title: format!("DB maintenance window {id}"),
             description: String::new(),
+            sort_order: None,
             created_by: None,
             created_at: at,
             updated_at: at,

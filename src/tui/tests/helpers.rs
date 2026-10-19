@@ -269,6 +269,7 @@ pub(in crate::tui) fn make_package(id: i64, title: &str) -> crate::models::WorkP
         id: crate::models::WorkPackageId(id),
         title: title.to_string(),
         description: String::new(),
+        sort_order: None,
         created_by: None,
         created_at: at,
         updated_at: at,

@@ -9,6 +9,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub struct WorkPackagePatch {
     pub title: Option<String>,
     pub description: Option<String>,
+    pub sort_order: Option<i64>,
 }
 
 impl __sdk::InModule for WorkPackagePatch {

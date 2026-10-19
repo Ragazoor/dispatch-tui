@@ -558,6 +558,12 @@ pub struct WorkPackage {
     pub created_by: String,
     pub created_at: String,
     pub updated_at: String,
+    /// Manual card order, `sort_order ?? id` ascending
+    /// (`work-packages.allium: ReorderPackage`). Last, with a default: a
+    /// column added to a published table must be appended and defaulted, or
+    /// the module no longer automigrates over a live store.
+    #[default(None)]
+    pub sort_order: Option<i64>,
 }
 
 /// One link from a work package to one task or one epic

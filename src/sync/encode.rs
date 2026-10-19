@@ -364,6 +364,7 @@ pub fn create_work_package_row(
         id: 0,
         title: title.trim().to_string(),
         description: description.to_string(),
+        sort_order: None,
         created_by: created_by.to_string(),
         created_at: now.to_string(),
         updated_at: now.to_string(),

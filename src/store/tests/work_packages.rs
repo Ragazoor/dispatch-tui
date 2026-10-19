@@ -34,7 +34,10 @@ async fn a_blank_title_is_refused_on_create_and_on_patch() {
     assert!(db.list_work_packages().await.is_empty());
 
     let id = db.create_work_package("W", "").await.unwrap();
-    assert!(db.patch_work_package(id, Some(" "), None).await.is_err());
+    assert!(db
+        .patch_work_package(id, Some(" "), None, None)
+        .await
+        .is_err());
     assert_eq!(db.list_work_packages().await[0].title, "W");
 }
 
@@ -42,7 +45,7 @@ async fn a_blank_title_is_refused_on_create_and_on_patch() {
 async fn patching_a_missing_package_is_refused() {
     let db = in_memory_db().await;
     assert!(db
-        .patch_work_package(WorkPackageId(99), Some("x"), None)
+        .patch_work_package(WorkPackageId(99), Some("x"), None, None)
         .await
         .is_err());
 }
@@ -52,7 +55,7 @@ async fn a_description_patch_leaves_the_title_alone() {
     let db = in_memory_db().await;
     let id = db.create_work_package("W", "").await.unwrap();
 
-    db.patch_work_package(id, None, Some("new plan"))
+    db.patch_work_package(id, None, Some("new plan"), None)
         .await
         .unwrap();
 

@@ -284,6 +284,7 @@ pub fn work_package(row: &bindings::WorkPackage) -> Decoded<WorkPackage> {
         id: WorkPackageId(row.id),
         title: row.title.clone(),
         description: row.description.clone(),
+        sort_order: row.sort_order,
         created_by: text(&row.created_by).map(str::to_owned),
         created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
         updated_at: required_timestamp(T, row.id, "updated_at", &row.updated_at)?,

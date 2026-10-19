@@ -443,7 +443,7 @@ async fn an_empty_work_package_patch_sends_nothing() {
     let (writer, caller) = writer_with(RecordingCaller::default());
 
     writer
-        .patch_work_package(WorkPackageId(1), None, None)
+        .patch_work_package(WorkPackageId(1), None, None, None)
         .await
         .unwrap();
 

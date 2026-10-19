@@ -30,6 +30,7 @@ pub struct UpdateWorkPackageParams {
     pub id: WorkPackageId,
     pub title: Option<String>,
     pub description: Option<String>,
+    pub sort_order: Option<i64>,
     pub link: Vec<WorkPackageItem>,
     pub unlink: Vec<WorkPackageItem>,
 }
@@ -41,6 +42,7 @@ impl UpdateWorkPackageParams {
             id,
             title: None,
             description: None,
+            sort_order: None,
             link: Vec::new(),
             unlink: Vec::new(),
         }
@@ -49,6 +51,7 @@ impl UpdateWorkPackageParams {
     fn changes_anything(&self) -> bool {
         self.title.is_some()
             || self.description.is_some()
+            || self.sort_order.is_some()
             || !self.link.is_empty()
             || !self.unlink.is_empty()
     }
@@ -139,8 +142,8 @@ impl WorkPackageService {
     ) -> Result<(), ServiceError> {
         if !params.changes_anything() {
             return Err(ServiceError::Validation(
-                "update_work_package needs at least one of title, description, or a link or \
-                 unlink list"
+                "update_work_package needs at least one of title, description, sort_order, or \
+                 a link or unlink list"
                     .into(),
             ));
         }
@@ -156,9 +159,14 @@ impl WorkPackageService {
         self.require_package(params.id).await?;
         self.require_items(&params.link).await?;
 
-        if title.is_some() || params.description.is_some() {
+        if title.is_some() || params.description.is_some() || params.sort_order.is_some() {
             self.db
-                .patch_work_package(params.id, title, params.description.as_deref())
+                .patch_work_package(
+                    params.id,
+                    title,
+                    params.description.as_deref(),
+                    params.sort_order,
+                )
                 .await?;
         }
         for item in dedup(&params.unlink) {

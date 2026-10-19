@@ -177,6 +177,143 @@ fn package_cards_sort_above_every_other_card_in_package_id_order() {
     assert!(matches!(items[3], ColumnItem::Epic(_)));
 }
 
+// ---------------------------------------------------------------------------
+// ReorderPackage
+// ---------------------------------------------------------------------------
+
+fn package_with_order(id: i64, sort_order: Option<i64>) -> crate::models::WorkPackage {
+    crate::models::WorkPackage {
+        sort_order,
+        ..make_package(id, &format!("P{id}"))
+    }
+}
+
+/// The ids of the package cards in `status`'s column, top to bottom.
+fn package_card_ids(app: &App, status: TaskStatus) -> Vec<i64> {
+    app.view()
+        .column_items_for_status(status)
+        .iter()
+        .filter_map(|i| match i {
+            ColumnItem::WorkPackage(p) => Some(p.id.0),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The `SetSortOrder` writes in `cmds`, as `(id, sort_order)`.
+fn sort_order_writes(cmds: &[Command]) -> Vec<(i64, i64)> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            Command::WorkPackage(WorkPackageCommand::SetSortOrder { id, sort_order }) => {
+                Some((id.0, *sort_order))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn reorder(app: &mut App, direction: isize) -> Vec<Command> {
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ReorderItem(direction),
+    ))
+}
+
+#[test]
+fn package_cards_sort_by_sort_order_before_id() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.work_packages = vec![package_with_order(8, Some(20)), package_with_order(9, None)];
+    assert_eq!(package_card_ids(&app, TaskStatus::Backlog), vec![9, 8]);
+}
+
+#[test]
+fn j_on_a_package_card_swaps_its_key_with_the_next_package() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.work_packages = vec![make_package(8, "A"), make_package(9, "B")];
+    cursor_on_package(&mut app, TaskStatus::Backlog);
+
+    let cmds = reorder(&mut app, 1);
+
+    assert_eq!(sort_order_writes(&cmds), vec![(8, 9), (9, 8)]);
+    assert_eq!(package_card_ids(&app, TaskStatus::Backlog), vec![9, 8]);
+    assert_eq!(app.selection().row(1), 1, "the cursor follows the card");
+}
+
+#[test]
+fn k_on_a_package_card_moves_it_up() {
+    let mut app = App::new(vec![]);
+    app.board.work_packages = vec![make_package(8, "A"), make_package(9, "B")];
+    cursor_on(
+        &mut app,
+        TaskStatus::Backlog,
+        |i| matches!(i, ColumnItem::WorkPackage(p) if p.id == WorkPackageId(9)),
+    );
+
+    let cmds = reorder(&mut app, -1);
+
+    assert_eq!(sort_order_writes(&cmds), vec![(9, 8), (8, 9)]);
+    assert_eq!(package_card_ids(&app, TaskStatus::Backlog), vec![9, 8]);
+}
+
+#[test]
+fn tied_package_keys_nudge_the_moved_card() {
+    let mut app = App::new(vec![]);
+    app.board.work_packages = vec![
+        package_with_order(8, Some(5)),
+        package_with_order(9, Some(5)),
+    ];
+    cursor_on_package(&mut app, TaskStatus::Backlog);
+
+    let cmds = reorder(&mut app, 1);
+
+    assert_eq!(sort_order_writes(&cmds), vec![(8, 6), (9, 5)]);
+    assert_eq!(package_card_ids(&app, TaskStatus::Backlog), vec![9, 8]);
+}
+
+#[test]
+fn reordering_stays_inside_the_package_block() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.work_packages = vec![make_package(8, "A")];
+    cursor_on_package(&mut app, TaskStatus::Backlog);
+
+    // J on the last package would swap with the task card below; K on the
+    // first package has nothing above. Neither writes or moves the cursor.
+    for direction in [1, -1] {
+        let cmds = reorder(&mut app, direction);
+        assert!(cmds.is_empty(), "{cmds:?}");
+        assert_eq!(app.selection().row(1), 0);
+    }
+    assert!(app.board.work_packages[0].sort_order.is_none());
+}
+
+#[test]
+fn k_on_the_first_task_card_does_not_swap_with_a_package() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.work_packages = vec![make_package(8, "A")];
+    cursor_on(&mut app, TaskStatus::Backlog, |i| {
+        matches!(i, ColumnItem::Task(_))
+    });
+
+    let cmds = reorder(&mut app, -1);
+
+    assert!(cmds.is_empty(), "{cmds:?}");
+    assert!(app.board.work_packages[0].sort_order.is_none());
+    assert!(app.board.tasks[0].sort_order.is_none());
+}
+
+#[test]
+fn package_cards_in_done_reorder_on_the_same_key() {
+    let mut app = App::new(vec![make_task(3, TaskStatus::Done)]);
+    app.board.work_packages = vec![make_package(7, "A"), make_package(8, "B")];
+    app.board.work_package_links = vec![link(7, task_item(3)), link(8, task_item(3))];
+    assert_eq!(package_card_ids(&app, TaskStatus::Done), vec![7, 8]);
+    cursor_on_package(&mut app, TaskStatus::Done);
+
+    let cmds = reorder(&mut app, 1);
+
+    assert_eq!(sort_order_writes(&cmds), vec![(7, 8), (8, 7)]);
+    assert_eq!(package_card_ids(&app, TaskStatus::Done), vec![8, 7]);
+}
+
 #[test]
 fn package_cards_come_before_the_first_section_header() {
     let app = board_with_package();

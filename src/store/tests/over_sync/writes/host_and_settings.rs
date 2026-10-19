@@ -537,7 +537,7 @@ async fn every_store_mutation_reaches_the_transport() {
     .unwrap();
 
     db.create_work_package("W", "").await.unwrap();
-    db.patch_work_package(WorkPackageId(1), Some("W2"), None)
+    db.patch_work_package(WorkPackageId(1), Some("W2"), None, None)
         .await
         .unwrap();
     db.link_work_package_item(WorkPackageId(1), WorkPackageItem::Task(TaskId(1)))

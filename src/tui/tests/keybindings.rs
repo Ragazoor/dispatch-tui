@@ -303,6 +303,7 @@ fn app_with_package_selected() -> App {
         id: crate::models::WorkPackageId(1),
         title: "Window".to_string(),
         description: String::new(),
+        sort_order: None,
         created_by: None,
         created_at: at,
         updated_at: at,

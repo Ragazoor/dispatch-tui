@@ -319,6 +319,7 @@ mirror!(
         id,
         title,
         description,
+        sort_order,
         created_by,
         created_at,
         updated_at
@@ -338,7 +339,11 @@ mirror!(
 
 mirror!(
     module::WorkPackagePatch,
-    bindings::WorkPackagePatch { title, description }
+    bindings::WorkPackagePatch {
+        title,
+        description,
+        sort_order
+    }
 );
 
 mirror!(

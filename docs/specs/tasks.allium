@@ -1048,6 +1048,12 @@ rule ReorderItem {
         -- An epic override is not permanent. EpicStatusRecalculation
         -- (epics.allium) rewrites epic.completed_at when the epic itself
         -- transitions into done, which discards an override made earlier.
+        --
+        -- Package cards are not part of this rule's key space: a work
+        -- package card reorders among package cards only
+        -- (work-packages.allium: ReorderPackage), and this rule refuses a
+        -- swap that would cross between a package card and a task or epic
+        -- card.
     @guarantee ABoardWriteLeavesThePointersAlone
         -- A reorder, and every other board write that goes through the
         -- generic Persist (detach, epic moves, lifecycle moves, a window

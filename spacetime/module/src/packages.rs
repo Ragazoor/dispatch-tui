@@ -16,6 +16,9 @@ pub fn work_package_link_id(work_package_id: i64, kind: &str, item_id: i64) -> S
 pub struct WorkPackagePatch {
     pub title: Option<String>,
     pub description: Option<String>,
+    /// `None` leaves the order alone; there is no way to clear it
+    /// (`work-packages.allium: UpdateWorkPackage`).
+    pub sort_order: Option<i64>,
 }
 
 /// `pub` so `MemoryReducerCaller` refuses a blank title with this very
@@ -41,6 +44,9 @@ pub fn apply_work_package_patch(
     }
     if let Some(description) = patch.description {
         row.description = description;
+    }
+    if let Some(sort_order) = patch.sort_order {
+        row.sort_order = Some(sort_order);
     }
     Ok(())
 }

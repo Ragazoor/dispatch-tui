@@ -110,6 +110,7 @@ pub(crate) fn blank_work_package() -> WorkPackage {
         created_by: String::new(),
         created_at: String::new(),
         updated_at: String::new(),
+        sort_order: None,
     }
 }
 

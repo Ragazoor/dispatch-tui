@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::models::{EpicId, TaskId, TaskStatus};
+use crate::models::{EpicId, TaskId, TaskStatus, WorkPackageId};
 
 use super::super::types::*;
 use super::super::App;
@@ -156,10 +156,15 @@ impl App {
         drop(placements);
         drop(cached);
         drop(items);
-        let [Some((a_task_id, a_epic_id, a_eff)), Some((b_task_id, b_epic_id, b_eff))] = resolved
-        else {
+        let [Some((a_card, a_eff)), Some((b_card, b_eff))] = resolved else {
             return vec![];
         };
+        // Package cards are a block of their own above every epic and task
+        // card, with a key space of their own: a swap never crosses the seam
+        // (`work-packages.allium: ReorderPackage`).
+        if matches!(a_card, ReorderCard::Package(_)) != matches!(b_card, ReorderCard::Package(_)) {
+            return vec![];
+        }
 
         // Swap the two keys, or nudge the moved card when they tie.
         let (new_a, new_b) = if a_eff == b_eff {
@@ -169,26 +174,40 @@ impl App {
         };
 
         let mut cmds = vec![];
-        for (task_id, epic_id, key) in
-            [(a_task_id, a_epic_id, new_a), (b_task_id, b_epic_id, new_b)]
-        {
-            if let Some(tid) = task_id {
-                if let Some(t) = self.find_task_mut(tid) {
-                    key.apply_to_task(t);
-                    cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
-                        crate::tui::commands::PersistFields::from_task(t),
-                    )));
+        for (card, key) in [(a_card, new_a), (b_card, new_b)] {
+            match card {
+                ReorderCard::Task(tid) => {
+                    if let Some(t) = self.find_task_mut(tid) {
+                        key.apply_to_task(t);
+                        cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                            crate::tui::commands::PersistFields::from_task(t),
+                        )));
+                    }
                 }
-            }
-            if let Some(eid) = epic_id {
-                if let Some(e) = self.board.epics.iter_mut().find(|e2| e2.id == eid) {
-                    key.apply_to_epic(e);
-                    cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Persist {
-                        id: eid,
-                        status: None,
-                        sort_order: key.sort_order(),
-                        completed_at: key.completed_at(),
-                    }));
+                ReorderCard::Epic(eid) => {
+                    if let Some(e) = self.board.epics.iter_mut().find(|e2| e2.id == eid) {
+                        key.apply_to_epic(e);
+                        cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Persist {
+                            id: eid,
+                            status: None,
+                            sort_order: key.sort_order(),
+                            completed_at: key.completed_at(),
+                        }));
+                    }
+                }
+                ReorderCard::Package(pid) => {
+                    if let (Some(p), Some(sort_order)) = (
+                        self.board.work_packages.iter_mut().find(|p| p.id == pid),
+                        key.sort_order(),
+                    ) {
+                        p.sort_order = Some(sort_order);
+                        cmds.push(Command::WorkPackage(
+                            crate::tui::commands::WorkPackageCommand::SetSortOrder {
+                                id: pid,
+                                sort_order,
+                            },
+                        ));
+                    }
                 }
             }
         }
@@ -267,7 +286,15 @@ impl ReorderKey {
 
 /// The card a reorder is about to move: which row it is, and the key the
 /// column currently orders it by.
-type ReorderTarget = (Option<TaskId>, Option<EpicId>, ReorderKey);
+type ReorderTarget = (ReorderCard, ReorderKey);
+
+/// Which card a reorder moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReorderCard {
+    Task(TaskId),
+    Epic(EpicId),
+    Package(WorkPackageId),
+}
 
 /// Resolve one card's [`ReorderTarget`], or `None` when there is nothing to
 /// swap — a non-card row, or a Done card carrying no completion time.
@@ -284,7 +311,7 @@ fn reorder_target(
             } else {
                 ReorderKey::Generic(t.sort_key())
             };
-            Some((Some(t.id), None, key))
+            Some((ReorderCard::Task(t.id), key))
         }
         ColumnItem::Epic(e) => {
             let key = if in_done {
@@ -297,12 +324,16 @@ fn reorder_target(
             } else {
                 ReorderKey::Generic(e.sort_key())
             };
-            Some((None, Some(e.id), key))
+            Some((ReorderCard::Epic(e.id), key))
         }
-        // A package card has no order of its own to swap: package cards sort
-        // by id (`work-packages.allium: PackageCardPlacement`).
-        ColumnItem::WorkPackage(_)
-        | ColumnItem::EpicHeader(_)
+        // A package has no completion time, so it orders on `sort_order ?? id`
+        // in every column, Done included (`work-packages.allium:
+        // ReorderPackage`).
+        ColumnItem::WorkPackage(p) => Some((
+            ReorderCard::Package(p.id),
+            ReorderKey::Generic(p.sort_key()),
+        )),
+        ColumnItem::EpicHeader(_)
         | ColumnItem::SubstatusLabel(_)
         | ColumnItem::FoldedSection(_)
         | ColumnItem::FoldedEpic(_)

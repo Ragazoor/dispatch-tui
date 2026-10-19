@@ -160,6 +160,27 @@ async fn update_renames_and_rewrites_the_description() {
 }
 
 #[tokio::test]
+async fn update_sets_sort_order_alone() {
+    let f = fixture();
+    let id = f
+        .svc
+        .create_work_package(create("W", vec![]))
+        .await
+        .unwrap();
+
+    f.svc
+        .update_work_package(UpdateWorkPackageParams {
+            sort_order: Some(7),
+            ..UpdateWorkPackageParams::for_package(id)
+        })
+        .await
+        .unwrap();
+
+    let p = &f.db.list_work_packages().await[0];
+    assert_eq!((p.title.as_str(), p.sort_order), ("W", Some(7)));
+}
+
+#[tokio::test]
 async fn update_unlinks_then_links() {
     let f = fixture();
     let a = task(&f.db, "a").await;

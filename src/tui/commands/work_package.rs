@@ -26,4 +26,10 @@ pub enum WorkPackageCommand {
         title: String,
     },
     Delete(WorkPackageId),
+    /// Persist a package's manual card order (`work-packages.allium:
+    /// ReorderPackage`).
+    SetSortOrder {
+        id: WorkPackageId,
+        sort_order: i64,
+    },
 }

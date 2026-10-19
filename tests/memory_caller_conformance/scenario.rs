@@ -795,16 +795,18 @@ fn memory_caller_matches_the_real_reducers() {
         // -- work packages (`work-packages.allium`) -----------------------------
         // `updated_at` is the store's own clock on a patch, so it is left out
         // of the comparison, on `SameEndState`'s reasoning.
-        let package_shapes = |rows: &SharedRows| -> Vec<(i64, String, String, Option<String>)> {
+        type PackageShape = (i64, String, String, Option<i64>, Option<String>);
+        let package_shapes = |rows: &SharedRows| -> Vec<PackageShape> {
             rows.work_packages()
                 .into_iter()
-                .map(|p| (p.id.0, p.title, p.description, p.created_by))
+                .map(|p| (p.id.0, p.title, p.description, p.sort_order, p.created_by))
                 .collect()
         };
         let package_row = || bindings::WorkPackage {
             id: 0,
             title: "  Window 1 ".into(),
             description: "the plan".into(),
+            sort_order: None,
             created_by: accepted.identity.clone(),
             created_at: "2026-01-01 00:00:00.000".into(),
             updated_at: "2026-01-01 00:00:00.000".into(),
@@ -871,6 +873,7 @@ fn memory_caller_matches_the_real_reducers() {
         let rename = || bindings::WorkPackagePatch {
             title: Some(" Window 2".into()),
             description: None,
+            sort_order: None,
         };
         real.patch_work_package(package_real, rename())
             .await
@@ -881,6 +884,26 @@ fn memory_caller_matches_the_real_reducers() {
             .is_some_and(|p| p.title == "Window 2"));
         mem.patch_work_package(package_mem, rename()).await.unwrap();
         assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
+
+        // The manual order is the patch's third field: written when given,
+        // left alone when not (`work-packages.allium: UpdateWorkPackage`).
+        let reorder = || bindings::WorkPackagePatch {
+            title: None,
+            description: None,
+            sort_order: Some(5),
+        };
+        real.patch_work_package(package_real, reorder())
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .work_packages()
+            .first()
+            .is_some_and(|p| p.sort_order == Some(5)));
+        mem.patch_work_package(package_mem, reorder())
+            .await
+            .unwrap();
+        assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
+        assert_eq!(package_shapes(&rows_real)[0].3, Some(5));
 
         let missing = dispatch_tui::models::WorkPackageId(987_654);
         let r = real.patch_work_package(missing, rename()).await.unwrap();
