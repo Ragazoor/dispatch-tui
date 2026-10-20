@@ -1820,6 +1820,42 @@ rule DeclareResourcesCapability {
         -- describes: the declared capabilities do not depend on the caller.
 }
 
+rule ServerInstructionsStateDispatchConventions {
+    when: McpInitialize(caller_identity)
+
+    ensures: McpServerInstructionsSent(text: server_instructions())
+
+    @guarantee InstructionsCoverOnlyConventionsNoSchemaStates
+        -- initialize's response carries an `instructions` string. Claude Code
+        -- loads it into the system prompt of every session connected to the
+        -- server, so it is the one place to state a convention that spans
+        -- several tools and that no single tool's schema owns:
+        --   * the name of one of a task's agents works wherever a tool takes
+        --     a task id (TaskRefResolvesToTaskId; agents.allium:
+        --     AgentNameResolvesToTask);
+        --   * an agent's Claude Code session carries that name, so another
+        --     agent is reached with the harness's ListAgents and SendMessage
+        --     by it, and each task's details and listing show it
+        --     (agents.allium: PromptNamesTheAgent);
+        --   * tasks in the same epic are siblings.
+        --
+        -- It says nothing else. It is identity-free like the rest of the
+        -- initialize response (DeclareResourcesCapability), so every client
+        -- reads it: an operator session, an agent in another repo, a task with
+        -- no epic. A rule that holds only for some tasks, or that is a
+        -- repository's policy rather than how to use dispatch's tools — TDD,
+        -- Allium specs, the design step, when to wrap up — stays in the
+        -- dispatch prompt (dispatch-prompt.allium), whose conditions decide
+        -- whether it applies. What one tool does belongs in that tool's
+        -- description (the tool-description standard at the head of this
+        -- file), not here.
+        --
+        -- The dispatch prompt does not restate these conventions: the epic
+        -- section keeps the epic's id and title and the invitation to ask a
+        -- sibling for help, and leaves how to reach one to this text
+        -- (dispatch-prompt.allium: ThePromptNamesNoToolMerelyToSayItExists).
+}
+
 rule ListContextResourcesViaMcp {
     when: McpListResources(caller_identity, cursor?)
 

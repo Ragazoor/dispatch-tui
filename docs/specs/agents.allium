@@ -394,12 +394,12 @@ surface AgentIdentity {
 
     @guarantee PromptNamesTheAgent
         -- A dispatched agent's prompt tells it its own name (a line in the
-        -- task block, for every mode), and, when the task is in an epic, that
-        -- sibling agents are reached by their agent names, which each task's
-        -- details and listing show. It no longer says siblings run as
-        -- `task-<id>` (dispatch-prompt.allium, rewritten by step A2). It names
-        -- no tool to say where the names are shown
-        -- (dispatch-prompt.allium: ThePromptNamesNoToolMerelyToSayItExists).
+        -- task block, for every mode). That other agents are reached by their
+        -- agent names, which each task's details and listing show, is stated
+        -- once for every session by the MCP server instructions
+        -- (mcp-task-tools.allium: ServerInstructionsStateDispatchConventions),
+        -- not in each prompt. Nothing says siblings run as `task-<id>`
+        -- (dispatch-prompt.allium, rewritten by step A2).
 }
 
 ------------------------------------------------------------

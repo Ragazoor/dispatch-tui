@@ -93,6 +93,10 @@ These codes never reach a client through `tools/call`: `handle_tools_call` re-wr
 
 The agent port rejects (HTTP 403) any request whose `Host` or `Origin` is not `127.0.0.1`, `localhost` or `[::1]`, on `/mcp`, the hook path and the pane-view path. This stops a DNS-rebinding page from calling tools. See `AgentPortRejectsNonLoopbackOrigins` in `docs/specs/mcp-task-tools.allium`.
 
+## Server instructions
+
+`initialize` returns an identity-free `instructions` string (`SERVER_INSTRUCTIONS` in `src/mcp/handlers/dispatch.rs`), which Claude Code loads into every connected session's system prompt. It holds only conventions that span several tools: an agent name works wherever a task id does, agents are reached with `ListAgents`/`SendMessage` by agent name, and epic tasks are siblings. Repository policy and per-task rules stay in the dispatch prompt. See `ServerInstructionsStateDispatchConventions` in `docs/specs/mcp-task-tools.allium`.
+
 ## Context resources
 
 The server offers read-only context as MCP resources (`resources/list`, `resources/read`), declared beside `tools` in `initialize` (no `subscribe`, no `listChanged`, no skills extension). Logic lives in `src/mcp/handlers/context.rs`; the behaviour is `McpContextResources` in `docs/specs/mcp-task-tools.allium`.

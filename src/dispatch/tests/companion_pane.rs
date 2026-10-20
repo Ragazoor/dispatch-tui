@@ -331,8 +331,8 @@ fn build_quick_dispatch_prompt_includes_epic_context() {
     assert!(prompt.contains("EpicId: 7"), "should include epic ID");
     assert!(prompt.contains("My Epic"), "should include epic title");
     assert!(
-        prompt.contains("SendMessage"),
-        "should tell agent how to message sibling agents"
+        prompt.contains("sibling task's agent"),
+        "should invite asking a sibling's agent"
     );
 }
 
@@ -527,13 +527,11 @@ fn epic_preamble_returns_id_line_and_section_for_some() {
     let (id_line, section) = epic_preamble(Some(&ctx));
     assert!(id_line.contains("EpicId: 5"));
     assert!(section.contains("Auth Rework"));
+    // How to reach a sibling (ListAgents/SendMessage by agent name) is the MCP
+    // server instructions' to say, not the prompt's.
     assert!(
-        section.contains("SendMessage") && section.contains("ListAgents"),
-        "should guide agent to use native cross-session messaging, got: {section}"
-    );
-    assert!(
-        section.contains("agent names") && !section.contains("task-<id>"),
-        "should say siblings are reached by agent name, got: {section}"
+        section.contains("sibling") && !section.contains("task-<id>"),
+        "should invite asking a sibling's agent, got: {section}"
     );
     assert!(
         !section.contains("send_message"),

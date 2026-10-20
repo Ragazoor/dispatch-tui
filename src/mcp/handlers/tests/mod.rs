@@ -418,6 +418,44 @@ async fn initialize_returns_capabilities() {
     assert!(result["capabilities"]["tools"].is_object());
 }
 
+/// ServerInstructionsStateDispatchConventions: initialize carries the
+/// cross-tool conventions — agent names stand in for task ids, agents are
+/// reached by name with ListAgents/SendMessage, epic tasks are siblings.
+#[tokio::test]
+async fn initialize_carries_server_instructions_on_agent_names() {
+    let state = test_state().await;
+    let resp = call(&state, "initialize", None).await;
+    let result = resp.result.expect("initialize must succeed");
+    let text = result["instructions"]
+        .as_str()
+        .unwrap_or_else(|| panic!("initialize must carry instructions: {result}"));
+    for needle in ["agent name", "task id", "ListAgents", "SendMessage", "epic"] {
+        assert!(
+            text.contains(needle),
+            "instructions must mention {needle:?}: {text}"
+        );
+    }
+}
+
+/// InstructionsCoverOnlyConventionsNoSchemaStates: the text is identity-free,
+/// the same whoever the caller is.
+#[tokio::test]
+async fn initialize_instructions_do_not_depend_on_the_caller() {
+    let state = test_state().await;
+    let anon = call(&state, "initialize", None).await.result.unwrap();
+    let as_task = call_with_identity(
+        &state,
+        "initialize",
+        None,
+        Ok(CallerIdentity::Task(crate::models::TaskId(1))),
+    )
+    .await
+    .result
+    .unwrap();
+    assert!(anon["instructions"].is_string());
+    assert_eq!(anon["instructions"], as_task["instructions"]);
+}
+
 /// When the client offers a supported older protocol version, the server
 /// echoes it back so the session downgrades gracefully.
 #[tokio::test]

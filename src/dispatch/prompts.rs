@@ -125,9 +125,8 @@ impl EpicContext {
     pub(super) fn prompt_section(&self) -> String {
         format!(
             "\n\nThis task is part of epic #{}: {}\n\
-            Sibling agents are reached by their agent names, which each task's details and \
-            listing show: find one with ListAgents, message it with SendMessage. If your task \
-            needs help, or a sibling is working on a similar problem, ask that agent.",
+            If you need help, or a sibling task's agent is working on a similar problem, ask \
+            that agent.",
             self.epic_id, self.epic_title
         )
     }

@@ -55,12 +55,14 @@ fn epic_section_names_no_mcp_tool() {
         text.contains("#7") && text.contains("My Epic"),
         "got: {text}"
     );
+    // How to reach a sibling is the MCP server instructions' to say
+    // (ServerInstructionsStateDispatchConventions), not each prompt's.
     assert!(
-        text.contains("ListAgents") && text.contains("agent names"),
-        "got: {text}"
+        !text.contains("ListAgents") && !text.contains("SendMessage"),
+        "the epic section must leave reaching siblings to the server instructions, got: {text}"
     );
     assert!(
-        text.contains("needs help") && text.contains("similar problem"),
+        text.contains("need help") && text.contains("similar problem"),
         "the section must invite coordination, got: {text}"
     );
     assert!(

@@ -270,13 +270,13 @@ rule ComposeAgentPrompt {
         --     EpicId: ...                  (only if task.epic != null)
         --   {epic sibling-communication}   (only if task.epic != null —
         --                                    the epic id and title, and that
-        --                                    sibling agents are reached
-        --                                    with ListAgents/SendMessage
-        --                                    by agent name, and that it
-        --                                    should do so when it needs
-        --                                    help, preferring a sibling on
-        --                                    a similar problem. Names no MCP
-        --                                    tool; see
+        --                                    it should message a sibling's
+        --                                    agent when it needs help or
+        --                                    the sibling works on a
+        --                                    similar problem. How to reach
+        --                                    one is the server
+        --                                    instructions' to say. Names no
+        --                                    MCP tool; see
         --                                    ThePromptNamesNoToolMerelyToSayItExists)
         --   <blank>
         --   {validated_knowledge}          (tiered learnings; see
@@ -358,14 +358,14 @@ rule ComposeAgentPrompt {
         -- {epic sibling-communication} falls under the same rule. It used to
         -- tell the agent to call list_tasks with the epic id to find its
         -- siblings — a sentence that restates list_tasks' epic_id filter, which
-        -- the schema already carries. The section keeps only what no schema
-        -- does: the epic's id and title, and that a sibling agent is reachable
-        -- with ListAgents/SendMessage by its agent name, which each task's
-        -- details and listing show (agents.allium: PromptNamesTheAgent, step
-        -- A2). The naming is dispatch's convention, not the harness's, so it
-        -- is a fact only the prompt can state. The section says where the
-        -- names are shown without naming a tool: a tool name here would be
-        -- the restatement this rule forbids.
+        -- the schema already carries. The section keeps only what is about
+        -- this task: the epic's id and title. That a sibling agent is
+        -- reachable with ListAgents/SendMessage by its agent name, which each
+        -- task's details and listing show, is dispatch's convention for every
+        -- task alike, so it moved to the MCP server instructions
+        -- (mcp-task-tools.allium: ServerInstructionsStateDispatchConventions),
+        -- which every session connected to dispatch already loads. Stating it
+        -- in each epic task's prompt as well was a second copy of one fact.
         --
         -- The section also invites coordination: when the agent needs help,
         -- or a running sibling in the epic works on a similar problem, it

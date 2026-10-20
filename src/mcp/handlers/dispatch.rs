@@ -698,6 +698,18 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
 // MCP handler
 // ---------------------------------------------------------------------------
 
+/// The MCP server instructions: the conventions that span several tools and
+/// that no one tool's schema owns. Claude Code loads them into every connected
+/// session's system prompt, so dispatch prompts do not restate them. Repository
+/// policy and per-task rules stay in the prompt — see
+/// `InstructionsCoverOnlyConventionsNoSchemaStates` in
+/// `docs/specs/mcp-task-tools.allium`.
+const SERVER_INSTRUCTIONS: &str = "Each dispatched task runs a Claude Code agent with its own \
+agent name, shown in the task's details and in task listings. Wherever these tools take a task \
+id, that agent name works too. The agent's session carries the same name, so reach another \
+task's agent with ListAgents and SendMessage by its agent name. Tasks in the same epic are \
+siblings.";
+
 /// The `"initialize"` arm of [`handle_mcp`]. Per spec: if the client offers a
 /// version we support, echo it back to use that version for the session;
 /// otherwise reply with our latest supported version (the client may then
@@ -722,7 +734,8 @@ fn negotiate_initialize(id: Option<Value>, params: Option<Value>) -> JsonRpcResp
             "serverInfo": {
                 "name": "dispatch",
                 "version": "0.1.0"
-            }
+            },
+            "instructions": SERVER_INSTRUCTIONS
         }),
     )
 }

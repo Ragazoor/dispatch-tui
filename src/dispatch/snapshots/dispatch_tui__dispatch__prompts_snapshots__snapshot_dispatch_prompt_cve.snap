@@ -10,7 +10,7 @@ Task:
   EpicId: 9
 
 This task is part of epic #9: CVE
-Sibling agents are reached by their agent names, which each task's details and listing show: find one with ListAgents, message it with SendMessage. If your task needs help, or a sibling is working on a similar problem, ask that agent.
+If you need help, or a sibling task's agent is working on a similar problem, ask that agent.
 
 This is a CVE remediation task. It is a targeted dependency fix, not a feature.
 Do not design it spec-first, and do not write a failing test first — neither
