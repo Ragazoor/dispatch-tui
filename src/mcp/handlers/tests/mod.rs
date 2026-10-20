@@ -456,6 +456,21 @@ async fn initialize_instructions_do_not_depend_on_the_caller() {
     assert_eq!(anon["instructions"], as_task["instructions"]);
 }
 
+/// InstructionsCoverOnlyConventionsNoSchemaStates: what one tool does belongs
+/// in that tool's description, so the instructions name no dispatch tool.
+#[tokio::test]
+async fn initialize_instructions_name_no_dispatch_tool() {
+    let state = test_state().await;
+    let result = call(&state, "initialize", None).await.result.unwrap();
+    let text = result["instructions"].as_str().unwrap();
+    for tool in crate::mcp::handlers::TOOL_NAMES {
+        assert!(
+            !text.contains(tool),
+            "the server instructions must not name the {tool} tool, got: {text}"
+        );
+    }
+}
+
 /// When the client offers a supported older protocol version, the server
 /// echoes it back so the session downgrades gracefully.
 #[tokio::test]
