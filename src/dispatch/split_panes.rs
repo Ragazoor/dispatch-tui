@@ -112,6 +112,13 @@ fn drain_pinned_from_window(
     }
 }
 
+/// Whether the live `window` is the leftover awaiting `pane_id`. A failed
+/// lookup reads as "not awaiting", which makes the caller refuse and leaves the
+/// pane where it is.
+fn awaits_pane(window: &TmuxWindow, pane_id: &str, runner: &dyn ProcessRunner) -> bool {
+    tmux::window_awaits_pane(window, pane_id, runner).unwrap_or(false)
+}
+
 /// Return the pinned `pane_id` to a standalone window named `window`.
 ///
 /// Breaks the pane out into a new window when the name is free. When a window
@@ -125,13 +132,10 @@ pub fn restore_pinned_pane(
     window: &TmuxWindow,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
-    let refused = match tmux::break_pane_to_window(pane_id, window, runner) {
-        Ok(()) => return Ok(()),
-        Err(e) => e,
+    let Err(refused) = tmux::break_pane_to_window(pane_id, window, runner) else {
+        return Ok(());
     };
-    // A failed lookup reads as "not awaiting": the refusal is then reported,
-    // which leaves the pane where it is.
-    if tmux::window_awaits_pane(window, pane_id, runner).unwrap_or(false) {
+    if awaits_pane(window, pane_id, runner) {
         tmux::rejoin_pane(pane_id, window, runner).context("rejoin pane failed")
     } else {
         Err(refused)
@@ -173,8 +177,7 @@ pub fn swap_task_window_into_pane(
     let rejoin = match old_task {
         Some((old_name, _)) => {
             let taken = tmux::has_window(old_name, runner).context("rename window failed")?;
-            // A failed tag lookup reads as "not awaiting", which refuses.
-            if taken && !tmux::window_awaits_pane(old_name, right_pane, runner).unwrap_or(false) {
+            if taken && !awaits_pane(old_name, right_pane, runner) {
                 return Err(tmux::duplicate_window_name_error(old_name))
                     .context("rename window failed");
             }

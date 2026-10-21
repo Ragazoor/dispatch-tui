@@ -922,9 +922,6 @@ fn unpin_breaks_the_pane_back_into_its_own_window() {
 // #98356: an exit refused on every [s] because the pinned task's own window
 // was still there.
 
-/// The window option a leftover window carries, naming the pane it awaits.
-const AWAITS_PANE_OPTION: &str = "@dispatch_awaits_pane";
-
 impl Fixture {
     /// Split an unmarked shell pane into `window` beside its agent — the user's
     /// own `prefix %`, which dispatch has no claim to and must not kill.
@@ -943,6 +940,14 @@ impl Fixture {
             "cat",
         ])
     }
+
+    /// `window` holds exactly `panes`, in any order: what it held before the pin.
+    fn assert_panes(&self, window: &TmuxWindow, panes: &[&str]) {
+        let got: std::collections::BTreeSet<String> =
+            self.server.pane_ids(window.as_str()).into_iter().collect();
+        let want = panes.iter().map(|p| p.to_string()).collect();
+        assert_eq!(got, want, "{window} must hold what it held before the pin");
+    }
 }
 
 #[test]
@@ -958,7 +963,8 @@ fn pin_tags_a_window_an_unmarked_pane_keeps_alive() {
         "a pane dispatch did not mark is not dispatch's to kill"
     );
     assert_eq!(
-        fx.server.window_option(window.as_str(), AWAITS_PANE_OPTION),
+        fx.server
+            .window_option(window.as_str(), tmux::AWAITS_PANE_OPTION),
         pinned,
         "the surviving window must name the pane it awaits"
     );
@@ -975,17 +981,11 @@ fn exit_rejoins_the_pinned_pane_into_the_window_awaiting_it() {
         .expect("the window the pane came from is not a duplicate");
 
     assert_eq!(fx.server.count_windows_named(window.as_str()), 1);
-    let mut panes = fx.server.pane_ids(window.as_str());
-    panes.sort();
-    let mut want = vec![pinned, users_pane];
-    want.sort();
-    assert_eq!(
-        panes, want,
-        "the window must hold what it held before the pin"
-    );
+    fx.assert_panes(&window, &[&pinned, &users_pane]);
     assert_eq!(fx.server.pane_count(BOARD_WINDOW), 1);
     assert_eq!(
-        fx.server.window_option(window.as_str(), AWAITS_PANE_OPTION),
+        fx.server
+            .window_option(window.as_str(), tmux::AWAITS_PANE_OPTION),
         "",
         "the tag is spent once the pane is back"
     );
@@ -1034,11 +1034,7 @@ fn swap_rejoins_the_outgoing_pane_into_its_leftover_window() {
 
     assert_eq!(now_pinned, pane_b);
     assert_eq!(fx.server.count_windows_named(window_a.as_str()), 1);
-    let mut panes = fx.server.pane_ids(window_a.as_str());
-    panes.sort();
-    let mut want = vec![pinned_a, users_pane];
-    want.sort();
-    assert_eq!(panes, want, "A's pane must be back beside the user's pane");
+    fx.assert_panes(&window_a, &[&pinned_a, &users_pane]);
     assert!(
         !fx.server.has_window(window_b.as_str()),
         "B's window held only B's agent, so it is consumed like a pin; got {:?}",

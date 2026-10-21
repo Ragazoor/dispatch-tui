@@ -720,20 +720,40 @@ pub fn set_window_dispatch_dir(
     working_dir: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
+    set_window_option(window, "@dispatch_dir", working_dir, runner)
+}
+
+/// Set window-scoped user option `option` on `window`, resolved exactly by
+/// [`window_target`] so a prefix-matched sibling never receives it.
+fn set_window_option(
+    window: &TmuxWindow,
+    option: &str,
+    value: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<()> {
     let target = window_target(window.as_str(), runner)?;
     run_checked_timeout(
         runner,
-        &[
-            "set-option",
-            "-w",
-            "-t",
-            &target,
-            "@dispatch_dir",
-            working_dir,
-        ],
+        &["set-option", "-w", "-t", &target, option, value],
         "set-option",
     )?;
     Ok(())
+}
+
+/// Read window-scoped user option `option` from `window`; `None` when unset.
+fn window_option(
+    window: &TmuxWindow,
+    option: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<Option<String>> {
+    let target = window_target(window.as_str(), runner)?;
+    // -q so an unset option is an empty answer rather than an error.
+    let value = run_checked_stdout(
+        runner,
+        &["show-options", "-wqv", "-t", &target, option],
+        "show-options",
+    )?;
+    Ok((!value.is_empty()).then_some(value))
 }
 
 /// The tmux format [`ensure_split_hook`] tests before correcting a pane: true
@@ -827,14 +847,7 @@ pub fn window_dispatch_dir(
     window: &TmuxWindow,
     runner: &dyn ProcessRunner,
 ) -> Result<Option<String>> {
-    let target = window_target(window.as_str(), runner)?;
-    // -q so an unset option is an empty answer rather than an error.
-    let dir = run_checked_stdout(
-        runner,
-        &["show-options", "-wqv", "-t", &target, "@dispatch_dir"],
-        "show-options",
-    )?;
-    Ok((!dir.is_empty()).then_some(dir))
+    window_option(window, "@dispatch_dir", runner)
 }
 
 /// Check whether tmux has `focus-events` enabled globally.
@@ -1322,20 +1335,7 @@ pub fn set_window_awaits_pane(
     pane_id: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
-    let target = window_target(window.as_str(), runner)?;
-    run_checked_timeout(
-        runner,
-        &[
-            "set-option",
-            "-w",
-            "-t",
-            &target,
-            AWAITS_PANE_OPTION,
-            pane_id,
-        ],
-        "set-option",
-    )?;
-    Ok(())
+    set_window_option(window, AWAITS_PANE_OPTION, pane_id, runner)
 }
 
 /// Whether the live window `window` is tagged as awaiting exactly `pane_id`.
@@ -1346,13 +1346,7 @@ pub fn window_awaits_pane(
     pane_id: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<bool> {
-    let target = window_target(window.as_str(), runner)?;
-    let awaited = run_checked_stdout(
-        runner,
-        &["show-options", "-wqv", "-t", &target, AWAITS_PANE_OPTION],
-        "show-options",
-    )?;
-    Ok(awaited == pane_id)
+    Ok(window_option(window, AWAITS_PANE_OPTION, runner)?.as_deref() == Some(pane_id))
 }
 
 /// Join `pane_id` back into `window` as its left-hand pane and clear the
@@ -1365,7 +1359,7 @@ pub fn rejoin_pane(pane_id: &str, window: &TmuxWindow, runner: &dyn ProcessRunne
         &["join-pane", "-h", "-b", "-d", "-s", pane_id, "-t", &target],
         "join-pane",
     )?;
-    run_checked(
+    run_checked_timeout(
         runner,
         &["set-option", "-w", "-u", "-t", &target, AWAITS_PANE_OPTION],
         "set-option",

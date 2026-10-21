@@ -111,8 +111,9 @@ impl App {
             return vec![];
         }
         // Cloned, never taken: the pane id is what a re-attempt needs. Exiting
-        // can be refused — `tmux::break_pane_to_window` will not assign a name
-        // a live window already holds (split-pane.allium:
+        // can be refused — `dispatch::restore_pinned_pane` will not assign a
+        // name a live window already holds, unless that window is the one the
+        // pane was pinned from (split-pane.allium:
         // RefuseExitSplitModeOntoLiveWindow) — and the refusal comes back as an
         // error message, not a state change. `SplitMessage::PaneClosed` is the
         // only confirmation that tmux really did it, and `handle_split_pane_closed`
