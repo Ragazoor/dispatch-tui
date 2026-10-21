@@ -46,6 +46,37 @@ must say why, got: {text}"
     );
 }
 
+/// A feed-linked fix PR is reviewed and merged rather than duplicated, and
+/// it still has to land on a fixed version. See "WHEN A FIX PR IS ALREADY
+/// OPEN" under `CveRemediationSkipsTheDesignStep`.
+#[test]
+fn cve_runbook_merges_a_linked_fix_pr_after_checking_it() {
+    let text = cve_runbook();
+    let first_step = text
+        .lines()
+        .find(|l| l.starts_with("1."))
+        .unwrap_or_default();
+    assert!(
+        first_step.contains("Fix PR:"),
+        "the runbook's first step must look for the feed's Fix PR line, got: {text}"
+    );
+    for token in [
+        "fixed set",
+        "gh pr checks",
+        "kognic-github-app",
+        "gh pr review",
+        "--approve",
+        "gh pr merge",
+        "--squash --auto",
+        "no git operations",
+    ] {
+        assert!(
+            text.contains(token),
+            "the linked-PR step must carry `{token}`, got: {text}"
+        );
+    }
+}
+
 /// The carve-out is test-FIRST, not testing. A patch we wrote ourselves
 /// still earns a test.
 #[test]

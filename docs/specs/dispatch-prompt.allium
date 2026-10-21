@@ -798,6 +798,23 @@ rule RenderCveRunbook {
         -- runbook rules out test-FIRST design of a version bump, not testing a
         -- patch we wrote ourselves.
         --
+        -- WHEN A FIX PR IS ALREADY OPEN. fetch-cve.sh appends a
+        -- "Fix PR: <url>" line to the description when an open PR in the
+        -- repo already fixes the alert (see "scripts/fetch-cve.sh: an alert
+        -- names the open PR that fixes it" in feed-scripts.allium). The
+        -- runbook's FIRST step checks for that line, and when it is there the
+        -- agent reviews and merges that PR instead of writing a fix: confirm
+        -- the PR lands on a version in the advisory's fixed set, that it
+        -- changes only dependency files, that CI passes and that Kognic's
+        -- GitHub App approved it; then approve it and merge it with
+        -- `gh pr merge --squash --auto`, and wrap up on the path with no git
+        -- operations. Any check that fails goes to the user, not to a
+        -- hand-written fix — the PR is the fix that is wanted, and a second one
+        -- would compete with it. No line means no linked PR, and the remaining
+        -- steps run as before. The fixed-set check is the same one the
+        -- hand-written path makes, for the same backport reason: a bot PR
+        -- matched by package name may bump to a version still vulnerable.
+        --
         -- HOW IT COMPOSES. The runbook replaces the DESIGN step and nothing
         -- else, so a plan attached to a CVE task still wins the addendum: the
         -- plan states the steps someone already worked out, and silently not

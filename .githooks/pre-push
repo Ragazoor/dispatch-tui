@@ -43,6 +43,9 @@ bash ./scripts/test-check-commit-msg.sh
 echo "fetch-reviews..."
 bash ./scripts/test-fetch-reviews.sh
 
+echo "fetch-cve..."
+bash ./scripts/test-fetch-cve.sh
+
 echo "bots.conf validation..."
 bash ./scripts/test-bots-conf.sh
 

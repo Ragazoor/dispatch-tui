@@ -383,6 +383,11 @@ jobs:
       - name: Self-test the fetch-reviews feed script
         run: bash ./scripts/test-fetch-reviews.sh
 
+      # fetch-cve.sh links each alert to the open PR that fixes it; same stub-`gh`
+      # approach, no network and no credentials.
+      - name: Self-test the fetch-cve feed script
+        run: bash ./scripts/test-fetch-cve.sh
+
       # Both feed scripts that read bots.conf reject a BOT_AUTHORS entry not in
       # gh's app form. Same stub-`gh` approach: no network, no credentials.
       - name: Self-test the bots.conf validation

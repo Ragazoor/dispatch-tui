@@ -101,6 +101,71 @@
 -- reaches the runtime — the runtime learned only that a feed may be
 -- append-only, which is upstream-agnostic.
 --
+-- == scripts/fetch-cve.sh: an alert names the open PR that fixes it ==
+--
+-- Most alerts already have a fix waiting: Dependabot opens a security update
+-- PR for its own alert, and Renovate opens a bump for the same package. A
+-- CVE task that ignores that PR has its agent write a second, competing fix.
+-- So fetch-cve.sh looks for an open PR in the alert's own repo and, when it
+-- finds one, the task's job becomes reviewing and merging that PR (see
+-- RenderCveRunbook in dispatch-prompt.allium) instead of authoring a fix.
+--
+-- HOW A PR IS FOUND, in precedence order. The first source that yields an
+-- open PR wins; later sources are not consulted for that alert.
+--
+--   1. THE ALERT'S OWN LINK. GitHub's GraphQL alert node carries
+--      `dependabotUpdate.pullRequest`: the security update PR Dependabot
+--      opened for exactly this alert. It is authoritative, so it is used
+--      whenever that PR is OPEN. A merged or closed one links nothing.
+--   2. A BOT PR THAT NAMES THE ADVISORY. An open, non-draft, bot-authored PR
+--      whose title or body contains the advisory's GHSA id or CVE id.
+--      Renovate's vulnerability PRs cite the advisory this way, and Renovate
+--      PRs never appear in source 1.
+--   3. A BOT PR THAT NAMES THE PACKAGE. An open, non-draft, bot-authored PR
+--      whose title holds the vulnerable package's name as a whole token
+--      (case-insensitive; the title split on whitespace, commas, brackets,
+--      parentheses and backticks). Whole-token, so "rand" never matches a
+--      bump of "random". Within sources 2 and 3 the newest PR (highest
+--      number) wins.
+--
+-- "Bot-authored" is gh's own `author.is_bot`, not bots.conf: the question is
+-- "did a dependency bot open this", and every such bot answers it, where
+-- bots.conf lists only the bots whose PRs earn the dependency REVIEW runbook.
+-- Sources 2 and 3 skip human PRs on purpose: a person's PR that mentions a
+-- package is not a fix to merge without reading it.
+--
+-- Sources 2 and 3 are a heuristic. A package-name match does not prove the
+-- PR lands on a fixed version, and the runbook does not assume it does: the
+-- agent still checks the PR's resulting version against the advisory's
+-- fixed set before approving anything.
+--
+-- WHAT A LINKED ITEM CARRIES. Its description gains a final paragraph
+-- "Fix PR: <url> (<title>)", its labels gain "fix-pr", and its wrap_up_mode
+-- is "done" instead of "pr" — merging another author's PR leaves the agent
+-- no commits of its own to open a PR for. The url stays the ALERT (url_type
+-- security_alert): the runbook reads the advisory from it, and the feed's
+-- Reconcile sync already removes the task once the merged PR closes the
+-- alert, so nothing needs to track the PR's own state.
+--
+-- Description and labels are re-applied on every poll, so a PR that appears
+-- after the card was created links it on the next poll, and one that closes
+-- unmerged unlinks it. wrap_up_mode is applied on INSERT only (see
+-- FeedItem.wrap_up_mode in feeds.allium), so a card linked later keeps "pr";
+-- the runbook tells the agent which wrap-up path to take either way.
+--
+-- FAILURE DEGRADES TO UNLINKED. Each repo costs one paginated GraphQL query
+-- (source 1) and one `gh pr list --state open --limit 200` (sources 2 and 3),
+-- tried with each authenticated token like the alerts call. If either fails,
+-- the script warns on stderr and emits that repo's alerts without the links
+-- the failed call would have supplied. It never drops an alert for it: an
+-- unlinked alert is still correct work, while a missing one deletes its task
+-- under Reconcile. A PR list that hits its limit also warns, since a fix PR
+-- past the cut goes unlinked.
+--
+-- fetch-security.sh does NOT link PRs. Its tasks sit on an ordinary epic,
+-- which never renders the CVE runbook (CveRemediationSkipsTheDesignStep), so
+-- a "Fix PR" line there would come with no instruction to act on it.
+--
 -- == scripts/fetch-reviews.sh: single emission with routing signals ==
 --
 -- fetch-reviews.sh emits ONE deduped FeedItem array covering every open PR
