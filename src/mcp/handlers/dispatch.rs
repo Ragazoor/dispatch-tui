@@ -361,7 +361,7 @@ loop.",
     async write "create_work_package" => work_packages::handle_create_work_package,
         "Create a work package: a named group that links to tasks and epics which already exist, \
 wherever they sit in the epic tree, so work spread across several epics can be followed as one \
-board. Nothing is created inside a package and one item can belong to many packages. Pass \
+board. A package only links; it never owns its items, and one item can belong to many packages. Pass \
 link_task_ids and link_epic_ids to link items at once; every id is checked first, and an unknown \
 one creates nothing. Returns the new package's id. To group new work under a parent, use \
 create_epic instead.",

@@ -70,6 +70,27 @@ impl TuiRuntime {
         self.exec_refresh_work_packages(app).await;
     }
 
+    /// Link a task just created from a package view to that package
+    /// (`work-packages.allium: CreateTaskInPackageView`). A refused link keeps
+    /// the task and shows the error, like any other link from the board.
+    pub(super) async fn link_new_task(
+        &self,
+        app: &mut App,
+        package: Option<models::WorkPackageId>,
+        task: models::TaskId,
+    ) {
+        if let Some(id) = package {
+            self.exec_work_package_command(
+                app,
+                WorkPackageCommand::Link {
+                    id,
+                    item: models::WorkPackageItem::Task(task),
+                },
+            )
+            .await;
+        }
+    }
+
     /// Re-read the board's packages and links through `board_reads`, the read
     /// seam every card on screen comes through.
     pub(super) async fn exec_refresh_work_packages(&self, app: &mut App) {

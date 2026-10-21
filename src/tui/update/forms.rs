@@ -94,6 +94,7 @@ pub(in crate::tui) fn submit_title(
             base_branch: "main".to_string(),
             wrap_up_mode: None,
             phoenix: false,
+            work_package: None,
         });
         input.mode = InputMode::InputTag;
         status.set(crate::tui::ui::tag_prompt(false).to_string());

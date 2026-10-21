@@ -314,6 +314,81 @@ async fn dispatch_work_package_commands_write_and_refresh_the_board() {
     );
 }
 
+/// `work-packages.allium: CreateTaskInPackageView`: a task drafted in a
+/// package view is created with no epic, then linked to the package, and the
+/// board re-reads its packages.
+#[tokio::test]
+async fn an_insert_drafted_in_a_package_view_links_the_new_task() {
+    let (rt, mut app) = test_runtime().await;
+    let package = rt
+        .work_package_svc
+        .create_work_package(crate::service::CreateWorkPackageParams {
+            title: "Window 1".into(),
+            description: String::new(),
+            link: vec![],
+        })
+        .await
+        .expect("package created");
+
+    dispatch_one(
+        &rt,
+        &mut app,
+        Command::Task(crate::tui::commands::TaskCommand::Insert {
+            draft: tui::TaskDraft {
+                title: "in package".into(),
+                repo_path: "/repo".into(),
+                work_package: Some(package),
+                ..Default::default()
+            },
+            epic_id: None,
+        }),
+    )
+    .await;
+
+    let task = rt
+        .database
+        .list_all()
+        .await
+        .into_iter()
+        .find(|t| t.title == "in package")
+        .expect("task created");
+    assert_eq!(task.epic_id, None);
+    assert_eq!(
+        app.work_package_links(),
+        [models::WorkPackageLink {
+            work_package_id: package,
+            item: models::WorkPackageItem::Task(task.id),
+        }]
+    );
+}
+
+/// A refused link keeps the created task and shows the error.
+#[tokio::test]
+async fn an_insert_whose_link_is_refused_keeps_the_task_and_surfaces_an_error() {
+    let (rt, mut app) = test_runtime().await;
+    dispatch_one(
+        &rt,
+        &mut app,
+        Command::Task(crate::tui::commands::TaskCommand::Insert {
+            draft: tui::TaskDraft {
+                title: "orphan".into(),
+                repo_path: "/repo".into(),
+                work_package: Some(models::WorkPackageId(404)),
+                ..Default::default()
+            },
+            epic_id: None,
+        }),
+    )
+    .await;
+    assert!(rt
+        .database
+        .list_all()
+        .await
+        .iter()
+        .any(|t| t.title == "orphan"));
+    assert!(app.error_popup().is_some());
+}
+
 #[tokio::test]
 async fn a_refused_work_package_write_surfaces_an_error() {
     use crate::tui::commands::WorkPackageCommand as W;

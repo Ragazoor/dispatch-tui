@@ -130,6 +130,62 @@ async fn exec_quick_dispatch_does_not_record_base_branch_history() {
     let _ = tokio::time::timeout(TEST_TIMEOUT, rx.recv()).await;
 }
 
+/// `work-packages.allium: CreateTaskInPackageView`: quick dispatch from a
+/// package view links the new task to the package.
+#[tokio::test]
+async fn exec_quick_dispatch_links_the_task_to_the_drafts_package() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    crate::dispatch::tests::create_worktree_dir(format!("{repo}/.worktrees/1-quick-task"));
+
+    let db = test_db().await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = DispatchScript::dispatch()
+        .detecting_default_branch("main")
+        .shared_runner();
+    let rt = make_runtime(db.clone(), tx, mock).await;
+    let package = rt
+        .work_package_svc
+        .create_work_package(crate::service::CreateWorkPackageParams {
+            title: "Window 1".into(),
+            description: String::new(),
+            link: vec![],
+        })
+        .await
+        .expect("package created");
+    let mut app = App::new(db.list_all().await);
+
+    rt.exec_quick_dispatch(
+        &mut app,
+        tui::TaskDraft {
+            title: "Quick task".into(),
+            repo_path: repo.to_string(),
+            work_package: Some(package),
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+
+    let task = db
+        .list_all()
+        .await
+        .into_iter()
+        .find(|t| t.title == "Quick task")
+        .expect("task created");
+    assert_eq!(task.epic_id, None);
+    assert_eq!(
+        app.work_package_links(),
+        [models::WorkPackageLink {
+            work_package_id: package,
+            item: models::WorkPackageItem::Task(task.id),
+        }]
+    );
+
+    serve(&rt).await;
+    let _ = tokio::time::timeout(TEST_TIMEOUT, rx.recv()).await;
+}
+
 #[tokio::test]
 async fn exec_refresh_from_db_syncs_external_changes() {
     let (rt, mut app) = test_runtime().await;

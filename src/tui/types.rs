@@ -2,7 +2,8 @@
 pub(in crate::tui) const REPARENT_NO_PARENT_SENTINEL: &str = "__no_parent__";
 
 use crate::models::{
-    DispatchMode, Epic, EpicId, Task, TaskId, TaskStatus, TaskTag, WrapUpMode, DEFAULT_BASE_BRANCH,
+    DispatchMode, Epic, EpicId, Task, TaskId, TaskStatus, TaskTag, WorkPackageId, WrapUpMode,
+    DEFAULT_BASE_BRANCH,
 };
 
 mod fold;
@@ -435,6 +436,10 @@ pub struct TaskDraft {
     pub base_branch: String,
     pub wrap_up_mode: Option<WrapUpMode>,
     pub phoenix: bool,
+    /// The package view the task was drafted in: the new task is linked to it
+    /// once created (`work-packages.allium: CreateTaskInPackageView`). Set
+    /// when the task is submitted, so it names the view at that moment.
+    pub work_package: Option<WorkPackageId>,
 }
 
 impl Default for TaskDraft {
@@ -447,6 +452,7 @@ impl Default for TaskDraft {
             base_branch: DEFAULT_BASE_BRANCH.to_string(),
             wrap_up_mode: None,
             phoenix: false,
+            work_package: None,
         }
     }
 }

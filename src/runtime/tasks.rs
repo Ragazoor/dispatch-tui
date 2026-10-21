@@ -8,6 +8,7 @@ impl TuiRuntime {
         epic_id: Option<models::EpicId>,
     ) {
         use crate::service::CreateTaskParams;
+        let work_package = draft.work_package;
         let params = CreateTaskParams {
             title: draft.title,
             description: draft.description,
@@ -22,9 +23,11 @@ impl TuiRuntime {
             phoenix: draft.phoenix,
         };
         if let Some(task) = self.create_task(app, params).await {
+            let id = task.id;
             app.update(Message::Task(crate::tui::messages::TaskMessage::Created {
                 task: Box::new(task),
             }));
+            self.link_new_task(app, work_package, id).await;
         }
     }
 
@@ -161,6 +164,7 @@ impl TuiRuntime {
     ) {
         use crate::service::CreateTaskParams;
         let repo_path = draft.repo_path.clone();
+        let work_package = draft.work_package;
         let expanded = models::expand_tilde(&repo_path);
         let Some(task) = self
             .create_task(
@@ -191,6 +195,7 @@ impl TuiRuntime {
         app.update(Message::Task(crate::tui::messages::TaskMessage::Created {
             task: Box::new(task.clone()),
         }));
+        self.link_new_task(app, work_package, task.id).await;
         app.update(Message::Task(
             crate::tui::messages::TaskMessage::MarkDispatching(task.id),
         ));

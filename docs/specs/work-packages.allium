@@ -23,10 +23,13 @@
 --   - A package is a VIEW on the board, not a to-do list. It has no status of
 --     its own and nothing to tick off: an item is done when the item itself
 --     is done, and the board's columns already say so.
---   - Nothing is ever created inside a package. It only links to existing
---     tasks and epics. Quick dispatch (D) inside a package view therefore
---     makes a plain main-board task, exactly as on the main board, and does
---     not link it.
+--   - A package only links; it never owns. A task created while a package
+--     view is showing (n, c copy, D quick dispatch) is still a plain
+--     main-board task with no epic, and is then linked to that package
+--     (task #98415, reversing the earlier "nothing is created inside a
+--     package": CreateTaskInPackageView). Only the package view itself
+--     links: a task created in an epic view entered from a package goes into
+--     that epic and is not linked, since the epic's card already carries it.
 --   - Membership is many-to-many: one task or epic can be linked to any
 --     number of packages.
 --   - The cards in a package view are the linked items themselves: a linked
@@ -179,6 +182,33 @@ rule LinkItem {
         -- Linking an epic and also a task inside that epic is allowed and
         -- both are kept: the user linked the task on purpose (see
         -- PackageViewCards).
+}
+
+-- A task created while a package view is showing is linked to that package.
+-- The task itself is created exactly as on the main board: no epic, the same
+-- form or quick dispatch. Only the link is added.
+rule CreateTaskInPackageView {
+    when: TaskCreatedFromBoard(task, view)
+
+    requires: view = PackageView(package)
+
+    ensures: LinkItem(package, task)
+
+    @guidance
+        -- Covers every board path that creates a task: n (the new-task
+        -- form), c (copy) and D (quick dispatch, whose repo picker is part
+        -- of the same keypress). The package is the one showing when the
+        -- task is submitted (the form's last step, or the repo picked), so a
+        -- package deleted while the form is open is not linked: the view has
+        -- already fallen back to the main board.
+        -- An epic view, even one entered from a package, creates into that
+        -- epic and links nothing (tasks.allium: CreateTask).
+        -- Two writes: the create, then the link. A refused link leaves the
+        -- plain main-board task and shows the error; the user links it with
+        -- `w`. The board re-reads its packages after the link.
+        -- MCP has no twin parameter on create_task: an agent has no view,
+        -- and create_task followed by update_work_package(link_task_ids)
+        -- already does the same.
 }
 
 rule DeleteWorkPackageViaMcp {

@@ -545,12 +545,118 @@ fn a_deepest_jump_from_a_package_starts_its_trail_at_the_package_view() {
     assert!(matches!(top.as_ref(), ViewMode::Package { .. }));
 }
 
+// ---------------------------------------------------------------------------
+// CreateTaskInPackageView
+// ---------------------------------------------------------------------------
+
+/// Answer the new-task form's last step (wrap-up mode) with `r`, from a draft
+/// parked there, and return the Insert it emits as `(draft, epic_id)`.
+fn finish_new_task(app: &mut App) -> (crate::tui::TaskDraft, Option<EpicId>) {
+    app.input.mode = InputMode::InputWrapUpMode;
+    app.input.task_draft = Some(crate::tui::TaskDraft {
+        title: "T".to_string(),
+        repo_path: "/repo".to_string(),
+        ..Default::default()
+    });
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    cmds.into_iter()
+        .find_map(|c| match c {
+            Command::Task(crate::tui::commands::TaskCommand::Insert { draft, epic_id }) => {
+                Some((draft, epic_id))
+            }
+            _ => None,
+        })
+        .expect("the form emits an Insert")
+}
+
+/// The QuickDispatch command in `cmds`, as `(draft, epic_id)`.
+fn quick_dispatch_of(cmds: Vec<Command>) -> (crate::tui::TaskDraft, Option<EpicId>) {
+    cmds.into_iter()
+        .find_map(|c| match c {
+            Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { draft, epic_id }) => {
+                Some((draft, epic_id))
+            }
+            _ => None,
+        })
+        .expect("a QuickDispatch command")
+}
+
 #[test]
-fn quick_dispatch_in_a_package_view_makes_a_plain_task() {
+fn a_new_task_in_a_package_view_is_a_plain_task_linked_to_the_package() {
     let mut app = board_with_package();
     enter_package(&mut app, 7);
+    let (draft, epic_id) = finish_new_task(&mut app);
+    assert_eq!(epic_id, None);
+    assert_eq!(draft.work_package, Some(WorkPackageId(7)));
+}
+
+#[test]
+fn a_new_task_on_the_main_board_is_linked_to_no_package() {
+    let mut app = board_with_package();
+    let (draft, epic_id) = finish_new_task(&mut app);
+    assert_eq!(epic_id, None);
+    assert_eq!(draft.work_package, None);
+}
+
+#[test]
+fn a_new_task_in_an_epic_entered_from_a_package_goes_into_the_epic_unlinked() {
+    let mut app = board_with_package();
+    enter_package(&mut app, 7);
+    cursor_on(
+        &mut app,
+        TaskStatus::Running,
+        |i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(1)),
+    );
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    let (draft, epic_id) = finish_new_task(&mut app);
+    assert_eq!(epic_id, Some(EpicId(1)));
+    assert_eq!(draft.work_package, None);
+}
+
+#[test]
+fn a_copy_made_in_a_package_view_is_linked_to_the_package() {
+    let mut app = board_with_package();
+    enter_package(&mut app, 7);
+    cursor_on(
+        &mut app,
+        TaskStatus::Backlog,
+        |i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(3)),
+    );
+    app.handle_key(make_key(KeyCode::Char('c')));
+    assert!(app.input.copy_flow, "c starts the copy form");
+    let (draft, epic_id) = finish_new_task(&mut app);
+    assert_eq!(epic_id, None);
+    assert_eq!(draft.work_package, Some(WorkPackageId(7)));
+}
+
+#[test]
+fn quick_dispatch_in_a_package_view_makes_a_plain_task_linked_to_the_package() {
+    let mut app = board_with_package();
+    app.board.repo_paths = vec!["/repo".to_string()];
+    enter_package(&mut app, 7);
+    let (draft, epic_id) = quick_dispatch_of(app.handle_key(make_key(KeyCode::Char('D'))));
+    assert_eq!(epic_id, None);
+    assert_eq!(draft.work_package, Some(WorkPackageId(7)));
+}
+
+#[test]
+fn quick_dispatch_through_the_repo_picker_keeps_the_package() {
+    let mut app = board_with_package();
+    app.board.repo_paths = vec!["/a".to_string(), "/b".to_string()];
+    enter_package(&mut app, 7);
     app.handle_key(make_key(KeyCode::Char('D')));
-    assert_eq!(app.input.pending_epic_id, None);
+    assert_eq!(app.input.mode, InputMode::QuickDispatch);
+    let (draft, epic_id) = quick_dispatch_of(app.handle_key(make_key(KeyCode::Enter)));
+    assert_eq!(epic_id, None);
+    assert_eq!(draft.work_package, Some(WorkPackageId(7)));
+}
+
+#[test]
+fn quick_dispatch_on_the_main_board_is_linked_to_no_package() {
+    let mut app = board_with_package();
+    app.board.repo_paths = vec!["/repo".to_string()];
+    let (draft, _) = quick_dispatch_of(app.handle_key(make_key(KeyCode::Char('D'))));
+    assert_eq!(draft.work_package, None);
 }
 
 // ---------------------------------------------------------------------------

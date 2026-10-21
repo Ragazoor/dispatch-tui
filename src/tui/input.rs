@@ -5,8 +5,10 @@ mod table;
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::{App, ColumnItem, Command, InputMode, Message, MoveDirection, ViewMode};
-use crate::models::{DispatchMode, EpicId, TaskId, UsageActor, UsageCategory, UsageEvent};
+use super::{App, BoardViewMode, ColumnItem, Command, InputMode, Message, MoveDirection, ViewMode};
+use crate::models::{
+    DispatchMode, EpicId, TaskId, UsageActor, UsageCategory, UsageEvent, WorkPackageId,
+};
 use crate::tui::commands::UsageCommand;
 
 fn key_event(action: &str, key: &str) -> Command {
@@ -351,6 +353,16 @@ impl App {
         match &self.board.view_mode {
             ViewMode::Epic { epic_id, .. } => Some(*epic_id),
             _ => None,
+        }
+    }
+
+    /// The package whose view is showing, beneath any overlay. `None` in an
+    /// epic view, even one entered from a package: a task created there goes
+    /// into the epic (`work-packages.allium: CreateTaskInPackageView`).
+    pub(in crate::tui) fn current_package_id(&self) -> Option<WorkPackageId> {
+        match self.view().effective_view_mode() {
+            BoardViewMode::Package { package_id, .. } => Some(package_id),
+            BoardViewMode::Board(_) | BoardViewMode::Epic { .. } => None,
         }
     }
 }
