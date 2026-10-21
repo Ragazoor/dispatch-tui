@@ -53,6 +53,8 @@ impl App {
     }
 
     /// The package whose view is showing or sits under the current epic view.
+    /// Not `current_package_id`, which is `None` in an epic view: a task
+    /// created there is not linked.
     fn open_package_id(&self) -> Option<WorkPackageId> {
         let mut current = &self.board.view_mode;
         loop {

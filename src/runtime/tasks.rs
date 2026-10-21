@@ -195,7 +195,6 @@ impl TuiRuntime {
         app.update(Message::Task(crate::tui::messages::TaskMessage::Created {
             task: Box::new(task.clone()),
         }));
-        self.link_new_task(app, work_package, task.id).await;
         app.update(Message::Task(
             crate::tui::messages::TaskMessage::MarkDispatching(task.id),
         ));
@@ -212,6 +211,8 @@ impl TuiRuntime {
             Some(models::DispatchMode::Quick),
         )
         .await;
+        // After the request: the agent's launch does not wait on the link.
+        self.link_new_task(app, work_package, task.id).await;
     }
 
     pub(super) async fn exec_persist_task(

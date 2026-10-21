@@ -549,8 +549,23 @@ fn a_deepest_jump_from_a_package_starts_its_trail_at_the_package_view() {
 // CreateTaskInPackageView
 // ---------------------------------------------------------------------------
 
+/// The task-creating command in `cmds` (Insert or QuickDispatch), as
+/// `(draft, epic_id)`.
+fn created(cmds: Vec<Command>) -> (crate::tui::TaskDraft, Option<EpicId>) {
+    use crate::tui::commands::TaskCommand;
+    cmds.into_iter()
+        .find_map(|c| match c {
+            Command::Task(
+                TaskCommand::Insert { draft, epic_id }
+                | TaskCommand::QuickDispatch { draft, epic_id },
+            ) => Some((draft, epic_id)),
+            _ => None,
+        })
+        .expect("a task-creating command")
+}
+
 /// Answer the new-task form's last step (wrap-up mode) with `r`, from a draft
-/// parked there, and return the Insert it emits as `(draft, epic_id)`.
+/// parked there, and return what it creates.
 fn finish_new_task(app: &mut App) -> (crate::tui::TaskDraft, Option<EpicId>) {
     app.input.mode = InputMode::InputWrapUpMode;
     app.input.task_draft = Some(crate::tui::TaskDraft {
@@ -558,27 +573,7 @@ fn finish_new_task(app: &mut App) -> (crate::tui::TaskDraft, Option<EpicId>) {
         repo_path: "/repo".to_string(),
         ..Default::default()
     });
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    cmds.into_iter()
-        .find_map(|c| match c {
-            Command::Task(crate::tui::commands::TaskCommand::Insert { draft, epic_id }) => {
-                Some((draft, epic_id))
-            }
-            _ => None,
-        })
-        .expect("the form emits an Insert")
-}
-
-/// The QuickDispatch command in `cmds`, as `(draft, epic_id)`.
-fn quick_dispatch_of(cmds: Vec<Command>) -> (crate::tui::TaskDraft, Option<EpicId>) {
-    cmds.into_iter()
-        .find_map(|c| match c {
-            Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { draft, epic_id }) => {
-                Some((draft, epic_id))
-            }
-            _ => None,
-        })
-        .expect("a QuickDispatch command")
+    created(app.handle_key(make_key(KeyCode::Char('r'))))
 }
 
 #[test]
@@ -634,7 +629,7 @@ fn quick_dispatch_in_a_package_view_makes_a_plain_task_linked_to_the_package() {
     let mut app = board_with_package();
     app.board.repo_paths = vec!["/repo".to_string()];
     enter_package(&mut app, 7);
-    let (draft, epic_id) = quick_dispatch_of(app.handle_key(make_key(KeyCode::Char('D'))));
+    let (draft, epic_id) = created(app.handle_key(make_key(KeyCode::Char('D'))));
     assert_eq!(epic_id, None);
     assert_eq!(draft.work_package, Some(WorkPackageId(7)));
 }
@@ -646,7 +641,7 @@ fn quick_dispatch_through_the_repo_picker_keeps_the_package() {
     enter_package(&mut app, 7);
     app.handle_key(make_key(KeyCode::Char('D')));
     assert_eq!(app.input.mode, InputMode::QuickDispatch);
-    let (draft, epic_id) = quick_dispatch_of(app.handle_key(make_key(KeyCode::Enter)));
+    let (draft, epic_id) = created(app.handle_key(make_key(KeyCode::Enter)));
     assert_eq!(epic_id, None);
     assert_eq!(draft.work_package, Some(WorkPackageId(7)));
 }
@@ -655,7 +650,7 @@ fn quick_dispatch_through_the_repo_picker_keeps_the_package() {
 fn quick_dispatch_on_the_main_board_is_linked_to_no_package() {
     let mut app = board_with_package();
     app.board.repo_paths = vec!["/repo".to_string()];
-    let (draft, _) = quick_dispatch_of(app.handle_key(make_key(KeyCode::Char('D'))));
+    let (draft, _) = created(app.handle_key(make_key(KeyCode::Char('D'))));
     assert_eq!(draft.work_package, None);
 }
 

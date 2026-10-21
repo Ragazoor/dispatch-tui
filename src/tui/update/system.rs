@@ -80,9 +80,6 @@ impl App {
                     // task is a one-off by construction anyway. The agent can
                     // arm the flag through update_tasks once it knows the work.
                     phoenix: false,
-                    // Read when the repo is picked, as the form reads it on
-                    // submit: a package deleted meanwhile has already sent
-                    // the view back to the main board.
                     work_package: self.current_package_id(),
                 },
                 epic_id,
@@ -155,12 +152,15 @@ impl App {
         self.status.clear();
         let epic_id = match self.view().effective_view_mode() {
             BoardViewMode::Epic { epic_id, .. } => Some(epic_id),
+            BoardViewMode::Board(_) => None,
             // A package only links: a new task in a package view is a plain
             // main-board task, linked to the package once created
             // (`work-packages.allium: CreateTaskInPackageView`).
-            BoardViewMode::Board(_) | BoardViewMode::Package { .. } => None,
+            BoardViewMode::Package { package_id, .. } => {
+                draft.work_package = Some(package_id);
+                None
+            }
         };
-        draft.work_package = self.current_package_id();
         vec![
             Command::Task(crate::tui::commands::TaskCommand::Insert { draft, epic_id }),
             Command::Settings(crate::tui::commands::SettingsCommand::SaveRepoPath(
