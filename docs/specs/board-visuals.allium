@@ -662,6 +662,45 @@ use "./core.allium" as core
 -- reasoned about on its own. This change removes a rule from the spec
 -- instead of adding one, which is the main reason it is worth making.
 --
+-- == New-task signal ==
+--
+-- A task created with the signal on is unseen by each follower of its epic
+-- until that follower enters the epic (core/UnseenTask; tasks.allium:
+-- SeeTasksByEnteringTheirEpic). While a card is marked for the viewing
+-- person it carries a diamond glyph (◆ U+25C6) in SIGNAL, a hue added to
+-- the palette for this one meaning (ORANGE, Rgb 255 158 100). The glyph sits
+-- on the title line in the same slot, and by the same mechanism, as the
+-- message flash and phoenix glyphs. It is single-column and BMP, so the
+-- title-width budget counts it as one.
+--
+-- Which cards are marked:
+--   - a TASK card whose task has an UnseenTask row for this person;
+--   - an EPIC card whose subtree (itself or any descendant epic) holds such a
+--     task. The mark is derived, never stored (core/UnseenTask), so the whole
+--     chain from the top-level epic down to the one holding the new task is
+--     marked, and each link clears as the operator enters the epic below it.
+--
+-- An epic card ALSO draws its stripe (▎) in SIGNAL instead of PURPLE while
+-- marked. The stripe is one cell on the title line, so there is no "lower
+-- half" to recolour; the whole cell changes. This is the one place the epic
+-- identity hue yields, and it is safe because the glyph says why. A task
+-- card's stripe is NOT touched: it carries column identity, and the board
+-- already learnt (see "Message flash") what recolouring a channel that means
+-- something else costs. A task card is marked by the glyph alone.
+--
+-- The signal is steady, not a blink. It lasts until the operator enters the
+-- epic, which is the same reason the message flash is a notice rather than a
+-- blink: a person whose attention is elsewhere must still catch it on their
+-- next glance, and a timer-driven toggle would add a periodic redraw to a
+-- board that otherwise draws on events only.
+--
+-- It is an attribute of the card, not a condition wanting a human: the frame
+-- is the resting neutral (or the cursor white) and is never coloured by it, on
+-- the same terms as the message flash and the phoenix marker.
+--
+-- Cards for which the viewing person has no row are unmarked, whatever
+-- another person sees.
+
 -- == Phoenix marker ==
 --
 -- A task with phoenix = true carries a recycling glyph (♻ U+267B) on its
@@ -836,6 +875,19 @@ use "./core.allium" as core
 --                                                read one duration, so they
 --                                                cannot disagree about
 --                                                whether a flash is live
+--   unseen_task_card_shows_signal_glyph          a task with an UnseenTask row
+--                                                for the viewer draws ◆ in
+--                                                SIGNAL on its title line
+--   unseen_task_card_stripe_keeps_column_hue     the task stripe is untouched
+--   epic_on_the_path_to_an_unseen_task_is_marked every epic whose subtree holds
+--                                                one draws the glyph, however
+--                                                deep the task sits
+--   marked_epic_stripe_is_signal_not_purple      the epic stripe takes SIGNAL
+--   epic_mark_clears_when_the_last_unseen_task_
+--     below_it_is_seen                           derived, not stored
+--   signal_never_colours_the_card_frame          the frame stays neutral/cursor
+--   signal_is_per_viewer                         another person's row marks
+--                                                nothing for this viewer
 --   message_flash_never_colours_the_card_frame   a live flash leaves the
 --                                                frame alone: no column
 --                                                hue, and the only

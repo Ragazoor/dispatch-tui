@@ -749,7 +749,7 @@ rule CreateTaskViaMcp {
     when: McpCreateTask(caller_identity,
                         title, repo_path, epic_id, description?, plan?,
                         sort_order?, tag?, base_branch?,
-                        wrap_up_mode?, auto_run_plan?, phoenix?)
+                        wrap_up_mode?, auto_run_plan?, phoenix?, signal?)
 
     -- epic_id is REQUIRED and nullable. Required means the ARGUMENT must be
     -- present; nullable means the VALUE may be null. The three cases are:
@@ -793,7 +793,8 @@ rule CreateTaskViaMcp {
     requires:
         if epic_id != null: core/Epic.exists(epic_id)
 
-    ensures: core/Task.created(
+    ensures:
+      let task = core/Task.created(
         title: title,
         description: description ?? "",
         repo_path: repo_path,
@@ -809,7 +810,34 @@ rule CreateTaskViaMcp {
         phoenix: phoenix ?? false,
         created_at: now,
         updated_at: now
-    )
+      )
+
+    -- SignalMarksTheTaskForEveryFollower. When signal is true and the task
+    -- lands in an epic, one core/UnseenTask row is written for every person
+    -- holding a core/Subscription to that epic or to any of its ancestors
+    -- (Epic.ancestor_chain), in the same store transaction as the task. The
+    -- epic is the one the task LANDS in (route_target's), not the argument.
+      if signal = true and task.epic != null:
+            for s in core/Subscription.where(s => Epic.ancestor_chain(task.epic.id).contains(s.epic.id)):
+                core/UnseenTask.created(subscriber: s.subscriber, task: task)
+
+    -- signal is optional and defaults to false. Absent or false writes no
+    -- row. With no epic there is no one following it, so signal is silently
+    -- ignored and the task is created normally; the call is not refused.
+    @guidance
+        -- WHO IS SIGNALLED IS DECIDED AT CREATION. A person who subscribes to
+        -- the epic afterwards is not marked for a task that already exists:
+        -- the signal says "something new arrived while you were following",
+        -- and a late follower was not following. Recorded because the
+        -- alternative (derive "unseen" at read time from a follow date) was
+        -- considered and rejected as a second clock to keep honest.
+        --
+        -- The caller's own subscription counts like anyone's. An agent that
+        -- wants no mark for its operator omits signal.
+        --
+        -- Only create_task takes it. update_tasks does not, and no other
+        -- creation path (TUI form, quick dispatch, feeds) writes UnseenTask
+        -- rows; a task created there is never marked.
 
     -- BaseBranchIsResolvedNotAssumed. An omitted base_branch is resolved
     -- against the repository named by repo_path, by detect_default_branch --

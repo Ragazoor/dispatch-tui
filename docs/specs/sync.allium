@@ -528,6 +528,7 @@ rule SubscribeOnceIdentityIsSettled {
             connection: connection,
             owner_board: identity,
             own_creations: identity,
+            own_unseen: identity,
             epics: connection.subscribed_epics
         )
 
@@ -538,7 +539,14 @@ rule SubscribeOnceIdentityIsSettled {
         -- already have asked for a stranger's rows before discovering it was a
         -- stranger.
         --
-        -- WHAT IS ASKED FOR IS EXACTLY THREE THINGS: this person's own user
+        -- own_unseen is the fourth ask: every core/UnseenTask row whose
+        -- subscriber is this identity. Without it the board could not draw
+        -- the new-task signal (board-visuals.allium, "New-task signal"). It
+        -- is scoped to the caller's own rows, so one person's marks are never
+        -- sent to another. The task a row names is already visible through
+        -- the epic subscription that caused the row to be written.
+        --
+        -- OF THE REST, WHAT IS ASKED FOR IS EXACTLY THREE THINGS: this person's own user
         -- board, the epics they subscribe to (each with its whole sub-epic
         -- tree — see ASubEpicOfAFollowedEpicIsAskedForToo), and every task or
         -- epic they have ever created themselves. The own board is not a Subscription row and
@@ -820,6 +828,7 @@ rule AnUnfollowReassertsTheWholeAsk {
             connection: connection,
             owner_board: core/local_host().owner,
             own_creations: core/local_host().owner,
+            own_unseen: core/local_host().owner,
             epics: connection.subscribed_epics
         )
 

@@ -580,6 +580,31 @@ entity Subscription {
     }
 }
 
+-- UnseenTask records that one person has not yet looked at one task that was
+-- created with the signal on (mcp-task-tools.allium: CreateTaskViaMcp's
+-- `signal`). It is the whole of the "new task" signal's stored state.
+--
+-- An EPIC's mark is never stored. An epic is marked for a person exactly when
+-- some UnseenTask row for that person names a task in the epic's subtree (the
+-- epic itself or any descendant). The epics on the path to a new task therefore
+-- light up and go dark by derivation, with no second write to keep in step.
+-- See "New-task signal" in board-visuals.allium for how it is drawn and
+-- tasks.allium: SeeTasksByEnteringTheirEpic for how it clears.
+--
+-- Rows exist for people, not for machines: the key is a UserIdentity, so one
+-- person's two laptops share one mark and clearing it on either clears both.
+--
+-- A row lives only as long as the task it names stays unseen, in its epic and
+-- not Done. See tasks.allium: UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing.
+entity UnseenTask {
+    subscriber: UserIdentity
+    task: Task
+
+    invariant UnseenTaskIsUniquePerSubscriberAndTask {
+        UnseenTasks.where(u => u.subscriber = subscriber and u.task = task).count = 1
+    }
+}
+
 -- TaskUrl is the single typed URL attached to a Task. The url_type is stored
 -- explicitly (not inferred from the string at render time), so the system
 -- knows whether the URL is a PR, security alert, issue, or something else.

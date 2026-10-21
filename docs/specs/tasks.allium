@@ -1145,6 +1145,60 @@ rule MoveTaskToEpic {
         -- under another feed records under that feed.
 }
 
+-- == New-task signal ==
+--
+-- A task created with the signal on (mcp-task-tools.allium:
+-- CreateTaskViaMcp's `signal`) is marked unseen for every follower of its
+-- epic (core/UnseenTask). The mark drives the board's "new" glyph and stripe
+-- (board-visuals.allium, "New-task signal"). These rules end it.
+
+rule SeeTasksByEnteringTheirEpic {
+    when: OperatorEntersEpic(viewer, epic)
+
+    -- Only tasks DIRECTLY in the entered epic are seen. A task in a child
+    -- epic stays unseen, so the child epic stays marked and the trail of
+    -- marks leads the operator one level further down.
+    ensures:
+        for u in core/UnseenTask.where(u => u.subscriber = viewer and u.task.epic = epic):
+            not exists u
+
+    @guidance
+        -- "Entering" is the epic view opening: Space on an epic card
+        -- (keybindings.allium: enter_epic), Enter's jump to the deepest epic
+        -- (epics.allium: JumpToDeepestEpic) and entering from a work package
+        -- (work-packages.allium: EnterEpicFromPackage). A jump passes over
+        -- the epics between; only the epic whose view actually opens is
+        -- entered, so only its own tasks are seen. Selecting a card, or
+        -- opening the task detail, does not clear anything: the operator
+        -- chose "going into the epic" as the trigger.
+        --
+        -- The row is removed for the viewing person only. Another follower's
+        -- mark stays until they enter. The same person on a second machine
+        -- sees it clear, because the row is keyed by person.
+        --
+        -- There is no MCP tool for this. It is an operator act.
+}
+
+rule UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing {
+    when: TaskLeavesItsEpicOrFinishes(task)   -- any change of task.epic, or task.status becoming done
+
+    -- Moving the task to another epic or to none, or reaching Done, ends
+    -- every person's mark on it. "Done" means the status, not a column
+    -- position. A task that moves back out of done is not re-marked.
+    ensures:
+        for u in core/UnseenTask.where(u => u.task = task):
+            not exists u
+
+    @guidance
+        -- Deleting the task removes its rows with it: an UnseenTask cannot
+        -- outlive the task it names. Deletion is already gated on done
+        -- (DeleteTask), so this holds before the delete as well.
+        --
+        -- A mark does not follow a task to its new epic. The signal means
+        -- "something new landed here"; a move is a different event, and the
+        -- followers of the new epic were never told about this task.
+}
+
 -- == Delete ==
 
 -- TaskTeardown (conceptual): the single named account of what it means to
