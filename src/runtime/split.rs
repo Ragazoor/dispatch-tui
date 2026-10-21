@@ -81,7 +81,7 @@ impl TuiRuntime {
             // the error would vanish, leaving the user with a pinned agent's
             // pane still inside the board's window and no trace of why.
             if let Some(window_name) = restore_window {
-                if let Err(e) = tmux::break_pane_to_window(&pane_id, &window_name, &*runner) {
+                if let Err(e) = dispatch::restore_pinned_pane(&pane_id, &window_name, &*runner) {
                     let error = format!("Break pane failed: {e:#}");
                     tracing::warn!(pane_id = %pane_id, window = %window_name, "{error}");
                     let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(

@@ -2062,11 +2062,13 @@ surface SandboxedAgentExecution {
 -- (store-split.allium: ReleaseClaimOfFailedRequest), and the split pane keeps the task
 -- pinned (split-pane.allium: RefuseExitSplitModeOntoLiveWindow).
 --
--- A failed existence query reads as "no live window" and the operation
--- proceeds — the same soft-fail default `tmux::rename_window` takes, and for
--- the same reason: a tmux hiccup must not block a dispatch, and the operation
--- itself then fails anyway if the server really is unreachable. It is the
--- weaker of the two defaults on purpose.
+-- A failed existence query is an error, and the operation is not applied:
+-- proceeding blind could create the very duplicate this invariant forbids.
+-- "No server running" is not a failure — it reads as an empty window list.
+-- The leftover window a split pane's agent was pinned from is the one live
+-- window under a task's name that is not a duplicate (split-pane.allium:
+-- PinTaskInSplitPane's leftover-window guidance); the pane rejoins it and no
+-- name is assigned.
 
 -- TmuxWindowTargetedExactly: every tmux operation aimed at a named window acts
 -- on that window or fails. It never acts on a different window. This covers all

@@ -238,12 +238,18 @@ pub(crate) fn window_target(window: &str, runner: &dyn ProcessRunner) -> Result<
 /// running" is not a failure here — [`has_window`] reads it as an empty list.
 fn refuse_duplicate_window_name(name: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()> {
     if has_window(name, runner)? {
-        bail!(
-            "a tmux window named '{name}' already exists — a second window under that name \
-             would make every operation on it ambiguous, leaving that task unreachable"
-        );
+        return Err(duplicate_window_name_error(name));
     }
     Ok(())
+}
+
+/// The refusal [`refuse_duplicate_window_name`] returns, for a caller that has
+/// already established the name is taken.
+pub(crate) fn duplicate_window_name_error(name: &TmuxWindow) -> anyhow::Error {
+    anyhow::anyhow!(
+        "a tmux window named '{name}' already exists — a second window under that name \
+         would make every operation on it ambiguous, leaving that task unreachable"
+    )
 }
 
 /// Create a new tmux window with the given name, starting in `working_dir`.
@@ -1277,7 +1283,9 @@ pub fn join_pane(
 ///
 /// Refuses a name a live window already holds, leaving the pane exactly where
 /// it is. Why staying put beats every alternative here is argued in
-/// split-pane.allium's `RefuseExitSplitModeOntoLiveWindow`.
+/// split-pane.allium's `RefuseExitSplitModeOntoLiveWindow`. The split pane's
+/// exit goes through `dispatch::restore_pinned_pane`, which rejoins the pane
+/// instead when that window is the one it was pinned from.
 pub fn break_pane_to_window(
     pane_id: &str,
     window_name: &TmuxWindow,
@@ -1295,6 +1303,72 @@ pub fn break_pane_to_window(
             window_name.as_str(),
         ],
         "break-pane",
+    )?;
+    Ok(())
+}
+
+/// Window option naming the pinned pane a leftover window awaits.
+///
+/// A pin moves only the agent's pane; a pane dispatch did not mark keeps the
+/// window, and its name, alive. The tag tells a later exit or swap that this
+/// window is where the pane came from, not a duplicate. See
+/// PinTaskInSplitPane's "Leftover window" guidance in
+/// docs/specs/split-pane.allium.
+pub const AWAITS_PANE_OPTION: &str = "@dispatch_awaits_pane";
+
+/// Tag `window` as awaiting `pane_id`'s return. See [`AWAITS_PANE_OPTION`].
+pub fn set_window_awaits_pane(
+    window: &TmuxWindow,
+    pane_id: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<()> {
+    let target = window_target(window.as_str(), runner)?;
+    run_checked_timeout(
+        runner,
+        &[
+            "set-option",
+            "-w",
+            "-t",
+            &target,
+            AWAITS_PANE_OPTION,
+            pane_id,
+        ],
+        "set-option",
+    )?;
+    Ok(())
+}
+
+/// Whether the live window `window` is tagged as awaiting exactly `pane_id`.
+/// Errors when no window, or more than one, answers to the name: callers ask
+/// only once they know the name is taken.
+pub fn window_awaits_pane(
+    window: &TmuxWindow,
+    pane_id: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<bool> {
+    let target = window_target(window.as_str(), runner)?;
+    let awaited = run_checked_stdout(
+        runner,
+        &["show-options", "-wqv", "-t", &target, AWAITS_PANE_OPTION],
+        "show-options",
+    )?;
+    Ok(awaited == pane_id)
+}
+
+/// Join `pane_id` back into `window` as its left-hand pane and clear the
+/// window's [`AWAITS_PANE_OPTION`] tag. Assigns no name, so it needs no
+/// duplicate check: the window already carries the name.
+pub fn rejoin_pane(pane_id: &str, window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()> {
+    let target = window_target(window.as_str(), runner)?;
+    run_checked(
+        runner,
+        &["join-pane", "-h", "-b", "-d", "-s", pane_id, "-t", &target],
+        "join-pane",
+    )?;
+    run_checked(
+        runner,
+        &["set-option", "-w", "-u", "-t", &target, AWAITS_PANE_OPTION],
+        "set-option",
     )?;
     Ok(())
 }

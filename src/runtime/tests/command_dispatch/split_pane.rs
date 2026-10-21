@@ -30,6 +30,7 @@ async fn dispatch_split_enter_with_task_joins_that_task_window() {
             MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
             MockProcessRunner::ok_with_stdout(b"%1 \n"), // companion_pane_ids: none
             MockProcessRunner::ok(),                    // join-pane
+            MockProcessRunner::ok_with_stdout(b"board\n"), // leftover check: task-1 is gone
         ])
         .with_windows(&["task-1"]),
     )

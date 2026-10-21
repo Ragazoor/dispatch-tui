@@ -67,6 +67,7 @@ async fn exec_enter_split_mode_with_task_joins_pane() {
             // companion_pane_ids: no pane carries a dispatch role
             MockProcessRunner::ok_with_stdout(b"%1 \n"),
             MockProcessRunner::ok(), // join_pane: join-pane command
+            MockProcessRunner::ok_with_stdout(b"board\n"), // leftover check: task-1 is gone
         ])
         .with_windows(&["task-1"]),
     );
@@ -115,6 +116,7 @@ async fn exec_enter_split_mode_with_task_kills_leftover_companion_panes_after_jo
             MockProcessRunner::ok(), // join_pane: join-pane
             MockProcessRunner::ok(), // kill-pane %2
             MockProcessRunner::ok(), // kill-pane %5
+            MockProcessRunner::ok_with_stdout(b"board\n"), // leftover check: task-1 is gone
         ])
         .with_windows(&["task-1"]),
     );
@@ -124,7 +126,7 @@ async fn exec_enter_split_mode_with_task_kills_leftover_companion_panes_after_jo
         .await
         .unwrap();
     let calls = mock.recorded_calls();
-    assert_eq!(calls.len(), 5, "calls: {calls:?}");
+    assert_eq!(calls.len(), 6, "calls: {calls:?}");
     assert_eq!(calls[3].1, vec!["kill-pane", "-t", "%2"]);
     assert_eq!(calls[4].1, vec!["kill-pane", "-t", "%5"]);
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
@@ -154,6 +156,7 @@ async fn exec_enter_split_mode_with_task_succeeds_even_if_companion_check_fails(
             MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
             MockProcessRunner::fail("list-panes error"), // companion_pane_ids check
             MockProcessRunner::ok(),                    // join_pane: join-pane
+            MockProcessRunner::ok_with_stdout(b"board\n"), // leftover check: task-1 is gone
         ])
         .with_windows(&["task-1"]),
     );
@@ -165,8 +168,8 @@ async fn exec_enter_split_mode_with_task_succeeds_even_if_companion_check_fails(
     let calls = mock.recorded_calls();
     assert_eq!(
         calls.len(),
-        3,
-        "no kill-pane attempted after a failed check"
+        4,
+        "no kill-pane attempted after a failed check, only the leftover check"
     );
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -192,6 +195,10 @@ async fn exec_enter_split_mode_with_task_succeeds_even_if_companion_kill_fails()
             MockProcessRunner::ok_with_stdout(b"%1 \n%2 agent_tree\n"),
             MockProcessRunner::ok(), // join_pane: join-pane
             MockProcessRunner::fail("kill-pane error"),
+            // leftover check: the unkilled companion keeps task-1 alive, and
+            // tagging it is best-effort too
+            MockProcessRunner::ok_with_stdout(b"board\ntask-1\n"),
+            MockProcessRunner::fail("set-option error"),
         ])
         .with_windows(&["task-1"]),
     );
@@ -405,6 +412,9 @@ async fn exec_swap_split_pane_renames_old_task_window() {
     // so they are not recorded calls.
     let mock = Arc::new(
         MockProcessRunner::new(vec![
+            // The outgoing name is free before anything moves, so there is no
+            // leftover window to rejoin and nothing to refuse.
+            MockProcessRunner::ok_with_stdout(b"board\ntask-3\n"),
             MockProcessRunner::ok(), // swap-pane
             // rename-window first asks whether `task-2` is already taken: no
             // window answers to it, so the rename may proceed. A listing that
@@ -435,26 +445,31 @@ async fn exec_swap_split_pane_renames_old_task_window() {
     .await
     .unwrap();
     let calls = mock.recorded_calls();
-    // 2nd call: the rename's own duplicate-name check — "is anything already
+    // 1st call: is the outgoing name taken before any pane moves?
+    assert_eq!(
+        calls[0].1,
+        vec!["list-windows", "-a", "-F", "#{window_name}"]
+    );
+    // 3rd call: the rename's own duplicate-name check — "is anything already
     // called task-2?". A listing naming it would refuse the rename rather than
     // leave two windows sharing the name (tmux::rename_window).
     assert_eq!(
-        calls[1].1,
+        calls[2].1,
         vec!["list-windows", "-a", "-F", "#{window_name}"]
     );
-    // 3rd call should be rename-window, not kill-window
-    assert!(calls[2].1.contains(&"rename-window".to_string()));
+    // 4th call should be rename-window, not kill-window
+    assert!(calls[3].1.contains(&"rename-window".to_string()));
     // The rename *target* is the resolved pane ID; the new name stays a name.
-    assert!(calls[2].1.contains(&mock.pane_id_of("task-3")));
-    assert!(calls[2].1.contains(&"task-2".to_string()));
-    // 4th call: @dispatch_dir is rewritten to the outgoing task's worktree —
+    assert!(calls[3].1.contains(&mock.pane_id_of("task-3")));
+    assert!(calls[3].1.contains(&"task-2".to_string()));
+    // 5th call: @dispatch_dir is rewritten to the outgoing task's worktree —
     // targeted by the *new* name ("task-2"), not the pane ID resolved in step
     // 1: swap-pane moves pane objects between windows, so that pane ID no
     // longer identifies anything in this window post-swap — only the window's
     // new name does. Without this rewrite the resync's start directory still
     // names task 3's worktree, since a rename never touches window options.
     assert_eq!(
-        calls[3].1,
+        calls[4].1,
         vec![
             "set-option",
             "-w",
@@ -467,15 +482,15 @@ async fn exec_swap_split_pane_renames_old_task_window() {
     // Companion pane resync: the renamed window's stale companion (still
     // showing the incoming task's tree) is killed and replaced with one for
     // the correct (old) task.
-    assert!(calls[4].1.contains(&"list-panes".to_string()));
-    assert_eq!(calls[5].1, vec!["kill-pane", "-t", "%11"]);
-    assert!(calls[7].1.contains(&"split-window".to_string()));
-    assert!(calls[7].1.contains(&"2".to_string()));
+    assert!(calls[5].1.contains(&"list-panes".to_string()));
+    assert_eq!(calls[6].1, vec!["kill-pane", "-t", "%11"]);
+    assert!(calls[8].1.contains(&"split-window".to_string()));
+    assert!(calls[8].1.contains(&"2".to_string()));
     // …and the respawned pane is marked, or the resynced window would read as
     // companion-less to the next toggle.
-    assert!(calls[8].1.contains(&"set-option".to_string()));
+    assert!(calls[9].1.contains(&"set-option".to_string()));
     // No further call — focus must NOT be transferred
-    assert_eq!(calls.len(), 9, "select-pane must not be called after swap");
+    assert_eq!(calls.len(), 10, "select-pane must not be called after swap");
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
@@ -560,6 +575,7 @@ mod split_mode_via_msg_tx {
                 // companion_pane_ids: no pane carries a dispatch role
                 MockProcessRunner::ok_with_stdout(b"%1 \n"),
                 MockProcessRunner::ok(), // join_pane: join-pane command
+                MockProcessRunner::ok_with_stdout(b"board\n"), // leftover check: task-1 is gone
             ])
             .with_windows(&["task-1"]),
         );

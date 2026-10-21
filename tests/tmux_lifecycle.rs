@@ -915,6 +915,167 @@ fn unpin_breaks_the_pane_back_into_its_own_window() {
     );
 }
 
+// -- leftover window: a pane dispatch did not mark keeps the pinned window ---
+//
+// docs/specs/split-pane.allium: PinTaskInSplitPane's "Leftover window"
+// guidance, ExitSplitMode and SwapSplitPane. Reached in the field as task
+// #98356: an exit refused on every [s] because the pinned task's own window
+// was still there.
+
+/// The window option a leftover window carries, naming the pane it awaits.
+const AWAITS_PANE_OPTION: &str = "@dispatch_awaits_pane";
+
+impl Fixture {
+    /// Split an unmarked shell pane into `window` beside its agent — the user's
+    /// own `prefix %`, which dispatch has no claim to and must not kill.
+    fn split_unmarked_pane(&self, window: &TmuxWindow) -> String {
+        self.server.tmux_stdout(&[
+            "split-window",
+            "-d",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-t",
+            window.as_str(),
+            "--",
+            "sh",
+            "-c",
+            "cat",
+        ])
+    }
+}
+
+#[test]
+fn pin_tags_a_window_an_unmarked_pane_keeps_alive() {
+    let Some(fx) = setup_or_skip() else { return };
+    let window = fx.bare_agent_window(TASK_ID);
+    let users_pane = fx.split_unmarked_pane(&window);
+
+    let pinned = fx.pin(&window);
+
+    assert!(
+        fx.server.pane_exists(&users_pane),
+        "a pane dispatch did not mark is not dispatch's to kill"
+    );
+    assert_eq!(
+        fx.server.window_option(window.as_str(), AWAITS_PANE_OPTION),
+        pinned,
+        "the surviving window must name the pane it awaits"
+    );
+}
+
+#[test]
+fn exit_rejoins_the_pinned_pane_into_the_window_awaiting_it() {
+    let Some(fx) = setup_or_skip() else { return };
+    let window = fx.bare_agent_window(TASK_ID);
+    let users_pane = fx.split_unmarked_pane(&window);
+    let pinned = fx.pin(&window);
+
+    dispatch::restore_pinned_pane(&pinned, &window, &fx.server.runner())
+        .expect("the window the pane came from is not a duplicate");
+
+    assert_eq!(fx.server.count_windows_named(window.as_str()), 1);
+    let mut panes = fx.server.pane_ids(window.as_str());
+    panes.sort();
+    let mut want = vec![pinned, users_pane];
+    want.sort();
+    assert_eq!(
+        panes, want,
+        "the window must hold what it held before the pin"
+    );
+    assert_eq!(fx.server.pane_count(BOARD_WINDOW), 1);
+    assert_eq!(
+        fx.server.window_option(window.as_str(), AWAITS_PANE_OPTION),
+        "",
+        "the tag is spent once the pane is back"
+    );
+}
+
+#[test]
+fn exit_without_a_leftover_window_breaks_the_pane_out() {
+    let Some(fx) = setup_or_skip() else { return };
+    let window = fx.bare_agent_window(TASK_ID);
+    let pinned = fx.pin(&window);
+
+    dispatch::restore_pinned_pane(&pinned, &window, &fx.server.runner()).expect("unpin");
+
+    assert_eq!(fx.server.pane_ids(window.as_str()), vec![pinned]);
+    assert_eq!(fx.server.pane_count(BOARD_WINDOW), 1);
+}
+
+#[test]
+fn exit_still_refuses_a_window_that_does_not_await_the_pane() {
+    let Some(fx) = setup_or_skip() else { return };
+    let window = fx.bare_agent_window(TASK_ID);
+    let pinned = fx.pin(&window);
+    let _squatter = fx.bare_agent_window(TASK_ID);
+
+    let err = dispatch::restore_pinned_pane(&pinned, &window, &fx.server.runner())
+        .expect_err("a window from anywhere else is a duplicate");
+    assert!(
+        format!("{err:#}").contains("already exists"),
+        "the refusal must name the conflict, got: {err:#}"
+    );
+    assert_eq!(fx.server.count_windows_named(window.as_str()), 1);
+    assert_eq!(fx.server.pane_count(BOARD_WINDOW), 2);
+}
+
+#[test]
+fn swap_rejoins_the_outgoing_pane_into_its_leftover_window() {
+    let Some(fx) = setup_or_skip() else { return };
+    let (a, b) = (TASK_ID, TASK_ID + 1);
+    let window_a = fx.bare_agent_window(a);
+    let users_pane = fx.split_unmarked_pane(&window_a);
+    let window_b = fx.bare_agent_window(b);
+    let pane_b = fx.server.active_pane_id(window_b.as_str()).expect("pane b");
+    let pinned_a = fx.pin(&window_a);
+
+    let now_pinned = fx.swap(&window_b, &pinned_a, Some((&window_a, "/tmp")));
+
+    assert_eq!(now_pinned, pane_b);
+    assert_eq!(fx.server.count_windows_named(window_a.as_str()), 1);
+    let mut panes = fx.server.pane_ids(window_a.as_str());
+    panes.sort();
+    let mut want = vec![pinned_a, users_pane];
+    want.sort();
+    assert_eq!(panes, want, "A's pane must be back beside the user's pane");
+    assert!(
+        !fx.server.has_window(window_b.as_str()),
+        "B's window held only B's agent, so it is consumed like a pin; got {:?}",
+        fx.server.window_names()
+    );
+    assert!(fx.server.pane_ids(BOARD_WINDOW).contains(&pane_b));
+}
+
+#[test]
+fn swap_refuses_before_moving_any_pane_when_the_outgoing_name_is_taken() {
+    let Some(fx) = setup_or_skip() else { return };
+    let (a, b) = (TASK_ID, TASK_ID + 1);
+    let window_a = fx.bare_agent_window(a);
+    let window_b = fx.bare_agent_window(b);
+    let pane_b = fx.server.active_pane_id(window_b.as_str()).expect("pane b");
+    let pinned_a = fx.pin(&window_a);
+    let _squatter = fx.bare_agent_window(a);
+
+    let err = dispatch::swap_task_window_into_pane(
+        &window_b,
+        &pinned_a,
+        Some((&window_a, "/tmp")),
+        &fx.server.runner(),
+    )
+    .expect_err("the outgoing name is held by a window that does not await it");
+    assert!(
+        format!("{err:#}").contains("already exists"),
+        "got: {err:#}"
+    );
+
+    assert!(
+        fx.server.pane_ids(BOARD_WINDOW).contains(&pinned_a),
+        "a refused swap must leave the pinned pane where the board thinks it is"
+    );
+    assert_eq!(fx.server.pane_ids(window_b.as_str()), vec![pane_b]);
+}
+
 #[test]
 fn split_operations_never_type_into_the_board_window() {
     let Some(fx) = setup_or_skip() else { return };

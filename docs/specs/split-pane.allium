@@ -220,6 +220,9 @@ rule ExitSplitMode {
     requires: split_pane.pane != null
     requires: split_pane.pinned_task = null
               or not has_window(name: current_agent(split_pane.pinned_task).tmux_window.name)
+              or window_awaits_pane(
+                     name: current_agent(split_pane.pinned_task).tmux_window.name,
+                     pane: split_pane.pane)
 
     let pinned = split_pane.pinned_task
 
@@ -229,8 +232,10 @@ rule ExitSplitMode {
     ensures: split_pane.focused = true
     ensures:
         if pinned != null:
-            -- The pinned agent is broken back out to a standalone tmux
-            -- window under its original name. Its session is preserved.
+            -- The pinned agent is returned to a standalone tmux window
+            -- under its original name: broken out into a new one, or joined
+            -- back into the window it was pinned from when that window is
+            -- still there awaiting it. Its session is preserved.
             TaskWindowRestored(task: pinned, window: current_agent(pinned).tmux_window)
 
     @guidance
@@ -245,6 +250,17 @@ rule ExitSplitMode {
         --
         -- The break-out must not assign a name a live window already holds;
         -- RefuseExitSplitModeOntoLiveWindow below is that case.
+        --
+        -- One live window under the name is not a duplicate: the one the
+        -- pane was pinned FROM. A pin moves only the agent's pane, and a pane
+        -- dispatch did not mark as its own keeps that window alive (see
+        -- PinTaskInSplitPane's leftover-window guidance). Such a window is
+        -- tagged with the pane it is waiting for, and window_awaits_pane is
+        -- true for exactly that window and that pane. The pane rejoins it
+        -- (join-pane), so the window ends up as it was before the pin, and no
+        -- name is assigned at all. Any other window under the name is still a
+        -- duplicate and still refused: the tag names one pane, so a window
+        -- that came from anywhere else cannot match it.
 }
 
 rule SplitPaneExitStarted {
@@ -277,6 +293,9 @@ rule RefuseExitSplitModeOntoLiveWindow {
     requires: split_pane.pane != null
     requires: split_pane.pinned_task != null
     requires: has_window(name: current_agent(split_pane.pinned_task).tmux_window.name)
+    requires: not window_awaits_pane(
+                  name: current_agent(split_pane.pinned_task).tmux_window.name,
+                  pane: split_pane.pane)
 
     let pinned = split_pane.pinned_task
     let pane = split_pane.pane
@@ -948,9 +967,9 @@ rule PinTaskInSplitPane {
         -- nothing owns — and a lone companion pane is indistinguishable, from
         -- live tmux state alone, from the companion being toggled hidden.
         -- `join_task_window_into_pane` therefore captures EVERY such pane
-        -- *before* the join and kills each once the join succeeds, so the
-        -- source window is fully drained either way, restoring the "the
-        -- window no longer exists" assumption
+        -- *before* the join and kills each once the join succeeds. When those
+        -- were the window's only other panes, the window is gone, restoring
+        -- the "the window no longer exists" assumption
         -- `SplitPaneRespawnOnWindowCleared`'s guidance relies on. The panes are
         -- found by the role marker dispatch wrote on each at creation (see
         -- agent-tree.allium's HideAgentTreePane), asked as one question — "which
@@ -963,6 +982,23 @@ rule PinTaskInSplitPane {
         -- the equivalent resync in SwapSplitPane's guidance below. Resolves
         -- agent-tree.allium's ToggleVsSplitPaneInteraction open question for
         -- the join half of the gap.
+        --
+        -- == Leftover window ==
+        -- Draining reaches only panes dispatch marked. A pane it did not mark
+        -- -- a shell the user split beside the agent, or a companion whose
+        -- marker write failed -- is not dispatch's to kill, so it stays, and
+        -- with it the window and its "task-<id>" name. That window is tagged
+        -- with the pinned pane's id (the window option @dispatch_awaits_pane),
+        -- which makes window_awaits_pane true for it. Without the tag every
+        -- exit would be refused as a duplicate (RefuseExitSplitModeOntoLiveWindow)
+        -- for as long as the user's pane lived, with nothing on the board to
+        -- say why. With it, ExitSplitMode and SwapSplitPane join the pane back
+        -- into that window. Tagging is best-effort: a failed tag is logged,
+        -- and the exit then falls back to the refusal.
+        --
+        -- Tagged, not killed: killing the window would take the user's pane
+        -- and its scrollback with it to settle a naming question, the same
+        -- trade RefuseExitSplitModeOntoLiveWindow rejects.
 }
 
 rule SwapSplitPane {
@@ -1002,8 +1038,20 @@ rule SwapSplitPane {
         --
         -- The rename below must not assign a name a live window already
         -- holds; see dispatch.allium's TmuxWindowNamesAreUnique for what a
-        -- duplicate costs. A refused rename fails the swap, which settles as
-        -- unsuccessful and leaves the pane showing what it showed before.
+        -- duplicate costs. The name is checked BEFORE any pane moves, so a
+        -- refusal fails the swap with nothing rearranged: it settles as
+        -- unsuccessful and the pane shows what it showed before. Checked
+        -- after the swap-pane, the refusal would leave the panes exchanged
+        -- while the board still recorded the old occupant.
+        --
+        -- The one live window under the outgoing name that is not a refusal
+        -- is the leftover window the outgoing pane was pinned from
+        -- (window_awaits_pane; see PinTaskInSplitPane's leftover-window
+        -- guidance). The swap then does not rename. After the swap-pane, the
+        -- outgoing pane rejoins that window, and the incoming task's window
+        -- -- now holding only what was left beside its agent -- is drained the
+        -- way a pin drains: its marked panes are killed, and if an unmarked
+        -- one keeps it alive it is tagged as awaiting the incoming pane.
         --
         -- == IMPLEMENTED: companion-pane resync ==
         -- `exec_swap_split_pane` (src/runtime/split.rs) uses `swap-pane` to
