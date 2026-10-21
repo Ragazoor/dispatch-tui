@@ -117,9 +117,11 @@ fn dependabot_alert_feed_scripts_default_wrap_up_mode_to_pr() {
     for script in ["scripts/fetch-cve.sh", "scripts/fetch-security.sh"] {
         let body = feed_script_code(script);
         assert!(
-            body.contains(r#"wrap_up_mode: "pr""#),
+            body.contains(r#"wrap_up_mode: "pr""#)
+                || body.contains(r#"wrap_up_mode: (if $fix_pr != null then "done" else "pr" end)"#),
             "{script} emits Dependabot vulnerability alerts (CVEs) and must set \
-             wrap_up_mode: \"pr\" on every item so wrap-up always goes straight to a PR"
+             wrap_up_mode: \"pr\" on every item it does not link to an existing fix PR, \
+             so wrap-up goes straight to a PR"
         );
     }
 }

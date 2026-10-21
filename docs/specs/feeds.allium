@@ -362,9 +362,10 @@ value FeedItem {
                               -- wrap-up time). Used by the CVE-alert feed
                               -- scripts (fetch-cve.sh, fetch-security.sh) to
                               -- default fix tasks to pr so wrap-up goes
-                              -- straight to a PR — a CVE-shaped item should
-                              -- always default to pr regardless of which of
-                              -- the two emits it, and by fetch-log-warnings.sh
+                              -- straight to a PR — a CVE-shaped item defaults
+                              -- to pr whichever of the two emits it, except a
+                              -- fetch-cve.sh item linked to an existing fix PR,
+                              -- which defaults to done — and by fetch-log-warnings.sh
                               -- to default its triage cards to rebase. Why each
                               -- script picks the path it does is in
                               -- feed-scripts.allium, not here.

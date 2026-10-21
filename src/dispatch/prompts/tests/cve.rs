@@ -68,6 +68,7 @@ fn cve_runbook_merges_a_linked_fix_pr_after_checking_it() {
         "--approve",
         "gh pr merge",
         "--squash --auto",
+        "--match-head-commit",
         "no git operations",
     ] {
         assert!(

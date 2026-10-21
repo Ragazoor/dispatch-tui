@@ -28,6 +28,22 @@ if [[ -f "$SCRIPT_DIR/repos.conf" ]]; then
 fi
 # ---------------------------------------------------------------------------
 
+# The bots whose PRs may be linked as an alert's fix: Dependabot always, plus
+# bots.conf's BOT_AUTHORS, falling back to app/kognic-renovate when that list
+# is empty, as fetch-dependabot.sh does. Only a known dependency bot's PR is
+# offered for merging; any other app's PR, or a person's, is not. bots.conf's
+# validation is fetch-reviews.sh's and fetch-dependabot.sh's to report: a
+# malformed entry here simply matches no author.
+BOT_AUTHORS=()
+if [[ -f "$SCRIPT_DIR/bots.conf" ]]; then
+  # shellcheck source=bots.conf
+  source "$SCRIPT_DIR/bots.conf"
+fi
+if [[ ${#BOT_AUTHORS[@]} -eq 0 ]]; then
+  BOT_AUTHORS=("app/kognic-renovate")
+fi
+FIX_PR_AUTHORS=$(printf '%s\n' "app/dependabot" "${BOT_AUTHORS[@]}" | jq -R 'ascii_downcase' | jq -s .)
+
 if [[ ${#REPOS[@]} -eq 0 ]]; then
   echo '[]'
   exit 0
@@ -110,10 +126,11 @@ for repo in "${REPOS[@]}"; do
   fi
 
   # Through file handles, not --argjson: PR bodies overflow the argument limit.
-  echo "$result" | jq --arg repo "$repo" \
+  echo "$result" | jq --arg repo "$repo" --argjson fix_authors "$FIX_PR_AUTHORS" \
       --slurpfile own <(printf '%s' "$own") --slurpfile prs <(printf '%s' "$prs") '
-    # Open, non-draft bot PRs, newest first.
-    ($prs[0] | map(select(.author.is_bot == true and (.isDraft | not)))
+    # Open, non-draft PRs by a known dependency bot, newest first.
+    ($prs[0] | map(select((.author.login | ascii_downcase) as $a
+                          | any($fix_authors[]; . == $a) and (.isDraft | not)))
           | sort_by(-.number)) as $bot_prs |
     [.[] |
     ($repo | split("/") | last) as $repo_name |
@@ -141,7 +158,8 @@ for repo in "${REPOS[@]}"; do
          else ""
          end) +
         (if $fix_pr != null
-         then "\n\nFix PR: \($fix_pr.url) (\($fix_pr.title))"
+         # The title reaches an agent prompt: one line, no control characters.
+         then "\n\nFix PR: \($fix_pr.url) (\($fix_pr.title | gsub("[[:cntrl:]]+"; " ") | .[0:200]))"
          else ""
          end)
       ),

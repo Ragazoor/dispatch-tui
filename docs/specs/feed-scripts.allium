@@ -117,22 +117,27 @@
 --      `dependabotUpdate.pullRequest`: the security update PR Dependabot
 --      opened for exactly this alert. It is authoritative, so it is used
 --      whenever that PR is OPEN. A merged or closed one links nothing.
---   2. A BOT PR THAT NAMES THE ADVISORY. An open, non-draft, bot-authored PR
+--   2. A BOT PR THAT NAMES THE ADVISORY. An open, non-draft PR by a known
+--      dependency bot (below)
 --      whose title or body contains the advisory's GHSA id or CVE id.
 --      Renovate's vulnerability PRs cite the advisory this way, and Renovate
 --      PRs never appear in source 1.
---   3. A BOT PR THAT NAMES THE PACKAGE. An open, non-draft, bot-authored PR
+--   3. A BOT PR THAT NAMES THE PACKAGE. An open, non-draft PR by a known
+--      dependency bot
 --      whose title holds the vulnerable package's name as a whole token
 --      (case-insensitive; the title split on whitespace, commas, brackets,
 --      parentheses and backticks). Whole-token, so "rand" never matches a
 --      bump of "random". Within sources 2 and 3 the newest PR (highest
 --      number) wins.
 --
--- "Bot-authored" is gh's own `author.is_bot`, not bots.conf: the question is
--- "did a dependency bot open this", and every such bot answers it, where
--- bots.conf lists only the bots whose PRs earn the dependency REVIEW runbook.
--- Sources 2 and 3 skip human PRs on purpose: a person's PR that mentions a
--- package is not a fix to merge without reading it.
+-- A KNOWN DEPENDENCY BOT is app/dependabot, plus bots.conf's BOT_AUTHORS,
+-- which falls back to app/kognic-renovate when empty exactly as in
+-- fetch-dependabot.sh. Logins compare case-insensitively. It is an allowlist,
+-- not gh's `author.is_bot`, because the link ends in an approve-and-merge: any
+-- GitHub App installed on the repo is a bot, and its PR's title and body reach
+-- the agent's prompt. Sources 2 and 3 skip human PRs for the same reason: a
+-- person's PR that mentions a package is not a fix to merge without reading
+-- it. Source 1 needs no allowlist; GitHub itself names the PR.
 --
 -- Sources 2 and 3 are a heuristic. A package-name match does not prove the
 -- PR lands on a fixed version, and the runbook does not assume it does: the
@@ -140,7 +145,8 @@
 -- fixed set before approving anything.
 --
 -- WHAT A LINKED ITEM CARRIES. Its description gains a final paragraph
--- "Fix PR: <url> (<title>)", its labels gain "fix-pr", and its wrap_up_mode
+-- "Fix PR: <url> (<title>)", the title with control characters collapsed to
+-- spaces and cut at 200 characters, since it lands in an agent prompt; its labels gain "fix-pr", and its wrap_up_mode
 -- is "done" instead of "pr" — merging another author's PR leaves the agent
 -- no commits of its own to open a PR for. The url stays the ALERT (url_type
 -- security_alert): the runbook reads the advisory from it, and the feed's

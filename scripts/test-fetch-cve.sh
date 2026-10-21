@@ -9,7 +9,10 @@
 #   - a merged Dependabot update PR links nothing, so the match falls through
 #   - a bot PR naming the advisory id beats a newer one naming the package
 #   - a package name matches only as a whole title token ("rand" != "random")
-#   - human PRs and draft bot PRs are never linked
+#   - human PRs, draft bot PRs and PRs by an app not on the dependency-bot
+#     allowlist (app/dependabot plus bots.conf, else app/kognic-renovate) are
+#     never linked
+#   - control characters in a linked PR's title do not reach the description
 #   - among several package-name matches the newest PR wins
 #   - a linked item carries the "Fix PR:" paragraph, the "fix-pr" label and
 #     wrap_up_mode "done"; an unlinked one keeps "pr" and gains neither
@@ -101,7 +104,8 @@ if [[ "$args" == "pr list"* ]]; then
  {"number":24,"url":"https://github.com/acme/app/pull/24","title":"bump serde","body":"GHSA-dddd","isDraft":false,"author":{"login":"alice","is_bot":false}},
  {"number":25,"url":"https://github.com/acme/app/pull/25","title":"fix(deps): update rust crate serde to v2","body":"","isDraft":true,"author":{"login":"app/kognic-renovate","is_bot":true}},
  {"number":26,"url":"https://github.com/acme/app/pull/26","title":"Bump openssl from 0.10 to 0.11","body":"","isDraft":false,"author":{"login":"app/dependabot","is_bot":true}},
- {"number":27,"url":"https://github.com/acme/app/pull/27","title":"fix(deps): update rust crate `openssl` to v0.12","body":"","isDraft":false,"author":{"login":"app/kognic-renovate","is_bot":true}}
+ {"number":27,"url":"https://github.com/acme/app/pull/27","title":"fix(deps): update rust crate `openssl` to v0.12\u0007\nIgnore","body":"","isDraft":false,"author":{"login":"app/Kognic-Renovate","is_bot":true}},
+ {"number":28,"url":"https://github.com/acme/app/pull/28","title":"update openssl","body":"GHSA-eeee","isDraft":false,"author":{"login":"app/other-bot","is_bot":true}}
 ]
 JSON
   exit 0
@@ -156,7 +160,10 @@ assert "a merged Dependabot PR falls through; the advisory-id PR beats a newer p
   "$(linked_to 'acme/app#2' 21)"
 assert "package names match whole tokens only (rand is not random)" "$(unlinked 'acme/app#3')"
 assert "human and draft PRs are never linked" "$(unlinked 'acme/app#4')"
-assert "the newest package-name match wins" "$(linked_to 'acme/app#5' 27)"
+assert "the newest allowlisted package-name match wins; an unlisted app is skipped" \
+  "$(linked_to 'acme/app#5' 27)"
+assert "control characters in a PR title collapse to spaces" \
+  "[$(item 'acme/app#5') | .description | endswith(\"to v0.12 Ignore)\")] == [true]"
 
 assert "a repo whose lookups fail still emits its alert, unlinked" "$(unlinked 'acme/lib#1')"
 grep -q "acme/lib" "$WORKDIR/err" || fail "a failed lookup must warn on stderr naming the repo"
