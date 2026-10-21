@@ -362,7 +362,8 @@ dispatch provisions and reconciles the epic tree for you:
   managed **`CVE`** epic. Advisories are not PRs, so the CVE feed stays a
   separate epic with the ordinary flat upsert. The shipped `fetch-cve.sh`
   links each alert to an open PR that already fixes it (Dependabot's own
-  security update, or a bot PR naming the advisory or package): the card gets
+  security update, or a known dependency bot's PR naming the advisory or
+  package): the card gets
   a `fix-pr` label and a `Fix PR:` line, and its agent reviews and merges that
   PR instead of writing a fix. See `docs/specs/feed-scripts.allium`.
 
