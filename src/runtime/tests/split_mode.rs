@@ -834,3 +834,172 @@ mod quit_awaits_split_restore {
         );
     }
 }
+
+/// A step after `swap-pane` failed, so the board must be told what tmux is
+/// actually showing (`SwapSplitPane`'s post-swap failure guidance in
+/// docs/specs/split-pane.allium). Each case is driven through the same three
+/// failure points: the rename, the rejoin and the kill of the displaced window.
+mod swap_fails_after_the_exchange {
+    use super::*;
+    use crate::tui::messages::{SplitMessage, SystemMessage};
+
+    /// Where the swap fails once the panes are exchanged.
+    #[derive(Clone, Copy)]
+    enum FailingStep {
+        Rename,
+        Rejoin,
+        Kill,
+    }
+
+    /// The tmux answers for a swap of task 3 into pinned pane `%2` that fails
+    /// at `step`, followed by the reverse `swap-pane`'s own answer.
+    fn responses(
+        step: FailingStep,
+        reverse: Result<std::process::Output>,
+    ) -> Vec<Result<std::process::Output>> {
+        let mut out = match step {
+            FailingStep::Rename => vec![
+                MockProcessRunner::ok_with_stdout(b"board\ntask-3\n"), // outgoing name is free
+                MockProcessRunner::ok(),                               // swap-pane
+                MockProcessRunner::ok_with_stdout(b"board\ntask-3\n"), // rename's duplicate check
+                MockProcessRunner::fail("rename refused"),             // rename-window
+            ],
+            FailingStep::Rejoin => vec![
+                // The outgoing name is held by the leftover awaiting `%2`.
+                MockProcessRunner::ok_with_stdout(b"board\ntask-2\ntask-3\n"),
+                MockProcessRunner::ok_with_stdout(b"%2\n"), // show-options: awaits %2
+                MockProcessRunner::ok(),                    // list-panes: no companions
+                MockProcessRunner::ok(),                    // swap-pane
+                MockProcessRunner::fail("join refused"),    // join-pane
+            ],
+            FailingStep::Kill => vec![
+                MockProcessRunner::ok(),                 // swap-pane
+                MockProcessRunner::fail("kill refused"), // kill-window
+            ],
+        };
+        out.push(reverse);
+        out
+    }
+
+    /// Run the swap and return the recorded calls and every message it sent.
+    async fn run(
+        step: FailingStep,
+        reverse: Result<std::process::Output>,
+    ) -> (Arc<MockProcessRunner>, Vec<Message>) {
+        let db = test_db().await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(
+            MockProcessRunner::new(responses(step, reverse)).with_windows(&["task-3", "task-2"]),
+        );
+        let rt = make_runtime(db.clone(), tx, mock.clone()).await;
+        let old_task = match step {
+            FailingStep::Kill => None,
+            FailingStep::Rename | FailingStep::Rejoin => Some("task-2"),
+        };
+        let old_window = old_task.map(test_tmux_window);
+        rt.exec_swap_split_pane(
+            TaskId(3),
+            &test_tmux_window("task-3"),
+            "%2",
+            old_window
+                .as_ref()
+                .map(|w| (w, "/repo/.worktrees/2-some-task")),
+        )
+        .await
+        .unwrap();
+        // The spawned closure has finished, so every message it sent is queued.
+        let mut msgs = Vec::new();
+        while let Ok(msg) = rx.try_recv() {
+            msgs.push(msg);
+        }
+        (mock, msgs)
+    }
+
+    /// The reverse `swap-pane` is the last call, exchanging the same two panes.
+    fn assert_reversed_last(mock: &MockProcessRunner) {
+        let calls = mock.recorded_calls();
+        let last = &calls.last().expect("calls were recorded").1;
+        assert_eq!(
+            last,
+            &vec![
+                "swap-pane".to_string(),
+                "-d".to_string(),
+                "-s".to_string(),
+                "%2".to_string(),
+                "-t".to_string(),
+                mock.pane_id_of("task-3"),
+            ],
+            "expected a reverse swap-pane as the last call, got: {calls:?}"
+        );
+    }
+
+    async fn reversed_settles_as_failed(step: FailingStep) {
+        let (mock, msgs) = run(step, MockProcessRunner::ok()).await;
+        assert_reversed_last(&mock);
+        assert!(
+            matches!(
+                msgs.as_slice(),
+                [Message::Split(SplitMessage::SwapFailed { .. })]
+            ),
+            "the panes are back where they were, so the swap settles as failed: {msgs:?}"
+        );
+    }
+
+    async fn unreversed_settles_on_the_incoming_task(step: FailingStep) {
+        let (mock, msgs) = run(step, MockProcessRunner::fail("reverse refused")).await;
+        assert_reversed_last(&mock);
+        let new_pane = mock.pane_id_of("task-3");
+        let opened = msgs.iter().any(|m| {
+            matches!(
+                m,
+                Message::Split(SplitMessage::SwapOpened { pane_id, task_id: TaskId(3) })
+                    if *pane_id == new_pane
+            )
+        });
+        assert!(
+            opened,
+            "the pane now shows task 3, so the swap settles on it: {msgs:?}"
+        );
+        let stranded = msgs.iter().any(|m| {
+            matches!(
+                m,
+                Message::System(SystemMessage::Error(e)) if e.contains("task-3")
+            )
+        });
+        assert!(
+            stranded,
+            "the error must name the window holding the outgoing pane: {msgs:?}"
+        );
+        assert_eq!(msgs.len(), 2, "one settle and one error: {msgs:?}");
+    }
+
+    #[tokio::test]
+    async fn rename_failure_reversed_settles_as_failed() {
+        reversed_settles_as_failed(FailingStep::Rename).await;
+    }
+
+    #[tokio::test]
+    async fn rename_failure_unreversed_settles_on_the_incoming_task() {
+        unreversed_settles_on_the_incoming_task(FailingStep::Rename).await;
+    }
+
+    #[tokio::test]
+    async fn rejoin_failure_reversed_settles_as_failed() {
+        reversed_settles_as_failed(FailingStep::Rejoin).await;
+    }
+
+    #[tokio::test]
+    async fn rejoin_failure_unreversed_settles_on_the_incoming_task() {
+        unreversed_settles_on_the_incoming_task(FailingStep::Rejoin).await;
+    }
+
+    #[tokio::test]
+    async fn kill_failure_reversed_settles_as_failed() {
+        reversed_settles_as_failed(FailingStep::Kill).await;
+    }
+
+    #[tokio::test]
+    async fn kill_failure_unreversed_settles_on_the_incoming_task() {
+        unreversed_settles_on_the_incoming_task(FailingStep::Kill).await;
+    }
+}

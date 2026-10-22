@@ -758,3 +758,32 @@ fn pane_ids_with_option_fails_when_window_is_absent() {
         "got: {err}"
     );
 }
+
+// --- rejoin_pane ---
+
+#[test]
+fn rejoin_pane_succeeds_once_the_pane_has_moved_even_if_the_tag_stays() {
+    // The join is what puts the pane home. A failed tag clear afterwards must
+    // not read as "not rejoined": the swap would then reverse a pane that has
+    // already left (split-pane.allium: SwapSplitPane).
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),                   // join-pane
+        MockProcessRunner::fail("set-option err"), // set-option -u
+    ])
+    .with_windows(&["task-42"]);
+    rejoin_pane("%7", &test_tmux_window("task-42"), &mock).unwrap();
+    assert_eq!(mock.recorded_calls().len(), 2);
+}
+
+#[test]
+fn rejoin_pane_fails_when_join_pane_fails() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("invalid target")])
+        .with_windows(&["task-42"]);
+    let err = rejoin_pane("%7", &test_tmux_window("task-42"), &mock).unwrap_err();
+    assert!(err.to_string().contains("join-pane failed"), "got: {err}");
+    assert_eq!(
+        mock.recorded_calls().len(),
+        1,
+        "no tag clear after a failed join"
+    );
+}

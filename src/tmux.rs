@@ -1352,6 +1352,12 @@ pub fn window_awaits_pane(
 /// Join `pane_id` back into `window` as its left-hand pane and clear the
 /// window's [`AWAITS_PANE_OPTION`] tag. Assigns no name, so it needs no
 /// duplicate check: the window already carries the name.
+///
+/// Succeeds once the join has moved the pane. Clearing the tag afterwards is
+/// best-effort: the pane is home either way, and an error here would tell a
+/// caller to undo a move that already happened (split-pane.allium:
+/// SwapSplitPane). A stale tag names a pane that is now inside the window, so
+/// it cannot let a different pane in.
 pub fn rejoin_pane(pane_id: &str, window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()> {
     let target = window_target(window.as_str(), runner)?;
     run_checked(
@@ -1359,11 +1365,13 @@ pub fn rejoin_pane(pane_id: &str, window: &TmuxWindow, runner: &dyn ProcessRunne
         &["join-pane", "-h", "-b", "-d", "-s", pane_id, "-t", &target],
         "join-pane",
     )?;
-    run_checked_timeout(
+    if let Err(e) = run_checked_timeout(
         runner,
         &["set-option", "-w", "-u", "-t", &target, AWAITS_PANE_OPTION],
         "set-option",
-    )?;
+    ) {
+        tracing::warn!(%window, %pane_id, error = %e, "failed to clear the awaits-pane tag after rejoining");
+    }
     Ok(())
 }
 

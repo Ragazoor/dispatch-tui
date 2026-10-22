@@ -1053,6 +1053,26 @@ rule SwapSplitPane {
         -- way a pin drains: its marked panes are killed, and if an unmarked
         -- one keeps it alive it is tagged as awaiting the incoming pane.
         --
+        -- A step after the swap-pane can fail: the rejoin, the rename, or the
+        -- kill of the displaced window. By then the panes are exchanged, so
+        -- the failure cannot simply be reported as "nothing happened". The
+        -- swap makes one attempt to put the panes back with a reverse
+        -- swap-pane, and then settles on whichever arrangement tmux is
+        -- actually in (SplitPaneSwapSettles):
+        --
+        --   * Reversed: the pane shows the outgoing occupant again, so the
+        --     swap settles unsuccessfully, reporting the step that failed.
+        --   * Not reversed: the pane shows the incoming task, so the swap
+        --     settles SUCCESSFULLY with the incoming pane, and a separate
+        --     error names the window still holding the outgoing pane, for the
+        --     user to tidy by hand. Settling as a failure here would leave
+        --     the board pinning a task the pane no longer shows.
+        --
+        -- The rejoin counts as done once its join-pane has moved the pane:
+        -- clearing the leftover window's awaiting tag afterwards is
+        -- best-effort, because the pane is home and reversing would carry it
+        -- back out.
+        --
         -- == IMPLEMENTED: companion-pane resync ==
         -- `exec_swap_split_pane` (src/runtime/split.rs) uses `swap-pane` to
         -- atomically exchange the previously-pinned task's pane and the new
@@ -1209,8 +1229,13 @@ rule SplitPaneSwapSettles {
         -- holds as well as which task it shows.
         --
         -- A failed swap settles too. succeeded = false leaves pinned_task and
-        -- pane naming the previous occupant, which is the truth: a swap that
-        -- could not rearrange tmux changed nothing about what the pane shows.
+        -- pane naming the previous occupant, which is the truth: it is raised
+        -- only when tmux is in its pre-swap arrangement — the swap failed
+        -- before any pane moved, or a later step failed and the panes were
+        -- swapped back (see SwapSplitPane). A swap whose panes stayed
+        -- exchanged settles with succeeded = true, whatever failed after the
+        -- exchange, because "settled" means the board records what the pane
+        -- actually shows, not whether every step succeeded.
         -- The failure is reported to the user as a status error by whichever
         -- step failed. Settling on failure is load-bearing, not tidiness — a
         -- swap that failed and left itself in flight would leave the board

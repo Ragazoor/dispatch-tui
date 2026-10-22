@@ -105,9 +105,11 @@ impl TuiRuntime {
 
     /// Swap `new_window`'s task into the split pane.
     ///
-    /// Exactly one message always comes back — `SwapOpened` or `SwapFailed` —
-    /// because the board holds every further swap until one of them arrives
-    /// (docs/specs/split-pane.allium: `SplitPaneSwapSettles`). A path that
+    /// Exactly one settling message always comes back — `SwapOpened` or
+    /// `SwapFailed` — because the board holds every further swap until one of
+    /// them arrives (docs/specs/split-pane.allium: `SplitPaneSwapSettles`).
+    /// Which one follows where tmux left the panes, not whether every step
+    /// succeeded: see [`swap_outcome`]. A path that
     /// returned silently would wedge swapping for the rest of the session,
     /// which is why `right_pane` is not optional here: the board does not
     /// issue the command at all when it has no pane to swap into.
@@ -133,7 +135,9 @@ impl TuiRuntime {
                     .map(|(window, worktree)| (window, worktree.as_str())),
                 &*runner,
             );
-            let _ = tx.send(Message::Split(swap_outcome(result, task_id)));
+            for msg in swap_outcome(result, task_id) {
+                let _ = tx.send(msg);
+            }
         })
     }
 
@@ -238,12 +242,28 @@ fn enter_split_with_task_outcome(
     }
 }
 
-/// The one message a swap settles with (`SplitPaneSwapSettles`).
-fn swap_outcome(result: anyhow::Result<String>, task_id: TaskId) -> SplitMessage {
+/// The messages a swap settles with (`SplitPaneSwapSettles`): exactly one
+/// settle, naming the task the pane actually shows.
+///
+/// A swap whose panes stayed exchanged after a later step failed settles as
+/// opened — the pane shows `task_id` now — and the failure goes out as a
+/// separate error, ahead of the settle as `SwapFailed` orders its own.
+fn swap_outcome(result: Result<String, dispatch::SwapFailure>, task_id: TaskId) -> Vec<Message> {
     match result {
-        Ok(pane_id) => SplitMessage::SwapOpened { pane_id, task_id },
-        Err(e) => SplitMessage::SwapFailed {
-            error: format!("Swap failed: {e:#}"),
-        },
+        Ok(pane_id) => vec![Message::Split(SplitMessage::SwapOpened {
+            pane_id,
+            task_id,
+        })],
+        Err(dispatch::SwapFailure::Unmoved(e)) => {
+            vec![Message::Split(SplitMessage::SwapFailed {
+                error: format!("Swap failed: {e:#}"),
+            })]
+        }
+        Err(dispatch::SwapFailure::Exchanged { pane_id, error }) => vec![
+            Message::System(crate::tui::messages::SystemMessage::Error(format!(
+                "Swap incomplete: {error:#}"
+            ))),
+            Message::Split(SplitMessage::SwapOpened { pane_id, task_id }),
+        ],
     }
 }

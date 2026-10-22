@@ -31,7 +31,10 @@ pub enum SplitMessage {
     },
     /// A swap that could not be carried out. Settles the swap (see
     /// `docs/specs/split-pane.allium`'s `SplitPaneSwapSettles`) and reports
-    /// `error` to the user; the pane keeps showing what it showed before.
+    /// `error` to the user; the pane keeps showing what it showed before. A
+    /// swap that failed after exchanging the panes, and could not swap them
+    /// back, settles as [`SplitMessage::SwapOpened`] instead, with its error
+    /// raised separately.
     ///
     /// Distinct from a plain `SystemMessage::Error` precisely so the settle
     /// happens: a failure that only raised the error popup would leave the swap

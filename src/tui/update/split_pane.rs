@@ -142,7 +142,9 @@ impl App {
                 self.record_open_pane(pane_id, Some(task_id));
             }
             // A failure changes nothing about what the pane shows: an entry
-            // never opened one, and a swap's still holds the previous occupant.
+            // never opened one, and a swap reports failure only once tmux is
+            // back in its pre-swap arrangement. A swap whose panes stayed
+            // exchanged arrives as `Settled::Swap(Some(..))` instead.
             Settled::Entry(None) | Settled::Swap(None) => {}
         }
         // A held quit wins, and is performed whether or not the rearrangement
@@ -239,8 +241,9 @@ impl App {
     }
 
     /// A swap that could not be carried out. The pane still shows the previous
-    /// occupant, so the pinned task and pane are left alone — but the swap
-    /// settles all the same, or the board could never swap again.
+    /// occupant — the runtime reports this only when no pane moved, or the
+    /// panes were swapped back — so the pinned task and pane are left alone.
+    /// The swap settles all the same, or the board could never swap again.
     pub(in crate::tui) fn handle_split_pane_swap_failed(&mut self, error: String) -> Vec<Command> {
         let mut cmds = self.handle_error(error);
         cmds.extend(self.settle(Settled::Swap(None)));
