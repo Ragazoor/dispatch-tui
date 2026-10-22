@@ -27,6 +27,23 @@ DB = "dispatch"
 TRAJ = os.path.expanduser("~/.local/share/dispatch/trajectories/*.jsonl")
 RULES_FROM = "2026-08-21"  # b1c78a32 added the PR-body rules to the wrap-up skill
 
+# Run 5 (task 94228) moved these user-scoped entries to repo scope in place, keeping their
+# ids. The store keeps only the current scope, so a retrieval before this time is read
+# with the scope the entry had then (user); otherwise the rescope would rewrite history.
+RESCOPED_AT = "2026-10-22 11:30"
+RESCOPED_FROM_USER = {
+    574, 578, 579, 580, 598, 599, 600, 601, 606, 614, 617, 621, 630, 632, 633, 637, 670,
+    671, 683, 700, 701, 724, 737, 742, 767, 770, 772, 775, 776, 777, 780, 791, 831, 4107,
+    12292, 12304, 69635, 69637,
+}
+
+
+def scope_at(learning, retrieval):
+    """The (scope, scope_ref) a learning had when the retrieval happened."""
+    if learning["id"] in RESCOPED_FROM_USER and retrieval["retrieved_at"] < RESCOPED_AT:
+        return "user", None
+    return learning["scope"], opt(learning["scope_ref"])
+
 
 def table(name):
     out = subprocess.run(
@@ -99,10 +116,12 @@ def off_scope_metrics(L, R):
     weeks = collections.defaultdict(lambda: [0, 0])
     for r in R:
         l, t = by.get(r["learning_id"]), tasks.get(r["task_id"])
-        if not l or not t or l["scope"] not in ("repo", "epic"):
+        if not l or not t:
             continue
-        ref = opt(l["scope_ref"])
-        if l["scope"] == "repo":
+        sc, ref = scope_at(l, r)
+        if sc not in ("repo", "epic"):
+            continue
+        if sc == "repo":
             inside = repo_ref_covers(ref, t["repo_path"])
         else:
             inside = ref == str(t["epic_id"])
@@ -165,7 +184,7 @@ def user_scope_metrics():
     with the top-30 share: a few entries cause most of it.
     """
     L, R, tasks = table("learnings"), table("learning_retrievals"), {t["id"]: t for t in table("tasks")}
-    scope = {r["id"]: r["scope"] for r in L}
+    by = {r["id"]: r for r in L}
     helped = {
         (e["task_id"], (e.get("args") or {}).get("learning_id"))
         for e in trajectory_events()
@@ -174,7 +193,8 @@ def user_scope_metrics():
     weeks = collections.defaultdict(lambda: [0, 0])
     per_entry = collections.Counter()
     for r in R:
-        if r["source"] != "prompt_injection" or scope.get(r["learning_id"]) != "user":
+        l = by.get(r["learning_id"])
+        if r["source"] != "prompt_injection" or not l or scope_at(l, r)[0] != "user":
             continue
         if r["task_id"] not in tasks:
             continue

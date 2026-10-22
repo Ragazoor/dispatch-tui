@@ -41,12 +41,13 @@ Good: summary "Sync the repo before starting work." — detail "…Stop and ask 
 
 | Scope | Use when | `scope_ref` |
 |-------|----------|-------------|
-| `user` | Personal workflow preference, applies to all work | omit |
+| `user` | Personal workflow preference, applies to all work in every repo | omit |
 | `repo` | Codebase-wide convention or landscape entry | omit (auto-derived) |
+| `repo` | A fact about a family of repos that share a parent directory (every Terraform domain repo, every Scala service) | the parent directory's absolute path |
 | `epic` | Shared design decision for this epic only | omit (auto-derived) |
 | `task` | One-off note; not auto-injected into future prompts | omit (auto-derived) |
 
-**Default to `repo` for code conventions and `user` for workflow preferences.**
+**Default to `repo` for code conventions and `user` for workflow preferences.** A domain fact that holds in more than one repo is still not `user`: a `repo` entry reaches every repo under its `scope_ref`, so give it the parent directory. User-scoped Terraform and Cloud SQL facts used to reach Scala, frontend and deployment repos, where agents almost never rated them helped.
 
 ### Writing a good summary
 
