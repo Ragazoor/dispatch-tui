@@ -3,28 +3,8 @@
 
 use crate::dispatch::worktree::{add_worktree, ensure_worktrees_excluded};
 use crate::process::{RealProcessRunner, SUBPROCESS_TIMEOUT};
+use crate::test_git::git;
 use std::path::Path;
-use std::process::Command;
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .current_dir(dir)
-        .args(args)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@example.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@example.com")
-        .output()
-        .expect("git must be on PATH");
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
 
 /// A repo whose `.gitignore` does not mention `.worktrees/`, as in a target repo.
 fn repo() -> (tempfile::TempDir, String) {

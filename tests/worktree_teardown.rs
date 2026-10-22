@@ -16,40 +16,8 @@
 
 use dispatch_tui::dispatch::teardown_task;
 use dispatch_tui::process::RealProcessRunner;
+use dispatch_tui::test_git::{git, try_git};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-
-/// Run git with a sanitised environment, as `tests/tmux_lifecycle.rs` does and
-/// for the same reason: a developer's global `commit.gpgsign`, `core.hooksPath`
-/// or `init.templateDir` would otherwise change what the fixture builds, and a
-/// machine with no configured `user.email` — a fresh CI container — cannot
-/// commit at all without the identity vars.
-fn git(dir: &Path, args: &[&str]) -> std::process::Output {
-    let out = try_git(dir, args);
-    assert!(
-        out.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    out
-}
-
-/// The sanitised-env half of [`git`], for a caller that expects git to FAIL —
-/// `git`'s own success assertion would panic before the caller ever sees that
-/// failure's stderr.
-fn try_git(dir: &Path, args: &[&str]) -> std::process::Output {
-    Command::new("git")
-        .current_dir(dir)
-        .args(args)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@example.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@example.com")
-        .output()
-        .expect("git must be on PATH")
-}
 
 /// A repo with one worktree at `<repo>/.worktrees/<slug>`, holding a tracked
 /// file and the gitignored build output that made the leak expensive.
@@ -128,17 +96,16 @@ fn the_same_task_can_be_dispatched_again_after_the_bad_teardown() {
 
     tear_down(&repo, &worktree).unwrap();
 
-    let out = Command::new("git")
-        .current_dir(&repo)
-        .args([
+    let out = try_git(
+        &repo,
+        &[
             "worktree",
             "add",
             worktree.to_str().unwrap(),
             "-B",
             "42-fix-bug",
-        ])
-        .output()
-        .unwrap();
+        ],
+    );
     assert!(
         out.status.success(),
         "re-dispatch must succeed after teardown: {}",
@@ -194,11 +161,10 @@ fn the_already_removed_marker_still_matches_this_git_version() {
     let (_dir, repo, worktree) = repo_with_worktree("42-fix-bug");
     std::fs::remove_dir_all(repo.join(".git/worktrees/42-fix-bug")).unwrap();
 
-    let out = Command::new("git")
-        .current_dir(&repo)
-        .args(["worktree", "remove", "--force", worktree.to_str().unwrap()])
-        .output()
-        .unwrap();
+    let out = try_git(
+        &repo,
+        &["worktree", "remove", "--force", worktree.to_str().unwrap()],
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
 
     assert!(!out.status.success());

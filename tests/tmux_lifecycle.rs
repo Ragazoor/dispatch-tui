@@ -29,6 +29,7 @@ use std::path::{Path, PathBuf};
 use dispatch_tui::dispatch;
 use dispatch_tui::models::{Task, TaskId, TmuxWindow};
 use dispatch_tui::process::ProcessRunner;
+use dispatch_tui::test_git::git;
 use dispatch_tui::tmux;
 
 use tmux_harness::{
@@ -147,47 +148,9 @@ fn seed_repo_no_origin(root: &Path) -> PathBuf {
     repo
 }
 
-/// Run git with a sanitised environment. The identity vars matter: without them
-/// the seed commit fails outright on a machine with no `user.email` configured,
-/// which is what a fresh CI container is. The config overrides keep a
-/// developer's global `commit.gpgsign` / `init.defaultBranch` / hooks path from
-/// changing what the fixture builds.
-fn git(cwd: &Path, args: &[&str]) {
-    let out = std::process::Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@example.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@example.com")
-        .output()
-        .expect("run git");
-    assert!(
-        out.status.success(),
-        "git {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-/// Like `git`, but returns trimmed stdout — for queries such as `rev-parse`.
+/// Trimmed stdout of a git query such as `rev-parse`.
 fn git_stdout(cwd: &Path, args: &[&str]) -> String {
-    let out = std::process::Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .output()
-        .expect("run git");
-    assert!(
-        out.status.success(),
-        "git {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
+    git(cwd, args).trim().to_string()
 }
 
 fn task(id: i64, repo: &Path) -> Task {

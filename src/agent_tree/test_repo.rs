@@ -3,12 +3,13 @@
 //! a commit against its parent, the commits since a fork point. A mock can
 //! only prove which argv was sent; these prove what that argv answers.
 //!
-//! The fixture's own git runs with a sanitised environment (docs/testing.md:
-//! "A test that builds a real git repo on disk"), so a developer's global
-//! `commit.gpgsign` or hooks cannot change what gets built.
+//! The fixture's own git runs through `crate::test_git`, with the sanitised
+//! environment docs/testing.md asks for ("A test that builds a real git repo
+//! on disk"), so a developer's global `commit.gpgsign` or hooks cannot change
+//! what gets built.
 
+use crate::test_git::git;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// `<tmp>/repo` on `main` with one seed commit, and a linked worktree at
 /// `<tmp>/repo/.worktrees/task` on branch `task`, branched from `main`.
@@ -18,40 +19,20 @@ pub(crate) struct TestRepo {
     pub worktree: PathBuf,
 }
 
-fn git_in(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .current_dir(dir)
-        .args(args)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@example.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@example.com")
-        .output()
-        .expect("git must be on PATH");
-    assert!(
-        out.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
 impl TestRepo {
     pub(crate) fn new() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = dir.path().join("repo");
         std::fs::create_dir_all(&repo).expect("mkdir");
-        git_in(&repo, &["init", "-q", "--initial-branch=main", "."]);
+        git(&repo, &["init", "-q", "--initial-branch=main", "."]);
         // Keep the linked worktree out of the main checkout's `git add -A`.
         std::fs::create_dir_all(repo.join(".git/info")).expect("mkdir");
         std::fs::write(repo.join(".git/info/exclude"), ".worktrees/\n").expect("exclude");
         std::fs::write(repo.join("seed.txt"), "seed\n").expect("write");
-        git_in(&repo, &["add", "-A"]);
-        git_in(&repo, &["commit", "-qm", "seed"]);
+        git(&repo, &["add", "-A"]);
+        git(&repo, &["commit", "-qm", "seed"]);
         let worktree = repo.join(".worktrees").join("task");
-        git_in(
+        git(
             &repo,
             &[
                 "worktree",
@@ -81,12 +62,12 @@ impl TestRepo {
 
     /// Run git in the worktree and return its stdout.
     pub(crate) fn git(&self, args: &[&str]) -> String {
-        git_in(&self.worktree, args)
+        git(&self.worktree, args)
     }
 
     /// Run git in the main checkout (on `main`) and return its stdout.
     pub(crate) fn git_main(&self, args: &[&str]) -> String {
-        git_in(&self.repo, args)
+        git(&self.repo, args)
     }
 
     /// Write `contents` to `rel` inside the worktree, creating parents.

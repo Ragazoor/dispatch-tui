@@ -141,8 +141,9 @@ the four `GIT_AUTHOR_*`/`GIT_COMMITTER_*` identity vars. Without them the
 fixture is whatever the developer's global config makes it (`commit.gpgsign`,
 `core.hooksPath`, `init.templateDir` all change what gets built), and on a
 machine with no configured `user.email` — a fresh CI container — the seed commit
-fails outright. `tests/tmux_lifecycle.rs`'s `git` helper and
-`tests/worktree_teardown.rs`'s are the two copies of this; follow either.
+fails outright. Use `git` / `try_git` from `src/test_git.rs`, the one copy:
+`crate::test_git` inside the crate, `dispatch_tui::test_git` from a `tests/`
+target (through the `test-support` feature). Don't write another.
 
 A test that stages an **unwritable directory** (to make a delete or a stat fail)
 owes two things beyond the `chmod`: restore the permissions from a `Drop` guard,

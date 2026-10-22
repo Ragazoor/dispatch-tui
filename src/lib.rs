@@ -33,6 +33,8 @@ pub mod startup_abort;
 pub mod store;
 pub mod store_connection;
 pub mod sync;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_git;
 #[cfg(test)]
 mod test_log;
 pub mod tmux;
