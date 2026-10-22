@@ -390,22 +390,25 @@ pub(crate) async fn handle_create_task(
         );
     };
 
-    let created = state
-        .task_svc
-        .create_task(CreateTaskParams {
-            title: parsed.title,
-            description: parsed.description,
-            repo_path: parsed.repo_path,
-            plan_path: parsed.plan_path,
-            epic_id,
-            sort_order: parsed.sort_order,
-            tag: parsed.tag,
-            base_branch: parsed.base_branch,
-            wrap_up_mode: parsed.wrap_up_mode,
-            auto_run_plan: parsed.auto_run_plan,
-            phoenix: parsed.phoenix,
-        })
-        .await;
+    let signal = parsed.signal;
+    let params = CreateTaskParams {
+        title: parsed.title,
+        description: parsed.description,
+        repo_path: parsed.repo_path,
+        plan_path: parsed.plan_path,
+        epic_id,
+        sort_order: parsed.sort_order,
+        tag: parsed.tag,
+        base_branch: parsed.base_branch,
+        wrap_up_mode: parsed.wrap_up_mode,
+        auto_run_plan: parsed.auto_run_plan,
+        phoenix: parsed.phoenix,
+    };
+    let created = if signal {
+        state.task_svc.create_task_signalled(params).await
+    } else {
+        state.task_svc.create_task(params).await
+    };
     let task_id = match created {
         Ok(task_id) => task_id,
         Err(e) => return service_err_to_response(id, e),

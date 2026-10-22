@@ -232,6 +232,8 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) auto_run_plan: bool,
     #[serde(default)]
     pub(super) phoenix: bool,
+    #[serde(default)]
+    pub(super) signal: bool,
 }
 
 // WrapUpAction lives in `crate::mcp` — it's shared between wrap_up (whose

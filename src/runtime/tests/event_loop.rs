@@ -623,6 +623,10 @@ mod host_reactor {
         }
         assert!(matches!(
             recv_msg(&mut rx).await,
+            Message::Task(crate::tui::messages::TaskMessage::UnseenRefreshed(_))
+        ));
+        assert!(matches!(
+            recv_msg(&mut rx).await,
             Message::Epic(crate::tui::messages::EpicMessage::Refresh(_))
         ));
     }

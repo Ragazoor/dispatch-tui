@@ -716,6 +716,103 @@ async fn create_task_with_description() {
     assert_eq!(tasks[0].description, "Some details");
 }
 
+/// `CreateTaskViaMcp`'s `signal`: advertised in the schema as a boolean.
+#[test]
+fn create_task_schema_advertises_a_boolean_signal() {
+    let def = tool_def("create_task");
+    assert_eq!(
+        def["inputSchema"]["properties"]["signal"]["type"],
+        "boolean"
+    );
+    let required = def["inputSchema"]["required"].as_array().unwrap();
+    assert!(
+        !required.iter().any(|r| r == "signal"),
+        "signal is optional"
+    );
+}
+
+/// A state over a concrete in-memory store the test can also subscribe and read
+/// unseen marks through, with its one epic already followed.
+async fn signal_fixture() -> (Arc<McpState>, Arc<Store>, crate::models::EpicId) {
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let (state, _) = state_over(
+        store.clone(),
+        Arc::new(MockProcessRunner::new(vec![])),
+        None,
+        None,
+        None,
+    );
+    let epic = crate::store::EpicCrud::create_epic(&*store, "E", "", None)
+        .await
+        .unwrap()
+        .id;
+    crate::store::SubscriptionStore::subscribe_to_epic(&*store, crate::store::MEMORY_USER_ID, epic)
+        .await
+        .unwrap();
+    (state, store, epic)
+}
+
+async fn create_in_epic(state: &Arc<McpState>, epic: crate::models::EpicId, extra: Value) {
+    let mut arguments = json!({ "title": "T", "repo_path": "/repo", "epic_id": epic.0 });
+    arguments
+        .as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    let resp = call(
+        state,
+        "tools/call",
+        Some(json!({ "name": "create_task", "arguments": arguments })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+}
+
+#[tokio::test]
+async fn create_task_with_signal_marks_it_unseen_for_the_follower() {
+    let (state, store, epic) = signal_fixture().await;
+
+    create_in_epic(&state, epic, json!({ "signal": true })).await;
+
+    let tasks = state.db.list_all().await;
+    assert_eq!(
+        crate::store::BoardReads::unseen_task_ids(&*store).await,
+        vec![tasks[0].id]
+    );
+}
+
+#[tokio::test]
+async fn create_task_without_signal_marks_nothing() {
+    let (state, store, epic) = signal_fixture().await;
+
+    create_in_epic(&state, epic, json!({})).await;
+    create_in_epic(&state, epic, json!({ "signal": false })).await;
+
+    assert!(crate::store::BoardReads::unseen_task_ids(&*store)
+        .await
+        .is_empty());
+}
+
+#[tokio::test]
+async fn create_task_with_signal_and_no_epic_is_created_unmarked() {
+    let (state, store, _) = signal_fixture().await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": { "title": "T", "repo_path": "/repo", "epic_id": null, "signal": true }
+        })),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    assert_eq!(state.db.list_all().await.len(), 1);
+    assert!(crate::store::BoardReads::unseen_task_ids(&*store)
+        .await
+        .is_empty());
+}
+
 #[tokio::test]
 async fn create_task_missing_title() {
     let state = test_state().await;

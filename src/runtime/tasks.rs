@@ -838,6 +838,11 @@ impl TuiRuntime {
             tasks,
         )));
 
+        let unseen = db.unseen_task_ids().await;
+        let _ = tx.send(Message::Task(
+            crate::tui::messages::TaskMessage::UnseenRefreshed(unseen),
+        ));
+
         let epics = db.list_epics().await;
         let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
             epics,
@@ -941,6 +946,10 @@ impl TuiRuntime {
             tasks,
         )));
         self.exec_refresh_epics_from_db(app).await;
+        let unseen = self.board_reads.unseen_task_ids().await;
+        cmds.extend(app.update(Message::Task(
+            crate::tui::messages::TaskMessage::UnseenRefreshed(unseen),
+        )));
         let requests = self.board_reads.dispatch_requests().await;
         cmds.extend(app.update(Message::Task(
             crate::tui::messages::TaskMessage::DispatchRequestsRefreshed(requests),

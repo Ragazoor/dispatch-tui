@@ -433,10 +433,28 @@ impl TaskService {
         Ok(self.create_task_returning(params).await?.id)
     }
 
+    /// [`Self::create_task`], and mark the task unseen for every follower of its
+    /// epic and ancestors (`mcp-task-tools.allium: CreateTaskViaMcp`'s
+    /// `signal`).
+    pub async fn create_task_signalled(
+        &self,
+        params: CreateTaskParams,
+    ) -> Result<TaskId, ServiceError> {
+        Ok(self.create_task_inner(params, true).await?.id)
+    }
+
     /// Create a task and return the full Task object (used by TUI).
     pub async fn create_task_returning(
         &self,
         params: CreateTaskParams,
+    ) -> Result<Task, ServiceError> {
+        self.create_task_inner(params, false).await
+    }
+
+    async fn create_task_inner(
+        &self,
+        params: CreateTaskParams,
+        signal: bool,
     ) -> Result<Task, ServiceError> {
         let (repo_path, plan) =
             Self::normalize_repo_and_plan(&params.repo_path, params.plan_path.as_deref());
@@ -485,23 +503,25 @@ impl TaskService {
 
         // Repo-grouping: the store places a task assigned to a group_by_repo
         // (non-feed) epic into its per-repo sub-epic, in the same transaction.
-        let task_id = self
-            .db
-            .create_task(CreateTaskRequest {
-                title: &params.title,
-                description: &params.description,
-                repo_path: &repo_path,
-                plan: plan.as_deref(),
-                status: TaskStatus::Backlog,
-                base_branch: &base_branch,
-                epic_id: params.epic_id,
-                sort_order: params.sort_order,
-                tag: params.tag,
-                wrap_up_mode: params.wrap_up_mode,
-                auto_run_plan: params.auto_run_plan,
-                phoenix: params.phoenix,
-            })
-            .await?;
+        let request = CreateTaskRequest {
+            title: &params.title,
+            description: &params.description,
+            repo_path: &repo_path,
+            plan: plan.as_deref(),
+            status: TaskStatus::Backlog,
+            base_branch: &base_branch,
+            epic_id: params.epic_id,
+            sort_order: params.sort_order,
+            tag: params.tag,
+            wrap_up_mode: params.wrap_up_mode,
+            auto_run_plan: params.auto_run_plan,
+            phoenix: params.phoenix,
+        };
+        let task_id = if signal {
+            self.db.create_task_signalled(request).await?
+        } else {
+            self.db.create_task(request).await?
+        };
 
         self.get_task(task_id).await
     }

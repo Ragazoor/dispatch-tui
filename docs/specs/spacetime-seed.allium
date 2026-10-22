@@ -79,8 +79,12 @@ use "./core.allium" as core
 -- left out for the same reason: a restored open row would have no timer, and
 -- would block its task's next wrap_up (one open session request per task). A
 -- restore also loses every unconsumed exit token, which lives in those rows;
--- an agent mid-wrap-up calls wrap_up again. The two pairs are the only
--- exceptions to "every table it holds" below.
+-- an agent mid-wrap-up calls wrap_up again.
+--
+-- `unseen_tasks` (core.allium: UnseenTask, the new-task signal) is left out
+-- as well: a mark says "you have not looked yet", and a restore would invent
+-- that for people who may have looked since. Losing the marks on a restore is
+-- accepted. These are the only exceptions to "every table it holds" below.
 --
 -- What is NOT here is as load-bearing as what is, and it is shorter than an
 -- earlier revision of this note claimed: the knowledge base (`learnings`,

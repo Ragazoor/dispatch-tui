@@ -30,11 +30,29 @@ pub struct BoardState {
     pub(in crate::tui) work_packages: Vec<WorkPackage>,
     /// Every package link the board holds.
     pub(in crate::tui) work_package_links: Vec<WorkPackageLink>,
+    /// The tasks this person has not yet seen (`core.allium: UnseenTask`), as
+    /// the latest board reload read them. Drives the new-task signal
+    /// (`board-visuals.allium`, "New-task signal"); an epic's mark is derived
+    /// from it by [`BoardState::epic_has_unseen`], never held.
+    pub(in crate::tui) unseen_tasks: HashSet<TaskId>,
 }
 
 impl BoardState {
     pub(in crate::tui) fn find_task(&self, id: TaskId) -> Option<&Task> {
         self.tasks.iter().find(|t| t.id == id)
+    }
+
+    /// Whether `id`'s card carries the new-task mark: a task in `id` or in any
+    /// descendant epic is unseen. Free when nothing is unseen, which is almost
+    /// always.
+    pub(in crate::tui) fn epic_has_unseen(&self, id: EpicId) -> bool {
+        if self.unseen_tasks.is_empty() {
+            return false;
+        }
+        let subtree = crate::models::descendant_epic_ids(id, &self.epics);
+        self.tasks.iter().any(|t| {
+            self.unseen_tasks.contains(&t.id) && t.epic_id.is_some_and(|e| subtree.contains(&e))
+        })
     }
 
     pub(in crate::tui) fn find_epic(&self, id: EpicId) -> Option<&Epic> {

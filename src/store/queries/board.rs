@@ -3,7 +3,7 @@
 
 use async_trait::async_trait;
 
-use crate::models::PollScopeId;
+use crate::models::{PollScopeId, TaskId};
 
 use super::super::Store;
 
@@ -16,6 +16,10 @@ use super::super::Store;
 impl crate::store::BoardReads for Store {
     async fn poll_owner(&self, target: PollScopeId) -> Option<String> {
         self.rows.poll_owner(target).map(|row| row.host)
+    }
+
+    async fn unseen_task_ids(&self) -> Vec<TaskId> {
+        self.rows.unseen_task_ids()
     }
 
     async fn revision(&self) -> u64 {

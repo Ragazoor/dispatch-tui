@@ -59,6 +59,9 @@ pub enum TaskMessage {
     /// `ReportChainedDispatchFailure`. The FIRST one an App receives is its
     /// baseline: rows already failed in it are history and raise nothing.
     DispatchRequestsRefreshed(Vec<crate::models::DispatchRequest>),
+    /// The tasks this person has not yet seen, as the latest board reload read
+    /// them (`core.allium: UnseenTask`).
+    UnseenRefreshed(Vec<TaskId>),
     Edited(TaskEdit),
     QuickDispatch {
         repo_path: String,
@@ -149,6 +152,7 @@ impl TaskMessage {
             TaskMessage::DispatchRequestsRefreshed(rows) => {
                 app.handle_dispatch_requests_refreshed(rows)
             }
+            TaskMessage::UnseenRefreshed(ids) => app.handle_unseen_refreshed(ids),
             TaskMessage::Edited(edit) => app.handle_task_edited(edit),
             TaskMessage::QuickDispatch { repo_path, epic_id } => {
                 app.handle_quick_dispatch(repo_path, epic_id)

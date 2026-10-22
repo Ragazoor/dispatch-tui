@@ -83,6 +83,7 @@ mod session_request;
 mod support;
 mod tables;
 mod tasks_epics;
+mod unseen;
 
 pub use agent::*;
 pub use agent_state::*;
@@ -104,6 +105,7 @@ pub use session_request::*;
 pub use support::*;
 pub use tables::*;
 pub use tasks_epics::*;
+pub use unseen::*;
 
 #[cfg(test)]
 mod tests;

@@ -33,6 +33,14 @@ impl TuiRuntime {
         }
     }
 
+    /// `tasks.allium: SeeTasksByEnteringTheirEpic`. The cards redraw when the
+    /// store's row change arrives, so nothing is read back here.
+    pub(super) async fn exec_mark_epic_seen(&self, id: models::EpicId) {
+        if let Err(e) = self.epic_svc.mark_epic_seen(id).await {
+            tracing::warn!("marking epic {id} seen: {e}");
+        }
+    }
+
     pub(super) async fn exec_delete_epic(&self, id: models::EpicId) {
         if !self
             .pass_delete_guard(&crate::tui::commands::DeleteGuard::Epic(id))

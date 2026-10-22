@@ -116,6 +116,10 @@ fn parse_field(accessor: &str, line: &str) -> Column {
 /// the store rather than the domain, and `SharedTable` deliberately omits them
 /// (see `snapshot.rs`).
 ///
+/// `unseen_tasks` (the new-task signal, `core.allium: UnseenTask`) is excluded
+/// too: a mark says "you have not looked yet", which a restore into another
+/// store would invent for people who may have looked since.
+///
 /// `dispatch_requests`, `dispatch_request_timeouts`, `session_requests` and
 /// `session_request_timeouts` (store-split M5, W10) are excluded too: they
 /// are in-flight state, not domain, and no snapshot carries them
@@ -138,6 +142,7 @@ fn the_module_declares_every_shared_table_and_nothing_else() {
                     | "dispatch_request_timeouts"
                     | "session_requests"
                     | "session_request_timeouts"
+                    | "unseen_tasks"
             )
         })
         .collect();

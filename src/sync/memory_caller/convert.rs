@@ -184,6 +184,15 @@ mirror!(
 );
 
 mirror!(
+    module::UnseenTask,
+    bindings::UnseenTask {
+        id,
+        task_id,
+        subscriber
+    }
+);
+
+mirror!(
     module::Setting,
     bindings::Setting {
         id,

@@ -13,11 +13,49 @@ impl App {
     // -----------------------------------------------------------------------
 
     pub(in crate::tui) fn handle_enter_epic(&mut self, epic_id: EpicId) -> Vec<Command> {
+        let mut cmds = self.push_epic_view(epic_id);
+        cmds.extend(self.see_epic(epic_id));
+        cmds
+    }
+
+    fn push_epic_view(&mut self, epic_id: EpicId) -> Vec<Command> {
         self.push_view(|selection, parent| ViewMode::Epic {
             epic_id,
             selection,
             parent,
         })
+    }
+
+    /// `tasks.allium: SeeTasksByEnteringTheirEpic`: the epic's own tasks stop
+    /// being unseen. Dropped locally at once so the mark does not outlive the
+    /// keypress, and sent to the store, which clears it for this person
+    /// everywhere. Tasks in child epics keep their mark.
+    fn see_epic(&mut self, epic_id: EpicId) -> Vec<Command> {
+        if self.board.unseen_tasks.is_empty() {
+            return vec![];
+        }
+        let seen: Vec<TaskId> = self
+            .board
+            .tasks
+            .iter()
+            .filter(|t| t.epic_id == Some(epic_id))
+            .map(|t| t.id)
+            .collect();
+        if !seen.iter().any(|id| self.board.unseen_tasks.contains(id)) {
+            return vec![];
+        }
+        for id in &seen {
+            self.board.unseen_tasks.remove(id);
+        }
+        vec![Command::Epic(crate::tui::commands::EpicCommand::MarkSeen(
+            epic_id,
+        ))]
+    }
+
+    pub(in crate::tui) fn handle_unseen_refreshed(&mut self, ids: Vec<TaskId>) -> Vec<Command> {
+        self.board.unseen_tasks = ids.into_iter().collect();
+        self.dirty = true;
+        vec![]
     }
 
     /// Open a nested view (an epic or a work package) over the current one,
@@ -79,10 +117,15 @@ impl App {
                 .unwrap_or(0),
         };
         let below = &path[start..];
+        // Every level is entered so `q` climbs back one at a time, but only the
+        // epic whose view finally opens is SEEN: the epics passed over were
+        // never looked at (`tasks.allium: SeeTasksByEnteringTheirEpic`).
         for &id in below {
-            self.handle_enter_epic(id);
+            self.push_epic_view(id);
         }
-        vec![]
+        below
+            .last()
+            .map_or_else(Vec::new, |&last| self.see_epic(last))
     }
 
     pub(in crate::tui) fn handle_jump_to_deepest_epic(

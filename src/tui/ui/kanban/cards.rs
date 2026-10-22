@@ -15,7 +15,7 @@ use super::{
     card_border_color, card_surface_color, column_color, cursor_border_color,
     selected_card_surface_color, status_icon,
 };
-use crate::palette::{CYAN, FG, FLASH_BG, GREEN, MUTED, PURPLE, RED, YELLOW};
+use crate::palette::{CYAN, FG, FLASH_BG, GREEN, MUTED, PURPLE, RED, SIGNAL, YELLOW};
 
 /// Format the title text for a task card (line 1 only — status annotations are on line 2).
 fn format_task_title(task: &Task, max_title: usize) -> String {
@@ -441,6 +441,13 @@ pub(super) const PHOENIX_GLYPH: &str = "\u{267b}";
 /// counts characters and gets away with it.
 const PHOENIX_MARKER_WIDTH: usize = 3;
 
+/// The new-task marker (`◆`, U+25C6), single-column BMP like the flash glyphs.
+/// See "New-task signal" in `docs/specs/board-visuals.allium`.
+pub(super) const UNSEEN_GLYPH: &str = "\u{25c6}";
+
+/// Cells the marker costs on line 1: a leading space plus the glyph.
+const UNSEEN_MARKER_WIDTH: usize = 2;
+
 /// Columns of column-ground left visible on each side of a card, so cards float
 /// inside the column instead of tiling flush against its edges.
 const CARD_MARGIN: usize = 1;
@@ -638,11 +645,13 @@ pub(super) fn build_task_list_item<'a>(
     let (has_message_flash, has_message_flash_sent) = message_flashes(task, app);
     let any_message_flash = has_message_flash || has_message_flash_sent;
 
-    let prefix_width = task_card_prefix_width(task, has_message_flash, has_message_flash_sent);
+    let unseen = app.board.unseen_tasks.contains(&task.id);
+    let prefix_width = task_card_prefix_width(task, has_message_flash, has_message_flash_sent)
+        + if unseen { UNSEEN_MARKER_WIDTH } else { 0 };
     let max_title = (col_width as usize).saturating_sub(prefix_width);
     let title_text = format_task_title(task, max_title);
 
-    let line1 = card_title_line(
+    let mut line1 = card_title_line(
         task,
         &title_text,
         is_batch_selected,
@@ -650,6 +659,14 @@ pub(super) fn build_task_list_item<'a>(
         col_color,
         (has_message_flash, has_message_flash_sent),
     );
+    // A glyph only: the stripe carries column identity and the frame carries
+    // state, so neither is touched ("New-task signal", board-visuals.allium).
+    if unseen {
+        line1.spans.push(Span::styled(
+            format!(" {UNSEEN_GLYPH}"),
+            Style::default().fg(SIGNAL),
+        ));
+    }
 
     let indicator = classify_card_indicator(task, status, app, now);
     // Read the severity off the indicator before it is consumed, so the border and
@@ -733,7 +750,14 @@ pub(super) fn render_epic_item(
 
     // Prefix: select(2) + stripe(1) + " #NNN "(id_len+3) + plan_indicator
     let id_len = epic.id.0.unsigned_abs().max(1).ilog10() as usize + 1;
-    let prefix_width = 2 + 1 + 3 + id_len + plan_indicator.chars().count() + CARD_CHROME_WIDTH;
+    let unseen = app.board.epic_has_unseen(epic.id);
+    let prefix_width = 2
+        + 1
+        + 3
+        + id_len
+        + plan_indicator.chars().count()
+        + if unseen { UNSEEN_MARKER_WIDTH } else { 0 }
+        + CARD_CHROME_WIDTH;
     let max_title = (col_width as usize).saturating_sub(prefix_width);
     let title_text = truncate(&epic.title, max_title);
 
@@ -744,12 +768,22 @@ pub(super) fn render_epic_item(
     // (board-visuals.allium: "Card stripe").
     let stripe_char = "\u{258e}";
     let title_style = Style::default().fg(PURPLE).add_modifier(Modifier::BOLD);
-    let line1 = Line::from(vec![
+    // A marked epic's stripe takes SIGNAL in place of PURPLE, and its title line
+    // ends in the glyph that says why ("New-task signal", board-visuals.allium).
+    let stripe_color = if unseen { SIGNAL } else { PURPLE };
+    let mut line1_spans = vec![
         Span::raw(select_prefix.to_string()),
-        Span::styled(stripe_char, Style::default().fg(PURPLE)),
+        Span::styled(stripe_char, Style::default().fg(stripe_color)),
         Span::styled(format!(" #{} ", epic.id), Style::default().fg(MUTED)),
         Span::styled(format!("{title_text}{plan_indicator}"), title_style),
-    ]);
+    ];
+    if unseen {
+        line1_spans.push(Span::styled(
+            format!(" {UNSEEN_GLYPH}"),
+            Style::default().fg(SIGNAL),
+        ));
+    }
+    let line1 = Line::from(line1_spans);
 
     // Line 2: colored status indicators + substatus label
     let line2 = if let Some(s) = stats.filter(|s| s.total > 0) {

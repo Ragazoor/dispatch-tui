@@ -301,8 +301,12 @@ impl MemoryReducerCaller {
         }
 
         let status_changed = prior_status != row.status;
+        let finished = status_changed && row.status == DONE;
         if let Err(why) = self.write_task(&mut tables, row) {
             return Ok(ReducerOutcome::Refused(why));
+        }
+        if finished {
+            self.clear_unseen_for_task(&mut tables, id.0);
         }
 
         if status_changed {
@@ -372,6 +376,7 @@ impl MemoryReducerCaller {
         if let Err(why) = self.write_task(&mut tables, row) {
             return Ok(ReducerOutcome::Refused(why));
         }
+        self.clear_unseen_for_task(&mut tables, id.0);
         self.recalculate_epic_chain(&mut tables, was_in);
         self.recalculate_epic_chain(&mut tables, epic_id);
         Ok(ReducerOutcome::Applied(vec![]))

@@ -23,6 +23,7 @@ impl MemoryReducerCaller {
     /// rather than four hand-copied ones.
     pub(super) fn delete_task_side_effects(&self, tables: &mut Tables, task_id: i64) {
         tables.task_subagents.retain(|s| s.task_id != task_id);
+        self.clear_unseen_for_task(tables, task_id);
         // agents.allium: AgentsGoWithTheirTask.
         module::delete_agents_of(&mut self.agent_store(tables), task_id);
         self.detach_learnings_from_task(tables, task_id);

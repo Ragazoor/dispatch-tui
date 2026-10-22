@@ -36,4 +36,7 @@ pub enum EpicCommand {
     /// `feeds.allium: OverrideFeedOwner`, fired after
     /// `ConfirmOverrideFeedOwner` accepts.
     OverrideFeedOwner(EpicId),
+    /// `tasks.allium: SeeTasksByEnteringTheirEpic`, fired when an epic's view
+    /// opens.
+    MarkSeen(EpicId),
 }

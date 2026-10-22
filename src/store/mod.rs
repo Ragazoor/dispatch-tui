@@ -108,6 +108,10 @@ pub trait AgentRead: Send + Sync {
 #[async_trait::async_trait]
 pub trait TaskCrud: TaskRead {
     async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
+    /// [`Self::create_task`], marking the task unseen for every follower of
+    /// its epic and ancestors in the same transaction
+    /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryFollower`).
+    async fn create_task_signalled(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
     /// `PhoenixRespawn`, made atomic: inserts the successor (with `labels` set
     /// directly, not a follow-up patch) and clears `predecessor`'s `phoenix`
     /// flag in one transaction. Either both happen or neither does — a failure
@@ -582,6 +586,10 @@ pub trait EpicCrud: EpicRead {
     /// `epics.allium: FlattenEpic`, likewise: the tasks of every `repo-group`
     /// sub-epic move back onto `root` and the emptied sub-epics are deleted.
     async fn flatten_epic(&self, root: EpicId) -> Result<()>;
+    /// `tasks.allium: SeeTasksByEnteringTheirEpic`: this board's person
+    /// entered `epic`, so their unseen marks on the tasks directly in it end.
+    /// A board with no settled identity has no marks to end and does nothing.
+    async fn mark_epic_seen(&self, epic: EpicId) -> Result<()>;
 }
 
 /// Read-only work-package queries (`work-packages.allium`). Held (via

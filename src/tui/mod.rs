@@ -338,6 +338,7 @@ impl App {
                 split: SplitState::default(),
                 work_packages: Vec::new(),
                 work_package_links: Vec::new(),
+                unseen_tasks: HashSet::new(),
             },
             status: StatusState::default(),
             should_quit: false,

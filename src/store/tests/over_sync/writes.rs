@@ -48,6 +48,8 @@ impl WriterIdentity for FixedIdentity {
 #[derive(Debug, Clone, PartialEq)]
 enum Sent {
     CreateTask(Box<bindings::Task>),
+    CreateTaskSignalled(Box<bindings::Task>),
+    MarkEpicSeen(String, EpicId),
     PatchTask(TaskId, Box<bindings::TaskPatch>),
     DeleteTask(TaskId),
     SetTaskEpic(TaskId, i64, String),
@@ -247,6 +249,19 @@ impl ReducerCaller for RecordingCaller {
     async fn create_task(&self, row: bindings::Task) -> anyhow::Result<TaskId> {
         self.record(Sent::CreateTask(Box::new(row)))?;
         Ok(TaskId(42))
+    }
+
+    async fn create_task_signalled(&self, row: bindings::Task) -> anyhow::Result<TaskId> {
+        self.record(Sent::CreateTaskSignalled(Box::new(row)))?;
+        Ok(TaskId(42))
+    }
+
+    async fn mark_epic_seen(
+        &self,
+        subscriber: String,
+        epic_id: EpicId,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::MarkEpicSeen(subscriber, epic_id))
     }
 
     async fn patch_task(

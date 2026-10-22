@@ -130,6 +130,13 @@ impl super::super::EpicCrud for Store {
         self.caller.regroup_epic(root).await?.applied()
     }
 
+    async fn mark_epic_seen(&self, epic: EpicId) -> Result<()> {
+        let Some(identity) = self.identity.user().await? else {
+            return Ok(());
+        };
+        self.caller.mark_epic_seen(identity, epic).await?.applied()
+    }
+
     async fn flatten_epic(&self, root: EpicId) -> Result<()> {
         self.caller.flatten_epic(root).await?.applied()
     }

@@ -456,6 +456,11 @@ impl EpicService {
         Ok(self.db.regroup_epic(root).await?)
     }
 
+    /// `tasks.allium: SeeTasksByEnteringTheirEpic`.
+    pub async fn mark_epic_seen(&self, epic: EpicId) -> Result<(), ServiceError> {
+        Ok(self.db.mark_epic_seen(epic).await?)
+    }
+
     pub async fn flatten_epic(&self, root: EpicId) -> Result<(), ServiceError> {
         Ok(self.db.flatten_epic(root).await?)
     }

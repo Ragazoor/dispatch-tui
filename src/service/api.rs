@@ -183,6 +183,11 @@ macro_rules! task_service_api {
                 params: $crate::service::CreateTaskParams
             ) -> Result<$crate::models::TaskId, $crate::service::ServiceError>;
 
+            async fn create_task_signalled(
+                &self,
+                params: $crate::service::CreateTaskParams
+            ) -> Result<$crate::models::TaskId, $crate::service::ServiceError>;
+
             async fn create_task_returning(
                 &self,
                 params: $crate::service::CreateTaskParams
@@ -468,6 +473,11 @@ macro_rules! epic_service_api {
             async fn regroup_epic(
                 &self,
                 root: $crate::models::EpicId
+            ) -> Result<(), $crate::service::ServiceError>;
+
+            async fn mark_epic_seen(
+                &self,
+                epic: $crate::models::EpicId
             ) -> Result<(), $crate::service::ServiceError>;
 
             async fn flatten_epic(

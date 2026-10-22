@@ -246,6 +246,10 @@ usually the right answer.",
                 "phoenix": {
                     "type": "boolean",
                     "description": "When true, completing this task automatically recreates it as a fresh backlog copy carrying the same settings, and the flag moves to that copy. A recurring task with no schedule — nothing dispatches the copy, you do. Defaults to false."
+                },
+                "signal": {
+                    "type": "boolean",
+                    "description": "When true, signal the user that a new task arrived: the new task and every epic on the path to it are marked on the board until the user enters the epic. Only the people following the epic when the task is created are marked. Ignored when epic_id is null. Defaults to false."
                 }
             },
             "required": ["title", "repo_path", "epic_id"]

@@ -47,9 +47,12 @@ use super::*;
 ///    never written (`agent.rs`, `agent_state.rs`).
 /// 9: agents A5 — `write_task` no longer assigns or checks a task alias, and
 ///    `backfill_task_aliases` and the `alias` patch field are gone.
+/// 10: new-task signal — `unseen_tasks`, `create_task_signalled` and
+///    `mark_epic_seen`; task moves, completion and deletion clear the marks
+///    (`unseen.rs`).
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 9;
+pub const RULES_VERSION: i64 = 10;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///

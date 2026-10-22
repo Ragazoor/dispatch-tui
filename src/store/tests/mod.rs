@@ -13,6 +13,7 @@ mod store_seam;
 mod tasks;
 mod tasks_feed;
 mod tasks_patch;
+mod unseen;
 mod usage;
 mod work_packages;
 

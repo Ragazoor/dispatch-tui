@@ -148,6 +148,10 @@ struct Rows {
     /// `settings` arrives already scoped to this host by the subscription's
     /// `WHERE host = …`, so nothing here filters by host.
     subscriptions: BTreeMap<String, bindings::Subscription>,
+    /// `core.allium: UnseenTask`. Arrive scoped to this person by the
+    /// subscription's `WHERE subscriber = …`, so nothing here filters by
+    /// subscriber.
+    unseen_tasks: BTreeMap<String, bindings::UnseenTask>,
     settings: BTreeMap<String, bindings::Setting>,
     /// Task #4971. Unconditionally subscribed, like `learnings`/`usage_events`
     /// above — a retirement record is not scoped by owner or host either.
@@ -213,6 +217,7 @@ impl Rows {
             && self.learning_retrievals.is_empty()
             && self.usage_events.is_empty()
             && self.subscriptions.is_empty()
+            && self.unseen_tasks.is_empty()
             && self.settings.is_empty()
             && self.retired_feed_items.is_empty()
             && self.work_packages.is_empty()
@@ -469,6 +474,31 @@ impl SharedRows {
 
     pub fn remove_subscription(&self, id: String) {
         self.write(|rows| rows.subscriptions.remove(&id).is_some());
+    }
+
+    pub fn upsert_unseen_task(&self, row: &bindings::UnseenTask) {
+        self.write(|rows| {
+            rows.unseen_tasks.insert(row.id.clone(), row.clone());
+            true
+        });
+    }
+
+    pub fn remove_unseen_task(&self, id: String) {
+        self.write(|rows| rows.unseen_tasks.remove(&id).is_some());
+    }
+
+    /// The tasks this person has not yet seen, ascending
+    /// (`core.allium: UnseenTask`). The rows are already this person's own.
+    pub fn unseen_task_ids(&self) -> Vec<TaskId> {
+        self.read(|rows| {
+            let mut ids: Vec<TaskId> = rows
+                .unseen_tasks
+                .values()
+                .map(|u| TaskId(u.task_id))
+                .collect();
+            ids.sort_unstable();
+            ids
+        })
     }
 
     pub fn upsert_setting(&self, row: &bindings::Setting) {

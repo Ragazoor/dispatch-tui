@@ -593,3 +593,22 @@ pub struct WorkPackageLink {
 pub const WORK_PACKAGE_ITEM_TASK: &str = "task";
 
 pub const WORK_PACKAGE_ITEM_EPIC: &str = "epic";
+
+/// One person's unseen mark on one task (`core.allium: UnseenTask`).
+///
+/// Written when a task is created with the signal on, one row per follower of
+/// its epic or of an ancestor; cleared when the person enters the epic, when the
+/// task leaves its epic or finishes, and with the task. An epic's mark is never
+/// a row: it is derived from these.
+#[spacetimedb::table(accessor = unseen_tasks, public)]
+#[derive(Clone, Debug)]
+pub struct UnseenTask {
+    /// `<subscriber>/<task_id>`, so re-marking overwrites rather than
+    /// duplicates, for the reason `Subscription::id` is derived.
+    #[primary_key]
+    pub id: String,
+    #[index(btree)]
+    pub task_id: i64,
+    /// The `UserIdentity` that has not yet seen the task.
+    pub subscriber: String,
+}

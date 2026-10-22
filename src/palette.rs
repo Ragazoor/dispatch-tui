@@ -14,6 +14,9 @@ pub(crate) const GREEN: Color = Color::Rgb(158, 206, 106);
 pub(crate) const CYAN: Color = Color::Rgb(86, 182, 194);
 pub(crate) const BLUE: Color = Color::Rgb(122, 162, 247);
 pub(crate) const RED: Color = Color::Rgb(247, 118, 142);
+/// The new-task signal (`board-visuals.allium`, "New-task signal"): one meaning,
+/// no other use on the board.
+pub(crate) const SIGNAL: Color = Color::Rgb(255, 158, 100);
 pub(crate) const FLASH_BG: Color = Color::Rgb(62, 52, 20);
 
 // ── Board neutral ramp (board-visuals.allium: BoardNeutralRamp) ──────────────

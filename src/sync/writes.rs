@@ -126,6 +126,12 @@ pub trait ReducerCaller: Send + Sync {
     /// [`super::SdkReducerCaller::create_task`] for how, and for what that
     /// costs.
     async fn create_task(&self, row: bindings::Task) -> Result<TaskId>;
+    /// [`Self::create_task`], and mark the task unseen for every follower of
+    /// its epic and ancestors in the same transaction
+    /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryFollower`).
+    async fn create_task_signalled(&self, row: bindings::Task) -> Result<TaskId>;
+    /// `tasks.allium: SeeTasksByEnteringTheirEpic`.
+    async fn mark_epic_seen(&self, subscriber: String, epic_id: EpicId) -> Result<ReducerOutcome>;
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome>;
     async fn delete_task(&self, id: TaskId) -> Result<ReducerOutcome>;
     async fn set_task_epic(

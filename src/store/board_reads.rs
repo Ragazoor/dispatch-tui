@@ -29,7 +29,7 @@ use async_trait::async_trait;
 use super::{
     DispatchRequestRead, EpicRead, RepoConfigRead, SessionRequestRead, TaskRead, WorkPackageRead,
 };
-use crate::models::PollScopeId;
+use crate::models::{PollScopeId, TaskId};
 
 /// The reads a board performs to draw itself.
 ///
@@ -54,4 +54,8 @@ pub trait BoardReads:
     /// The subscription's generation, read straight from the rows in memory, so
     /// it always has an answer.
     async fn revision(&self) -> u64;
+
+    /// The tasks this person has not yet seen (`core.allium: UnseenTask`),
+    /// ascending. Drives the board's new-task signal.
+    async fn unseen_task_ids(&self) -> Vec<TaskId>;
 }

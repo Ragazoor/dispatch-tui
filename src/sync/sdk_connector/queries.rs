@@ -54,6 +54,9 @@ pub(in crate::sync) fn subscription_queries(
         // This person's own subscription rows, so a change made on another of
         // their machines arrives here.
         format!("SELECT * FROM subscriptions WHERE subscriber = '{owner}'"),
+        // This person's own unseen marks (sync.allium: own_unseen). Never
+        // another person's.
+        format!("SELECT * FROM unseen_tasks WHERE subscriber = '{owner}'"),
         // The user board: epic-less tasks this person owns.
         format!("SELECT * FROM tasks WHERE owner = '{owner}'"),
         // own_creations (sync.allium: SubscribeOnceIdentityIsSettled):

@@ -22,6 +22,7 @@ pub mod close_task_reducer;
 pub mod create_epic_reducer;
 pub mod create_learning_reducer;
 pub mod create_task_reducer;
+pub mod create_task_signalled_reducer;
 pub mod create_work_package_reducer;
 pub mod delete_epic_reducer;
 pub mod delete_learning_reducer;
@@ -55,6 +56,7 @@ pub mod learning_type;
 pub mod learning_verdict_input_type;
 pub mod learnings_table;
 pub mod link_work_package_item_reducer;
+pub mod mark_epic_seen_reducer;
 pub mod mark_pr_learnings_gate_shown_reducer;
 pub mod override_poll_owner_reducer;
 pub mod patch_epic_reducer;
@@ -146,6 +148,8 @@ pub mod todo_type;
 pub mod todos_table;
 pub mod try_record_stop_reducer;
 pub mod unlink_work_package_item_reducer;
+pub mod unseen_task_type;
+pub mod unseen_tasks_table;
 pub mod unsubscribe_from_epic_reducer;
 pub mod usage_event_type;
 pub mod usage_events_table;
@@ -171,6 +175,7 @@ pub use close_task_reducer::close_task;
 pub use create_epic_reducer::create_epic;
 pub use create_learning_reducer::create_learning;
 pub use create_task_reducer::create_task;
+pub use create_task_signalled_reducer::create_task_signalled;
 pub use create_work_package_reducer::create_work_package;
 pub use delete_epic_reducer::delete_epic;
 pub use delete_learning_reducer::delete_learning;
@@ -204,6 +209,7 @@ pub use learning_type::Learning;
 pub use learning_verdict_input_type::LearningVerdictInput;
 pub use learnings_table::*;
 pub use link_work_package_item_reducer::link_work_package_item;
+pub use mark_epic_seen_reducer::mark_epic_seen;
 pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
 pub use override_poll_owner_reducer::override_poll_owner;
 pub use patch_epic_reducer::patch_epic;
@@ -295,6 +301,8 @@ pub use todo_type::Todo;
 pub use todos_table::*;
 pub use try_record_stop_reducer::try_record_stop;
 pub use unlink_work_package_item_reducer::unlink_work_package_item;
+pub use unseen_task_type::UnseenTask;
+pub use unseen_tasks_table::*;
 pub use unsubscribe_from_epic_reducer::unsubscribe_from_epic;
 pub use usage_event_type::UsageEvent;
 pub use usage_events_table::*;
@@ -360,6 +368,9 @@ pub enum Reducer {
     CreateTask {
         row: Task,
     },
+    CreateTaskSignalled {
+        row: Task,
+    },
     CreateWorkPackage {
         row: WorkPackage,
     },
@@ -403,6 +414,10 @@ pub enum Reducer {
         work_package_id: i64,
         kind: String,
         item_id: i64,
+    },
+    MarkEpicSeen {
+        subscriber: String,
+        epic_id: i64,
     },
     MarkPrLearningsGateShown {
         id: i64,
@@ -666,6 +681,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::CreateEpic { .. } => "create_epic",
             Reducer::CreateLearning { .. } => "create_learning",
             Reducer::CreateTask { .. } => "create_task",
+            Reducer::CreateTaskSignalled { .. } => "create_task_signalled",
             Reducer::CreateWorkPackage { .. } => "create_work_package",
             Reducer::DeleteEpic { .. } => "delete_epic",
             Reducer::DeleteLearning { .. } => "delete_learning",
@@ -678,6 +694,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::FlattenEpic { .. } => "flatten_epic",
             Reducer::IngestFeed { .. } => "ingest_feed",
             Reducer::LinkWorkPackageItem { .. } => "link_work_package_item",
+            Reducer::MarkEpicSeen { .. } => "mark_epic_seen",
             Reducer::MarkPrLearningsGateShown { .. } => "mark_pr_learnings_gate_shown",
             Reducer::OverridePollOwner { .. } => "override_poll_owner",
             Reducer::PatchEpic { .. } => "patch_epic",
@@ -829,6 +846,11 @@ Reducer::BatchDelete{
 }             => __sats::bsatn::to_vec(&create_task_reducer::CreateTaskArgs {
                 row: row.clone(),
 }),
+            Reducer::CreateTaskSignalled{
+                row,
+}             => __sats::bsatn::to_vec(&create_task_signalled_reducer::CreateTaskSignalledArgs {
+                row: row.clone(),
+}),
             Reducer::CreateWorkPackage{
                 row,
 }             => __sats::bsatn::to_vec(&create_work_package_reducer::CreateWorkPackageArgs {
@@ -904,6 +926,13 @@ Reducer::BatchDelete{
                 work_package_id: work_package_id.clone(),
                 kind: kind.clone(),
                 item_id: item_id.clone(),
+}),
+            Reducer::MarkEpicSeen{
+                subscriber,
+                epic_id,
+}             => __sats::bsatn::to_vec(&mark_epic_seen_reducer::MarkEpicSeenArgs {
+                subscriber: subscriber.clone(),
+                epic_id: epic_id.clone(),
 }),
             Reducer::MarkPrLearningsGateShown{
                 id,
@@ -1357,6 +1386,7 @@ pub struct DbUpdate {
     task_watchers: __sdk::TableUpdate<TaskWatcher>,
     tasks: __sdk::TableUpdate<Task>,
     todos: __sdk::TableUpdate<Todo>,
+    unseen_tasks: __sdk::TableUpdate<UnseenTask>,
     usage_events: __sdk::TableUpdate<UsageEvent>,
     work_package_links: __sdk::TableUpdate<WorkPackageLink>,
     work_packages: __sdk::TableUpdate<WorkPackage>,
@@ -1440,6 +1470,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "todos" => db_update
                     .todos
                     .append(todos_table::parse_table_update(table_update)?),
+                "unseen_tasks" => db_update
+                    .unseen_tasks
+                    .append(unseen_tasks_table::parse_table_update(table_update)?),
                 "usage_events" => db_update
                     .usage_events
                     .append(usage_events_table::parse_table_update(table_update)?),
@@ -1556,6 +1589,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.todos = cache
             .apply_diff_to_table::<Todo>("todos", &self.todos)
             .with_updates_by_pk(|row| &row.id);
+        diff.unseen_tasks = cache
+            .apply_diff_to_table::<UnseenTask>("unseen_tasks", &self.unseen_tasks)
+            .with_updates_by_pk(|row| &row.id);
         diff.usage_events = cache
             .apply_diff_to_table::<UsageEvent>("usage_events", &self.usage_events)
             .with_updates_by_pk(|row| &row.id);
@@ -1643,6 +1679,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "todos" => db_update
                     .todos
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "unseen_tasks" => db_update
+                    .unseen_tasks
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "usage_events" => db_update
                     .usage_events
@@ -1738,6 +1777,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "todos" => db_update
                     .todos
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "unseen_tasks" => db_update
+                    .unseen_tasks
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "usage_events" => db_update
                     .usage_events
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1786,6 +1828,7 @@ pub struct AppliedDiff<'r> {
     task_watchers: __sdk::TableAppliedDiff<'r, TaskWatcher>,
     tasks: __sdk::TableAppliedDiff<'r, Task>,
     todos: __sdk::TableAppliedDiff<'r, Todo>,
+    unseen_tasks: __sdk::TableAppliedDiff<'r, UnseenTask>,
     usage_events: __sdk::TableAppliedDiff<'r, UsageEvent>,
     work_package_links: __sdk::TableAppliedDiff<'r, WorkPackageLink>,
     work_packages: __sdk::TableAppliedDiff<'r, WorkPackage>,
@@ -1882,6 +1925,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         );
         callbacks.invoke_table_row_callbacks::<Task>("tasks", &self.tasks, event);
         callbacks.invoke_table_row_callbacks::<Todo>("todos", &self.todos, event);
+        callbacks.invoke_table_row_callbacks::<UnseenTask>(
+            "unseen_tasks",
+            &self.unseen_tasks,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<UsageEvent>(
             "usage_events",
             &self.usage_events,
@@ -2581,6 +2629,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         task_watchers_table::register_table(client_cache);
         tasks_table::register_table(client_cache);
         todos_table::register_table(client_cache);
+        unseen_tasks_table::register_table(client_cache);
         usage_events_table::register_table(client_cache);
         work_package_links_table::register_table(client_cache);
         work_packages_table::register_table(client_cache);
@@ -2610,6 +2659,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "task_watchers",
         "tasks",
         "todos",
+        "unseen_tasks",
         "usage_events",
         "work_package_links",
         "work_packages",

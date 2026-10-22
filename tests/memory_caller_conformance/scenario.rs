@@ -68,7 +68,12 @@ fn memory_caller_matches_the_real_reducers() {
                     }
                 })
                 .await
-                .unwrap_or_else(|_| panic!("real store never reached the expected state"))
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "real store never reached the expected state: {}",
+                        stringify!($cond)
+                    )
+                })
             };
         }
 
@@ -263,6 +268,110 @@ fn memory_caller_matches_the_real_reducers() {
             rows_mem.subscribed_epics(subscriber),
             "subscribed_epics after unsubscribe"
         );
+
+        // -- new-task signal --------------------------------------------------------
+        // A task created with the signal on is marked for each follower of its
+        // epic; entering the epic clears it; moving it out clears it too.
+        real.subscribe_to_epic(subscriber.into(), EpicId(epic2_id_real))
+            .await
+            .unwrap();
+        wait_for!(rows_real.subscribed_epics(subscriber) == vec![EpicId(epic2_id_real)]);
+        mem.subscribe_to_epic(subscriber.into(), EpicId(epic2_id_mem))
+            .await
+            .unwrap();
+        let signalled_real = real
+            .create_task_signalled(blank_task_in_epic(epic2_id_real))
+            .await
+            .unwrap();
+        wait_for!(rows_real.unseen_task_ids() == vec![signalled_real]);
+        let signalled_mem = mem
+            .create_task_signalled(blank_task_in_epic(epic2_id_mem))
+            .await
+            .unwrap();
+        assert_eq!(signalled_real, signalled_mem, "signalled task id");
+        assert_eq!(
+            rows_real.unseen_task_ids(),
+            rows_mem.unseen_task_ids(),
+            "unseen after a signalled create"
+        );
+
+        real.mark_epic_seen(subscriber.into(), EpicId(epic2_id_real))
+            .await
+            .unwrap();
+        wait_for!(rows_real.unseen_task_ids().is_empty());
+        mem.mark_epic_seen(subscriber.into(), EpicId(epic2_id_mem))
+            .await
+            .unwrap();
+        assert_eq!(
+            rows_real.unseen_task_ids(),
+            rows_mem.unseen_task_ids(),
+            "unseen after entering the epic"
+        );
+
+        let moved_real = real
+            .create_task_signalled(blank_task_in_epic(epic2_id_real))
+            .await
+            .unwrap();
+        wait_for!(rows_real.unseen_task_ids() == vec![moved_real]);
+        let moved_mem = mem
+            .create_task_signalled(blank_task_in_epic(epic2_id_mem))
+            .await
+            .unwrap();
+        real.set_task_epic(moved_real, Some(EpicId(epic_id_real)), String::new())
+            .await
+            .unwrap();
+        wait_for!(rows_real.unseen_task_ids().is_empty());
+        mem.set_task_epic(moved_mem, Some(EpicId(epic_id_mem)), String::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows_real.unseen_task_ids(),
+            rows_mem.unseen_task_ids(),
+            "unseen after the task moves to another epic"
+        );
+
+        // Finishing a marked task clears it as well, and leaves nothing behind
+        // for the delete section below.
+        let done_patch = || bindings::TaskPatch {
+            status: Some("done".into()),
+            ..blank_task_patch()
+        };
+        let finished_real = real
+            .create_task_signalled(blank_task_in_epic(epic2_id_real))
+            .await
+            .unwrap();
+        wait_for!(rows_real.unseen_task_ids() == vec![finished_real]);
+        let finished_mem = mem
+            .create_task_signalled(blank_task_in_epic(epic2_id_mem))
+            .await
+            .unwrap();
+        real.patch_task(finished_real, done_patch()).await.unwrap();
+        wait_for!(rows_real.unseen_task_ids().is_empty());
+        mem.patch_task(finished_mem, done_patch()).await.unwrap();
+        assert_eq!(
+            rows_real.unseen_task_ids(),
+            rows_mem.unseen_task_ids(),
+            "unseen after the task is finished"
+        );
+        for (real_id, mem_id) in [
+            (signalled_real, signalled_mem),
+            (moved_real, moved_mem),
+            (finished_real, finished_mem),
+        ] {
+            real.patch_task(real_id, done_patch()).await.unwrap();
+            mem.patch_task(mem_id, done_patch()).await.unwrap();
+            real.delete_task(real_id).await.unwrap();
+            wait_for!(rows_real.task(real_id).is_none());
+            mem.delete_task(mem_id).await.unwrap();
+        }
+
+        real.unsubscribe_from_epic(subscriber.into(), EpicId(epic2_id_real))
+            .await
+            .unwrap();
+        wait_for!(rows_real.subscribed_epics(subscriber).is_empty());
+        mem.unsubscribe_from_epic(subscriber.into(), EpicId(epic2_id_mem))
+            .await
+            .unwrap();
 
         // -- settings ---------------------------------------------------------------
         // Scoped by HOST (`docs/specs/settings.allium`), not by owner — "host-a"

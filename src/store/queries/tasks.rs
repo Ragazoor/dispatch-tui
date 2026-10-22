@@ -64,6 +64,19 @@ impl TaskCrud for Store {
         self.caller.create_task(row).await
     }
 
+    async fn create_task_signalled(&self, req: CreateTaskRequest<'_>) -> Result<TaskId> {
+        let identity = self
+            .require_identity("there is no name to stamp on a new task; it was not created")
+            .await?;
+        let owner = if req.epic_id.is_none() {
+            identity.as_str()
+        } else {
+            ""
+        };
+        let row = encode::create_task_row(&req, owner, &identity, &self.now());
+        self.caller.create_task_signalled(row).await
+    }
+
     async fn respawn_phoenix_successor(
         &self,
         predecessor: TaskId,

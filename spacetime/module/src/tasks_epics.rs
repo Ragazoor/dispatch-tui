@@ -28,6 +28,13 @@ pub(crate) fn write_task_keeping_session_facts(
     ctx: &ReducerContext,
     row: Task,
 ) -> Result<(), String> {
+    store_task(ctx, row).map(|_| ())
+}
+
+/// The body of [`write_task_keeping_session_facts`], answering the row as
+/// stored. A create's generated id exists only here, and
+/// [`create_task_signalled`] needs it in the same transaction.
+fn store_task(ctx: &ReducerContext, row: Task) -> Result<Task, String> {
     validate_task_ownership(row.epic_id, &row.owner)
         .map_err(|why| format!("task {}: {why}", row.id))?;
     validate_status("task", row.id, &row.status)?;
@@ -58,10 +65,10 @@ pub(crate) fn write_task_keeping_session_facts(
         // `agents.allium`: EndAgentWhenWorktreeGoes, in the same transaction
         // as the write.
         follow_task_write(&mut AgentTables(ctx), prior.as_ref(), &row);
+        Ok(row)
     } else {
-        ctx.db.tasks().insert(row);
+        Ok(ctx.db.tasks().insert(row))
     }
-    Ok(())
 }
 
 // Seeding
@@ -288,6 +295,30 @@ pub fn create_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
     Ok(())
 }
 
+/// [`create_task`], and mark the new task unseen for every follower of the epic
+/// it lands in or of any ancestor (`mcp-task-tools.allium:
+/// CreateTaskViaMcp`, SignalMarksTheTaskForEveryFollower).
+///
+/// A separate reducer rather than a flag on `create_task`: the caller learns
+/// the generated id only after the row arrives, so the marks cannot be a second
+/// call, and widening `create_task` would break every existing caller and
+/// binding. A task with no epic is created plain: nobody follows it.
+#[spacetimedb::reducer]
+pub fn create_task_signalled(ctx: &ReducerContext, row: Task) -> Result<(), String> {
+    let epic_id = route_to_repo_group(ctx, row.epic_id, &row.repo_path);
+    let stored = store_task(
+        ctx,
+        without_session_facts(Task {
+            id: 0,
+            epic_id,
+            ..row
+        }),
+    )?;
+    mark_task_unseen_for_followers(ctx, stored.id, epic_id);
+    recalculate_epic_chain(ctx, epic_id);
+    Ok(())
+}
+
 /// Change some fields of a task, and recalculate whatever epics it touched.
 ///
 /// A missing task is a silent no-op rather than an error. The realistic
@@ -346,7 +377,11 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
     }
 
     let status_changed = prior_status != row.status;
+    let finished = status_changed && row.status == DONE;
     write_task(ctx, row)?;
+    if finished {
+        clear_unseen_for_task(ctx, id);
+    }
 
     // ONLY WHEN THE DERIVATION'S INPUT MOVED. `derive_epic_status` reads the
     // child statuses and nothing else, so a patch that changes a url, a
@@ -408,6 +443,7 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 /// without it (task #4971's design doc flagged the gap).
 pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
     delete_agent_state_for(ctx, task_id);
+    clear_unseen_for_task(ctx, task_id);
     // agents.allium: AgentsGoWithTheirTask. Their names stay in the ledger.
     delete_agents_of(&mut AgentTables(ctx), task_id);
     detach_learnings_from_task(ctx, task_id);
@@ -462,6 +498,7 @@ pub fn set_task_epic(
             ..task
         },
     )?;
+    clear_unseen_for_task(ctx, id);
     // Both, and in that order. The one it left may now be complete; the one it
     // joined may no longer be.
     recalculate_epic_chain(ctx, was_in);
