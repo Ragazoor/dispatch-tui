@@ -235,7 +235,7 @@ impl StartupPaths {
 /// startup input is a field here, so it reaches every step of the root
 /// without changing a signature.
 struct BootstrapInputs<'a> {
-    /// The directory the operator named with `--db`.
+    /// The directory the operator named with `--data-dir`.
     data_dir: &'a Path,
     /// The MCP port to claim; `0` lets the OS choose.
     port: u16,
@@ -802,7 +802,7 @@ impl TuiRuntime {
         let parts = (inputs.build_store)(&data_dir, &host_id);
         let database = parts.database.clone();
 
-        // `data_dir` (above) is the directory the operator named with `--db`:
+        // `data_dir` (above) is the directory the operator named with `--data-dir`:
         // the example feed epic's script lives there (seeded once the store is
         // up, below).
 
