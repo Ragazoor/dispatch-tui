@@ -205,6 +205,8 @@ pub fn swap_task_window_into_pane(
         Vec::new()
     };
     tmux::swap_pane(&new_pane_id, right_pane, runner).context("swap pane failed")?;
+    // No `?` below this line: `?` converts through `From` into
+    // `SwapFailure::Unmoved`, which is false once the panes are exchanged.
 
     // 4. Dispose of the displaced window. The panes are exchanged now, so a
     // failure there cannot be reported as "nothing happened". Put them back if
