@@ -693,7 +693,7 @@ pub(super) fn build_prompt(
         // A CVE task names no design step: the runbook takes the addendum the
         // design step would have had, and only that one. `is_cve` is read from
         // the epic context because answering it needs the epic's ancestry.
-        (_, None) if is_cve => cve_runbook().to_string(),
+        (_, None) if is_cve => cve_runbook(description),
         (_, None) => design_instruction(ctx.has_allium_specs).to_string(),
         (_, Some(path)) => {
             let tail = if ctx.auto_run_plan {
@@ -814,8 +814,25 @@ fn pr_review_addendum() -> &'static str {
 /// authors its own PR and finishes through `/wrap-up`, so `wrap_up_instruction`
 /// is owed to it — and for the same reason `TaskTag::is_review` is untouched.
 /// See `CveRemediationSkipsTheDesignStep` in `docs/specs/dispatch-prompt.allium`.
-fn cve_runbook() -> &'static str {
-    include_str!("prompts/cve.md").trim_end_matches('\n')
+///
+/// The branch is chosen here, from the description, not by the agent: a line
+/// starting `Fix PR:` (written by `fetch-cve.sh`) selects the merge steps, and
+/// its absence the hand-written-fix steps, so the agent never reads a branch
+/// that cannot apply.
+fn cve_runbook(description: &str) -> String {
+    let steps = if description
+        .lines()
+        .any(|l| l.trim_start().starts_with("Fix PR:"))
+    {
+        include_str!("prompts/cve/fix-pr.md")
+    } else {
+        include_str!("prompts/cve/patch.md")
+    };
+    format!(
+        "{}\n\n{}",
+        include_str!("prompts/cve.md").trim_end_matches('\n'),
+        steps.trim_end_matches('\n')
+    )
 }
 
 /// Whether this prompt takes the CVE branch: the task hangs under the managed
@@ -992,9 +1009,9 @@ Then, before making any changes:\n\
 \n\
 {design}",
         design = if is_cve {
-            cve_runbook()
+            cve_runbook(description)
         } else {
-            design_instruction(ctx.has_allium_specs)
+            design_instruction(ctx.has_allium_specs).to_string()
         },
     );
 

@@ -42,7 +42,7 @@ A fresh clone must point git at the tracked hooks once: `git config core.hooksPa
 
 The pre-push hook (`.githooks/pre-push`) runs `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `check-rustdoc-links.sh` (rustdoc `[`Item`]` links in `src/`; its own CI job), the three doc checkers (`check-doc-paths.sh`, `check-doc-symbols.sh`, `check-doc-headings.sh`, each with a self-test), `check-no-test-sleep.sh`, `test-fetch-reviews.sh`, `test-fetch-cve.sh` and the spacetime module check. `cargo test` is not part of the hook; run it yourself before pushing. To exempt a deliberate citation, annotate it with `allow-phantom-symbol: <why>` or `allow-phantom-heading: <why>`.
 
-**Commit subjects must be Conventional Commits** (`feat(tui): ...`, `fix: ...`; types `feat fix docs chore refactor test perf ci build style revert`). The tracked `.githooks/commit-msg` hook rejects anything else, so a commit that does not parse fails at `git commit` — write the subject in this form from the start. release-please builds versions and the changelog from them. Merge, `Revert "..."` and `fixup!`/`squash!` subjects are exempt. Details: [docs/conventions.md](docs/conventions.md) ("Conventional commits").
+**Commit subjects must be Conventional Commits** (`feat(tui): ...`, `fix: ...`). The tracked `.githooks/commit-msg` hook rejects anything else at `git commit`, so write the subject in this form from the start. Types, exemptions and why: [docs/conventions.md](docs/conventions.md) ("Conventional commits").
 
 **That `cargo fmt` step has no `--check`.** Pushing reformats your working tree in place, so a push can leave you with unstaged changes you did not make. Run `cargo fmt` yourself before committing and the step becomes a no-op.
 
@@ -52,7 +52,7 @@ Cite `path::symbol` (`src/feed/exec.rs::exec_feed_command`) rather than `file:NN
 
 ### CI
 
-CI runs Test, Clippy, Rustdoc links, Format, Coverage, release Build (per shipped target) and Gate scripts (a mirror of the pre-push hook). Coverage is gated. Details: [docs/testing.md](docs/testing.md).
+CI mirrors the pre-push hook and also runs the tests, a release build per shipped target and a coverage check that is gated. Details: [docs/testing.md](docs/testing.md).
 
 ## Running & Debugging Locally
 

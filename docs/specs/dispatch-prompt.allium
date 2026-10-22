@@ -802,7 +802,12 @@ rule RenderCveRunbook {
         -- "Fix PR: <url>" line to the description when an open PR in the
         -- repo already fixes the alert (see "scripts/fetch-cve.sh: an alert
         -- names the open PR that fixes it" in feed-scripts.allium). The
-        -- runbook's FIRST step checks for that line, and when it is there the
+        -- RENDERER, not the agent, checks for that line: a description line
+        -- that starts with "Fix PR:" selects the merge steps, and its absence
+        -- selects the hand-written-fix steps. Each runbook carries only its
+        -- own branch, so the agent never reads a branch that cannot apply.
+        -- The shared opening (a dependency fix, no spec-first design, no
+        -- failing test first) renders either way. With the line, the
         -- agent reviews and merges that PR instead of writing a fix: confirm
         -- the PR lands on a version in the advisory's fixed set, that a
         -- dependency bot opened it and it changes only dependency files, that
@@ -812,8 +817,8 @@ rule RenderCveRunbook {
         -- review cannot ride the approval into main; and wrap up on the path
         -- with no git operations. Any check that fails goes to the user, not to a
         -- hand-written fix — the PR is the fix that is wanted, and a second one
-        -- would compete with it. No line means no linked PR, and the remaining
-        -- steps run as before. The fixed-set check is the same one the
+        -- would compete with it. No line means no linked PR, and the runbook
+        -- is the hand-written-fix steps above. The fixed-set check is the same one the
         -- hand-written path makes, for the same backport reason: a bot PR
         -- matched by package name may bump to a version still vulnerable.
         --

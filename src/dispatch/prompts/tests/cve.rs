@@ -26,7 +26,7 @@ fn plain_epic() -> EpicContext {
 
 #[test]
 fn cve_runbook_states_the_advisory_steps_and_the_backport_trap() {
-    let text = cve_runbook();
+    let text = cve_runbook("d");
     assert!(
         text.contains("advisory"),
         "the runbook must send the agent to the advisory, got: {text}"
@@ -46,20 +46,16 @@ must say why, got: {text}"
     );
 }
 
+/// The description `fetch-cve.sh` writes when an open PR fixes the alert.
+const LINKED_DESCRIPTION: &str =
+    "lodash: prototype pollution\n\nFix PR: https://github.com/o/r/pull/7 (Bump lodash)";
+
 /// A feed-linked fix PR is reviewed and merged rather than duplicated, and
 /// it still has to land on a fixed version. See "WHEN A FIX PR IS ALREADY
 /// OPEN" under `CveRemediationSkipsTheDesignStep`.
 #[test]
 fn cve_runbook_merges_a_linked_fix_pr_after_checking_it() {
-    let text = cve_runbook();
-    let first_step = text
-        .lines()
-        .find(|l| l.starts_with("1."))
-        .unwrap_or_default();
-    assert!(
-        first_step.contains("Fix PR:"),
-        "the runbook's first step must look for the feed's Fix PR line, got: {text}"
-    );
+    let text = cve_runbook(LINKED_DESCRIPTION);
     for token in [
         "fixed set",
         "gh pr checks",
@@ -78,11 +74,72 @@ fn cve_runbook_merges_a_linked_fix_pr_after_checking_it() {
     }
 }
 
+/// The renderer resolves the Fix PR branch, so the agent reads only the
+/// steps that apply: a linked PR gets the merge steps and none of the
+/// hand-written-fix steps.
+#[test]
+fn a_linked_fix_pr_renders_only_the_merge_steps() {
+    let text = cve_runbook(LINKED_DESCRIPTION);
+    assert!(
+        !text.contains("Find where this repo pins"),
+        "a linked PR must not be sent to write its own fix, got: {text}"
+    );
+    assert!(
+        text.contains("do not write a failing test first"),
+        "the shared opening renders on both branches, got: {text}"
+    );
+}
+
+/// With no Fix PR line the merge steps have no subject, so they are absent.
+#[test]
+fn an_unlinked_alert_renders_only_the_hand_written_fix_steps() {
+    let text = cve_runbook("lodash: prototype pollution");
+    for token in ["Fix PR", "gh pr merge", "kognic-github-app"] {
+        assert!(
+            !text.contains(token),
+            "an unlinked alert must not carry `{token}`, got: {text}"
+        );
+    }
+    assert!(
+        text.contains("Find where this repo pins"),
+        "an unlinked alert gets the hand-written-fix steps, got: {text}"
+    );
+}
+
+/// Only a line that starts with `Fix PR:` links a PR; the words elsewhere
+/// in an advisory summary do not.
+#[test]
+fn fix_pr_mid_line_does_not_select_the_merge_steps() {
+    let text = cve_runbook("upstream notes: see Fix PR: in the changelog");
+    assert!(
+        !text.contains("gh pr merge"),
+        "a mid-line mention is not the feed's line, got: {text}"
+    );
+}
+
+/// `build_prompt` passes the task's own description through.
+#[test]
+fn cve_task_prompt_with_a_linked_pr_carries_the_merge_steps() {
+    let ctx = PromptContext::default();
+    let text = build_prompt(
+        TaskId(1),
+        "t",
+        LINKED_DESCRIPTION,
+        None,
+        Some(&cve_epic()),
+        &ctx,
+    );
+    assert!(
+        text.contains("gh pr merge"),
+        "the prompt must carry the merge steps, got: {text}"
+    );
+}
+
 /// The carve-out is test-FIRST, not testing. A patch we wrote ourselves
 /// still earns a test.
 #[test]
 fn cve_runbook_rules_out_test_first_without_ruling_out_tests() {
-    let text = cve_runbook();
+    let text = cve_runbook("d");
     assert!(
         text.contains("do not write a failing test first"),
         "the runbook must rule test-first out by name, got: {text}"

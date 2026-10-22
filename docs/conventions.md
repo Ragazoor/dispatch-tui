@@ -754,8 +754,7 @@ Commit subjects take the form `<type>[(scope)][!]: <description>`, with `<type>`
 
 ## `main` moves while you work
 
-Other agents land on `main` during your session. Other agents land on it during your session, so
-the snapshot you read at startup goes stale. Before wrapping up, run `git log
+Other agents land on `main` during your session, so the snapshot you read at startup goes stale. Before wrapping up, run `git log
 --oneline main..HEAD` **and** `git log --oneline HEAD..main` — the second is the
 one that catches a base that moved under you. If it is non-empty, merge `main`
 into your branch and re-run the suite before reporting completion; a green run

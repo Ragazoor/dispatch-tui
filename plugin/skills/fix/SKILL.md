@@ -56,12 +56,9 @@ description, or cancel. Apply what they ask for.
 
 ## Step 5: Create and dispatch
 
-Call the `dispatch` MCP tool `create_task` with `title`, `description`,
-`repo_path`, `tag`: `"fix"` and `epic_id`. `fix` is a board label only; it is
-the one that says "a person asked for this fix". Pass your own epic (it is in
-your prompt) only if the fix belongs to it. Otherwise, and in any session
-outside dispatch, pass `null` for a standalone task. Leave `wrap_up_mode`,
-`base_branch` and `auto_run_plan` unset.
+Call the `dispatch` MCP tool `create_task` with `tag`: `"fix"`, the board
+label that says a person asked for this fix. For `epic_id`, pass your own epic
+only if the fix belongs to it; otherwise pass `null` for a standalone task.
 
 If `create_task` errors, for example on a closed epic, report the error and
 stop. Otherwise call `dispatch_task` with the returned id. If that errors,

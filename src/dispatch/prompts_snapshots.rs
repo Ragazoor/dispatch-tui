@@ -82,6 +82,32 @@ fn snapshot_dispatch_prompt_cve() {
     insta::assert_snapshot!(prompt);
 }
 
+/// The same task once the feed has linked an open fix PR: the merge steps
+/// replace the hand-written-fix steps.
+#[test]
+fn snapshot_dispatch_prompt_cve_fix_pr() {
+    let epic = EpicContext {
+        epic_id: EpicId(9),
+        epic_title: "CVE".to_string(),
+        under_cve_feed: true,
+    };
+    let ctx = PromptContext {
+        tag: Some(TaskTag::Fix),
+        from_feed: true,
+        ..PromptContext::default()
+    };
+    let prompt = build_prompt(
+        TaskId(42),
+        "[HIGH] dispatch: CVE-2026-1234",
+        "idna accepts Punycode labels that do not produce any non-ASCII output\n\n\
+         Fix PR: https://github.com/o/r/pull/7 (Bump idna to 3.7)",
+        None,
+        Some(&epic),
+        &ctx,
+    );
+    insta::assert_snapshot!(prompt);
+}
+
 #[test]
 fn snapshot_dispatch_prompt_dependabot() {
     // With a pr_url AND from_feed, which is the production shape: only a feed
