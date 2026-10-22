@@ -693,7 +693,7 @@ pub(super) fn build_prompt(
         // A CVE task names no design step: the runbook takes the addendum the
         // design step would have had, and only that one. `is_cve` is read from
         // the epic context because answering it needs the epic's ancestry.
-        (_, None) if is_cve => cve_runbook(description),
+        (_, None) if is_cve => cve_runbook(ctx.fix_pr_linked),
         (_, None) => design_instruction(ctx.has_allium_specs).to_string(),
         (_, Some(path)) => {
             let tail = if ctx.auto_run_plan {
@@ -815,23 +815,19 @@ fn pr_review_addendum() -> &'static str {
 /// is owed to it — and for the same reason `TaskTag::is_review` is untouched.
 /// See `CveRemediationSkipsTheDesignStep` in `docs/specs/dispatch-prompt.allium`.
 ///
-/// The branch is chosen here, from the description, not by the agent: a line
-/// starting `Fix PR:` (written by `fetch-cve.sh`) selects the merge steps, and
-/// its absence the hand-written-fix steps, so the agent never reads a branch
-/// that cannot apply.
-fn cve_runbook(description: &str) -> String {
-    let steps = if description
-        .lines()
-        .any(|l| l.trim_start().starts_with("Fix PR:"))
-    {
+/// The branch is chosen here, not by the agent: the feed's `fix-pr` label
+/// ([`PromptContext::fix_pr_linked`]) selects the merge steps, and its absence
+/// the hand-written-fix steps, so the agent never reads a branch that cannot
+/// apply.
+fn cve_runbook(fix_pr_linked: bool) -> String {
+    let steps = if fix_pr_linked {
         include_str!("prompts/cve/fix-pr.md")
     } else {
         include_str!("prompts/cve/patch.md")
     };
-    format!(
-        "{}\n\n{}",
-        include_str!("prompts/cve.md").trim_end_matches('\n'),
-        steps.trim_end_matches('\n')
+    render_template(
+        include_str!("prompts/cve.md"),
+        &[("STEPS", steps.trim_end_matches('\n'))],
     )
 }
 
@@ -1009,7 +1005,7 @@ Then, before making any changes:\n\
 \n\
 {design}",
         design = if is_cve {
-            cve_runbook(description)
+            cve_runbook(ctx.fix_pr_linked)
         } else {
             design_instruction(ctx.has_allium_specs).to_string()
         },
@@ -1110,6 +1106,12 @@ pub struct PromptContext<'a> {
     /// anything. See `AReviewRunbookCarriesOnlyTheBranchThatApplies` in
     /// `docs/specs/dispatch-prompt.allium`.
     pub from_feed: bool,
+    /// Does the task carry the `fix-pr` label, which the CVE feed sets when an
+    /// open PR already fixes the alert? Read only by [`cve_runbook`] to choose
+    /// the merge steps over the hand-written-fix steps. The label, not the
+    /// description's `Fix PR:` line, is the signal, so rewording that line
+    /// cannot silently change the branch.
+    pub fix_pr_linked: bool,
 }
 
 /// `Default` is hand-written for one field: `has_allium_specs` defaults to
@@ -1126,6 +1128,7 @@ impl Default for PromptContext<'_> {
             has_allium_specs: true,
             pr_url: None,
             from_feed: false,
+            fix_pr_linked: false,
         }
     }
 }

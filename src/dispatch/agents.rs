@@ -582,6 +582,7 @@ pub fn dispatch_agent(
                 // author was already filtered, which is only true of a task a
                 // feed created.
                 from_feed: task.external_id.is_some(),
+                fix_pr_linked: task.labels.iter().any(|l| l == "fix-pr"),
             };
             build_prompt(
                 task.id,
@@ -642,6 +643,7 @@ pub fn quick_dispatch_agent(
                 learnings: injections.clone(),
                 agent_name,
                 has_allium_specs: repo_has_allium_specs(&task.repo_path),
+                fix_pr_linked: task.labels.iter().any(|l| l == "fix-pr"),
                 ..PromptContext::default()
             };
             build_quick_dispatch_prompt(task.id, &task.title, &task.description, epic, &ctx)
