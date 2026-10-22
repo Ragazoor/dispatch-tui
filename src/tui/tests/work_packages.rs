@@ -80,6 +80,18 @@ fn board_with_package() -> App {
     app
 }
 
+/// The view `n` levels above the one showing.
+fn nth_parent(app: &App, n: usize) -> &ViewMode {
+    let mut view = &app.board.view_mode;
+    for _ in 0..n {
+        match view {
+            ViewMode::Epic { parent, .. } | ViewMode::Package { parent, .. } => view = parent,
+            other => panic!("no parent above {other:?}"),
+        }
+    }
+    view
+}
+
 fn enter_package(app: &mut App, id: i64) {
     app.update(Message::WorkPackage(WorkPackageMessage::Enter(
         WorkPackageId(id),
@@ -529,23 +541,8 @@ fn enter_on_a_flattened_card_in_a_package_starts_the_trail_at_the_linked_epic() 
     app.handle_key(make_key(KeyCode::Enter));
 
     // Trail: package -> #1 -> #2.
-    let ViewMode::Epic {
-        epic_id, parent, ..
-    } = &app.board.view_mode
-    else {
-        panic!("expected an epic view, got {:?}", app.board.view_mode);
-    };
-    assert_eq!(*epic_id, EpicId(2));
-    let ViewMode::Epic {
-        epic_id: mid,
-        parent: top,
-        ..
-    } = parent.as_ref()
-    else {
-        panic!("expected linked epic #1 below the package");
-    };
-    assert_eq!(*mid, EpicId(1));
-    assert!(matches!(top.as_ref(), ViewMode::Package { .. }));
+    assert_eq!(trail(&app), vec![EpicId(2), EpicId(1)]);
+    assert!(matches!(nth_parent(&app, 2), ViewMode::Package { .. }));
 }
 
 #[test]
@@ -559,14 +556,8 @@ fn enter_on_a_linked_task_in_an_unlinked_epic_opens_only_its_own_epic() {
     app.handle_key(make_key(KeyCode::Enter));
 
     // Trail: package -> #4. Its parent #5 is not on it.
-    let ViewMode::Epic {
-        epic_id, parent, ..
-    } = &app.board.view_mode
-    else {
-        panic!("expected an epic view, got {:?}", app.board.view_mode);
-    };
-    assert_eq!(*epic_id, EpicId(4));
-    assert!(matches!(parent.as_ref(), ViewMode::Package { .. }));
+    assert_eq!(trail(&app), vec![EpicId(4)]);
+    assert!(matches!(nth_parent(&app, 1), ViewMode::Package { .. }));
 
     app.handle_key(make_key(KeyCode::Char('q')));
     assert!(matches!(app.board.view_mode, ViewMode::Package { .. }));
@@ -639,23 +630,8 @@ fn a_deepest_jump_from_a_package_starts_its_trail_at_the_package_view() {
     ));
 
     // Trail: package -> #2 -> #3. Epic #1 (above the linked epic) is not on it.
-    let ViewMode::Epic {
-        epic_id, parent, ..
-    } = &app.board.view_mode
-    else {
-        panic!("expected an epic view, got {:?}", app.board.view_mode);
-    };
-    assert_eq!(*epic_id, EpicId(3));
-    let ViewMode::Epic {
-        epic_id: mid,
-        parent: top,
-        ..
-    } = parent.as_ref()
-    else {
-        panic!("expected epic #2 below the package");
-    };
-    assert_eq!(*mid, EpicId(2));
-    assert!(matches!(top.as_ref(), ViewMode::Package { .. }));
+    assert_eq!(trail(&app), vec![EpicId(3), EpicId(2)]);
+    assert!(matches!(nth_parent(&app, 2), ViewMode::Package { .. }));
 }
 
 // ---------------------------------------------------------------------------

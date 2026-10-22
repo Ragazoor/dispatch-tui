@@ -45,20 +45,6 @@ fn running_in(id: i64, epic: Option<i64>) -> Task {
     t
 }
 
-/// The epic views showing, innermost first; empty on the board.
-fn trail(app: &App) -> Vec<EpicId> {
-    let mut out = vec![];
-    let mut view = &app.board.view_mode;
-    while let ViewMode::Epic {
-        epic_id, parent, ..
-    } = view
-    {
-        out.push(*epic_id);
-        view = parent;
-    }
-    out
-}
-
 fn on_running_card(app: &mut App) {
     app.selection_mut().set_column(RUNNING_COL);
     app.selection_mut().set_row(RUNNING_COL, 0);

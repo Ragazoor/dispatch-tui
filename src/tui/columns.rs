@@ -135,26 +135,22 @@ impl<'a> BoardView<'a> {
                 // in a flattened column every task under a linked epic too
                 // (`work-packages.allium: PackageViewCards`).
                 let (linked, linked_epics) = self.package_item_ids(package_id);
-                let subtree: HashSet<TaskId> = if self.filter.lens.flattened() {
-                    linked_epics
-                        .iter()
-                        .flat_map(|&e| {
-                            crate::models::descendant_task_ids(
-                                e,
-                                &self.board.epics,
-                                &self.board.tasks,
-                            )
-                        })
-                        .collect()
-                } else {
-                    HashSet::new()
-                };
+                // As in the Epic arm, only a flattened column reaches past
+                // the linked items, so the subtree is walked only then.
+                let subtree = self
+                    .filter
+                    .lens
+                    .flattened()
+                    .then(|| self.package_subtree_epics(linked_epics));
                 self.board
                     .tasks
                     .iter()
                     .filter(|t| {
                         linked.contains(&t.id)
-                            || (self.is_flattened_for_status(t.status) && subtree.contains(&t.id))
+                            || (self.is_flattened_for_status(t.status)
+                                && t.epic_id
+                                    .zip(subtree.as_ref())
+                                    .is_some_and(|(e, s)| s.contains(&e)))
                     })
                     .filter(|t| filters.admits(t))
                     .collect()

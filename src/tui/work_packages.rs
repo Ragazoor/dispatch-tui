@@ -20,6 +20,18 @@ use crate::models::{EpicId, TaskId, TaskStatus, WorkPackage, WorkPackageId, Work
 /// absent from the map has no card at all (hidden by the search query).
 pub(in crate::tui) type PackagePlacementMap = HashMap<WorkPackageId, EpicPlacement>;
 
+/// Each of `linked_epics` and every epic below it: the epics whose tasks a
+/// package reaches through its epic links (`work-packages.allium`).
+fn package_subtree_epics(
+    linked_epics: HashSet<EpicId>,
+    children: &HashMap<EpicId, Vec<EpicId>>,
+) -> HashSet<EpicId> {
+    linked_epics
+        .into_iter()
+        .flat_map(|e| crate::models::descendant_epic_ids_with_map(e, children))
+        .collect()
+}
+
 impl<'a> BoardView<'a> {
     /// The items `package` links to, in link order.
     pub(in crate::tui) fn package_items(
@@ -53,6 +65,18 @@ impl<'a> BoardView<'a> {
         (tasks, epics)
     }
 
+    /// [`package_subtree_epics`] against the board's own epic tree, for a
+    /// caller with one package in hand.
+    pub(in crate::tui) fn package_subtree_epics(
+        self,
+        linked_epics: HashSet<EpicId>,
+    ) -> HashSet<EpicId> {
+        package_subtree_epics(
+            linked_epics,
+            &crate::models::build_children_map(&self.board.epics),
+        )
+    }
+
     /// Where each package card sits on the main board (`PackageCardPlacement`).
     /// Empty outside the main board (`PackageCardsOnlyOnMainBoard`).
     ///
@@ -84,10 +108,7 @@ impl<'a> BoardView<'a> {
             .filter(|p| !self.filter.package_is_hidden(p.id))
         {
             let (task_ids, linked_epics) = self.package_item_ids(package.id);
-            let subtree: HashSet<EpicId> = linked_epics
-                .into_iter()
-                .flat_map(|e| crate::models::descendant_epic_ids_with_map(e, &children))
-                .collect();
+            let subtree = package_subtree_epics(linked_epics, &children);
             let mut any_visible = false;
             let mut all_done = true;
             for task in &self.board.tasks {

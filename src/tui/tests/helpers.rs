@@ -294,3 +294,17 @@ pub(in crate::tui) fn epic_task(id: i64, epic_id: i64, status: TaskStatus) -> Ta
         ..make_task(id, status)
     }
 }
+
+/// The epic views showing, innermost first; empty on the board.
+pub(in crate::tui) fn trail(app: &App) -> Vec<EpicId> {
+    let mut out = vec![];
+    let mut view = &app.board.view_mode;
+    while let ViewMode::Epic {
+        epic_id, parent, ..
+    } = view
+    {
+        out.push(*epic_id);
+        view = parent;
+    }
+    out
+}
