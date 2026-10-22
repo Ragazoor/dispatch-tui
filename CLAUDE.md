@@ -22,7 +22,7 @@ cargo run -- tui
 
 **`spacetime/module/` is a separate wasm crate.** Root `cargo test` does not cover it; its checks, the committed `module.wasm` and the client bindings are in [docs/testing.md](docs/testing.md) ("SpacetimeDB module and CI details"). Reducers have in-memory tests in `spacetime/module-tests/` (own crate, needs `gcc-c++` and `openssl-devel`). Rebuild with `./scripts/build-managed-module.sh` after a module change, and regenerate bindings with `./scripts/regenerate-spacetime-bindings.sh`.
 
-**The full suite needs `tmux` on `PATH`.** Without it the `tmux_*` targets print `skipping: tmux not available on PATH` and pass, so a green local run isn't proof they ran.
+**The full suite needs `tmux` and `spacetime` on `PATH`.** Without tmux the `tmux_*` targets print `skipping: tmux not available on PATH` and pass, so a green local run isn't proof they ran; without `spacetime` the live-store targets skip the same way (docs/testing.md, "The live-store tests skip without `spacetime`, except under CI").
 
 **Don't pipe `cargo test` into `tail`/`head`/`grep`.** A pipeline's exit code is the last command's, so a failing suite reads as a clean pass. Redirect instead: `cargo test > /tmp/t.txt 2>&1; echo $?`.
 
@@ -36,11 +36,11 @@ Everything else about tests — the per-target command list, snapshot workflow, 
 
 ### First-time setup
 
-A fresh clone must point git at the tracked hooks once: `git config core.hooksPath .githooks`. It also needs the wasm target (`sudo dnf install rust-std-static-wasm32-unknown-unknown`, or `rustup target add wasm32-unknown-unknown`) — the hook's last step builds the SpacetimeDB module and hard-fails without it, so a docs-only push fails at push time with no earlier warning. Nothing does this for you, and until it is run the whole gate below is silently inert locally — CI runs the same checks (see "CI" below), so skipping the setup costs you the fast local feedback, not the enforcement. Don't add hooks to `.git/hooks/` directly — that directory is untracked and shared across all worktrees, so changes there aren't version-controlled or reviewed.
+A fresh clone must point git at the tracked hooks once: `git config core.hooksPath .githooks`. **Use rustup.** `rust-toolchain.toml` pins the toolchain CI uses, and only rustup reads it; a distro cargo (Fedora's, no rustup) silently builds with its own rustc, and clippy then reports lints CI does not have. The hook's first step, `scripts/check-toolchain.sh`, stops the push with a clear message when the host rustc differs from the pin. A distro toolchain works only while its version equals the pin. It also needs the wasm target (`rustup target add wasm32-unknown-unknown`, or on a distro toolchain `sudo dnf install rust-std-static-wasm32-unknown-unknown`) — the hook's last step builds the SpacetimeDB module and hard-fails without it, so a docs-only push fails at push time with no earlier warning. Nothing does this for you, and until it is run the whole gate below is silently inert locally — CI runs the same checks (see "CI" below), so skipping the setup costs you the fast local feedback, not the enforcement. Don't add hooks to `.git/hooks/` directly — that directory is untracked and shared across all worktrees, so changes there aren't version-controlled or reviewed.
 
 **Install `sccache`** (`sudo dnf install sccache`): dispatch sets `RUSTC_WRAPPER=sccache` on agent windows when it is on `PATH` (`DispatchedAgentsShareASccacheNotATargetDir` in `docs/specs/dispatch.allium`). Do not share a `CARGO_TARGET_DIR` across worktrees. Raise the cache cap with `SCCACHE_CACHE_SIZE` (e.g. `50G`).
 
-The pre-push hook (`.githooks/pre-push`) runs `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `check-rustdoc-links.sh` (rustdoc `[`Item`]` links in `src/`; its own CI job), the three doc checkers (`check-doc-paths.sh`, `check-doc-symbols.sh`, `check-doc-headings.sh`, each with a self-test), `check-no-test-sleep.sh`, `test-fetch-reviews.sh`, `test-fetch-cve.sh` and the spacetime module check. `cargo test` is not part of the hook; run it yourself before pushing. To exempt a deliberate citation, annotate it with `allow-phantom-symbol: <why>` or `allow-phantom-heading: <why>`.
+The pre-push hook (`.githooks/pre-push`) runs `check-toolchain.sh` (with its self-test), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `check-rustdoc-links.sh` (rustdoc `[`Item`]` links in `src/`; its own CI job), the three doc checkers (`check-doc-paths.sh`, `check-doc-symbols.sh`, `check-doc-headings.sh`, each with a self-test), `check-no-test-sleep.sh`, `test-fetch-reviews.sh`, `test-fetch-cve.sh` and the spacetime module check. `cargo test` is not part of the hook; run it yourself before pushing. To exempt a deliberate citation, annotate it with `allow-phantom-symbol: <why>` or `allow-phantom-heading: <why>`.
 
 **Commit subjects must be Conventional Commits** (`feat(tui): ...`, `fix: ...`). The tracked `.githooks/commit-msg` hook rejects anything else at `git commit`, so write the subject in this form from the start. Types, exemptions and why: [docs/conventions.md](docs/conventions.md) ("Conventional commits").
 
@@ -112,7 +112,7 @@ This file is intentionally slim — it is loaded into every agent's context. Sea
 - **Session seam** — `wrap_up` and `exit_session` write request rows (`TaskService::request_wrap_up`, `request_exit_session`); the module owns the exit token, the Conflict sub_status, the close and the epic chain; only this host's reactor rebases and tears windows down (`TaskService::serve_session_request`). Never do either anywhere else.
 - **Layout-cache coherence**, **board read source**, **one store, no routing layer**, **DB connection model** — the TUI and storage seams.
 - **Render-panic policy**, **unsafe policy**, **tag system**, **read-side layering**, **module layering**, **`#[cfg(test)]` gating**, **workhorse macros**, **timing constants**.
-- Bare `unwrap()`/`expect()` outside tests only hard-fail under `cargo clippy --all-targets -- -D warnings` (the pre-push hook).
+- Production code has no bare `unwrap()`/`expect()`; the few `expect()` calls carry an `#[allow(clippy::expect_used)]` naming the invariant. The lints are `warn` in `Cargo.toml`, so a new one hard-fails only under `cargo clippy --all-targets -- -D warnings` (the pre-push hook and CI's Clippy job).
 
 Read these on demand:
 

@@ -42,6 +42,8 @@ fn pre_push_hook_is_executable() {
 fn pre_push_hook_runs_full_check_sequence() {
     let body = std::fs::read_to_string(pre_push_path()).unwrap();
     for needle in [
+        "scripts/check-toolchain.sh",
+        "scripts/test-check-toolchain.sh",
         "cargo fmt",
         "cargo clippy --all-targets -- -D warnings",
         "scripts/check-doc-paths.sh",

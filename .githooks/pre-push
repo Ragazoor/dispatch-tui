@@ -1,6 +1,14 @@
 #!/bin/sh
 set -e
 
+# First: a host cargo that ignores rust-toolchain.toml makes fmt and clippy
+# disagree with CI, so say so before they report errors the change did not cause.
+echo "toolchain..."
+./scripts/check-toolchain.sh
+
+echo "toolchain self-test..."
+bash ./scripts/test-check-toolchain.sh
+
 echo "fmt..."
 cargo fmt
 

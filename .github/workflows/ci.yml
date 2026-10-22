@@ -133,6 +133,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-v2-
 
+      # The pre-push hook runs this first so a host cargo that ignores the pin
+      # says so. Here it catches the other drift: a dtolnay/rust-toolchain pin
+      # moved without rust-toolchain.toml, or the other way round.
+      - name: Check rustc matches rust-toolchain.toml
+        run: ./scripts/check-toolchain.sh
+
       - name: Run clippy
         run: cargo clippy --target x86_64-unknown-linux-gnu --all-targets -- -D warnings
 
@@ -350,6 +356,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Self-test the toolchain checker
+        run: bash ./scripts/test-check-toolchain.sh
 
       - name: Validate path references in docs
         run: ./scripts/check-doc-paths.sh
