@@ -167,6 +167,27 @@ pub(super) async fn test_db() -> Arc<Store> {
     Arc::new(Store::open_in_memory().unwrap())
 }
 
+/// The named store every bootstrap test launches against.
+pub(super) const TEST_STORE: &str = "http://store.test";
+
+/// The inputs a bootstrap test starts from: an OS-chosen MCP port, the named
+/// [`TEST_STORE`] wired by `build_store`, and no store switch accepted. A test
+/// that needs another value overrides that field with `..`.
+pub(super) fn bootstrap_inputs<'a>(
+    data_dir: &'a Path,
+    paths: &'a StartupPaths,
+    build_store: fn(&Path, &str) -> StoreParts,
+) -> BootstrapInputs<'a> {
+    BootstrapInputs {
+        data_dir,
+        port: 0,
+        paths,
+        target: StoreTarget::Named(TEST_STORE.into()),
+        build_store,
+        accept_store_switch: false,
+    }
+}
+
 /// Persist `cmd` as `epic_id`'s feed command.
 ///
 /// The manual trigger reads the command (and feed_role, and group_by_repo) from

@@ -46,11 +46,16 @@ impl App {
         } else {
             &no_folds
         };
-        let mut rows = vec![];
-        list_epic_subtree(
-            None, 0, false, &children, epics, hidden, folded, &qualifies, &mut rows,
-        );
-        rows
+        let mut walk = SubtreeWalk {
+            children: &children,
+            epics,
+            hidden,
+            folded,
+            qualifies: &qualifies,
+            out: vec![],
+        };
+        walk.walk(None, 0, false);
+        walk.out
     }
 
     /// The number of rows on `tab`'s list.
@@ -310,67 +315,59 @@ fn sorted_ids_json(ids: impl Iterator<Item = i64>) -> String {
     serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string())
 }
 
-/// Append the listed epics under `node` to `out`, depth-first in board order.
-/// A child is listed when it qualifies or some descendant does (post-order
-/// decision, pre-order output). `depth` past the epic count means a parent
-/// cycle; the walk stops rather than hang the overlay.
-#[allow(clippy::too_many_arguments)]
-fn list_epic_subtree(
-    node: Option<EpicId>,
-    depth: usize,
-    parent_hidden: bool,
-    children: &HashMap<Option<EpicId>, Vec<usize>>,
-    epics: &[crate::models::Epic],
-    hidden: &std::collections::HashSet<EpicId>,
-    folded: &std::collections::HashSet<EpicId>,
-    qualifies: &dyn Fn(usize) -> bool,
-    out: &mut Vec<FilterEpicRow>,
-) {
-    let Some(kids) = children.get(&node) else {
-        return;
-    };
-    if depth > epics.len() {
-        return;
-    }
-    for &i in kids {
-        let e = &epics[i];
-        let own_hidden = hidden.contains(&e.id);
-        let mark = if parent_hidden {
-            FilterEpicMark::HiddenByParent
-        } else if own_hidden {
-            FilterEpicMark::Hidden
-        } else {
-            FilterEpicMark::Shown
+/// One walk of the epic tree for the filter overlay: the inputs that stay the
+/// same at every level of the recursion, and the rows it appends to.
+struct SubtreeWalk<'a> {
+    children: &'a HashMap<Option<EpicId>, Vec<usize>>,
+    epics: &'a [crate::models::Epic],
+    hidden: &'a std::collections::HashSet<EpicId>,
+    folded: &'a std::collections::HashSet<EpicId>,
+    qualifies: &'a dyn Fn(usize) -> bool,
+    out: Vec<FilterEpicRow>,
+}
+
+impl SubtreeWalk<'_> {
+    /// Append the listed epics under `node` to `out`, depth-first in board
+    /// order. A child is listed when it qualifies or some descendant does
+    /// (post-order decision, pre-order output). `depth` past the epic count
+    /// means a parent cycle; the walk stops rather than hang the overlay.
+    fn walk(&mut self, node: Option<EpicId>, depth: usize, parent_hidden: bool) {
+        let Some(kids) = self.children.get(&node) else {
+            return;
         };
-        let at = out.len();
-        list_epic_subtree(
-            Some(e.id),
-            depth + 1,
-            parent_hidden || own_hidden,
-            children,
-            epics,
-            hidden,
-            folded,
-            qualifies,
-            out,
-        );
-        let has_children = out.len() > at;
-        let is_folded = has_children && folded.contains(&e.id);
-        if is_folded {
-            out.truncate(at);
+        if depth > self.epics.len() {
+            return;
         }
-        if qualifies(i) || has_children {
-            out.insert(
-                at,
-                FilterEpicRow {
-                    id: e.id,
-                    depth,
-                    title: e.title.clone(),
-                    mark,
-                    has_children,
-                    folded: is_folded,
-                },
-            );
+        for &i in kids {
+            let e = &self.epics[i];
+            let own_hidden = self.hidden.contains(&e.id);
+            let mark = if parent_hidden {
+                FilterEpicMark::HiddenByParent
+            } else if own_hidden {
+                FilterEpicMark::Hidden
+            } else {
+                FilterEpicMark::Shown
+            };
+            let at = self.out.len();
+            self.walk(Some(e.id), depth + 1, parent_hidden || own_hidden);
+            let has_children = self.out.len() > at;
+            let is_folded = has_children && self.folded.contains(&e.id);
+            if is_folded {
+                self.out.truncate(at);
+            }
+            if (self.qualifies)(i) || has_children {
+                self.out.insert(
+                    at,
+                    FilterEpicRow {
+                        id: e.id,
+                        depth,
+                        title: e.title.clone(),
+                        mark,
+                        has_children,
+                        folded: is_folded,
+                    },
+                );
+            }
         }
     }
 }

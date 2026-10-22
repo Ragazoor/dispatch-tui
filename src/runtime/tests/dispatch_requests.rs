@@ -672,14 +672,11 @@ mod bootstrap {
         crate::host_file::resolve_for_launch(dir.path()).unwrap();
         crate::host_file::rename_host(dir.path(), "m4-bootstrap-host").unwrap();
 
-        let bootstrap = TuiRuntime::bootstrap_with(
+        let bootstrap = TuiRuntime::bootstrap(bootstrap_inputs(
             &data_dir,
-            0,
             &paths,
-            "http://store.test".into(),
             store_with_an_interrupted_dispatch,
-            false,
-        )
+        ))
         .await
         .expect("bootstrap must succeed");
 

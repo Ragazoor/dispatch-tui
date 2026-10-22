@@ -231,6 +231,23 @@ impl StartupPaths {
     }
 }
 
+/// What the composition root (`TuiRuntime::bootstrap`) starts from. A new
+/// startup input is a field here, so it reaches every step of the root
+/// without changing a signature.
+struct BootstrapInputs<'a> {
+    /// The directory the operator named with `--db`.
+    data_dir: &'a Path,
+    /// The MCP port to claim; `0` lets the OS choose.
+    port: u16,
+    paths: &'a StartupPaths,
+    target: StoreTarget,
+    /// The store's wiring. Production passes [`StoreParts::build`]; the tests
+    /// pass a stand-in over the in-memory reducers, whose connector accepts
+    /// without a server, so the startup wiring runs without one.
+    build_store: fn(&Path, &str) -> StoreParts,
+    accept_store_switch: bool,
+}
+
 /// Everything built by `TuiRuntime::bootstrap` that `run_tui` needs after
 /// the composition root returns.
 struct Bootstrap {
@@ -389,8 +406,15 @@ pub async fn run_tui(
         target.managed().cloned(),
         target.is_named().then(|| data_dir.to_path_buf()),
     );
-    let bootstrapped =
-        TuiRuntime::bootstrap_for(data_dir, port, paths, target.clone(), accept_store_switch).await;
+    let bootstrapped = TuiRuntime::bootstrap(BootstrapInputs {
+        data_dir,
+        port,
+        paths,
+        target: target.clone(),
+        build_store: StoreParts::build,
+        accept_store_switch,
+    })
+    .await;
     let Bootstrap {
         store_server: server,
         mut app,
@@ -765,67 +789,17 @@ impl TuiRuntime {
     ///
     /// The `#[cfg(test)]` / `#[cfg(not(test))]` embedding-service split lives
     /// here so call sites don't branch on `cfg`.
-    async fn bootstrap_for(
-        data_dir: &Path,
-        port: u16,
-        paths: &StartupPaths,
-        target: StoreTarget,
-        accept_store_switch: bool,
-    ) -> Result<Bootstrap> {
-        Self::bootstrap_inner(
-            data_dir,
-            port,
-            paths,
-            target,
-            StoreParts::build,
-            accept_store_switch,
-        )
-        .await
-    }
-
-    /// [`Self::bootstrap`], with the store's wiring supplied by the caller.
     ///
-    /// Production passes [`StoreParts::build`]. The tests pass a stand-in
-    /// over the in-memory reducers, whose connector accepts without a
-    /// server, so the startup wiring runs without one.
-    #[cfg(test)]
-    async fn bootstrap_with(
-        data_dir: &Path,
-        port: u16,
-        paths: &StartupPaths,
-        server: String,
-        build_store: fn(&Path, &str) -> StoreParts,
-        accept_store_switch: bool,
-    ) -> Result<Bootstrap> {
-        Self::bootstrap_inner(
-            data_dir,
-            port,
-            paths,
-            StoreTarget::Named(server),
-            build_store,
-            accept_store_switch,
-        )
-        .await
-    }
-
-    /// The composition root itself. A managed store is brought up between the
-    /// host being named and the first connection
-    /// (`BringUpTheManagedStoreOnceTheHostIsNamed`).
-    async fn bootstrap_inner(
-        data_dir: &Path,
-        port: u16,
-        paths: &StartupPaths,
-        target: StoreTarget,
-        build_store: fn(&Path, &str) -> StoreParts,
-        accept_store_switch: bool,
-    ) -> Result<Bootstrap> {
-        let mcp_listener = claim_agent_port(port).await?;
-        let data_dir = data_dir.to_path_buf();
+    /// A managed store is brought up between the host being named and the
+    /// first connection (`BringUpTheManagedStoreOnceTheHostIsNamed`).
+    async fn bootstrap(inputs: BootstrapInputs<'_>) -> Result<Bootstrap> {
+        let mcp_listener = claim_agent_port(inputs.port).await?;
+        let data_dir = inputs.data_dir.to_path_buf();
         let (host_id, host_label) = read_launch_identity(&data_dir).await?;
         // Fixed at construction: which backing a read or write goes to cannot
         // change under a caller. Nothing connects yet — that is
         // `connect_first` below, once the host is named.
-        let parts = build_store(&data_dir, &host_id);
+        let parts = (inputs.build_store)(&data_dir, &host_id);
         let database = parts.database.clone();
 
         // `data_dir` (above) is the directory the operator named with `--db`:
@@ -847,7 +821,7 @@ impl TuiRuntime {
         // MCP server, the feed runner and `TaskService`, so every launch path
         // gets the same answer.
         let runner: Arc<dyn ProcessRunner> = Arc::new(RealProcessRunner::with_claude_json(
-            paths.claude_json_path.clone(),
+            inputs.paths.claude_json_path.clone(),
         ));
         let (mcp_notify_tx, mcp_notify_rx) =
             mpsc::unbounded_channel::<crate::board_event::BoardEvent>();
@@ -862,8 +836,13 @@ impl TuiRuntime {
         // with, the example feed epic, the managed feeds, the repo paths and
         // every setting the loaders read — is a shared row, and would read
         // nothing from a store that had not answered yet.
-        let (store_server, session) =
-            connect_to_store(&target, &data_dir, &parts, accept_store_switch).await?;
+        let (store_server, session) = connect_to_store(
+            &inputs.target,
+            &data_dir,
+            &parts,
+            inputs.accept_store_switch,
+        )
+        .await?;
         let sync_store: Arc<dyn crate::sync::SyncStore> = database.clone();
 
         let emb_svc = finish_embedding_load(emb_load).await?;
@@ -918,7 +897,7 @@ impl TuiRuntime {
             &parts,
             &host_id,
             feed_notify_tx,
-            paths,
+            &inputs,
         );
 
         // store-split.allium: HostRestartFailsInterrupted, then the D5
@@ -974,7 +953,7 @@ impl TuiRuntime {
         parts: &StoreParts,
         host_id: &str,
         feed_notify_tx: mpsc::UnboundedSender<crate::board_event::BoardEvent>,
-        paths: &StartupPaths,
+        inputs: &BootstrapInputs<'_>,
     ) -> (TuiRuntime, mpsc::UnboundedReceiver<Message>) {
         let database = &parts.database;
         let (msg_tx, msg_rx) = mpsc::unbounded_channel::<Message>();
@@ -1015,7 +994,7 @@ impl TuiRuntime {
             // docs/specs/observability.allium:
             // SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase.
             budget_snapshot_path: crate::budget_snapshot_path(),
-            claude_json_path: paths.claude_json_path.clone(),
+            claude_json_path: inputs.paths.claude_json_path.clone(),
             split_restores: std::sync::Mutex::new(Vec::new()),
             dispatch_observer: Arc::new(std::sync::Mutex::new(
                 crate::dispatch::DispatchRequestObserver::new(host_id),

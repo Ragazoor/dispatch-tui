@@ -15,8 +15,6 @@ use crate::host_file::{host_file_path, HostIdentity};
 use crate::sync::tests::{accepted, ScriptedConnector};
 use crate::sync::StoreConnector;
 
-const TEST_STORE: &str = "http://store.test";
-
 /// The stand-in store `misc.rs`'s bootstrap tests use: the production wiring
 /// over fresh rows, behind a connector that accepts once.
 fn test_store(data_dir: &Path, _host: &str) -> StoreParts {
@@ -110,9 +108,7 @@ async fn a_launch_with_no_host_file_mints_one_and_leaves_the_legacy_database_alo
     let (dir, data_dir, paths) = legacy_install().await;
     let before = footprint(&data_dir);
 
-    let result =
-        TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
-            .await;
+    let result = TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, test_store)).await;
 
     match result {
         Ok(_) => panic!("a freshly minted host is unnamed and nobody can name it here"),
@@ -154,9 +150,7 @@ async fn a_launch_with_an_unparseable_host_file_aborts_and_keeps_it() {
     std::fs::write(&path, b"not json at all").unwrap();
     let before = footprint(&data_dir);
 
-    let result =
-        TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
-            .await;
+    let result = TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, test_store)).await;
 
     match result {
         Ok(_) => panic!("a damaged host file must abort the launch"),
@@ -191,19 +185,11 @@ async fn a_launch_with_a_named_host_file_never_opens_the_legacy_database() {
     );
     let before = footprint(&data_dir);
 
-    let bootstrap = match TuiRuntime::bootstrap_with(
-        &data_dir,
-        0,
-        &paths,
-        TEST_STORE.into(),
-        test_store,
-        false,
-    )
-    .await
-    {
-        Ok(b) => b,
-        Err(err) => panic!("a named host file must let the board start: {err}"),
-    };
+    let bootstrap =
+        match TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, test_store)).await {
+            Ok(b) => b,
+            Err(err) => panic!("a named host file must let the board start: {err}"),
+        };
 
     assert_eq!(
         footprint(&data_dir),

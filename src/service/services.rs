@@ -1,6 +1,6 @@
 //! [`Services`] — the four services, built once per process.
 //!
-//! The board's composition root (`TuiRuntime::bootstrap_inner`) builds one set and
+//! The board's composition root (`TuiRuntime::bootstrap`) builds one set and
 //! hands it to both the TUI runtime and the MCP server, so a keypress and an
 //! agent's tool call go through the same `TaskService` rather than two built
 //! from the same handles.

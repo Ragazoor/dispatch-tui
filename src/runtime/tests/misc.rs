@@ -728,8 +728,6 @@ mod bootstrap {
     use crate::sync::tests::{accepted, refused, ScriptedConnector};
     use crate::sync::StoreConnector;
 
-    const TEST_STORE: &str = "http://store.test";
-
     /// The stand-in store: the in-memory reducers over fresh rows, behind a
     /// connector that answers as scripted.
     fn test_store_with(data_dir: &Path, connector: Arc<dyn StoreConnector>) -> StoreParts {
@@ -781,16 +779,7 @@ mod bootstrap {
     async fn bootstrap_aborts_when_the_store_cannot_be_reached() {
         let (_dir, data_dir, paths) = fixture().await;
 
-        match TuiRuntime::bootstrap_with(
-            &data_dir,
-            0,
-            &paths,
-            TEST_STORE.into(),
-            unreachable_store,
-            false,
-        )
-        .await
-        {
+        match TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, unreachable_store)).await {
             Ok(_) => panic!("a board whose store is unreachable must not start"),
             Err(err) => assert_eq!(
                 err.to_string(),
@@ -839,16 +828,10 @@ mod bootstrap {
     async fn bootstrap_pins_the_store_database_once_it_answers() {
         let (_dir, data_dir, paths) = fixture().await;
 
-        let _bootstrap = TuiRuntime::bootstrap_with(
-            &data_dir,
-            0,
-            &paths,
-            TEST_STORE.into(),
-            store_holding_pinned_db,
-            false,
-        )
-        .await
-        .expect("a first launch has nothing pinned and must start");
+        let _bootstrap =
+            TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, store_holding_pinned_db))
+                .await
+                .expect("a first launch has nothing pinned and must start");
 
         assert_eq!(
             crate::startup::pinned_store_identity(&data_dir).as_deref(),
@@ -865,14 +848,11 @@ mod bootstrap {
         let (_dir, data_dir, paths) = fixture().await;
         assert!(crate::startup::pin_store_identity(&data_dir, PINNED_DB));
 
-        let result = TuiRuntime::bootstrap_with(
+        let result = TuiRuntime::bootstrap(bootstrap_inputs(
             &data_dir,
-            0,
             &paths,
-            TEST_STORE.into(),
             store_holding_other_db_never_connect,
-            false,
-        )
+        ))
         .await;
 
         match result {
@@ -901,14 +881,10 @@ mod bootstrap {
         let (_dir, data_dir, paths) = fixture().await;
         assert!(crate::startup::pin_store_identity(&data_dir, PINNED_DB));
 
-        let result = TuiRuntime::bootstrap_with(
-            &data_dir,
-            0,
-            &paths,
-            TEST_STORE.into(),
-            store_holding_other_db,
-            true,
-        )
+        let result = TuiRuntime::bootstrap(BootstrapInputs {
+            accept_store_switch: true,
+            ..bootstrap_inputs(&data_dir, &paths, store_holding_other_db)
+        })
         .await;
 
         assert!(
@@ -928,10 +904,9 @@ mod bootstrap {
     async fn bootstrap_gives_the_app_its_store_address() {
         let (_dir, data_dir, paths) = fixture().await;
 
-        let bootstrap =
-            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
-                .await
-                .expect("bootstrap must succeed");
+        let bootstrap = TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, test_store))
+            .await
+            .expect("bootstrap must succeed");
 
         assert_eq!(bootstrap.app.store_server(), Some(TEST_STORE));
     }
@@ -949,10 +924,9 @@ mod bootstrap {
     async fn bootstrap_records_a_named_store_beside_the_database_once_it_answers() {
         let (_dir, data_dir, paths) = fixture().await;
 
-        let _bootstrap =
-            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
-                .await
-                .expect("bootstrap must succeed against a reachable named store");
+        let _bootstrap = TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, test_store))
+            .await
+            .expect("bootstrap must succeed against a reachable named store");
 
         let recorded = std::fs::read_to_string(store_record(&data_dir))
             .expect("a board on a named store must record its address beside the database");
@@ -966,15 +940,8 @@ mod bootstrap {
     async fn bootstrap_records_nothing_when_the_named_store_cannot_be_reached() {
         let (_dir, data_dir, paths) = fixture().await;
 
-        let result = TuiRuntime::bootstrap_with(
-            &data_dir,
-            0,
-            &paths,
-            TEST_STORE.into(),
-            unreachable_store,
-            false,
-        )
-        .await;
+        let result =
+            TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, unreachable_store)).await;
 
         assert!(result.is_err(), "an unreachable store must abort startup");
         assert!(
@@ -992,9 +959,7 @@ mod bootstrap {
         let (_dir, data_dir, paths) = fixture().await;
         std::fs::create_dir(store_record(&data_dir)).unwrap();
 
-        let result =
-            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
-                .await;
+        let result = TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, test_store)).await;
 
         assert!(
             result.is_ok(),
@@ -1041,10 +1006,9 @@ mod bootstrap {
     async fn wires_up_a_working_app_and_runtime() {
         let (_dir, data_dir, paths) = fixture().await;
 
-        let bootstrap =
-            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
-                .await
-                .expect("bootstrap must succeed against a fresh, writable db path");
+        let bootstrap = TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, test_store))
+            .await
+            .expect("bootstrap must succeed against a fresh, writable db path");
 
         assert!(
             bootstrap.app.tasks().is_empty(),
@@ -1070,10 +1034,9 @@ mod bootstrap {
     async fn budget_snapshot_path_ignores_the_open_database() {
         let (dir, data_dir, paths) = fixture().await;
 
-        let bootstrap =
-            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
-                .await
-                .expect("bootstrap must succeed against a fresh, writable db path");
+        let bootstrap = TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, test_store))
+            .await
+            .expect("bootstrap must succeed against a fresh, writable db path");
 
         assert!(
             !bootstrap
@@ -1103,7 +1066,7 @@ mod bootstrap {
     async fn bootstrap_writes_nothing_into_the_supplied_claude_dir() {
         let (_dir, data_dir, paths) = fixture().await;
 
-        TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
+        TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, test_store))
             .await
             .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -1123,10 +1086,9 @@ mod bootstrap {
     async fn bootstrap_seeds_no_example_feed_epic() {
         let (_dir, data_dir, paths) = fixture().await;
 
-        let bootstrap =
-            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
-                .await
-                .expect("bootstrap must succeed against a fresh, writable db path");
+        let bootstrap = TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, test_store))
+            .await
+            .expect("bootstrap must succeed against a fresh, writable db path");
 
         let epics = crate::store::EpicRead::list_epics(&*bootstrap.runtime.database).await;
         assert!(
@@ -1194,10 +1156,9 @@ mod bootstrap {
     async fn trust_store_path_comes_from_the_supplied_paths() {
         let (_dir, data_dir, paths) = fixture().await;
 
-        let bootstrap =
-            TuiRuntime::bootstrap_with(&data_dir, 0, &paths, TEST_STORE.into(), test_store, false)
-                .await
-                .expect("bootstrap must succeed against a fresh, writable db path");
+        let bootstrap = TuiRuntime::bootstrap(bootstrap_inputs(&data_dir, &paths, test_store))
+            .await
+            .expect("bootstrap must succeed against a fresh, writable db path");
 
         assert_eq!(
             bootstrap.runtime.claude_json_path, paths.claude_json_path,
