@@ -2,7 +2,7 @@ The description's `Fix PR:` line names an open PR in this repo that already
 fixes the alert. Review and merge that PR instead of writing your own fix.
 
 1. Confirm the PR lands on a version in the fixed set (gh pr diff <PR>). The
-   feed may have matched it by package name alone.
+   line ends with how the feed matched it; a package-name match proves least.
 2. Confirm a dependency bot opened it and that it changes only dependency
    manifests and lockfiles (gh pr view <PR> --json author,files,headRefOid).
    Note headRefOid: it is the commit you are reviewing.

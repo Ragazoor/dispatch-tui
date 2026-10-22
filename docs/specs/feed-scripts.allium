@@ -145,8 +145,13 @@
 -- fixed set before approving anything.
 --
 -- WHAT A LINKED ITEM CARRIES. Its description gains a final paragraph
--- "Fix PR: <url> (<title>)", the title with control characters collapsed to
--- spaces and cut at 200 characters, since it lands in an agent prompt; its labels gain "fix-pr", and its wrap_up_mode
+-- "Fix PR: <url> (<title>), matched by <reason>", the title with control
+-- characters collapsed to spaces and cut at 200 characters, since it lands in
+-- an agent prompt. <reason> names the source that found the PR: "the alert's
+-- Dependabot link" (1), "advisory id" (2) or "package name" (3). Sources 2 and
+-- 3 can link a PR that only mentions the advisory or bumps the package to a
+-- version still affected, so the agent reads how strong the link is instead
+-- of assuming every match is the authoritative one. Its labels gain "fix-pr", and its wrap_up_mode
 -- is "done" instead of "pr" — merging another author's PR leaves the agent
 -- no commits of its own to open a PR for. The url stays the ALERT (url_type
 -- security_alert): the runbook reads the advisory from it, and the feed's

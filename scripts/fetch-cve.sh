@@ -141,12 +141,16 @@ for repo in "${REPOS[@]}"; do
     ([.security_advisory.ghsa_id, .security_advisory.cve_id]
        | map(select(. != null and . != ""))) as $ids |
     (.dependency.package.name // "" | ascii_downcase) as $pkg |
-    ($own[0][.number | tostring]
-       // first($bot_prs[] | select(
+    # Each source tags its match, so the description says how strong it is.
+    (($own[0][.number | tostring] | select(. != null)
+         | . + {reason: "the alert'\''s Dependabot link"})
+       // (first($bot_prs[] | select(
             ((.title + "\n" + (.body // "")) as $text
              | any($ids[]; . as $id | $text | contains($id)))))
-       // first($bot_prs[] | select($pkg != "" and
+           | . + {reason: "advisory id"})
+       // (first($bot_prs[] | select($pkg != "" and
             (.title | ascii_downcase | [splits("[\\s,()\\[\\]`]+")] | index($pkg)) != null))
+           | . + {reason: "package name"})
        // null) as $fix_pr |
     {
       external_id: ("cve:\($repo)#" + (.number | tostring)),
@@ -159,7 +163,7 @@ for repo in "${REPOS[@]}"; do
          end) +
         (if $fix_pr != null
          # The title reaches an agent prompt: one line, no control characters.
-         then "\n\nFix PR: \($fix_pr.url) (\($fix_pr.title | gsub("[[:cntrl:]]+"; " ") | .[0:200]))"
+         then "\n\nFix PR: \($fix_pr.url) (\($fix_pr.title | gsub("[[:cntrl:]]+"; " ") | .[0:200])), matched by \($fix_pr.reason)"
          else ""
          end)
       ),

@@ -74,7 +74,7 @@ fn cve_prompt(fix_pr_linked: bool) -> String {
     };
     let description = if fix_pr_linked {
         "idna accepts Punycode labels that do not produce any non-ASCII output\n\n\
-         Fix PR: https://github.com/o/r/pull/7 (Bump idna to 3.7)"
+         Fix PR: https://github.com/o/r/pull/7 (Bump idna to 3.7), matched by advisory id"
     } else {
         "idna accepts Punycode labels that do not produce any non-ASCII output"
     };

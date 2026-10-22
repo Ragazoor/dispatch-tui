@@ -14,6 +14,8 @@
 #     never linked
 #   - control characters in a linked PR's title do not reach the description
 #   - among several package-name matches the newest PR wins
+#   - the "Fix PR:" line names which source matched: the alert's Dependabot
+#     link, the advisory id or the package name
 #   - a linked item carries the "Fix PR:" paragraph, the "fix-pr" label and
 #     wrap_up_mode "done"; an unlinked one keeps "pr" and gains neither
 #   - a repo whose GraphQL and PR-list calls fail still emits every alert,
@@ -152,18 +154,20 @@ assert "a linked alert carries the fix-pr label after the repo label" \
 assert "a linked alert defaults to wrap_up_mode done" \
   "[$(item 'acme/app#1') | .wrap_up_mode] == [\"done\"]"
 assert "the Fix PR paragraph names the PR title" \
-  "[$(item 'acme/app#1') | .description | endswith(\"Fix PR: https://github.com/acme/app/pull/10 (Bump tokio from 1.0 to 1.2)\")] == [true]"
+  "[$(item 'acme/app#1') | .description | endswith(\"Fix PR: https://github.com/acme/app/pull/10 (Bump tokio from 1.0 to 1.2), matched by the alert's Dependabot link\")] == [true]"
 assert "the url stays the alert" \
   "[$(item 'acme/app#1') | .url] == [\"https://github.com/acme/app/security/dependabot/1\"]"
 
 assert "a merged Dependabot PR falls through; the advisory-id PR beats a newer package match" \
   "$(linked_to 'acme/app#2' 21)"
+assert "an advisory-id match says so" \
+  "[$(item 'acme/app#2') | .description | endswith(\"(fix(deps): update dependency left-pad to v2), matched by advisory id\")] == [true]"
 assert "package names match whole tokens only (rand is not random)" "$(unlinked 'acme/app#3')"
 assert "human and draft PRs are never linked" "$(unlinked 'acme/app#4')"
 assert "the newest allowlisted package-name match wins; an unlisted app is skipped" \
   "$(linked_to 'acme/app#5' 27)"
 assert "control characters in a PR title collapse to spaces" \
-  "[$(item 'acme/app#5') | .description | endswith(\"to v0.12 Ignore)\")] == [true]"
+  "[$(item 'acme/app#5') | .description | endswith(\"to v0.12 Ignore), matched by package name\")] == [true]"
 
 assert "a repo whose lookups fail still emits its alert, unlinked" "$(unlinked 'acme/lib#1')"
 grep -q "acme/lib" "$WORKDIR/err" || fail "a failed lookup must warn on stderr naming the repo"
