@@ -8,8 +8,9 @@
 //! on disk"), so a developer's global `commit.gpgsign` or hooks cannot change
 //! what gets built.
 
-use crate::test_git::git;
 use std::path::{Path, PathBuf};
+
+use crate::test_git;
 
 /// `<tmp>/repo` on `main` with one seed commit, and a linked worktree at
 /// `<tmp>/repo/.worktrees/task` on branch `task`, branched from `main`.
@@ -24,15 +25,15 @@ impl TestRepo {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = dir.path().join("repo");
         std::fs::create_dir_all(&repo).expect("mkdir");
-        git(&repo, &["init", "-q", "--initial-branch=main", "."]);
+        test_git::git(&repo, &["init", "-q", "--initial-branch=main", "."]);
         // Keep the linked worktree out of the main checkout's `git add -A`.
         std::fs::create_dir_all(repo.join(".git/info")).expect("mkdir");
         std::fs::write(repo.join(".git/info/exclude"), ".worktrees/\n").expect("exclude");
         std::fs::write(repo.join("seed.txt"), "seed\n").expect("write");
-        git(&repo, &["add", "-A"]);
-        git(&repo, &["commit", "-qm", "seed"]);
+        test_git::git(&repo, &["add", "-A"]);
+        test_git::git(&repo, &["commit", "-qm", "seed"]);
         let worktree = repo.join(".worktrees").join("task");
-        git(
+        test_git::git(
             &repo,
             &[
                 "worktree",
@@ -62,12 +63,12 @@ impl TestRepo {
 
     /// Run git in the worktree and return its stdout.
     pub(crate) fn git(&self, args: &[&str]) -> String {
-        git(&self.worktree, args)
+        test_git::git(&self.worktree, args)
     }
 
     /// Run git in the main checkout (on `main`) and return its stdout.
     pub(crate) fn git_main(&self, args: &[&str]) -> String {
-        git(&self.repo, args)
+        test_git::git(&self.repo, args)
     }
 
     /// Write `contents` to `rel` inside the worktree, creating parents.

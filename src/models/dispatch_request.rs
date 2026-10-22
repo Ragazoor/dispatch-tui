@@ -7,6 +7,8 @@
 //! (`sync.allium: SubscribeToThisHostsDispatchRequests`), which delivers only
 //! the rows naming this machine.
 
+use std::time::Duration;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +22,7 @@ define_id_newtype!(DispatchRequestId, dispatch_request_id_tests);
 /// may stay open, from `requested_at`. The module stores the deadline on the
 /// row and the host enforces the row's value; this copy is only for what has
 /// no row to read — `UnprovisionedIndicator`'s claim-stamp fallback.
-pub const DISPATCH_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+pub const DISPATCH_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Where a request is in its life. `Requested` and `Provisioning` are open;
 /// `Dispatched` and `Failed` are terminal.

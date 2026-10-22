@@ -9,8 +9,9 @@
 //! into the board's `tui` (both draw with the shared `palette`). A shared type both sides need belongs in a leaf module
 //! (`models`, `clock`, `embeddings`, …) that each depends on downward.
 //! The board's `tui` sits below `runtime`, which drives it: it turns messages
-//! into commands and draws, and never reaches into an adapter (`tmux`, `store`,
-//! `sync`, `spacetime`, `mcp`, `dispatch`) itself.
+//! into commands and draws, and never reaches into an adapter or service
+//! itself: what it may import is the leaf layer (`models`, `palette`,
+//! `keybindings`, `editor`, `backoff`, and `repo_sync`'s types).
 //! Test files are scanned too: a test reaching upward pins the edge just as
 //! firmly as production code does.
 
@@ -23,12 +24,12 @@ use std::path::PathBuf;
 /// `(module under src/, a directory or one file; modules it must not import)`.
 const RULES: &[(&str, &[&str])] = &[
     ("feed", &["runtime", "mcp"]),
-    ("mcp", &["cli"]),
+    ("mcp", &["cli", "tui"]),
     ("host_file", &["startup"]),
     ("spacetime", &["startup"]),
     ("sync", &["startup", "service", "store"]),
     ("store", &["startup"]),
-    ("service", &["startup"]),
+    ("service", &["startup", "tui"]),
     ("dispatch", &["service"]),
     ("cli", &["runtime", "tui"]),
     (
@@ -58,6 +59,18 @@ const RULES: &[(&str, &[&str])] = &[
             "spacetime",
             "mcp",
             "dispatch",
+            "service",
+            "process",
+            "git",
+            "feed",
+            "cli",
+            "startup",
+            "hooks",
+            "setup",
+            "agent_tree",
+            "host_file",
+            "store_connection",
+            "worktree_admin",
         ],
     ),
 ];

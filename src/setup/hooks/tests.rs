@@ -143,12 +143,10 @@ fn spawn_hook_harness(
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo = tmp.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
-    run(&["git", "init", "-q", "-b", branch], &repo);
-    run(&["git", "config", "user.email", "t@e.st"], &repo);
-    run(&["git", "config", "user.name", "T"], &repo);
+    crate::test_git::git(&repo, &["init", "-q", "-b", branch]);
     std::fs::write(repo.join("README"), "x").unwrap();
-    run(&["git", "add", "."], &repo);
-    run(&["git", "commit", "-q", "-m", "init"], &repo);
+    crate::test_git::git(&repo, &["add", "."]);
+    crate::test_git::git(&repo, &["commit", "-q", "-m", "init"]);
 
     // Drop the embedded script to a real file so bash can execute it.
     let script_path = tmp.path().join("task-status-hook");
@@ -505,16 +503,6 @@ fn subagent_events_do_not_stamp_activity() {
     );
 }
 
-#[cfg(unix)]
-fn run(args: &[&str], cwd: &std::path::Path) {
-    let status = std::process::Command::new(args[0])
-        .args(&args[1..])
-        .current_dir(cwd)
-        .status()
-        .expect("spawn");
-    assert!(status.success(), "command failed: {args:?}");
-}
-
 fn pr_learnings_hook_script() -> &'static str {
     PLUGIN_DIR
         .get_file("hooks/scripts/pr-learnings-hook")
@@ -584,12 +572,10 @@ fn pr_learnings_hook_invokes_gate_only_for_gh_pr_create() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo = tmp.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
-    run(&["git", "init", "-q", "-b", "321-pr"], &repo);
-    run(&["git", "config", "user.email", "t@e.st"], &repo);
-    run(&["git", "config", "user.name", "T"], &repo);
+    crate::test_git::git(&repo, &["init", "-q", "-b", "321-pr"]);
     std::fs::write(repo.join("README"), "x").unwrap();
-    run(&["git", "add", "."], &repo);
-    run(&["git", "commit", "-q", "-m", "init"], &repo);
+    crate::test_git::git(&repo, &["add", "."]);
+    crate::test_git::git(&repo, &["commit", "-q", "-m", "init"]);
 
     // Drop the embedded script to a real executable file.
     let script_path = tmp.path().join("pr-learnings-hook");
