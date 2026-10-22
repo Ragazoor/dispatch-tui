@@ -315,3 +315,79 @@ fn fix_skill_confirms_then_creates_and_dispatches_a_fix_task_in_the_owning_repo(
         "fix skill must check duplicates, then confirm, then create, then dispatch"
     );
 }
+
+/// The section of `skill` from `start` up to the next `## Step` heading.
+fn step_section(skill: &str, start: &str) -> &'static str {
+    skill_body(skill)
+        .split(start)
+        .nth(1)
+        .unwrap_or_else(|| panic!("{skill} skill must have a '{start}' section"))
+        .split("\n## Step")
+        .next()
+        .expect("split always yields at least one element")
+}
+
+/// Low findings are small issues the repo wants fixed in passing, not only
+/// reported. The 2026-10-22 review (epic 69651) dropped 10 of them until the
+/// user asked; Step 1 must take every finding and Step 2 must give Low ones
+/// a package rather than leave them out.
+#[test]
+fn decompose_review_skill_keeps_low_findings() {
+    let step1 = step_section("decompose-review", "## Step 1: Extract Review Findings");
+    assert!(
+        !step1.contains("blocker, high or medium"),
+        "Step 1 must not filter findings to blocker/high/medium: {step1:?}"
+    );
+    assert!(
+        step1.contains("Low"),
+        "Step 1 must say Low findings are included: {step1:?}"
+    );
+    let step2 = step_section("decompose-review", "## Step 2: Group into Work Packages");
+    assert!(
+        step2.contains("Cleanups"),
+        "Step 2 must group Low findings with no other home into a \
+         \"Cleanups\" package: {step2:?}"
+    );
+}
+
+#[test]
+fn decompose_review_skill_confirmation_names_left_out_findings() {
+    let step3 = step_section("decompose-review", "## Step 3: Confirm the Work Packages");
+    assert!(
+        step3.contains("Not included"),
+        "Step 3's confirmation list must name every finding left out, and \
+         why: {step3:?}"
+    );
+}
+
+/// `auto_run_plan` skips the "proceed?" question, not a decision only the
+/// user can make. A finding that needs one must reach the plan as a
+/// decision item the executing agent asks about, instead of guessing.
+#[test]
+fn decompose_review_skill_carries_decision_items_into_the_plan() {
+    let step2 = step_section("decompose-review", "## Step 2: Group into Work Packages");
+    assert!(
+        step2.contains("decision item"),
+        "Step 2 must say how to recognise a finding that needs a user \
+         decision: {step2:?}"
+    );
+    let step6 = step_section(
+        "decompose-review",
+        "## Step 6: Write Plan Files and Create Tasks",
+    );
+    assert!(
+        step6.contains("decision item"),
+        "Step 6 must write decision items into the plan and say \
+         auto_run_plan does not skip them: {step6:?}"
+    );
+    let template = skill_file("decompose-review", "references/plan-template.md");
+    assert!(
+        template.contains("## Decisions"),
+        "plan-template.md must have a '## Decisions' section"
+    );
+    assert!(
+        template.contains("AskUserQuestion"),
+        "the template's decision items must tell the executing agent to ask \
+         the user with AskUserQuestion"
+    );
+}
