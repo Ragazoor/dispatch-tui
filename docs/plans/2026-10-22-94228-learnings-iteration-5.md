@@ -58,7 +58,8 @@ The script run as if the new scopes had held all of W43:
 | Rows the rescoped entries now lose (outside their new repo) | n/a | 152 of 264 |
 
 (106 and 89, not 133 and 111: deleting an entry deletes its retrieval rows.) The real
-after number needs a week of retrievals: read W44.
+after number needs a week of retrievals: read W44. The parent-directory match is live:
+the running board binary was built 2026-10-22 09:39 CEST, after run 4's commit.
 
 ## Metrics table (run-to-run)
 
