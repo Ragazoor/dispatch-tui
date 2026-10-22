@@ -169,6 +169,56 @@ pub fn swap_task_window_into_pane(
     old_task: Option<(&TmuxWindow, &str)>,
     runner: &dyn ProcessRunner,
 ) -> std::result::Result<String, SwapFailure> {
+    let (new_pane_id, displaced) =
+        exchange_panes(new_window, right_pane, old_task, runner).map_err(SwapFailure::Unmoved)?;
+
+    // 4. Dispose of the displaced window. The panes are exchanged now, so a
+    // failure there cannot be reported as "nothing happened". Put them back if
+    // tmux lets us, and otherwise report that the exchange stuck. See
+    // SwapSplitPane in docs/specs/split-pane.allium.
+    let Err(error) =
+        dispose_of_displaced_window(new_window, &new_pane_id, right_pane, displaced, runner)
+    else {
+        return Ok(new_pane_id);
+    };
+    Err(match tmux::swap_pane(right_pane, &new_pane_id, runner) {
+        Ok(()) => SwapFailure::Unmoved(error),
+        Err(reverse) => {
+            tracing::warn!(%new_window, error = %reverse, "failed to reverse a swap after a later step failed");
+            SwapFailure::Exchanged {
+                pane_id: new_pane_id,
+                error: error.context(format!("the outgoing pane is left in window {new_window}")),
+            }
+        }
+    })
+}
+
+/// What becomes of the standalone window holding the outgoing pane once the
+/// panes are exchanged, decided before any pane moves.
+enum Displaced<'a> {
+    /// The outgoing pane goes back into `home`, the leftover it was pinned
+    /// from; `companions` are the incoming window's panes to drain.
+    Rejoin {
+        home: &'a TmuxWindow,
+        companions: Vec<String>,
+    },
+    /// The window is renamed to the outgoing task's `name`.
+    Rename {
+        name: &'a TmuxWindow,
+        worktree: &'a str,
+    },
+    /// The outgoing pane belonged to no task: the window is killed.
+    Kill,
+}
+
+/// Steps 1–3 of [`swap_task_window_into_pane`]: everything up to and including
+/// the `swap-pane`. An `Err` means no pane moved.
+fn exchange_panes<'a>(
+    new_window: &TmuxWindow,
+    right_pane: &str,
+    old_task: Option<(&'a TmuxWindow, &'a str)>,
+    runner: &dyn ProcessRunner,
+) -> Result<(String, Displaced<'a>)> {
     // 1. Resolve the incoming task's pane before swapping.
     let new_pane_id = tmux::pane_id_for_window(new_window, runner).context("cannot get pane ID")?;
 
@@ -176,18 +226,26 @@ pub fn swap_task_window_into_pane(
     // refusal fails the swap with nothing rearranged. A live window under the
     // outgoing name is either the leftover the pane was pinned from (rejoin it)
     // or a duplicate (refuse). See SwapSplitPane in docs/specs/split-pane.allium.
-    let rejoin = match old_task {
-        Some((old_name, _)) => {
-            let taken = tmux::has_window(old_name, runner)
-                .context("checking the outgoing window failed")?;
-            if taken && !awaits_pane(old_name, right_pane, runner) {
-                return Err(tmux::duplicate_window_name_error(old_name)
-                    .context("checking the outgoing window failed")
-                    .into());
+    let displaced = match old_task {
+        Some((name, worktree)) => {
+            let rejoin = (|| {
+                let taken = tmux::has_window(name, runner)?;
+                if taken && !awaits_pane(name, right_pane, runner) {
+                    return Err(tmux::duplicate_window_name_error(name));
+                }
+                Ok(taken)
+            })()
+            .context("checking the outgoing window failed")?;
+            if rejoin {
+                Displaced::Rejoin {
+                    home: name,
+                    companions: companion_panes_or_none(new_window, runner),
+                }
+            } else {
+                Displaced::Rename { name, worktree }
             }
-            taken
         }
-        None => false,
+        None => Displaced::Kill,
     };
 
     // 3. Atomically swap pane contents, addressing the source by pane id.
@@ -199,41 +257,8 @@ pub fn swap_task_window_into_pane(
     // index. The pane id resolved above is exactly the pane meant here and is
     // immune to both. See learning #324 and tests/tmux_lifecycle.rs's
     // `swap_works_when_pane_base_index_is_1`.
-    let companions = if rejoin {
-        companion_panes_or_none(new_window, runner)
-    } else {
-        Vec::new()
-    };
     tmux::swap_pane(&new_pane_id, right_pane, runner).context("swap pane failed")?;
-    // No `?` below this line: `?` converts through `From` into
-    // `SwapFailure::Unmoved`, which is false once the panes are exchanged.
-
-    // 4. Dispose of the displaced window. The panes are exchanged now, so a
-    // failure there cannot be reported as "nothing happened". Put them back if
-    // tmux lets us, and otherwise report that the exchange stuck. See
-    // SwapSplitPane in docs/specs/split-pane.allium.
-    if let Err(error) = dispose_of_displaced_window(
-        new_window,
-        &new_pane_id,
-        right_pane,
-        old_task,
-        rejoin,
-        companions,
-        runner,
-    ) {
-        return Err(match tmux::swap_pane(right_pane, &new_pane_id, runner) {
-            Ok(()) => SwapFailure::Unmoved(error),
-            Err(reverse) => {
-                tracing::warn!(%new_window, error = %reverse, "failed to reverse a swap after a later step failed");
-                SwapFailure::Exchanged {
-                    pane_id: new_pane_id,
-                    error: error
-                        .context(format!("the outgoing pane is left in window {new_window}")),
-                }
-            }
-        });
-    }
-    Ok(new_pane_id)
+    Ok((new_pane_id, displaced))
 }
 
 /// Step 4 of [`swap_task_window_into_pane`], run once the panes are exchanged:
@@ -243,19 +268,20 @@ fn dispose_of_displaced_window(
     new_window: &TmuxWindow,
     new_pane_id: &str,
     right_pane: &str,
-    old_task: Option<(&TmuxWindow, &str)>,
-    rejoin: bool,
-    companions: Vec<String>,
+    displaced: Displaced<'_>,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
-    match old_task {
-        Some((old_name, _)) if rejoin => {
+    match displaced {
+        Displaced::Rejoin { home, companions } => {
             // The outgoing pane goes home, leaving the incoming task's window
             // with only what sat beside its agent: drain it as a pin would.
-            tmux::rejoin_pane(right_pane, old_name, runner).context("rejoin pane failed")?;
+            tmux::rejoin_pane(right_pane, home, runner).context("rejoin pane failed")?;
             drain_pinned_from_window(new_window, new_pane_id, companions, runner);
         }
-        Some((old_name, old_worktree)) => {
+        Displaced::Rename {
+            name: old_name,
+            worktree: old_worktree,
+        } => {
             tmux::rename_window(new_window.as_str(), old_name, runner)
                 .context("rename window failed")?;
             // The renamed window's @dispatch_dir still names the incoming
@@ -282,7 +308,7 @@ fn dispose_of_displaced_window(
             // tree. Resync it to the task the window's new name implies.
             super::resync_agent_tree_pane(old_name, runner);
         }
-        None => {
+        Displaced::Kill => {
             tmux::kill_window(new_window, runner).context("kill window failed")?;
         }
     }
@@ -306,29 +332,13 @@ pub enum SwapFailure {
     },
 }
 
-impl SwapFailure {
-    /// The error to report, whichever arrangement tmux was left in.
-    pub fn error(&self) -> &anyhow::Error {
-        match self {
-            SwapFailure::Unmoved(error) | SwapFailure::Exchanged { error, .. } => error,
-        }
-    }
-}
-
-/// A failure before the `swap-pane` moved anything.
-impl From<anyhow::Error> for SwapFailure {
-    fn from(error: anyhow::Error) -> Self {
-        SwapFailure::Unmoved(error)
-    }
-}
-
-/// Renders the error, so `{:#}` still shows its whole context chain.
 impl std::fmt::Display for SwapFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if f.alternate() {
-            write!(f, "{:#}", self.error())
-        } else {
-            write!(f, "{}", self.error())
+        // `{:#}` renders anyhow's full context chain, as `TeardownFailure` does.
+        match self {
+            SwapFailure::Unmoved(error) | SwapFailure::Exchanged { error, .. } => {
+                write!(f, "{error:#}")
+            }
         }
     }
 }

@@ -264,6 +264,7 @@ fn a_pane_report_with_no_rearrangement_in_flight_changes_nothing() {
         crate::tui::messages::SplitMessage::SwapOpened {
             pane_id: "%42".to_string(),
             task_id: TaskId(3),
+            error: None,
         },
     ] {
         let mut app = make_app();
@@ -316,6 +317,7 @@ fn a_swap_report_does_not_settle_an_entry() {
         crate::tui::messages::SplitMessage::SwapOpened {
             pane_id: "%42".to_string(),
             task_id: TaskId(3),
+            error: None,
         },
     ));
     assert!(cmds.is_empty(), "expected no commands, got {cmds:?}");
@@ -741,6 +743,7 @@ fn swap_settles(app: &mut App, id: i64) -> Vec<Command> {
         crate::tui::messages::SplitMessage::SwapOpened {
             pane_id: "%77".to_string(),
             task_id: TaskId(id),
+            error: None,
         },
     ))
 }
@@ -753,6 +756,29 @@ fn swap_fails(app: &mut App) -> Vec<Command> {
             error: "Swap failed: rename window failed".to_string(),
         },
     ))
+}
+
+/// A swap whose panes stayed exchanged after a later step failed settles on the
+/// task the pane now shows, and still reports what went wrong
+/// (split-pane.allium: SplitPaneSwapSettles).
+#[test]
+fn a_swap_that_stayed_exchanged_settles_on_the_new_task_and_reports_the_error() {
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::SwapOpened {
+            pane_id: "%77".to_string(),
+            task_id: TaskId(4),
+            error: Some("Swap incomplete: left in window task-4".to_string()),
+        },
+    ));
+    assert!(!swap_in_flight(&app.board.split));
+    assert_eq!(app.board.split.pinned_task_id, Some(TaskId(4)));
+    assert_eq!(app.board.split.right_pane_id.as_deref(), Some("%77"));
+    assert_eq!(
+        app.status.error_popup.as_deref(),
+        Some("Swap incomplete: left in window task-4")
+    );
 }
 
 fn swap_target(cmds: &[Command]) -> Option<TaskId> {

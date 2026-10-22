@@ -841,7 +841,7 @@ mod quit_awaits_split_restore {
 /// failure points: the rename, the rejoin and the kill of the displaced window.
 mod swap_fails_after_the_exchange {
     use super::*;
-    use crate::tui::messages::{SplitMessage, SystemMessage};
+    use crate::tui::messages::SplitMessage;
 
     /// Where the swap fails once the panes are exchanged.
     #[derive(Clone, Copy)]
@@ -917,18 +917,11 @@ mod swap_fails_after_the_exchange {
 
     /// The reverse `swap-pane` is the last call, exchanging the same two panes.
     fn assert_reversed_last(mock: &MockProcessRunner) {
-        let calls = mock.recorded_calls();
-        let last = &calls.last().expect("calls were recorded").1;
+        let expected = format!("tmux swap-pane -d -s %2 -t {}", mock.pane_id_of("task-3"));
+        let calls = mock.flattened_calls();
         assert_eq!(
-            last,
-            &vec![
-                "swap-pane".to_string(),
-                "-d".to_string(),
-                "-s".to_string(),
-                "%2".to_string(),
-                "-t".to_string(),
-                mock.pane_id_of("task-3"),
-            ],
+            calls.last(),
+            Some(&expected),
             "expected a reverse swap-pane as the last call, got: {calls:?}"
         );
     }
@@ -949,28 +942,20 @@ mod swap_fails_after_the_exchange {
         let (mock, msgs) = run(step, MockProcessRunner::fail("reverse refused")).await;
         assert_reversed_last(&mock);
         let new_pane = mock.pane_id_of("task-3");
-        let opened = msgs.iter().any(|m| {
-            matches!(
-                m,
-                Message::Split(SplitMessage::SwapOpened { pane_id, task_id: TaskId(3) })
-                    if *pane_id == new_pane
-            )
-        });
+        // One message, as on every swap: it settles on task 3, which the pane
+        // now shows, and carries an error naming the window holding the
+        // outgoing pane.
         assert!(
-            opened,
+            matches!(
+                msgs.as_slice(),
+                [Message::Split(SplitMessage::SwapOpened {
+                    pane_id,
+                    task_id: TaskId(3),
+                    error: Some(error),
+                })] if *pane_id == new_pane && error.contains("task-3")
+            ),
             "the pane now shows task 3, so the swap settles on it: {msgs:?}"
         );
-        let stranded = msgs.iter().any(|m| {
-            matches!(
-                m,
-                Message::System(SystemMessage::Error(e)) if e.contains("task-3")
-            )
-        });
-        assert!(
-            stranded,
-            "the error must name the window holding the outgoing pane: {msgs:?}"
-        );
-        assert_eq!(msgs.len(), 2, "one settle and one error: {msgs:?}");
     }
 
     #[tokio::test]

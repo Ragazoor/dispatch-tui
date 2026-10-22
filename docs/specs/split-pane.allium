@@ -1063,9 +1063,9 @@ rule SwapSplitPane {
         --   * Reversed: the pane shows the outgoing occupant again, so the
         --     swap settles unsuccessfully, reporting the step that failed.
         --   * Not reversed: the pane shows the incoming task, so the swap
-        --     settles SUCCESSFULLY with the incoming pane, and a separate
-        --     error names the window still holding the outgoing pane, for the
-        --     user to tidy by hand. Settling as a failure here would leave
+        --     settles SUCCESSFULLY with the incoming pane, and the user is
+        --     shown an error naming the window still holding the outgoing
+        --     pane, to tidy by hand. Settling as a failure here would leave
         --     the board pinning a task the pane no longer shows.
         --
         -- The rejoin counts as done once its join-pane has moved the pane:

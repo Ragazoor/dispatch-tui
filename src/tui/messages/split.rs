@@ -25,16 +25,18 @@ pub enum SplitMessage {
     },
     /// A swap exchanged the pane's occupant. Settles the swap (see
     /// `docs/specs/split-pane.allium`'s `SplitPaneSwapSettles`).
+    ///
+    /// `error` is set when a step after the exchange failed and the panes could
+    /// not be swapped back ([`crate::dispatch::SwapFailure::Exchanged`]): the
+    /// pane shows `task_id` all the same, and the error is reported to the user.
     SwapOpened {
         pane_id: String,
         task_id: TaskId,
+        error: Option<String>,
     },
     /// A swap that could not be carried out. Settles the swap (see
     /// `docs/specs/split-pane.allium`'s `SplitPaneSwapSettles`) and reports
-    /// `error` to the user; the pane keeps showing what it showed before. A
-    /// swap that failed after exchanging the panes, and could not swap them
-    /// back, settles as [`SplitMessage::SwapOpened`] instead, with its error
-    /// raised separately.
+    /// `error` to the user; the pane keeps showing what it showed before.
     ///
     /// Distinct from a plain `SystemMessage::Error` precisely so the settle
     /// happens: a failure that only raised the error popup would leave the swap
@@ -86,9 +88,11 @@ impl SplitMessage {
             SplitMessage::EntryOpened { pane_id, task_id } => {
                 app.handle_split_pane_entry_opened(pane_id, task_id)
             }
-            SplitMessage::SwapOpened { pane_id, task_id } => {
-                app.handle_split_pane_swap_opened(pane_id, task_id)
-            }
+            SplitMessage::SwapOpened {
+                pane_id,
+                task_id,
+                error,
+            } => app.handle_split_pane_swap_opened(pane_id, task_id, error),
             SplitMessage::SwapFailed { error } => app.handle_split_pane_swap_failed(error),
             SplitMessage::EnterFailed { failure } => app.handle_split_pane_enter_failed(failure),
             SplitMessage::PaneClosed => app.handle_split_pane_closed(),
