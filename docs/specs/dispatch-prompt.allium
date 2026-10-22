@@ -802,7 +802,9 @@ rule RenderCveRunbook {
         -- "Fix PR: <url>" line to the description when an open PR in the
         -- repo already fixes the alert (see "scripts/fetch-cve.sh: an alert
         -- names the open PR that fixes it" in feed-scripts.allium). The
-        -- RENDERER, not the agent, checks for that line: a description line
+        -- RENDERER, not the agent, checks for that line, once, when the prompt
+        -- is built at dispatch; a line the feed adds later reaches only an
+        -- agent dispatched after it. A description line
         -- that starts with "Fix PR:" selects the merge steps, and its absence
         -- selects the hand-written-fix steps. Each runbook carries only its
         -- own branch, so the agent never reads a branch that cannot apply.
