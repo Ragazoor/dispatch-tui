@@ -121,7 +121,7 @@ jobs:
           ref: ${{ inputs.tag || needs.release-please.outputs.sha || github.sha }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@d86e0fa8f147d6539442c26a61ebba8becc19489 # 1.96.0
+        uses: dtolnay/rust-toolchain@ff7f6a3374ce205788da40198ec918bd5d67aea7 # 1.99.0
         with:
           targets: ${{ matrix.target }}
 
