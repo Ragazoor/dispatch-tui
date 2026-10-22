@@ -737,7 +737,7 @@ fn negotiate_initialize(id: Option<Value>, params: Option<Value>) -> JsonRpcResp
             },
             "serverInfo": {
                 "name": "dispatch",
-                "version": "0.1.0"
+                "version": env!("CARGO_PKG_VERSION")
             },
             "instructions": SERVER_INSTRUCTIONS
         }),

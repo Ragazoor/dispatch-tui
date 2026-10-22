@@ -55,14 +55,14 @@ pub(crate) use prompts::RESEARCH_AGENT_INTRO;
 pub use prompts::{build_and_record_injections, EpicContext, LearningInjections};
 pub use request_host::{
     DeadlineRunner, DispatchRequestObserver, SessionRequestObserver, SessionWork, DEADLINE_PASSED,
-    DISPATCH_REQUEST_TIMEOUT, EXIT_SESSION_TEARDOWN_TIMEOUT, WRAP_UP_REBASE_TIMEOUT,
+    EXIT_SESSION_TEARDOWN_TIMEOUT, WRAP_UP_REBASE_TIMEOUT,
 };
 pub use split_panes::{
     join_task_window_into_pane, restore_pinned_pane, swap_task_window_into_pane, SwapFailure,
 };
 pub(crate) use trust::{is_trusted_at, trust_at};
 pub(crate) use worktree::rollback_failed_provisioning;
-pub use worktree::{branch_from_worktree, teardown_task, validate_repo_path, TeardownFailure};
+pub use worktree::{branch_from_worktree, teardown_task, TeardownFailure};
 
 // ---------------------------------------------------------------------------
 // PR types

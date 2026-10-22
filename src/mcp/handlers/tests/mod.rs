@@ -501,6 +501,16 @@ async fn initialize_falls_back_to_server_version_for_unknown_client_version() {
     assert_eq!(result["protocolVersion"], "2025-06-18");
 }
 
+/// `serverInfo.version` is the crate's version, so a client log names the
+/// build it talked to.
+#[tokio::test]
+async fn initialize_reports_the_crate_version() {
+    let state = test_state().await;
+    let resp = call(&state, "initialize", None).await;
+    let result = resp.result.unwrap();
+    assert_eq!(result["serverInfo"]["version"], env!("CARGO_PKG_VERSION"));
+}
+
 /// MCP defines `ping` for liveness probes. It must return an empty result —
 /// not a `-32601 Method not found` protocol error.
 #[tokio::test]

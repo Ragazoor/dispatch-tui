@@ -30,12 +30,6 @@ use crate::models::{
 };
 use crate::process::{AgentBinaries, ProcessRunner};
 
-/// `store-split.allium: config.dispatch_request_timeout`: how long a request
-/// may stay open, from `requested_at`. The module stores the deadline on the
-/// row and the host enforces the row's value; this copy is only for what has
-/// no row to read — `UnprovisionedIndicator`'s claim-stamp fallback.
-pub const DISPATCH_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-
 /// `ProvisioningStopsAtTheDeadline`'s reason, as the row records it.
 pub const DEADLINE_PASSED: &str = "deadline passed";
 

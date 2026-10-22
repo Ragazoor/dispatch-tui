@@ -315,7 +315,7 @@ fn stale_claim_flips_to_unprovisioned() {
     let now = Utc::now();
     let mut task = make_unprovisioned_task(1, TaskStatus::Running);
     task.last_pre_tool_use_at = Some(
-        now - chrono::Duration::from_std(crate::dispatch::DISPATCH_REQUEST_TIMEOUT).unwrap()
+        now - chrono::Duration::from_std(crate::models::DISPATCH_REQUEST_TIMEOUT).unwrap()
             - chrono::Duration::seconds(1),
     );
     let app = App::new(vec![task.clone()]);

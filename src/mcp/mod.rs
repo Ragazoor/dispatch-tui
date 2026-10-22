@@ -74,7 +74,7 @@ pub struct McpDeps {
 /// `mcp-task-tools.allium: config.dispatch_task_wait_cap`: how long
 /// `dispatch_task` waits on its dispatch request before answering with the
 /// request's id and pending state. Shorter than the request's own deadline
-/// (`crate::dispatch::DISPATCH_REQUEST_TIMEOUT`), so a slow provisioning
+/// (`crate::models::DISPATCH_REQUEST_TIMEOUT`), so a slow provisioning
 /// answers pending rather than holding the call open to the end.
 pub const DISPATCH_TASK_WAIT_CAP: std::time::Duration = std::time::Duration::from_secs(30);
 

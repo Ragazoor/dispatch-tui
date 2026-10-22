@@ -696,21 +696,10 @@ async fn stress_rapid_status_transitions() {
 }
 
 #[tokio::test]
-async fn stress_db_with_many_tasks() {
-    let db = crate::store::Store::open_in_memory().unwrap();
-    use crate::store::{CreateTaskRequest, TaskCrud, TaskRead};
-    for i in 0..500 {
-        db.create_task(CreateTaskRequest {
-            description: "stress test",
-            ..CreateTaskRequest::fixture(&format!("Task {i}"), "/repo")
-        })
-        .await
-        .unwrap();
-    }
-    let tasks = db.list_all().await;
-    assert_eq!(tasks.len(), 500);
-
-    // Create app from DB tasks and verify navigation works
+async fn navigation_reaches_the_last_of_many_tasks() {
+    let tasks: Vec<_> = (1..=500)
+        .map(|id| make_task(id, TaskStatus::Backlog))
+        .collect();
     let mut app = App::new(tasks);
     for _ in 0..499 {
         app.update(Message::NavigateRow(1));

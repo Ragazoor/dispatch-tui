@@ -5,7 +5,8 @@
 //! the shared fallback one module away from one of its users. Turning a
 //! resolved repo name into a *local filesystem path* is a different job and
 //! stays in the dispatch adapter (`resolve_repo_path`), which is the only
-//! thing here that needs to know what is on disk.
+//! thing here that needs to know what is on disk. The one disk read here is
+//! [`validate_repo_path`]'s stat of a path already given.
 
 /// Expand a leading `~` or `~/` against a home directory *value*.
 ///
@@ -39,6 +40,23 @@ pub fn expand_tilde_with_home(path: &str, home: Option<&str>) -> String {
 pub fn expand_tilde(path: &str) -> String {
     let home = std::env::var("HOME").ok();
     expand_tilde_with_home(path, home.as_deref())
+}
+
+/// Validate that a repo path points to an existing directory.
+///
+/// Returns the expanded path on success, or an error message on failure. A
+/// stat, no git: the task form checks what the user typed with it, and the
+/// dispatch adapter checks the task's path before it provisions.
+pub fn validate_repo_path(path: &str) -> Result<String, String> {
+    let expanded = expand_tilde(path);
+    let p = std::path::Path::new(&expanded);
+    if !p.exists() {
+        return Err(format!("Directory does not exist: {expanded}"));
+    }
+    if !p.is_dir() {
+        return Err(format!("Not a directory: {expanded}"));
+    }
+    Ok(expanded)
 }
 
 /// Grouping key for anything whose repo cannot be determined.

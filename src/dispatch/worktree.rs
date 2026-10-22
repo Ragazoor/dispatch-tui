@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::time::Duration;
 
-use crate::models::{expand_tilde, slugify, Task, TmuxWindow};
+use crate::models::{expand_tilde, slugify, validate_repo_path, Task, TmuxWindow};
 use crate::process::ProcessRunner;
 use crate::tmux;
 
@@ -1219,21 +1219,6 @@ pub fn branch_from_worktree(worktree: &str) -> Option<String> {
         .file_name()
         .and_then(|n| n.to_str())
         .map(|s| s.to_string())
-}
-
-/// Validate that a repo path points to an existing directory.
-///
-/// Returns the expanded path on success, or an error message on failure.
-pub fn validate_repo_path(path: &str) -> Result<String, String> {
-    let expanded = expand_tilde(path);
-    let p = std::path::Path::new(&expanded);
-    if !p.exists() {
-        return Err(format!("Directory does not exist: {expanded}"));
-    }
-    if !p.is_dir() {
-        return Err(format!("Not a directory: {expanded}"));
-    }
-    Ok(expanded)
 }
 
 #[cfg(test)]

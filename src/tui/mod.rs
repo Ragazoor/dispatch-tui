@@ -423,7 +423,7 @@ impl App {
         task.last_pre_tool_use_at.is_some_and(|stamp| {
             now.signed_duration_since(stamp)
                 .to_std()
-                .is_ok_and(|elapsed| elapsed < crate::dispatch::DISPATCH_REQUEST_TIMEOUT)
+                .is_ok_and(|elapsed| elapsed < crate::models::DISPATCH_REQUEST_TIMEOUT)
         })
     }
 

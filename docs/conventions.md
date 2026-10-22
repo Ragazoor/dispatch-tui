@@ -493,7 +493,7 @@ Two patterns have already caused bugs and must not be repeated:
 
 - **No `std::fs` inside async handlers.** Blocking I/O on the async executor stalls the tokio thread pool. Any file-system operation inside an `async fn` must use `tokio::fs` or be wrapped in `tokio::task::spawn_blocking`.
 
-  **Accepted exception:** `validate_repo_path` (`src/dispatch/worktree.rs`), called synchronously from `submit_repo_path` (`src/tui/update/forms.rs`). It does only a `.exists()`/`.is_dir()` stat — no file content is read or parsed — on the low-frequency repo-path form-submit path (once per new task typed), unlike the `~/.claude.json` read-plus-`serde_json`-parse that motivated moving the `Space`-key trust check off the render thread (`CheckTrustAndDispatch` in `src/tui/commands/task.rs`). Keep it inline; don't route it through a `Command` unless it grows beyond a bare stat.
+  **Accepted exception:** `validate_repo_path` (`src/models/paths.rs`), called synchronously from `submit_repo_path` (`src/tui/update/forms.rs`). It does only a `.exists()`/`.is_dir()` stat — no file content is read or parsed — on the low-frequency repo-path form-submit path (once per new task typed), unlike the `~/.claude.json` read-plus-`serde_json`-parse that motivated moving the `Space`-key trust check off the render thread (`CheckTrustAndDispatch` in `src/tui/commands/task.rs`). Keep it inline; don't route it through a `Command` unless it grows beyond a bare stat.
 
 ## No domain entity is stored inline on the `Message`/`Command` bus
 

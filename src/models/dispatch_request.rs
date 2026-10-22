@@ -16,6 +16,12 @@ use crate::define_str_enum;
 
 define_id_newtype!(DispatchRequestId, dispatch_request_id_tests);
 
+/// `store-split.allium: config.dispatch_request_timeout`: how long a request
+/// may stay open, from `requested_at`. The module stores the deadline on the
+/// row and the host enforces the row's value; this copy is only for what has
+/// no row to read — `UnprovisionedIndicator`'s claim-stamp fallback.
+pub const DISPATCH_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Where a request is in its life. `Requested` and `Provisioning` are open;
 /// `Dispatched` and `Failed` are terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

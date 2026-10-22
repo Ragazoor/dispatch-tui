@@ -431,25 +431,6 @@ imply, got: {prompt}"
     );
 }
 
-#[test]
-fn validate_repo_path_existing_dir() {
-    assert!(validate_repo_path("/tmp").is_ok());
-}
-
-#[test]
-fn validate_repo_path_nonexistent() {
-    let result = validate_repo_path("/nonexistent/path");
-    assert!(result.is_err());
-    assert!(result.unwrap_err().contains("does not exist"));
-}
-
-#[test]
-fn validate_repo_path_not_a_dir() {
-    let result = validate_repo_path("/etc/hostname");
-    assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Not a directory"));
-}
-
 mod agent_launch;
 mod build_output;
 mod companion_pane;

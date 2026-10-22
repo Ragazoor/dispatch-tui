@@ -14,7 +14,8 @@
 
 use chrono::{TimeZone, Utc};
 
-use crate::dispatch::{DispatchRequestObserver, DEADLINE_PASSED, DISPATCH_REQUEST_TIMEOUT};
+use crate::dispatch::{DispatchRequestObserver, DEADLINE_PASSED};
+use crate::models::DISPATCH_REQUEST_TIMEOUT;
 use crate::models::{
     DispatchMode, DispatchOrigin, DispatchRequest, DispatchRequestId, DispatchRequestState, TaskId,
 };

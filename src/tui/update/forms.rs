@@ -141,7 +141,7 @@ pub(in crate::tui) fn submit_repo_path(
     // Accepted std::fs-in-handler exception (docs/conventions.md, "No
     // std::fs inside async handlers"): a bare exists()/is_dir() stat, no
     // read or parse, on the low-frequency repo-path submit path.
-    if let Err(msg) = crate::dispatch::validate_repo_path(&value) {
+    if let Err(msg) = crate::models::validate_repo_path(&value) {
         status.set(msg);
         return vec![];
     }
