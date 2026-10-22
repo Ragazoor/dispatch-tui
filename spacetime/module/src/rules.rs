@@ -51,6 +51,11 @@ use super::*;
 ///    `mark_epic_seen`; task moves, completion and deletion clear the marks
 ///    (`unseen.rs`).
 ///
+/// Not a bump: eb73e7eb, which made `write_task` check sub-status legality on
+/// every write path and tightened `patch_task`, `close_task` and the epic caps.
+/// Each of those rules already lived in the module; the commit closed write
+/// paths that skipped them and moved nothing out of the board.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
 pub const RULES_VERSION: i64 = 10;
 
