@@ -782,13 +782,10 @@ impl TuiRuntime {
             )));
     }
 
-    /// Build a fully-initialised runtime and its companion `App` from a database
-    /// path and MCP port. Encapsulates all startup I/O — database open, embedding
+    /// Build a fully-initialised runtime and its companion `App` from
+    /// `inputs`. Encapsulates all startup I/O — database open, embedding
     /// model load, MCP server spawn, and settings hydration — so `run_tui` reads
     /// as a sequence of named steps rather than an inline setup blob.
-    ///
-    /// The `#[cfg(test)]` / `#[cfg(not(test))]` embedding-service split lives
-    /// here so call sites don't branch on `cfg`.
     ///
     /// A managed store is brought up between the host being named and the
     /// first connection (`BringUpTheManagedStoreOnceTheHostIsNamed`).
