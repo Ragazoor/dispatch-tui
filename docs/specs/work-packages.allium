@@ -34,7 +34,10 @@
 --     number of packages.
 --   - The cards in a package view are the linked items themselves: a linked
 --     task is a task card, a linked epic is an epic card that Space enters.
---     Linked epics are NOT opened up into their subtasks.
+--     Linked epics are NOT opened up into their subtasks, except by the
+--     flat lens: every board lens applies in a package view as it does on
+--     the main board (task #98402, reversing the earlier "a package view is
+--     never flattened": PackageViewCards).
 --   - Package cards sit on the main board only. A package cannot hold a
 --     package, and no package card appears inside an epic view or another
 --     package view.
@@ -404,10 +407,18 @@ rule PackageViewCards {
         -- A task that is linked AND sits inside a linked epic shows as its
         -- own card and also counts toward the epic card's placement.
         -- Visible is the same predicate the main board applies.
-        -- Flattened columns (board-layout.allium: FlattenedView) are not
-        -- applied in a package view: its cards are a hand-picked set, and
-        -- flattening would replace the epic cards the user linked with their
-        -- contents.
+        -- Flattened columns (board-layout.allium: FlattenedView) apply in a
+        -- package view exactly as on the main board, per column. A flattened
+        -- column draws no epic card: it holds the linked tasks plus every
+        -- task in the subtree of a linked epic, each once, grouped under
+        -- the header of the task's own epic as on the main board. Backlog is
+        -- never flattened, so the linked epic cards stay there. The
+        -- only-active half of the lens applies through `visible`.
+        -- Enter on a flattened card jumps to its epic (epics.allium:
+        -- JumpToTaskEpic) with the trail starting at the outermost linked
+        -- epic on the task's epic path, or at the task's own epic when no
+        -- linked epic is on it: the user never stepped through the
+        -- ancestors above.
         -- A link whose task or epic this board does not hold (not in the
         -- shared rows it subscribes to) draws nothing.
 }

@@ -1831,7 +1831,9 @@ rule JumpToTaskEpic {
         ViewShowing(task.epic)
         -- The trail runs from the epic directly below the view the key was
         -- pressed in (or from the root epic on the main board) down to
-        -- task.epic.
+        -- task.epic. From a package view it starts at the outermost linked
+        -- epic on task.epic's path, or at task.epic itself when none is
+        -- linked (work-packages.allium: PackageViewCards).
 
     @guidance
         -- Enter on a task card in a FLATTENED column (board-layout.allium:

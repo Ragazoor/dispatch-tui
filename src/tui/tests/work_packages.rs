@@ -447,16 +447,129 @@ fn a_linked_sub_epic_is_an_epic_card_in_the_package_view() {
     assert_eq!(epics, vec![EpicId(2)]);
 }
 
-#[test]
-fn flattening_is_not_applied_in_a_package_view() {
-    let mut app = board_with_package();
+/// Board for the flat lens in a package view: linked epic #1 holds Backlog
+/// task #1 and sub-epic #2, whose task #2 is Running. Task #3 is Running in
+/// unlinked epic #4 and linked on its own; epic #4's parent #5 is unlinked
+/// too. Task #4 is Running in no package and no epic. Task #2 is also linked
+/// directly, so it is reached both ways.
+fn flat_package_board() -> App {
+    let mut app = App::new(vec![
+        epic_task(1, 1, TaskStatus::Backlog),
+        epic_task(2, 2, TaskStatus::Running),
+        epic_task(3, 4, TaskStatus::Running),
+        make_task(4, TaskStatus::Running),
+    ]);
+    let mut two = make_epic(2);
+    two.parent_epic_id = Some(EpicId(1));
+    let mut four = make_epic(4);
+    four.parent_epic_id = Some(EpicId(5));
+    app.board.epics = vec![make_epic(1), two, four, make_epic(5)];
+    app.board.work_packages = vec![make_package(7, "W")];
+    app.board.work_package_links = vec![
+        link(7, epic_item(1)),
+        link(7, task_item(2)),
+        link(7, task_item(3)),
+    ];
     app.filter.lens = app.filter.lens.with_flattened(true);
     enter_package(&mut app, 7);
+    app
+}
+
+#[test]
+fn flattening_applies_in_a_package_view() {
+    let app = flat_package_board();
 
     let running = app.view().column_items_for_status(TaskStatus::Running);
+    assert!(
+        !running.iter().any(|i| matches!(i, ColumnItem::Epic(_))),
+        "a flattened column draws no epic card: {running:?}"
+    );
+    let tasks: Vec<TaskId> = running
+        .iter()
+        .filter_map(|i| match i {
+            ColumnItem::Task(t) => Some(t.id),
+            _ => None,
+        })
+        .collect();
+    // Task #2 once (linked and inside linked epic #1), task #3 (linked), and
+    // not task #4 (in no package).
+    let mut sorted = tasks.clone();
+    sorted.sort_by_key(|t| t.0);
+    assert_eq!(sorted, vec![TaskId(2), TaskId(3)], "{running:?}");
+    // Grouped under each task's own epic, as on the main board.
     assert!(running
         .iter()
+        .any(|i| matches!(i, ColumnItem::EpicHeader(e) if e.id == EpicId(2))));
+    assert!(running
+        .iter()
+        .any(|i| matches!(i, ColumnItem::EpicHeader(e) if e.id == EpicId(4))));
+}
+
+#[test]
+fn backlog_keeps_the_linked_epic_card_under_the_flat_lens() {
+    let app = flat_package_board();
+
+    let backlog = app.view().column_items_for_status(TaskStatus::Backlog);
+    assert!(backlog
+        .iter()
         .any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(1))));
+    assert!(!backlog
+        .iter()
+        .any(|i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(1))));
+}
+
+#[test]
+fn enter_on_a_flattened_card_in_a_package_starts_the_trail_at_the_linked_epic() {
+    let mut app = flat_package_board();
+    cursor_on(
+        &mut app,
+        TaskStatus::Running,
+        |i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(2)),
+    );
+    app.handle_key(make_key(KeyCode::Enter));
+
+    // Trail: package -> #1 -> #2.
+    let ViewMode::Epic {
+        epic_id, parent, ..
+    } = &app.board.view_mode
+    else {
+        panic!("expected an epic view, got {:?}", app.board.view_mode);
+    };
+    assert_eq!(*epic_id, EpicId(2));
+    let ViewMode::Epic {
+        epic_id: mid,
+        parent: top,
+        ..
+    } = parent.as_ref()
+    else {
+        panic!("expected linked epic #1 below the package");
+    };
+    assert_eq!(*mid, EpicId(1));
+    assert!(matches!(top.as_ref(), ViewMode::Package { .. }));
+}
+
+#[test]
+fn enter_on_a_linked_task_in_an_unlinked_epic_opens_only_its_own_epic() {
+    let mut app = flat_package_board();
+    cursor_on(
+        &mut app,
+        TaskStatus::Running,
+        |i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(3)),
+    );
+    app.handle_key(make_key(KeyCode::Enter));
+
+    // Trail: package -> #4. Its parent #5 is not on it.
+    let ViewMode::Epic {
+        epic_id, parent, ..
+    } = &app.board.view_mode
+    else {
+        panic!("expected an epic view, got {:?}", app.board.view_mode);
+    };
+    assert_eq!(*epic_id, EpicId(4));
+    assert!(matches!(parent.as_ref(), ViewMode::Package { .. }));
+
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert!(matches!(app.board.view_mode, ViewMode::Package { .. }));
 }
 
 #[test]

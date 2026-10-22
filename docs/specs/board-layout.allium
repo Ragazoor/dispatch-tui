@@ -946,9 +946,8 @@ entity FoldedEpics {
 --   flat_active  → both at once
 -- Forward wraps from flat_active to everything; backward wraps the other way.
 --
--- The lens does not reach inside a package view: its cards are a hand-picked
--- set, so it is never flattened (work-packages.allium: PackageViewCards). The
--- only-active half still applies there.
+-- The lens reaches inside a package view as it does everywhere else: both
+-- halves apply there (work-packages.allium: PackageViewCards).
 --
 -- What `active` narrows: only tasks where tmux_window is set are included in
 -- tasks_for_current_view. This is applied in addition to the board filter.

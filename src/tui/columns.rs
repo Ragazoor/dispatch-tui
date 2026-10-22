@@ -38,14 +38,8 @@ impl<'a> BoardView<'a> {
     /// Whether flattened mode applies to `status`. The exempt columns live on
     /// [`TaskStatus::UNFLATTENED`], so this is only the mode half of the
     /// question; nothing here restates which columns those are.
-    ///
-    /// Never in a package view: its cards are a hand-picked set, and
-    /// flattening would replace the linked epic cards with their contents
-    /// (`work-packages.allium: PackageViewCards`).
     pub(in crate::tui) fn is_flattened_for_status(self, status: TaskStatus) -> bool {
-        self.filter.lens.flattened()
-            && !status.is_unflattened()
-            && !matches!(self.effective_view_mode(), BoardViewMode::Package { .. })
+        self.filter.lens.flattened() && !status.is_unflattened()
     }
 
     /// Whether the main board shows `task` as a card of its own, rather than
@@ -137,13 +131,31 @@ impl<'a> BoardView<'a> {
                     .collect()
             }
             BoardViewMode::Package { package_id, .. } => {
-                // The linked tasks, wherever they live in the epic tree
+                // The linked tasks, wherever they live in the epic tree, and
+                // in a flattened column every task under a linked epic too
                 // (`work-packages.allium: PackageViewCards`).
-                let (linked, _) = self.package_item_ids(package_id);
+                let (linked, linked_epics) = self.package_item_ids(package_id);
+                let subtree: HashSet<TaskId> = if self.filter.lens.flattened() {
+                    linked_epics
+                        .iter()
+                        .flat_map(|&e| {
+                            crate::models::descendant_task_ids(
+                                e,
+                                &self.board.epics,
+                                &self.board.tasks,
+                            )
+                        })
+                        .collect()
+                } else {
+                    HashSet::new()
+                };
                 self.board
                     .tasks
                     .iter()
-                    .filter(|t| linked.contains(&t.id))
+                    .filter(|t| {
+                        linked.contains(&t.id)
+                            || (self.is_flattened_for_status(t.status) && subtree.contains(&t.id))
+                    })
                     .filter(|t| filters.admits(t))
                     .collect()
             }

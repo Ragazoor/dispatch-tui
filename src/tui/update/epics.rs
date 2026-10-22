@@ -99,8 +99,24 @@ impl App {
 
     /// Open `target`'s epic view, entering each epic between the current view
     /// and `target` so that `q` climbs back one level at a time.
+    ///
+    /// From a package view the trail starts at the outermost linked epic on
+    /// `target`'s path, or at `target` itself when none is linked
+    /// (`work-packages.allium: PackageViewCards`).
     pub(in crate::tui) fn handle_jump_to_epic(&mut self, target: EpicId) -> Vec<Command> {
-        self.jump_to_epic_from(target, None)
+        let first = match self.board.view_mode {
+            ViewMode::Package { package_id, .. } => {
+                let (_, linked) = self.view().package_item_ids(package_id);
+                let path = crate::models::epic_path(target, &self.board.epics);
+                Some(
+                    path.into_iter()
+                        .find(|e| linked.contains(e))
+                        .unwrap_or(target),
+                )
+            }
+            _ => None,
+        };
+        self.jump_to_epic_from(target, first)
     }
 
     /// [`Self::handle_jump_to_epic`], with the trail's first level named when
