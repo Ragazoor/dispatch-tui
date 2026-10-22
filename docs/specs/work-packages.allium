@@ -390,15 +390,22 @@ rule ExitPackage {
 
 -- What the package view's columns hold.
 rule PackageViewCards {
-    when: PackageViewRendered(package)
+    when: PackageViewRendered(package, flat)
+    -- flat: board_layout/FlattenedView, the board lens as it applies here.
 
     ensures:
         for task in package.linked_tasks where task.visible:
             CardShown(task, column: task.status)
         for epic in package.linked_epics where epic.visible:
             -- placed exactly as on the main board: one card per column its
-            -- subtree has visible work in, Backlog when it has none.
-            EpicCardShown(epic)
+            -- subtree has visible work in, Backlog when it has none, and
+            -- only in columns the lens does not flatten.
+            for column in epic.placement_columns where flat.renders_epics(column):
+                EpicCardShown(epic, column: column)
+            -- In a flattened column the epic's contents stand in for it:
+            -- every visible task in its subtree, once each.
+            for task in epic.subtree_tasks where task.visible and flat.flattens(task.status):
+                FlattenedCardShown(task, column: task.status)
 
     @guidance
         -- The cards are the linked items, not their contents. A linked
