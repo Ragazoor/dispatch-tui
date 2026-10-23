@@ -14,6 +14,8 @@ lifecycle (`managed_store.rs`), generated `bindings/` and snapshot tooling.
 `sync/memory_caller/` is the in-memory test double, conformance-checked by
 `tests/memory_caller_conformance.rs`.
 
+**Per-host tables.** Only `settings` (and the dead `filter_presets`) are scoped to one machine, keyed by `host`; `hosts` holds one row per machine. Every other table is shared across hosts, `RepoPath` included: it carries a `host` stamp of who last saved the path, but the row is global, so code that judges a path from one machine's disk must check that stamp first (see `spacetime/module/src/tables.rs`).
+
 | File | Responsibility |
 |------|---------------|
 | `src/main.rs` | CLI entry point (clap), subcommand dispatch (`tui`, `setup`, `verify-feed`, `repo`, …), global `--data-dir` flag, `app.log` tracing subscriber |

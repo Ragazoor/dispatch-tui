@@ -356,6 +356,101 @@ fn remember_feed_tasks(
     }
 }
 
+/// What `route_and_move` decided: the items to upsert per target epic, the
+/// external ids that stay, and the repo groups it reached.
+struct RoutedItems {
+    groups: HashMap<i64, Vec<FeedTaskUpsertItem>>,
+    all_external_ids: HashSet<String>,
+    repo_group_cache: HashMap<(i64, String), i64>,
+}
+
+/// Index every feed task under the reviews `parent` by `external_id`, and
+/// list the repo groups that already exist under the role sub-epics.
+///
+/// Task identity is global by external_id across the parent, the role
+/// sub-epics and their repo-group children.
+fn index_existing(
+    store: &impl IngestStore,
+    parent_id: i64,
+    roles: &[i64; 3],
+) -> (HashMap<String, Task>, Vec<i64>) {
+    let mut existing: HashMap<String, Task> = HashMap::new();
+    let mut pre_existing_repo_groups: Vec<i64> = Vec::new();
+    remember_feed_tasks(store, &mut existing, parent_id);
+    for &sub in roles {
+        for child in store.child_epics(sub) {
+            remember_feed_tasks(store, &mut existing, child.id);
+            pre_existing_repo_groups.push(child.id);
+        }
+    }
+    for &sub in roles {
+        remember_feed_tasks(store, &mut existing, sub);
+    }
+    (existing, pre_existing_repo_groups)
+}
+
+/// Route each item to its role epic (and repo group), and move any already
+/// known task there. Nothing is upserted or deleted here.
+fn route_and_move(
+    store: &mut impl IngestStore,
+    items: &[FeedIngestItem],
+    dropped: &HashSet<&str>,
+    existing: &HashMap<String, Task>,
+    roles: [i64; 3],
+    identity: &str,
+) -> RoutedItems {
+    let [my, team, bots] = roles;
+    let mut groups: HashMap<i64, Vec<FeedTaskUpsertItem>> = HashMap::new();
+    let mut all_external_ids: HashSet<String> = HashSet::new();
+    let mut repo_group_cache: HashMap<(i64, String), i64> = HashMap::new();
+    for entry in items {
+        let item = &entry.item;
+        if dropped.contains(item.external_id.as_str()) {
+            continue;
+        }
+        let role_target = match route_signals(&entry.signals) {
+            ROLE_TEAM_REVIEWS => team,
+            ROLE_BOTS => bots,
+            _ => my,
+        };
+        let groups_by_repo = store
+            .epic(role_target)
+            .is_some_and(|e| can_auto_group(e.group_by_repo, &e.feed_command));
+        let target = if groups_by_repo {
+            let name = repo_name_from_url(&item.url);
+            *repo_group_cache
+                .entry((role_target, name.clone()))
+                .or_insert_with(|| {
+                    store.find_or_create_repo_group(role_target, &name, identity.to_string())
+                })
+        } else {
+            role_target
+        };
+
+        all_external_ids.insert(item.external_id.clone());
+
+        // A move touches only epic_id and updated_at, so status, sub_status,
+        // worktree, tmux_window and sort_order survive; the upsert that
+        // follows refreshes the feed-owned fields.
+        if let Some(task) = existing.get(&item.external_id) {
+            if task.epic_id != target {
+                let updated_at = store.now();
+                store.update_task(Task {
+                    epic_id: target,
+                    updated_at,
+                    ..task.clone()
+                });
+            }
+        }
+        groups.entry(target).or_default().push(item.clone());
+    }
+    RoutedItems {
+        groups,
+        all_external_ids,
+        repo_group_cache,
+    }
+}
+
 /// `RoleRoutedFeedSync`: reconcile the whole `reviews-parent` subtree from one
 /// emission. Phase order matters and is the board's old order: every
 /// cross-role move lands before any delete, so a moved task is never deleted.
@@ -378,20 +473,7 @@ fn ingest_role_routed(
     let bots = ensure_role_sub_epic(store, parent.id, ROLE_BOTS, "Bots", &identity);
     let roles = [my, team, bots];
 
-    // Task identity is global by external_id across the parent, the role
-    // sub-epics and their repo-group children.
-    let mut existing: HashMap<String, Task> = HashMap::new();
-    let mut pre_existing_repo_groups: Vec<i64> = Vec::new();
-    remember_feed_tasks(store, &mut existing, parent.id);
-    for &sub in &roles {
-        for child in store.child_epics(sub) {
-            remember_feed_tasks(store, &mut existing, child.id);
-            pre_existing_repo_groups.push(child.id);
-        }
-    }
-    for &sub in &roles {
-        remember_feed_tasks(store, &mut existing, sub);
-    }
+    let (existing, pre_existing_repo_groups) = index_existing(store, parent.id, &roles);
 
     // Read from the FULL emission, before the exclusion filter: an excluded
     // but still open PR keeps its retired record.
@@ -407,50 +489,12 @@ fn ingest_role_routed(
     let candidates: Vec<&str> = items.iter().map(|i| i.item.external_id.as_str()).collect();
     let dropped = retired_without_task(store, parent.id, &candidates);
 
-    let mut groups: HashMap<i64, Vec<FeedTaskUpsertItem>> = HashMap::new();
-    let mut all_external_ids: HashSet<String> = HashSet::new();
-    let mut repo_group_cache: HashMap<(i64, String), i64> = HashMap::new();
-    for entry in &items {
-        let item = &entry.item;
-        if dropped.contains(item.external_id.as_str()) {
-            continue;
-        }
-        let role_target = match route_signals(&entry.signals) {
-            ROLE_TEAM_REVIEWS => team,
-            ROLE_BOTS => bots,
-            _ => my,
-        };
-        let groups_by_repo = store
-            .epic(role_target)
-            .is_some_and(|e| can_auto_group(e.group_by_repo, &e.feed_command));
-        let target = if groups_by_repo {
-            let name = repo_name_from_url(&item.url);
-            *repo_group_cache
-                .entry((role_target, name.clone()))
-                .or_insert_with(|| {
-                    store.find_or_create_repo_group(role_target, &name, identity.clone())
-                })
-        } else {
-            role_target
-        };
-
-        all_external_ids.insert(item.external_id.clone());
-
-        // A move touches only epic_id and updated_at, so status, sub_status,
-        // worktree, tmux_window and sort_order survive; the upsert below then
-        // refreshes the feed-owned fields.
-        if let Some(task) = existing.get(&item.external_id) {
-            if task.epic_id != target {
-                let updated_at = store.now();
-                store.update_task(Task {
-                    epic_id: target,
-                    updated_at,
-                    ..task.clone()
-                });
-            }
-        }
-        groups.entry(target).or_default().push(item.clone());
-    }
+    let routed = route_and_move(store, &items, &dropped, &existing, roles, &identity);
+    let RoutedItems {
+        groups,
+        all_external_ids,
+        repo_group_cache,
+    } = routed;
 
     for (sub, group) in groups {
         store.upsert_feed_tasks(sub, group, created_by, !additive)?;

@@ -103,9 +103,6 @@ async fn read_data_dir(data_dir: &Path) -> Result<Snapshot> {
     .await
 }
 
-/// How many free ports the import tries before it gives up.
-const PORT_ATTEMPTS: u32 = 5;
-
 /// How long the copy gets to answer before the import gives up.
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -157,26 +154,22 @@ async fn read_data_dir_with(
 /// process.
 ///
 /// The port is free when picked, not when the store starts: another process
-/// can take it in between. Pick again when the start reports that.
+/// can take it in between. The start only spawns the process, and the child
+/// binds later, so a lost race is not seen here; it shows up as the copy never
+/// answering, which `wait_until_answering` reports after its timeout.
 fn spawn_on_free_port(
     spawner: &dyn StoreSpawner,
     copy: &Path,
     log: &Path,
 ) -> Result<(String, std::process::Child)> {
-    let mut attempt = 1;
-    loop {
-        let port = std::net::TcpListener::bind("127.0.0.1:0")?
-            .local_addr()?
-            .port();
-        let address = format!("127.0.0.1:{port}");
-        match spawner.spawn(&address, copy, log) {
-            Ok(child) => return Ok((address, child)),
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && attempt < PORT_ATTEMPTS => {
-                attempt += 1;
-            }
-            Err(e) => return Err(e).context("could not run `spacetime start`"),
-        }
-    }
+    let port = std::net::TcpListener::bind("127.0.0.1:0")?
+        .local_addr()?
+        .port();
+    let address = format!("127.0.0.1:{port}");
+    let child = spawner
+        .spawn(&address, copy, log)
+        .context("could not run `spacetime start`")?;
+    Ok((address, child))
 }
 
 /// Poll `address` until a store answers, or fail after `start_timeout`.

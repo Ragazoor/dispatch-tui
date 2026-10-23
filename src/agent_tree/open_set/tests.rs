@@ -3,6 +3,33 @@ use super::*;
 // test of this placement rule — see its own doc comment.
 use crate::worktree_admin::tests::make_linked_worktree;
 
+/// A fixed temporary name is shared by two panes saving at once, so one
+/// rename can move the other's half-written file into place. The write must
+/// not use a name two writers can share, and must leave no temporary behind.
+#[test]
+fn a_write_uses_no_fixed_temporary_name_and_leaves_none_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let (worktree, _) = make_linked_worktree(dir.path(), "42-fix");
+    let path = open_set_path(&worktree).unwrap();
+    // A file at the old fixed temporary name must survive a write untouched.
+    let fixed = path.with_extension("json.tmp");
+    std::fs::write(&fixed, b"another writer's half file").unwrap();
+
+    write_open_set(&worktree, &[PathBuf::from("a.rs")]).unwrap();
+
+    assert_eq!(read_open_set(&worktree), vec![PathBuf::from("a.rs")]);
+    assert_eq!(
+        std::fs::read(&fixed).unwrap(),
+        b"another writer's half file"
+    );
+    let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(".atomic-write."))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
 // ---- the selected source (AgentTreeSourceIsOneSelection) ----------
 
 #[test]

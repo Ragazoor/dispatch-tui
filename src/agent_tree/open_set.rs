@@ -70,14 +70,15 @@ pub fn write_open_set(worktree_path: &str, paths: &[PathBuf]) -> Result<()> {
     write_atomic(&path, &body)
 }
 
-/// Write `body` to `path` through a sibling temporary file and a rename, so a
-/// reader on another timer never sees half a file.
+/// Replace `path` with `body` through [`crate::atomic_write`], so a reader on
+/// another timer never sees half a file and two writers never share a
+/// temporary file.
 fn write_atomic(path: &Path, body: &[u8]) -> Result<()> {
-    let temp = path.with_extension("json.tmp");
-    std::fs::write(&temp, body).with_context(|| format!("could not write {}", temp.display()))?;
-    std::fs::rename(&temp, path)
-        .with_context(|| format!("could not replace {}", path.display()))?;
-    Ok(())
+    crate::atomic_write::write_bytes(
+        path,
+        crate::atomic_write::Mode::KeepOr { default: 0o644 },
+        body,
+    )
 }
 
 /// Read the recorded open set, or an empty one.

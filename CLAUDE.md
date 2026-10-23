@@ -112,7 +112,7 @@ This file is intentionally slim — it is loaded into every agent's context. Sea
 - **Session seam** — `wrap_up` and `exit_session` write request rows (`TaskService::request_wrap_up`, `request_exit_session`); the module owns the exit token, the Conflict sub_status, the close and the epic chain; only this host's reactor rebases and tears windows down (`TaskService::serve_session_request`). Never do either anywhere else.
 - **Layout-cache coherence**, **board read source**, **one store, no routing layer**, **DB connection model** — the TUI and storage seams.
 - **Render-panic policy**, **unsafe policy**, **tag system**, **read-side layering**, **module layering**, **`#[cfg(test)]` gating**, **workhorse macros**, **timing constants**.
-- Production code has no bare `unwrap()`/`expect()`; the few `expect()` calls carry an `#[allow(clippy::expect_used)]` naming the invariant. The lints are `warn` in `Cargo.toml`, so a new one hard-fails only under `cargo clippy --all-targets -- -D warnings` (the pre-push hook and CI's Clippy job).
+- The tree has no `unwrap()`/`expect()` outside `cfg(test)` code, and clippy's `unwrap_used`/`expect_used` under `cargo clippy --all-targets -- -D warnings` (the pre-push hook and CI's Clippy job) keeps it so. The lints are `warn` in `Cargo.toml`, so a new one hard-fails only under that command. Test modules may use them freely.
 
 Read these on demand:
 
