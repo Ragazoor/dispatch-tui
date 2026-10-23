@@ -72,6 +72,9 @@ pub(super) fn build_task_patch<'a>(
     if let Some(v) = params.phoenix {
         patch = patch.phoenix(v);
     }
+    if let Some(update) = params.schedule.as_ref() {
+        patch = patch.schedule(update.as_option());
+    }
     patch
 }
 
@@ -86,6 +89,18 @@ mod tests {
         let params = UpdateTaskParams::for_task(TaskId(1));
         let patch = build_task_patch(&params, None, None);
         assert!(!patch.has_changes());
+    }
+
+    #[test]
+    fn schedule_set_and_clear_map_to_nullable() {
+        use crate::service::FieldUpdate;
+        let params = UpdateTaskParams::for_task(TaskId(1))
+            .schedule(FieldUpdate::Set("0 9 * * 1".to_string()));
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.schedule, Some(Some("0 9 * * 1")));
+        let params = UpdateTaskParams::for_task(TaskId(1)).schedule(FieldUpdate::Clear);
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.schedule, Some(None));
     }
 
     #[test]

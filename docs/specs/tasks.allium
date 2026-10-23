@@ -475,10 +475,11 @@ rule ConfirmDone {
 
 -- == Phoenix ==
 
--- A phoenix task is a recurring task with no schedule. Entering done creates a
--- fresh backlog copy of it, and the flag MOVES to that copy. Nothing runs the
--- copy: it waits in backlog until a human dispatches it, which is the whole
--- point — the recurrence is in the queueing, not in the running.
+-- A phoenix task is a recurring task. Entering done creates a fresh backlog
+-- copy of it, and the flag MOVES to that copy. Without a schedule nothing runs
+-- the copy: it waits in backlog until a human dispatches it — the recurrence
+-- is in the queueing, not in the running. With a schedule (schedules.allium,
+-- S3) the copy carries it and a running board dispatches it when it is due.
 --
 -- WhyNotATag. phoenix is its own Boolean on core/Task rather than a TaskTag
 -- variant, because a tag already answers a different question: it selects the
@@ -549,6 +550,11 @@ rule PhoenixRespawn {
                 base_branch: task.base_branch,
                 wrap_up_mode: task.wrap_up_mode,
                 phoenix: true,
+                -- schedules.allium (S3-S5): the schedule repeats with the
+                -- flag, due next at its first match after this respawn.
+                schedule: task.schedule,
+                next_due: if task.schedule != null: next_match(task.schedule, after: now) else: null,
+                schedule_error: null,
                 created_at: now,
                 updated_at: now
             )

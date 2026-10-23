@@ -203,9 +203,41 @@ impl App {
         cmds.extend(self.tick_budget_poll());
         cmds.extend(self.tick_db_refresh());
         cmds.extend(self.tick_build_output_cleanup());
+        cmds.extend(self.tick_due_schedules());
 
         self.mark_tick_dirty(&status_before, flash_count_before, flash_sent_count_before);
         cmds
+    }
+
+    /// `schedules.allium: FireDueTask`: ask for a dispatch of every backlog
+    /// task whose `next_due` has passed, unless it already holds an open
+    /// request or this board asked within
+    /// [`SCHEDULE_REFIRE_AFTER`](crate::tui::SCHEDULE_REFIRE_AFTER). The clock
+    /// only compares; the store computed `next_due` and checks it again with
+    /// its own clock (`RequestDispatch`).
+    fn tick_due_schedules(&mut self) -> Vec<Command> {
+        let now = chrono::Utc::now();
+        self.schedule_fired
+            .retain(|_, at| at.elapsed() < crate::tui::SCHEDULE_REFIRE_AFTER);
+        let due: Vec<(TaskId, String)> = self
+            .board
+            .tasks
+            .iter()
+            .filter(|t| t.status == crate::models::TaskStatus::Backlog)
+            .filter(|t| t.next_due.is_some_and(|due| due <= now))
+            .filter(|t| !self.dispatch_requests.open.contains_key(&t.id))
+            .filter(|t| !self.schedule_fired.contains_key(&t.id))
+            .map(|t| (t.id, t.repo_path.clone()))
+            .collect();
+        if due.is_empty() {
+            return vec![];
+        }
+        let at = std::time::Instant::now();
+        self.schedule_fired
+            .extend(due.iter().map(|(id, _)| (*id, at)));
+        vec![Command::Task(
+            crate::tui::commands::TaskCommand::FireScheduled { due },
+        )]
     }
 
     /// Auto-clear transient status messages after 5 seconds (only in Normal

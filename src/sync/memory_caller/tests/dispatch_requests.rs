@@ -18,7 +18,7 @@ use crate::models::{
     DispatchMode, DispatchOrigin, DispatchRequestId, DispatchRequestState, TaskStatus,
 };
 
-const HOST: &str = "host-a";
+pub(super) const HOST: &str = "host-a";
 const OTHER_HOST: &str = "host-b";
 /// The identity this double's calls are sent as, and the owner of both hosts
 /// above, so its calls may act for either (`store-split.allium`, D11).
@@ -36,7 +36,7 @@ fn caller() -> (MemoryReducerCaller, Arc<SharedRows>) {
 }
 
 /// [`caller`] on a clock the test can move, for the deadline.
-fn caller_with_clock() -> (MemoryReducerCaller, Arc<SharedRows>, Arc<FixedClock>) {
+pub(super) fn caller_with_clock() -> (MemoryReducerCaller, Arc<SharedRows>, Arc<FixedClock>) {
     let rows = Arc::new(SharedRows::new());
     let clock = Arc::new(FixedClock::new(
         Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
@@ -48,7 +48,7 @@ fn caller_with_clock() -> (MemoryReducerCaller, Arc<SharedRows>, Arc<FixedClock>
 }
 
 /// The request id an applied `request_dispatch` reads back.
-fn request_id(outcome: ReducerOutcome) -> DispatchRequestId {
+pub(super) fn request_id(outcome: ReducerOutcome) -> DispatchRequestId {
     match outcome {
         ReducerOutcome::Applied(ids) => {
             assert_eq!(ids.len(), 1, "request_dispatch reads back one id: {ids:?}");
@@ -58,7 +58,7 @@ fn request_id(outcome: ReducerOutcome) -> DispatchRequestId {
     }
 }
 
-async fn request(
+pub(super) async fn request(
     caller: &MemoryReducerCaller,
     task: TaskId,
     host: &str,

@@ -366,6 +366,7 @@ impl MemoryReducerCaller {
             .filter(|t| t.epic_id == closed.epic_id)
             .cloned()
             .collect();
+        let stamp = self.now();
         for candidate in module::chain_candidates(subtasks) {
             let has_open = tables
                 .dispatch_requests
@@ -376,6 +377,7 @@ impl MemoryReducerCaller {
                 host,
                 module::DISPATCH_ORIGIN_EPIC_CHAIN,
                 has_open,
+                &stamp,
             )
             .is_err()
             {

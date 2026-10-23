@@ -653,8 +653,9 @@ enum DispatchRequestState { requested | provisioning | dispatched | failed }
 
 -- Which launch path wrote the request (D9). user is the TUI keys, including
 -- retry-fresh and research; mcp is dispatch_task; epic_chain is
--- epics.allium's AutoDispatchNextSubtask; quick is quick dispatch.
-enum DispatchRequestOrigin { user | mcp | epic_chain | quick }
+-- epics.allium's AutoDispatchNextSubtask; quick is quick dispatch; schedule
+-- is a board firing a due task (schedules.allium: FireDueTask).
+enum DispatchRequestOrigin { user | mcp | epic_chain | quick | schedule }
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -1015,6 +1016,14 @@ rule RequestDispatch {
     -- reason, like any other refused request. Any other origin may request
     -- a phoenix task.
     requires: not (origin = epic_chain and task.phoenix)
+    -- schedules.allium (S8): the epic chain passes over a subtask whose
+    -- scheduled time is still ahead. Any other origin may launch it early.
+    requires: not (origin = epic_chain and task.next_due != null and task.next_due > now)
+    -- schedules.allium: FireDueTask, checked by the store's clock. A
+    -- schedule-origin request is for a task that is due now: it guards a board
+    -- whose clock runs ahead of the store's, and a board acting on a view
+    -- older than a ClearSchedule.
+    requires: origin != schedule or (task.next_due != null and task.next_due <= now)
 
     -- D3: the caller's mode when it names one, else today's derivation.
     let chosen_mode =
@@ -1068,8 +1077,10 @@ rule RequestDispatch {
         -- A refusal is ORDINARY: it is how a caller learns that another entry
         -- point claimed the task first, as the claim did before M4.
         -- The refusal names why (not backlog, owned by another machine, an
-        -- open request already exists, a phoenix task the epic chain may not
-        -- take), and nothing was written. The epic chain treats every refusal
+        -- open request already exists, a phoenix task or a task still
+        -- waiting for its scheduled time the epic chain may not take, a
+        -- schedule-origin request for a task that is not due), and nothing
+        -- was written. The epic chain treats every refusal
         -- alike and offers its next candidate (epics.allium:
         -- AutoDispatchNextSubtask).
         --

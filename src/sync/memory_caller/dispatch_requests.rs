@@ -60,28 +60,28 @@ impl MemoryReducerCaller {
         row: module::DispatchRequest,
         reason: &str,
     ) -> Result<(), String> {
+        let origin = row.origin.clone();
         let failed = module::failed_request_row(row, reason, &self.now());
         let stamp = failed.finished_at.clone();
         let task_id = failed.task_id;
-        // The release is the one write that can refuse; ask before the failed
-        // row is written, so a refusal leaves the request as it was.
-        let released = tables
-            .tasks
-            .get(&task_id)
-            .cloned()
-            .and_then(module::release_claim_after_failure)
-            .map(|released| module::Task {
-                updated_at: stamp,
-                ..released
-            });
-        if let Some(released) = &released {
-            Self::validate_task_write(tables, released)?;
+        // The release, and the schedule mark that rides on its write
+        // (`schedules.allium: ScheduledLaunchFails`), is the one write that can
+        // refuse; ask before the failed row is written, so a refusal leaves the
+        // request as it was.
+        let (marked, was_released) = match tables.tasks.get(&task_id).cloned() {
+            Some(task) => module::task_after_failed_request(task, &origin, reason, &stamp),
+            None => (None, false),
+        };
+        if let Some(marked) = &marked {
+            Self::validate_task_write(tables, marked)?;
         }
         self.write_dispatch_request(tables, failed);
         if let Some(task) = tables.tasks.get(&task_id).cloned() {
             let epic_id = task.epic_id;
-            if let Some(released) = released {
-                self.write_task(tables, released)?;
+            if let Some(marked) = marked {
+                self.write_task(tables, marked)?;
+            }
+            if was_released {
                 // agents.allium: EndAgentWhenLaunchFails.
                 module::end_current_agent(
                     &mut self.agent_store(tables),
@@ -189,7 +189,7 @@ impl MemoryReducerCaller {
             .dispatch_requests
             .values()
             .any(|r| r.task_id == task_id && module::dispatch_request_is_open(&r.state));
-        module::validate_dispatch_request(&row, requester, origin, has_open)?;
+        module::validate_dispatch_request(&row, requester, origin, has_open, &self.now())?;
         let mode = module::choose_dispatch_mode(&row, mode)?;
         let id = self.create_dispatch_request_body(&mut tables, row, requester, mode, origin)?;
         Ok(vec![id])

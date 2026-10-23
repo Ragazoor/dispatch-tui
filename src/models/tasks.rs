@@ -383,7 +383,7 @@ pub struct Task {
     pub last_peer_message_received_at: Option<DateTime<Utc>>,
     pub wrap_up_mode: Option<WrapUpMode>,
     pub auto_run_plan: bool,
-    /// A recurring task with no schedule. When this task enters Done, a fresh
+    /// A recurring task. When this task enters Done, a fresh
     /// Backlog copy of it is created and the flag MOVES to that copy — so it
     /// fires exactly once, and the flag surviving in Done means the copy did
     /// not land (`respawn_failed`). See `PhoenixRespawn` and the `== Phoenix ==`
@@ -393,6 +393,16 @@ pub struct Task {
     /// marks review work, and a recurring *chore* is the ordinary case, so the
     /// two must be able to coexist.
     pub phoenix: bool,
+    /// A five-field UTC cron string; `None` when the task is not scheduled.
+    /// Repeats on a phoenix task, fires once on any other. See
+    /// `docs/specs/schedules.allium`.
+    pub schedule: Option<String>,
+    /// When a running board next dispatches this task; `None` when nothing is
+    /// pending. Computed by the store, never here: a board only compares it
+    /// against its clock (`schedules.allium: FireDueTask`).
+    pub next_due: Option<DateTime<Utc>>,
+    /// Why the last scheduled launch failed (`ScheduledLaunchFails`).
+    pub schedule_error: Option<String>,
     /// Number of subagents currently executing for this task. Denormalised
     /// `COUNT(*)` over `task_subagents`, rewritten by every mutation and
     /// every clear point. Read by `classify_agent_activity` (live subagents
@@ -519,6 +529,13 @@ impl Task {
     /// marker" in `docs/specs/board-visuals.allium`.
     pub fn respawn_failed(&self) -> bool {
         self.phoenix && self.status == TaskStatus::Done
+    }
+
+    /// A scheduled launch failed and the task still waits in backlog for a
+    /// human (`core.allium: Task.schedule_failed`,
+    /// `schedules.allium: ScheduledLaunchFails`).
+    pub fn schedule_failed(&self) -> bool {
+        self.schedule_error.is_some() && self.status == TaskStatus::Backlog
     }
 
     /// Why this task cannot be wrapped up, or `None` when it can.
@@ -748,6 +765,9 @@ impl Default for Task {
             wrap_up_mode: None,
             auto_run_plan: false,
             phoenix: false,
+            schedule: None,
+            next_due: None,
+            schedule_error: None,
             live_subagents: 0,
             stop_pending: false,
             agent_name: None,

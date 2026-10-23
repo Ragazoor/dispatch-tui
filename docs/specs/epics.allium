@@ -974,7 +974,10 @@ rule AutoDispatchNextSubtask {
             -- the task id), then by id, whose epic_chain request is accepted.
             -- Phoenix subtasks never are: the request refuses them
             -- (store-split.allium: RequestDispatch) — see
-            -- PhoenixIsNeverChained below.
+            -- PhoenixIsNeverChained below. Nor is a subtask still waiting
+            -- for its scheduled time (schedules.allium, S8): the request
+            -- refuses one whose next_due is ahead of now, in the same way,
+            -- and the chain moves on to its next candidate.
             let next = first_by_order(epic.subtasks where status = backlog and not phoenix)
             -- A request, as every launch path writes since store-split M4
             -- (store-split.allium: RequestDispatch), naming the closed task's
@@ -1074,10 +1077,10 @@ rule AutoDispatchNextSubtask {
         --      backlog task is always safe, and launching an agent at it
         --      unattended is the step that needs the veto.
         --   2. It is what a phoenix task means. The flag exists so a recurring
-        --      task can be queued without being scheduled — the human picks the
-        --      moment (see the head of the Phoenix section in tasks.allium).
-        --      A phoenix task that auto-dispatched would be a scheduled task
-        --      with extra steps.
+        --      task can be queued without picking its moment by itself — a
+        --      human picks it, or the task's own schedule does
+        --      (schedules.allium, S3). Finishing an unrelated sibling is
+        --      neither, so the chain never launches one.
         --
         -- The skip is a filter, not a stop: the chain passes OVER a phoenix
         -- subtask and dispatches the next ordinary backlog subtask behind it.

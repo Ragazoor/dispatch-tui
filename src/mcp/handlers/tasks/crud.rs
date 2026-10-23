@@ -225,6 +225,7 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
         wrap_up_mode,
         auto_run_plan,
         phoenix,
+        schedule,
     } = parsed;
 
     [
@@ -242,6 +243,7 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
         ("wrap_up_mode", wrap_up_mode.is_some()),
         ("auto_run_plan", auto_run_plan.is_some()),
         ("phoenix", phoenix.is_some()),
+        ("schedule", schedule.is_some()),
     ]
     .into_iter()
     .filter_map(|(name, is_set)| is_set.then_some(name))
@@ -403,6 +405,7 @@ pub(crate) async fn handle_create_task(
         wrap_up_mode: parsed.wrap_up_mode,
         auto_run_plan: parsed.auto_run_plan,
         phoenix: parsed.phoenix,
+        schedule: parsed.schedule.filter(|s| !s.is_empty()),
     };
     let created = if signal {
         state.task_svc.create_task_signalled(params).await
@@ -659,6 +662,7 @@ mod tests {
             wrap_up_mode: None,
             auto_run_plan: None,
             phoenix: None,
+            schedule: None,
         }
     }
 
@@ -769,6 +773,13 @@ mod tests {
                 "phoenix",
                 UpdateTaskArgs {
                     phoenix: Some(true),
+                    ..base_args()
+                },
+            ),
+            (
+                "schedule",
+                UpdateTaskArgs {
+                    schedule: Some("0 9 * * 1".into()),
                     ..base_args()
                 },
             ),

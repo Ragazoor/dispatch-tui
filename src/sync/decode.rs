@@ -177,6 +177,9 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
         wrap_up_mode,
         auto_run_plan: row.auto_run_plan,
         phoenix: row.phoenix,
+        schedule: text(&row.schedule).map(str::to_owned),
+        next_due: timestamp(T, row.id, "next_due", &row.next_due)?,
+        schedule_error: text(&row.schedule_error).map(str::to_owned),
         live_subagents: 0,
         stop_pending: false,
         // The current agent's name too, laid over the same way.

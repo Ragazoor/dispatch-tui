@@ -916,16 +916,20 @@ fn the_chains_request_refuses_a_phoenix_candidate_and_one_on_another_host() {
         host: String::new(),
         ..subtask(1, "backlog", None)
     };
-    assert!(validate_dispatch_request(&phoenix, HOST_A, "epic_chain", false).is_err());
+    assert!(validate_dispatch_request(&phoenix, HOST_A, "epic_chain", false, NOW).is_err());
     let elsewhere = Task {
         host: HOST_B.into(),
         ..subtask(2, "backlog", None)
     };
-    assert!(validate_dispatch_request(&elsewhere, HOST_A, "epic_chain", false).is_err());
-    assert!(
-        validate_dispatch_request(&subtask(3, "backlog", None), HOST_A, "epic_chain", false)
-            .is_ok()
-    );
+    assert!(validate_dispatch_request(&elsewhere, HOST_A, "epic_chain", false, NOW).is_err());
+    assert!(validate_dispatch_request(
+        &subtask(3, "backlog", None),
+        HOST_A,
+        "epic_chain",
+        false,
+        NOW
+    )
+    .is_ok());
 }
 
 // -- PR state (store-split.allium: ReportPrStatus, ReportPrUnreadable) ----

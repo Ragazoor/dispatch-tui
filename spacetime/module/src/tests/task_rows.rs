@@ -263,6 +263,7 @@ fn every_field_of_a_task_patch_reaches_the_row() {
         host: Some(MARK.into()),
         owner: Some(MARK.into()),
         completed_at: Some(MARK.into()),
+        schedule: Some("0 9 * * 1".into()),
     };
     let session = patch.clone();
     apply_task_patch(&mut row, patch);
@@ -310,6 +311,9 @@ fn every_field_of_a_task_patch_reaches_the_row() {
     assert_eq!(row.completed_at, MARK);
     // created_at/updated_at are not patch fields; the reducer stamps them.
     assert_eq!(row.created_at, before.created_at);
+    // Nor is the schedule: `patch_task` applies it through `apply_schedule`,
+    // which can refuse and moves `next_due` and `schedule_error` with it.
+    assert_eq!(row.schedule, "");
 }
 
 #[test]

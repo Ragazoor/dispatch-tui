@@ -96,6 +96,7 @@ fn blank_task_patch() -> bindings::TaskPatch {
         host: None,
         owner: None,
         completed_at: None,
+        schedule: None,
     }
 }
 
@@ -126,5 +127,6 @@ mod feed;
 mod learnings;
 mod pr_status;
 mod rules;
+mod schedules;
 mod session_requests;
 mod tasks;

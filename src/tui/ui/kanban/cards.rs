@@ -1,6 +1,6 @@
 //! Task and epic card rendering.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -79,13 +79,46 @@ enum CardIndicator {
     /// "the copy did not land" state (`Task::respawn_failed`). See "Phoenix
     /// marker" in `docs/specs/board-visuals.allium`.
     RespawnFailed,
+    /// A scheduled launch failed and the task is back in backlog
+    /// (`Task::schedule_failed`). See "Schedule marker" in
+    /// `docs/specs/board-visuals.allium`.
+    ScheduleFailed {
+        /// [`schedule_suffix`]: a phoenix task re-armed after the failure
+        /// still says when it next runs.
+        schedule_suffix: String,
+    },
     Idle {
         status: TaskStatus,
         age: String,
         staleness: Staleness,
         plan_indicator: &'static str,
         tag_suffix: String,
+        /// [`schedule_suffix`]: the pending scheduled run, or `""`.
+        schedule_suffix: String,
     },
+}
+
+/// The pending scheduled run on a card's metadata line (`board-visuals.allium`:
+/// "Schedule marker"): ` · ◷ <Mon> <d> <HH:MM>` in `tz`, or ` · ◷ due` once
+/// passed, or `""` with nothing pending. The board passes the machine's local
+/// zone; the schedule itself is read in UTC, but the card answers "when will
+/// this run" in the operator's terms.
+fn schedule_suffix<Tz: TimeZone>(
+    next_due: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+    tz: &Tz,
+) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    match next_due {
+        None => String::new(),
+        Some(due) if due <= now => " \u{00b7} \u{25f7} due".to_string(),
+        Some(due) => format!(
+            " \u{00b7} \u{25f7} {}",
+            due.with_timezone(tz).format("%b %-d %H:%M")
+        ),
+    }
 }
 
 fn classify_card_indicator(
@@ -169,6 +202,14 @@ fn classify_card_indicator(
         let pr_label = u.label();
         return CardIndicator::DoneMerged { pr_label };
     }
+    // Backlog only, so it competes with nothing above: every earlier arm
+    // presupposes Running, Review or Done, or a dispatch in flight, which
+    // outranks the failure it may be retrying.
+    // The board's own zone, once, for both arms that show it.
+    let schedule_suffix = schedule_suffix(task.next_due, now, &chrono::Local);
+    if task.schedule_failed() {
+        return CardIndicator::ScheduleFailed { schedule_suffix };
+    }
 
     let age = format_age(task.updated_at, now);
     let staleness = Staleness::from_age(task.updated_at, now);
@@ -187,13 +228,14 @@ fn classify_card_indicator(
         staleness,
         plan_indicator,
         tag_suffix,
+        schedule_suffix,
     }
 }
 
 /// The border colour a card's state claims, or `None` if it claims none.
 ///
 /// The card frame carries *state*, not identity (`board-visuals.allium`: "Selection" and
-/// "Border as state"). Red is the five hard failures — the same states whose
+/// "Border as state"). Red is the six hard failures — the same states whose
 /// indicator renders a `⚠`. Note that is an agreement between two independent
 /// exhaustive matches over one enum, not a derivation: `render_card_indicator`
 /// picks the glyph, this picks the border, and only
@@ -214,7 +256,8 @@ fn state_border_color(indicator: &CardIndicator) -> Option<Color> {
         | CardIndicator::AutoDispatchFailed
         | CardIndicator::Conflict
         | CardIndicator::Crashed
-        | CardIndicator::RespawnFailed => Some(RED),
+        | CardIndicator::RespawnFailed
+        | CardIndicator::ScheduleFailed { .. } => Some(RED),
         CardIndicator::Blocked | CardIndicator::Stale { .. } => Some(YELLOW),
         CardIndicator::Dispatching { .. }
         | CardIndicator::DetachedReview { .. }
@@ -291,16 +334,20 @@ fn render_card_indicator(indicator: CardIndicator, labels: &[String]) -> Line<'s
         CardIndicator::ReviewPr { pr_label } => (format!("\u{25cf} {pr_label}"), CYAN),
         CardIndicator::DoneMerged { pr_label } => (format!("\u{2714} {pr_label} merged"), GREEN),
         CardIndicator::RespawnFailed => ("\u{26a0} respawn failed".to_string(), RED),
+        CardIndicator::ScheduleFailed { schedule_suffix } => {
+            (format!("\u{26a0} schedule failed{schedule_suffix}"), RED)
+        }
         CardIndicator::Idle {
             status,
             age,
             staleness,
             plan_indicator,
             tag_suffix,
+            schedule_suffix,
         } => {
             let icon = status_icon(status);
             (
-                format!("{plan_indicator}{icon} {age}{tag_suffix}"),
+                format!("{plan_indicator}{icon} {age}{tag_suffix}{schedule_suffix}"),
                 staleness_color(staleness),
             )
         }

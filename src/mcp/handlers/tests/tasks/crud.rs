@@ -139,6 +139,7 @@ async fn update_task_maps_every_advertised_field_to_params() {
                 "wrap_up_mode": "pr",
                 "auto_run_plan": true,
                 "phoenix": true,
+                "schedule": "0 9 * * 1",
             }
         })),
     )
@@ -893,4 +894,5 @@ mod base_branch;
 mod epic_tree;
 mod mock_service;
 mod query;
+mod schedule;
 mod sub_status;

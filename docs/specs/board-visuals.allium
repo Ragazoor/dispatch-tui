@@ -384,10 +384,12 @@ use "./core.allium" as core
 -- The state colours are a closed set, chosen so that the border never
 -- says anything the card is not already saying elsewhere:
 --
---   RED     the five hard failures — unprovisioned, auto-dispatch
---           failed, rebase conflict, crashed, and respawn-failed (a
+--   RED     the six hard failures — unprovisioned, auto-dispatch
+--           failed, rebase conflict, crashed, respawn-failed (a
 --           phoenix task left sitting in done with its flag intact; see
---           "Phoenix marker"). These are exactly the states whose
+--           "Phoenix marker") and schedule-failed (a scheduled launch
+--           that failed, its task back in backlog; see "Schedule
+--           marker"). These are exactly the states whose
 --           indicator line already renders a ⚠, so border and glyph agree
 --           by construction rather than by two lists being maintained in
 --           parallel.
@@ -730,6 +732,30 @@ use "./core.allium" as core
 -- where the two measures differ, which is exactly why it is written down
 -- rather than left to be rediscovered.
 --
+-- == Schedule marker ==
+--
+-- A task whose next_due is set says so on its metadata line (line 2), after
+-- the idle indicator and before the label badges: ` · ◷ <when>`, in the
+-- indicator's own colour. ◷ (U+25F7) is a single-column BMP glyph, so the
+-- title budget is untouched — line 2 is never budgeted, it clips at the
+-- frame like the badges. <when> is next_due in the MACHINE'S LOCAL time,
+-- `<Mon> <d> <HH:MM>` (e.g. `Oct 27 09:00`), though the schedule itself is
+-- read in UTC (schedules.allium, S2): the card answers "when will this run"
+-- in the operator's terms. A next_due already passed reads `◷ due` — the
+-- task is waiting for a board whose machine holds its repo
+-- (schedules.allium: FireDueTask).
+--
+-- A task with schedule set but no next_due (a phoenix run in progress, a
+-- one-off that already ran) shows nothing: its schedule is not pending.
+--
+-- Task.schedule_failed replaces the idle indicator with `⚠ schedule failed`
+-- and takes the RED border, as the other hard failures do. A phoenix task
+-- re-armed after the failure still carries its ` · ◷ <when>` after it, so
+-- the card says both that the last launch failed and when the next is. The reason is
+-- task.schedule_error, read through get_task (mcp-task-tools.allium:
+-- GetTaskViaMcp). The board offers no key to set, edit or clear a schedule
+-- (schedules.allium, S9).
+--
 -- == Where these rules are enforced ==
 --
 -- Coverage lives in two files, and which one is not arbitrary. Most of it
@@ -900,7 +926,7 @@ use "./core.allium" as core
 --                                                every CardIndicator
 --                                                variant paired with the
 --                                                border it should claim
---   exactly_five_indicators_are_hard_failures    the counts: five red, three
+--   exactly_six_indicators_are_hard_failures     the counts: six red, three
 --                                                amber, and every variant
 --                                                in {red, amber, none}
 --
@@ -1220,7 +1246,7 @@ enum CardFrameColour {
                        -- on the board. Deliberately not a PaletteToken: a
                        -- colour that cannot be named as an identity hue cannot
                        -- be misread as one.
-    state_red          -- the five hard failures
+    state_red          -- the six hard failures
     state_yellow       -- the two attention states
     resting_neutral    -- every healthy card that is not the cursor
 }
@@ -1241,8 +1267,8 @@ entity RenderedCard {
     -- Whether this card holds the keyboard cursor.
     is_cursor: Boolean
 
-    -- The five hard failures — unprovisioned, auto-dispatch failed, rebase
-    -- conflict, crashed, and respawn-failed. Exactly the states whose
+    -- The six hard failures — unprovisioned, auto-dispatch failed, rebase
+    -- conflict, crashed, respawn-failed and schedule-failed. Exactly the states whose
     -- indicator line already renders a ⚠; see ClassifyAgentActivity in
     -- agent-health.allium for how a task acquires them.
     has_hard_failure: Boolean
@@ -1303,7 +1329,7 @@ entity RenderedCard {
         -- Dispatching is absent from both boolean fields on purpose. It
         -- renders an amber indicator and claims no border, and it is the
         -- rule's one judgement-rather-than-category exclusion. See
-        -- exactly_five_indicators_are_hard_failures, which asserts that
+        -- exactly_six_indicators_are_hard_failures, which asserts that
         -- absence rather than leaving it to be inferred.
 }
 
@@ -1609,6 +1635,8 @@ surface TaskCard {
         task.labels
         task.phoenix
         task.respawn_failed
+        task.next_due
+        task.schedule_failed
 
     @guarantee FrameIsCompleteAndLit
         -- Every card draws its own complete frame — rounded top and bottom
@@ -1681,6 +1709,14 @@ surface TaskCard {
         -- character count. It is the only glyph on a card where the two
         -- measures differ. The marker itself is not a state colour; in done
         -- it is task.respawn_failed that claims the red border.
+
+    @guarantee ScheduleShowsOnTheMetadataLine
+        -- A task with next_due set carries ` · ◷ <when>` on line 2 after the
+        -- idle indicator, <when> its local `<Mon> <d> <HH:MM>` or `due` once
+        -- passed. task.schedule_failed shows `⚠ schedule failed` instead of
+        -- the idle indicator, followed by the same suffix when next_due is
+        -- set, and claims the red border. See "Schedule
+        -- marker".
 }
 
 surface EpicCard {

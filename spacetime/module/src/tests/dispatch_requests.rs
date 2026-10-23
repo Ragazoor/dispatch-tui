@@ -113,7 +113,7 @@ fn only_the_four_launch_paths_are_origins() {
 
 #[test]
 fn a_backlog_task_with_no_open_request_may_be_requested() {
-    assert!(validate_dispatch_request(&backlog_task(), HOST_A, "user", false).is_ok());
+    assert!(validate_dispatch_request(&backlog_task(), HOST_A, "user", false, NOW).is_ok());
 }
 
 /// `DispatchClaimExclusive`, through the request reducer: a claimed task is
@@ -125,7 +125,7 @@ fn a_task_that_is_not_in_backlog_is_refused() {
             status: status.into(),
             ..backlog_task()
         };
-        let why = validate_dispatch_request(&task, HOST_A, "user", false).unwrap_err();
+        let why = validate_dispatch_request(&task, HOST_A, "user", false, NOW).unwrap_err();
         assert!(why.contains("already claimed"), "{status}: {why}");
     }
 }
@@ -137,8 +137,8 @@ fn a_task_whose_worktree_is_on_another_host_is_refused() {
         host: HOST_A.into(),
         ..backlog_task()
     };
-    assert!(validate_dispatch_request(&task, HOST_A, "user", false).is_ok());
-    let why = validate_dispatch_request(&task, HOST_B, "user", false).unwrap_err();
+    assert!(validate_dispatch_request(&task, HOST_A, "user", false, NOW).is_ok());
+    let why = validate_dispatch_request(&task, HOST_B, "user", false, NOW).unwrap_err();
     assert!(why.contains(HOST_A), "{why}");
 }
 
@@ -147,7 +147,7 @@ fn a_task_whose_worktree_is_on_another_host_is_refused() {
 /// refused rather than written beside it.
 #[test]
 fn a_task_with_an_open_request_is_refused_even_in_backlog() {
-    let why = validate_dispatch_request(&backlog_task(), HOST_A, "user", true).unwrap_err();
+    let why = validate_dispatch_request(&backlog_task(), HOST_A, "user", true, NOW).unwrap_err();
     assert!(why.contains("open dispatch request"), "{why}");
 }
 
@@ -160,15 +160,15 @@ fn the_epic_chain_may_not_request_a_phoenix_task() {
         phoenix: true,
         ..backlog_task()
     };
-    let why = validate_dispatch_request(&phoenix, HOST_A, "epic_chain", false).unwrap_err();
+    let why = validate_dispatch_request(&phoenix, HOST_A, "epic_chain", false, NOW).unwrap_err();
     assert!(why.contains("phoenix"), "{why}");
     for origin in ["user", "mcp", "quick"] {
         assert!(
-            validate_dispatch_request(&phoenix, HOST_A, origin, false).is_ok(),
+            validate_dispatch_request(&phoenix, HOST_A, origin, false, NOW).is_ok(),
             "{origin}"
         );
     }
-    assert!(validate_dispatch_request(&backlog_task(), HOST_A, "epic_chain", false).is_ok());
+    assert!(validate_dispatch_request(&backlog_task(), HOST_A, "epic_chain", false, NOW).is_ok());
 }
 
 // -- RequestDispatch: the mode (D3) ----------------------------------

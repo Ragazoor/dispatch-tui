@@ -120,6 +120,20 @@ pub struct Task {
     #[index(btree)]
     #[default("")]
     pub alias: String,
+    /// A five-field UTC cron string, or `""` when the task is not scheduled
+    /// (`schedules.allium`). On a phoenix task it repeats, on any other it
+    /// fires once. Appended last, as every column since `owner` is.
+    #[default("")]
+    pub schedule: String,
+    /// When a running board next dispatches this task, in the store's
+    /// timestamp spelling, or `""` when nothing is pending. Computed only by
+    /// the module, from `schedule` (`schedule.rs`), never by a board.
+    #[default("")]
+    pub next_due: String,
+    /// Why the last scheduled launch failed, or `""`
+    /// (`schedules.allium: ScheduledLaunchFails`).
+    #[default("")]
+    pub schedule_error: String,
 }
 
 #[spacetimedb::table(accessor = epics, public)]

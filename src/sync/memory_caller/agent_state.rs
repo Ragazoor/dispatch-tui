@@ -525,9 +525,17 @@ impl MemoryReducerCaller {
         }
         let epic_id =
             self.route_to_repo_group(&mut tables, successor.epic_id, &successor.repo_path);
+        // Mirrors the module: the successor carries the predecessor's
+        // schedule, which `write_task` arms (tasks.allium: PhoenixRespawn).
+        let schedule = tables
+            .tasks
+            .get(&predecessor)
+            .map(|t| t.schedule.clone())
+            .unwrap_or_default();
         let successor_row = module::Task {
             id: 0,
             epic_id,
+            schedule,
             ..module::Task::from(successor)
         };
         self.write_task(&mut tables, successor_row)

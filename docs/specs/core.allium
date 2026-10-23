@@ -654,8 +654,20 @@ entity Task {
                               -- purpose — a phoenix task still carries whatever kanban
                               -- label it wants, and `tag` keeps its two behavioural
                               -- readers untouched (see "Tag system" in
-                              -- docs/conventions.md). Not a schedule: nothing dispatches
-                              -- a phoenix task, the human does.
+                              -- docs/conventions.md). Not a schedule by itself: an
+                              -- unscheduled phoenix task waits for a human to
+                              -- dispatch it. With `schedule` set it repeats on that
+                              -- schedule (schedules.allium, S3).
+    schedule: String?         -- a five-field UTC cron string; null when the task is not
+                              -- scheduled. On a phoenix task it repeats, on any other
+                              -- it fires once (schedules.allium: SetSchedule)
+    next_due: Timestamp?      -- when a running board next dispatches this task; null
+                              -- when nothing is pending. Computed by the store from
+                              -- `schedule`, never by a board (schedules.allium:
+                              -- FireDueTask, DispatchConsumesTheDueTime)
+    schedule_error: String?   -- why the last scheduled launch failed; null when it has
+                              -- not, or since a launch succeeded or the schedule was set
+                              -- again (schedules.allium: ScheduledLaunchFails)
     created_at: Timestamp
     updated_at: Timestamp
 
@@ -744,6 +756,11 @@ entity Task {
     -- no separate error column to keep in step with it. Surfaced on the card by
     -- "Phoenix marker" in board-visuals.allium.
     respawn_failed: phoenix and status = done
+
+    -- A scheduled launch failed and the task is still waiting in backlog for
+    -- a human (schedules.allium: ScheduledLaunchFails). Surfaced on the card
+    -- by "Schedule marker" in board-visuals.allium.
+    schedule_failed: schedule_error != null and status = backlog
 
     -- LiveSubagentCountMatchesEntries and PendingStopOnlyWhileRunning moved
     -- to Agent with the fields they constrain (agents.allium step A4).

@@ -67,6 +67,14 @@ pub(in crate::tui) const PR_POLL_BACKOFF_MAX: Duration = Duration::from_secs(30 
 /// the map that the card no longer drew, or the reverse.
 pub(in crate::tui) const MESSAGE_FLASH_TTL: Duration = Duration::from_secs(30);
 
+/// How long after asking to dispatch a due scheduled task this board waits
+/// before it may ask again (`schedules.allium: FireDueTask`). Long enough to
+/// cover the reducer round trip that moves the task out of backlog, so the
+/// ticks in between do not repeat a request the store would refuse; short
+/// enough that a task left due — a request refused for a skewed clock, a repo
+/// missing on this machine — is tried again within a minute.
+pub(in crate::tui) const SCHEDULE_REFIRE_AFTER: Duration = Duration::from_secs(30);
+
 /// Number of ticks between budget-snapshot reads. At `TICK_INTERVAL` (2s) this
 /// is 10s — mirrors config.budget_poll_interval (see docs/specs/core.allium
 /// config and dispatch.allium: TokenBudgetIndicator).
@@ -237,6 +245,11 @@ pub struct App {
     /// DispatchingFeedback's OPEN part: this host's dispatch request rows as
     /// the last board reload delivered them. See [`DispatchRequestView`].
     pub(in crate::tui) dispatch_requests: DispatchRequestView,
+    /// When this board last asked to dispatch each due scheduled task
+    /// (`schedules.allium: FireDueTask`), so the ticks during the reducer round
+    /// trip that moves the task out of backlog do not ask again. See
+    /// [`SCHEDULE_REFIRE_AFTER`](crate::tui::SCHEDULE_REFIRE_AFTER).
+    pub(in crate::tui) schedule_fired: HashMap<TaskId, std::time::Instant>,
     /// Spinner frame index (0..DISPATCH_SPINNER_FRAMES) for the per-card "dispatching…" indicator.
     /// Advanced by `Tick` only while `dispatching` is non-empty.
     pub(in crate::tui) spinner_tick: u8,
@@ -353,6 +366,7 @@ impl App {
             epic_folds: EpicFoldState::default(),
             dispatching: HashSet::new(),
             dispatch_requests: DispatchRequestView::default(),
+            schedule_fired: HashMap::new(),
             spinner_tick: 0,
             budget: None,
             store_server: None,

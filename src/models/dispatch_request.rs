@@ -57,6 +57,8 @@ pub enum DispatchOrigin {
     Mcp,
     EpicChain,
     Quick,
+    /// A board firing a due scheduled task (`schedules.allium: FireDueTask`).
+    Schedule,
 }
 
 define_str_enum!(DispatchOrigin, "dispatch origin" {
@@ -64,6 +66,7 @@ define_str_enum!(DispatchOrigin, "dispatch origin" {
     Mcp => "mcp",
     EpicChain => "epic_chain",
     Quick => "quick",
+    Schedule => "schedule",
 });
 
 /// One `dispatch_requests` row as the board reads it. An absent optional

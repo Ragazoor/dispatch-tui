@@ -111,7 +111,13 @@ pub const DISPATCH_FAILED: &str = "failed";
 
 pub const DISPATCH_MODES: [&str; 3] = ["dispatch", "research", "quick"];
 pub const DISPATCH_ORIGIN_EPIC_CHAIN: &str = "epic_chain";
-pub const DISPATCH_ORIGINS: [&str; 4] = ["user", "mcp", DISPATCH_ORIGIN_EPIC_CHAIN, "quick"];
+pub const DISPATCH_ORIGINS: [&str; 5] = [
+    "user",
+    "mcp",
+    DISPATCH_ORIGIN_EPIC_CHAIN,
+    "quick",
+    DISPATCH_ORIGIN_SCHEDULE,
+];
 
 /// The backstop's reason (`DispatchRequestTimesOut`).
 pub const DISPATCH_REASON_TIMED_OUT: &str = "timed out";
@@ -171,7 +177,7 @@ pub fn new_dispatch_request(
     }
 }
 
-/// Refuse an origin that is not one of the four launch paths (D9).
+/// Refuse an origin that is not one of the launch paths (D9).
 pub fn validate_dispatch_origin(origin: &str) -> Result<(), String> {
     if DISPATCH_ORIGINS.contains(&origin) {
         Ok(())
@@ -190,11 +196,16 @@ pub fn validate_dispatch_origin(origin: &str) -> Result<(), String> {
 /// epic chain's request for a phoenix task is refused like any other refusal,
 /// and the chain moves on to its next candidate. Every other origin may take
 /// a phoenix task.
+///
+/// `schedules.allium` adds two more, both read against the store's clock
+/// `now`: the epic chain passes over a task still waiting for its scheduled
+/// time (S8), and a schedule-origin request is for a task that is due.
 pub fn validate_dispatch_request(
     task: &Task,
     requester: &str,
     origin: &str,
     has_open_request: bool,
+    now: &str,
 ) -> Result<(), String> {
     validate_claim_acceptance(task, requester)?;
     if has_open_request {
@@ -208,6 +219,15 @@ pub fn validate_dispatch_request(
             "task {} is a phoenix task, which the epic chain never dispatches",
             task.id
         ));
+    }
+    if origin == DISPATCH_ORIGIN_EPIC_CHAIN && task_awaits_schedule(task, now) {
+        return Err(format!(
+            "task {} is waiting for its scheduled time, which the epic chain does not dispatch early",
+            task.id
+        ));
+    }
+    if origin == DISPATCH_ORIGIN_SCHEDULE && !task_is_due(task, now) {
+        return Err(format!("task {} is not due", task.id));
     }
     Ok(())
 }
@@ -400,11 +420,15 @@ pub fn dispatched_request_row(
 
 /// `HostReportsDispatched`'s writes to the task: the worktree and the host
 /// paired with the worktree (`HostTracksWorktree`). The window is the current
-/// agent's, written beside it.
+/// agent's, written beside it. A launch of any origin consumes a pending
+/// scheduled run and clears a recorded failure
+/// (`schedules.allium: DispatchConsumesTheDueTime`).
 pub fn apply_dispatched_to_task(task: Task, row: &DispatchRequest) -> Task {
     Task {
         worktree: row.worktree.clone(),
         host: row.host.clone(),
+        next_due: String::new(),
+        schedule_error: String::new(),
         updated_at: row.finished_at.clone(),
         ..task
     }
@@ -425,6 +449,30 @@ pub fn failed_request_row(row: DispatchRequest, reason: &str, now: &str) -> Disp
 /// left alone. `updated_at` is the caller's to stamp.
 pub fn release_claim_after_failure(task: Task) -> Option<Task> {
     is_bare_claim(&task).then(|| released_task(task))
+}
+
+/// Every failure's write to the task (`ReleaseClaimOfFailedRequest` and
+/// `schedules.allium: ScheduledLaunchFails` in one write): the row to write,
+/// stamped `updated_at = stamp`, or `None` when neither rule changes it, and
+/// whether the claim was released (which ends the task's agent).
+pub fn task_after_failed_request(
+    task: Task,
+    origin: &str,
+    reason: &str,
+    stamp: &str,
+) -> (Option<Task>, bool) {
+    let released = release_claim_after_failure(task.clone());
+    let was_released = released.is_some();
+    let base = released.unwrap_or(task);
+    let row = match schedule_after_failed_launch(base.clone(), origin, reason, stamp) {
+        Some(marked) => Some(marked),
+        None => was_released.then_some(base),
+    };
+    let row = row.map(|row| Task {
+        updated_at: stamp.into(),
+        ..row
+    });
+    (row, was_released)
 }
 
 /// `HostRestartFailsInterrupted`'s selection, over rows already read by the
@@ -480,6 +528,7 @@ pub(crate) fn fail_dispatch_request(
     row: DispatchRequest,
     reason: &str,
 ) -> Result<(), String> {
+    let origin = row.origin.clone();
     let failed = failed_request_row(row, reason, &now(ctx));
     let stamp = failed.finished_at.clone();
     let task_id = failed.task_id;
@@ -488,14 +537,13 @@ pub(crate) fn fail_dispatch_request(
     cancel_dispatch_request_timer(ctx, request_id);
     if let Some(task) = ctx.db.tasks().id().find(task_id) {
         let epic_id = task.epic_id;
-        if let Some(released) = release_claim_after_failure(task) {
-            write_task(
-                ctx,
-                Task {
-                    updated_at: stamp,
-                    ..released
-                },
-            )?;
+        // schedules.allium: ScheduledLaunchFails rides on the release's
+        // write, so the task is back in backlog already disarmed or re-armed.
+        let (row, was_released) = task_after_failed_request(task, &origin, reason, &stamp);
+        if let Some(row) = row {
+            write_task(ctx, row)?;
+        }
+        if was_released {
             // agents.allium: EndAgentWhenLaunchFails, with the release.
             end_current_agent(&mut AgentTables(ctx), task_id, AGENT_END_LAUNCH_FAILED);
         }
@@ -555,7 +603,7 @@ pub fn request_dispatch(
         .task_id()
         .filter(&task_id)
         .any(|r| dispatch_request_is_open(&r.state));
-    validate_dispatch_request(&task, &requester, &origin, has_open)?;
+    validate_dispatch_request(&task, &requester, &origin, has_open, &now(ctx))?;
     let mode = choose_dispatch_mode(&task, &mode)?;
     create_dispatch_request(ctx, task, &requester, mode, &origin)
 }

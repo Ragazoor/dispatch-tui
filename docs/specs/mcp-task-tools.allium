@@ -17,6 +17,7 @@
 --           HookPeerMessageSent in agent-health.allium.
 
 use "./core.allium" as core
+use "./schedules.allium" as schedules
 
 ------------------------------------------------------------
 -- Config
@@ -200,7 +201,8 @@ rule AgentPortRejectsNonLoopbackOrigins {
 rule UpdateTaskViaMcp {
     when: McpUpdateTask(task, status?, sub_status?, plan?, title?, description?,
                         repo_path?, sort_order?, url?, url_type?, tag?, epic_id?,
-                        base_branch?, wrap_up_mode?, auto_run_plan?, phoenix?)
+                        base_branch?, wrap_up_mode?, auto_run_plan?, phoenix?,
+                        schedule?)
 
     requires: status != null or sub_status != null or plan != null or title != null
               or description != null or repo_path != null
@@ -210,6 +212,7 @@ rule UpdateTaskViaMcp {
               or wrap_up_mode != omitted
               or auto_run_plan != null
               or phoenix != null
+              or schedule != null
 
     -- Typed-url validation contract. The url string and its type travel
     -- together; the handler rejects inconsistent combinations before any
@@ -332,12 +335,20 @@ rule UpdateTaskViaMcp {
         -- phoenix-armed task closed that way respawns — see that rule's own
         -- guidance.
         if phoenix != null: task.phoenix = phoenix
+    ensures:
+        -- schedule is a five-field UTC cron string (schedules.allium). The
+        -- empty string clears it; omitted leaves it alone. Applied after
+        -- phoenix in the same write, so one call can arm both and
+        -- SetSchedule's backlog-or-phoenix check sees the new flag.
+        if schedule != null:
+            if schedule = "": schedules/ScheduleCleared(task: task)
+            else: schedules/ScheduleSet(task: task, cron: schedule)
     ensures: task.updated_at = now
 
     @guidance
         -- MCP update_tasks accepts status, sub_status, plan_path, title,
         -- description, repo_path, sort_order, url, url_type, tag, epic_id,
-        -- base_branch, wrap_up_mode, auto_run_plan, and phoenix. It does NOT
+        -- base_branch, wrap_up_mode, auto_run_plan, phoenix, and schedule. It does NOT
         -- accept worktree or tmux_window — those are owned by the dispatch flow
         -- and never set via MCP.
         --
@@ -434,7 +445,8 @@ rule UpdateTaskViaMcp {
 rule MarkTaskDoneViaMcp {
     when: McpUpdateTask(task, caller_identity, status?, sub_status?, plan?, title?,
                         description?, repo_path?, sort_order?, url?, url_type?, tag?,
-                        epic_id?, base_branch?, wrap_up_mode?, auto_run_plan?, phoenix?)
+                        epic_id?, base_branch?, wrap_up_mode?, auto_run_plan?, phoenix?,
+                        schedule?)
 
     requires: status = done
 
@@ -454,6 +466,7 @@ rule MarkTaskDoneViaMcp {
         and repo_path = null and sort_order = null and url = null and url_type = null
         and tag = null and epic_id = null and base_branch = null
         and wrap_up_mode = omitted and auto_run_plan = null and phoenix = null
+        and schedule = null
 
     -- A dispatched agent may not close its OWN task through this call — that
     -- route stays wrap_up + exit_session, with its token, its ordering
@@ -749,7 +762,7 @@ rule CreateTaskViaMcp {
     when: McpCreateTask(caller_identity,
                         title, repo_path, epic_id, description?, plan?,
                         sort_order?, tag?, base_branch?,
-                        wrap_up_mode?, auto_run_plan?, phoenix?, signal?)
+                        wrap_up_mode?, auto_run_plan?, phoenix?, schedule?, signal?)
 
     -- epic_id is REQUIRED and nullable. Required means the ARGUMENT must be
     -- present; nullable means the VALUE may be null. The three cases are:
@@ -811,6 +824,10 @@ rule CreateTaskViaMcp {
         created_at: now,
         updated_at: now
       )
+      -- schedule as on update_tasks, applied in the same store write as the
+      -- creation, so a refused cron creates no task.
+      if schedule != null and schedule != "":
+            schedules/ScheduleSet(task: task, cron: schedule)
 
     -- SignalMarksTheTaskForEveryFollower. When signal is true and the task
     -- lands in an epic, one core/UnseenTask row is written for every person
@@ -979,7 +996,8 @@ rule GetTaskViaMcp {
         --   resolved)], [Tag], [Plan], [<url label>: <url> — the typed label
         --   derived from url.url_type], [Worktree], Base branch,
         --   [Tmux window], [Dispatch request], [Sort order], [Verify command],
-        --   [Wrap-up mode], [Phoenix], Created, Updated.
+        --   [Wrap-up mode], [Phoenix], [Schedule], [Schedule error], Created,
+        --   Updated.
         -- [Dispatch request] is not a Task field: it is the task's most recent
         -- store-split.allium DispatchRequest that this board's subscription
         -- holds, rendered as its id, state and, when failed, its reason.
@@ -989,6 +1007,9 @@ rule GetTaskViaMcp {
         -- come back — so an agent wrapping up knows it is finishing THIS run of
         -- a recurring task, not the task itself, and can leave notes for its
         -- successor in the description rather than only in the commit.
+        -- [Schedule] renders when task.schedule is set, as the cron string
+        -- marked UTC and, when next_due is set, the next due time.
+        -- [Schedule error] renders task.schedule_error when set.
         -- Not surfaced at all: labels, external_id, auto_run_plan, origin, and
         -- the hook timestamps (last_pre_tool_use_at, last_notification_at,
         -- pr_learnings_gate_shown_at).

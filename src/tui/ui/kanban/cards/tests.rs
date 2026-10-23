@@ -11,7 +11,7 @@ use crate::tui::tests::{make_task, make_unprovisioned_task};
 /// the mistake and the test says which.
 fn every_indicator() -> Vec<(CardIndicator, Option<Color>, &'static str)> {
     vec![
-        // The five hard failures. This is the *membership* claim: these five
+        // The six hard failures. This is the *membership* claim: these six
         // and no others are red. Only `Crashed` is exercised through the
         // renderer, so without this a state quietly promoted into or dropped
         // out of the set would pass every other test.
@@ -24,6 +24,13 @@ fn every_indicator() -> Vec<(CardIndicator, Option<Color>, &'static str)> {
         (CardIndicator::Conflict, Some(RED), "rebase conflict"),
         (CardIndicator::Crashed, Some(RED), "crashed"),
         (CardIndicator::RespawnFailed, Some(RED), "respawn failed"),
+        (
+            CardIndicator::ScheduleFailed {
+                schedule_suffix: String::new(),
+            },
+            Some(RED),
+            "schedule failed",
+        ),
         // The two attention states.
         (CardIndicator::Blocked, Some(YELLOW), "blocked"),
         (
@@ -74,6 +81,7 @@ fn every_indicator() -> Vec<(CardIndicator, Option<Color>, &'static str)> {
                 staleness: Staleness::Fresh,
                 plan_indicator: "",
                 tag_suffix: String::new(),
+                schedule_suffix: String::new(),
             },
             None,
             "idle",
@@ -192,7 +200,7 @@ fn every_indicator_claims_the_border_its_severity_earns() {
 }
 
 #[test]
-fn exactly_five_indicators_are_hard_failures() {
+fn exactly_six_indicators_are_hard_failures() {
     // The counts are the membership claim stated a second way: the per-variant
     // test above would still pass if a variant were *added* to the red set and
     // its expectation updated in the same edit. These numbers make that edit
@@ -201,10 +209,7 @@ fn exactly_five_indicators_are_hard_failures() {
     let red = all.iter().filter(|(_, c, _)| *c == Some(RED)).count();
     let amber = all.iter().filter(|(_, c, _)| *c == Some(YELLOW)).count();
     let none = all.iter().filter(|(_, c, _)| c.is_none()).count();
-    assert_eq!(
-        red, 5,
-        "the hard-failure set must have exactly five members"
-    );
+    assert_eq!(red, 6, "the hard-failure set must have exactly six members");
     assert_eq!(amber, 2, "the attention set must have exactly two members");
     assert_eq!(
         red + amber + none,
@@ -442,5 +447,104 @@ fn the_title_budget_follows_the_lead_word_not_the_id() {
     assert_eq!(
         task_card_prefix_width(&named, false, false),
         task_card_prefix_width(&numbered, false, false)
+    );
+}
+
+// -- Schedule marker ---------------------------------------------------
+//
+// board-visuals.allium's "Schedule marker": a pending scheduled run shows on
+// the metadata line, in local time; a failed scheduled launch is a hard
+// failure.
+
+fn scheduled_task(next_due: Option<DateTime<Utc>>) -> Task {
+    Task {
+        schedule: Some("0 9 * * 1".into()),
+        next_due,
+        ..make_task(1, TaskStatus::Backlog)
+    }
+}
+
+#[test]
+fn a_pending_run_reads_as_the_local_due_time() {
+    let now = Utc.with_ymd_and_hms(2026, 10, 21, 10, 0, 0).unwrap();
+    let due = Utc.with_ymd_and_hms(2026, 10, 26, 9, 0, 0).unwrap();
+    let cet = chrono::FixedOffset::east_opt(3600).unwrap();
+    assert_eq!(
+        schedule_suffix(Some(due), now, &Utc),
+        " \u{00b7} \u{25f7} Oct 26 09:00"
+    );
+    assert_eq!(
+        schedule_suffix(Some(due), now, &cet),
+        " \u{00b7} \u{25f7} Oct 26 10:00"
+    );
+}
+
+#[test]
+fn a_passed_due_time_reads_due() {
+    let now = Utc.with_ymd_and_hms(2026, 10, 21, 10, 0, 0).unwrap();
+    let due = Utc.with_ymd_and_hms(2026, 10, 19, 9, 0, 0).unwrap();
+    assert_eq!(
+        schedule_suffix(Some(due), now, &Utc),
+        " \u{00b7} \u{25f7} due"
+    );
+}
+
+#[test]
+fn no_pending_run_shows_nothing() {
+    assert_eq!(schedule_suffix(None, Utc::now(), &Utc), "");
+}
+
+#[test]
+fn a_scheduled_backlog_card_carries_the_marker_on_its_idle_line() {
+    let now = Utc::now();
+    let app = App::new(vec![]);
+    let task = scheduled_task(Some(now + chrono::Duration::days(3)));
+    let text = label_of(classify_card_indicator(&task, task.status, &app, now));
+    assert!(text.contains('\u{25f7}'), "got {text:?}");
+}
+
+#[test]
+fn a_failed_scheduled_launch_in_backlog_is_a_hard_failure() {
+    let now = Utc::now();
+    let app = App::new(vec![]);
+    let task = Task {
+        schedule_error: Some("repo missing".into()),
+        ..scheduled_task(None)
+    };
+    let indicator = classify_card_indicator(&task, task.status, &app, now);
+    assert_eq!(
+        indicator,
+        CardIndicator::ScheduleFailed {
+            schedule_suffix: String::new()
+        }
+    );
+    let text = label_of(indicator);
+    assert!(text.contains("\u{26a0} schedule failed"), "got {text:?}");
+
+    // Out of backlog the failure is no longer waiting on anyone.
+    let moved_on = Task {
+        status: TaskStatus::Done,
+        ..task
+    };
+    assert!(!matches!(
+        classify_card_indicator(&moved_on, moved_on.status, &app, now),
+        CardIndicator::ScheduleFailed { .. }
+    ));
+}
+
+/// A phoenix task re-armed after a failed launch says both.
+#[test]
+fn a_rearmed_failed_phoenix_shows_the_failure_and_the_next_try() {
+    let now = Utc::now();
+    let app = App::new(vec![]);
+    let task = Task {
+        phoenix: true,
+        schedule_error: Some("repo missing".into()),
+        ..scheduled_task(Some(now + chrono::Duration::days(3)))
+    };
+    let text = label_of(classify_card_indicator(&task, task.status, &app, now));
+    assert!(
+        text.contains("\u{26a0} schedule failed \u{00b7} \u{25f7} "),
+        "got {text:?}"
     );
 }

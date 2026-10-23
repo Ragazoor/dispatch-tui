@@ -1103,6 +1103,7 @@ fn a_shared_argument_carries_one_wording_on_every_tool() {
         "wrap_up_mode",
         "auto_run_plan",
         "phoenix",
+        "schedule",
         "tag",
         "sort_order",
     ] {

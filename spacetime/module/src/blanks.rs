@@ -47,6 +47,9 @@ pub fn blank_task() -> Task {
         completed_at: String::new(),
         created_by: String::new(),
         alias: String::new(),
+        schedule: String::new(),
+        next_due: String::new(),
+        schedule_error: String::new(),
     }
 }
 

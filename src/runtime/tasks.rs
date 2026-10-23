@@ -21,6 +21,7 @@ impl TuiRuntime {
             wrap_up_mode: draft.wrap_up_mode,
             auto_run_plan: false,
             phoenix: draft.phoenix,
+            schedule: None,
         };
         if let Some(task) = self.create_task(app, params).await {
             let id = task.id;
@@ -186,6 +187,7 @@ impl TuiRuntime {
                     wrap_up_mode: None,
                     auto_run_plan: false,
                     phoenix: false,
+                    schedule: None,
                 },
             )
             .await
@@ -519,6 +521,45 @@ impl TuiRuntime {
     pub(super) async fn exec_dispatch_agent(&self, id: TaskId, mode: Option<models::DispatchMode>) {
         self.request_for_dispatch(id, models::DispatchOrigin::User, mode)
             .await;
+    }
+
+    /// `schedules.allium: FireDueTask`: request a `schedule`-origin dispatch
+    /// for each due task whose repo exists on this machine. A board without
+    /// the repo leaves the task due for one that has it, so it never fails a
+    /// schedule. A refusal is ordinary — another board fired it first, or the
+    /// store's clock says it is not due yet — and is logged, not shown: no one
+    /// asked for this dispatch at this moment.
+    ///
+    /// Off the event loop: nothing comes back to the App, and a burst of tasks
+    /// due at the same minute is one store round trip each.
+    pub(super) fn exec_fire_scheduled(
+        &self,
+        due: Vec<(TaskId, String)>,
+    ) -> tokio::task::JoinHandle<()> {
+        let task_svc = Arc::clone(&self.task_svc);
+        tokio::spawn(async move {
+            for (id, repo_path) in due {
+                // The same check the dispatch adapter makes, `~` included.
+                if let Err(why) = models::validate_repo_path(&repo_path) {
+                    tracing::debug!(task = id.0, %why, "scheduled task due, repo not on this machine");
+                    continue;
+                }
+                match task_svc
+                    .request_dispatch(id, models::DispatchOrigin::Schedule, None)
+                    .await
+                {
+                    Ok(crate::store::RequestDispatchAnswer::Requested(_)) => {
+                        tracing::info!(task = id.0, "scheduled task dispatched");
+                    }
+                    Ok(crate::store::RequestDispatchAnswer::Refused(why)) => {
+                        tracing::info!(task = id.0, %why, "scheduled dispatch refused");
+                    }
+                    Err(e) => {
+                        tracing::warn!(task = id.0, error = %e, "scheduled dispatch request failed");
+                    }
+                }
+            }
+        })
     }
 
     /// Write a dispatch request for `id`.

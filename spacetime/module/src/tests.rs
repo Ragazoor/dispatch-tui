@@ -42,3 +42,9 @@ mod session_requests;
 /// `AgentStore` and run here over a plain in-test store (`agent.rs`).
 #[cfg(test)]
 mod agents;
+
+/// The scheduled-task rules of schedules.allium (task #98394): the cron
+/// grammar, arming and clearing, the dispatch-request checks, and what a
+/// launch's outcome and a phoenix respawn do to the schedule.
+#[cfg(test)]
+mod schedules;

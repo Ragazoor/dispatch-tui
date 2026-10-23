@@ -49,6 +49,10 @@ pub struct UpdateTaskParams {
     /// `None` = leave untouched; `Some(v)` = write `v`. Arms or disarms the
     /// recurrence; see `PhoenixRespawn` in `docs/specs/tasks.allium`.
     pub phoenix: Option<bool>,
+    /// `None` = leave untouched; `Set(cron)` = schedule it; `Clear` = drop the
+    /// schedule. The store validates the cron and arms `next_due`
+    /// (`schedules.allium: SetSchedule`, `ClearSchedule`).
+    pub schedule: Option<FieldUpdate>,
 }
 
 impl UpdateTaskParams {
@@ -85,6 +89,7 @@ impl UpdateTaskParams {
             wrap_up_mode,
             auto_run_plan,
             phoenix,
+            schedule,
         } = self;
 
         [
@@ -107,6 +112,7 @@ impl UpdateTaskParams {
             ("wrap_up_mode", wrap_up_mode.is_some()),
             ("auto_run_plan", auto_run_plan.is_some()),
             ("phoenix", phoenix.is_some()),
+            ("schedule", schedule.is_some()),
         ]
         .into_iter()
         .filter_map(|(name, is_set)| is_set.then_some(name))
@@ -136,6 +142,7 @@ impl UpdateTaskParams {
             wrap_up_mode: None,
             auto_run_plan: None,
             phoenix: None,
+            schedule: None,
         }
     }
 
@@ -229,6 +236,11 @@ impl UpdateTaskParams {
         self
     }
 
+    pub fn schedule(mut self, update: FieldUpdate) -> Self {
+        self.schedule = Some(update);
+        self
+    }
+
     pub fn auto_run_plan(mut self, value: bool) -> Self {
         self.auto_run_plan = Some(value);
         self
@@ -254,6 +266,9 @@ pub struct CreateTaskParams {
     /// the phoenix respawn itself, which passes `true` so the flag moves to the
     /// successor. See `PhoenixRespawn` in `docs/specs/tasks.allium`.
     pub phoenix: bool,
+    /// A five-field UTC cron string, or `None` for an unscheduled task
+    /// (`schedules.allium: SetSchedule`).
+    pub schedule: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

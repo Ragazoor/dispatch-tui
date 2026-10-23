@@ -71,6 +71,9 @@ mirror!(
         completed_at,
         created_by,
         alias,
+        schedule,
+        next_due,
+        schedule_error,
     }
 );
 
@@ -107,6 +110,7 @@ mirror!(
         host,
         owner,
         completed_at,
+        schedule,
     }
 );
 

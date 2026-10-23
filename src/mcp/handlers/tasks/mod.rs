@@ -152,7 +152,13 @@ mcp_args! {
     #[serde(default)]
     optional phoenix: Option<bool> = [set(phoenix)] {
         "type": "boolean",
-        "description": "When true, completing this task automatically recreates it as a fresh backlog copy carrying the same settings, and the flag moves to that copy. A recurring task with no schedule — nothing dispatches the copy, you do."
+        "description": "When true, completing this task automatically recreates it as a fresh backlog copy carrying the same settings, and the flag moves to that copy. Without a schedule nothing dispatches the copy, you do; with one, the copy runs on it."
+    };
+
+    #[serde(default)]
+    optional schedule: Option<String> = [set(schedule, FieldUpdate::from_string)] {
+        "type": "string",
+        "description": "Run this task on a schedule: a five-field cron string read in UTC (minute hour day-of-month month day-of-week), e.g. '0 9 * * 1' for Mondays 09:00 UTC. A running board dispatches it when due, or as soon as one starts if the time passed. A phoenix task repeats on it; any other task runs once, so for a one-off give a cron matching that date. An empty string clears it."
     };
 }
 
@@ -232,6 +238,8 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) auto_run_plan: bool,
     #[serde(default)]
     pub(super) phoenix: bool,
+    #[serde(default)]
+    pub(super) schedule: Option<String>,
     #[serde(default)]
     pub(super) signal: bool,
 }
@@ -423,6 +431,16 @@ fn format_task_detail(
     // belong in the description and not only in the commit.
     if task.phoenix {
         text.push_str("\nPhoenix: yes — completing this task recreates it as a fresh backlog copy");
+    }
+    // schedules.allium; mcp-task-tools.allium: GetTaskViaMcp.
+    if let Some(cron) = task.schedule.as_deref() {
+        text.push_str(&format!("\nSchedule: {cron} (UTC)"));
+        if let Some(due) = task.next_due {
+            text.push_str(&format!(", next due {}", due.format("%Y-%m-%d %H:%M UTC")));
+        }
+    }
+    if let Some(why) = task.schedule_error.as_deref() {
+        text.push_str(&format!("\nSchedule error: {why}"));
     }
     text.push_str(&format!(
         "\nCreated: {}",

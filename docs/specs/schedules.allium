@@ -1,0 +1,255 @@
+-- allium: 3
+-- schedules.allium
+--
+-- Scope: Scheduled tasks. A task can carry a cron schedule; when its next due
+--        time arrives, a running board dispatches it. A phoenix task repeats
+--        on its schedule; any other task runs once.
+-- Includes: The schedule fields on Task and how they are set and cleared;
+--           when a task is due; which board fires it; what a fire, a
+--           successful launch and a failed launch do to the schedule; how a
+--           phoenix successor inherits it; the epic chain passing over a
+--           waiting task.
+-- Excludes: How the agent turns "every week" into a cron string (the agent's
+--           own judgement; the tool only takes the cron string); the dispatch
+--           request lifecycle itself (store-split.allium: RequestDispatch and
+--           the M4 rules); provisioning (dispatch.allium: ProvisionDispatch);
+--           the card and detail rendering (board-visuals.allium: "Schedule
+--           marker"); the MCP argument contracts (mcp-task-tools.allium).
+-- Dependencies: Task, Host and local_host() from core.allium;
+--               DispatchRequest and DispatchRequestOrigin from
+--               store-split.allium; PhoenixRespawn from tasks.allium.
+--
+-- Decisions taken with the user (task #98394), recorded so they are not
+-- re-litigated:
+--   - S1, a fire DISPATCHES. When a schedule comes due the task gets an agent,
+--     through the same dispatch request every other launch path writes
+--     (origin = schedule). Nothing else happens at the due time.
+--   - S2, the schedule is a cron string. Standard five fields (minute, hour,
+--     day of month, month, day of week), minute precision, read in UTC. A
+--     caller who means "next Monday" or "every week" has the agent convert
+--     the words into a cron string; the store never parses words.
+--   - S3, phoenix decides recurrence. There is no run-once flag. A phoenix
+--     task with a schedule repeats: each run's done respawns a successor
+--     (tasks.allium: PhoenixRespawn) that carries the schedule and its own
+--     next due time. Any other task with a schedule fires once.
+--   - S4, missed runs collapse to one. A task whose due time passed while no
+--     board was running fires once, as soon as a board runs. The runs it
+--     missed are not made up: the next due time is computed from the moment
+--     the successor is created, not from the missed slot.
+--   - S5, overlap is skipped by construction. While a phoenix run is still
+--     going (running or review) there is no backlog copy to fire, so a slot
+--     that passes meanwhile is skipped. No separate overlap check exists.
+--   - S6, any running board fires a due task, but only a board whose machine
+--     holds the task's repo. A board without the repo leaves the task for one
+--     that has it, so a missing repo never marks a schedule failed.
+--     Deliberately ANY person's board, not only the setter's: a shared board
+--     is shared between teammates, so a scheduled task in a shared epic is
+--     work any of them may run. A task that must not run on a teammate's
+--     machine belongs on its owner's own board or a private epic, where no
+--     one else's board sees it. Raised by a security review and confirmed
+--     with the user; not to be re-litigated.
+--   - S7, a failed scheduled launch is marked, not retried. The task stays in
+--     backlog with the failure reason. A one-off stops there; a phoenix task
+--     moves on to its next due time.
+--   - S8, the epic chain passes over a task still waiting for its time
+--     (epics.allium: AutoDispatchNextSubtask).
+--   - S9, the TUI shows a schedule and never edits it. Setting and clearing
+--     are MCP-only (create_task and update_tasks' `schedule` argument).
+
+use "./core.allium" as core
+use "./store-split.allium" as store_split
+
+config {
+    -- How long a board waits after asking to dispatch a due task before it
+    -- may ask again for the same task (FireDueTask).
+    schedule_refire_after: Duration = 30.seconds
+}
+
+------------------------------------------------------------
+-- Value
+------------------------------------------------------------
+
+-- The cron grammar the store accepts. Five whitespace-separated fields:
+-- minute (0-59), hour (0-23), day of month (1-31), month (1-12), day of week
+-- (0-6, 0 = Sunday; 7 also means Sunday). Each field takes `*`, a number, a
+-- range `a-b`, a list `a,b,c` and a step `*/n` or `a-b/n`; month and weekday
+-- also take their three-letter English names. Nothing else: no seconds field,
+-- no year field, no `@weekly` macros, no `L`/`W`/`#`.
+--
+-- next_match(cron, after) is the first whole UTC minute STRICTLY after
+-- `after` that the cron matches. Day of month and day of week combine the
+-- standard way: when both are restricted (neither field starts with `*`, so
+-- `*/2` counts as unrestricted, as in Vixie cron), a day matches if EITHER
+-- does. A cron that matches no minute at all (e.g. "0 0 31 2 *") is
+-- refused when it is set, so next_match always has an answer for a stored
+-- schedule.
+
+------------------------------------------------------------
+-- Setting and clearing
+------------------------------------------------------------
+
+rule SetSchedule {
+    when: ScheduleSet(task, cron)
+
+    requires: cron_is_valid(cron)
+    -- A non-phoenix task fires once, from backlog. Set on one that has left
+    -- backlog it could never fire, so it is refused rather than stored inert.
+    -- A phoenix task may take a schedule in any status: the run in progress
+    -- is not affected, and the successor its done respawns carries it.
+    requires: task.status = backlog or task.phoenix
+
+    ensures: task.schedule = cron
+    ensures: task.schedule_error = null
+    ensures: task.next_due =
+        if task.status = backlog: next_match(cron, after: now) else: null
+
+    @guidance
+        -- Reached from create_task's and update_tasks' `schedule` argument
+        -- (mcp-task-tools.allium: CreateTaskViaMcp, UpdateTaskViaMcp), and
+        -- applied by the store in the same write as the rest of the patch, so
+        -- a task is never seen half-scheduled. Re-setting the same cron
+        -- recomputes next_due from now and clears a recorded failure: setting
+        -- a schedule is how a caller re-arms a one-off that failed.
+        -- The refusals read "invalid cron schedule \"<cron>\": <why>" and
+        -- "a schedule on a non-phoenix task needs it in backlog", and write
+        -- nothing.
+}
+
+rule ClearSchedule {
+    when: ScheduleCleared(task)
+
+    ensures: task.schedule = null
+    ensures: task.next_due = null
+    ensures: task.schedule_error = null
+
+    @guidance
+        -- update_tasks with `schedule` set to the empty string. Clearing a
+        -- task with no schedule is a no-op, not a refusal.
+}
+
+------------------------------------------------------------
+-- Firing
+------------------------------------------------------------
+
+rule FireDueTask {
+    when: task: core/Task.next_due <= now
+
+    requires: task.status = backlog
+    -- S6: only a board whose machine holds the repo fires. Another board
+    -- leaves the task due for one that does.
+    requires: task.repo_path != "" and directory_exists_locally(task.repo_path)
+    requires: not store_split/DispatchRequests.any(r => r.task = task and r.is_open)
+
+    ensures: store_split/DispatchRequested(
+        task: task,
+        requester: core/local_host(),
+        origin: schedule,
+        mode: null
+    )
+
+    @guidance
+        -- HOST-SIDE. Every running board checks the tasks it can see on its
+        -- periodic tick and requests a dispatch for each due one; the board's
+        -- clock only COMPARES against the stored next_due, it never computes
+        -- one. The first board to tick after a start fires every task whose
+        -- time passed while no board ran (S4). Two boards that both see the
+        -- task due race on the request; the store accepts one
+        -- (OneOpenDispatchRequestPerTask, and the claim moves the task out of
+        -- backlog) and refuses the other, which is an ordinary refusal the
+        -- board ignores. A refusal for any other reason is logged, and so is a
+        -- task skipped for its repo. Either way the board asks again for the
+        -- same task only after config.schedule_refire_after, and only while
+        -- it is still due: the gap covers the round trip in which the claim
+        -- moves the task out of backlog, so the ticks in between repeat no
+        -- request.
+        -- mode is left to RequestDispatch's own derivation (D3).
+}
+
+rule LeavingBacklogCancelsThePendingRun {
+    -- Every status write other than the dispatch claim. The claim moves the
+    -- task to running and keeps next_due until the launch ends
+    -- (DispatchConsumesTheDueTime, ScheduledLaunchFails).
+    when: TaskStatusWrittenByHand(task, from, to)
+
+    requires: from = backlog and to != backlog
+
+    ensures: task.next_due = null
+
+    @guidance
+        -- A hand move (the TUI's moves and editor, update_tasks' status, the
+        -- done-path close) cancels the pending run. A one-off is then spent:
+        -- moving it back to backlog does not fire it; setting its schedule
+        -- again re-arms it. A phoenix task keeps its schedule, and the copy
+        -- its done respawns is armed as usual. task.schedule and
+        -- task.schedule_error are kept as a record.
+}
+
+rule DispatchConsumesTheDueTime {
+    when: request: store_split/DispatchRequest.state transitions_to dispatched
+
+    let task = request.task
+
+    ensures:
+        if exists task:
+            task.next_due = null
+            task.schedule_error = null
+
+    @guidance
+        -- Every origin, not only schedule: a scheduled task launched early by
+        -- hand has had its run, and a one-off must not fire again if it is
+        -- later moved back to backlog. task.schedule is kept as a record; on a
+        -- phoenix task it is what the successor inherits (PhoenixRespawn).
+        -- A launch that fails does not reach this rule; see
+        -- ScheduledLaunchFails.
+}
+
+rule ScheduledLaunchFails {
+    when: request: store_split/DispatchRequest.state transitions_to failed
+
+    requires: request.origin = schedule
+
+    let task = request.task
+
+    ensures:
+        if exists task and task.schedule != null:
+            task.schedule_error = request.reason
+            task.next_due =
+                if task.phoenix: next_match(task.schedule, after: now) else: null
+
+    @guidance
+        -- S7. Applied in the same transaction as the failure and its claim
+        -- release (store-split.allium: ReleaseClaimOfFailedRequest), so the
+        -- task returns to backlog already disarmed or re-armed: no board can
+        -- see it back in backlog with the old, passed due time and fire it
+        -- again. Every way a request fails reaches it (a reported failure, the
+        -- backstop timer, a host restart); a deleted task has nothing left to
+        -- mark. A request of any other origin that fails leaves the schedule
+        -- untouched: the person who launched it by hand sees the failure on
+        -- the request, and the schedule still fires at its own time.
+}
+
+-- Two rules owned elsewhere carry the rest of this spec, written into them
+-- rather than restated here:
+--   - store-split.allium: RequestDispatch refuses a schedule-origin request
+--     for a task that is not due by the store's clock, and refuses the epic
+--     chain a task whose due time is still ahead (S8).
+--   - tasks.allium: PhoenixRespawn gives the successor the predecessor's
+--     schedule and a next_due computed from the moment of the respawn (S4,
+--     S5). So "0 9 * * 1" on a run that finishes Wednesday next fires the
+--     following Monday 09:00 UTC, and a run that took two weeks skips the
+--     Monday it overran.
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant DueTimeNeedsASchedule {
+    for task in core/Tasks:
+        task.next_due = null or task.schedule != null
+}
+
+invariant DueTimeIsAMatch {
+    -- next_due is always a minute the stored cron matches.
+    for task in core/Tasks:
+        task.next_due = null or cron_matches(task.schedule, task.next_due)
+}

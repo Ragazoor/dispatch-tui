@@ -44,6 +44,9 @@ pub struct Task {
     pub completed_at: String,
     pub created_by: String,
     pub alias: String,
+    pub schedule: String,
+    pub next_due: String,
+    pub schedule_error: String,
 }
 
 impl __sdk::InModule for Task {
@@ -91,6 +94,9 @@ pub struct TaskCols {
     pub completed_at: __sdk::__query_builder::Col<Task, String>,
     pub created_by: __sdk::__query_builder::Col<Task, String>,
     pub alias: __sdk::__query_builder::Col<Task, String>,
+    pub schedule: __sdk::__query_builder::Col<Task, String>,
+    pub next_due: __sdk::__query_builder::Col<Task, String>,
+    pub schedule_error: __sdk::__query_builder::Col<Task, String>,
 }
 
 impl __sdk::__query_builder::HasCols for Task {
@@ -152,6 +158,9 @@ impl __sdk::__query_builder::HasCols for Task {
             completed_at: __sdk::__query_builder::Col::new(table_name, "completed_at"),
             created_by: __sdk::__query_builder::Col::new(table_name, "created_by"),
             alias: __sdk::__query_builder::Col::new(table_name, "alias"),
+            schedule: __sdk::__query_builder::Col::new(table_name, "schedule"),
+            next_due: __sdk::__query_builder::Col::new(table_name, "next_due"),
+            schedule_error: __sdk::__query_builder::Col::new(table_name, "schedule_error"),
         }
     }
 }

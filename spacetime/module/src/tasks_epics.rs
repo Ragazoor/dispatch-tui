@@ -52,6 +52,15 @@ fn store_task(ctx: &ReducerContext, row: Task) -> Result<Task, String> {
     // (`board-layout.allium`, "Done Column Ordering"). The SQLite side stamps
     // it in `insert_task_row` for the same reason. Nothing creates a Done task
     // today; this is here so that whatever does first does not have to know.
+    // A CREATED TASK IS ARMED FROM ITS OWN SCHEDULE (`schedules.allium:
+    // SetSchedule`), whichever reducer creates it: a client cannot plant a
+    // `next_due` or a `schedule_error`, and an invalid cron creates nothing.
+    // A seed keeps its real id and is restored as it was.
+    let row = if row.id == 0 {
+        arm_created_task(row, &now(ctx))?
+    } else {
+        row
+    };
     let row = if row.status == DONE && row.completed_at.is_empty() {
         Task {
             completed_at: now(ctx),
@@ -191,6 +200,12 @@ pub struct TaskPatch {
     pub host: Patch<String>,
     pub owner: Patch<String>,
     pub completed_at: Patch<String>,
+    /// A cron string sets the schedule, `""` clears it
+    /// (`schedules.allium: SetSchedule`, `ClearSchedule`). Not applied by
+    /// [`apply_task_patch`]: `next_due` and `schedule_error` move with it, and
+    /// the set can be refused, so `patch_task` applies it through
+    /// [`apply_schedule`] after the rest of the patch.
+    pub schedule: Patch<String>,
 }
 
 /// The fields of an epic a patch may change.
@@ -339,6 +354,7 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
     let caller_named_a_completion = patch.completed_at.is_some();
     let caller_named_stop_pending = patch.stop_pending.is_some();
     let session_patch = patch.clone();
+    let schedule = patch.schedule.clone();
     // A repo change re-routes within a grouped subtree. A patch that repeats
     // the current repo (the editor sends it on every save) changes nothing to
     // route.
@@ -348,6 +364,14 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
         .is_some_and(|repo| repo != row.repo_path);
 
     apply_task_patch(&mut row, patch);
+    // After the rest of the patch, so the backlog-or-phoenix check sees the
+    // status and flag this same patch sets; before any write, so a refusal
+    // leaves the row and its agent untouched.
+    if let Some(cron) = schedule {
+        row = apply_schedule(row, &cron, &now(ctx))?;
+    }
+    // schedules.allium: LeavingBacklogCancelsThePendingRun.
+    row = cancel_pending_run_on_leaving_backlog(&prior_status, row);
     // The session facts go to the current agent (`agents.allium`, A4).
     update_current_agent(&mut AgentTables(ctx), id, |agent| {
         apply_session_patch(agent, &session_patch)
@@ -530,6 +554,12 @@ pub fn respawn_phoenix_successor(
         ));
     }
     let epic_id = route_to_repo_group(ctx, successor.epic_id, &successor.repo_path);
+    // tasks.allium: PhoenixRespawn carries the predecessor's schedule,
+    // whatever the client's row said; `store_task` arms it from now.
+    let successor = Task {
+        schedule: predecessor_row.schedule.clone(),
+        ..successor
+    };
     write_task(
         ctx,
         Task {

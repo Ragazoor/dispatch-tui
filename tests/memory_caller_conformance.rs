@@ -142,6 +142,9 @@ fn blank_task_in_epic(epic_id: i64) -> bindings::Task {
         completed_at: String::new(),
         created_by: String::new(),
         alias: String::new(),
+        schedule: String::new(),
+        next_due: String::new(),
+        schedule_error: String::new(),
     }
 }
 
@@ -177,6 +180,7 @@ fn blank_task_patch() -> bindings::TaskPatch {
         host: None,
         owner: None,
         completed_at: None,
+        schedule: None,
     }
 }
 
@@ -318,6 +322,9 @@ struct TaskShape {
     stop_pending: bool,
     has_completed_at: bool,
     has_last_pre_tool_use_at: bool,
+    schedule: Option<String>,
+    next_due: Option<chrono::DateTime<chrono::Utc>>,
+    schedule_error: Option<String>,
 }
 
 fn task_shape(t: &dispatch_tui::models::Task) -> TaskShape {
@@ -349,6 +356,11 @@ fn task_shape(t: &dispatch_tui::models::Task) -> TaskShape {
         stop_pending: t.stop_pending,
         has_completed_at: t.completed_at.is_some(),
         has_last_pre_tool_use_at: t.last_pre_tool_use_at.is_some(),
+        schedule: t.schedule.clone(),
+        // Compared exactly: the scenarios use crons whose next match cannot
+        // fall between the two sides' clocks (schedules.rs).
+        next_due: t.next_due,
+        schedule_error: t.schedule_error.clone(),
     }
 }
 
@@ -452,5 +464,7 @@ mod feeds;
 mod pr_state;
 #[path = "memory_caller_conformance/scenario.rs"]
 mod scenario;
+#[path = "memory_caller_conformance/schedules.rs"]
+mod schedules;
 #[path = "memory_caller_conformance/session_requests.rs"]
 mod session_requests;

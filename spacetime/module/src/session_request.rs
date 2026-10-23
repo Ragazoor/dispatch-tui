@@ -564,8 +564,13 @@ pub fn new_exit_session_request(
 /// `completed_at`.
 pub fn apply_done_close(task: Task, now: &str) -> Task {
     let was_already_done = task.status == DONE;
+    let prior_status = task.status.clone();
     let kept = task.completed_at.clone();
-    let closed = apply_session_close(task, ACTION_DONE, "", now);
+    // schedules.allium: LeavingBacklogCancelsThePendingRun.
+    let closed = cancel_pending_run_on_leaving_backlog(
+        &prior_status,
+        apply_session_close(task, ACTION_DONE, "", now),
+    );
     if was_already_done {
         Task {
             completed_at: kept,
@@ -643,6 +648,10 @@ pub fn phoenix_successor(predecessor: &Task, epic_id: i64, now: &str, created_by
         wrap_up_mode: predecessor.wrap_up_mode.clone(),
         auto_run_plan: predecessor.auto_run_plan,
         phoenix: true,
+        // schedules.allium (S3-S5): the schedule repeats with the flag. The
+        // write that inserts the successor arms it from the respawn's moment
+        // (`store_task`, `arm_created_task`).
+        schedule: predecessor.schedule.clone(),
         created_at: now.into(),
         updated_at: now.into(),
         created_by: created_by.into(),
@@ -779,6 +788,7 @@ fn chain_next_subtask(ctx: &ReducerContext, closed: &Task, host: &str) -> i64 {
         _ => return 0,
     }
     let subtasks: Vec<Task> = ctx.db.tasks().epic_id().filter(&closed.epic_id).collect();
+    let stamp = now(ctx);
     for candidate in chain_candidates(subtasks) {
         let has_open = ctx
             .db
@@ -786,8 +796,14 @@ fn chain_next_subtask(ctx: &ReducerContext, closed: &Task, host: &str) -> i64 {
             .task_id()
             .filter(&candidate.id)
             .any(|r| dispatch_request_is_open(&r.state));
-        if validate_dispatch_request(&candidate, host, DISPATCH_ORIGIN_EPIC_CHAIN, has_open)
-            .is_err()
+        if validate_dispatch_request(
+            &candidate,
+            host,
+            DISPATCH_ORIGIN_EPIC_CHAIN,
+            has_open,
+            &stamp,
+        )
+        .is_err()
         {
             continue;
         }

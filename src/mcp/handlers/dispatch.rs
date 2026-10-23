@@ -172,7 +172,7 @@ mcp_tools! {
     async idempotent "update_tasks" => tasks::handle_update_tasks,
         "Update one or many tasks. Pass task_ids (one id updates one task) plus the fields to set: \
 status, sub_status, title, description, repo_path, plan_path, sort_order, url, url_type, tag, \
-epic_id, base_branch, wrap_up_mode, auto_run_plan, and phoenix. At least one field must be \
+epic_id, base_branch, wrap_up_mode, auto_run_plan, phoenix, and schedule. At least one field must be \
 provided; every field left out is untouched. Every named task is updated whatever its status; \
 pick many ids with list_tasks (epic_id, recursive, status, base_branch). With one id the reply is \
 \"Task N updated (fields)\" or an error. With several it is not atomic: one line per task, success \
@@ -245,7 +245,11 @@ usually the right answer.",
                 },
                 "phoenix": {
                     "type": "boolean",
-                    "description": "When true, completing this task automatically recreates it as a fresh backlog copy carrying the same settings, and the flag moves to that copy. A recurring task with no schedule — nothing dispatches the copy, you do. Defaults to false."
+                    "description": "When true, completing this task automatically recreates it as a fresh backlog copy carrying the same settings, and the flag moves to that copy. Without a schedule nothing dispatches the copy, you do; with one, the copy runs on it. Defaults to false."
+                },
+                "schedule": {
+                    "type": "string",
+                    "description": "Run this task on a schedule: a five-field cron string read in UTC (minute hour day-of-month month day-of-week), e.g. '0 9 * * 1' for Mondays 09:00 UTC. A running board dispatches it when due, or as soon as one starts if the time passed. A phoenix task repeats on it; any other task runs once, so for a one-off give a cron matching that date."
                 },
                 "signal": {
                     "type": "boolean",

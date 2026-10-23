@@ -25,6 +25,7 @@ impl<'a> CreateTaskRequest<'a> {
             wrap_up_mode: None,
             auto_run_plan: false,
             phoenix: false,
+            schedule: None,
         }
     }
 }

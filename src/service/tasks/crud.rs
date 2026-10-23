@@ -516,6 +516,7 @@ impl TaskService {
             wrap_up_mode: params.wrap_up_mode,
             auto_run_plan: params.auto_run_plan,
             phoenix: params.phoenix,
+            schedule: params.schedule.as_deref(),
         };
         let task_id = if signal {
             self.db.create_task_signalled(request).await?

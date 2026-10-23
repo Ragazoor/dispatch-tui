@@ -204,6 +204,12 @@ pub enum TaskCommand {
     BatchCheckWindows {
         windows: Vec<(TaskId, TmuxWindow)>,
     },
+    /// Request a `schedule`-origin dispatch for each due task whose repo
+    /// exists on this machine (`schedules.allium: FireDueTask`), given as
+    /// `(id, repo_path)`. The repo check is the runtime's: it touches the disk.
+    FireScheduled {
+        due: Vec<(TaskId, String)>,
+    },
     /// Remove the build output of each Done task's worktree
     /// (`tasks.allium: ClearBuildOutputOfDoneTask`). Best effort, off the
     /// board's thread; nothing comes back.

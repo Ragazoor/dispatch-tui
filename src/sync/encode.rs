@@ -186,6 +186,11 @@ pub fn create_task_row(
         // Retired (`agents.allium`, step A5): the column stays, blank and
         // unread, because the store cannot automigrate a removed column.
         alias: String::new(),
+        // The store arms `next_due` from it and ignores anything sent for the
+        // other two (`schedules.allium: SetSchedule`).
+        schedule: req.schedule.unwrap_or_default().to_string(),
+        next_due: String::new(),
+        schedule_error: String::new(),
     }
 }
 
@@ -252,6 +257,8 @@ pub fn task_patch(patch: &TaskPatch<'_>) -> bindings::TaskPatch {
         // a task on two boards or on none.
         owner: None,
         completed_at: nullable(patch.completed_at, stamp, String::new()),
+        // `""` clears it (`schedules.allium: ClearSchedule`).
+        schedule: nullable(patch.schedule, str::to_string, String::new()),
     }
 }
 

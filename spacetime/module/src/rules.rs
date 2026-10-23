@@ -50,6 +50,11 @@ use super::*;
 /// 10: new-task signal — `unseen_tasks`, `create_task_signalled` and
 ///    `mark_epic_seen`; task moves, completion and deletion clear the marks
 ///    (`unseen.rs`).
+/// 11: scheduled tasks — `schedule`/`next_due`/`schedule_error`, armed by
+///    `create_task` and `patch_task`, carried by the phoenix respawn, consumed
+///    by a dispatched report and marked by a failed schedule-origin request;
+///    the `schedule` dispatch origin and the epic chain's skip of a waiting
+///    task (`schedule.rs`).
 ///
 /// Not a bump: eb73e7eb, which made `write_task` check sub-status legality on
 /// every write path and tightened `patch_task`, `close_task` and the epic caps.
@@ -57,7 +62,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 10;
+pub const RULES_VERSION: i64 = 11;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///

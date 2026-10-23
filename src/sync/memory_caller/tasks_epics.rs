@@ -23,6 +23,11 @@ impl MemoryReducerCaller {
         mut row: module::Task,
     ) -> Result<(), String> {
         Self::validate_task_write(tables, &row)?;
+        // Mirrors the module's `store_task`: a created row is armed from its
+        // own schedule (schedules.allium: SetSchedule).
+        if row.id == 0 {
+            row = module::arm_created_task(row, &self.now())?;
+        }
         if row.status == DONE && row.completed_at.is_empty() {
             row.completed_at = self.now();
         }
@@ -264,12 +269,21 @@ impl MemoryReducerCaller {
         let caller_named_a_completion = patch.completed_at.is_some();
         let caller_named_stop_pending = patch.stop_pending.is_some();
         let session_patch = patch.clone();
+        let schedule = patch.schedule.clone();
         let repo_changed_in_place = patch
             .repo_path
             .as_deref()
             .is_some_and(|repo| repo != row.repo_path);
 
         module::apply_task_patch(&mut row, patch);
+        // Mirrors the module: after the rest of the patch, before any write.
+        if let Some(cron) = schedule {
+            row = match module::apply_schedule(row, &cron, &self.now()) {
+                Ok(row) => row,
+                Err(why) => return Ok(ReducerOutcome::Refused(why)),
+            };
+        }
+        row = module::cancel_pending_run_on_leaving_backlog(&prior_status, row);
         // Before the first side effect below: a refused patch leaves nothing
         // behind, as the module's rolled-back transaction does.
         if let Err(why) = Self::validate_task_write(&tables, &row) {
