@@ -55,6 +55,9 @@ use super::*;
 ///    by a dispatched report and marked by a failed schedule-origin request;
 ///    the `schedule` dispatch origin and the epic chain's skip of a waiting
 ///    task (`schedule.rs`).
+/// 12: repo paths carry the host that saved them — `save_repo_path` takes the
+///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
+///    other hosts' rows alone. A reducer argument an old board does not send.
 ///
 /// Not a bump: eb73e7eb, which made `write_task` check sub-status legality on
 /// every write path and tightened `patch_task`, `close_task` and the epic caps.
@@ -62,7 +65,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 11;
+pub const RULES_VERSION: i64 = 12;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///

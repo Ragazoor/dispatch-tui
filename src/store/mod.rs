@@ -671,6 +671,11 @@ pub trait SettingsStore: Send + Sync {
 pub trait RepoConfigRead: Send + Sync {
     async fn list_repo_paths(&self) -> Vec<String>;
 
+    /// The paths THIS host saved, most recent first. What a command that
+    /// judges paths against this machine's disk may act on: a row another
+    /// host saved, or one saved before hosts were recorded, is not in it.
+    async fn list_repo_paths_saved_by_this_host(&self) -> Vec<String>;
+
     async fn get_verify_command(&self, path: &str) -> Option<String>;
 
     /// All `(repo_path, branch)` pairs across every repo, ordered by

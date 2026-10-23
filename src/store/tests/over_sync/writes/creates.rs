@@ -147,7 +147,8 @@ async fn a_refusal_is_not_retried_inside_the_writer() {
 }
 
 /// A repo path is stamped by the board too, for the same reason a create is:
-/// `last_used` is when this person used it.
+/// `last_used` is when this person used it, and the path is stamped with this
+/// host (`core.allium: SavedRepoPath.host`).
 #[tokio::test]
 async fn a_repo_path_is_stamped_with_this_boards_clock() {
     let (writer, caller) = writer_with(RecordingCaller::default());
@@ -156,7 +157,11 @@ async fn a_repo_path_is_stamped_with_this_boards_clock() {
 
     assert_eq!(
         caller.sent(),
-        vec![Sent::SaveRepoPath("/repo".into(), AT_STORED.into())]
+        vec![Sent::SaveRepoPath(
+            "/repo".into(),
+            AT_STORED.into(),
+            "host-me".into()
+        )]
     );
 }
 

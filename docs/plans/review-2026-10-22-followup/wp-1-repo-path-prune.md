@@ -33,7 +33,7 @@ This work package addresses findings from the code review in `docs/plans/2026-10
 - **(b) Keep rows with a verify command unless `--force`.** Small CLI-only change; other hosts' plain paths can still be pruned.
 - **(c) Dry-run list then confirm.** Print what would go and ask y/N (non-interactive: refuse without `--yes`). Cheapest; relies on the operator to recognise foreign paths.
 
-Ask the user with `AskUserQuestion` before implementing this finding. Do not pick an option yourself. If the user does not answer, leave the finding unimplemented and say so at wrap-up.
+**Outcome (2026-10-23): (a), confirmed by the user.** Repo paths are per host; boards are shared. `path` stays the row identity; `host` is a stamp written by every `save_repo_path` (insert and update), so a row saved before the stamp (`host = ""`) is adopted by the first host to save it again and is never pruned until then. `list_repo_paths` is not host-filtered (picker, feeds and verify lookup are unchanged); prune uses `list_repo_paths_saved_by_this_host`. `RULES_VERSION`/`BOARD_RULES_VERSION` are 12.
 
 ## Changes
 

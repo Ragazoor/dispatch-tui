@@ -285,11 +285,12 @@ impl ReducerCaller for SdkReducerCaller {
         &self,
         path: String,
         last_used: DateTime<Utc>,
+        host: String,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the repo path",
-            save_repo_path_then(path, encode::stamp(last_used))
+            save_repo_path_then(path, encode::stamp(last_used), host)
         )
     }
 

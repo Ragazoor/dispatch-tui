@@ -747,6 +747,147 @@ async fn prune_repo_paths_removes_nonexistent_paths() {
     );
 }
 
+/// Two handles over ONE shared store, as two machines on one board are: the
+/// first is this host (`"test-host"`), the second is named by `other`. Rows
+/// saved through the returned caller carry whatever host the test names.
+fn shared_store_with_caller() -> (
+    tempfile::TempDir,
+    Store,
+    std::sync::Arc<dispatch_tui::sync::MemoryReducerCaller>,
+) {
+    use dispatch_tui::clock::{Clock, SystemClock};
+    use dispatch_tui::sync::{MemoryReducerCaller, ReducerCaller, SettledIdentity, SharedRows};
+    let dir = tempfile::tempdir().unwrap();
+    let rows = std::sync::Arc::new(SharedRows::new());
+    let clock: std::sync::Arc<dyn Clock> = std::sync::Arc::new(SystemClock);
+    let memory = std::sync::Arc::new(
+        MemoryReducerCaller::new(rows.clone(), clock.clone()).with_sender("test-user"),
+    );
+    let caller: std::sync::Arc<dyn ReducerCaller> = memory.clone();
+    let identity = std::sync::Arc::new(SettledIdentity::default());
+    identity.settle("test-user");
+    let db = Store::new(
+        rows,
+        caller,
+        identity,
+        clock,
+        dispatch_tui::store::MEMORY_HOST_ID.to_string(),
+        dir.path(),
+    );
+    (dir, db, memory)
+}
+
+/// Save `path` as `host` did, with a verify command, straight through the
+/// reducer so the row's host is the test's choice.
+async fn seed_repo_path_saved_by(
+    db: &Store,
+    memory: &dispatch_tui::sync::MemoryReducerCaller,
+    host: &str,
+    path: &str,
+) {
+    use dispatch_tui::sync::ReducerCaller;
+    memory
+        .save_repo_path(path.into(), chrono::Utc::now(), host.into())
+        .await
+        .unwrap();
+    memory
+        .set_verify_command(path.into(), "cargo test".into())
+        .await
+        .unwrap();
+    assert_eq!(
+        dispatch_tui::store::RepoConfigRead::get_verify_command(db, path)
+            .await
+            .as_deref(),
+        Some("cargo test"),
+        "seeding {path}"
+    );
+}
+
+// surface-provides.PruneRepoPathsViaCli — another host's path is not judged by
+// this host's disk, and neither is its verify command lost.
+#[tokio::test]
+async fn prune_repo_paths_keeps_a_missing_path_another_host_saved() {
+    let (_dir, db, memory) = shared_store_with_caller();
+    let foreign = "/home/b/code/dispatch-test-only-on-host-b";
+    seed_repo_path_saved_by(&db, &memory, "host-b", foreign).await;
+
+    let mut out = Vec::new();
+    commands::prune_repo_paths(&db, &mut out).await.unwrap();
+    let stdout = String::from_utf8(out).unwrap();
+
+    assert!(
+        !stdout.contains("removed: "),
+        "must not remove a row saved by another host, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("0 path(s) removed, 1 kept."),
+        "kept counts the whole store, got: {stdout}"
+    );
+    assert_eq!(
+        dispatch_tui::store::RepoConfigRead::get_verify_command(&db, foreign)
+            .await
+            .as_deref(),
+        Some("cargo test"),
+        "the other host's verify command must survive"
+    );
+}
+
+// A row saved before rows carried a host has no owner, so no host can call it
+// gone.
+#[tokio::test]
+async fn prune_repo_paths_keeps_a_missing_path_with_no_recorded_host() {
+    let (_dir, db, memory) = shared_store_with_caller();
+    let legacy = "/home/old/dispatch-test-legacy-row";
+    seed_repo_path_saved_by(&db, &memory, "", legacy).await;
+
+    let mut out = Vec::new();
+    commands::prune_repo_paths(&db, &mut out).await.unwrap();
+
+    assert!(String::from_utf8(out)
+        .unwrap()
+        .contains("0 path(s) removed"));
+    assert!(
+        dispatch_tui::store::RepoConfigRead::get_verify_command(&db, legacy)
+            .await
+            .is_some(),
+        "a row with no host must stay"
+    );
+}
+
+// T1 — this host's own missing path goes, and its verify command with it.
+#[tokio::test]
+async fn prune_repo_paths_removes_this_hosts_missing_path_and_its_verify_command() {
+    let (_dir, db, memory) = shared_store_with_caller();
+    let mine = "/dispatch-test-nonexistent-mine-77777";
+    let theirs = "/dispatch-test-nonexistent-theirs-77777";
+    seed_repo_path_saved_by(&db, &memory, dispatch_tui::store::MEMORY_HOST_ID, mine).await;
+    seed_repo_path_saved_by(&db, &memory, "host-b", theirs).await;
+
+    let mut out = Vec::new();
+    commands::prune_repo_paths(&db, &mut out).await.unwrap();
+    let stdout = String::from_utf8(out).unwrap();
+
+    assert!(
+        stdout.contains(&format!("removed: {mine}")),
+        "got: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 path(s) removed, 1 kept."),
+        "got: {stdout}"
+    );
+    assert!(
+        dispatch_tui::store::RepoConfigRead::get_verify_command(&db, mine)
+            .await
+            .is_none(),
+        "this host's pruned row takes its verify command with it"
+    );
+    assert!(
+        dispatch_tui::store::RepoConfigRead::get_verify_command(&db, theirs)
+            .await
+            .is_some()
+    );
+}
+
 #[tokio::test]
 async fn prune_repo_paths_empty_db_succeeds() {
     let (_tmp, db) = sqlite().await;

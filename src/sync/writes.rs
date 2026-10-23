@@ -162,10 +162,13 @@ pub trait ReducerCaller: Send + Sync {
         epic_ids: Vec<EpicId>,
     ) -> Result<ReducerOutcome>;
 
+    /// Record `path`, stamped with `host` — the install saving it, which alone
+    /// may later judge the path gone (`core.allium: SavedRepoPath.host`).
     async fn save_repo_path(
         &self,
         path: String,
         last_used: DateTime<Utc>,
+        host: String,
     ) -> Result<ReducerOutcome>;
     async fn delete_repo_path(&self, path: String) -> Result<ReducerOutcome>;
     async fn set_verify_command(&self, path: String, command: String) -> Result<ReducerOutcome>;

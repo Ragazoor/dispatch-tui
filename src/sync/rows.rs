@@ -55,6 +55,9 @@ pub struct RepoPathRow {
     pub path: String,
     pub last_used: String,
     pub verify_command: Option<String>,
+    /// The host that last saved the path; `""` for a row saved before hosts
+    /// were recorded.
+    pub host: String,
 }
 
 /// One `repo_base_branches` row: a repo's recently-used base branch.
@@ -847,6 +850,20 @@ impl SharedRows {
     pub fn repo_paths(&self) -> Vec<String> {
         self.read(|rows| {
             let mut out: Vec<&RepoPathRow> = rows.repo_paths.values().collect();
+            out.sort_by(|a, b| b.last_used.cmp(&a.last_used).then(a.id.cmp(&b.id)));
+            out.into_iter().map(|row| row.path.clone()).collect()
+        })
+    }
+
+    /// The paths `host` saved, in [`Self::repo_paths`]'s order. A row with no
+    /// recorded host belongs to no one, so it is in nobody's list.
+    pub fn repo_paths_saved_by(&self, host: &str) -> Vec<String> {
+        self.read(|rows| {
+            let mut out: Vec<&RepoPathRow> = rows
+                .repo_paths
+                .values()
+                .filter(|row| !row.host.is_empty() && row.host == host)
+                .collect();
             out.sort_by(|a, b| b.last_used.cmp(&a.last_used).then(a.id.cmp(&b.id)));
             out.into_iter().map(|row| row.path.clone()).collect()
         })

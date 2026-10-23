@@ -123,6 +123,7 @@ pub(crate) fn blank_repo_path() -> RepoPath {
         path: String::new(),
         last_used: String::new(),
         verify_command: String::new(),
+        host: String::new(),
     }
 }
 

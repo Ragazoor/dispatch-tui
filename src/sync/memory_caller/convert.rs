@@ -164,7 +164,8 @@ mirror!(
         id,
         path,
         last_used,
-        verify_command
+        verify_command,
+        host
     }
 );
 

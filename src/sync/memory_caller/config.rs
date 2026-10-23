@@ -37,6 +37,7 @@ impl MemoryReducerCaller {
         &self,
         path: String,
         last_used: DateTime<Utc>,
+        host: String,
     ) -> Result<ReducerOutcome> {
         let last_used = encode::stamp(last_used);
         if path.trim().is_empty() {
@@ -46,7 +47,14 @@ impl MemoryReducerCaller {
         let existing = tables.repo_paths.values().find(|r| r.path == path).cloned();
         match existing {
             Some(row) => {
-                self.write_repo_path(&mut tables, module::RepoPath { last_used, ..row });
+                self.write_repo_path(
+                    &mut tables,
+                    module::RepoPath {
+                        last_used,
+                        host,
+                        ..row
+                    },
+                );
             }
             None => {
                 self.write_repo_path(
@@ -56,6 +64,7 @@ impl MemoryReducerCaller {
                         path,
                         last_used,
                         verify_command: String::new(),
+                        host,
                     },
                 );
             }

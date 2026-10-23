@@ -9,6 +9,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub(super) struct SaveRepoPathArgs {
     pub path: String,
     pub last_used: String,
+    pub host: String,
 }
 
 impl From<SaveRepoPathArgs> for super::Reducer {
@@ -16,6 +17,7 @@ impl From<SaveRepoPathArgs> for super::Reducer {
         Self::SaveRepoPath {
             path: args.path,
             last_used: args.last_used,
+            host: args.host,
         }
     }
 }
@@ -35,8 +37,8 @@ pub trait save_repo_path {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`save_repo_path:save_repo_path_then`] to run a callback after the reducer completes.
-    fn save_repo_path(&self, path: String, last_used: String) -> __sdk::Result<()> {
-        self.save_repo_path_then(path, last_used, |_, _| {})
+    fn save_repo_path(&self, path: String, last_used: String, host: String) -> __sdk::Result<()> {
+        self.save_repo_path_then(path, last_used, host, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `save_repo_path` to run as soon as possible,
@@ -49,6 +51,7 @@ pub trait save_repo_path {
         &self,
         path: String,
         last_used: String,
+        host: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -61,12 +64,19 @@ impl save_repo_path for super::RemoteReducers {
         &self,
         path: String,
         last_used: String,
+        host: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp
-            .invoke_reducer_with_callback(SaveRepoPathArgs { path, last_used }, callback)
+        self.imp.invoke_reducer_with_callback(
+            SaveRepoPathArgs {
+                path,
+                last_used,
+                host,
+            },
+            callback,
+        )
     }
 }

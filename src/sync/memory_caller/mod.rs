@@ -370,8 +370,9 @@ impl ReducerCaller for MemoryReducerCaller {
         &self,
         path: String,
         last_used: DateTime<Utc>,
+        host: String,
     ) -> Result<ReducerOutcome> {
-        self.apply_save_repo_path(path, last_used)
+        self.apply_save_repo_path(path, last_used, host)
     }
 
     async fn delete_repo_path(&self, path: String) -> Result<ReducerOutcome> {

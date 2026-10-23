@@ -169,13 +169,17 @@ pub async fn repo_sync(
     Ok(())
 }
 
-/// `dispatch prune-repo-paths` — forget every saved repo path that no longer
-/// exists on disk.
+/// `dispatch prune-repo-paths` — forget every repo path THIS host saved that no
+/// longer exists on its disk.
+///
+/// The table is shared, but a path is a place on one machine: a row another
+/// host saved, or one saved before rows carried a host, says nothing about
+/// this disk and is left alone, verify command and all. `kept` counts the
+/// whole store.
 pub async fn prune_repo_paths(database: &Store, out: &mut dyn Write) -> Result<()> {
-    let paths = database.list_repo_paths().await;
-    let total = paths.len();
+    let total = database.list_repo_paths().await.len();
     let mut removed = 0;
-    for p in &paths {
+    for p in &database.list_repo_paths_saved_by_this_host().await {
         let expanded = expand_tilde(p);
         if !Path::new(&expanded).exists() {
             database.delete_repo_path(p).await?;

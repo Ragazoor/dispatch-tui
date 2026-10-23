@@ -197,14 +197,23 @@ fn memory_caller_matches_the_real_reducers() {
         compare_owner(task_id_real.0);
 
         // -- repo configuration ---------------------------------------------------
-        real.save_repo_path("/repo".into(), ts("2026-01-01 00:00:00.000"))
+        real.save_repo_path("/repo".into(), ts("2026-01-01 00:00:00.000"), "h".into())
             .await
             .unwrap();
         wait_for!(!rows_real.repo_paths().is_empty());
-        mem.save_repo_path("/repo".into(), ts("2026-01-01 00:00:00.000"))
+        mem.save_repo_path("/repo".into(), ts("2026-01-01 00:00:00.000"), "h".into())
             .await
             .unwrap();
         assert_eq!(rows_real.repo_paths(), rows_mem.repo_paths(), "repo_paths");
+        assert_eq!(
+            rows_real.repo_paths_saved_by("h"),
+            rows_mem.repo_paths_saved_by("h"),
+            "repo_paths host stamp"
+        );
+        assert_eq!(
+            rows_real.repo_paths_saved_by("h"),
+            vec!["/repo".to_string()]
+        );
 
         real.set_verify_command("/repo".into(), "cargo test".into())
             .await

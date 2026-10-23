@@ -9,14 +9,23 @@ use super::*;
 /// Upsert by path rather than by id, because the path is what the domain calls
 /// the same repo. Two rows for one path would give the verify command two
 /// answers.
+///
+/// `host` is stamped on both arms: a row saved before hosts were recorded is
+/// adopted by the first host to save it again.
 #[spacetimedb::reducer]
-pub fn save_repo_path(ctx: &ReducerContext, path: String, last_used: String) -> Result<(), String> {
+pub fn save_repo_path(
+    ctx: &ReducerContext,
+    path: String,
+    last_used: String,
+    host: String,
+) -> Result<(), String> {
     if path.trim().is_empty() {
         return Err("repo path is empty".into());
     }
     match ctx.db.repo_paths().iter().find(|r| r.path == path) {
         Some(existing) => ctx.db.repo_paths().id().update(RepoPath {
             last_used,
+            host,
             ..existing
         }),
         None => ctx.db.repo_paths().insert(RepoPath {
@@ -24,6 +33,7 @@ pub fn save_repo_path(ctx: &ReducerContext, path: String, last_used: String) -> 
             path,
             last_used,
             verify_command: String::new(),
+            host,
         }),
     };
     Ok(())

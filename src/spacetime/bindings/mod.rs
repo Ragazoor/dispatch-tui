@@ -543,6 +543,7 @@ pub enum Reducer {
     SaveRepoPath {
         path: String,
         last_used: String,
+        host: String,
     },
     SaveSetting {
         host: String,
@@ -1154,9 +1155,11 @@ Reducer::RecordBaseBranch{
             Reducer::SaveRepoPath{
                 path,
                 last_used,
+                host,
 }             => __sats::bsatn::to_vec(&save_repo_path_reducer::SaveRepoPathArgs {
                 path: path.clone(),
                 last_used: last_used.clone(),
+                host: host.clone(),
 }),
             Reducer::SaveSetting{
                 host,

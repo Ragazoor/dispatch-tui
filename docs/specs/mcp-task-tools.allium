@@ -1358,8 +1358,9 @@ rule AttachPlanViaCli {
 --     equivalents of SetVerifyCommandViaMcp, writing the same
 --     core/SavedRepoPath.verify_command. set-verify creates the path entry
 --     when it does not exist yet.
---   • `dispatch prune-repo-paths` — drops core/SavedRepoPath rows whose path
---     no longer exists on the filesystem. Operator-only housekeeping.
+--   • `dispatch prune-repo-paths` — drops the core/SavedRepoPath rows THIS host
+--     saved whose path no longer exists on its filesystem; other hosts' rows
+--     are left alone (cli.allium: PruneRepoPathsViaCli). Operator-only housekeeping.
 --   • `dispatch hook <id> <kind> [--kind K]` — see HookNotification in agent-health.allium.
 --   • `dispatch pr-gate <id>` — see PrLearningsGate in pr-workflow.allium.
 --   • `dispatch caller-headers` — prints the session identity header and

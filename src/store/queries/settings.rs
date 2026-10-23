@@ -90,6 +90,10 @@ impl super::super::RepoConfigRead for Store {
         self.rows.repo_paths()
     }
 
+    async fn list_repo_paths_saved_by_this_host(&self) -> Vec<String> {
+        self.rows.repo_paths_saved_by(&self.host)
+    }
+
     async fn get_verify_command(&self, path: &str) -> Option<String> {
         self.rows.verify_command(path)
     }
@@ -103,7 +107,7 @@ impl super::super::RepoConfigRead for Store {
 impl super::super::RepoConfigStore for Store {
     async fn save_repo_path(&self, path: &str) -> Result<()> {
         self.caller
-            .save_repo_path(path.to_string(), self.clock.now())
+            .save_repo_path(path.to_string(), self.clock.now(), self.host.clone())
             .await?
             .applied()
     }

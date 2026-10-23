@@ -59,7 +59,7 @@ enum Sent {
     BatchDelete(Vec<i64>, Vec<i64>),
     Regroup(i64),
     Flatten(i64),
-    SaveRepoPath(String, String),
+    SaveRepoPath(String, String, String),
     DeleteRepoPath(String),
     SetVerifyCommand(String, String),
     RecordBaseBranch(String, String, String),
@@ -327,9 +327,10 @@ impl ReducerCaller for RecordingCaller {
         &self,
         path: String,
         last_used: DateTime<Utc>,
+        host: String,
     ) -> anyhow::Result<ReducerOutcome> {
         let last_used = encode::stamp(last_used);
-        self.answer(Sent::SaveRepoPath(path, last_used))
+        self.answer(Sent::SaveRepoPath(path, last_used, host))
     }
 
     async fn delete_repo_path(&self, path: String) -> anyhow::Result<ReducerOutcome> {

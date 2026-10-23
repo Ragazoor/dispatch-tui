@@ -11,6 +11,7 @@ pub struct RepoPath {
     pub path: String,
     pub last_used: String,
     pub verify_command: String,
+    pub host: String,
 }
 
 impl __sdk::InModule for RepoPath {
@@ -25,6 +26,7 @@ pub struct RepoPathCols {
     pub path: __sdk::__query_builder::Col<RepoPath, String>,
     pub last_used: __sdk::__query_builder::Col<RepoPath, String>,
     pub verify_command: __sdk::__query_builder::Col<RepoPath, String>,
+    pub host: __sdk::__query_builder::Col<RepoPath, String>,
 }
 
 impl __sdk::__query_builder::HasCols for RepoPath {
@@ -35,6 +37,7 @@ impl __sdk::__query_builder::HasCols for RepoPath {
             path: __sdk::__query_builder::Col::new(table_name, "path"),
             last_used: __sdk::__query_builder::Col::new(table_name, "last_used"),
             verify_command: __sdk::__query_builder::Col::new(table_name, "verify_command"),
+            host: __sdk::__query_builder::Col::new(table_name, "host"),
         }
     }
 }

@@ -290,6 +290,12 @@ pub struct RepoPath {
     pub last_used: String,
     #[default("")]
     pub verify_command: String,
+    /// The host that last saved this path (`core.allium: SavedRepoPath.host`),
+    /// `""` on a row saved before the stamp existed. A path names a place on
+    /// one machine's disk, so only that host may judge it gone. Appended last
+    /// so the store can automigrate the table.
+    #[default("")]
+    pub host: String,
 }
 
 #[spacetimedb::table(accessor = repo_base_branches, public)]

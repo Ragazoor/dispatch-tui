@@ -1038,6 +1038,11 @@ entity SavedRepoPath {
     path: String             -- filesystem path, unique across all saved paths
     last_used: Timestamp     -- updated on each use; drives recency ordering
     verify_command: String?  -- single-line shell command run by agents before declaring work complete, e.g. "cargo test"
+    host: Host?              -- the install that last saved this path; null on a row saved before the stamp existed.
+                             -- A path is a place on ONE machine's disk, so only that host can say it is gone:
+                             -- prune-repo-paths (cli.allium: PruneRepoPathsViaCli) touches only its own host's rows.
+                             -- Identity stays the path alone (verify_command is keyed by it); host is a stamp
+                             -- rewritten by each save, so a path two hosts both use belongs to the later saver.
 
     invariant VerifyCommandSingleLine {
         verify_command = null or not (verify_command.contains("\n") or verify_command.contains("\r"))  -- short-circuits: rhs only evaluated when verify_command != null

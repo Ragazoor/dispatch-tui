@@ -57,7 +57,8 @@ rule RecordRepoPath {
 
     ensures: core/SavedRepoPath.created_or_updated(
         path: path,
-        last_used: now
+        last_used: now,
+        host: this_host
     )
 
     @guidance
@@ -71,7 +72,8 @@ rule RecordRepoPath {
         --     by resolve_feed_item_repo_paths on subsequent feed syncs
         -- The path is first expand_tilde'd. If a SavedRepoPath with
         -- the same path already exists, last_used is bumped to now;
-        -- otherwise a new record is created.
+        -- otherwise a new record is created. Either way host is stamped with
+        -- this install, adopting a row saved before hosts were recorded.
         -- Not fired for MCP task creation (create_task tool) — that
         -- skips repo path persistence. (There is no CLI for task
         -- creation; tasks are created exclusively via MCP.) Cap

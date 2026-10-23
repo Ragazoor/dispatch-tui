@@ -6,11 +6,11 @@ use super::*;
 async fn save_repo_path_upserts_by_path_not_by_call_count() {
     let (caller, rows) = caller();
     caller
-        .save_repo_path("/repo".into(), at("2026-01-01 00:00:00.000"))
+        .save_repo_path("/repo".into(), at("2026-01-01 00:00:00.000"), "h".into())
         .await
         .unwrap();
     caller
-        .save_repo_path("/repo".into(), at("2026-01-02 00:00:00.000"))
+        .save_repo_path("/repo".into(), at("2026-01-02 00:00:00.000"), "h".into())
         .await
         .unwrap();
     let paths = rows.repo_paths();
@@ -18,10 +18,51 @@ async fn save_repo_path_upserts_by_path_not_by_call_count() {
 }
 
 #[tokio::test]
+async fn save_repo_path_stamps_the_saving_host_and_adopts_a_row_with_none() {
+    let (caller, rows) = caller();
+    caller
+        .save_repo_path(
+            "/legacy".into(),
+            at("2026-01-01 00:00:00.000"),
+            String::new(),
+        )
+        .await
+        .unwrap();
+    assert!(rows.repo_paths_saved_by("laptop").is_empty());
+
+    caller
+        .save_repo_path(
+            "/legacy".into(),
+            at("2026-01-02 00:00:00.000"),
+            "laptop".into(),
+        )
+        .await
+        .unwrap();
+    caller
+        .save_repo_path(
+            "/fresh".into(),
+            at("2026-01-02 00:00:00.000"),
+            "desk".into(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        rows.repo_paths_saved_by("laptop"),
+        vec!["/legacy".to_string()]
+    );
+    assert_eq!(rows.repo_paths_saved_by("desk"), vec!["/fresh".to_string()]);
+    assert!(
+        rows.repo_paths_saved_by("").is_empty(),
+        "a row with no host is nobody's"
+    );
+}
+
+#[tokio::test]
 async fn save_repo_path_refuses_an_empty_path() {
     let (caller, _rows) = caller();
     let outcome = caller
-        .save_repo_path("   ".into(), at(TEST_STAMP))
+        .save_repo_path("   ".into(), at(TEST_STAMP), "h".into())
         .await
         .unwrap();
     assert!(matches!(outcome, ReducerOutcome::Refused(_)));
@@ -31,7 +72,7 @@ async fn save_repo_path_refuses_an_empty_path() {
 async fn set_verify_command_refuses_a_multi_line_command() {
     let (caller, _rows) = caller();
     caller
-        .save_repo_path("/repo".into(), at(TEST_STAMP))
+        .save_repo_path("/repo".into(), at(TEST_STAMP), "h".into())
         .await
         .unwrap();
     let outcome = caller
@@ -72,7 +113,7 @@ async fn record_base_branch_upserts_by_repo_and_branch() {
 async fn delete_repo_path_removes_every_row_for_that_path() {
     let (caller, rows) = caller();
     caller
-        .save_repo_path("/repo".into(), at(TEST_STAMP))
+        .save_repo_path("/repo".into(), at(TEST_STAMP), "h".into())
         .await
         .unwrap();
     caller.delete_repo_path("/repo".into()).await.unwrap();

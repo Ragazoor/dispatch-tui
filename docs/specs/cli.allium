@@ -285,7 +285,8 @@ rule ListReposViaCli {
 rule PruneRepoPathsViaCli {
     when: CliPruneRepoPaths(operator)
 
-    let missing = core/SavedRepoPaths where not path_exists_on_disk(path)
+    let mine = core/SavedRepoPaths where host = this_host
+    let missing = mine where not path_exists_on_disk(path)
 
     ensures:
         for repo in missing:
@@ -295,8 +296,14 @@ rule PruneRepoPathsViaCli {
 
     @guidance
         -- `dispatch prune-repo-paths`. Existence is judged on THIS machine's
-        -- filesystem, after tilde expansion. The summary line reads
-        -- `<removed> path(s) removed, <kept> kept.`
+        -- filesystem, after tilde expansion, and only for rows THIS host
+        -- saved. A row another host saved, or one saved before rows carried
+        -- a host (host = null), is never judged and never removed: its path
+        -- says nothing about this disk, and its verify command goes with the
+        -- row. The summary line reads `<removed> path(s) removed, <kept>
+        -- kept.`; kept counts every row left in the store, not only this
+        -- host's. A row this host removes takes its verify command with it.
+        -- this_host is the host file's identity (CliCommandsNeedAHostFile).
         --
         -- == Black boxes ==
         -- path_exists_on_disk(path) asks the local filesystem;
@@ -598,4 +605,3 @@ open question "An unparseable argument list exits 2 before any command body runs
 
 open question "Task #4982: CliCommandsReachTheStoreWithoutManagingIt now falls back to the address a named-store board recorded beside the --data-dir database before the managed address, while `store import` with nothing named brings up the managed store. Should `import` — which would then write into a store some board is running on rather than bring the managed one up — read the recorded address too, or ignore it?"
 
-open question "`prune-repo-paths` judges existence on the local filesystem, but saved repo paths are shared rows in the store (core/SavedRepoPath has no host). Run on one machine, it forgets every repo path that exists only on a teammate's machine. Is pruning meant to be per-host, or is the shared table meant to hold only paths valid everywhere?"
