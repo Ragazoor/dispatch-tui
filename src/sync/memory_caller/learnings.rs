@@ -32,6 +32,7 @@ impl MemoryReducerCaller {
             .map(|r| r.id)
             .collect();
         self.delete_learning_retrieval_rows(tables, retrievals);
+        tables.learning_verdicts.retain(|_, v| v.task_id != task_id);
     }
 
     /// Collect every learning matching `pred`, apply `f`, and write each
@@ -124,6 +125,7 @@ impl MemoryReducerCaller {
             .map(|r| r.id)
             .collect();
         self.delete_learning_retrieval_rows(&mut tables, retrievals);
+        tables.learning_verdicts.retain(|_, v| v.learning_id != id);
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
@@ -175,61 +177,110 @@ impl MemoryReducerCaller {
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    /// Mirrors the module's `apply_learning_verdicts`. Two passes rather than
-    /// one, to reproduce a real reducer's atomicity: an unknown verdict for a
-    /// learning that EXISTS refuses the whole batch (a real reducer's `Err`
-    /// rolls back every mutation the transaction already made), so every
-    /// existing learning's delta is validated before any of them is applied.
-    /// Existence is checked before the verdict string, per entry, same order
-    /// as the module — an unknown verdict tied to a MISSING learning id is a
-    /// silent no-op for that entry, same as the module, not a batch refusal:
-    /// the module's own `continue` never reaches its `match` for that entry.
+    /// Mirrors the module's `apply_learning_verdicts`, which owns the rule: the
+    /// weights and the score change are the module's own `verdict_weight` and
+    /// `verdict_score_change`, and the refusal text is its
+    /// `not_retrieved_message`.
     ///
-    /// The second pass re-`get`s each row rather than carrying the clone
-    /// pass 1 already made — NOT redundant, on purpose: the module re-reads
-    /// via `ctx.db.learnings().id().find()` on every loop iteration too, so
-    /// two entries naming the same `learning_id` apply in order against each
-    /// other's result (read-your-own-writes within the one transaction), not
-    /// both against the pre-batch row. Below,
-    /// `apply_learning_verdicts_applies_duplicate_entries_for_the_same_id_in_order`
-    /// pins this. The `Some` this re-`get` unwraps can never be `None` —
-    /// nothing in this function removes a row — so the `else` is a defensive
-    /// no-op, not a reachable path.
+    /// A real reducer's `Err` rolls back every mutation the transaction already
+    /// made, so this validates before it writes: every entry needs a retrieval
+    /// for `task_id` first (a refusal for the batch), and the second pass
+    /// works on a copy of the verdict table and the learnings it touches,
+    /// installed only once every entry has applied. Entries naming one learning
+    /// twice apply in order against each other's result, as the module's
+    /// re-reads do.
     pub(super) fn apply_apply_learning_verdicts(
         &self,
+        task_id: TaskId,
         verdicts: Vec<(LearningId, LearningVerdict)>,
     ) -> Result<ReducerOutcome> {
+        let task_id = task_id.0;
         let mut tables = self.lock();
-        let mut deltas = Vec::with_capacity(verdicts.len());
-        for (learning_id, verdict) in &verdicts {
-            let learning_id = learning_id.0;
-            if !tables.learnings.contains_key(&learning_id) {
-                continue;
+        for (learning_id, _) in &verdicts {
+            let retrieved = tables
+                .learning_retrievals
+                .values()
+                .any(|r| r.task_id == task_id && r.learning_id == learning_id.0);
+            if !retrieved {
+                return Ok(ReducerOutcome::Refused(module::not_retrieved_message(
+                    learning_id.0,
+                    task_id,
+                )));
             }
-            let delta: i64 = match verdict {
-                LearningVerdict::Helped => 1,
-                LearningVerdict::Wrong => -1,
-            };
-            deltas.push((learning_id, delta));
         }
         let now = self.now();
-        for (learning_id, delta) in deltas {
-            let Some(row) = tables.learnings.get(&learning_id).cloned() else {
+        let mut standing = tables.learning_verdicts.clone();
+        let mut learnings = tables.learnings.clone();
+        let mut next_id = tables.next_learning_verdict_id;
+        let mut touched = Vec::new();
+        for (learning_id, verdict) in &verdicts {
+            let learning_id = learning_id.0;
+            let Some(row) = learnings.get(&learning_id).cloned() else {
                 continue;
             };
-            let last_upvoted_at = if delta > 0 {
+            let verdict = match verdict {
+                LearningVerdict::Helped => "helped",
+                LearningVerdict::Wrong => "wrong",
+            };
+            let previous = standing
+                .values()
+                .find(|s| s.task_id == task_id && s.learning_id == learning_id)
+                .cloned();
+            let delta = module::verdict_score_change(
+                previous.as_ref().map(|s| s.verdict.as_str()),
+                verdict,
+            )
+            .map_err(anyhow::Error::msg)?;
+            match previous {
+                Some(s) => {
+                    standing.insert(
+                        s.id,
+                        module::LearningVerdict {
+                            verdict: verdict.to_string(),
+                            ..s
+                        },
+                    );
+                }
+                None => {
+                    let id = next_id;
+                    next_id += 1;
+                    standing.insert(
+                        id,
+                        module::LearningVerdict {
+                            id,
+                            task_id,
+                            learning_id,
+                            verdict: verdict.to_string(),
+                        },
+                    );
+                }
+            }
+            if delta == 0 {
+                continue;
+            }
+            let last_upvoted_at = if verdict == "helped" {
                 Some(now.clone())
             } else {
                 row.last_upvoted_at.clone()
             };
-            let updated = module::Learning {
-                upvote_count: row.upvote_count + delta,
-                last_upvoted_at,
-                updated_at: now.clone(),
-                ..row
-            };
-            tables.learnings.insert(learning_id, updated.clone());
-            self.rows.upsert_learning(&updated.into());
+            learnings.insert(
+                learning_id,
+                module::Learning {
+                    upvote_count: row.upvote_count + delta,
+                    last_upvoted_at,
+                    updated_at: now.clone(),
+                    ..row
+                },
+            );
+            touched.push(learning_id);
+        }
+        tables.learning_verdicts = standing;
+        tables.next_learning_verdict_id = next_id;
+        for learning_id in touched {
+            if let Some(updated) = learnings.get(&learning_id).cloned() {
+                tables.learnings.insert(learning_id, updated.clone());
+                self.rows.upsert_learning(&updated.into());
+            }
         }
         Ok(ReducerOutcome::Applied(vec![]))
     }

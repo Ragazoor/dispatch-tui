@@ -297,6 +297,11 @@ impl LearningService {
             .map_err(ServiceError::from)
     }
 
+    /// Rate learnings for `task_id`. The rules (a retrieval for the task, one
+    /// standing verdict per task and learning) live in the store's
+    /// `apply_learning_verdicts` reducer; a refusal arrives as
+    /// `ServiceError::Validation`. See docs/specs/learnings.allium:
+    /// RateLearningViaMcp.
     pub async fn apply_verdicts(
         &self,
         task_id: TaskId,
@@ -305,23 +310,8 @@ impl LearningService {
         if verdicts.is_empty() {
             return Ok(());
         }
-        let retrieved: std::collections::HashSet<LearningId> = self
-            .db
-            .list_retrievals_for_task(task_id)
-            .await?
-            .into_iter()
-            .map(|r| r.learning_id)
-            .collect();
-        for (lid, _) in &verdicts {
-            if !retrieved.contains(lid) {
-                return Err(ServiceError::Validation(format!(
-                    "learning {} was not retrieved during task {}",
-                    lid, task_id
-                )));
-            }
-        }
         self.db
-            .apply_verdicts_tx(&verdicts)
+            .apply_verdicts_tx(task_id, &verdicts)
             .await
             .map_err(ServiceError::from)
     }

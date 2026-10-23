@@ -55,6 +55,8 @@ pub mod learning_retrieval_type;
 pub mod learning_retrievals_table;
 pub mod learning_type;
 pub mod learning_verdict_input_type;
+pub mod learning_verdict_type;
+pub mod learning_verdicts_table;
 pub mod learnings_table;
 pub mod link_work_package_item_reducer;
 pub mod mark_epic_seen_reducer;
@@ -211,6 +213,8 @@ pub use learning_retrieval_type::LearningRetrieval;
 pub use learning_retrievals_table::*;
 pub use learning_type::Learning;
 pub use learning_verdict_input_type::LearningVerdictInput;
+pub use learning_verdict_type::LearningVerdict;
+pub use learning_verdicts_table::*;
 pub use learnings_table::*;
 pub use link_work_package_item_reducer::link_work_package_item;
 pub use mark_epic_seen_reducer::mark_epic_seen;
@@ -327,6 +331,7 @@ pub use work_packages_table::*;
 
 pub enum Reducer {
     ApplyLearningVerdicts {
+        task_id: i64,
         verdicts: Vec<LearningVerdictInput>,
     },
     ArchiveStaleLearnings {
@@ -783,8 +788,10 @@ impl __sdk::Reducer for Reducer {
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
                         Reducer::ApplyLearningVerdicts{
+                task_id,
                 verdicts,
 }             => __sats::bsatn::to_vec(&apply_learning_verdicts_reducer::ApplyLearningVerdictsArgs {
+                task_id: task_id.clone(),
                 verdicts: verdicts.clone(),
 }),
             Reducer::ArchiveStaleLearnings{
@@ -1409,6 +1416,7 @@ pub struct DbUpdate {
     handed_out_agent_names: __sdk::TableUpdate<HandedOutAgentName>,
     hosts: __sdk::TableUpdate<Host>,
     learning_retrievals: __sdk::TableUpdate<LearningRetrieval>,
+    learning_verdicts: __sdk::TableUpdate<LearningVerdict>,
     learnings: __sdk::TableUpdate<Learning>,
     poll_owners: __sdk::TableUpdate<PollOwner>,
     repo_base_branches: __sdk::TableUpdate<RepoBaseBranch>,
@@ -1461,6 +1469,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "learning_retrievals" => db_update
                     .learning_retrievals
                     .append(learning_retrievals_table::parse_table_update(table_update)?),
+                "learning_verdicts" => db_update
+                    .learning_verdicts
+                    .append(learning_verdicts_table::parse_table_update(table_update)?),
                 "learnings" => db_update
                     .learnings
                     .append(learnings_table::parse_table_update(table_update)?),
@@ -1580,6 +1591,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 &self.learning_retrievals,
             )
             .with_updates_by_pk(|row| &row.id);
+        diff.learning_verdicts = cache
+            .apply_diff_to_table::<LearningVerdict>("learning_verdicts", &self.learning_verdicts)
+            .with_updates_by_pk(|row| &row.id);
         diff.learnings = cache
             .apply_diff_to_table::<Learning>("learnings", &self.learnings)
             .with_updates_by_pk(|row| &row.id);
@@ -1670,6 +1684,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "learning_retrievals" => db_update
                     .learning_retrievals
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "learning_verdicts" => db_update
+                    .learning_verdicts
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "learnings" => db_update
                     .learnings
@@ -1768,6 +1785,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "learning_retrievals" => db_update
                     .learning_retrievals
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "learning_verdicts" => db_update
+                    .learning_verdicts
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "learnings" => db_update
                     .learnings
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1851,6 +1871,7 @@ pub struct AppliedDiff<'r> {
     handed_out_agent_names: __sdk::TableAppliedDiff<'r, HandedOutAgentName>,
     hosts: __sdk::TableAppliedDiff<'r, Host>,
     learning_retrievals: __sdk::TableAppliedDiff<'r, LearningRetrieval>,
+    learning_verdicts: __sdk::TableAppliedDiff<'r, LearningVerdict>,
     learnings: __sdk::TableAppliedDiff<'r, Learning>,
     poll_owners: __sdk::TableAppliedDiff<'r, PollOwner>,
     repo_base_branches: __sdk::TableAppliedDiff<'r, RepoBaseBranch>,
@@ -1910,6 +1931,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<LearningRetrieval>(
             "learning_retrievals",
             &self.learning_retrievals,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<LearningVerdict>(
+            "learning_verdicts",
+            &self.learning_verdicts,
             event,
         );
         callbacks.invoke_table_row_callbacks::<Learning>("learnings", &self.learnings, event);
@@ -2652,6 +2678,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         handed_out_agent_names_table::register_table(client_cache);
         hosts_table::register_table(client_cache);
         learning_retrievals_table::register_table(client_cache);
+        learning_verdicts_table::register_table(client_cache);
         learnings_table::register_table(client_cache);
         poll_owners_table::register_table(client_cache);
         repo_base_branches_table::register_table(client_cache);
@@ -2682,6 +2709,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "handed_out_agent_names",
         "hosts",
         "learning_retrievals",
+        "learning_verdicts",
         "learnings",
         "poll_owners",
         "repo_base_branches",

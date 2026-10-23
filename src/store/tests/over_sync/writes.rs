@@ -443,6 +443,7 @@ impl ReducerCaller for RecordingCaller {
 
     async fn apply_learning_verdicts(
         &self,
+        _task_id: crate::models::TaskId,
         verdicts: Vec<(crate::models::LearningId, crate::models::LearningVerdict)>,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::ApplyLearningVerdicts(verdicts.len()))

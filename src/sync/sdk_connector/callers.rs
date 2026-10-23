@@ -433,12 +433,13 @@ impl ReducerCaller for SdkReducerCaller {
 
     async fn apply_learning_verdicts(
         &self,
+        task_id: TaskId,
         verdicts: Vec<(LearningId, LearningVerdict)>,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the learning verdicts",
-            apply_learning_verdicts_then(encode::verdict_inputs(&verdicts))
+            apply_learning_verdicts_then(task_id.0, encode::verdict_inputs(&verdicts))
         )
     }
 

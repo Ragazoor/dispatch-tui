@@ -228,6 +228,7 @@ pub trait ReducerCaller: Send + Sync {
     ) -> Result<ReducerOutcome>;
     async fn apply_learning_verdicts(
         &self,
+        task_id: TaskId,
         verdicts: Vec<(LearningId, LearningVerdict)>,
     ) -> Result<ReducerOutcome>;
     async fn archive_stale_learnings(&self, cutoff: DateTime<Utc>) -> Result<ReducerOutcome>;

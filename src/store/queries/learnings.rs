@@ -94,9 +94,13 @@ impl super::super::LearningRetrievalStore for Store {
         Ok(self.rows.retrievals_for_task(task_id))
     }
 
-    async fn apply_verdicts_tx(&self, verdicts: &[(LearningId, LearningVerdict)]) -> Result<()> {
+    async fn apply_verdicts_tx(
+        &self,
+        task_id: TaskId,
+        verdicts: &[(LearningId, LearningVerdict)],
+    ) -> Result<()> {
         self.caller
-            .apply_learning_verdicts(verdicts.to_vec())
+            .apply_learning_verdicts(task_id, verdicts.to_vec())
             .await?
             .applied()
     }

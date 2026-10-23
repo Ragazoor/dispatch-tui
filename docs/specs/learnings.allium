@@ -54,10 +54,11 @@ use "./core.allium" as core
 -- the move from SQLite to the SpacetimeDB subscription. Moving the storage
 -- changed nothing about how a learning is scored or ranked.
 --
--- learning_verdicts is not a table in the store: the old SQLite migration v74
--- dropped it long before SQLite was removed (task #36865), and a verdict has
--- never been more than an in-flight score effect on core/Learning.upvote_count
--- (see Retrievals & Verdicts below and core.allium). Only core/Learning and core/Retrieval have module tables.
+-- The store keeps one verdict per (task, learning) in its learning_verdicts
+-- table (the SQLite table of that name was dropped in v74 and is unrelated):
+-- a repeat from the same task replaces the earlier verdict, so a task moves a
+-- learning's core/Learning.upvote_count by at most one in either direction
+-- (see Retrievals & Verdicts below and core.allium).
 
 ------------------------------------------------------------
 -- Scope Model
@@ -220,8 +221,8 @@ use "./core.allium" as core
 --             injection or query_learnings).
 --   Applies the verdict as described in Retrievals & Verdicts below
 --   (helped → upvote_count + 1; wrong → upvote_count - 1). Neither verdict
---   changes status. The verdict itself is not persisted (the learning_verdicts
---   table was dropped in v74); only the in-flight score effect is applied.
+--   changes status. A task rates a learning once: a repeat replaces its earlier
+--   verdict and moves the score by the difference (see RateLearningViaMcp).
 --
 -- delete_learning(learning_id)
 --   Permanently deletes the learning entry with the given id.
@@ -292,9 +293,9 @@ use "./core.allium" as core
 -- — re-retrieval in a long session contributes its own row each time.
 --
 -- An agent rates a retrieved learning by calling rate_learning at any point
--- during the task. The verdict itself is not persisted (the learning_verdicts
--- table was dropped in v74); each call applies the in-flight effects described
--- by the rules below (see RateLearningViaMcp).
+-- during the task. One verdict stands per (task, learning): a repeat call
+-- replaces the earlier verdict and applies the difference, as described by the
+-- rules below (see RateLearningViaMcp).
 --
 -- Rule: a `helped` verdict increments upvote_count and sets last_upvoted_at to
 -- now. Status is unchanged.
@@ -304,8 +305,11 @@ use "./core.allium" as core
 -- unchanged — there is no needs_review routing. A downvoted entry stays in the
 -- active pool but ranks lower, and becomes eligible for stale cleanup once its
 -- score is non-positive and it has gone untouched for the configured threshold.
--- The verdict itself is not persisted (the learning_verdicts table was dropped
--- in v74).
+--
+-- Rule: a repeat verdict from the same task on the same learning replaces the
+-- earlier one. The same verdict again changes nothing; helped then wrong moves
+-- upvote_count by -2, wrong then helped by +2. last_upvoted_at is set when the
+-- standing verdict becomes helped and is not rolled back when it is replaced.
 --
 -- Rule: a verdict is valid only if the same (task_id, learning_id) appears in
 -- at least one prior core/Retrieval row. Verdicts referencing learnings that
@@ -638,12 +642,13 @@ rule RateLearningViaMcp {
     requires: core/Retrievals.any(r => r.task = task and r.learning = learning)
 
     ensures:
-        if verdict = helped:
-            learning.upvote_count = learning.upvote_count + 1
+        -- previous is the verdict this task already gave this learning, if any.
+        -- The standing verdict is now `verdict`; the score moves by the
+        -- difference between the two (helped = +1, wrong = -1, none = 0).
+        learning.upvote_count = learning.upvote_count + weight(verdict) - weight(previous)
+        if verdict = helped and previous != helped:
             learning.last_upvoted_at = now
-            learning.updated_at = now
-        else if verdict = wrong:
-            learning.upvote_count = learning.upvote_count - 1
+        if verdict != previous:
             learning.updated_at = now
 
     @guidance
@@ -656,11 +661,14 @@ rule RateLearningViaMcp {
         -- downvoted entry stays active but ranks lower and becomes eligible for
         -- ArchiveStaleLearning once its score is non-positive and it goes
         -- untouched for config.stale_learning_threshold.
-        -- The verdict itself is not persisted: there is no learning_verdicts
-        -- table (the old SQLite migration v74 dropped it), so only the
-        -- in-flight score effect is applied. See apply_verdicts in src/service/learnings.rs.
+        -- One verdict stands per (task, learning), kept in the learning_verdicts
+        -- table: a repeat replaces it and applies the difference, so the task
+        -- prompt's "rate when you act" and the wrap-up /learnings step cannot
+        -- count one use twice. The same verdict again is a no-op.
         -- The retrieval guard ensures agents only rate learnings actually
-        -- surfaced to them (prompt injection or query_learnings).
+        -- surfaced to them (prompt injection or query_learnings). It lives in
+        -- the apply_learning_verdicts reducer, not in the service; the service
+        -- (apply_verdicts in src/service/learnings.rs) only passes the call on.
         -- Replaces the former upvote_learning tool and the wrap_up
         -- learning_verdicts argument.
         -- Implemented in src/mcp/handlers/learnings.rs.

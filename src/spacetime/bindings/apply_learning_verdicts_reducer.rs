@@ -9,12 +9,14 @@ use super::learning_verdict_input_type::LearningVerdictInput;
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub(super) struct ApplyLearningVerdictsArgs {
+    pub task_id: i64,
     pub verdicts: Vec<LearningVerdictInput>,
 }
 
 impl From<ApplyLearningVerdictsArgs> for super::Reducer {
     fn from(args: ApplyLearningVerdictsArgs) -> Self {
         Self::ApplyLearningVerdicts {
+            task_id: args.task_id,
             verdicts: args.verdicts,
         }
     }
@@ -35,8 +37,12 @@ pub trait apply_learning_verdicts {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`apply_learning_verdicts:apply_learning_verdicts_then`] to run a callback after the reducer completes.
-    fn apply_learning_verdicts(&self, verdicts: Vec<LearningVerdictInput>) -> __sdk::Result<()> {
-        self.apply_learning_verdicts_then(verdicts, |_, _| {})
+    fn apply_learning_verdicts(
+        &self,
+        task_id: i64,
+        verdicts: Vec<LearningVerdictInput>,
+    ) -> __sdk::Result<()> {
+        self.apply_learning_verdicts_then(task_id, verdicts, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `apply_learning_verdicts` to run as soon as possible,
@@ -47,6 +53,7 @@ pub trait apply_learning_verdicts {
     ///  and its status can be observed with the `callback`.
     fn apply_learning_verdicts_then(
         &self,
+        task_id: i64,
         verdicts: Vec<LearningVerdictInput>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
@@ -58,6 +65,7 @@ pub trait apply_learning_verdicts {
 impl apply_learning_verdicts for super::RemoteReducers {
     fn apply_learning_verdicts_then(
         &self,
+        task_id: i64,
         verdicts: Vec<LearningVerdictInput>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
@@ -65,6 +73,6 @@ impl apply_learning_verdicts for super::RemoteReducers {
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp
-            .invoke_reducer_with_callback(ApplyLearningVerdictsArgs { verdicts }, callback)
+            .invoke_reducer_with_callback(ApplyLearningVerdictsArgs { task_id, verdicts }, callback)
     }
 }

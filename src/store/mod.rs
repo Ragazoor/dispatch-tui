@@ -808,11 +808,17 @@ pub trait LearningRetrievalStore: Send + Sync {
     /// Return all retrievals recorded for `task_id`, ordered by id ascending.
     async fn list_retrievals_for_task(&self, task_id: TaskId) -> Result<Vec<LearningRetrieval>>;
 
-    /// Apply a batch of verdicts atomically. Verdicts are not persisted; each
-    /// only adjusts the learning's score: `Helped` bumps `upvote_count` (and
-    /// sets `last_upvoted_at`), `Wrong` decrements it (a downvote; may go
-    /// negative). Neither verdict changes status.
-    async fn apply_verdicts_tx(&self, verdicts: &[(LearningId, LearningVerdict)]) -> Result<()>;
+    /// Apply a batch of `task_id`'s verdicts atomically. One verdict stands per
+    /// (task, learning): a repeat replaces the earlier one and moves the score
+    /// by the difference. `Helped` counts +1 toward `upvote_count` (and sets
+    /// `last_upvoted_at`), `Wrong` counts -1 (a downvote; may go negative).
+    /// Neither verdict changes status. A learning the task never retrieved
+    /// refuses the whole batch.
+    async fn apply_verdicts_tx(
+        &self,
+        task_id: TaskId,
+        verdicts: &[(LearningId, LearningVerdict)],
+    ) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------

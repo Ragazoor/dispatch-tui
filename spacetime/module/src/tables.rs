@@ -405,9 +405,7 @@ pub struct Learning {
 /// to see every host's retrievals for a task, not only the recording host's
 /// own, so this is unconditionally subscribed to as well.
 ///
-/// `learning_verdicts` has no table here or in SQLite: migration v74 dropped
-/// it, and a verdict has never been more than an in-flight effect on
-/// `Learning.upvote_count` — see [`apply_learning_verdict`].
+/// The verdict a task gave a learning lives in [`LearningVerdict`].
 #[spacetimedb::table(accessor = learning_retrievals, public)]
 #[derive(Clone, Debug)]
 pub struct LearningRetrieval {
@@ -420,6 +418,26 @@ pub struct LearningRetrieval {
     pub learning_id: i64,
     pub source: String,
     pub retrieved_at: String,
+}
+
+/// The verdict one task stands behind on one learning
+/// (`learnings.allium: RateLearningViaMcp`): at most one row per
+/// (`task_id`, `learning_id`), which a repeat replaces. The row exists so a
+/// repeat can move `Learning.upvote_count` by the difference instead of again.
+/// Not a snapshot table: it is derived from agents' ratings, and a restore
+/// that dropped it would let a task rate once more.
+#[spacetimedb::table(accessor = learning_verdicts, public)]
+#[derive(Clone, Debug)]
+pub struct LearningVerdict {
+    #[primary_key]
+    #[auto_inc]
+    pub id: i64,
+    #[index(btree)]
+    pub task_id: i64,
+    #[index(btree)]
+    pub learning_id: i64,
+    /// `helped` | `wrong`, an opaque string like every enum-typed column.
+    pub verdict: String,
 }
 
 /// One recorded telemetry event (`docs/plans/2026-09-17-spacetimedb-migration-plan.md`'s

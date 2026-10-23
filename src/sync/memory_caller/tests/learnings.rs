@@ -170,49 +170,144 @@ async fn record_learning_retrieval_inserts_a_row() {
     assert_eq!(retrievals[0].learning_id, learning_id);
 }
 
+const RATING_TASK: TaskId = TaskId(7);
+
+/// Record that `RATING_TASK` was shown `learning`, the precondition of a verdict.
+async fn retrieve(caller: &MemoryReducerCaller, learning: LearningId) {
+    caller
+        .record_learning_retrieval(RATING_TASK, learning, RetrievalSource::PromptInjection)
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 async fn apply_learning_verdicts_applies_helped_and_wrong() {
     let (caller, rows) = caller();
     let helped = caller.create_learning(blank_learning()).await.unwrap();
     let wrong = caller.create_learning(blank_learning()).await.unwrap();
+    retrieve(&caller, helped).await;
+    retrieve(&caller, wrong).await;
     caller
-        .apply_learning_verdicts(vec![
-            (helped, LearningVerdict::Helped),
-            (wrong, LearningVerdict::Wrong),
-        ])
+        .apply_learning_verdicts(
+            RATING_TASK,
+            vec![
+                (helped, LearningVerdict::Helped),
+                (wrong, LearningVerdict::Wrong),
+            ],
+        )
         .await
         .unwrap();
     assert_eq!(rows.learning(helped).unwrap().upvote_count, 1);
     assert_eq!(rows.learning(wrong).unwrap().upvote_count, -1);
 }
 
-/// Two entries naming the SAME learning apply against each other's
-/// result, not both against the pre-batch row — mirrors the module
-/// re-reading via `ctx.db.learnings().id().find()` on every loop
-/// iteration. Net count is 0 (+1 then -1), and `last_upvoted_at` is
-/// retained from the "helped" step: "wrong" only ever keeps whatever is
-/// already there, never clears it.
+/// One task rating a learning twice moves the score once: the second
+/// verdict replaces the first, and an identical repeat changes nothing.
 #[tokio::test]
-async fn apply_learning_verdicts_applies_duplicate_entries_for_the_same_id_in_order() {
+async fn apply_learning_verdicts_counts_a_repeat_from_one_task_once() {
     let (caller, rows) = caller();
     let id = caller.create_learning(blank_learning()).await.unwrap();
+    retrieve(&caller, id).await;
+    for _ in 0..2 {
+        caller
+            .apply_learning_verdicts(RATING_TASK, vec![(id, LearningVerdict::Helped)])
+            .await
+            .unwrap();
+    }
+    assert_eq!(rows.learning(id).unwrap().upvote_count, 1);
+}
+
+/// A changed verdict from the same task moves the score by the difference
+/// (helped then wrong is -2 from the helped state), so the latest wins.
+#[tokio::test]
+async fn apply_learning_verdicts_latest_verdict_from_a_task_wins() {
+    let (caller, rows) = caller();
+    let id = caller.create_learning(blank_learning()).await.unwrap();
+    retrieve(&caller, id).await;
     caller
-        .apply_learning_verdicts(vec![
-            (id, LearningVerdict::Helped),
-            (id, LearningVerdict::Wrong),
-        ])
+        .apply_learning_verdicts(RATING_TASK, vec![(id, LearningVerdict::Helped)])
+        .await
+        .unwrap();
+    caller
+        .apply_learning_verdicts(RATING_TASK, vec![(id, LearningVerdict::Wrong)])
         .await
         .unwrap();
     let stored = rows.learning(id).unwrap();
-    assert_eq!(stored.upvote_count, 0);
-    assert!(stored.last_upvoted_at.is_some());
+    assert_eq!(stored.upvote_count, -1);
+    assert!(
+        stored.last_upvoted_at.is_some(),
+        "replacing a helped verdict does not roll last_upvoted_at back"
+    );
+}
+
+/// Two tasks each get their own verdict on one learning.
+#[tokio::test]
+async fn apply_learning_verdicts_counts_each_task_once() {
+    let (caller, rows) = caller();
+    let id = caller.create_learning(blank_learning()).await.unwrap();
+    for task in [TaskId(7), TaskId(8)] {
+        caller
+            .record_learning_retrieval(task, id, RetrievalSource::PromptInjection)
+            .await
+            .unwrap();
+        caller
+            .apply_learning_verdicts(task, vec![(id, LearningVerdict::Helped)])
+            .await
+            .unwrap();
+    }
+    assert_eq!(rows.learning(id).unwrap().upvote_count, 2);
+}
+
+/// Two entries naming the SAME learning in one batch apply in order against
+/// each other: helped then wrong from one task ends at -1, not 0.
+#[tokio::test]
+async fn apply_learning_verdicts_duplicate_entries_in_one_batch_latest_wins() {
+    let (caller, rows) = caller();
+    let id = caller.create_learning(blank_learning()).await.unwrap();
+    retrieve(&caller, id).await;
+    caller
+        .apply_learning_verdicts(
+            RATING_TASK,
+            vec![(id, LearningVerdict::Helped), (id, LearningVerdict::Wrong)],
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.learning(id).unwrap().upvote_count, -1);
+}
+
+#[tokio::test]
+async fn apply_learning_verdicts_refuses_a_learning_never_retrieved_for_the_task() {
+    let (caller, rows) = caller();
+    let retrieved = caller.create_learning(blank_learning()).await.unwrap();
+    let stranger = caller.create_learning(blank_learning()).await.unwrap();
+    retrieve(&caller, retrieved).await;
+    let outcome = caller
+        .apply_learning_verdicts(
+            RATING_TASK,
+            vec![
+                (retrieved, LearningVerdict::Helped),
+                (stranger, LearningVerdict::Helped),
+            ],
+        )
+        .await
+        .unwrap();
+    assert!(!outcome.won(), "the batch is refused");
+    assert_eq!(
+        rows.learning(retrieved).unwrap().upvote_count,
+        0,
+        "a refused batch changes nothing"
+    );
 }
 
 #[tokio::test]
 async fn apply_learning_verdicts_skips_a_missing_learning() {
     let (caller, _rows) = caller();
+    retrieve(&caller, LearningId(999)).await;
     let outcome = caller
-        .apply_learning_verdicts(vec![(LearningId(999), LearningVerdict::Helped)])
+        .apply_learning_verdicts(
+            RATING_TASK,
+            vec![(LearningId(999), LearningVerdict::Helped)],
+        )
         .await
         .unwrap();
     assert!(outcome.won());

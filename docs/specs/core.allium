@@ -1187,11 +1187,13 @@ entity Retrieval {
     retrieved_at: Timestamp
 }
 
--- A rate_learning call evaluates a retrieved learning. The verdict is no
--- longer persisted (migration v74 dropped the learning_verdicts table); the
--- VerdictKind enum still describes the in-flight effects applied on receipt:
---   helped → increments learning.upvote_count and updates last_upvoted_at
---   wrong  → decrements learning.upvote_count (a downvote; may go negative);
+-- A rate_learning call evaluates a retrieved learning. The verdict is kept, one
+-- per (task, learning): a repeat from the same task replaces the earlier one
+-- (latest wins) and moves upvote_count by the difference, so one task moves a
+-- learning's score by at most one in either direction. The VerdictKind enum
+-- describes the effect of the standing verdict:
+--   helped → counts +1 toward learning.upvote_count and updates last_upvoted_at
+--   wrong  → counts -1 toward learning.upvote_count (a downvote; may go negative);
 --            no status change
 -- See learnings.allium for the rule that applies these effects.
 

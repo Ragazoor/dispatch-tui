@@ -609,23 +609,71 @@ fn memory_caller_matches_the_real_reducers() {
             "retrievals after record_learning_retrieval"
         );
 
+        real.record_learning_retrieval(task_id_real, wrong_real, RetrievalSource::QueryLearnings)
+            .await
+            .unwrap();
+        wait_for!(rows_real.retrievals_for_task(task_id_real).len() == 2);
+        mem.record_learning_retrieval(task_id_mem, wrong_mem, RetrievalSource::QueryLearnings)
+            .await
+            .unwrap();
+
         let verdicts = |helped_id: LearningId, wrong_id: LearningId| {
             vec![
                 (helped_id, LearningVerdict::Helped),
                 (wrong_id, LearningVerdict::Wrong),
             ]
         };
-        real.apply_learning_verdicts(verdicts(helped_real, wrong_real))
+        real.apply_learning_verdicts(task_id_real, verdicts(helped_real, wrong_real))
             .await
             .unwrap();
         wait_for!(rows_real
             .learning(helped_real)
             .is_some_and(|l| l.upvote_count == 1));
-        mem.apply_learning_verdicts(verdicts(helped_mem, wrong_mem))
+        mem.apply_learning_verdicts(task_id_mem, verdicts(helped_mem, wrong_mem))
             .await
             .unwrap();
         compare_learning(helped_real);
         compare_learning(wrong_real);
+
+        // One verdict stands per (task, learning): the same ratings again change
+        // nothing, and a changed verdict moves the score by the difference.
+        let flipped = |helped_id: LearningId, wrong_id: LearningId| {
+            vec![
+                (helped_id, LearningVerdict::Wrong),
+                (wrong_id, LearningVerdict::Wrong),
+            ]
+        };
+        real.apply_learning_verdicts(task_id_real, verdicts(helped_real, wrong_real))
+            .await
+            .unwrap();
+        real.apply_learning_verdicts(task_id_real, flipped(helped_real, wrong_real))
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .learning(helped_real)
+            .is_some_and(|l| l.upvote_count == -1));
+        mem.apply_learning_verdicts(task_id_mem, verdicts(helped_mem, wrong_mem))
+            .await
+            .unwrap();
+        mem.apply_learning_verdicts(task_id_mem, flipped(helped_mem, wrong_mem))
+            .await
+            .unwrap();
+        compare_learning(helped_real);
+        compare_learning(wrong_real);
+
+        // A task that never retrieved the learning is refused by both.
+        let stranger_real = real.apply_learning_verdicts(
+            TaskId(task_id_real.0 + 1_000),
+            verdicts(helped_real, wrong_real),
+        );
+        let stranger_mem = mem.apply_learning_verdicts(
+            TaskId(task_id_mem.0 + 1_000),
+            verdicts(helped_mem, wrong_mem),
+        );
+        let (stranger_real, stranger_mem) =
+            (stranger_real.await.unwrap(), stranger_mem.await.unwrap());
+        assert!(!stranger_real.won() && !stranger_mem.won(), "both refuse");
+        compare_learning(helped_real);
 
         // (An unknown verdict string is unrepresentable through the typed
         // `LearningVerdict`; the module's own tests cover that refusal.)

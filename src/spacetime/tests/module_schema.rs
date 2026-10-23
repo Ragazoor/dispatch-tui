@@ -126,6 +126,10 @@ fn parse_field(accessor: &str, line: &str) -> Column {
 /// (`spacetime-seed.allium`'s note on `SharedTable`, and `store-split.allium`
 /// M4's D10). A restored open request would have no timer and would hold its
 /// task's claim forever.
+///
+/// `learning_verdicts` is excluded as well: it is the standing verdict each task
+/// gave each learning, kept so a repeat rating cannot count twice, and no
+/// snapshot carries it (`learnings.allium: RateLearningViaMcp`).
 #[test]
 fn the_module_declares_every_shared_table_and_nothing_else() {
     let module = module_tables();
@@ -143,6 +147,7 @@ fn the_module_declares_every_shared_table_and_nothing_else() {
                     | "session_requests"
                     | "session_request_timeouts"
                     | "unseen_tasks"
+                    | "learning_verdicts"
             )
         })
         .collect();

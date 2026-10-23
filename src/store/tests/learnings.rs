@@ -288,7 +288,7 @@ async fn helped_verdict_increments_count_and_timestamps() {
     assert_eq!(before.upvote_count, 0);
     assert!(before.last_upvoted_at.is_none());
 
-    db.apply_verdicts_tx(&[(id, LearningVerdict::Helped)])
+    db.apply_verdicts_tx(task_id, &[(id, LearningVerdict::Helped)])
         .await
         .unwrap();
     let after = db.get_learning(id).await.unwrap().unwrap();
@@ -296,11 +296,14 @@ async fn helped_verdict_increments_count_and_timestamps() {
     assert!(after.last_upvoted_at.is_some());
     assert!(after.updated_at >= before.updated_at);
 
-    db.apply_verdicts_tx(&[(id, LearningVerdict::Helped)])
+    db.apply_verdicts_tx(task_id, &[(id, LearningVerdict::Helped)])
         .await
         .unwrap();
     let after2 = db.get_learning(id).await.unwrap().unwrap();
-    assert_eq!(after2.upvote_count, 2);
+    assert_eq!(
+        after2.upvote_count, 1,
+        "the same task rating again counts once"
+    );
 }
 
 #[tokio::test]
@@ -379,7 +382,7 @@ async fn apply_verdicts_helped_increments_count() {
     db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
         .await
         .unwrap();
-    db.apply_verdicts_tx(&[(learning_id, LearningVerdict::Helped)])
+    db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Helped)])
         .await
         .unwrap();
     let l = db.get_learning(learning_id).await.unwrap().unwrap();
@@ -395,7 +398,7 @@ async fn apply_verdicts_wrong_decrements_upvote_count() {
     db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
         .await
         .unwrap();
-    db.apply_verdicts_tx(&[(learning_id, LearningVerdict::Wrong)])
+    db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Wrong)])
         .await
         .unwrap();
     let l = db.get_learning(learning_id).await.unwrap().unwrap();
@@ -403,13 +406,13 @@ async fn apply_verdicts_wrong_decrements_upvote_count() {
     assert_eq!(l.status, LearningStatus::Approved);
     assert_eq!(l.upvote_count, -1);
 
-    // A second `wrong` verdict decrements further (may go negative).
-    db.apply_verdicts_tx(&[(learning_id, LearningVerdict::Wrong)])
+    // The same task's second `wrong` verdict replaces the first: no further drop.
+    db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Wrong)])
         .await
         .unwrap();
     let l = db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(l.status, LearningStatus::Approved);
-    assert_eq!(l.upvote_count, -2);
+    assert_eq!(l.upvote_count, -1);
 }
 
 #[tokio::test]

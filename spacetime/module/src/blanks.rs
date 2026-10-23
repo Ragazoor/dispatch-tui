@@ -175,6 +175,15 @@ pub(crate) fn blank_learning_retrieval() -> LearningRetrieval {
     }
 }
 
+pub(crate) fn blank_learning_verdict() -> LearningVerdict {
+    LearningVerdict {
+        id: 0,
+        task_id: 0,
+        learning_id: 0,
+        verdict: String::new(),
+    }
+}
+
 pub(crate) fn blank_usage_event() -> UsageEvent {
     UsageEvent {
         id: 0,

@@ -150,6 +150,23 @@ async fn apply_verdicts_succeeds_when_retrieval_exists() {
 }
 
 #[tokio::test]
+async fn apply_verdicts_counts_one_task_rating_twice_once() {
+    let (svc, db) = service_with_db().await;
+    let task_id = seed_task(&db).await;
+    let learning_id = seed_approved_learning(&svc).await;
+    svc.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        svc.apply_verdicts(task_id, vec![(learning_id, LearningVerdict::Helped)])
+            .await
+            .unwrap();
+    }
+    let l = svc.get_learning(learning_id).await.unwrap();
+    assert_eq!(l.upvote_count, 1);
+}
+
+#[tokio::test]
 async fn apply_verdicts_empty_is_ok() {
     let (svc, db) = service_with_db().await;
     let task_id = seed_task(&db).await;

@@ -22,6 +22,14 @@ pub(crate) fn detach_learnings_from_task(ctx: &ReducerContext, task_id: i64) {
         .map(|r| r.id)
         .collect();
     delete_learning_retrievals(ctx, retrievals);
+    let verdicts: Vec<i64> = ctx
+        .db
+        .learning_verdicts()
+        .task_id()
+        .filter(&task_id)
+        .map(|v| v.id)
+        .collect();
+    delete_learning_verdicts(ctx, verdicts);
 }
 
 /// Collect every learning matching `pred`, apply `f`, and write each back.
@@ -45,6 +53,14 @@ pub(crate) fn update_matching_learnings(
 pub(crate) fn delete_learning_retrievals(ctx: &ReducerContext, ids: impl IntoIterator<Item = i64>) {
     for id in ids {
         ctx.db.learning_retrievals().id().delete(id);
+    }
+}
+
+/// Delete each `learning_verdicts` row by id, the verdict twin of
+/// [`delete_learning_retrievals`].
+pub(crate) fn delete_learning_verdicts(ctx: &ReducerContext, ids: impl IntoIterator<Item = i64>) {
+    for id in ids {
+        ctx.db.learning_verdicts().id().delete(id);
     }
 }
 
@@ -146,6 +162,14 @@ pub fn delete_learning(ctx: &ReducerContext, id: i64) -> Result<(), String> {
         .map(|r| r.id)
         .collect();
     delete_learning_retrievals(ctx, retrievals);
+    let verdicts: Vec<i64> = ctx
+        .db
+        .learning_verdicts()
+        .learning_id()
+        .filter(&id)
+        .map(|v| v.id)
+        .collect();
+    delete_learning_verdicts(ctx, verdicts);
     Ok(())
 }
 
@@ -204,31 +228,94 @@ pub struct LearningVerdictInput {
     pub verdict: String,
 }
 
-/// Apply a batch of verdicts' in-flight score effects.
+/// What one verdict is worth to `Learning.upvote_count`: `helped` +1, `wrong`
+/// -1. `pub`, like [`validate_learning_scope`], so `MemoryReducerCaller` shares
+/// it rather than re-deriving it.
+pub fn verdict_weight(verdict: &str) -> Result<i64, String> {
+    match verdict {
+        "helped" => Ok(1),
+        "wrong" => Ok(-1),
+        other => Err(format!("unknown verdict {other}")),
+    }
+}
+
+/// How far a task's new verdict moves a learning's score: the new verdict's
+/// weight less the weight of the verdict that task already stood behind, if
+/// any. The same verdict again is 0.
+pub fn verdict_score_change(previous: Option<&str>, verdict: &str) -> Result<i64, String> {
+    let before = match previous {
+        Some(prev) => verdict_weight(prev)?,
+        None => 0,
+    };
+    Ok(verdict_weight(verdict)? - before)
+}
+
+/// The refusal for a verdict on a learning the task was never shown.
 ///
-/// The verdict itself is not persisted — migration v74 dropped
-/// `learning_verdicts`, and a verdict has never been more than this effect on
-/// `Learning.upvote_count` (`docs/specs/learnings.allium`'s Retrievals &
-/// Verdicts). A missing learning is skipped rather than failing the whole
-/// batch: the retrieval precondition that makes a verdict valid is enforced
-/// client-side by `LearningServiceApi::apply_verdicts` before this is ever
-/// called, so a batch here has already passed that check.
+/// `pub` for the same reason as [`verdict_weight`]: the service maps it to a
+/// validation error by this text.
+pub fn not_retrieved_message(learning_id: i64, task_id: i64) -> String {
+    format!("learning {learning_id} was not retrieved during task {task_id}")
+}
+
+/// Apply a batch of verdicts from `task_id`.
+///
+/// One verdict stands per (task, learning) — `learnings.allium:
+/// RateLearningViaMcp`. A repeat replaces the stored verdict and moves
+/// `Learning.upvote_count` by the difference, so a task cannot raise a score
+/// by rating twice; entries naming one learning twice in a batch apply in
+/// order. A verdict on a learning the task was never shown (no
+/// `learning_retrievals` row) refuses the whole batch, as does an unknown
+/// verdict string. A missing learning is skipped rather than failing the batch.
 #[spacetimedb::reducer]
 pub fn apply_learning_verdicts(
     ctx: &ReducerContext,
+    task_id: i64,
     verdicts: Vec<LearningVerdictInput>,
 ) -> Result<(), String> {
+    for v in &verdicts {
+        let retrieved = ctx
+            .db
+            .learning_retrievals()
+            .task_id()
+            .filter(&task_id)
+            .any(|r| r.learning_id == v.learning_id);
+        if !retrieved {
+            return Err(not_retrieved_message(v.learning_id, task_id));
+        }
+    }
     for v in verdicts {
         let Some(row) = ctx.db.learnings().id().find(v.learning_id) else {
             continue;
         };
-        let delta: i64 = match v.verdict.as_str() {
-            "helped" => 1,
-            "wrong" => -1,
-            other => return Err(format!("unknown verdict {other}")),
-        };
+        let standing = ctx
+            .db
+            .learning_verdicts()
+            .task_id()
+            .filter(&task_id)
+            .find(|s| s.learning_id == v.learning_id);
+        let delta = verdict_score_change(standing.as_ref().map(|s| s.verdict.as_str()), &v.verdict)?;
+        match standing {
+            Some(s) => {
+                ctx.db.learning_verdicts().id().update(LearningVerdict {
+                    verdict: v.verdict.clone(),
+                    ..s
+                });
+            }
+            None => {
+                ctx.db.learning_verdicts().insert(LearningVerdict {
+                    task_id,
+                    learning_id: v.learning_id,
+                    verdict: v.verdict.clone(),
+                    ..blank_learning_verdict()
+                });
+            }
+        }
+        if delta == 0 {
+            continue;
+        }
         let now = now(ctx);
-        let last_upvoted_at = if delta > 0 {
+        let last_upvoted_at = if v.verdict == "helped" {
             Some(now.clone())
         } else {
             row.last_upvoted_at.clone()

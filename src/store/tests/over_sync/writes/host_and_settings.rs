@@ -523,9 +523,12 @@ async fn every_store_mutation_reaches_the_transport() {
     db.record_retrieval(TaskId(1), LearningId(1), RetrievalSource::QueryLearnings)
         .await
         .unwrap();
-    db.apply_verdicts_tx(&[(LearningId(1), crate::models::LearningVerdict::Helped)])
-        .await
-        .unwrap();
+    db.apply_verdicts_tx(
+        TaskId(1),
+        &[(LearningId(1), crate::models::LearningVerdict::Helped)],
+    )
+    .await
+    .unwrap();
 
     db.record_usage_event(&crate::models::UsageEvent {
         category: crate::models::UsageCategory::Keybinding,

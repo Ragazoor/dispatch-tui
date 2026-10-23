@@ -117,6 +117,9 @@ struct Tables {
     retired_feed_items: BTreeMap<i64, module::RetiredFeedItem>,
     learnings: BTreeMap<i64, module::Learning>,
     learning_retrievals: BTreeMap<i64, module::LearningRetrieval>,
+    /// Not mirrored into `SharedRows`: the board never reads a verdict, only
+    /// the module's reducer does.
+    learning_verdicts: BTreeMap<i64, module::LearningVerdict>,
     /// No primary key on the module's own `task_subagents` table either (see
     /// `TaskSubagent`'s doc comment) — a live set of rows, not entities with
     /// an identity of their own, so a plain `Vec` mirrors it exactly. Nothing
@@ -148,6 +151,7 @@ struct Tables {
     next_retired_feed_item_id: i64,
     next_learning_id: i64,
     next_learning_retrieval_id: i64,
+    next_learning_verdict_id: i64,
     next_work_package_id: i64,
     next_dispatch_request_id: i64,
     next_session_request_id: i64,
@@ -166,6 +170,7 @@ impl Tables {
             next_retired_feed_item_id: 1,
             next_learning_id: 1,
             next_learning_retrieval_id: 1,
+            next_learning_verdict_id: 1,
             next_work_package_id: 1,
             next_dispatch_request_id: 1,
             next_session_request_id: 1,
@@ -452,9 +457,10 @@ impl ReducerCaller for MemoryReducerCaller {
 
     async fn apply_learning_verdicts(
         &self,
+        task_id: TaskId,
         verdicts: Vec<(LearningId, LearningVerdict)>,
     ) -> Result<ReducerOutcome> {
-        self.apply_apply_learning_verdicts(verdicts)
+        self.apply_apply_learning_verdicts(task_id, verdicts)
     }
 
     async fn archive_stale_learnings(&self, cutoff: DateTime<Utc>) -> Result<ReducerOutcome> {
