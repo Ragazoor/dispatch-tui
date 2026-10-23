@@ -249,7 +249,6 @@ section.prose { margin: 56px 0 40px; max-width: 820px; }
 .prose p, .prose li { color: var(--page-fg); }
 .prose .muted { color: var(--page-muted); }
 .install { background: var(--page-card); border: 1px solid var(--page-line); border-radius: 10px; padding: 14px 18px; margin-top: 28px; }
-.install pre { background: var(--t-bg); color: var(--t-fg); padding: 10px 14px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
 footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border-top: 1px solid var(--page-line); }
 [hidden] { display: none !important; }
 </style>
@@ -429,12 +428,7 @@ footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border
     </ul>
 
     <div class="install">
-      <b>Try the real thing.</b> You need Rust, <code>tmux</code>, <code>git</code> and the <code>claude</code> CLI.
-      <pre>git clone https://github.com/Ragazoor/dispatch-tui
-cd dispatch-tui
-cargo install --path .
-dispatch tui</pre>
-      The <a href="https://github.com/Ragazoor/dispatch-tui#readme">README</a> has the details.
+      <b>Try the real thing.</b> You need <code>tmux</code>, <code>git</code>, the <code>claude</code> CLI and the <code>spacetime</code> CLI. Download a prebuilt binary or build from source: the <a href="https://github.com/Ragazoor/dispatch-tui#install">README's Install section</a> has the steps. Then run <code>dispatch tui</code>.
     </div>
   </section>
 
@@ -613,7 +607,7 @@ function epicSection(epicId, status) {
 
 // ------------------------------------------------------------------ view state
 const state = {
-  stack: [],            // [{kind: "epic"|"package", id}]
+  stack: [],            // [{kind: "epic"|"package", id, col, row}]: col/row is the cursor in the view below
   col: 0,
   row: [0, 0, 0, 0],
   folded: new Set(),     // section names
@@ -720,7 +714,10 @@ function goal(name) {
   state.goals.add(name);
   document.querySelector(`.tip[data-goal="${name}"]`)?.classList.add("done");
 }
-function enter(kind, id) { state.stack.push({ kind, id }); state.col = 0; state.row = [0, 0, 0, 0]; }
+// Entering a view starts its cursor on the first column, as on the real board;
+// leaving gives the view below its cursor back.
+function enter(kind, id) { state.stack.push({ kind, id, col: state.col, row: [...state.row] }); state.col = 0; state.row = [0, 0, 0, 0]; }
+function leave(v) { if (v) { state.col = v.col; state.row = v.row; } }
 
 const ACTIONS = {
   navigate_column(key) {
@@ -744,8 +741,8 @@ const ACTIONS = {
     const at = rows.findIndex(r => r.section === c.section);
     if (at >= 0) state.row[state.col] = at;
   },
-  exit_epic() { state.stack.pop(); state.col = 0; },
-  exit_all_epics() { state.stack = []; state.col = 0; },
+  exit_epic() { leave(state.stack.pop()); },
+  exit_all_epics() { leave(state.stack[0]); state.stack = []; },
   quit() { toast("In the real TUI, q quits dispatch. Your agents keep running in their tmux windows."); },
   enter_epic() { enter("epic", current().epic.id); goal("epic"); },
   jump_to_deepest_epic() {
@@ -760,9 +757,13 @@ const ACTIONS = {
       e = epics.get(kids[0]);
       path.push(e.id);
     }
-    for (const id of path) state.stack.push({ kind: "epic", id });
+    for (const id of path) enter("epic", id);
+    // Each step down lands on this column, so q walks back up through it.
+    for (let i = state.stack.length - path.length + 1; i < state.stack.length; i++) {
+      state.stack[i].col = COLUMNS.indexOf(status);
+      state.stack[i].row = [0, 0, 0, 0];
+    }
     state.col = COLUMNS.indexOf(status);
-    state.row = [0, 0, 0, 0];
     goal("epic");
   },
   enter_work_package() { enter("package", current().pkg.id); goal("package"); },
@@ -771,7 +772,7 @@ const ACTIONS = {
   dispatch_task() {
     const t = current().task;
     t.status = "running"; t.sub = "active"; t.window = true; t.worktree = true;
-    t.dispatched = Date.now();
+    t.dispatched = Date.now(); t.age = "now";
     toast(`Dispatched #${t.id}: worktree .worktrees/${t.id}-${slug(t.title)}, tmux window task-${t.id}`);
     followTask(t.id);
     goal("dispatch");
@@ -1019,6 +1020,9 @@ function describe(t) {
     changes_requested_by_me: "You asked for changes on someone else's pull request. The ball is with them.",
     approved_by_me: "You approved someone else's pull request. Nothing is waiting on you.",
   }[sec];
+  if (sec === "awaiting_review" && !t.pr) {
+    return "The agent finished. Run /wrap-up in its window: it commits, then rebases onto the base branch or opens a draft pull request.";
+  }
   if (why) return why;
   return t.status === "backlog" ? "Waiting in the backlog. Space dispatches an agent to do it." : "Finished. Its worktree was cleaned up.";
 }
@@ -1056,9 +1060,10 @@ function renderAgent() {
 }
 
 function renderTmux() {
-  const live = [...tasks.values()].filter(t => t.window).slice(0, 6);
+  const live = [...tasks.values()].filter(t => t.window);
   const wins = [`<span class="win ${state.agent ? "" : "cur"}">0:TUI</span>`]
-    .concat(live.map((t, i) => `<span class="win ${state.agent === t.id ? "cur" : ""}">${i + 1}:task-${t.id}</span>`));
+    .concat(live.slice(0, 6).map((t, i) => `<span class="win ${state.agent === t.id ? "cur" : ""}">${i + 1}:task-${t.id}</span>`));
+  if (live.length > 6) wins.push(`<span>+${live.length - 6} more</span>`);
   $("t-tmux").innerHTML = `<span class="sess">dispatch</span>${wins.join("")}`;
 }
 
