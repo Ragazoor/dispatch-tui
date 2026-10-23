@@ -45,6 +45,13 @@
 --     without JavaScript, so an agent reading the file or a visitor who
 --     prefers reading gets the whole story.
 --   - The README links to the guide.
+--
+-- Decision taken with the user (task #98503):
+--   - The guide answers only to the keys its tour teaches (see
+--     GuideKeyRunsItsDeclaredAction), plus z, U and Space's other card
+--     actions. Keys that only showed a toast or that a first visit does not
+--     need (n, E, D, [ ] gg G, L, H) were cut, so the banner fits on one line.
+--     Add a key back only when the tour gains a step that uses it.
 
 use "./keybindings.allium" as keybindings
 
