@@ -24,6 +24,7 @@ pub mod create_learning_reducer;
 pub mod create_task_reducer;
 pub mod create_task_signalled_reducer;
 pub mod create_work_package_reducer;
+pub mod create_work_package_with_links_reducer;
 pub mod delete_epic_reducer;
 pub mod delete_learning_reducer;
 pub mod delete_repo_path_reducer;
@@ -151,8 +152,10 @@ pub mod unlink_work_package_item_reducer;
 pub mod unseen_task_type;
 pub mod unseen_tasks_table;
 pub mod unsubscribe_from_epic_reducer;
+pub mod update_work_package_with_links_reducer;
 pub mod usage_event_type;
 pub mod usage_events_table;
+pub mod work_package_item_ref_type;
 pub mod work_package_link_type;
 pub mod work_package_links_table;
 pub mod work_package_patch_type;
@@ -177,6 +180,7 @@ pub use create_learning_reducer::create_learning;
 pub use create_task_reducer::create_task;
 pub use create_task_signalled_reducer::create_task_signalled;
 pub use create_work_package_reducer::create_work_package;
+pub use create_work_package_with_links_reducer::create_work_package_with_links;
 pub use delete_epic_reducer::delete_epic;
 pub use delete_learning_reducer::delete_learning;
 pub use delete_repo_path_reducer::delete_repo_path;
@@ -304,8 +308,10 @@ pub use unlink_work_package_item_reducer::unlink_work_package_item;
 pub use unseen_task_type::UnseenTask;
 pub use unseen_tasks_table::*;
 pub use unsubscribe_from_epic_reducer::unsubscribe_from_epic;
+pub use update_work_package_with_links_reducer::update_work_package_with_links;
 pub use usage_event_type::UsageEvent;
 pub use usage_events_table::*;
+pub use work_package_item_ref_type::WorkPackageItemRef;
 pub use work_package_link_type::WorkPackageLink;
 pub use work_package_links_table::*;
 pub use work_package_patch_type::WorkPackagePatch;
@@ -373,6 +379,10 @@ pub enum Reducer {
     },
     CreateWorkPackage {
         row: WorkPackage,
+    },
+    CreateWorkPackageWithLinks {
+        row: WorkPackage,
+        links: Vec<WorkPackageItemRef>,
     },
     DeleteEpic {
         id: i64,
@@ -659,6 +669,12 @@ pub enum Reducer {
         subscriber: String,
         epic_id: i64,
     },
+    UpdateWorkPackageWithLinks {
+        id: i64,
+        patch: WorkPackagePatch,
+        unlink: Vec<WorkPackageItemRef>,
+        link: Vec<WorkPackageItemRef>,
+    },
 }
 
 impl __sdk::InModule for Reducer {
@@ -684,6 +700,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::CreateTask { .. } => "create_task",
             Reducer::CreateTaskSignalled { .. } => "create_task_signalled",
             Reducer::CreateWorkPackage { .. } => "create_work_package",
+            Reducer::CreateWorkPackageWithLinks { .. } => "create_work_package_with_links",
             Reducer::DeleteEpic { .. } => "delete_epic",
             Reducer::DeleteLearning { .. } => "delete_learning",
             Reducer::DeleteRepoPath { .. } => "delete_repo_path",
@@ -758,6 +775,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::TryRecordStop { .. } => "try_record_stop",
             Reducer::UnlinkWorkPackageItem { .. } => "unlink_work_package_item",
             Reducer::UnsubscribeFromEpic { .. } => "unsubscribe_from_epic",
+            Reducer::UpdateWorkPackageWithLinks { .. } => "update_work_package_with_links",
             _ => unreachable!(),
         }
     }
@@ -856,6 +874,13 @@ Reducer::BatchDelete{
                 row,
 }             => __sats::bsatn::to_vec(&create_work_package_reducer::CreateWorkPackageArgs {
                 row: row.clone(),
+}),
+            Reducer::CreateWorkPackageWithLinks{
+                row,
+                links,
+}             => __sats::bsatn::to_vec(&create_work_package_with_links_reducer::CreateWorkPackageWithLinksArgs {
+                row: row.clone(),
+                links: links.clone(),
 }),
             Reducer::DeleteEpic{
                 id,
@@ -1355,6 +1380,17 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&unsubscribe_from_epic_reducer::UnsubscribeFromEpicArgs {
                 subscriber: subscriber.clone(),
                 epic_id: epic_id.clone(),
+}),
+            Reducer::UpdateWorkPackageWithLinks{
+                id,
+                patch,
+                unlink,
+                link,
+}             => __sats::bsatn::to_vec(&update_work_package_with_links_reducer::UpdateWorkPackageWithLinksArgs {
+                id: id.clone(),
+                patch: patch.clone(),
+                unlink: unlink.clone(),
+                link: link.clone(),
 }),
             _ => unreachable!(),
 }

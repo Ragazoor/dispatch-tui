@@ -21,6 +21,22 @@ pub struct WorkPackagePatch {
     pub sort_order: Option<i64>,
 }
 
+/// One task or epic a call names, by [`WORK_PACKAGE_ITEM_TASK`] /
+/// [`WORK_PACKAGE_ITEM_EPIC`] kind and id.
+#[derive(spacetimedb::SpacetimeType, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct WorkPackageItemRef {
+    pub kind: String,
+    pub item_id: i64,
+}
+
+impl WorkPackagePatch {
+    /// Whether the patch writes nothing. A patch that writes nothing leaves
+    /// `updated_at` alone, so a link-only update is not a rename.
+    pub fn is_empty(&self) -> bool {
+        self.title.is_none() && self.description.is_none() && self.sort_order.is_none()
+    }
+}
+
 /// `pub` so `MemoryReducerCaller` refuses a blank title with this very
 /// wording rather than a hand-kept copy of it.
 pub fn validate_work_package_title(title: &str) -> Result<(), String> {
@@ -67,6 +83,74 @@ pub fn create_work_package(ctx: &ReducerContext, row: WorkPackage) -> Result<(),
     Ok(())
 }
 
+/// `work-packages.allium: CreateWorkPackage` then `LinkItem` for each of
+/// `links`, in one transaction: every item is checked before the first write,
+/// so a missing one refuses the call and leaves no package behind. A repeated
+/// item is one link.
+#[spacetimedb::reducer]
+pub fn create_work_package_with_links(
+    ctx: &ReducerContext,
+    row: WorkPackage,
+    links: Vec<WorkPackageItemRef>,
+) -> Result<(), String> {
+    validate_work_package_title(&row.title)?;
+    for item in &links {
+        validate_item_exists(ctx, item)?;
+    }
+    let title = row.title.trim().to_string();
+    let package = ctx.db.work_packages().insert(WorkPackage {
+        id: 0,
+        title,
+        ..row
+    });
+    for item in links {
+        insert_link_if_absent(ctx, package.id, item);
+    }
+    Ok(())
+}
+
+/// `work-packages.allium: UpdateWorkPackage`, then every unlink, then every
+/// link, in one transaction. Validated before the first write: the package,
+/// the patch, no item in both lists, and every item to link. A patch that
+/// writes nothing leaves `updated_at` alone. An unlink of an item that is not
+/// linked is a silent success (`UnlinkItem`).
+#[spacetimedb::reducer]
+pub fn update_work_package_with_links(
+    ctx: &ReducerContext,
+    id: i64,
+    patch: WorkPackagePatch,
+    unlink: Vec<WorkPackageItemRef>,
+    link: Vec<WorkPackageItemRef>,
+) -> Result<(), String> {
+    let Some(mut row) = ctx.db.work_packages().id().find(id) else {
+        return Err(format!("no work package {id}"));
+    };
+    if let Some(both) = link.iter().find(|i| unlink.contains(i)) {
+        return Err(format!(
+            "{} {} is in both a link and an unlink list; name it in one",
+            both.kind, both.item_id
+        ));
+    }
+    for item in &link {
+        validate_item_exists(ctx, item)?;
+    }
+    if !patch.is_empty() {
+        apply_work_package_patch(&mut row, patch)?;
+        row.updated_at = now(ctx);
+        ctx.db.work_packages().id().update(row);
+    }
+    for item in unlink {
+        ctx.db
+            .work_package_links()
+            .id()
+            .delete(&work_package_link_id(id, &item.kind, item.item_id));
+    }
+    for item in link {
+        insert_link_if_absent(ctx, id, item);
+    }
+    Ok(())
+}
+
 /// `work-packages.allium: UpdateWorkPackage`. A missing package is a refusal,
 /// not a no-op: unlike a delete there is nothing a stale caller could have
 /// meant by renaming something that is gone.
@@ -103,6 +187,18 @@ pub fn delete_work_package(ctx: &ReducerContext, id: i64) -> Result<(), String> 
     Ok(())
 }
 
+fn validate_item_exists(ctx: &ReducerContext, item: &WorkPackageItemRef) -> Result<(), String> {
+    let exists = match item.kind.as_str() {
+        WORK_PACKAGE_ITEM_TASK => ctx.db.tasks().id().find(item.item_id).is_some(),
+        WORK_PACKAGE_ITEM_EPIC => ctx.db.epics().id().find(item.item_id).is_some(),
+        other => return Err(format!("unknown work package item kind {other:?}")),
+    };
+    if !exists {
+        return Err(format!("no {} {}", item.kind, item.item_id));
+    }
+    Ok(())
+}
+
 fn validate_link_target(
     ctx: &ReducerContext,
     work_package_id: i64,
@@ -112,15 +208,28 @@ fn validate_link_target(
     if ctx.db.work_packages().id().find(work_package_id).is_none() {
         return Err(format!("no work package {work_package_id}"));
     }
-    let exists = match kind {
-        WORK_PACKAGE_ITEM_TASK => ctx.db.tasks().id().find(item_id).is_some(),
-        WORK_PACKAGE_ITEM_EPIC => ctx.db.epics().id().find(item_id).is_some(),
-        other => return Err(format!("unknown work package item kind {other:?}")),
-    };
-    if !exists {
-        return Err(format!("no {kind} {item_id}"));
+    validate_item_exists(
+        ctx,
+        &WorkPackageItemRef {
+            kind: kind.to_string(),
+            item_id,
+        },
+    )
+}
+
+/// Write the link unless its derived key is present. The caller has validated
+/// the package and the item.
+fn insert_link_if_absent(ctx: &ReducerContext, work_package_id: i64, item: WorkPackageItemRef) {
+    let id = work_package_link_id(work_package_id, &item.kind, item.item_id);
+    if ctx.db.work_package_links().id().find(&id).is_none() {
+        ctx.db.work_package_links().insert(WorkPackageLink {
+            id,
+            work_package_id,
+            kind: item.kind,
+            item_id: item.item_id,
+            created_at: now(ctx),
+        });
     }
-    Ok(())
 }
 
 /// `work-packages.allium: LinkItem`. Idempotent: a repeat finds the derived
@@ -133,16 +242,7 @@ pub fn link_work_package_item(
     item_id: i64,
 ) -> Result<(), String> {
     validate_link_target(ctx, work_package_id, &kind, item_id)?;
-    let id = work_package_link_id(work_package_id, &kind, item_id);
-    if ctx.db.work_package_links().id().find(&id).is_none() {
-        ctx.db.work_package_links().insert(WorkPackageLink {
-            id,
-            work_package_id,
-            kind,
-            item_id,
-            created_at: now(ctx),
-        });
-    }
+    insert_link_if_absent(ctx, work_package_id, WorkPackageItemRef { kind, item_id });
     Ok(())
 }
 

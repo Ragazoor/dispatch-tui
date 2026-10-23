@@ -22,7 +22,12 @@ impl super::super::WorkPackageRead for Store {
 
 #[async_trait::async_trait]
 impl super::super::WorkPackageCrud for Store {
-    async fn create_work_package(&self, title: &str, description: &str) -> Result<WorkPackageId> {
+    async fn create_work_package(
+        &self,
+        title: &str,
+        description: &str,
+        links: &[WorkPackageItem],
+    ) -> Result<WorkPackageId> {
         // `sync.allium: CreatesRequireASettledIdentity`: the board subscribes
         // to packages by `created_by`, so a package with no name stamped on it
         // would be created and then never seen again.
@@ -31,7 +36,29 @@ impl super::super::WorkPackageCrud for Store {
             .await?;
         let now = self.now();
         let row = encode::create_work_package_row(title, description, &identity, &now);
-        self.caller.create_work_package(row).await
+        self.caller
+            .create_work_package_with_links(row, links.to_vec())
+            .await
+    }
+
+    async fn update_work_package(
+        &self,
+        id: WorkPackageId,
+        title: Option<&str>,
+        description: Option<&str>,
+        sort_order: Option<i64>,
+        unlink: &[WorkPackageItem],
+        link: &[WorkPackageItem],
+    ) -> Result<()> {
+        let patch = bindings::WorkPackagePatch {
+            title: title.map(str::to_string),
+            description: description.map(str::to_string),
+            sort_order,
+        };
+        self.caller
+            .update_work_package_with_links(id, patch, unlink.to_vec(), link.to_vec())
+            .await?
+            .applied()
     }
 
     async fn patch_work_package(

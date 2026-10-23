@@ -571,12 +571,30 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_create_work_package(row)
     }
 
+    async fn create_work_package_with_links(
+        &self,
+        row: bindings::WorkPackage,
+        links: Vec<WorkPackageItem>,
+    ) -> Result<WorkPackageId> {
+        self.apply_create_work_package_with_links(row, links)
+    }
+
     async fn patch_work_package(
         &self,
         id: WorkPackageId,
         patch: bindings::WorkPackagePatch,
     ) -> Result<ReducerOutcome> {
         self.apply_patch_work_package(id, patch)
+    }
+
+    async fn update_work_package_with_links(
+        &self,
+        id: WorkPackageId,
+        patch: bindings::WorkPackagePatch,
+        unlink: Vec<WorkPackageItem>,
+        link: Vec<WorkPackageItem>,
+    ) -> Result<ReducerOutcome> {
+        self.apply_update_work_package_with_links(id, patch, unlink, link)
     }
 
     async fn delete_work_package(&self, id: WorkPackageId) -> Result<ReducerOutcome> {

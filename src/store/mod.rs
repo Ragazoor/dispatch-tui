@@ -606,8 +606,27 @@ pub trait WorkPackageRead: Send + Sync {
 /// through the service layer.
 #[async_trait::async_trait]
 pub trait WorkPackageCrud: WorkPackageRead {
-    /// Create a package stamped with this board's identity; answers its id.
-    async fn create_work_package(&self, title: &str, description: &str) -> Result<WorkPackageId>;
+    /// Create a package stamped with this board's identity and link `links`
+    /// to it, in one store transaction; answers its id. A missing item
+    /// refuses the call and leaves no package.
+    async fn create_work_package(
+        &self,
+        title: &str,
+        description: &str,
+        links: &[WorkPackageItem],
+    ) -> Result<WorkPackageId>;
+    /// The patch, then every unlink, then every link, in one store
+    /// transaction. `None` leaves a field alone; an unlink of an item that is
+    /// not linked is a silent success.
+    async fn update_work_package(
+        &self,
+        id: WorkPackageId,
+        title: Option<&str>,
+        description: Option<&str>,
+        sort_order: Option<i64>,
+        unlink: &[WorkPackageItem],
+        link: &[WorkPackageItem],
+    ) -> Result<()>;
     /// Change the title, description and/or manual order; `None` leaves a
     /// field alone.
     async fn patch_work_package(

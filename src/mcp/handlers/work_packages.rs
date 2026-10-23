@@ -217,15 +217,30 @@ pub(super) async fn handle_update_work_package(
         unlink: items(parsed.unlink_task_ids, parsed.unlink_epic_ids),
     };
     match state.work_package_svc.update_work_package(params).await {
-        Ok(()) => {
+        Ok(not_linked) => {
             state.notify();
-            text(
-                id,
-                format!("Work package {package_id} updated ({})", fields.join(", ")),
-            )
+            text(id, update_reply(package_id, &fields, &not_linked))
         }
         Err(e) => service_err_to_response(id, e),
     }
+}
+
+/// The reply to an update: what was written, and any requested unlink that
+/// named an item the package never held (it changed nothing).
+fn update_reply(
+    package_id: WorkPackageId,
+    fields: &[&str],
+    not_linked: &[WorkPackageItem],
+) -> String {
+    let mut reply = format!("Work package {package_id} updated ({})", fields.join(", "));
+    if !not_linked.is_empty() {
+        let named: Vec<String> = not_linked
+            .iter()
+            .map(|i| format!("{} {}", i.kind(), i.raw_id()))
+            .collect();
+        reply.push_str(&format!("; not linked: {}", named.join(", ")));
+    }
+    reply
 }
 
 /// work-packages.allium: DeleteWorkPackageViaMcp, the `delete: true` form of

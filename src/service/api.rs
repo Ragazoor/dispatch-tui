@@ -522,12 +522,12 @@ macro_rules! work_package_service_api {
                 id: Option<$crate::models::WorkPackageId>
             ) -> Result<Vec<$crate::service::WorkPackageView>, $crate::service::ServiceError>;
 
-            /// Title/description, then unlinks, then links — all validated
-            /// before the first write.
+            /// Title/description, then unlinks, then links, as one store
+            /// transaction. Answers the requested unlinks that were not linked.
             async fn update_work_package(
                 &self,
                 params: $crate::service::UpdateWorkPackageParams
-            ) -> Result<(), $crate::service::ServiceError>;
+            ) -> Result<Vec<$crate::models::WorkPackageItem>, $crate::service::ServiceError>;
 
             async fn delete_work_package(
                 &self,

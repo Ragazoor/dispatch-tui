@@ -106,10 +106,24 @@ enum Sent {
     ArchiveStaleLearnings(String),
     RecordUsageEvent(Box<bindings::UsageEvent>, i64),
     CreateWorkPackage(Box<bindings::WorkPackage>),
+    CreateWorkPackageWithLinks(Box<bindings::WorkPackage>, Vec<(String, i64)>),
     PatchWorkPackage(i64, Box<bindings::WorkPackagePatch>),
+    UpdateWorkPackageWithLinks {
+        id: i64,
+        patch: Box<bindings::WorkPackagePatch>,
+        unlink: Vec<(String, i64)>,
+        link: Vec<(String, i64)>,
+    },
     DeleteWorkPackage(i64),
     LinkWorkPackageItem(i64, String, i64),
     UnlinkWorkPackageItem(i64, String, i64),
+}
+
+fn kind_ids(items: &[WorkPackageItem]) -> Vec<(String, i64)> {
+    items
+        .iter()
+        .map(|i| (i.kind().to_string(), i.raw_id()))
+        .collect()
 }
 
 #[derive(Default)]
@@ -603,12 +617,39 @@ impl ReducerCaller for RecordingCaller {
         Ok(WorkPackageId(9))
     }
 
+    async fn create_work_package_with_links(
+        &self,
+        row: bindings::WorkPackage,
+        links: Vec<WorkPackageItem>,
+    ) -> anyhow::Result<WorkPackageId> {
+        self.record(Sent::CreateWorkPackageWithLinks(
+            Box::new(row),
+            kind_ids(&links),
+        ))?;
+        Ok(WorkPackageId(9))
+    }
+
     async fn patch_work_package(
         &self,
         id: WorkPackageId,
         patch: bindings::WorkPackagePatch,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::PatchWorkPackage(id.0, Box::new(patch)))
+    }
+
+    async fn update_work_package_with_links(
+        &self,
+        id: WorkPackageId,
+        patch: bindings::WorkPackagePatch,
+        unlink: Vec<WorkPackageItem>,
+        link: Vec<WorkPackageItem>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::UpdateWorkPackageWithLinks {
+            id: id.0,
+            patch: Box::new(patch),
+            unlink: kind_ids(&unlink),
+            link: kind_ids(&link),
+        })
     }
 
     async fn delete_work_package(&self, id: WorkPackageId) -> anyhow::Result<ReducerOutcome> {

@@ -1029,6 +1029,119 @@ fn memory_caller_matches_the_real_reducers() {
         assert!(!r.won(), "patching a missing package is refused");
         assert_eq!(r.won(), m.won(), "patch of a missing package");
 
+        // The atomic twins: package and links (or patch, unlinks and links)
+        // in one transaction on both sides.
+        let with_links_real = real
+            .create_work_package_with_links(package_row(), vec![task_item, epic_item, task_item])
+            .await
+            .unwrap();
+        wait_for!(rows_real.work_packages().len() == 2);
+        let with_links_mem = mem
+            .create_work_package_with_links(package_row(), vec![task_item, epic_item, task_item])
+            .await
+            .unwrap();
+        assert_eq!(with_links_real, with_links_mem, "id of a create with links");
+        wait_for!(rows_real.work_package_links().len() == 3);
+        assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
+        assert_eq!(
+            rows_real.work_package_links(),
+            rows_mem.work_package_links(),
+            "links after a create with links"
+        );
+
+        // A missing item mid-list refuses the whole call: no package, no link.
+        let bad_links = vec![task_item, unknown, epic_item];
+        let r = real
+            .create_work_package_with_links(package_row(), bad_links.clone())
+            .await;
+        let m = mem
+            .create_work_package_with_links(package_row(), bad_links)
+            .await;
+        assert!(
+            r.is_err() && m.is_err(),
+            "a missing item refuses the create"
+        );
+        let blank_row = bindings::WorkPackage {
+            title: " ".into(),
+            ..package_row()
+        };
+        assert!(real
+            .create_work_package_with_links(blank_row.clone(), vec![])
+            .await
+            .is_err());
+        assert!(mem
+            .create_work_package_with_links(blank_row, vec![])
+            .await
+            .is_err());
+        assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
+        assert_eq!(
+            rows_real.work_package_links(),
+            rows_mem.work_package_links(),
+            "a refused create writes no link"
+        );
+
+        let retitle = || bindings::WorkPackagePatch {
+            title: Some(" Window 3".into()),
+            description: None,
+            sort_order: None,
+        };
+        let r = real
+            .update_work_package_with_links(with_links_real, retitle(), vec![task_item], vec![])
+            .await
+            .unwrap();
+        let m = mem
+            .update_work_package_with_links(with_links_mem, retitle(), vec![task_item], vec![])
+            .await
+            .unwrap();
+        assert!(r.won() && m.won(), "a valid update is applied");
+        wait_for!(rows_real.work_package_links().len() == 2);
+        assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
+        assert_eq!(
+            rows_real.work_package_links(),
+            rows_mem.work_package_links(),
+            "links after an update with links"
+        );
+
+        // Refused calls change nothing: a missing item mid-list, the same item
+        // in both lists, a missing package.
+        let refusals = |package: dispatch_tui::models::WorkPackageId| {
+            vec![
+                (package, vec![epic_item], vec![task_item, unknown]),
+                (package, vec![epic_item], vec![epic_item]),
+                (
+                    dispatch_tui::models::WorkPackageId(987_654),
+                    vec![],
+                    vec![task_item],
+                ),
+            ]
+        };
+        for ((pr, ur, lr), (pm, um, lm)) in refusals(with_links_real)
+            .into_iter()
+            .zip(refusals(with_links_mem))
+        {
+            let r = real
+                .update_work_package_with_links(pr, retitle(), ur, lr)
+                .await
+                .unwrap();
+            let m = mem
+                .update_work_package_with_links(pm, retitle(), um, lm)
+                .await
+                .unwrap();
+            assert!(!r.won() && !m.won(), "refused update");
+        }
+        assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
+        assert_eq!(
+            rows_real.work_package_links(),
+            rows_mem.work_package_links(),
+            "a refused update writes no link"
+        );
+
+        // Later steps count on the first package being the only one.
+        real.delete_work_package(with_links_real).await.unwrap();
+        wait_for!(rows_real.work_packages().len() == 1);
+        mem.delete_work_package(with_links_mem).await.unwrap();
+        assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
+
         // -- poll ownership (agent_state) ----------------------------------------
         real.claim_poll_owner(PollScopeId::Task(task_id_real), "host-a".into())
             .await

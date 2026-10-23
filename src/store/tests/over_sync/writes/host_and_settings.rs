@@ -536,7 +536,7 @@ async fn every_store_mutation_reaches_the_transport() {
     .await
     .unwrap();
 
-    db.create_work_package("W", "").await.unwrap();
+    db.create_work_package("W", "", &[]).await.unwrap();
     db.patch_work_package(WorkPackageId(1), Some("W2"), None, None)
         .await
         .unwrap();
@@ -544,6 +544,9 @@ async fn every_store_mutation_reaches_the_transport() {
         .await
         .unwrap();
     db.unlink_work_package_item(WorkPackageId(1), WorkPackageItem::Epic(EpicId(1)))
+        .await
+        .unwrap();
+    db.update_work_package(WorkPackageId(1), Some("W3"), None, None, &[], &[])
         .await
         .unwrap();
     db.delete_work_package(WorkPackageId(1)).await.unwrap();
@@ -617,10 +620,11 @@ async fn every_store_mutation_reaches_the_transport() {
             "RecordLearningRetrieval",
             "ApplyLearningVerdicts",
             "RecordUsageEvent",
-            "CreateWorkPackage",
+            "CreateWorkPackageWithLinks",
             "PatchWorkPackage",
             "LinkWorkPackageItem",
             "UnlinkWorkPackageItem",
+            "UpdateWorkPackageWithLinks",
             "DeleteWorkPackage",
         ]
     );

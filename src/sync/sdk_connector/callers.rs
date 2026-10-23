@@ -23,14 +23,14 @@ use crate::spacetime::bindings::{
     batch_patch_sub_status as _, claim_dispatch_request as _, claim_poll_owner as _,
     claim_session_request as _, clear_setting as _, close_task as _, create_epic as _,
     create_learning as _, create_task as _, create_task_signalled as _, create_work_package as _,
-    delete_epic as _, delete_learning as _, delete_repo_path as _, delete_task as _,
-    delete_work_package as _, ensure_managed_epics as _, fail_interrupted_dispatch_requests as _,
-    fail_interrupted_session_requests as _, flatten_epic as _, ingest_feed as _,
-    link_work_package_item as _, mark_epic_seen as _, mark_pr_learnings_gate_shown as _,
-    override_poll_owner as _, patch_epic as _, patch_learning as _, patch_task as _,
-    patch_work_package as _, record_base_branch as _, record_learning_retrieval as _,
-    record_notification as _, record_pre_tool_use as _, record_usage_event as _,
-    record_user_prompt_submit as _, register_host as _, regroup_epic as _,
+    create_work_package_with_links as _, delete_epic as _, delete_learning as _,
+    delete_repo_path as _, delete_task as _, delete_work_package as _, ensure_managed_epics as _,
+    fail_interrupted_dispatch_requests as _, fail_interrupted_session_requests as _,
+    flatten_epic as _, ingest_feed as _, link_work_package_item as _, mark_epic_seen as _,
+    mark_pr_learnings_gate_shown as _, override_poll_owner as _, patch_epic as _,
+    patch_learning as _, patch_task as _, patch_work_package as _, record_base_branch as _,
+    record_learning_retrieval as _, record_notification as _, record_pre_tool_use as _,
+    record_usage_event as _, record_user_prompt_submit as _, register_host as _, regroup_epic as _,
     report_dispatch_failed as _, report_dispatch_provisioned as _, report_pr_status as _,
     report_pr_unreadable as _, report_session_request_done as _,
     report_session_request_failed as _, request_dispatch as _, request_exit_session as _,
@@ -38,9 +38,10 @@ use crate::spacetime::bindings::{
     save_repo_path as _, save_setting as _, set_task_epic as _, set_verify_command as _,
     subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
     subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
-    unlink_work_package_item as _, unsubscribe_from_epic as _, DbConnection,
-    DispatchRequestsTableAccess as _, EpicsTableAccess as _, LearningsTableAccess as _,
-    SessionRequestsTableAccess as _, TasksTableAccess as _, WorkPackagesTableAccess as _,
+    unlink_work_package_item as _, unsubscribe_from_epic as _, update_work_package_with_links as _,
+    DbConnection, DispatchRequestsTableAccess as _, EpicsTableAccess as _,
+    LearningsTableAccess as _, SessionRequestsTableAccess as _, TasksTableAccess as _,
+    WorkPackagesTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -147,6 +148,17 @@ macro_rules! created_call {
         .await?;
         generated_id(answer, $label)
     }};
+}
+
+/// The wire form of the items a work-package call names.
+fn item_refs(items: &[WorkPackageItem]) -> Vec<bindings::WorkPackageItemRef> {
+    items
+        .iter()
+        .map(|i| bindings::WorkPackageItemRef {
+            kind: i.kind().to_string(),
+            item_id: i.raw_id(),
+        })
+        .collect()
 }
 
 #[async_trait]
@@ -710,6 +722,37 @@ impl ReducerCaller for SdkReducerCaller {
             |p| matches_created_work_package(p, &wanted)
         )
         .map(WorkPackageId)
+    }
+
+    async fn create_work_package_with_links(
+        &self,
+        row: bindings::WorkPackage,
+        links: Vec<WorkPackageItem>,
+    ) -> anyhow::Result<WorkPackageId> {
+        let wanted = row.clone();
+        created_call!(
+            self,
+            "the new work package",
+            "work package",
+            create_work_package_with_links_then(row, item_refs(&links)),
+            work_packages,
+            |p| matches_created_work_package(p, &wanted)
+        )
+        .map(WorkPackageId)
+    }
+
+    async fn update_work_package_with_links(
+        &self,
+        id: WorkPackageId,
+        patch: bindings::WorkPackagePatch,
+        unlink: Vec<WorkPackageItem>,
+        link: Vec<WorkPackageItem>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the work package change",
+            update_work_package_with_links_then(id.0, patch, item_refs(&unlink), item_refs(&link))
+        )
     }
 
     async fn patch_work_package(

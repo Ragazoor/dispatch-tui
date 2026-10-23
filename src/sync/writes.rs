@@ -328,10 +328,27 @@ pub trait ReducerCaller: Send + Sync {
     // -- Work packages (`work-packages.allium`) ----------------------------------
     /// Insert a work package and answer with the id the store generated.
     async fn create_work_package(&self, row: bindings::WorkPackage) -> Result<WorkPackageId>;
+    /// Insert a work package and link `links` to it in one transaction
+    /// (`create_work_package_with_links`): a missing item refuses the call and
+    /// leaves no package. Answers the new package's id.
+    async fn create_work_package_with_links(
+        &self,
+        row: bindings::WorkPackage,
+        links: Vec<WorkPackageItem>,
+    ) -> Result<WorkPackageId>;
     async fn patch_work_package(
         &self,
         id: WorkPackageId,
         patch: bindings::WorkPackagePatch,
+    ) -> Result<ReducerOutcome>;
+    /// The patch, then every unlink, then every link, in one transaction
+    /// (`update_work_package_with_links`).
+    async fn update_work_package_with_links(
+        &self,
+        id: WorkPackageId,
+        patch: bindings::WorkPackagePatch,
+        unlink: Vec<WorkPackageItem>,
+        link: Vec<WorkPackageItem>,
     ) -> Result<ReducerOutcome>;
     async fn delete_work_package(&self, id: WorkPackageId) -> Result<ReducerOutcome>;
     async fn link_work_package_item(

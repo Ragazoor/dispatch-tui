@@ -90,8 +90,8 @@ async fn create_with_an_unknown_item_writes_nothing() {
         .create_work_package(create("W", vec![Item::Task(t), Item::Epic(EpicId(404))]))
         .await
         .unwrap_err();
-    assert!(matches!(err, ServiceError::NotFound(_)), "{err}");
-    assert!(err.to_string().contains("Epic 404"), "{err}");
+    assert!(matches!(err, ServiceError::Validation(_)), "{err}");
+    assert!(err.to_string().contains("no epic 404"), "{err}");
     assert!(f.db.list_work_packages().await.is_empty());
     assert!(f.db.list_work_package_links().await.is_empty());
 }
@@ -214,7 +214,8 @@ async fn linking_twice_and_unlinking_an_absent_item_are_silent() {
         .await
         .unwrap();
 
-    f.svc
+    let not_linked = f
+        .svc
         .update_work_package(UpdateWorkPackageParams {
             link: vec![Item::Task(a), Item::Task(a)],
             unlink: vec![Item::Task(b)],
@@ -224,6 +225,8 @@ async fn linking_twice_and_unlinking_an_absent_item_are_silent() {
         .unwrap();
 
     assert_eq!(links_of(&f.db, id).await, vec![Item::Task(a)]);
+    // Still a success, but the caller is told the unlink changed nothing.
+    assert_eq!(not_linked, vec![Item::Task(b)]);
 }
 
 #[tokio::test]
@@ -273,13 +276,13 @@ async fn an_unknown_item_to_link_is_refused_before_any_write() {
         .await
         .unwrap_err();
 
-    assert!(matches!(err, ServiceError::NotFound(_)), "{err}");
+    assert!(matches!(err, ServiceError::Validation(_)), "{err}");
     assert_eq!(f.db.list_work_packages().await[0].title, "W");
     assert_eq!(links_of(&f.db, id).await, vec![Item::Task(a)]);
 }
 
 #[tokio::test]
-async fn update_of_an_unknown_package_is_not_found() {
+async fn update_of_an_unknown_package_is_refused() {
     let f = fixture();
     let err = f
         .svc
@@ -289,7 +292,8 @@ async fn update_of_an_unknown_package_is_not_found() {
         })
         .await
         .unwrap_err();
-    assert!(matches!(err, ServiceError::NotFound(_)), "{err}");
+    assert!(matches!(err, ServiceError::Validation(_)), "{err}");
+    assert!(err.to_string().contains("no work package 9"), "{err}");
 }
 
 #[tokio::test]
@@ -349,4 +353,28 @@ async fn delete_of_an_unknown_package_is_not_found() {
         .await
         .unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)), "{err}");
+}
+
+#[tokio::test]
+async fn update_reports_only_the_unlinks_that_touched_nothing() {
+    let f = fixture();
+    let a = task(&f.db, "a").await;
+    let b = task(&f.db, "b").await;
+    let id = f
+        .svc
+        .create_work_package(create("W", vec![Item::Task(a)]))
+        .await
+        .unwrap();
+
+    let not_linked = f
+        .svc
+        .update_work_package(UpdateWorkPackageParams {
+            unlink: vec![Item::Task(a), Item::Task(b), Item::Task(b)],
+            ..UpdateWorkPackageParams::for_package(id)
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(not_linked, vec![Item::Task(b)], "a repeat is named once");
+    assert!(links_of(&f.db, id).await.is_empty());
 }

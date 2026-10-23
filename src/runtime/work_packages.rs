@@ -17,7 +17,8 @@ impl TuiRuntime {
                         link: vec![item],
                         ..UpdateWorkPackageParams::for_package(id)
                     })
-                    .await,
+                    .await
+                    .map(|_| ()),
             ),
             WorkPackageCommand::Unlink { id, item } => (
                 "unlinking from work package",
@@ -26,7 +27,8 @@ impl TuiRuntime {
                         unlink: vec![item],
                         ..UpdateWorkPackageParams::for_package(id)
                     })
-                    .await,
+                    .await
+                    .map(|_| ()),
             ),
             WorkPackageCommand::Create { title, item } => (
                 "creating work package",
@@ -46,7 +48,8 @@ impl TuiRuntime {
                         title: Some(title),
                         ..UpdateWorkPackageParams::for_package(id)
                     })
-                    .await,
+                    .await
+                    .map(|_| ()),
             ),
             WorkPackageCommand::SetSortOrder { id, sort_order } => (
                 "reordering work package",
@@ -55,7 +58,8 @@ impl TuiRuntime {
                         sort_order: Some(sort_order),
                         ..UpdateWorkPackageParams::for_package(id)
                     })
-                    .await,
+                    .await
+                    .map(|_| ()),
             ),
             WorkPackageCommand::Delete(id) => (
                 "deleting work package",

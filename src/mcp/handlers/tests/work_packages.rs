@@ -79,7 +79,7 @@ async fn create_work_package_with_an_unknown_item_creates_nothing() {
         json!({"title": "W", "link_task_ids": [404]}),
     )
     .await;
-    assert_error(&resp, "Task 404 not found");
+    assert_error(&resp, "no task 404");
     assert!(state.db.list_work_packages().await.is_empty());
 }
 
@@ -151,6 +151,36 @@ async fn update_work_package_renames_and_swaps_links() {
     );
     assert_eq!(state.db.list_work_packages().await[0].title, "Window 2");
     assert_eq!(links(&state).await, vec![WorkPackageItem::Task(b)]);
+}
+
+#[tokio::test]
+async fn update_work_package_names_the_unlinks_that_touched_nothing() {
+    let state = test_state().await;
+    let a = seed_task(&state, "a").await;
+    let b = seed_task(&state, "b").await;
+    tool(
+        &state,
+        "create_work_package",
+        json!({"title": "W", "link_task_ids": [a.0]}),
+    )
+    .await;
+    let id = only_package(&state).await;
+
+    let resp = tool(
+        &state,
+        "update_work_package",
+        json!({"work_package_id": id.0, "unlink_task_ids": [a.0, b.0]}),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(text.contains("updated"), "{text}");
+    assert!(
+        text.contains(&format!("not linked: task {}", b.0)),
+        "{text}"
+    );
+    assert!(!text.contains(&format!("task {},", a.0)) && !text.ends_with(&format!("task {}", a.0)));
+    assert!(links(&state).await.is_empty());
 }
 
 #[tokio::test]

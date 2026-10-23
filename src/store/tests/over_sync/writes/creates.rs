@@ -418,13 +418,19 @@ async fn a_work_package_create_carries_the_creator_and_a_trimmed_title() {
     let (writer, caller) = writer_with(RecordingCaller::default());
 
     let id = writer
-        .create_work_package("  Window 1 ", "the plan")
+        .create_work_package(
+            "  Window 1 ",
+            "the plan",
+            &[WorkPackageItem::Task(TaskId(4))],
+        )
         .await
         .unwrap();
 
-    let Some(Sent::CreateWorkPackage(row)) = caller.sent().into_iter().next() else {
+    let Some(Sent::CreateWorkPackageWithLinks(row, links)) = caller.sent().into_iter().next()
+    else {
         panic!("expected a create");
     };
+    assert_eq!(links, vec![("task".to_string(), 4)]);
     assert_eq!(id, WorkPackageId(9));
     assert_eq!(row.title, "Window 1");
     assert_eq!(row.description, "the plan");
@@ -438,7 +444,7 @@ async fn a_work_package_create_carries_the_creator_and_a_trimmed_title() {
 async fn a_board_with_no_identity_cannot_create_a_work_package() {
     let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
 
-    assert!(writer.create_work_package("W", "").await.is_err());
+    assert!(writer.create_work_package("W", "", &[]).await.is_err());
     assert!(caller.sent().is_empty());
 }
 

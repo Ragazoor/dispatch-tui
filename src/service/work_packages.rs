@@ -1,10 +1,10 @@
 //! Work packages (`docs/specs/work-packages.allium`): the service every
 //! package write goes through, from the board and from MCP alike.
 //!
-//! A package only links to tasks and epics that already exist, so the rules
-//! here are about the links: every id a call names is checked before the first
-//! write, and a call that would both link and unlink the same item is refused
-//! outright rather than left to an order the caller cannot see.
+//! The data rules (a non-blank title, a package that exists, items that exist,
+//! no item in both lists) live in the store's reducers, which write a create
+//! or an update as one transaction. What stays here is the empty-call check
+//! and the report of unlinks that touched nothing.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -83,22 +83,16 @@ impl WorkPackageService {
         Self { db }
     }
 
-    /// `CreateWorkPackage` then `LinkItem` for each of `params.link`. Every
-    /// item is checked to exist before the package is created, so a bad id
-    /// leaves no package behind.
+    /// `CreateWorkPackage` then `LinkItem` for each of `params.link`, as one
+    /// store transaction: a bad id leaves no package behind.
     pub async fn create_work_package(
         &self,
         params: CreateWorkPackageParams,
     ) -> Result<WorkPackageId, ServiceError> {
-        let title = require_title(&params.title)?;
-        self.require_items(&params.link).await?;
         let id = self
             .db
-            .create_work_package(title, &params.description)
+            .create_work_package(&params.title, &params.description, &params.link)
             .await?;
-        for item in dedup(&params.link) {
-            self.db.link_work_package_item(id, item).await?;
-        }
         Ok(id)
     }
 
@@ -133,13 +127,14 @@ impl WorkPackageService {
         Ok(views)
     }
 
-    /// `UpdateWorkPackage`, then every unlink, then every link. Everything is
-    /// validated before the first write: the package, a non-blank title, no
-    /// item in both lists, and every item to link.
+    /// `UpdateWorkPackage`, then every unlink, then every link, as one store
+    /// transaction. Answers the requested unlinks that were not linked, each
+    /// once: still a success (`UnlinkItem` is idempotent), but the caller can
+    /// tell that nothing changed for it.
     pub async fn update_work_package(
         &self,
         params: UpdateWorkPackageParams,
-    ) -> Result<(), ServiceError> {
+    ) -> Result<Vec<WorkPackageItem>, ServiceError> {
         if !params.changes_anything() {
             return Err(ServiceError::Validation(
                 "update_work_package needs at least one of title, description, sort_order, or \
@@ -147,35 +142,36 @@ impl WorkPackageService {
                     .into(),
             ));
         }
-        let title = params.title.as_deref().map(require_title).transpose()?;
-        let unlink: HashSet<WorkPackageItem> = params.unlink.iter().copied().collect();
-        if let Some(both) = params.link.iter().find(|i| unlink.contains(i)) {
-            return Err(ServiceError::Validation(format!(
-                "{} {} is in both a link and an unlink list; name it in one",
-                both.kind(),
-                both.raw_id()
-            )));
-        }
-        self.require_package(params.id).await?;
-        self.require_items(&params.link).await?;
-
-        if title.is_some() || params.description.is_some() || params.sort_order.is_some() {
-            self.db
-                .patch_work_package(
-                    params.id,
-                    title,
-                    params.description.as_deref(),
-                    params.sort_order,
-                )
-                .await?;
-        }
-        for item in dedup(&params.unlink) {
-            self.db.unlink_work_package_item(params.id, item).await?;
-        }
-        for item in dedup(&params.link) {
-            self.db.link_work_package_item(params.id, item).await?;
-        }
-        Ok(())
+        // Read before the write: a link the same call adds is not a link the
+        // unlink could have removed. A racing writer can make this stale; the
+        // report is advice, the write is the store's.
+        let not_linked: Vec<WorkPackageItem> = if params.unlink.is_empty() {
+            Vec::new()
+        } else {
+            let linked: HashSet<WorkPackageItem> = self
+                .db
+                .list_work_package_links()
+                .await
+                .into_iter()
+                .filter(|l| l.work_package_id == params.id)
+                .map(|l| l.item)
+                .collect();
+            dedup(&params.unlink)
+                .into_iter()
+                .filter(|i| !linked.contains(i))
+                .collect()
+        };
+        self.db
+            .update_work_package(
+                params.id,
+                params.title.as_deref(),
+                params.description.as_deref(),
+                params.sort_order,
+                &params.unlink,
+                &params.link,
+            )
+            .await?;
+        Ok(not_linked)
     }
 
     /// `DeleteWorkPackage`: the package and its links go; no item is touched.
@@ -199,19 +195,6 @@ impl WorkPackageService {
         }
     }
 
-    async fn require_items(&self, items: &[WorkPackageItem]) -> Result<(), ServiceError> {
-        for &item in items {
-            if self.resolve(item).await.is_none() {
-                return Err(ServiceError::NotFound(format!(
-                    "{} {} not found",
-                    capitalised(item.kind()),
-                    item.raw_id()
-                )));
-            }
-        }
-        Ok(())
-    }
-
     async fn resolve(&self, item: WorkPackageItem) -> Option<LinkedItem> {
         let (title, status) = match item {
             WorkPackageItem::Task(id) => {
@@ -231,28 +214,8 @@ impl WorkPackageService {
     }
 }
 
-fn require_title(title: &str) -> Result<&str, ServiceError> {
-    let trimmed = title.trim();
-    if trimmed.is_empty() {
-        return Err(ServiceError::Validation(
-            "a work package needs a non-empty title".into(),
-        ));
-    }
-    Ok(trimmed)
-}
-
 fn not_found(id: WorkPackageId) -> ServiceError {
     ServiceError::NotFound(format!("Work package {} not found", id.0))
-}
-
-/// `kind` with its first letter upper-cased ("task" -> "Task"), so an error
-/// names the item kind from `WorkPackageItem::kind`'s one table.
-fn capitalised(kind: &str) -> String {
-    let mut chars = kind.chars();
-    chars
-        .next()
-        .map(|first| first.to_uppercase().chain(chars).collect())
-        .unwrap_or_default()
 }
 
 /// `items` in first-seen order with repeats dropped: a repeated id is one

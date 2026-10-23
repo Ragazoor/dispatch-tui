@@ -110,7 +110,13 @@ fn patching_a_work_package_writes_the_sort_order_and_omitting_it_keeps_it() {
     let store = Store::new();
     let id = new_package(&store, "Window 1");
     assert_eq!(
-        store.db().work_packages().id().find(id).expect("row").sort_order,
+        store
+            .db()
+            .work_packages()
+            .id()
+            .find(id)
+            .expect("row")
+            .sort_order,
         None
     );
 
@@ -140,7 +146,10 @@ fn patching_a_work_package_writes_the_sort_order_and_omitting_it_keeps_it() {
         .expect("a description change");
 
     let row = store.db().work_packages().id().find(id).expect("row");
-    assert_eq!((row.sort_order, row.description.as_str()), (Some(3), "plan"));
+    assert_eq!(
+        (row.sort_order, row.description.as_str()),
+        (Some(3), "plan")
+    );
 }
 
 /// `work-packages.allium: LinkItem` / `UnlinkItem`: both idempotent; a link
@@ -263,4 +272,167 @@ fn batch_delete_removes_the_links_of_everything_it_deletes() {
         .expect("batch_delete");
     assert!(link_ids(&store).is_empty());
     assert!(store.db().epics().id().find(epic_f).is_some());
+}
+
+fn item(kind: &str, item_id: i64) -> WorkPackageItemRef {
+    WorkPackageItemRef {
+        kind: kind.into(),
+        item_id,
+    }
+}
+
+fn create_with(store: &Store, title: &str, links: Vec<WorkPackageItemRef>) -> Result<(), String> {
+    store.call("alice", |ctx| {
+        create_work_package_with_links(ctx, package_row(title), links)
+    })
+}
+
+fn update_with(
+    store: &Store,
+    id: i64,
+    patch: WorkPackagePatch,
+    unlink: Vec<WorkPackageItemRef>,
+    link: Vec<WorkPackageItemRef>,
+) -> Result<(), String> {
+    store.call("alice", |ctx| {
+        update_work_package_with_links(ctx, id, patch, unlink, link)
+    })
+}
+
+/// `work-packages.allium: CreateWorkPackage` over MCP: package and links are
+/// one transaction, so a missing item anywhere in the list leaves no package.
+#[test]
+fn create_with_links_writes_package_and_links_or_nothing() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "E", false);
+    let task = store.create("alice", epic_task("t", epic, "backlog"));
+
+    create_with(
+        &store,
+        " W ",
+        vec![item("task", task), item("task", task), item("epic", epic)],
+    )
+    .expect("create with links");
+    assert_eq!(link_ids(&store).len(), 2, "a repeated item is one link");
+    assert_eq!(
+        store.db().work_packages().iter().next().expect("row").title,
+        "W"
+    );
+
+    let before = store.db().work_packages().iter().count();
+    let missing_mid_list = create_with(
+        &store,
+        "Second",
+        vec![item("task", task), item("task", 999), item("epic", epic)],
+    );
+    assert!(missing_mid_list.is_err());
+    assert_eq!(store.db().work_packages().iter().count(), before);
+    assert_eq!(
+        link_ids(&store).len(),
+        2,
+        "no link of the failed call stays"
+    );
+
+    assert!(create_with(&store, "  ", vec![]).is_err());
+    assert!(create_with(&store, "Bad kind", vec![item("board", task)]).is_err());
+    assert_eq!(store.db().work_packages().iter().count(), before);
+}
+
+/// Update: patch, unlinks and links in one transaction; a refusal anywhere
+/// leaves the package, its title and its links as they were.
+#[test]
+fn update_with_links_is_atomic_and_refuses_overlap_and_a_missing_package() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "E", false);
+    let task = store.create("alice", epic_task("t", epic, "backlog"));
+    let package = new_package(&store, "W");
+    link(&store, package, "task", task).expect("link");
+
+    let rename = |t: &str| WorkPackagePatch {
+        title: Some(t.into()),
+        ..Default::default()
+    };
+
+    // Missing item mid-list: the rename and the unlink are rolled back too.
+    let refused = update_with(
+        &store,
+        package,
+        rename("Renamed"),
+        vec![item("task", task)],
+        vec![item("epic", epic), item("task", 999)],
+    );
+    assert!(refused.is_err());
+    let row = store.db().work_packages().id().find(package).expect("row");
+    assert_eq!(row.title, "W");
+    assert_eq!(link_ids(&store).len(), 1);
+
+    // The same item in both lists is refused, nothing written.
+    let overlap = update_with(
+        &store,
+        package,
+        rename("Renamed"),
+        vec![item("task", task)],
+        vec![item("task", task)],
+    );
+    assert!(overlap.is_err());
+    assert_eq!(link_ids(&store).len(), 1);
+
+    // A missing package is refused.
+    assert!(update_with(&store, 99, rename("x"), vec![], vec![]).is_err());
+
+    // Happy path: unlink the task, link the epic, rename.
+    update_with(
+        &store,
+        package,
+        rename("Renamed"),
+        vec![item("task", task)],
+        vec![item("epic", epic)],
+    )
+    .expect("update");
+    let row = store.db().work_packages().id().find(package).expect("row");
+    assert_eq!(row.title, "Renamed");
+    let kinds: Vec<String> = store
+        .db()
+        .work_package_links()
+        .iter()
+        .map(|l| l.kind)
+        .collect();
+    assert_eq!(kinds, vec!["epic".to_string()]);
+
+    // Unlinking what was never linked is a silent success.
+    update_with(
+        &store,
+        package,
+        WorkPackagePatch::default(),
+        vec![item("task", task)],
+        vec![],
+    )
+    .expect("an idempotent unlink");
+}
+
+/// A link-only update does not touch `updated_at`, as before the move.
+#[test]
+fn a_link_only_update_leaves_updated_at_alone() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "E", false);
+    let package = new_package(&store, "W");
+    let stamp = |store: &Store| {
+        store
+            .db()
+            .work_packages()
+            .id()
+            .find(package)
+            .expect("row")
+            .updated_at
+    };
+    let before = stamp(&store);
+    update_with(
+        &store,
+        package,
+        WorkPackagePatch::default(),
+        vec![],
+        vec![item("epic", epic)],
+    )
+    .expect("link only");
+    assert_eq!(before, stamp(&store));
 }

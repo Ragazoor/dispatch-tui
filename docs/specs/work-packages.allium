@@ -531,7 +531,9 @@ rule DeletePackageFromBoard {
 --
 --   create_work_package(title, description?, link_task_ids?, link_epic_ids?)
 --       write. Creates the package (CreateWorkPackage) and links the given
---       items. Returns the new package id.
+--       items, in one store transaction: a link to an unknown task or epic
+--       refuses the whole call and no package is left behind. Returns the new
+--       package id.
 --   list_work_packages(work_package_id?)
 --       read_only. Every package the board holds, i.e. the caller's own
 --       (or the one named): id, title, description (omitted when empty),
@@ -542,8 +544,12 @@ rule DeletePackageFromBoard {
 --                       link_task_ids?, unlink_task_ids?, link_epic_ids?,
 --                       unlink_epic_ids?, delete?)
 --       destructive. Applies UpdateWorkPackage, then every unlink, then every
---       link. An id appearing in both a link and an unlink list is refused
---       before anything is written, and so is a call that names no field.
+--       link, in one store transaction. An id appearing in both a link and an
+--       unlink list is refused before anything is written, and so is a call
+--       that names no field. A link-only call leaves updated_at alone. UnlinkItem
+--       stays idempotent, but the reply names each requested unlink that
+--       was not linked ("not linked: task 4"), so the caller can tell that
+--       nothing changed for it.
 --       delete: true is DeleteWorkPackage (DeleteWorkPackageViaMcp below).
 --
 -- There is no delete_work_package tool. A delete is the last update of a
@@ -557,8 +563,10 @@ rule DeletePackageFromBoard {
 -- tool names its selector after the entity (task_id, epic_id), and
 -- docs/mcp-tool-design.md asks for unambiguous argument names.
 --
--- A missing package id is not-found, on update (delete included) and list alike; so is
--- the id of a package another user created, which this board does not hold. A
--- link to a task or epic id that does not exist is not-found, and nothing in
--- that call is written: the call validates every id before the first write.
+-- A missing package id is not-found on list and delete, and a refusal
+-- ("no work package N", invalid params) on a create or update, which the
+-- store decides; so is the id of a package another user created, which this
+-- board does not hold. A link to a task or epic id that does not exist is
+-- refused the same way, and nothing in that call is written: the store
+-- validates every id before the first write.
 -- A repeated id in one list is one write.
