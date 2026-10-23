@@ -106,6 +106,7 @@ pub(crate) fn test_key_event(key: &str) -> crossterm::event::KeyEvent {
         "Space" => KeyCode::Char(' '),
         "Enter" => KeyCode::Enter,
         "Tab" => KeyCode::Tab,
+        "BackTab" => KeyCode::BackTab,
         "Left" => KeyCode::Left,
         "Right" => KeyCode::Right,
         "Up" => KeyCode::Up,
@@ -113,7 +114,12 @@ pub(crate) fn test_key_event(key: &str) -> crossterm::event::KeyEvent {
         k if k.chars().count() == 1 => KeyCode::Char(k.chars().next().unwrap_or(' ')),
         other => panic!("test cannot press {other}"),
     };
-    KeyEvent::new(code, KeyModifiers::NONE)
+    let modifiers = if key == "BackTab" {
+        KeyModifiers::SHIFT
+    } else {
+        KeyModifiers::NONE
+    };
+    KeyEvent::new(code, modifiers)
 }
 
 /// A rendered test buffer as text, one line per row, trailing blanks trimmed.

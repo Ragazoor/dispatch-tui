@@ -1,7 +1,7 @@
 //! The agents section of the agent-tree pane: the band beneath the file tree
 //! that lists every task with a live agent window and jumps to the selected
 //! one (see `docs/specs/agent-tree.allium`'s `RefreshAgentTreeAgentList` and
-//! `JumpToAgentWindow` rules, and the `AgentsSectionSitsBelowTheTree`,
+//! `JumpToAgentWindow` rules, and the `TwoViewsShareThePane`,
 //! `AgentRowShowsIdAndTitle` and `AgentKeysFollowFocus` guarantees).
 //!
 //! Pure view state and rendering only. Reading the board's task list and
@@ -15,10 +15,6 @@ use ratatui::Frame;
 
 use crate::agent_tree::list_cursor::ListCursor;
 use crate::models::{TaskId, TmuxWindow};
-
-/// The most rows the section takes from the pane — the spec's
-/// `config.agent_tree_agents_max_rows`.
-pub(crate) const MAX_ROWS: usize = 8;
 
 /// One listed agent, as its row draws it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +47,7 @@ impl AgentRow {
 pub struct AgentsSection {
     rows: Vec<AgentRow>,
     cursor: usize,
-    /// First row drawn, so the cursor stays in view past `MAX_ROWS`.
+    /// First row drawn, so the cursor stays in view in a short pane.
     offset: usize,
     /// Rows drawn at the last render — the half-page motions' page.
     viewport_rows: usize,
@@ -88,14 +84,6 @@ impl AgentsSection {
         self.selected()
             .filter(|row| !row.is_own)
             .map(|row| row.window.clone())
-    }
-
-    /// Rows the section wants, borders included: one per agent up to
-    /// `MAX_ROWS`, and one empty row when there are none so the section — and
-    /// Tab's destination — is still visible.
-    pub fn height(&self) -> u16 {
-        let rows = self.rows.len().clamp(1, MAX_ROWS);
-        u16::try_from(rows + 2).unwrap_or(u16::MAX)
     }
 }
 
@@ -148,8 +136,9 @@ pub fn render_agents(
     section: &mut AgentsSection,
     focused: bool,
     alert: bool,
+    notice: Option<&str>,
 ) {
-    use crate::palette::MUTED;
+    use crate::palette::{MUTED, RED};
 
     let visible = usize::from(area.height.saturating_sub(2));
     section.viewport_rows = visible;
@@ -160,10 +149,18 @@ pub fn render_agents(
     }
 
     let border = border_style(focused, alert);
-    let block = Block::default()
+    let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(border)
-        .title(" Agents (Tab) ");
+        .title(" Agents (Tab: browse) ");
+    // The agents view is the whole pane, so a notice has no tree border to sit
+    // on: it goes on this one (TwoViewsShareThePane).
+    if let Some(text) = notice {
+        block = block.title_bottom(Line::from(Span::styled(
+            format!(" {text} "),
+            Style::default().fg(RED).add_modifier(Modifier::BOLD),
+        )));
+    }
 
     let lines: Vec<Line> = section
         .rows
@@ -204,7 +201,7 @@ mod tests {
     fn rendered(section: &mut AgentsSection, focused: bool, height: u16) -> String {
         let mut terminal = Terminal::new(TestBackend::new(30, height)).expect("terminal");
         terminal
-            .draw(|frame| render_agents(frame, frame.area(), section, focused, false))
+            .draw(|frame| render_agents(frame, frame.area(), section, focused, false, None))
             .expect("draw");
         crate::agent_tree::pane::buffer_to_string(terminal.backend().buffer())
     }
@@ -292,17 +289,7 @@ mod tests {
         assert_eq!(section.jump_target(), None);
     }
 
-    // ---- AgentsSectionSitsBelowTheTree / AgentRowShowsIdAndTitle ----------
-
-    #[test]
-    fn the_section_grows_with_its_rows_up_to_the_cap() {
-        let mut section = AgentsSection::new();
-        assert_eq!(section.height(), 3, "an empty section still shows one row");
-        section.set_rows((1..=3).map(|id| row(id, false)).collect());
-        assert_eq!(section.height(), 5);
-        section.set_rows((1..=20).map(|id| row(id, false)).collect());
-        assert_eq!(section.height(), (MAX_ROWS + 2) as u16);
-    }
+    // ---- TwoViewsShareThePane / AgentRowShowsIdAndTitle ----------
 
     #[test]
     fn a_row_reads_id_then_title_and_the_own_task_is_marked() {
@@ -316,22 +303,23 @@ mod tests {
 
     #[test]
     fn the_title_names_tab_whichever_section_has_focus() {
-        // AgentsSectionSitsBelowTheTree: the "(Tab)" hint is the only place
-        // the pane names the key that reaches the section.
+        // TwoViewsShareThePane: the hint names the key that leaves the view.
         let mut section = AgentsSection::new();
         for focused in [true, false] {
             let out = rendered(&mut section, focused, 3);
-            assert!(out.contains("Agents (Tab)"), "focused={focused}: {out}");
+            assert!(
+                out.contains("Agents (Tab: browse)"),
+                "focused={focused}: {out}"
+            );
         }
     }
 
     #[test]
-    fn past_the_cap_the_section_scrolls_to_keep_the_cursor_in_view() {
+    fn in_a_short_pane_the_section_scrolls_to_keep_the_cursor_in_view() {
         let mut section = AgentsSection::new();
         section.set_rows((1..=20).map(|id| row(id, false)).collect());
         section.bottom();
-        let height = section.height();
-        let out = rendered(&mut section, true, height);
+        let out = rendered(&mut section, true, 10);
         assert!(out.contains("#20 task 20"), "{out}");
         assert!(!out.contains("#1 task 1\n"), "{out}");
     }

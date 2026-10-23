@@ -9,35 +9,63 @@ fn the_pane_starts_with_the_tree_focused() {
     assert_eq!(RenderState::new().focus, Focus::Tree);
 }
 
-/// SwitchAgentTreeFocus: a cycle in screen order — tree, then commits,
-/// then agents, then tree again.
+/// SwitchAgentTreeView: Tab flips from the browse view to the agents view and
+/// back, landing on the browse section the user left.
 #[test]
-fn tab_cycles_focus_tree_then_commits_then_agents_then_tree() {
+fn tab_flips_between_the_browse_view_and_the_agents_view() {
     let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(1, false)]);
     assert_eq!(rig.press(KeyCode::Tab), KeyAction::Continue);
-    assert_eq!(rig.state.focus, Focus::Commits);
-    rig.press(KeyCode::Tab);
     assert_eq!(rig.state.focus, Focus::Agents);
     rig.press(KeyCode::Tab);
     assert_eq!(rig.state.focus, Focus::Tree);
 }
 
-/// An empty section is a real place to be: Tab never skips one.
+/// SwitchAgentTreeView: with two views the two keys are the same flip.
 #[test]
-fn tab_works_with_no_commits_or_agents_listed() {
-    let mut rig = KeyRig::new(&[modified("a.rs")]);
-    rig.press(KeyCode::Tab);
-    assert_eq!(rig.state.focus, Focus::Commits);
-    rig.press(KeyCode::Tab);
-    assert_eq!(rig.state.focus, Focus::Agents);
-}
-
-/// Tab is the ONLY focus key: Shift+Tab (BackTab) does not cycle backwards.
-#[test]
-fn back_tab_does_not_move_focus() {
+fn back_tab_flips_the_view_like_tab() {
     let mut rig = KeyRig::new(&[modified("a.rs")]);
     rig.press_with(KeyCode::BackTab, KeyModifiers::SHIFT);
+    assert_eq!(rig.state.focus, Focus::Agents);
+    rig.press_with(KeyCode::BackTab, KeyModifiers::SHIFT);
     assert_eq!(rig.state.focus, Focus::Tree);
+}
+
+/// An empty agents list is a real place to be: Tab never skips it.
+#[test]
+fn tab_works_with_no_agents_listed() {
+    let mut rig = KeyRig::new(&[modified("a.rs")]);
+    rig.press(KeyCode::Tab);
+    assert_eq!(rig.state.focus, Focus::Agents);
+}
+
+/// SwitchAgentTreeBrowseFocus: `s` moves between tree and commits.
+#[test]
+fn s_moves_between_the_tree_and_the_commits_section() {
+    let mut rig = KeyRig::new(&[modified("a.rs")]);
+    rig.press(KeyCode::Char('s'));
+    assert_eq!(rig.state.focus, Focus::Commits);
+    rig.press(KeyCode::Char('s'));
+    assert_eq!(rig.state.focus, Focus::Tree);
+}
+
+/// Tab returns to the browse section that was focused when the user left.
+#[test]
+fn flipping_back_returns_to_the_commits_section_when_that_is_where_you_were() {
+    let mut rig = KeyRig::new(&[modified("a.rs")]);
+    rig.press(KeyCode::Char('s'));
+    rig.press(KeyCode::Tab);
+    assert_eq!(rig.state.focus, Focus::Agents);
+    rig.press(KeyCode::Tab);
+    assert_eq!(rig.state.focus, Focus::Commits);
+}
+
+/// In the agents view there is only one section, so `s` has nowhere to go.
+#[test]
+fn s_does_nothing_in_the_agents_view() {
+    let mut rig = KeyRig::new(&[modified("a.rs")]);
+    rig.press(KeyCode::Tab);
+    rig.press(KeyCode::Char('s'));
+    assert_eq!(rig.state.focus, Focus::Agents);
 }
 
 #[test]
@@ -49,7 +77,7 @@ fn tab_clears_a_notice() {
 }
 
 // The agents-section tests below set focus directly: they are about the
-// section, not about how Tab reaches it (SwitchAgentTreeFocus, above).
+// section, not about how Tab reaches it (SwitchAgentTreeView, above).
 
 #[test]
 fn with_the_agents_section_focused_j_and_k_move_its_cursor_not_the_trees() {
@@ -215,7 +243,7 @@ fn a_successful_jump_selects_the_window_and_leaves_no_notice() {
         .any(|(_, args)| args.first().map(String::as_str) == Some("select-window")));
 }
 
-// ---- AgentsSectionSitsBelowTheTree -----------------------------------
+// ---- TwoViewsShareThePane ---------------------------------------------
 
 fn render_pane_to_string(state: &mut RenderState, tree: &TreeNode, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(40, height)).expect("terminal");
@@ -226,30 +254,44 @@ fn render_pane_to_string(state: &mut RenderState, tree: &TreeNode, height: u16) 
 }
 
 #[test]
-fn the_agents_section_sits_below_the_tree() {
+fn the_browse_view_shows_the_tree_and_commits_and_no_agents() {
+    let tree = build_tree(&root(), &[modified("a.rs")]);
+    let mut state = RenderState::new();
+    state.sync_expansion(&tree);
+    state.adopt_agent_list(Ok(vec![agent(4941, false)]));
+    let out = render_pane_to_string(&mut state, &tree, 12);
+    assert!(out.contains("a.rs") && out.contains("Commits"), "{out}");
+    assert!(!out.contains("Agents") && !out.contains("#4941"), "{out}");
+}
+
+#[test]
+fn the_agents_view_fills_the_pane_with_agents_and_hides_the_tree() {
     let tree = build_tree(&root(), &[modified("a.rs")]);
     let mut state = RenderState::new();
     state.sync_expansion(&tree);
     state.adopt_agent_list(Ok(vec![agent(4941, false), agent(4942, true)]));
+    state.focus = Focus::Agents;
     let out = render_pane_to_string(&mut state, &tree, 12);
-    let lines: Vec<&str> = out.lines().collect();
-    let tree_row = lines.iter().position(|l| l.contains("a.rs")).expect(&out);
-    let header = lines.iter().position(|l| l.contains("Agents")).expect(&out);
-    let first = lines.iter().position(|l| l.contains("#4941")).expect(&out);
-    assert!(tree_row < header && header < first, "{out}");
-    assert_eq!(
-        first,
-        lines.len() - 3,
-        "the section is at the bottom:\n{out}"
-    );
+    assert!(out.contains("Agents (Tab: browse)"), "{out}");
+    assert!(out.contains("#4941") && out.contains("#4942"), "{out}");
+    assert!(!out.contains("a.rs") && !out.contains("Commits"), "{out}");
 }
 
 #[test]
-fn the_agents_section_shows_with_no_agents() {
+fn the_agents_view_shows_with_no_agents() {
+    let tree = build_tree(&root(), &[modified("a.rs")]);
+    let mut state = RenderState::new();
+    state.focus = Focus::Agents;
+    let out = render_pane_to_string(&mut state, &tree, 12);
+    assert!(out.contains("Agents"), "{out}");
+}
+
+#[test]
+fn the_commits_border_names_the_keys_that_leave_it() {
     let tree = build_tree(&root(), &[modified("a.rs")]);
     let mut state = RenderState::new();
     let out = render_pane_to_string(&mut state, &tree, 12);
-    assert!(out.contains("Agents"), "{out}");
+    assert!(out.contains("Commits (s, Tab: agents)"), "{out}");
 }
 
 // ---- PanesReadThroughTheBoard: the agents section's read (task #4982)

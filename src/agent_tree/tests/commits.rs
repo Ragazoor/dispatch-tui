@@ -341,7 +341,7 @@ fn selecting_a_source_empties_the_tree_at_once_and_publishes_the_selection() {
 
 /// press_every_row_key / RecordedActionMatchesRow for the commits section.
 /// The namespace's rows are exactly the pane-wide keys plus select_source:
-/// q, Ctrl+C, Tab, a, j, Down, k, Up, gg, G, Ctrl+D, Ctrl+U, Space, Enter.
+/// q, Ctrl+C, Tab, BackTab, s, a, j, Down, k, Up, gg, G, Ctrl+D, Ctrl+U, Space, Enter.
 #[test]
 fn pressing_each_key_of_each_commits_row_records_the_rows_action() {
     let mut pressed = 0;
@@ -374,10 +374,10 @@ fn pressing_each_key_of_each_commits_row_records_the_rows_action() {
             );
         }
     }
-    assert_eq!(pressed, 14);
+    assert_eq!(pressed, 16);
 }
 
-// -- CommitsSectionSitsBetweenTreeAndAgents / CommitRowShowsShortIdAndSubject
+// -- TwoViewsShareThePane / CommitRowShowsShortIdAndSubject
 
 fn render_pane_buffer(
     state: &mut RenderState,
@@ -413,22 +413,17 @@ fn row_cells(buffer: &ratatui::buffer::Buffer, y: u16) -> Vec<(String, ratatui::
 }
 
 #[test]
-fn the_commits_section_sits_between_the_tree_and_the_agents_section() {
+fn the_commits_section_sits_below_the_tree() {
     let tree = build_tree(&root(), &[modified("a.rs")]);
     let mut state = RenderState::new();
     state.sync_expansion(&tree);
-    state.adopt_agent_list(Ok(vec![agent(4941, false)]));
 
     let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 16));
 
     let tree_row = line_index(&out, "a.rs");
-    let header = line_index(&out, "Commits (Tab)");
+    let header = line_index(&out, "Commits (s, Tab: agents)");
     let unstaged = line_index(&out, "unstaged work");
-    let agents = line_index(&out, "Agents (Tab)");
-    assert!(
-        tree_row < header && header < unstaged && unstaged < agents,
-        "{out}"
-    );
+    assert!(tree_row < header && header < unstaged, "{out}");
 }
 
 /// "unstaged work" is always the top row, so the section is never empty.
@@ -471,9 +466,8 @@ fn the_commits_section_grows_with_its_commits_up_to_its_cap() {
             state.adopt_commit_list(Ok((1..=listed).rev().map(commit).collect()));
         }
         let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 30));
-        let header = line_index(&out, "Commits (Tab)");
-        let agents = line_index(&out, "Agents (Tab)");
-        assert_eq!(agents - header - 2, rows, "{listed} commits:\n{out}");
+        let header = line_index(&out, "Commits (s, Tab: agents)");
+        assert_eq!(30 - header - 2, rows, "{listed} commits:\n{out}");
     }
 }
 
@@ -550,13 +544,13 @@ fn the_commits_sections_border_shows_focus_and_reddens_with_a_notice() {
     let mut state = RenderState::new();
     state.focus = Focus::Commits;
     let buffer = render_pane_buffer(&mut state, &tree, 20);
-    let y = row_of(&buffer, "Commits (Tab)");
+    let y = row_of(&buffer, "Commits (s, Tab: agents)");
     assert_eq!(buffer[(0, y)].style().fg, Some(CYAN));
 
     let mut state = RenderState::new();
     state.notice = Some(Notice::commit_list("no base branch"));
     let buffer = render_pane_buffer(&mut state, &tree, 20);
-    let y = row_of(&buffer, "Commits (Tab)");
+    let y = row_of(&buffer, "Commits (s, Tab: agents)");
     assert_eq!(buffer[(0, y)].style().fg, Some(RED));
 }
 

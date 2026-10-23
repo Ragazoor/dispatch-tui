@@ -511,3 +511,21 @@ fn unbound_and_contextless_presses_record_nothing() {
     }
     assert!(rig.state.usage.is_empty(), "{:?}", rig.state.usage);
 }
+
+/// OpenAgentTreeFileInEditor: `v` on a file asks the loop to open it; on a
+/// directory, or with nothing selected, it does nothing and records nothing.
+#[test]
+fn v_on_a_file_asks_for_the_editor_and_elsewhere_does_nothing() {
+    let mut rig = KeyRig::new(&[modified("a.rs")]);
+    rig.press(KeyCode::Char('j'));
+    rig.state.usage.clear();
+    assert_eq!(
+        rig.press(KeyCode::Char('v')),
+        KeyAction::OpenInEditor(std::path::PathBuf::from("a.rs"))
+    );
+    assert_eq!(rig.state.open_diffs().len(), 0, "the open set is untouched");
+
+    let mut empty = KeyRig::new(&[modified("a.rs")]);
+    assert_eq!(empty.press(KeyCode::Char('v')), KeyAction::Continue);
+    assert!(empty.state.usage.is_empty());
+}

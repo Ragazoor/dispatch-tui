@@ -104,10 +104,45 @@ fn publish_open_set(
         context.task_id,
         context.root,
         !state.open_diffs.is_empty(),
+        state.lower_pane_editor,
         runner,
     ) {
         tracing::warn!(error = %format!("{e:#}"), "failed to reconcile the diff pane");
         state.notice = Some(Notice::diff(format!("{e:#}")));
+    } else {
+        // Whatever the pane was running, it now runs the diff renderer or is
+        // gone (`ShowDiffInLowerPane`, `CloseAgentTreeDiffPaneWhenEmpty`).
+        state.lower_pane_editor = false;
+    }
+}
+
+/// `v`: show one file in the user's editor in the lower pane
+/// (`OpenAgentTreeFileInEditor`). The open set is not touched.
+fn open_in_editor(
+    context: &DiffPaneContext<'_>,
+    relative: &Path,
+    state: &mut RenderState,
+    runner: &dyn ProcessRunner,
+) {
+    let my_pane = match crate::agent_tree::diff_pane::current_pane_from_env() {
+        Ok(pane) => pane,
+        Err(e) => {
+            state.notice = Some(Notice::diff(e.to_string()));
+            return;
+        }
+    };
+    match crate::agent_tree::diff_pane::show_in_editor(
+        &my_pane,
+        context.root,
+        relative,
+        &crate::editor::editor_from_env(),
+        runner,
+    ) {
+        Ok(()) => state.lower_pane_editor = true,
+        Err(e) => {
+            tracing::warn!(error = %format!("{e:#}"), "failed to open the editor pane");
+            state.notice = Some(Notice::diff(format!("{e:#}")));
+        }
     }
 }
 
@@ -287,6 +322,7 @@ fn run_loop<B: Backend>(
                 KeyAction::DiffSetChanged => {
                     publish_open_set(context, &tree, &mut state, runner);
                 }
+                KeyAction::OpenInEditor(path) => open_in_editor(context, &path, &mut state, runner),
                 KeyAction::JumpTo(window) => jump_to_agent(&window, &mut state, runner),
                 KeyAction::SourceChanged => {
                     adopt_selected_source(root, &mut tree, &mut state);

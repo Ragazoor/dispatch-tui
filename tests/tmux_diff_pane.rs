@@ -99,6 +99,7 @@ impl Fixture {
             TASK_ID,
             self.dir.path(),
             anything_open,
+            false,
             &self.server.runner(),
         )
         .expect("reconcile the diff pane");
@@ -186,49 +187,39 @@ fn opening_a_diff_does_not_move_focus() {
     );
 }
 
-/// The one geometric difference from the editor pane this replaced, and the
-/// reason `-f` was dropped: the diff subdivides the tree's own narrow column, so
-/// the agent's pane keeps every column it had. With `-f` the new pane would span
-/// the window and take the agent's room instead.
+/// The lower pane spans the whole window (`split-window -f`), beneath the tree
+/// and the agent's pane alike, so diff lines get the full width.
 #[test]
-fn the_diff_pane_stays_inside_the_trees_column() {
+fn the_diff_pane_spans_the_window_width() {
     let Some(fx) = setup_or_skip() else { return };
-    let agent_width_before = fx.pane_dimension(&fx.agent_pane, "#{pane_width}");
 
     fx.reconcile(true);
 
     let diff = fx.diff_pane().expect("diff pane");
-    let window_width = fx.pane_dimension(WINDOW, "#{window_width}");
-    assert!(
-        fx.pane_dimension(&diff, "#{pane_width}") < window_width,
-        "the diff pane must not span the window"
-    );
     assert_eq!(
         fx.pane_dimension(&diff, "#{pane_width}"),
-        fx.pane_dimension(&fx.tree_pane, "#{pane_width}"),
-        "it must be exactly as wide as the tree it subdivides"
-    );
-    assert_eq!(
-        fx.pane_dimension(&fx.agent_pane, "#{pane_width}"),
-        agent_width_before,
-        "the agent's own pane must be untouched by opening a diff"
+        fx.pane_dimension(WINDOW, "#{window_width}"),
+        "the lower pane must span the window"
     );
 }
 
-/// It takes the larger share of that column: the tree is a list of short path
-/// segments, and reading the change is the point of opening it.
+/// The lower pane sits beneath both of the window's panes and takes about half
+/// its height (`config.agent_tree_diff_pane_percent`).
 #[test]
-fn the_diff_pane_takes_the_larger_share_of_the_column() {
+fn the_diff_pane_sits_below_the_tree_and_the_agent() {
     let Some(fx) = setup_or_skip() else { return };
 
     fx.reconcile(true);
 
     let diff = fx.diff_pane().expect("diff pane");
-    assert!(
-        fx.pane_dimension(&diff, "#{pane_height}")
-            > fx.pane_dimension(&fx.tree_pane, "#{pane_height}"),
-        "the diff must be taller than the tree above it"
-    );
+    let top = fx.pane_dimension(&diff, "#{pane_top}");
+    for pane in [&fx.tree_pane, &fx.agent_pane] {
+        assert!(
+            top >= fx.pane_dimension(pane, "#{pane_top}")
+                + fx.pane_dimension(pane, "#{pane_height}"),
+            "the lower pane must start below {pane}"
+        );
+    }
 }
 
 /// #231's failure mode, for this pane: `-c` is passed explicitly because the

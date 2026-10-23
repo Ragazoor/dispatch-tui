@@ -643,6 +643,7 @@ fn the_commits_namespace_has_only_the_pane_wide_rows_and_select_source() {
         vec![
             "exit_pane",
             "toggle_focus",
+            "switch_section",
             "toggle_all_diffs",
             "navigate_row",
             "navigate_row_first",

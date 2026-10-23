@@ -307,6 +307,7 @@ fn split_window_below_running_issues_correct_args() {
         vec![
             "split-window",
             "-v",
+            "-f",
             "-d",
             "-l",
             "60%",
@@ -324,19 +325,18 @@ fn split_window_below_running_issues_correct_args() {
     );
 }
 
-/// The ABSENCE of `-f` is what keeps the new pane inside the target's own
-/// column, so the agent's pane is untouched by opening a diff; `-d` is what
-/// keeps focus in the tree. Both are single-character flags, easy to add or
-/// drop in a refactor and invisible in the result, so both are asserted by
-/// name as well as by the argv above.
+/// `-f` is what makes the new pane span the whole window, so a diff gets full
+/// width lines; `-d` is what keeps focus in the tree. Both are single-character
+/// flags, easy to drop in a refactor and invisible in the result, so both are
+/// asserted by name as well as by the argv above.
 #[test]
-fn split_window_below_running_subdivides_its_target_and_keeps_focus() {
+fn split_window_below_running_spans_the_window_and_keeps_focus() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%7\n")]);
-    split_window_below_running("%3", 66, "/work/wt", &["dispatch", "agent-diff"], &mock).unwrap();
+    split_window_below_running("%3", 50, "/work/wt", &["dispatch", "agent-diff"], &mock).unwrap();
     let args = &mock.recorded_calls()[0].1;
     assert!(
-        !args.contains(&"-f".to_string()),
-        "-f would span the window and steal the agent's columns; args: {args:?}"
+        args.contains(&"-f".to_string()),
+        "without -f the pane stays in the tree's narrow column; args: {args:?}"
     );
     assert!(args.contains(&"-d".to_string()), "args: {args:?}");
 }

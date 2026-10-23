@@ -130,9 +130,16 @@ enum NoticeSource { git_query | diff_open | agent_list | agent_jump | commit_lis
 
 -- Which of the pane's three sections the pane's keys act on. The tree, the
 -- commits section and the agents section each keep their own cursor; focus
--- decides which one a motion moves and what Space and Enter do. See
--- SwitchAgentTreeFocus.
+-- decides which one a motion moves and what Space and Enter do. The pane
+-- shows two VIEWS: the browse view holds the tree (above) and the commits
+-- section (below), the agents view holds the agents section alone. Focus
+-- tree or commits means the browse view is showing; focus agents means the
+-- agents view is. See SwitchAgentTreeView and SwitchAgentTreeBrowseFocus.
 enum AgentTreeFocus { tree | commits | agents }
+
+-- What the lower pane (pane.diff_pane) is running: the diff renderer, or the
+-- user's editor on one file. See OpenAgentTreeFileInEditor.
+enum LowerPaneContent { diff | editor }
 
 ------------------------------------------------------------
 -- Value Types
@@ -410,11 +417,28 @@ entity AgentTreePane {
     notice_source: NoticeSource when error_notice != null
 
     -- Which section the pane's keys act on. Starts on the tree, because the
-    -- tree is what the pane is for; Tab cycles it through tree, commits and
-    -- agents (SwitchAgentTreeFocus).
+    -- tree is what the pane is for. Tab and Shift+Tab flip between the browse
+    -- view and the agents view (SwitchAgentTreeView); `s` moves between the
+    -- tree and the commits section inside the browse view
+    -- (SwitchAgentTreeBrowseFocus).
     -- Per-process view state like the cursor, and modelled here only because
     -- it decides which rule a Space or Enter reaches.
     focus: AgentTreeFocus
+
+    -- The browse-view section that had focus when the user left for the agents
+    -- view, so flipping back lands where they were. Starts on the tree. Only
+    -- ever tree or commits.
+    browse_focus: AgentTreeFocus
+
+    -- What the lower pane is running while it exists. Meaningless when
+    -- diff_pane is null.
+    diff_pane_content: LowerPaneContent when diff_pane != null
+
+    -- Whether dispatch created diff_pane. Always true today: the lower pane is
+    -- only ever one this renderer split itself (see SplitAgentTreeDiffPane);
+    -- dispatch never takes over a pane it did not create. Kept as a field so a
+    -- reader sees the ownership rule instead of inferring it.
+    diff_pane_is_ours: Boolean when diff_pane != null
 
     -- The tasks the agents section shows: what the last SUCCESSFUL read of the
     -- board's task list returned, filtered to tasks with a live agent window
@@ -576,17 +600,12 @@ config {
     -- binding shadows nothing. See the ToggleKeyChoice open question.
     agent_tree_toggle_key: String = "e"
 
-    -- Height of the diff pane as a percentage of the COMPANION PANE'S COLUMN,
-    -- not of the agent window. The diff pane subdivides the tree's own 30%
-    -- column rather than spanning the window, so the agent's own pane keeps
-    -- every column it had and is untouched by opening a diff.
-    --
-    -- Deliberately the larger share of that column: the tree is a list of
-    -- short path segments and stays legible in a few rows, while reading the
-    -- change is the point of opening it. The predecessor of this value gave
-    -- the editor pane 60% of the whole WINDOW's height, which took the room
-    -- from the agent instead.
-    agent_tree_diff_pane_percent: Integer = 66
+    -- Height of the lower pane as a percentage of the AGENT WINDOW. The lower
+    -- pane spans the window's full width beneath both the companion pane and
+    -- the agent's own pane (SplitAgentTreeDiffPane), so a diff or an editor
+    -- gets room for full-width lines. The agent's pane gives up this share of
+    -- its height while a file is open and gets it back when the pane closes.
+    agent_tree_diff_pane_percent: Integer = 50
 
     -- How much diff text the pane will render for ONE file before refusing it
     -- and showing a placeholder instead (DiffRefusal.too_large). The cap is
@@ -607,8 +626,7 @@ config {
 
     -- The most rows the commits section takes from the pane, its fixed
     -- "unstaged work" row included. It grows with the number of commits up
-    -- to this cap and scrolls beyond it, exactly as the agents section does
-    -- (config.agent_tree_agents_max_rows). How many commits are READ is
+    -- to this cap and scrolls beyond it. How many commits are READ is
     -- config.agent_tree_commits_max_listed, below.
     agent_tree_commits_max_rows: Integer = 6
 
@@ -626,12 +644,6 @@ config {
     -- and one small read-only query a second costs nothing a user would see.
     agent_tree_agents_refresh_interval: Duration = 1.second
 
-    -- The most rows the agents section takes from the pane. It grows with the
-    -- number of live agents up to this cap and scrolls beyond it; the tree
-    -- keeps every row the section does not take. Small on purpose: the tree
-    -- is what the pane is for, and eight agents at once is already a busy
-    -- board.
-    agent_tree_agents_max_rows: Integer = 8
 
     -- How long a pane's renderer waits, at startup, for the board to answer
     -- with its task's row before giving up and saying so. The row normally
@@ -1698,14 +1710,17 @@ rule CloseAllAgentTreeFileDiffs {
 }
 
 rule SplitAgentTreeDiffPane {
-    -- The open set changed to something non-empty and there is no pane to show
-    -- it in: split one beneath the tree.
+    -- The open set changed to something non-empty, or the user asked for the
+    -- editor, and there is no lower pane to show it in: split one across the
+    -- bottom of the window.
     when: AgentTreeDiffOpenSetChanged(pane)
 
     requires: not pane.open_diff_paths.is_empty()
     requires: pane.diff_pane = null
 
     ensures: pane.diff_pane = core/TmuxPane.created()
+    ensures: pane.diff_pane_is_ours = true
+    ensures: pane.diff_pane_content = diff
     ensures: pane.error_notice = null
 
     -- The diff pane's renderer is its own process and resolves the task for
@@ -1716,30 +1731,40 @@ rule SplitAgentTreeDiffPane {
 
     @guidance
         -- == Geometry ==
-        -- The pane subdivides the COMPANION PANE'S column, taking
-        -- config.agent_tree_diff_pane_percent of its height beneath the tree.
-        -- It deliberately does NOT span the window: the agent's own pane keeps
-        -- every column it had, so opening a diff never takes room from the
-        -- thing the user is supervising. This is the one geometric difference
-        -- from the editor pane this replaced, and it is the reason the split
-        -- targets the tree pane rather than the window.
+        -- The pane spans the WINDOW's full width beneath every pane in it
+        -- (tmux split-window -f), taking config.agent_tree_diff_pane_percent
+        -- of the window's height. This reverses the earlier design, where the
+        -- diff subdivided the companion pane's narrow column so the agent's
+        -- pane kept its width: a diff in forty columns truncated most real
+        -- source lines (answered by widening rather than scrolling). The cost is that the agent's pane loses
+        -- height while a file is open and regains it when the pane closes.
+        --
+        -- == Reuse, never takeover ==
+        -- If a lower pane this renderer created already exists it is reused
+        -- (OneDiffPanePerAgentWindow). Dispatch never takes over a pane it did
+        -- not create: the agent's own pane and any pane the user split by hand
+        -- are untouched, because killing the process in one of them would
+        -- cost the user work. "Already split" therefore means "dispatch
+        -- already split it".
         --
         -- == Focus does not move ==
         -- The keystroke that opens a diff leaves tmux focus in the tree, so
         -- browsing stays a one-handed loop: move the cursor, open, move on.
-        -- Reaching the diff to scroll it is a deliberate second act — the tmux
-        -- prefix plus a direction, tmux's own pane navigation and nothing this
-        -- spec invents. That is also why the diff pane needs no focus
-        -- indicator of its own: tmux already draws one.
+        -- Reaching the lower pane is tmux's own pane navigation and nothing
+        -- this spec invents. That is also why it needs no focus indicator of
+        -- its own: tmux already draws one. (The editor is the exception worth
+        -- noting: typing into it needs focus, so the user moves there with
+        -- tmux's keys.)
         --
         -- == Why this is a rule and not an ensures on the four toggles ==
-        -- A user can kill the diff pane themselves, with tmux or by pressing
-        -- the exit key inside it, while the open set is still non-empty
-        -- (ExitAgentTreeDiffRenderer). Routing every set change through this
-        -- one rule is what makes the next toggle bring the pane back rather
-        -- than leaving the user with a set of open files and nowhere to see
-        -- them. The repair is deliberately NOT on the refresh tick: a pane the
-        -- user closed a second ago must stay closed until they ask again.
+        -- A user can kill the lower pane themselves, with tmux or by pressing
+        -- the exit key inside the diff (ExitAgentTreeDiffRenderer) or by
+        -- quitting the editor, while the open set is still non-empty. Routing
+        -- every set change through this one rule is what makes the next
+        -- toggle bring the pane back rather than leaving the user with a set
+        -- of open files and nowhere to see them. The repair is deliberately
+        -- NOT on the refresh tick: a pane the user closed a second ago must
+        -- stay closed until they ask again.
         --
         -- One consequence is accepted and slightly odd: pressing Space to
         -- CLOSE one file, while the pane is gone and other files remain open,
@@ -1748,12 +1773,58 @@ rule SplitAgentTreeDiffPane {
         -- only after killing the pane by hand.
 }
 
+rule OpenAgentTreeFileInEditor {
+    -- `v` on a file node: show that one file in the user's editor in the lower
+    -- pane, instead of its diff.
+    when: OpenSelectedAgentTreeFileInEditor(user, pane, node)
+
+    requires: pane.focus = tree
+    requires: node.kind = file
+
+    -- Splits the lower pane when there is none (same geometry and ownership as
+    -- SplitAgentTreeDiffPane); otherwise replaces what the pane we own is
+    -- running (tmux respawn-pane -k), which ends the diff renderer.
+    ensures: pane.diff_pane != null
+    ensures: pane.diff_pane_is_ours = true
+    ensures: pane.diff_pane_content = editor
+    ensures: pane.error_notice = null
+
+    @guidance
+        -- The editor is the resolved $VISUAL, then $EDITOR, then the fallback
+        -- (core.allium: editor_fallback), run directly with the file's path as
+        -- its last argument and the worktree as its working directory: the
+        -- same single resolver the board's pop-out editor uses, so one
+        -- $EDITOR never means two things.
+        --
+        -- The path is the working-tree file. A deleted file has none, so the
+        -- press raises the diff-open notice ("file no longer exists") and
+        -- changes nothing: the diff (Space) is the key for a deleted file.
+        -- While a commit is the selected source the file may not match what
+        -- the commit changed; the editor shows the working tree, and the
+        -- title is not changed. Use Space for the commit's diff.
+        --
+        -- The open set is NOT touched. `v` is a view of one file, not a
+        -- membership change: files already open stay marked in the tree, and
+        -- a later Space (OpenAgentTreeFileDiff or CloseAgentTreeFileDiff)
+        -- puts the diff renderer back in the same pane, replacing the editor.
+        -- Closing the last open file while the editor shows still closes the
+        -- pane (CloseAgentTreeDiffPaneWhenEmpty). With an empty open set the
+        -- editor pane exists WITHOUT an open file, which is the one exception
+        -- to DiffPaneExistsWhenSomethingIsOpen; it ends when the user quits
+        -- the editor, like any other process in a pane.
+        --
+        -- Quitting the editor closes its pane and leaves diff_pane null
+        -- exactly as a hand-killed diff pane does.
+}
+
 rule CloseAgentTreeDiffPaneWhenEmpty {
     -- The last open file was closed: the pane has nothing to show, so it goes.
+    -- Only a pane dispatch created is ever killed.
     when: AgentTreeDiffOpenSetChanged(pane)
 
     requires: pane.open_diff_paths.is_empty()
     requires: pane.diff_pane != null
+    requires: pane.diff_pane_is_ours = true
 
     ensures: pane.diff_pane = null
 
@@ -1762,6 +1833,20 @@ rule CloseAgentTreeDiffPaneWhenEmpty {
         -- what DiffPaneExistsWhenSomethingIsOpen states. Leaving an empty pane
         -- behind would make the user close it a second time, by a second
         -- mechanism, to get their rows back.
+}
+
+rule ShowDiffInLowerPane {
+    -- The open set changed to something non-empty while the lower pane is
+    -- running the editor: put the diff renderer back in the same pane.
+    when: AgentTreeDiffOpenSetChanged(pane)
+
+    requires: not pane.open_diff_paths.is_empty()
+    requires: pane.diff_pane != null
+    requires: pane.diff_pane_content = editor
+
+    ensures: pane.diff_pane_content = diff
+    ensures: pane.diff_task_resolution = waiting
+    ensures: pane.diff_renderer_started_at = now
 }
 
 rule KillAgentTreeDiffPaneWithItsTree {
@@ -2241,32 +2326,51 @@ rule AgentTreeAgentListFailureKeepsLastList {
         -- read the same.
 }
 
-rule SwitchAgentTreeFocus {
-    -- Tab moves the pane's keys on to the next section, top to bottom and
-    -- round again: tree, then commits, then agents, then tree.
-    when: SwitchAgentTreeFocus(user, pane)
+rule SwitchAgentTreeView {
+    -- Tab or Shift+Tab flips the pane between its two views: the browse view
+    -- (tree above, commits below) and the agents view (the agents section
+    -- alone). With two views there is no direction, so the two keys do the
+    -- same thing.
+    when: SwitchAgentTreeView(user, pane)
 
     requires: pane.status = shown
 
     ensures: pane.focus =
-        if old(pane.focus) = tree: commits
-        else if old(pane.focus) = commits: agents
-        else: tree
+        if old(pane.focus) = agents: old(pane.browse_focus)
+        else: agents
+    ensures: pane.browse_focus =
+        if old(pane.focus) = agents: old(pane.browse_focus)
+        else: old(pane.focus)
 
     @guidance
-        -- A cycle in screen order, now that there are three sections. It was
-        -- a toggle while there were two, and the cycle is that toggle's
-        -- natural extension: the same key, the same direction down the pane.
-        -- Tab is the ONLY focus key, deliberately. There is no Shift+Tab to
-        -- cycle backwards and no key that focuses a section directly: with
-        -- three sections, at most two presses reach any of them, and every
-        -- extra key would be one more row in three namespaces for a pane
-        -- whose keys are meant to stay few.
+        -- The pane used to stack three sections and cycle focus through them
+        -- with Tab. Two views fit the pane better: browsing a change is one
+        -- activity (pick a commit, read its files) and listing agents is
+        -- another, and the agents list was a band that shrank the tree
+        -- whether or not it was wanted.
         --
-        -- Tab works whether or not a section has any rows: an empty section
-        -- is a real place to be, and skipping it would read as a broken key.
-        -- (The commits section is never empty anyway — "unstaged work" is
-        -- always its top row.)
+        -- Flipping back returns to the section that had focus, with its
+        -- cursor where it was. Each section keeps its cursor while hidden.
+        -- Tab works whether or not the agents list has rows: an empty list is
+        -- a real place to be.
+}
+
+rule SwitchAgentTreeBrowseFocus {
+    -- `s` moves the keys between the tree and the commits section while the
+    -- browse view is showing.
+    when: SwitchAgentTreeBrowseFocus(user, pane)
+
+    requires: pane.status = shown
+    requires: pane.focus != agents
+
+    ensures: pane.focus = if old(pane.focus) = tree: commits else: tree
+    ensures: pane.browse_focus = pane.focus
+
+    @guidance
+        -- `s` for "section". h/l and the arrows are the tree's own expand and
+        -- collapse keys, and Tab is the view flip, so a fresh unbound key
+        -- keeps all three meanings apart. In the agents view `s` does nothing:
+        -- there is only one section to be in.
 }
 
 rule JumpToAgentWindow {
@@ -2335,7 +2439,7 @@ invariant OneCompanionPanePerAgentWindow {
 }
 
 -- At most one diff pane per agent window, and never shared between windows.
--- A second would divide the tree's column again on every open and leave the
+-- A second would divide the window again on every open and leave the
 -- older one unowned: nothing refreshes it, nothing drives its open set, and
 -- only the tree that opened it knows it is there.
 --
@@ -2370,7 +2474,12 @@ invariant OneDiffPanePerAgentWindow {
 -- SplitAgentTreeDiffPane's guidance argues for.
 invariant DiffPaneExistsWhenSomethingIsOpen {
     for p in AgentTreePanes:
-        (p.diff_pane = null) = p.open_diff_paths.is_empty()
+        not p.open_diff_paths.is_empty() implies p.diff_pane != null
+        -- The converse holds except while the editor is showing
+        -- (OpenAgentTreeFileInEditor): an editor pane may exist with
+        -- nothing open.
+        (p.diff_pane != null and p.diff_pane_content = diff)
+            implies not p.open_diff_paths.is_empty()
 }
 
 -- Only files ever have an open diff. A directory has no contents of its own —
@@ -2597,12 +2706,15 @@ surface AgentTreeCompanionPane {
         -- meaning for the state the user can see.
         ToggleAllAgentTreeFileDiffs(user, pane)           -- a
 
-        -- The commits and agents sections. Tab cycles focus tree -> commits
-        -- -> agents -> tree. With the commits section focused, Space and Enter
+        -- The commits and agents sections. Tab and Shift+Tab flip between the
+        -- browse view (tree and commits) and the agents view; `s` moves between
+        -- tree and commits. With the commits section focused, Space and Enter
         -- select the row under the cursor as the tree's source; with the
         -- agents section focused, they jump. See AgentKeysFollowFocus for
         -- what every other key does there.
-        SwitchAgentTreeFocus(user, pane)                  -- Tab
+        SwitchAgentTreeView(user, pane)                   -- Tab, Shift+Tab
+        SwitchAgentTreeBrowseFocus(user, pane)            -- s (browse view)
+        OpenSelectedAgentTreeFileInEditor(user, pane, node) -- v (file, tree focus)
         SelectAgentTreeSource(user, pane, commit)         -- Space, Enter (commits focus)
         JumpToAgentWindow(user, pane, target)             -- Space, Enter (agents focus)
 
@@ -2660,39 +2772,33 @@ surface AgentTreeCompanionPane {
         -- never closes itself — see "Companion Pane Startup" for the race
         -- that made it do so.
 
-    @guarantee AgentsSectionSitsBelowTheTree
-        -- The agents section is a band across the bottom of the pane, under
-        -- the tree and the commits section, with its own titled top border
-        -- ("Agents (Tab)"). The "(Tab)" is the only place the pane names the
-        -- key that reaches the section, and it reads the same whichever
-        -- section has focus: Tab cycles through every section, so the one key
-        -- both enters and leaves. Without it the
-        -- section was reachable but undiscoverable (task #4977). It is as tall
-        -- as the number of listed agents, capped at
-        -- config.agent_tree_agents_max_rows, and the tree keeps every row the
-        -- section does not take. Past the cap the section scrolls to keep its
+    @guarantee TwoViewsShareThePane
+        -- The pane shows ONE view at a time. The browse view stacks the tree
+        -- above the commits section; the agents view gives the whole pane to
+        -- the agents section. Tab and Shift+Tab flip between them
+        -- (SwitchAgentTreeView). The titled top borders name the keys: the
+        -- commits border reads "Commits (s, Tab: agents)" — `s` reaches it
+        -- from the tree, Tab leaves the browse view — and the agents border
+        -- reads "Agents (Tab: browse)". The tree's border names its source
+        -- only (TreeTitleNamesItsSource).
+        --
+        -- In the browse view the commits section is as tall as its rows — the
+        -- "unstaged work" row plus one per listed commit — capped at
+        -- config.agent_tree_commits_max_rows and scrolling past the cap, and
+        -- the tree keeps every row the commits section does not take. It always
+        -- has at least the "unstaged work" row, so it is never empty. "unstaged
+        -- work" is the top row, then commits newest first, as `git log` reads.
+        --
+        -- In the agents view the section fills the pane and scrolls to keep its
         -- cursor in view. With no agents listed it still shows its border and
         -- one empty row, so Tab always has somewhere visible to go.
         --
         -- The focused section's border is drawn in the focus colour and the
-        -- others' in the ordinary border colour, so the user can always see
-        -- which section the next key will act on. A notice still reddens the
-        -- pane's border (AgentTreeNoticeRedensBorder) — every section's — and
-        -- wins over focus. Its text stays where it always was, on the tree's
-        -- bottom border, which now sits directly above the commits section.
-
-    @guarantee CommitsSectionSitsBetweenTreeAndAgents
-        -- The commits section is a band beneath the tree and above the
-        -- agents section, with its own titled top border ("Commits (Tab)"),
-        -- drawn and focused exactly as the agents section is. It is as tall
-        -- as its rows — the "unstaged work" row plus one per listed commit —
-        -- capped at config.agent_tree_commits_max_rows, and scrolls past the
-        -- cap to keep its cursor in view. It always has at least the
-        -- "unstaged work" row, so it is never empty.
-        --
-        -- "unstaged work" is the top row, then commits newest first, so the
-        -- default sits next to the most recent work and the list reads
-        -- downward into the past, as `git log` does.
+        -- other browse section's in the ordinary border colour. A notice
+        -- reddens whichever borders are showing
+        -- (AgentTreeNoticeRedensBorder) and wins over focus. Its text stays on
+        -- the tree's bottom border in the browse view and on the agents
+        -- border in the agents view.
 
     @guarantee CompanionPaneIsHumanOnly
         -- The companion pane, its commits section included, is deliberately
@@ -2763,7 +2869,7 @@ surface AgentTreeCompanionPane {
         -- (keybindings.allium), in three namespaces: agent_tree.tree while the
         -- tree has focus, agent_tree.commits while the commits section does,
         -- and agent_tree.agents while the agents section does. The pane-wide
-        -- keys (q, Ctrl-C, Tab, a) are rows of all three, and no key in the
+        -- keys (q, Ctrl-C, Tab, Shift+Tab, a) are rows of all three, and no key in the
         -- commits namespace means anything new: Space/Enter is select_source
         -- there as it is jump_to_agent in the agents namespace, so focus, not
         -- a new key, decides the meaning. A press is
@@ -3291,11 +3397,12 @@ surface AgentTreeDiffPane {
         -- wrapped, and the rest is not shown on a continuation row.
         --
         -- Wrapping is the tempting alternative and it is worse here, because
-        -- the pane is narrow by design (config.agent_tree_pane_percent): one
+        -- the pane is no wider than the window (config.agent_tree_diff_pane_percent sets its height): one
         -- long line would wrap into many rows and push several files' diffs off
         -- screen, so the cost of a single minified or generated line would be
         -- paid by everything the user opened alongside it. Truncation costs
-        -- only the line it happens to. See the DiffPaneWidth open question.
+        -- only the line it happens to. The lower pane spans the window, so
+        -- truncation bites rarely.
 
     @guarantee DiffPaneIsGitDerivedToo
         -- Everything this pane shows comes from git, exactly as the tree's
@@ -3330,7 +3437,5 @@ surface AgentTreeDiffPane {
 open question "AgentTreeViewState: the renderer's cursor position and the set of directories the user has manually expanded or collapsed are real, observable state — CollapseSelectedAgentTreeNode and friends act on them, DirectoryExpansionFollowsChangedDescendants only constrains the first render, not what the user does afterwards, and CountsShowOnTheFolderNearestTheFiles now READS live expansion to decide whether a directory row draws its sum. They are currently modelled nowhere. Should AgentTreePane carry them as fields (making the manual-override behaviour rule-expressible and the invariant honest about when it applies), or is per-process view state deliberately below this spec's abstraction line?"
 
 open question "MergedRouteWidth: a chain-merged directory row carries its whole route, so a deep one can be wider than the pane — around forty columns — and MergedRoutesClipAtThePaneEdge says it is then clipped from the right, losing the last segment, the badge and the counts. Those are the parts of the row the merging was meant to make prominent, so clipping is the least useful place to lose width. Should a route too wide for the pane elide its middle segments instead, keeping the first and last, should the row drop leading segments until it fits, or is clipping plus the user's own tmux resize the intended answer here as it is for the diff pane?"
-
-open question "DiffPaneWidth: the diff pane inherits the companion pane's column, which is config.agent_tree_pane_percent of the window — around forty columns on a typical terminal. Diff lines wider than that are truncated at the pane edge (AgentTreeDiffPane's DiffLinesTruncateRatherThanWrap), which is legible for most source but loses the right-hand side of long lines outright, with no way to reach it from inside the pane. Should the pane offer horizontal scrolling, should opening a diff widen the column, or is truncation plus the user's own tmux resize the intended answer?"
 
 open question "IgnoredFileChanges: git's ignore rules decide what the pane can see, so an agent writing to an ignored path (a build artefact, a scratch file, a local config) leaves no trace in the tree at all. That is usually right — an ignored file is ignored for a reason — but it does mean the pane cannot show an agent scribbling somewhere it should not. Is silent omission the intended behaviour, or should ignored changes be surfaced somewhere distinguishable?"

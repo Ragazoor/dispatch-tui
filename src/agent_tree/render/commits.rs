@@ -3,7 +3,7 @@
 //! fork point, under a fixed "unstaged work" row, and selects which change the
 //! tree and the diff pane show (see `docs/specs/agent-tree.allium`'s
 //! `RefreshAgentTreeCommitList` and `SelectAgentTreeSource` rules, and the
-//! `CommitsSectionSitsBetweenTreeAndAgents`, `CommitRowShowsShortIdAndSubject`
+//! `TwoViewsShareThePane`, `CommitRowShowsShortIdAndSubject`
 //! and `AgentTreeSourceIsOneSelection` guarantees).
 //!
 //! Pure view state and rendering only. Reading the commits from git belongs to
@@ -131,7 +131,7 @@ pub fn render_commits(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style(focused, alert))
-        .title(" Commits (Tab) ");
+        .title(" Commits (s, Tab: agents) ");
 
     let unstaged = std::iter::once((None, "unstaged work".to_string()));
     let commits = section.commits.iter().map(|commit| {

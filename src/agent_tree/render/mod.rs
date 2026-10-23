@@ -286,10 +286,10 @@ pub fn render(
     }
 }
 
-/// Render the whole pane: the tree above, the commits section beneath it and
-/// the agents section in a band across the bottom
-/// (`CommitsSectionSitsBetweenTreeAndAgents`, `AgentsSectionSitsBelowTheTree`).
-/// Each section takes one row per entry up to its cap; the tree keeps the rest.
+/// Render the whole pane, one view at a time (`TwoViewsShareThePane`). The
+/// browse view stacks the tree above the commits section, which takes one row
+/// per entry up to its cap while the tree keeps the rest; the agents view gives
+/// the whole pane to the agents section.
 ///
 /// The tree's title names its source (`TreeTitleNamesItsSource`): the pane
 /// root alone for unstaged work, the selected commit's short id beside it for a
@@ -301,10 +301,22 @@ pub fn render_pane(
     state: &mut RenderState,
     title: &str,
 ) {
-    let agents_height = state.agents.height().min(area.height);
-    let commits_height = state.commits.height().min(area.height - agents_height);
+    let alert = state.notice.is_some();
+    if state.focus == Focus::Agents {
+        let notice = state.notice.as_ref().map(|n| n.text().to_string());
+        render_agents(
+            frame,
+            area,
+            &mut state.agents,
+            true,
+            alert,
+            notice.as_deref(),
+        );
+        return;
+    }
+    let commits_height = state.commits.height().min(area.height);
     let tree_area = Rect {
-        height: area.height - agents_height - commits_height,
+        height: area.height - commits_height,
         ..area
     };
     let commits_area = Rect {
@@ -312,30 +324,17 @@ pub fn render_pane(
         height: commits_height,
         ..area
     };
-    let agents_area = Rect {
-        y: commits_area.y + commits_height,
-        height: agents_height,
-        ..area
-    };
     let tree_title = match &state.selected_commit {
         Some(id) => format!("{title} {}", short_id(id)),
         None => title.to_string(),
     };
     render(frame, tree_area, root, state, &tree_title);
-    let alert = state.notice.is_some();
     render_commits(
         frame,
         commits_area,
         &mut state.commits,
         state.selected_commit.as_deref(),
         state.focus == Focus::Commits,
-        alert,
-    );
-    render_agents(
-        frame,
-        agents_area,
-        &mut state.agents,
-        state.focus == Focus::Agents,
         alert,
     );
 }

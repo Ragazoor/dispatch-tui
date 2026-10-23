@@ -1138,10 +1138,10 @@ pub fn split_window_horizontal_running(
     run_checked_stdout(runner, &args, "split-window")
 }
 
-/// Create a pane **below `target`, inside `target`'s own column**, taking
-/// `size_pct`% of that column's height, running `command` as separate argv
-/// elements (no shell) with `cwd` as its start directory. Keeps focus where it
-/// is. Returns the new pane's ID.
+/// Create a pane **across the bottom of `target`'s window, spanning its full
+/// width**, taking `size_pct`% of the window's height, running `command` as
+/// separate argv elements (no shell) with `cwd` as its start directory. Keeps
+/// focus where it is. Returns the new pane's ID.
 ///
 /// The third split helper in this module, and each difference is load-bearing.
 /// [`split_window_horizontal`] (40%, right, no command) serves the board's
@@ -1149,12 +1149,11 @@ pub fn split_window_horizontal_running(
 /// command) opens the agent-tree companion pane. This one opens the DIFF pane
 /// *from* that companion pane, where:
 ///
-/// * There is deliberately **no `-f`**. The new pane subdivides the companion
-///   pane's narrow column rather than spanning the window, so the agent's own
-///   pane keeps every column it had and opening a diff never takes room from
-///   the thing the user is supervising. The editor pane this replaced did span
-///   the window, and that is the one geometric difference between them — see
-///   `SplitAgentTreeDiffPane` in docs/specs/agent-tree.allium.
+/// * It passes **`-f`**, so the new pane spans the whole window beneath the
+///   companion pane and the agent's pane alike: a diff in the companion
+///   pane's forty columns truncated most source lines. The agent's pane gives
+///   up height while the pane is open — see `SplitAgentTreeDiffPane` in
+///   docs/specs/agent-tree.allium.
 /// * `-c` is passed explicitly rather than relying on [`ensure_split_hook`]'s
 ///   `@dispatch_dir` `cd`: that hook *types* `cd <dir>` into the new pane, which
 ///   works for a shell and would land in the diff renderer's own input here.
@@ -1175,6 +1174,7 @@ pub fn split_window_below_running(
     let mut args: Vec<&str> = vec![
         "split-window",
         "-v",
+        "-f",
         "-d",
         "-l",
         &size_arg,

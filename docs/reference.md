@@ -21,8 +21,10 @@ the bare key's row. See `docs/specs/keybindings.allium`.
 Pressed inside the pane itself (no tmux prefix) while it has tmux focus. The pane is
 its own process — its keys never reach the board TUI, and all of them act on the
 pane's own view only. The keys are the `agent_tree.tree`, `agent_tree.commits` and
-`agent_tree.agents` rows of the table. Tab cycles the keys through the file tree, the
-**Commits** section and the **Agents** section.
+`agent_tree.agents` rows of the table. The pane has two views. The browse view shows the file tree above the
+**Commits** section; `s` moves the keys between them. Tab or Shift+Tab flips to the **Agents**
+list and back. Space opens a file's diff, and `v` opens the file in `$VISUAL`/`$EDITOR`, in a
+pane across the bottom of the window.
 
 By default the tree and the diff pane show only your agent's **unstaged** work: the
 working tree against the index, plus untracked files (shown as added, without counts).

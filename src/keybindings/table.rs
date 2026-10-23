@@ -1150,10 +1150,18 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeTree,
-        &["Tab"],
+        &["Tab", "BackTab"],
         None,
         "toggle_focus",
-        "Move the keys through the file tree, the Commits section and the Agents section below it (their titles read `Commits (Tab)` and `Agents (Tab)`); each section keeps its own cursor, so Tab back returns you where you were",
+        "Flip between browsing (file tree and Commits) and the Agents list; each section keeps its own cursor, so flipping back returns you where you were",
+        None,
+    ),
+    row(
+        N::AgentTreeTree,
+        &["s"],
+        None,
+        "switch_section",
+        "Move the keys between the file tree and the Commits section",
         None,
     ),
     row(
@@ -1222,6 +1230,14 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeTree,
+        &["v"],
+        Some(C::OnFile),
+        "open_in_editor",
+        "Open the file in your editor ($VISUAL, then $EDITOR) in the pane below; Space then brings the diff back. A deleted file has no working-tree copy: use Space",
+        None,
+    ),
+    row(
+        N::AgentTreeTree,
         &["Space", "Enter"],
         Some(C::OnDirectory),
         "toggle_directory",
@@ -1238,10 +1254,18 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeCommits,
-        &["Tab"],
+        &["Tab", "BackTab"],
         None,
         "toggle_focus",
-        "Move the keys on to the Agents section; Tab cycles the file tree, Commits and Agents in turn",
+        "Flip to the Agents list; flipping back returns to the section you left",
+        None,
+    ),
+    row(
+        N::AgentTreeCommits,
+        &["s"],
+        None,
+        "switch_section",
+        "Move the keys between the file tree and the Commits section",
         None,
     ),
     row(
@@ -1302,10 +1326,10 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeAgents,
-        &["Tab"],
+        &["Tab", "BackTab"],
         None,
         "toggle_focus",
-        "Switch focus: file tree, Commits, Agents, and back to the tree",
+        "Flip back to browsing (file tree and Commits)",
         None,
     ),
     row(

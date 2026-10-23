@@ -115,13 +115,15 @@ use "./observability.allium" as observability
 -- The panes' rows (agent_tree.tree, agent_tree.commits, agent_tree.agents,
 -- agent_diff). The companion pane's three sections share the pane-wide keys
 -- — all act in whichever section has focus — and differ in what Space/Enter
--- and h/l do. toggle_focus (Tab) cycles focus tree -> commits -> agents ->
--- tree (agent-tree.allium: SwitchAgentTreeFocus). The commits section adds no
+-- and h/l do. toggle_focus (Tab, BackTab) flips between the browse view (tree and commits)
+-- and the agents view (agent-tree.allium: SwitchAgentTreeView); switch_section
+-- (s) moves between tree and commits (SwitchAgentTreeBrowseFocus). The commits section adds no
 -- new key: Space/Enter take a section-specific meaning there exactly as they
 -- already do in the agents section, so no key collides with another row:
 --   agent_tree.tree
 --     exit_pane                  q, Ctrl+C
---     toggle_focus               Tab
+--     toggle_focus               Tab, BackTab
+--     switch_section             s
 --     toggle_all_diffs           a
 --     navigate_row               j, Down, k, Up
 --     navigate_row_first         gg
@@ -132,9 +134,10 @@ use "./observability.allium" as observability
 --                                               its parent
 --     expand_directory           l, Right       context on_directory
 --     toggle_diff                Space, Enter   context on_file
+--     open_in_editor             v              context on_file
 --     toggle_directory           Space, Enter   context on_directory
 --   agent_tree.commits
---     exit_pane, toggle_focus, toggle_all_diffs, navigate_row,
+--     exit_pane, toggle_focus, switch_section, toggle_all_diffs, navigate_row,
 --     navigate_row_first, navigate_row_last, navigate_half_page — the same
 --     keys as in agent_tree.tree
 --     select_source              Space, Enter   selects the row under the

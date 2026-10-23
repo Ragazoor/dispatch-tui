@@ -30,6 +30,9 @@ pub enum KeyAction {
     /// (`SelectAgentTreeSource`). The loop drops the old source's tree,
     /// publishes the selection and re-queries — see [`crate::agent_tree::run::adopt_selected_source`].
     SourceChanged,
+    /// `v` on a file: show it in the user's editor in the lower pane
+    /// (`OpenAgentTreeFileInEditor`). The path is relative to the worktree.
+    OpenInEditor(std::path::PathBuf),
 }
 
 /// The node the widget's current selection names, if any. A selection path is
@@ -165,12 +168,30 @@ fn run_tree_action(
     let result = match action {
         "exit_pane" => KeyAction::Exit,
         "toggle_focus" => {
+            // SwitchAgentTreeView: two views, so Tab and Shift+Tab are one flip.
+            if state.focus == Focus::Agents {
+                state.focus = state.browse_focus;
+            } else {
+                state.browse_focus = state.focus;
+                state.focus = Focus::Agents;
+            }
+            KeyAction::Continue
+        }
+        // SwitchAgentTreeBrowseFocus: tree <-> commits. Nothing to switch to in
+        // the agents view, so no usage is recorded there.
+        "switch_section" => {
             state.focus = match state.focus {
                 Focus::Tree => Focus::Commits,
-                Focus::Commits => Focus::Agents,
-                Focus::Agents => Focus::Tree,
+                Focus::Commits => Focus::Tree,
+                Focus::Agents => return None,
             };
+            state.browse_focus = state.focus;
             KeyAction::Continue
+        }
+        "open_in_editor" => {
+            let selected = state.tree_state.selected();
+            selected_node(root, selected)?;
+            KeyAction::OpenInEditor(selected.iter().collect())
         }
         // The all-files key. Unlike Space/Enter it does NOT dispatch on the
         // selection — it acts on the whole tree, whatever the cursor is on,

@@ -78,8 +78,9 @@ impl Notice {
 }
 
 /// Which of the pane's three sections the keys act on — the spec's
-/// `AgentTreeFocus`. Tab cycles it tree -> commits -> agents
-/// (`SwitchAgentTreeFocus`).
+/// `AgentTreeFocus`. Tab flips between the browse view (tree and commits) and
+/// the agents view (`SwitchAgentTreeView`); `s` moves between tree and commits
+/// (`SwitchAgentTreeBrowseFocus`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Focus {
     #[default]
@@ -146,6 +147,14 @@ pub struct RenderState {
     pub(super) viewport_rows: usize,
     /// Which section the keys act on. Starts on the tree.
     pub focus: Focus,
+    /// The browse section that had focus when the user flipped to the agents
+    /// view — where Tab flips back to. Always `Tree` or `Commits`.
+    pub browse_focus: Focus,
+    /// Whether the lower pane is running the editor rather than the diff
+    /// renderer (`pane.diff_pane_content = editor`). Written by the loop after
+    /// a successful tmux effect; a pane the user killed leaves it stale until
+    /// the next reconcile, which resets it.
+    pub lower_pane_editor: bool,
     /// The agents section beneath the tree, with its own cursor.
     pub agents: AgentsSection,
     /// The commits section between the tree and the agents section, with its
@@ -169,6 +178,8 @@ impl RenderState {
             pending_g: false,
             viewport_rows: 0,
             focus: Focus::Tree,
+            browse_focus: Focus::Tree,
+            lower_pane_editor: false,
             agents: AgentsSection::new(),
             commits: CommitsSection::new(),
             selected_commit: None,
