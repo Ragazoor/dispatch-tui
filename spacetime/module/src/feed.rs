@@ -109,7 +109,7 @@ pub struct FeedTaskUpsertItem {
 /// user (or an earlier, richer emission) already set.
 ///
 /// **Preserved on conflict:** status, sub_status, repo_path, base_branch,
-/// wrap_up_mode, completed_at — user-managed or store-owned fields a re-poll
+/// wrap_up_mode, model, completed_at — user-managed or store-owned fields a re-poll
 /// must not disturb. `status`/`sub_status` not moving is what makes a re-poll
 /// not a completion; `completed_at` not moving is a direct consequence — see
 /// [`write_task`]'s own stamp-on-insert logic, which this reuses for the

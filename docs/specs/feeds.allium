@@ -1407,7 +1407,10 @@ rule UpsertFeedTasks {
     --     insert-only, so a user's manual wrap-up choice survives — but note
     --     an item that drops out of an emission and later reappears is
     --     deleted and reinserted, taking the feed's wrap_up_mode again, the
-    --     same reappear-caveat as status/repo_path). url (and its url_type) are
+    --     same reappear-caveat as status/repo_path). model is not touched
+    --     either: a feed never sets it, so the user's choice survives a
+    --     re-poll, and a reinserted item starts on the default again.
+    --     url (and its url_type) are
     --     backfilled TOGETHER from item.url when the existing Task's url
     --     is null (COALESCE semantics), so feed tasks that pre-date the
     --     URL-on-insert behavior, or were inserted from a script revision
