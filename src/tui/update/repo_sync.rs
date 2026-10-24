@@ -52,6 +52,9 @@ impl App {
         if !state.has_drift() {
             return vec![];
         }
+        if self.repo_syncs_in_flight.contains(&state.repo_path) {
+            return self.refuse_sync_in_flight();
+        }
         let repo_path = state.repo_path.clone();
         let prompt = crate::tui::ui::repo_sync_prompt_text(state);
         self.input.mode = InputMode::ConfirmRepoSync { repo_path };
@@ -67,6 +70,7 @@ impl App {
         repo_path: String,
         outcome: SyncOutcome,
     ) -> Vec<Command> {
+        self.repo_syncs_in_flight.remove(&repo_path);
         let base = self
             .repo_sync
             .get(&repo_path)
@@ -91,10 +95,11 @@ impl App {
     /// not by a failed one.
     pub(in crate::tui) fn handle_repo_sync_failed(
         &mut self,
-        _repo_path: String,
+        repo_path: String,
         detail: String,
         retryable: bool,
     ) -> Vec<Command> {
+        self.repo_syncs_in_flight.remove(&repo_path);
         let msg = if retryable {
             format!("Repo sync failed: {detail}. Retrying the same action is the fix — try again.")
         } else {
@@ -107,6 +112,12 @@ impl App {
     /// Confirming the prompt syncs the repository (rule `AcceptRepoSyncPrompt`).
     /// The measurement is re-read here rather than captured when the prompt
     /// opened, so a refresh that landed meanwhile cannot be acted on stale.
+    ///
+    /// The repository is marked in flight until the sync reports back, and a
+    /// second confirmation meanwhile is refused (`OneSyncInFlightPerRepo`): two
+    /// runs on one checkout make the second's merge abort the first's. The
+    /// runtime's worker reports on every `Ok` and `Err`; only a panic inside it
+    /// would leave the mark set, until the board restarts.
     pub(in crate::tui) fn confirm_repo_sync(&mut self, repo_path: &str) -> Vec<Command> {
         let Some(state) = self.repo_sync.get(repo_path) else {
             return vec![];
@@ -114,9 +125,22 @@ impl App {
         if !state.has_drift() {
             return vec![];
         }
-        vec![Command::RepoSync(RepoSyncCommand::Sync {
+        if self.repo_syncs_in_flight.contains(&state.repo_path) {
+            return self.refuse_sync_in_flight();
+        }
+        let cmd = Command::RepoSync(RepoSyncCommand::Sync {
             repo_path: state.repo_path.clone(),
             base_branch: state.base_branch.clone(),
-        })]
+        });
+        self.repo_syncs_in_flight.insert(repo_path.to_string());
+        vec![cmd]
+    }
+
+    /// A sync of this repository is already running: say so in the status bar
+    /// (nothing needs deciding — that sync will report) and start nothing.
+    fn refuse_sync_in_flight(&mut self) -> Vec<Command> {
+        self.status
+            .set("A sync of this repository is already running".to_string());
+        vec![]
     }
 }

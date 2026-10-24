@@ -291,6 +291,11 @@ pub struct App {
     /// (docs/specs/repo-sync.allium: entity RepoSyncState). Purely in-memory:
     /// every refresh point re-establishes it, and nothing is persisted.
     pub(in crate::tui) repo_sync: crate::repo_sync::RepoSyncCache,
+    /// Repo paths with a board-confirmed sync that has not reported back
+    /// (docs/specs/repo-sync.allium: `sync_in_flight`, OneSyncInFlightPerRepo).
+    /// Kept apart from [`Self::repo_sync`] because a measurement replaces its
+    /// entry wholesale and would drop the mark.
+    pub(in crate::tui) repo_syncs_in_flight: HashSet<String>,
     /// Wall-clock of the last stale-learning cleanup sweep. `None` = never run.
     /// `handle_tick` emits `LearningCommand::ArchiveStale` at most once per
     /// [`STALE_CLEANUP_INTERVAL`] by consulting this. See
@@ -379,6 +384,7 @@ impl App {
             key_table: crate::keybindings::KEY_BINDINGS,
             broken_repo_paths: HashSet::new(),
             repo_sync: crate::repo_sync::RepoSyncCache::default(),
+            repo_syncs_in_flight: HashSet::new(),
             last_stale_cleanup_at: None,
             build_output_cleared: HashSet::new(),
             local_host_id: None,

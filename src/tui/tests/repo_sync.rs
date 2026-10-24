@@ -647,3 +647,93 @@ fn naming_the_repository_keeps_the_branch_and_the_counts() {
     assert!(text.contains("merge") && text.contains('1'), "got: {text}");
     assert!(text.contains("push") && text.contains('3'), "got: {text}");
 }
+
+// ---------------------------------------------------------------------------
+// OneSyncInFlightPerRepo (AcceptRepoSyncPrompt)
+// ---------------------------------------------------------------------------
+
+fn emits_sync(cmds: &[Command]) -> bool {
+    cmds.iter()
+        .any(|c| matches!(c, Command::RepoSync(RepoSyncCommand::Sync { .. })))
+}
+
+/// `[o]`, `y`: the first sync is now in flight and its drift still shows.
+fn app_with_a_sync_in_flight() -> App {
+    let mut app = app_with_measurement(drifted(3, 1));
+    app.handle_key(make_key(KeyCode::Char('o')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('y'))));
+    assert!(emits_sync(&cmds), "the first sync starts: {cmds:?}");
+    app
+}
+
+// rule-success.PromptRepoSync.sync_in_flight: [o] on a repo with a sync in
+// flight opens no prompt and says why in the status bar.
+#[test]
+fn o_refuses_a_second_sync_while_one_is_in_flight() {
+    let mut app = app_with_a_sync_in_flight();
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('o'))));
+    assert!(!emits_sync(&cmds), "got: {cmds:?}");
+    assert_eq!(app.mode(), &InputMode::Normal, "no second prompt opens");
+    let msg = app.status_message().expect("the refusal is reported");
+    assert!(msg.contains("already"), "got: {msg}");
+    assert!(app.error_popup().is_none(), "nothing needs deciding");
+}
+
+// rule-success.AcceptRepoSyncPrompt.sync_in_flight: a confirmation reached
+// while a sync is in flight starts no second run.
+#[test]
+fn confirming_refuses_a_second_sync_while_one_is_in_flight() {
+    let mut app = app_with_a_sync_in_flight();
+    let cmds = app.confirm_repo_sync(REPO);
+    assert!(!emits_sync(&cmds), "got: {cmds:?}");
+}
+
+// rule-success.RefreshRepoSyncStateAfterSync: the report clears the mark.
+#[test]
+fn a_completed_sync_allows_the_next_one() {
+    let mut app = app_with_a_sync_in_flight();
+    app.update(Message::RepoSync(RepoSyncMessage::Succeeded {
+        repo_path: REPO.to_string(),
+        outcome: SyncOutcome::Synced {
+            pulled: 1,
+            pushed: 4,
+        },
+    }));
+    app.handle_key(make_key(KeyCode::Char('o')));
+    assert!(
+        matches!(app.mode(), InputMode::ConfirmRepoSync { .. }),
+        "got: {:?}",
+        app.mode()
+    );
+}
+
+// rule-success.ReportRepoSyncFailure: a failure clears the mark too.
+#[test]
+fn a_failed_sync_allows_the_next_one() {
+    let mut app = app_with_a_sync_in_flight();
+    app.update(Message::RepoSync(RepoSyncMessage::Failed {
+        repo_path: REPO.to_string(),
+        detail: "Push rejected".to_string(),
+        retryable: true,
+    }));
+    app.status.error_popup = None;
+    app.handle_key(make_key(KeyCode::Char('o')));
+    assert!(
+        matches!(app.mode(), InputMode::ConfirmRepoSync { .. }),
+        "got: {:?}",
+        app.mode()
+    );
+}
+
+// The mark is per repository: another repo's sync does not block this one.
+#[test]
+fn a_sync_in_flight_elsewhere_does_not_block_this_repo() {
+    let mut app = app_with_measurement(drifted(3, 1));
+    app.repo_syncs_in_flight.insert("/other".to_string());
+    app.handle_key(make_key(KeyCode::Char('o')));
+    assert!(
+        matches!(app.mode(), InputMode::ConfirmRepoSync { .. }),
+        "got: {:?}",
+        app.mode()
+    );
+}

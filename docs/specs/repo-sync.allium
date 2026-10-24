@@ -261,6 +261,7 @@ entity RepoSyncState {
     base_branch: String      -- the repository's own default branch, as measured
     counts: AheadBehind?     -- null when origin/<base_branch> could not be measured at all
     last_fetch_error: String? -- message from the most recent failed fetch; null once a fetch succeeds
+    sync_in_flight: Boolean  -- a board-confirmed sync of this repository has started and not yet reported back; board-only (see OneSyncInFlightPerRepo)
 
     -- Whether the repository could be measured. An unmeasured repository is
     -- distinct from a clean one and must not be presented as clean.
@@ -408,6 +409,11 @@ rule RefreshRepoSyncStateAfterRebase {
 rule RefreshRepoSyncStateAfterSync {
     when: RepoSyncFinished(repo_path)
 
+    let state = RepoSyncState{repo_path: repo_path}
+
+    ensures:
+        if exists state:
+            state.sync_in_flight = false
     ensures: RefreshRepoSyncState(repo_path: repo_path, fetch_first: false)
 
     @guidance
@@ -516,6 +522,11 @@ rule SyncRepo {
 rule ReportRepoSyncFailure {
     when: RepoSyncFailed(repo_path, report)
 
+    let state = RepoSyncState{repo_path: repo_path}
+
+    ensures:
+        if exists state:
+            state.sync_in_flight = false
     ensures: RepoSyncFailureShown(
         repo_path: repo_path,
         failure: report.failure,
@@ -547,9 +558,10 @@ rule ReportRepoSyncFailure {
         -- every failure here needs a decision. Successful outcomes
         -- (RepoSynced, RepoAlreadyInSync) go to the status bar.
         --
-        -- No task or repository state is mutated. Every precondition failure and
-        -- every merge conflict — the merge is aborted — leaves the repository
-        -- exactly as the operation found it, so retrying once the cause is
+        -- No task or repository state is mutated beyond clearing the in-flight
+        -- mark. Every precondition failure, every merge conflict and every merge
+        -- that could not run to completion (killed at its timeout) — the merge
+        -- is aborted — leaves the repository exactly as the operation found it, so retrying once the cause is
         -- cleared is safe. The one exception is a failed push on a diverged
         -- repository (push_rejected, or `other` from the push step): the merge
         -- has already been committed locally and stays there. That is why
@@ -580,7 +592,11 @@ rule PromptRepoSync {
     requires: exists state
     requires: state.has_drift
 
-    ensures: RepoSyncPrompted(state: state)
+    ensures:
+        if state.sync_in_flight:
+            RepoSyncAlreadyRunning(repo_path: state.repo_path)
+        else:
+            RepoSyncPrompted(state: state)
 
     @guidance
         -- [o] for origin. It is the only unbound board-mode key with a clean
@@ -600,10 +616,32 @@ rule AcceptRepoSyncPrompt {
 
     requires: state.has_drift
 
-    ensures: SyncRepo(
-        repo_path: state.repo_path,
-        base_branch: state.base_branch
-    )
+    ensures:
+        if state.sync_in_flight:
+            RepoSyncAlreadyRunning(repo_path: state.repo_path)
+        else:
+            state.sync_in_flight = true
+            SyncRepo(
+                repo_path: state.repo_path,
+                base_branch: state.base_branch
+            )
+
+    @guidance
+        -- OneSyncInFlightPerRepo: a repository with a sync in flight refuses
+        -- another. The drift indicator stays lit until the first sync reports
+        -- back (the fetch alone can take the whole subprocess timeout), so
+        -- without the mark [o], y, [o], y starts a second run on the same
+        -- checkout. Its merge then fails on index.lock or MERGE_HEAD, and the
+        -- abort that follows aborts the first run's merge. Both the prompt and
+        -- the confirmation refuse, because a prompt can outlive the moment it
+        -- was opened. The refusal goes to the status bar: nothing needs
+        -- deciding, the sync already running will report.
+        --
+        -- The mark is cleared by the sync's own report, success
+        -- (RefreshRepoSyncStateAfterSync) or failure (ReportRepoSyncFailure).
+        -- It is board-local and in memory: `dispatch repo sync` from a shell
+        -- (SyncRepoViaCli) neither sets nor checks it, and that overlap is
+        -- accepted — the operator started both.
 }
 
 -- == CLI ==
