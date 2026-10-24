@@ -767,6 +767,13 @@ mod tests {
                 },
             ),
             (
+                "model",
+                UpdateTaskArgs {
+                    model: Some(Some(crate::models::TaskModel::Opus)),
+                    ..base_args()
+                },
+            ),
+            (
                 "auto_run_plan",
                 UpdateTaskArgs {
                     auto_run_plan: Some(true),
