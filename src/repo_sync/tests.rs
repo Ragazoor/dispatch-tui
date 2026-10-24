@@ -1239,18 +1239,24 @@ fn sync_repo_bounds_the_conflict_abort_path() {
 // Review 2026-10-23 A3/A4
 // ---------------------------------------------------------------------
 
+/// A diverged sync whose merge was killed at the timeout and left MERGE_HEAD,
+/// with `abort` as the response to `merge --abort`.
+fn killed_merge(abort: Result<Output>) -> MockProcessRunner {
+    MockProcessRunner::new(responses(vec![
+        MockProcessRunner::ok(),                          // fetch
+        MockProcessRunner::ok_with_stdout(b"3\t1\n"),     // rev-list: diverged
+        Err(anyhow::anyhow!("git timed out after 120s")), // merge, killed
+        MockProcessRunner::ok_with_stdout(b"abc123\n"),   // rev-parse MERGE_HEAD
+        abort,
+    ]))
+}
+
 // A merge killed at the timeout can leave MERGE_HEAD behind, and every later
 // sync would then report the checkout as dirty. The killed merge is aborted
 // before the failure is reported.
 #[test]
 fn sync_repo_aborts_a_merge_that_could_not_finish() {
-    let mock = MockProcessRunner::new(responses(vec![
-        MockProcessRunner::ok(),                          // fetch
-        MockProcessRunner::ok_with_stdout(b"3\t1\n"),     // rev-list: diverged
-        Err(anyhow::anyhow!("git timed out after 120s")), // merge, killed
-        MockProcessRunner::ok_with_stdout(b"abc123\n"),   // rev-parse MERGE_HEAD
-        MockProcessRunner::ok(),                          // merge --abort
-    ]));
+    let mock = killed_merge(MockProcessRunner::ok()); // merge --abort
     let err = sync_repo(REPO, BASE, &mock).unwrap_err();
     assert!(
         matches!(err, SyncError::Other(ref m) if m.contains("timed out")),
@@ -1279,5 +1285,18 @@ fn measure_repo_expands_the_tilde_for_the_default_branch_probe() {
         calls[0].1,
         argv(&["-C", &expanded, "symbolic-ref", "refs/remotes/origin/HEAD"]),
         "got: {calls:?}"
+    );
+}
+
+// The abort is best-effort; when it fails too, the report says the checkout
+// was left mid-merge rather than letting the next sync find it dirty unexplained.
+#[test]
+fn sync_repo_reports_a_killed_merge_it_could_not_abort() {
+    let mock = killed_merge(MockProcessRunner::fail("fatal: index.lock exists"));
+    let err = sync_repo(REPO, BASE, &mock).unwrap_err();
+    assert!(
+        matches!(err, SyncError::Other(ref m)
+            if m.contains("timed out") && m.contains("could not be aborted") && m.contains("index.lock")),
+        "got: {err}"
     );
 }

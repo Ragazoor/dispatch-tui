@@ -144,9 +144,7 @@ async fn read_data_dir_with(
     .await;
 
     // The CLI starts the real server as its child, so stop the whole group.
-    let _ = std::process::Command::new("kill")
-        .args(["-TERM", "--", &format!("-{group}")])
-        .status();
+    crate::process::kill_process_group(group, "TERM");
     result
 }
 

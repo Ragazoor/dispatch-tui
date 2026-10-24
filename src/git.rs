@@ -190,10 +190,12 @@ pub(crate) fn prune_worktrees(runner: &dyn ProcessRunner, repo: &str, timeout: D
 ///
 /// Falls back to `"main"` when the remote ref is missing or the command
 /// fails (no remote, fresh clone without `git remote set-head`, etc.).
+/// A leading `~` is expanded, as `crate::repo_sync`'s readers do, so a `~/x`
+/// caller does not silently get `main`.
 pub fn detect_default_branch(repo_path: &str, runner: &dyn ProcessRunner) -> String {
     if let Ok(output) = git_in(
         runner,
-        repo_path,
+        &crate::models::expand_tilde(repo_path),
         &["symbolic-ref", "refs/remotes/origin/HEAD"],
         SUBPROCESS_TIMEOUT,
     ) {

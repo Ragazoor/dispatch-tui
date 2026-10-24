@@ -657,6 +657,15 @@ fn emits_sync(cmds: &[Command]) -> bool {
         .any(|c| matches!(c, Command::RepoSync(RepoSyncCommand::Sync { .. })))
 }
 
+fn assert_prompt_opens(app: &mut App) {
+    app.handle_key(make_key(KeyCode::Char('o')));
+    assert!(
+        matches!(app.mode(), InputMode::ConfirmRepoSync { .. }),
+        "got: {:?}",
+        app.mode()
+    );
+}
+
 /// `[o]`, `y`: the first sync is now in flight and its drift still shows.
 fn app_with_a_sync_in_flight() -> App {
     let mut app = app_with_measurement(drifted(3, 1));
@@ -666,7 +675,7 @@ fn app_with_a_sync_in_flight() -> App {
     app
 }
 
-// rule-success.PromptRepoSync.sync_in_flight: [o] on a repo with a sync in
+// @guarantee OneSyncInFlightPerRepo / rule-success.PromptRepoSync.sync_in_flight: [o] on a repo with a sync in
 // flight opens no prompt and says why in the status bar.
 #[test]
 fn o_refuses_a_second_sync_while_one_is_in_flight() {
@@ -699,12 +708,7 @@ fn a_completed_sync_allows_the_next_one() {
             pushed: 4,
         },
     }));
-    app.handle_key(make_key(KeyCode::Char('o')));
-    assert!(
-        matches!(app.mode(), InputMode::ConfirmRepoSync { .. }),
-        "got: {:?}",
-        app.mode()
-    );
+    assert_prompt_opens(&mut app);
 }
 
 // rule-success.ReportRepoSyncFailure: a failure clears the mark too.
@@ -717,12 +721,7 @@ fn a_failed_sync_allows_the_next_one() {
         retryable: true,
     }));
     app.status.error_popup = None;
-    app.handle_key(make_key(KeyCode::Char('o')));
-    assert!(
-        matches!(app.mode(), InputMode::ConfirmRepoSync { .. }),
-        "got: {:?}",
-        app.mode()
-    );
+    assert_prompt_opens(&mut app);
 }
 
 // The mark is per repository: another repo's sync does not block this one.
@@ -730,10 +729,5 @@ fn a_failed_sync_allows_the_next_one() {
 fn a_sync_in_flight_elsewhere_does_not_block_this_repo() {
     let mut app = app_with_measurement(drifted(3, 1));
     app.repo_syncs_in_flight.insert("/other".to_string());
-    app.handle_key(make_key(KeyCode::Char('o')));
-    assert!(
-        matches!(app.mode(), InputMode::ConfirmRepoSync { .. }),
-        "got: {:?}",
-        app.mode()
-    );
+    assert_prompt_opens(&mut app);
 }

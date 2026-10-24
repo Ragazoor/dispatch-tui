@@ -133,31 +133,19 @@ const EXIT_POLL_STEP: Duration = Duration::from_millis(5);
 /// EOF already; it stays open only while a grandchild that outlived the child
 /// still holds it, and that grandchild must not stretch the call out to the
 /// whole deadline. What the child wrote before exiting is kept either way
-/// (see [`drain_shared`]).
+/// (see [`drain`]).
 const STDERR_GRACE: Duration = Duration::from_millis(100);
 
-/// Drain `pipe` to EOF on its own thread. The receiver yields the bytes once,
-/// which doubles as the signal that the child stopped writing to that stream.
+/// Drain `pipe` on its own thread into a buffer the caller can [`take`] at any
+/// time, not only at EOF. The receiver fires once, at EOF: the signal that the
+/// child stopped writing to that stream.
 ///
 /// A channel rather than a `JoinHandle`: the caller has to be able to give up on
-/// this at a deadline, and `join` cannot be bounded.
-fn drain(mut pipe: impl std::io::Read + Send + 'static) -> std::sync::mpsc::Receiver<Vec<u8>> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        pipe.read_to_end(&mut buf).ok();
-        let _ = tx.send(buf);
-    });
-    rx
-}
-
-/// Drain `pipe` on its own thread into a buffer the caller can read at any
-/// time, not only at EOF. The receiver fires once, at EOF.
-///
-/// For stderr: a grandchild that outlives the child can hold the pipe open
-/// long after the child exited, and what the child wrote before exiting must
-/// still reach the caller (`repo_sync::is_push_rejection` reads it).
-fn drain_shared(
+/// this at a deadline, and `join` cannot be bounded. A buffer readable before
+/// EOF because a grandchild that outlives the child can hold the pipe open long
+/// after the child exited, and what the child wrote before exiting must still
+/// reach the caller (`repo_sync::is_push_rejection` reads stderr).
+fn drain(
     mut pipe: impl std::io::Read + Send + 'static,
 ) -> (Arc<Mutex<Vec<u8>>>, std::sync::mpsc::Receiver<()>) {
     let buf = Arc::new(Mutex::new(Vec::new()));
@@ -179,13 +167,22 @@ fn drain_shared(
     (buf, rx)
 }
 
-/// Kill every process in the group `pgid` leads. [`run_bounded`] starts each
-/// child as the leader of its own group, so this reaches the children it
-/// spawned too (`git` → `ssh`). `libc` is not a dependency, so this shells out
-/// to `kill`, as `crate::feed::exec` does.
-fn kill_process_group(pgid: u32) {
+/// Everything [`drain`] has read into `buf` so far.
+fn take(buf: &Mutex<Vec<u8>>) -> Vec<u8> {
+    std::mem::take(
+        &mut *buf
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    )
+}
+
+/// Send `signal` (`"KILL"`, `"TERM"`) to every process in the group `pgid`
+/// leads, reaching the children a group leader spawned too (`git` → `ssh`).
+/// `libc` is not a dependency, so this shells out to `kill`; the async feed
+/// runner has its own twin (`crate::feed::exec`).
+pub(crate) fn kill_process_group(pgid: u32, signal: &str) {
     let _ = std::process::Command::new("kill")
-        .args(["-KILL", "--", &format!("-{pgid}")])
+        .args([&format!("-{signal}"), "--", &format!("-{pgid}")])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -196,7 +193,8 @@ fn kill_process_group(pgid: u32) {
 /// linger as an orphan or zombie, and describe the overrun. Output it had
 /// already produced is dropped with it — see [`run_bounded`].
 fn abandon(child: &mut std::process::Child, program: &str, timeout: Duration) -> anyhow::Error {
-    kill_process_group(child.id());
+    kill_process_group(child.id(), "KILL");
+    // Fallback for when `kill` itself could not be run.
     let _ = child.kill();
     let _ = child.wait();
     anyhow::anyhow!("{program} timed out after {timeout:?}")
@@ -294,17 +292,18 @@ pub(crate) fn run_bounded(
     }
 
     #[allow(clippy::expect_used)] // invariant: we set Stdio::piped() above
-    let stdout_rx = drain(child.stdout.take().expect("stdout is piped"));
+    let (stdout_buf, stdout_eof) = drain(child.stdout.take().expect("stdout is piped"));
     #[allow(clippy::expect_used)] // invariant: we set Stdio::piped() above
-    let (stderr_buf, stderr_eof) = drain_shared(child.stderr.take().expect("stderr is piped"));
+    let (stderr_buf, stderr_eof) = drain(child.stderr.take().expect("stderr is piped"));
 
     let deadline = std::time::Instant::now() + timeout;
     let remaining = || deadline.saturating_duration_since(std::time::Instant::now());
 
     // Wait for the child to stop producing output. One wakeup, at EOF.
-    let Ok(stdout) = stdout_rx.recv_timeout(remaining()) else {
+    if stdout_eof.recv_timeout(remaining()).is_err() {
         return Err(abandon(&mut child, program, timeout));
-    };
+    }
+    let stdout = take(&stdout_buf);
 
     // Then for it to exit, on the same deadline (hazard 1).
     let status = loop {
@@ -325,11 +324,7 @@ pub(crate) fn run_bounded(
     // grandchild holding the pipe. That case gets a short grace, not the rest
     // of the deadline, and keeps whatever the child wrote.
     let _ = stderr_eof.recv_timeout(STDERR_GRACE.min(remaining()));
-    let stderr = std::mem::take(
-        &mut *stderr_buf
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
-    );
+    let stderr = take(&stderr_buf);
     Ok(Output {
         status,
         stdout,

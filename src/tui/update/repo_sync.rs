@@ -128,12 +128,12 @@ impl App {
         if self.repo_syncs_in_flight.contains(&state.repo_path) {
             return self.refuse_sync_in_flight();
         }
-        let cmd = Command::RepoSync(RepoSyncCommand::Sync {
-            repo_path: state.repo_path.clone(),
-            base_branch: state.base_branch.clone(),
-        });
-        self.repo_syncs_in_flight.insert(repo_path.to_string());
-        vec![cmd]
+        let (repo_path, base_branch) = (state.repo_path.clone(), state.base_branch.clone());
+        self.repo_syncs_in_flight.insert(repo_path.clone());
+        vec![Command::RepoSync(RepoSyncCommand::Sync {
+            repo_path,
+            base_branch,
+        })]
     }
 
     /// A sync of this repository is already running: say so in the status bar

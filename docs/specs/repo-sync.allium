@@ -837,6 +837,14 @@ surface RepoSyncConfirmation {
         -- apart. A bare basename is explicitly not enough: two checkouts of the
         -- same repository under different parents share it.
 
+    @guarantee OneSyncInFlightPerRepo
+        -- While a sync of this repository is in flight (state.sync_in_flight),
+        -- neither [o] nor confirming starts another: no prompt opens, nothing
+        -- is fetched, merged or pushed, and the status bar says a sync of this
+        -- repository is already running. The error popup is not used — nothing
+        -- needs deciding, the running sync will report. See
+        -- AcceptRepoSyncPrompt for why.
+
     @guarantee NoSyncWithoutConfirmation
         -- Nothing is fetched, merged or pushed until the prompt is confirmed.
         -- Dismissing it leaves the repository untouched.
