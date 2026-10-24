@@ -714,12 +714,8 @@ impl App {
                 let KeyCode::Char(c) = key.code else {
                     return vec![];
                 };
-                let model = match c {
-                    'h' => TaskModel::Haiku,
-                    's' => TaskModel::Sonnet,
-                    'o' => TaskModel::Opus,
-                    'f' => TaskModel::Fable,
-                    _ => return vec![],
+                let Some(model) = TaskModel::for_key(c) else {
+                    return vec![];
                 };
                 self.dispatch_keyed(
                     Message::Input(InputMessage::SubmitModel(Some(model))),

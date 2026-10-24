@@ -191,7 +191,10 @@ fn model_step_ignores_other_keys_and_esc_cancels() {
 #[test]
 fn model_prompt_names_what_enter_picks() {
     use crate::models::TaskModel;
-    assert!(crate::tui::ui::model_prompt(None).ends_with("[Enter] sonnet"));
+    assert_eq!(
+        crate::tui::ui::model_prompt(None),
+        "Model: [h]aiku  [s]onnet  [o]pus  [f]able  [Enter] sonnet"
+    );
     assert!(crate::tui::ui::model_prompt(Some(TaskModel::Fable)).ends_with("[Enter] fable"));
 }
 

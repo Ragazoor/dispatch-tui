@@ -442,8 +442,17 @@ pub(in crate::tui) fn input_wrap_up_mode_lines(
 /// on entering the step (CreateTask: ModelPicker). `[Enter]` names the model
 /// Enter keeps: the draft's own (a copy's), else the default.
 pub(in crate::tui) fn model_prompt(draft_model: Option<TaskModel>) -> String {
+    // Each key is its alias's first letter (TaskModel::for_key).
+    let keys: Vec<String> = TaskModel::ALL
+        .iter()
+        .map(|m| {
+            let (key, rest) = m.as_str().split_at(1);
+            format!("[{key}]{rest}")
+        })
+        .collect();
     format!(
-        "Model: [h]aiku  [s]onnet  [o]pus  [f]able  [Enter] {}",
+        "Model: {}  [Enter] {}",
+        keys.join("  "),
         draft_model.unwrap_or(TaskModel::DEFAULT)
     )
 }

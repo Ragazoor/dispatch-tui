@@ -441,7 +441,10 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
         s.remove("MODEL").unwrap_or_default(),
         "MODEL",
         crate::models::TaskModel::parse,
-        |raw| format!("unknown model: {raw:?} (valid: haiku, sonnet, opus, fable)"),
+        |raw| {
+            let valid = crate::models::TaskModel::valid_list();
+            format!("unknown model: {raw:?} (valid: {valid})")
+        },
         &mut errors,
     );
 

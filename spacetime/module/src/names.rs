@@ -106,13 +106,11 @@ mod tests {
     #[test]
     fn with_every_word_taken_a_number_is_appended() {
         let base = WORDS[5];
-        let all: std::collections::HashSet<String> = WORDS.iter().map(|w| w.to_string()).collect();
+        let all: std::collections::HashSet<String> =
+            WORDS.iter().map(|w| w.to_string()).collect();
         assert_eq!(pick_word(WORDS, 5, |w| all.contains(w)), format!("{base}2"));
         let mut more = all.clone();
         more.insert(format!("{base}2"));
-        assert_eq!(
-            pick_word(WORDS, 5, |w| more.contains(w)),
-            format!("{base}3")
-        );
+        assert_eq!(pick_word(WORDS, 5, |w| more.contains(w)), format!("{base}3"));
     }
 }

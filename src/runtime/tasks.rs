@@ -1118,11 +1118,12 @@ impl TuiRuntime {
         };
         // Read at resume, not at dispatch: a model changed while the agent was
         // stopped takes effect here (`tasks.allium: SetModel`).
-        let model = self
-            .database
-            .get_task(id)
-            .await
-            .map_or(models::TaskModel::DEFAULT, |t| t.launch_model());
+        let Some(model) = self.database.get_task(id).await.map(|t| t.launch_model()) else {
+            let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                format!("Resume failed: task {id} not found"),
+            )));
+            return;
+        };
         let worktree_path = worktree.unwrap_or_default();
         let runner = self.runner.clone();
 
