@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 #[cfg(any(test, feature = "test-support"))]
 use std::collections::VecDeque;
 use std::process::Output;
-#[cfg(any(test, feature = "test-support"))]
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -130,6 +129,13 @@ pub(crate) fn shell_quote(s: &str) -> String {
 /// paces the pathological case it exists for.
 const EXIT_POLL_STEP: Duration = Duration::from_millis(5);
 
+/// How long stderr is waited on once the child has exited. Normally it is at
+/// EOF already; it stays open only while a grandchild that outlived the child
+/// still holds it, and that grandchild must not stretch the call out to the
+/// whole deadline. What the child wrote before exiting is kept either way
+/// (see [`drain_shared`]).
+const STDERR_GRACE: Duration = Duration::from_millis(100);
+
 /// Drain `pipe` to EOF on its own thread. The receiver yields the bytes once,
 /// which doubles as the signal that the child stopped writing to that stream.
 ///
@@ -145,10 +151,52 @@ fn drain(mut pipe: impl std::io::Read + Send + 'static) -> std::sync::mpsc::Rece
     rx
 }
 
-/// Give up on `child`: kill it, reap it so it cannot linger as an orphan or
-/// zombie, and describe the overrun. Output it had already produced is dropped
-/// with it — see [`run_bounded`].
+/// Drain `pipe` on its own thread into a buffer the caller can read at any
+/// time, not only at EOF. The receiver fires once, at EOF.
+///
+/// For stderr: a grandchild that outlives the child can hold the pipe open
+/// long after the child exited, and what the child wrote before exiting must
+/// still reach the caller (`repo_sync::is_push_rejection` reads it).
+fn drain_shared(
+    mut pipe: impl std::io::Read + Send + 'static,
+) -> (Arc<Mutex<Vec<u8>>>, std::sync::mpsc::Receiver<()>) {
+    let buf = Arc::new(Mutex::new(Vec::new()));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let sink = Arc::clone(&buf);
+    std::thread::spawn(move || {
+        let mut chunk = [0u8; 8192];
+        loop {
+            match pipe.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => sink
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .extend_from_slice(&chunk[..n]),
+            }
+        }
+        let _ = tx.send(());
+    });
+    (buf, rx)
+}
+
+/// Kill every process in the group `pgid` leads. [`run_bounded`] starts each
+/// child as the leader of its own group, so this reaches the children it
+/// spawned too (`git` → `ssh`). `libc` is not a dependency, so this shells out
+/// to `kill`, as `crate::feed::exec` does.
+fn kill_process_group(pgid: u32) {
+    let _ = std::process::Command::new("kill")
+        .args(["-KILL", "--", &format!("-{pgid}")])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+/// Give up on `child`: kill it and its process group, reap it so it cannot
+/// linger as an orphan or zombie, and describe the overrun. Output it had
+/// already produced is dropped with it — see [`run_bounded`].
 fn abandon(child: &mut std::process::Child, program: &str, timeout: Duration) -> anyhow::Error {
+    kill_process_group(child.id());
     let _ = child.kill();
     let _ = child.wait();
     anyhow::anyhow!("{program} timed out after {timeout:?}")
@@ -199,6 +247,13 @@ fn abandon(child: &mut std::process::Child, program: &str, timeout: Duration) ->
 /// With `stdin` absent the child's stdin is `/dev/null`, never inherited: the
 /// board's own stdin is the operator's terminal, and a child that reads it
 /// competes with the board for keystrokes (a verify run's test once did).
+///
+/// The child runs in its **own process group**, and an overrun kills the whole
+/// group. A child that spawns children of its own (`git fetch` over ssh or
+/// https) would otherwise leave them running past the deadline, holding the
+/// output pipes and the drain threads with them. The cost: the child no longer
+/// shares the terminal's foreground group, so Ctrl-C at the terminal does not
+/// reach it; it runs to its own exit or deadline.
 pub(crate) fn run_bounded(
     program: &str,
     args: &[&str],
@@ -212,6 +267,8 @@ pub(crate) fn run_bounded(
         .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    // Its own group, so `abandon` can kill its children with it.
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
     // Never the caller's stdin: the board's is the operator's terminal, and a
     // child that reads it (a test reaching an interactive prompt) blocks and
     // takes keystrokes from the board.
@@ -239,7 +296,7 @@ pub(crate) fn run_bounded(
     #[allow(clippy::expect_used)] // invariant: we set Stdio::piped() above
     let stdout_rx = drain(child.stdout.take().expect("stdout is piped"));
     #[allow(clippy::expect_used)] // invariant: we set Stdio::piped() above
-    let stderr_rx = drain(child.stderr.take().expect("stderr is piped"));
+    let (stderr_buf, stderr_eof) = drain_shared(child.stderr.take().expect("stderr is piped"));
 
     let deadline = std::time::Instant::now() + timeout;
     let remaining = || deadline.saturating_duration_since(std::time::Instant::now());
@@ -265,9 +322,14 @@ pub(crate) fn run_bounded(
     };
 
     // The child has exited, so stderr is at EOF too in every case but a
-    // grandchild holding the pipe — which the deadline covers rather than
-    // waiting out.
-    let stderr = stderr_rx.recv_timeout(remaining()).unwrap_or_default();
+    // grandchild holding the pipe. That case gets a short grace, not the rest
+    // of the deadline, and keeps whatever the child wrote.
+    let _ = stderr_eof.recv_timeout(STDERR_GRACE.min(remaining()));
+    let stderr = std::mem::take(
+        &mut *stderr_buf
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
     Ok(Output {
         status,
         stdout,

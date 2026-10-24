@@ -413,6 +413,66 @@ fn run_bounded_discards_output_from_a_child_that_then_overruns() {
     );
 }
 
+/// A child abandoned at the deadline takes its own children with it. `git
+/// fetch` over ssh is the case: killing git alone leaves `ssh` running, holding
+/// the output pipes, with a drain thread pair blocked on it.
+///
+/// The grandchild alone holds a FIFO open for writing, so EOF on our read end
+/// is its death signal — no wall-clock polling of `/proc`.
+#[test]
+fn run_bounded_kills_the_childs_process_group_at_the_deadline() {
+    let dir = tempfile::tempdir().unwrap();
+    let fifo = dir.path().join("grandchild");
+    let made = std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap();
+    assert!(made.success());
+
+    // Opening the read end blocks until the grandchild opens the write end.
+    let (dead_tx, dead_rx) = std::sync::mpsc::channel();
+    let reader_path = fifo.clone();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut f = std::fs::File::open(reader_path).unwrap();
+        let mut sink = Vec::new();
+        let _ = f.read_to_end(&mut sink);
+        let _ = dead_tx.send(());
+    });
+
+    let script = format!("sleep 30 > '{}' & wait", fifo.display());
+    let result = run_bounded("sh", &["-c", &script], None, Duration::from_millis(100));
+    assert!(result.is_err(), "expected a timeout error, got {result:?}");
+
+    dead_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the grandchild must die with the child at the deadline");
+}
+
+/// Once the child has exited, a grandchild still holding stderr must not
+/// stretch the call out to the whole deadline, nor cost the stderr the child
+/// wrote: `repo_sync::is_push_rejection` reads it.
+#[test]
+fn run_bounded_returns_promptly_with_stderr_when_a_grandchild_holds_the_pipe() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = run_bounded(
+            "sh",
+            &["-c", "echo oops >&2; sleep 30 >/dev/null & exit 3"],
+            None,
+            Duration::from_secs(60),
+        );
+        let _ = tx.send(result);
+    });
+
+    let out = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("an exited child must not wait out the deadline for stderr")
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3));
+    assert_eq!(String::from_utf8_lossy(&out.stderr).trim(), "oops");
+}
+
 // --- MockProcessRunner::run_with_timeout ---
 
 #[test]
