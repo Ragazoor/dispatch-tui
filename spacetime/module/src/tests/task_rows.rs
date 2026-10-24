@@ -264,6 +264,7 @@ fn every_field_of_a_task_patch_reaches_the_row() {
         owner: Some(MARK.into()),
         completed_at: Some(MARK.into()),
         schedule: Some("0 9 * * 1".into()),
+        model: Some(MARK.into()),
     };
     let session = patch.clone();
     apply_task_patch(&mut row, patch);
@@ -294,6 +295,7 @@ fn every_field_of_a_task_patch_reaches_the_row() {
     assert_eq!(row.epic_id, 9);
     assert_eq!(row.sub_status, MARK);
     assert_eq!(row.tag, MARK);
+    assert_eq!(row.model, MARK);
     assert_eq!(row.sort_order, Some(3));
     assert_eq!(row.base_branch, MARK);
     assert_eq!(row.external_id, MARK);

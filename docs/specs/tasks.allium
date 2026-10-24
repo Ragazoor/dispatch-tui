@@ -35,7 +35,7 @@ given {
 -- == Task Creation ==
 
 rule CreateTask {
-    when: CreateTask(title, description, repo_path, plan?, epic?, tag?, sort_order?, base_branch?, wrap_up_mode?, auto_run_plan?, phoenix?)
+    when: CreateTask(title, description, repo_path, plan?, epic?, tag?, sort_order?, base_branch?, wrap_up_mode?, model?, auto_run_plan?, phoenix?)
 
     ensures: core/Task.created(
         title: title,
@@ -49,6 +49,7 @@ rule CreateTask {
         sort_order: sort_order,
         base_branch: base_branch ?? detect_default_branch(repo_path),
         wrap_up_mode: wrap_up_mode,
+        model: model,
         auto_run_plan: auto_run_plan ?? false,
         phoenix: phoenix ?? false,
         created_at: now,
@@ -116,13 +117,14 @@ rule CreateTask {
         --
         -- There is NO separate phoenix step. The form's steps are, in order:
         -- InputTitle -> InputTag -> InputDescription -> InputRepoPath ->
-        -- InputBaseBranch -> InputWrapUpMode -> created. phoenix is decided at
+        -- InputBaseBranch -> InputWrapUpMode -> InputModel -> created. phoenix is decided at
         -- InputTag, before the fields that follow it, and the ordinary
         -- non-phoenix task costs no keypress at all for the flag: not pressing
         -- p IS declining it.
         --
         -- SettledLinesStayOneRow. Every settled line the form restates above
-        -- the active field (Title, Tag, Description, Repo path, Base branch)
+        -- the active field (Title, Tag, Description, Repo path, Base branch,
+        -- Wrap-up)
         -- occupies exactly ONE terminal row. A value wider than the row is
         -- clipped with a trailing "…" so the label stays visible and the
         -- active field and the repo / branch picker beneath it keep their
@@ -154,9 +156,27 @@ rule CreateTask {
         -- repo did not have, and nothing noticed until `git worktree add`
         -- rejected the ref.
         -- wrap_up_mode is set during the TUI creation form (InputWrapUpMode
-        -- step, after InputBaseBranch, and now the form's last step) or via
-        -- the MCP create_task tool. When null, the wrap-up path is decided at
-        -- wrap-up time. Answering it finishes the form and creates the task.
+        -- step, after InputBaseBranch) or via the MCP create_task tool. When
+        -- null, the wrap-up path is decided at wrap-up time. Answering it
+        -- moves the form on to InputModel.
+        --
+        -- ModelPicker. model is set at the InputModel step, the form's last
+        -- step, or via the MCP create_task tool. InputModel is a
+        -- single-keypress picker like InputTag: h -> haiku, s -> sonnet,
+        -- o -> opus, f -> fable (EveryKeyInItsName: each key is the first
+        -- letter of the alias it picks). Enter means "no explicit pick" and
+        -- keeps the draft (EnterKeepsTheDraft), so for the manual form,
+        -- whose draft holds null, Enter leaves model null — which launches on
+        -- sonnet (core/TaskModel). Esc cancels creation. Any other key is
+        -- silently ignored. Answering it finishes the form and creates the
+        -- task.
+        --
+        -- The prompt says what Enter means — "[Enter] sonnet" — because a null
+        -- model is not "undecided" the way a null wrap_up_mode is: it is a
+        -- concrete model the agent will run on. Like InputTag's, the prompt
+        -- is ONE value that the transient status message, the form hint and
+        -- the status-bar hint all derive their text from. A draft seeded by
+        -- CopyTask with a model shows that model as Enter's meaning instead.
         --
         -- phoenix is set at the InputTag step as described above, or via the
         -- MCP create_task tool. It defaults to false.
@@ -177,6 +197,23 @@ rule CreateTask {
         -- When epic is a grouped root (group_by_repo = true), the task is
         -- routed to the matching per-repo sub-epic via route_target, using
         -- task.repo_path as the routing key.
+}
+
+rule SetModel {
+    when: SetModel(task, model?)
+
+    ensures: task.model = model
+    ensures: task.updated_at = now
+
+    @guidance
+        -- Sets or clears the model an existing task's agent launches on.
+        -- Exposed via MCP update_tasks(model: "haiku"|"sonnet"|"opus"|"fable"|null)
+        -- and the task editor (MODEL section). model = null clears it, and the
+        -- task launches on sonnet again (core/TaskModel).
+        -- No status precondition, like SetWrapUpMode. The change reaches the
+        -- agent at its next launch: a running agent keeps the model it was
+        -- launched on, and a resume (dispatch.allium: ResumeTask) or a
+        -- re-dispatch picks up the new one.
 }
 
 rule SetWrapUpMode {
@@ -549,6 +586,7 @@ rule PhoenixRespawn {
                 labels: task.labels,
                 base_branch: task.base_branch,
                 wrap_up_mode: task.wrap_up_mode,
+                model: task.model,
                 phoenix: true,
                 -- schedules.allium (S3-S5): the schedule repeats with the
                 -- flag, due next at its first match after this respawn.
@@ -611,8 +649,8 @@ rule PhoenixRespawn {
         -- nothing the previous run produced. Carried across: title (verbatim,
         -- with no "Copy of:" prefix and no run counter — the predecessor sits in
         -- done and the successor in backlog, so the columns disambiguate them),
-        -- description, repo_path, tag, labels, base_branch, wrap_up_mode, epic,
-        -- plan_path and auto_run_plan.
+        -- description, repo_path, tag, labels, base_branch, wrap_up_mode,
+        -- model, epic, plan_path and auto_run_plan.
         --
         -- Deliberately NOT carried: worktree, tmux_window and url, which belong
         -- to the run that just finished; external_id, which the precondition
@@ -1847,13 +1885,15 @@ rule CopyTask {
         tag: confirmed_tag,              -- source.tag seeds it; user re-confirms
         phoenix: armed_phoenix,          -- false unless armed at InputTag
         wrap_up_mode: source.wrap_up_mode,
+        model: confirmed_model,          -- source.model seeds it; user re-confirms
         created_at: now,
         updated_at: now
     )
 
     @guidance
         -- Copies a subset of fields from the source task, including the tag and
-        -- the wrap_up_mode preference. Fields that are NOT copied: plan,
+        -- the wrap_up_mode preference and the model. Fields that are NOT
+        -- copied: plan,
         -- worktree, tmux_window, url, epic, sort_order, base_branch, phoenix.
         -- auto_run_plan is NOT copied — like plan_path, it's tied to a
         -- specific (unshared) plan file, and this field is set by skills
@@ -1873,7 +1913,8 @@ rule CopyTask {
         --
         -- The copy flow runs the manual creation form's steps from InputTag on,
         -- skipping only InputTitle and InputDescription (both copied outright):
-        -- InputTag -> InputRepoPath -> InputBaseBranch -> InputWrapUpMode. It
+        -- InputTag -> InputRepoPath -> InputBaseBranch -> InputWrapUpMode ->
+        -- InputModel. It
         -- runs InputTag rather than accepting the copied tag silently because
         -- that step is where phoenix is armed (CreateTask: PhoenixArming), and
         -- a copy that could never become a phoenix would be the only flow with
@@ -1893,7 +1934,8 @@ rule CopyTask {
         -- prompt that follows keeps it: Enter there means "no explicit pick",
         -- not "no preference", so only an explicit r/p/d replaces the copied
         -- value (CreateTask: EnterKeepsTheDraft — the tag step follows the
-        -- same rule, for the same reason).
+        -- same rule, for the same reason). The source's model seeds the draft
+        -- the same way, and InputModel's Enter keeps it.
 }
 
 -- == Editor ==
@@ -1907,14 +1949,15 @@ rule EditTask {
     -- run with no shell, so `EDITOR="vim -p"` works) — with a
     -- structured file containing the task's
     -- title, description, repo_path, status, plan, tag, base_branch,
-    -- wrap_up_mode, phoenix, url and url_type.
+    -- wrap_up_mode, model, phoenix, url and url_type.
     -- The sections are delimited by `--- SECTION ---` markers
     -- (TITLE, DESCRIPTION, REPO_PATH, STATUS, PLAN, TAG, BASE_BRANCH,
-    -- WRAP_UP_MODE, PHOENIX, URL, URL_TYPE).
+    -- WRAP_UP_MODE, MODEL, PHOENIX, URL, URL_TYPE).
     -- The user edits the file; on save, fields are parsed back.
     -- Empty title/description/repo_path retain their previous values.
     -- Empty plan or tag clears the field. Empty base_branch retains the
-    -- previous value. Empty wrap_up_mode clears the preference.
+    -- previous value. Empty wrap_up_mode clears the preference. Empty model
+    -- clears it, so the task launches on sonnet again.
     -- PHOENIX joins the enum-ish sections under the same one parse rule: it
     -- accepts a boolean spelled any of true/false, yes/no, on/off or 1/0,
     -- case-insensitively, and an empty or unparseable section yields no value —
@@ -1924,14 +1967,14 @@ rule EditTask {
     -- cleared recurrence, something a human has to work at. As with the other
     -- enum-ish sections, unparseable input additionally records a parse error
     -- and the edit still applies.
-    -- The enum-ish sections (STATUS, TAG, WRAP_UP_MODE, URL_TYPE) all share
+    -- The enum-ish sections (STATUS, TAG, WRAP_UP_MODE, MODEL, URL_TYPE) all share
     -- one parse rule: an empty section and an unparseable section are
     -- treated identically — the section yields no value. Unparseable input
     -- additionally records a parse error, and all accumulated errors are
     -- surfaced together as a status message ("Edit accepted with parse
     -- errors — ..."); the edit is still applied. What "no value" means is
-    -- per-field: STATUS retains the previous status, TAG and WRAP_UP_MODE
-    -- clear the field, and URL_TYPE falls back as described below.
+    -- per-field: STATUS retains the previous status, TAG, WRAP_UP_MODE and
+    -- MODEL clear the field, and URL_TYPE falls back as described below.
     --
     -- url is computed from the URL and URL_TYPE sections, then diffed
     -- against the task's prior url; the field is only touched when it
@@ -1983,6 +2026,7 @@ rule EditTask {
         else: task.tag = null
         if edited.base_branch != "": task.base_branch = edited.base_branch
         task.wrap_up_mode = edited.wrap_up_mode
+        task.model = edited.model
         task.phoenix = edited.phoenix ?? false
         -- url updated from the URL/URL_TYPE sections per the semantics
         -- in the comment above; left untouched when unchanged.

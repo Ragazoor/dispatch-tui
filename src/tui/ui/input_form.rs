@@ -1,4 +1,4 @@
-use crate::models::TaskId;
+use crate::models::{TaskId, TaskModel};
 use crate::palette::{CYAN, MUTED, RED};
 use crate::tui::{App, InputState};
 use ratatui::{
@@ -385,13 +385,11 @@ pub(in crate::tui) fn input_base_branch_lines<'a>(
     lines
 }
 
-/// The four steps answered before the wrap-up picker, restated above it.
+/// The four steps answered before the wrap-up picker, restated above it and,
+/// with the wrap-up answer added, above the model picker.
 ///
-/// Still split out rather than inlined into its one caller: it is the shape a
-/// step added after wrap-up would build on, the same way the (now removed)
-/// standalone phoenix step did. The sibling step renderers above build their
-/// settled lines inline instead — none of them has a step after it that needs
-/// to restate their answers.
+/// Split out because both tail steps restate them. The sibling step renderers
+/// above build their settled lines inline instead.
 fn answered_step_lines(app: &App, area: Rect, completed: Style) -> Vec<Line<'static>> {
     let summary = DraftSummary::from_input(&app.input);
     let draft = app.input.task_draft.as_ref();
@@ -411,9 +409,8 @@ fn answered_step_lines(app: &App, area: Rect, completed: Style) -> Vec<Line<'sta
 ///
 /// A tail step is settled summaries, one active line, then this footer.
 /// `active` is the part that differs per step — a styled span for a
-/// single-key picker, a [`caret_field`] for a free-text one. The wrap-up
-/// picker, the form's last step, uses it today; it is the shape a step added
-/// after it would take.
+/// single-key picker, a [`caret_field`] for a free-text one. The wrap-up and
+/// model pickers use it.
 fn form_step_page<'a>(mut settled: Vec<Line<'a>>, active: Line<'a>, hint: Style) -> Vec<Line<'a>> {
     settled.push(active);
     settled.push(Line::from(""));
@@ -421,10 +418,10 @@ fn form_step_page<'a>(mut settled: Vec<Line<'a>>, active: Line<'a>, hint: Style)
     settled
 }
 
-/// The form's last step (see docs/specs/tasks.allium's CreateTask guidance):
+/// The wrap-up step (see docs/specs/tasks.allium's CreateTask guidance):
 /// restates the four answered steps — with phoenix riding the settled tag line
-/// when it was armed at InputTag — then the wrap-up picker. Answering it
-/// creates the task.
+/// when it was armed at InputTag — then the wrap-up picker. Answering it opens
+/// the model step.
 pub(in crate::tui) fn input_wrap_up_mode_lines(
     app: &App,
     area: Rect,
@@ -434,6 +431,50 @@ pub(in crate::tui) fn input_wrap_up_mode_lines(
         answered_step_lines(app, area, styles.completed),
         Line::from(Span::styled(
             "  Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip",
+            styles.active,
+        )),
+        styles.hint,
+    )
+}
+
+/// The model step's prompt, shared by all three surfaces that show it: the
+/// form panel's active line, the status-bar hint and the transient status set
+/// on entering the step (CreateTask: ModelPicker). `[Enter]` names the model
+/// Enter keeps: the draft's own (a copy's), else the default.
+pub(in crate::tui) fn model_prompt(draft_model: Option<TaskModel>) -> String {
+    format!(
+        "Model: [h]aiku  [s]onnet  [o]pus  [f]able  [Enter] {}",
+        draft_model.unwrap_or(TaskModel::DEFAULT)
+    )
+}
+
+/// The `Line` count [`input_model_lines`] returns: 5 settled (title, tag,
+/// repo, base branch, wrap-up) + active + blank + hint. `input_panel_height`
+/// reserves rows from it.
+pub(in crate::tui) const MODEL_STEP_LINES: u16 = 8;
+
+/// The form's last step: the wrap-up step's settled lines plus its answer,
+/// then the model picker. Answering it creates the task.
+pub(in crate::tui) fn input_model_lines(
+    app: &App,
+    area: Rect,
+    styles: &FormStyles,
+) -> Vec<Line<'static>> {
+    let draft = app.input.task_draft.as_ref();
+    let wrap_up = draft
+        .and_then(|d| d.wrap_up_mode)
+        .map_or_else(|| "decide at wrap-up".to_string(), |m| m.to_string());
+    let mut settled = answered_step_lines(app, area, styles.completed);
+    settled.push(settled_line(
+        "  Wrap-up: ",
+        &wrap_up,
+        area,
+        styles.completed,
+    ));
+    form_step_page(
+        settled,
+        Line::from(Span::styled(
+            format!("  {}", model_prompt(draft.and_then(|d| d.model))),
             styles.active,
         )),
         styles.hint,

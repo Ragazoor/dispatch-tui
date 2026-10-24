@@ -227,7 +227,14 @@ fn no_task_agent_passes_a_permission_mode_flag() {
             let (_dir, worktree_path) = make_test_repo();
             let script = DispatchScript::resume();
             let mock = script.runner();
-            resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
+            resume_agent(
+                TaskId(42),
+                "atlas",
+                crate::models::TaskModel::DEFAULT,
+                &worktree_path,
+                &mock,
+            )
+            .unwrap();
             find_call_arg(
                 &mock.recorded_calls(),
                 script.index_of(Step::SendKeysLiteral),

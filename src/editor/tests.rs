@@ -152,6 +152,7 @@ fn format_editor_content_maps_each_field_to_its_own_section() {
     task.tag = Some(crate::models::TaskTag::Bug);
     task.base_branch = "field-base-branch".into();
     task.wrap_up_mode = Some(crate::models::WrapUpMode::Pr);
+    task.model = Some(crate::models::TaskModel::Haiku);
     task.url = Some(crate::models::TaskUrl::new(
         "field-url",
         crate::models::UrlType::Issue,
@@ -180,6 +181,7 @@ fn format_editor_content_maps_each_field_to_its_own_section() {
         Some("field-base-branch")
     );
     assert_eq!(sections.get("WRAP_UP_MODE").map(String::as_str), Some("pr"));
+    assert_eq!(sections.get("MODEL").map(String::as_str), Some("haiku"));
     assert_eq!(sections.get("URL").map(String::as_str), Some("field-url"));
     assert_eq!(sections.get("URL_TYPE").map(String::as_str), Some("issue"));
 }
@@ -398,6 +400,62 @@ fn apply_task_editor_wrap_up_mode_clear() {
         applied.wrap_up_mode, None,
         "empty wrap_up_mode section should clear it"
     );
+}
+
+// MODEL section (tasks.allium: EditTask, SetModel)
+
+#[test]
+fn editor_roundtrip_model() {
+    let mut task = make_task("T", "D", "/repo", TaskStatus::Backlog, None);
+    task.model = Some(crate::models::TaskModel::Fable);
+    let fields = parse_editor_content(&format_editor_content(&task));
+    assert_eq!(fields.model, Some(crate::models::TaskModel::Fable));
+}
+
+#[test]
+fn editor_model_section_is_empty_for_a_task_on_the_default() {
+    let task = make_task("T", "D", "/repo", TaskStatus::Backlog, None);
+    let content = format_editor_content(&task);
+    let sections = parse_sections(&content);
+    assert_eq!(sections.get("MODEL").map(String::as_str), Some(""));
+}
+
+#[test]
+fn editor_unknown_model_records_an_error_and_clears() {
+    let input = "--- TITLE ---\nT\n--- MODEL ---\ngpt\n";
+    let fields = parse_editor_content(input);
+    assert_eq!(fields.model, None);
+    assert!(
+        fields
+            .errors
+            .iter()
+            .any(|e| e.to_string().contains("MODEL")),
+        "an unparseable MODEL section is reported"
+    );
+}
+
+#[test]
+fn apply_task_editor_model_sets_and_clears() {
+    let mut task = make_task("T", "D", "/repo", TaskStatus::Backlog, None);
+    let applied = apply_task_editor_fields(
+        &task,
+        EditorFields {
+            title: "T".into(),
+            model: Some(crate::models::TaskModel::Opus),
+            ..Default::default()
+        },
+    );
+    assert_eq!(applied.model, Some(crate::models::TaskModel::Opus));
+
+    task.model = Some(crate::models::TaskModel::Opus);
+    let applied = apply_task_editor_fields(
+        &task,
+        EditorFields {
+            title: "T".into(),
+            ..Default::default()
+        },
+    );
+    assert_eq!(applied.model, None, "an empty MODEL section clears it");
 }
 
 #[test]
@@ -753,6 +811,7 @@ fn every_formatted_section_is_a_section_the_parser_reads() {
         vec![
             "BASE_BRANCH",
             "DESCRIPTION",
+            "MODEL",
             "PHOENIX",
             "PLAN",
             "REPO_PATH",

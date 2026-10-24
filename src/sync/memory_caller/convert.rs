@@ -74,6 +74,7 @@ mirror!(
         schedule,
         next_due,
         schedule_error,
+        model,
     }
 );
 
@@ -111,6 +112,7 @@ mirror!(
         owner,
         completed_at,
         schedule,
+        model,
     }
 );
 

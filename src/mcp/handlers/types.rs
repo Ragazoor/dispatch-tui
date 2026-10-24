@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::models::{TaskStatus, WrapUpMode};
+use crate::models::{TaskModel, TaskStatus, WrapUpMode};
 
 // ---------------------------------------------------------------------------
 // JSON-RPC error codes
@@ -370,6 +370,17 @@ where
 pub(super) fn deserialize_nullable_wrap_up_mode<'de, D>(
     deserializer: D,
 ) -> Result<Option<Option<WrapUpMode>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_nullable(deserializer)
+}
+
+/// Nullable TaskModel deserializer, the same three states as
+/// [`deserialize_nullable_wrap_up_mode`].
+pub(super) fn deserialize_nullable_model<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<TaskModel>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

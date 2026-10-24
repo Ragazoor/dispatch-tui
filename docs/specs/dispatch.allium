@@ -294,6 +294,19 @@ rule ProvisionDispatch {
     -- owed by this dispatch. What stays below is the provisioning and the
     -- launch command that carries the text.
 
+    @guarantee EveryTaskAgentLaunchesOnItsModel
+        -- Every task-agent launch passes `--model <alias>`, where alias is
+        -- task.model, or sonnet when task.model is null (core/TaskModel).
+        -- This holds for DispatchTask, DispatchResearchTask, quick dispatch
+        -- and ResumeTask alike — the flag is part of the launch flags every
+        -- launcher shares, so ResumeTask's `--continue` carries it too, and a
+        -- model changed while the agent was stopped takes effect on resume.
+        -- The flag is always passed, never left to Claude Code's own
+        -- configured default: "sonnet unless the task says otherwise" must
+        -- hold whatever the operator's ~/.claude settings choose for their own
+        -- sessions. The alias goes before `--mcp-config`, which is variadic
+        -- and stays last (PromptIsSeparatedFromTheLaunchFlags).
+
     @guarantee EveryTaskAgentLaunchesInAutoMode
         -- Every task-agent launch starts Claude in auto mode — i.e.
         -- with no --permission-mode flag at all — with no exceptions.

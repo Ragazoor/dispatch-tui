@@ -39,7 +39,14 @@ fn resume_agent_includes_plugin_dir() {
     let script = DispatchScript::resume();
     let mock = script.runner();
 
-    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
+    resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        &worktree_path,
+        &mock,
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -117,7 +124,14 @@ fn resume_agent_sets_rustc_wrapper_when_sccache_available() {
     let script = DispatchScript::resume();
     let mock = script.runner().with_sccache_available(true);
 
-    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
+    resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        &worktree_path,
+        &mock,
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
@@ -126,6 +140,94 @@ fn resume_agent_sets_rustc_wrapper_when_sccache_available() {
             .windows(2)
             .any(|w| w == ["-e", "RUSTC_WRAPPER=sccache"]),
         "new-window should carry -e RUSTC_WRAPPER=sccache, got: {new_window_args:?}"
+    );
+}
+
+// --- model tests (EveryTaskAgentLaunchesOnItsModel: every launch passes
+// `--model`, the task's own or sonnet) ---
+
+#[test]
+fn dispatch_agent_launches_a_task_without_a_model_on_sonnet() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let script = DispatchScript::dispatch();
+    let mock = script.runner();
+
+    let task = make_task(&repo_path);
+    assert_eq!(task.model, None);
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
+
+    let calls = mock.recorded_calls();
+    let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
+    assert!(
+        send_keys_arg.contains(" --model sonnet "),
+        "a task with no model launches on sonnet, got: {send_keys_arg}"
+    );
+}
+
+#[test]
+fn dispatch_agent_launches_on_the_tasks_model() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let script = DispatchScript::dispatch();
+    let mock = script.runner();
+
+    let mut task = make_task(&repo_path);
+    task.model = Some(crate::models::TaskModel::Opus);
+    dispatch_agent(
+        &task,
+        "atlas",
+        &mock,
+        &mock,
+        None,
+        &LearningInjections::default(),
+    )
+    .unwrap();
+
+    let calls = mock.recorded_calls();
+    let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
+    assert!(
+        send_keys_arg.contains(" --model opus "),
+        "the task's model reaches the launch, got: {send_keys_arg}"
+    );
+    let model_at = send_keys_arg.find("--model").unwrap();
+    if let Some(config_at) = send_keys_arg.find("--mcp-config") {
+        assert!(
+            model_at < config_at,
+            "--mcp-config stays last: {send_keys_arg}"
+        );
+    }
+}
+
+#[test]
+fn resume_agent_launches_on_the_model_it_is_given() {
+    let (_dir, worktree_path) = make_test_repo();
+
+    let script = DispatchScript::resume();
+    let mock = script.runner();
+
+    resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::Fable,
+        &worktree_path,
+        &mock,
+    )
+    .unwrap();
+
+    let calls = mock.recorded_calls();
+    let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
+    assert!(
+        send_keys_arg.contains(" --model fable "),
+        "resume launches on the task's model, got: {send_keys_arg}"
     );
 }
 
@@ -170,7 +272,14 @@ fn resume_agent_names_the_session_after_the_agent() {
     let script = DispatchScript::resume();
     let mock = script.runner();
 
-    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
+    resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        &worktree_path,
+        &mock,
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -268,7 +377,14 @@ fn resume_agent_launches_the_runners_claude_binary() {
     let script = DispatchScript::resume();
     let mock = script.runner().with_agent_binaries(AgentBinaries::stub());
 
-    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
+    resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        &worktree_path,
+        &mock,
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -1262,7 +1378,13 @@ fn resume_agent_propagates_new_window_failure() {
         MockProcessRunner::fail("no server running on /tmp/tmux-1000/default"),
     ]);
 
-    let result = resume_agent(TaskId(42), "atlas", "/repo/.worktrees/42-fix-bug", &mock);
+    let result = resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        "/repo/.worktrees/42-fix-bug",
+        &mock,
+    );
 
     assert!(
         result.is_err(),
@@ -1280,7 +1402,13 @@ fn resume_agent_reattaches_to_live_window_without_creating_duplicate() {
     let script = DispatchScript::resume().window_already_alive();
     let mock = script.runner();
 
-    let result = resume_agent(TaskId(42), "atlas", "/repo/.worktrees/42-fix-bug", &mock);
+    let result = resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        "/repo/.worktrees/42-fix-bug",
+        &mock,
+    );
     assert!(
         result.is_ok(),
         "resume_agent should succeed by reattaching, not erroring: {result:?}"
@@ -1297,7 +1425,13 @@ fn resume_agent_has_window_runner_error_aborts_resume() {
     // a window that might duplicate a live one.
     let mock = MockProcessRunner::new(vec![Err(anyhow::anyhow!("tmux not installed"))]);
 
-    let result = resume_agent(TaskId(42), "atlas", "/repo/.worktrees/42-fix-bug", &mock);
+    let result = resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        "/repo/.worktrees/42-fix-bug",
+        &mock,
+    );
     assert!(
         result.is_err(),
         "a has_window query failure must abort resume: {result:?}"
@@ -1511,7 +1645,14 @@ fn all_spawn_sites_inject_the_statusline_settings_file() {
     let (_resume_dir, worktree_path) = make_test_repo();
     let resume_script = DispatchScript::resume();
     let mock = resume_script.runner();
-    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
+    resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        &worktree_path,
+        &mock,
+    )
+    .unwrap();
     assert_spawn_flags(
         "resume_agent",
         &find_call_arg(
@@ -1613,7 +1754,14 @@ fn resume_launches_claude_with_the_per_task_mcp_config() {
         .runner()
         .with_claude_json(claude_json_with_dispatch_entry(dir.path()));
 
-    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
+    resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        &worktree_path,
+        &mock,
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let launch = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
@@ -2166,7 +2314,13 @@ fn resume_agent_errors_when_the_liveness_check_fails() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail(
         "error connecting to /tmp/tmux-1000/default (Operation not permitted)",
     )]);
-    let result = resume_agent(TaskId(42), "agent", "/repo/.worktrees/42-fix-bug", &mock);
+    let result = resume_agent(
+        TaskId(42),
+        "agent",
+        crate::models::TaskModel::DEFAULT,
+        "/repo/.worktrees/42-fix-bug",
+        &mock,
+    );
     assert!(result.is_err(), "a failed liveness check must abort resume");
     let calls = mock.recorded_calls();
     assert!(

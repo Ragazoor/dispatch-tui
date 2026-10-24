@@ -1284,7 +1284,14 @@ fn resume_skips_git_issues_tmux_continue() {
     let script = DispatchScript::resume();
     let mock = script.runner();
 
-    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
+    resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        &worktree_path,
+        &mock,
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     script.assert_matches(&calls);
@@ -1313,7 +1320,14 @@ fn resume_agent_splits_agent_tree_companion_pane_after_send_keys() {
     let script = DispatchScript::resume();
     let mock = script.runner();
 
-    resume_agent(TaskId(42), "atlas", &worktree_path, &mock).unwrap();
+    resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        &worktree_path,
+        &mock,
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let last = &calls[script.index_of(Step::CompanionSplit)];
@@ -1346,7 +1360,13 @@ fn resume_agent_succeeds_even_if_companion_pane_split_fails() {
         MockProcessRunner::fail("no target pane"), // tmux split-window fails
     ]);
 
-    let result = resume_agent(TaskId(42), "atlas", &worktree_path, &mock);
+    let result = resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        &worktree_path,
+        &mock,
+    );
     assert!(
         result.is_ok(),
         "a failed companion-pane split must not fail resume: {result:?}"

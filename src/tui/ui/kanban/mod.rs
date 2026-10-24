@@ -19,9 +19,9 @@ mod tests;
 
 use super::input_form::{
     confirm_retry_lines, input_base_branch_lines, input_description_lines,
-    input_epic_description_lines, input_epic_title_lines, input_repo_path_lines, input_tag_lines,
-    input_title_lines, input_wrap_up_mode_lines, quick_dispatch_lines, FormStyles,
-    PHOENIX_ARMED_TAG_STEP_LINES,
+    input_epic_description_lines, input_epic_title_lines, input_model_lines, input_repo_path_lines,
+    input_tag_lines, input_title_lines, input_wrap_up_mode_lines, quick_dispatch_lines, FormStyles,
+    MODEL_STEP_LINES, PHOENIX_ARMED_TAG_STEP_LINES,
 };
 use super::shared::{push_hint_spans, render_top_indicators, rounded_block};
 use crate::palette::{
@@ -226,6 +226,7 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
         InputMode::InputTag if app.input.phoenix_armed() => {
             (PHOENIX_ARMED_TAG_STEP_LINES + 2).clamp(8, max_height)
         }
+        InputMode::InputModel => (MODEL_STEP_LINES + 2).clamp(8, max_height),
         InputMode::InputTitle
         | InputMode::InputTag
         | InputMode::InputDescription
@@ -550,6 +551,7 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
         InputMode::InputRepoPath => input_repo_path_lines(app, area, &styles),
         InputMode::InputBaseBranch => input_base_branch_lines(app, area, &styles),
         InputMode::InputWrapUpMode => input_wrap_up_mode_lines(app, area, &styles),
+        InputMode::InputModel => input_model_lines(app, area, &styles),
         InputMode::QuickDispatch => quick_dispatch_lines(app, area, &styles),
         InputMode::ConfirmRetry(id) => confirm_retry_lines(app, *id),
         InputMode::InputEpicTitle => input_epic_title_lines(app, area, &styles),

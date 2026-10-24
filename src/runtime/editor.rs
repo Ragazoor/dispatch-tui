@@ -344,6 +344,7 @@ impl TuiRuntime {
             tag,
             base_branch,
             wrap_up_mode,
+            model,
             url,
             resolved_url,
             phoenix,
@@ -358,6 +359,7 @@ impl TuiRuntime {
             .tag(Some(tag))
             .base_branch(base_branch.clone())
             .wrap_up_mode(wrap_up_mode)
+            .model(model)
             .phoenix(phoenix);
         // Only forward a url change when the edit actually altered it.
         if let Some(url_update) = url {
@@ -388,6 +390,7 @@ impl TuiRuntime {
                 tag,
                 base_branch,
                 wrap_up_mode,
+                model,
                 url: resolved_url,
                 phoenix,
             },

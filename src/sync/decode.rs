@@ -34,8 +34,8 @@ use crate::models::{
     DispatchRequestId, DispatchRequestState, Epic, EpicId, EpicOrigin, FeedRole, Learning,
     LearningId, LearningKind, LearningRetrieval, LearningScope, LearningStatus, RetrievalSource,
     SessionRequest, SessionRequestId, SessionRequestKind, SessionRequestState, SubStatus, Task,
-    TaskId, TaskStatus, TaskTag, TaskUrl, TmuxWindow, UrlType, WorkPackage, WorkPackageId,
-    WorkPackageItem, WorkPackageLink, WrapUpMode,
+    TaskId, TaskModel, TaskStatus, TaskTag, TaskUrl, TmuxWindow, UrlType, WorkPackage,
+    WorkPackageId, WorkPackageItem, WorkPackageLink, WrapUpMode,
 };
 use crate::spacetime::bindings;
 
@@ -131,6 +131,12 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
                 .ok_or_else(|| refuse(format!("unknown wrap_up_mode {raw:?}")))?,
         ),
     };
+    let model = match text(&row.model) {
+        None => None,
+        Some(raw) => {
+            Some(TaskModel::parse(raw).ok_or_else(|| refuse(format!("unknown model {raw:?}")))?)
+        }
+    };
 
     Ok(Task {
         id: TaskId(row.id),
@@ -175,6 +181,7 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
             &row.last_peer_message_received_at,
         )?,
         wrap_up_mode,
+        model,
         auto_run_plan: row.auto_run_plan,
         phoenix: row.phoenix,
         schedule: text(&row.schedule).map(str::to_owned),

@@ -145,6 +145,7 @@ fn blank_task_in_epic(epic_id: i64) -> bindings::Task {
         schedule: String::new(),
         next_due: String::new(),
         schedule_error: String::new(),
+        model: String::new(),
     }
 }
 
@@ -181,6 +182,7 @@ fn blank_task_patch() -> bindings::TaskPatch {
         owner: None,
         completed_at: None,
         schedule: None,
+        model: None,
     }
 }
 

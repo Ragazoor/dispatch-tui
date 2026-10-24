@@ -50,6 +50,7 @@ pub fn blank_task() -> Task {
         schedule: String::new(),
         next_due: String::new(),
         schedule_error: String::new(),
+        model: String::new(),
     }
 }
 

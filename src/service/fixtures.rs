@@ -35,6 +35,7 @@ impl CreateTaskParams {
             tag: None,
             base_branch: None,
             wrap_up_mode: None,
+            model: None,
             auto_run_plan: false,
             phoenix: false,
             schedule: None,

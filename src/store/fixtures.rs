@@ -23,6 +23,7 @@ impl<'a> CreateTaskRequest<'a> {
             sort_order: None,
             tag: None,
             wrap_up_mode: None,
+            model: None,
             auto_run_plan: false,
             phoenix: false,
             schedule: None,

@@ -137,6 +137,7 @@ async fn update_task_maps_every_advertised_field_to_params() {
                 "epic_id": epic.id.0,
                 "base_branch": "develop",
                 "wrap_up_mode": "pr",
+                "model": "opus",
                 "auto_run_plan": true,
                 "phoenix": true,
                 "schedule": "0 9 * * 1",
@@ -893,6 +894,7 @@ pub(super) fn extract_created_task_id(resp: &JsonRpcResponse) -> crate::models::
 mod base_branch;
 mod epic_tree;
 mod mock_service;
+mod model;
 mod query;
 mod schedule;
 mod sub_status;

@@ -454,6 +454,7 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
         }
         N::BoardPickerTag => one(draft_app(InputMode::InputTag)),
         N::BoardPickerWrapUpMode => one(draft_app(InputMode::InputWrapUpMode)),
+        N::BoardPickerModel => one(draft_app(InputMode::InputModel)),
         N::BoardPickerQuickDispatch => one(draft_app(InputMode::QuickDispatch)),
         N::BoardPickerMoveToEpic => one(with_move_task_picker()),
         N::BoardPickerReparentEpic => one(with_reparent_picker()),

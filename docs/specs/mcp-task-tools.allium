@@ -72,7 +72,7 @@ config {
 --     prose: an enum for a closed value set, a conditional requirement for
 --     one argument depending on another (update_tasks' url_type).
 --   - An argument that means the same thing on every tool that takes it —
---     base_branch, wrap_up_mode, auto_run_plan, phoenix, tag, sort_order —
+--     base_branch, wrap_up_mode, model, auto_run_plan, phoenix, tag, sort_order —
 --     carries one short wording of that meaning, the same on each tool. A
 --     tool adds text only where its meaning differs (an omitted argument
 --     defaulting on create but meaning "no change" on update).
@@ -201,7 +201,7 @@ rule AgentPortRejectsNonLoopbackOrigins {
 rule UpdateTaskViaMcp {
     when: McpUpdateTask(task, status?, sub_status?, plan?, title?, description?,
                         repo_path?, sort_order?, url?, url_type?, tag?, epic_id?,
-                        base_branch?, wrap_up_mode?, auto_run_plan?, phoenix?,
+                        base_branch?, wrap_up_mode?, model?, auto_run_plan?, phoenix?,
                         schedule?)
 
     requires: status != null or sub_status != null or plan != null or title != null
@@ -210,6 +210,7 @@ rule UpdateTaskViaMcp {
               or url != null or tag != null
               or base_branch != null
               or wrap_up_mode != omitted
+              or model != omitted
               or auto_run_plan != null
               or phoenix != null
               or schedule != null
@@ -323,6 +324,11 @@ rule UpdateTaskViaMcp {
         -- WrapUpMode's literals (set), or explicit null (clear to NULL).
         if wrap_up_mode != omitted: task.wrap_up_mode = wrap_up_mode
     ensures:
+        -- model has the same three states as wrap_up_mode: omitted (no
+        -- change), one of TaskModel's literals (set), or explicit null (clear,
+        -- so the task launches on sonnet again — tasks.allium: SetModel).
+        if model != omitted: task.model = model
+    ensures:
         if auto_run_plan != null: task.auto_run_plan = auto_run_plan
         -- phoenix is a plain nullable boolean: omitted leaves it alone, true
         -- and false set it. What it then does is PhoenixRespawn
@@ -348,7 +354,7 @@ rule UpdateTaskViaMcp {
     @guidance
         -- MCP update_tasks accepts status, sub_status, plan_path, title,
         -- description, repo_path, sort_order, url, url_type, tag, epic_id,
-        -- base_branch, wrap_up_mode, auto_run_plan, phoenix, and schedule. It does NOT
+        -- base_branch, wrap_up_mode, model, auto_run_plan, phoenix, and schedule. It does NOT
         -- accept worktree or tmux_window — those are owned by the dispatch flow
         -- and never set via MCP.
         --
@@ -445,8 +451,8 @@ rule UpdateTaskViaMcp {
 rule MarkTaskDoneViaMcp {
     when: McpUpdateTask(task, caller_identity, status?, sub_status?, plan?, title?,
                         description?, repo_path?, sort_order?, url?, url_type?, tag?,
-                        epic_id?, base_branch?, wrap_up_mode?, auto_run_plan?, phoenix?,
-                        schedule?)
+                        epic_id?, base_branch?, wrap_up_mode?, model?, auto_run_plan?,
+                        phoenix?, schedule?)
 
     requires: status = done
 
@@ -465,7 +471,8 @@ rule MarkTaskDoneViaMcp {
         sub_status = null and plan = null and title = null and description = null
         and repo_path = null and sort_order = null and url = null and url_type = null
         and tag = null and epic_id = null and base_branch = null
-        and wrap_up_mode = omitted and auto_run_plan = null and phoenix = null
+        and wrap_up_mode = omitted and model = omitted and auto_run_plan = null
+        and phoenix = null
         and schedule = null
 
     -- A dispatched agent may not close its OWN task through this call — that
@@ -709,7 +716,7 @@ rule UpdateTasksViaMcp {
     -- update_tasks is the only MCP tool that updates tasks. fields is the
     -- field set (status, sub_status, plan_path, title, description, repo_path,
     -- sort_order, url, url_type, tag, epic_id, base_branch, wrap_up_mode,
-    -- auto_run_plan, phoenix), with the meaning UpdateTaskViaMcp gives it.
+    -- model, auto_run_plan, phoenix), with the meaning UpdateTaskViaMcp gives it.
 
     requires: task_ids.count > 0
 
@@ -762,7 +769,7 @@ rule CreateTaskViaMcp {
     when: McpCreateTask(caller_identity,
                         title, repo_path, epic_id, description?, plan?,
                         sort_order?, tag?, base_branch?,
-                        wrap_up_mode?, auto_run_plan?, phoenix?, schedule?, signal?)
+                        wrap_up_mode?, model?, auto_run_plan?, phoenix?, schedule?, signal?)
 
     -- epic_id is REQUIRED and nullable. Required means the ARGUMENT must be
     -- present; nullable means the VALUE may be null. The three cases are:
@@ -819,6 +826,7 @@ rule CreateTaskViaMcp {
         sort_order: sort_order,
         base_branch: base_branch ?? detect_default_branch(repo_path),
         wrap_up_mode: wrap_up_mode,
+        model: model,
         auto_run_plan: auto_run_plan ?? false,
         phoenix: phoenix ?? false,
         created_at: now,
@@ -996,8 +1004,12 @@ rule GetTaskViaMcp {
         --   resolved)], [Tag], [Plan], [<url label>: <url> — the typed label
         --   derived from url.url_type], [Worktree], Base branch,
         --   [Tmux window], [Dispatch request], [Sort order], [Verify command],
-        --   [Wrap-up mode], [Phoenix], [Schedule], [Schedule error], Created,
-        --   Updated.
+        --   [Wrap-up mode], Model, [Phoenix], [Schedule], [Schedule error],
+        --   Created, Updated.
+        -- Model always renders, as the alias the agent launches on: task.model,
+        -- or "sonnet (default)" when it is null. A missing line would read as
+        -- "no model applies", and a null model is a concrete one
+        -- (core/TaskModel).
         -- [Dispatch request] is not a Task field: it is the task's most recent
         -- store-split.allium DispatchRequest that this board's subscription
         -- holds, rendered as its id, state and, when failed, its reason.

@@ -47,6 +47,7 @@ impl App {
             InputMode::InputBaseBranch => N::BoardPickerBaseBranch,
             InputMode::InputTag => N::BoardPickerTag,
             InputMode::InputWrapUpMode => N::BoardPickerWrapUpMode,
+            InputMode::InputModel => N::BoardPickerModel,
             InputMode::QuickDispatch => N::BoardPickerQuickDispatch,
             InputMode::MoveTaskToEpic(_) => N::BoardPickerMoveToEpic,
             InputMode::ReparentEpic(_) => N::BoardPickerReparentEpic,
@@ -352,6 +353,7 @@ impl App {
             N::BoardFilterSearch => self.handle_key_board_filter_search(action, label),
             N::BoardPickerTag => self.run_tag_picker(action, key, label),
             N::BoardPickerWrapUpMode => self.run_wrap_up_picker(action, key, label),
+            N::BoardPickerModel => self.run_model_picker(action, key, label),
             N::BoardPickerQuickDispatch => self.run_quick_dispatch_picker(action, key, label),
             N::BoardPickerMoveToEpic => self.run_move_to_epic_picker(action, key, label),
             N::BoardPickerReparentEpic => self.run_reparent_picker(action, key, label),
@@ -698,6 +700,41 @@ impl App {
             "wrap_up_mode_picker_cancel" => self.dispatch_keyed(
                 Message::Input(InputMessage::CancelInput),
                 "wrap_up_mode_picker_cancel",
+                label,
+            ),
+            _ => vec![],
+        }
+    }
+
+    fn run_model_picker(&mut self, action: &str, key: KeyEvent, label: &str) -> Vec<Command> {
+        use crate::models::TaskModel;
+        use crate::tui::messages::InputMessage;
+        match action {
+            "model_picker_select" => {
+                let KeyCode::Char(c) = key.code else {
+                    return vec![];
+                };
+                let model = match c {
+                    'h' => TaskModel::Haiku,
+                    's' => TaskModel::Sonnet,
+                    'o' => TaskModel::Opus,
+                    'f' => TaskModel::Fable,
+                    _ => return vec![],
+                };
+                self.dispatch_keyed(
+                    Message::Input(InputMessage::SubmitModel(Some(model))),
+                    "model_picker_select",
+                    label,
+                )
+            }
+            "model_picker_default" => self.dispatch_keyed(
+                Message::Input(InputMessage::SubmitModel(None)),
+                "model_picker_default",
+                label,
+            ),
+            "model_picker_cancel" => self.dispatch_keyed(
+                Message::Input(InputMessage::CancelInput),
+                "model_picker_cancel",
                 label,
             ),
             _ => vec![],

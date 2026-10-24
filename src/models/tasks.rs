@@ -382,6 +382,9 @@ pub struct Task {
     /// observation. Drives the TUI's "received" flash.
     pub last_peer_message_received_at: Option<DateTime<Utc>>,
     pub wrap_up_mode: Option<WrapUpMode>,
+    /// The model the agent launches on; `None` launches on
+    /// [`TaskModel::DEFAULT`]. See [`Task::launch_model`].
+    pub model: Option<TaskModel>,
     pub auto_run_plan: bool,
     /// A recurring task. When this task enters Done, a fresh
     /// Backlog copy of it is created and the flag MOVES to that copy — so it
@@ -763,6 +766,7 @@ impl Default for Task {
             last_peer_message_sent_at: None,
             last_peer_message_received_at: None,
             wrap_up_mode: None,
+            model: None,
             auto_run_plan: false,
             phoenix: false,
             schedule: None,
@@ -946,6 +950,49 @@ define_str_enum!(WrapUpMode, "wrap-up mode" {
     Pr => "pr",
     Done => "done",
 });
+
+// ---------------------------------------------------------------------------
+// TaskModel
+// ---------------------------------------------------------------------------
+
+/// The Claude model a task's agent runs on. Each spelling is a Claude Code
+/// model alias, passed verbatim as `claude --model <alias>`
+/// (`core.allium: TaskModel`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskModel {
+    Haiku,
+    Sonnet,
+    Opus,
+    Fable,
+}
+
+impl TaskModel {
+    pub const ALL: &'static [TaskModel] = &[
+        TaskModel::Haiku,
+        TaskModel::Sonnet,
+        TaskModel::Opus,
+        TaskModel::Fable,
+    ];
+
+    /// What a task with no model launches on
+    /// (`dispatch.allium: EveryTaskAgentLaunchesOnItsModel`).
+    pub const DEFAULT: TaskModel = TaskModel::Sonnet;
+}
+
+define_str_enum!(TaskModel, "model" {
+    Haiku => "haiku",
+    Sonnet => "sonnet",
+    Opus => "opus",
+    Fable => "fable",
+});
+
+impl Task {
+    /// The model this task's agent launches on: its own, or the default.
+    pub fn launch_model(&self) -> TaskModel {
+        self.model.unwrap_or(TaskModel::DEFAULT)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // DispatchResult

@@ -1101,6 +1101,7 @@ fn a_shared_argument_carries_one_wording_on_every_tool() {
     for arg in [
         "base_branch",
         "wrap_up_mode",
+        "model",
         "auto_run_plan",
         "phoenix",
         "schedule",

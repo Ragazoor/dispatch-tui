@@ -131,11 +131,11 @@ async fn the_confirm_family_returns_fifteen_non_empty_groups() {
     }
 }
 
-/// The picker family is every board.picker.* namespace — eight of them
-/// (repo_path, base_branch, tag, wrap_up_mode, quick_dispatch, move_to_epic,
-/// reparent_epic, work_package) — and each has rows.
+/// The picker family is every board.picker.* namespace — nine of them
+/// (repo_path, base_branch, tag, wrap_up_mode, model, quick_dispatch,
+/// move_to_epic, reparent_epic, work_package) — and each has rows.
 #[tokio::test]
-async fn the_picker_family_returns_eight_non_empty_groups() {
+async fn the_picker_family_returns_nine_non_empty_groups() {
     let state = test_state().await;
     let resp = list(&state, json!({"namespace": "board.picker"})).await;
     let gs = groups(&resp);
@@ -150,6 +150,7 @@ async fn the_picker_family_returns_eight_non_empty_groups() {
             "board.picker.base_branch",
             "board.picker.tag",
             "board.picker.wrap_up_mode",
+            "board.picker.model",
             "board.picker.quick_dispatch",
             "board.picker.move_to_epic",
             "board.picker.reparent_epic",

@@ -66,6 +66,9 @@ pub(super) fn build_task_patch<'a>(
     if let Some(inner) = params.wrap_up_mode {
         patch = patch.wrap_up_mode(inner);
     }
+    if let Some(inner) = params.model {
+        patch = patch.model(inner);
+    }
     if let Some(v) = params.auto_run_plan {
         patch = patch.auto_run_plan(v);
     }
@@ -82,7 +85,7 @@ pub(super) fn build_task_patch<'a>(
 mod tests {
     use super::super::params::UpdateTaskParams;
     use super::build_task_patch;
-    use crate::models::{SubStatus, TaskId, TaskStatus, TaskTag, WrapUpMode};
+    use crate::models::{SubStatus, TaskId, TaskModel, TaskStatus, TaskTag, WrapUpMode};
 
     #[test]
     fn all_none_produces_empty_patch() {
@@ -241,6 +244,20 @@ mod tests {
         let params = UpdateTaskParams::for_task(TaskId(1)).wrap_up_mode(None);
         let patch = build_task_patch(&params, None, None);
         assert_eq!(patch.wrap_up_mode, Some(None));
+    }
+
+    #[test]
+    fn model_set_when_some_provided() {
+        let params = UpdateTaskParams::for_task(TaskId(1)).model(Some(TaskModel::Opus));
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.model, Some(Some(TaskModel::Opus)));
+    }
+
+    #[test]
+    fn model_cleared_when_none_provided() {
+        let params = UpdateTaskParams::for_task(TaskId(1)).model(None);
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.model, Some(None));
     }
 
     #[test]

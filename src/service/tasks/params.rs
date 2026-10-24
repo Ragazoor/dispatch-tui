@@ -4,7 +4,7 @@
 //! TUI commands) construct one of these and pass it to the corresponding
 //! `TaskService` method.
 
-use crate::models::{EpicId, SubStatus, TaskId, TaskStatus, TaskTag, WrapUpMode};
+use crate::models::{EpicId, SubStatus, TaskId, TaskModel, TaskStatus, TaskTag, WrapUpMode};
 use crate::service::{FieldUpdate, UrlUpdate};
 
 // ---------------------------------------------------------------------------
@@ -44,6 +44,9 @@ pub struct UpdateTaskParams {
     pub last_pre_tool_use_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
     /// Double-Option: outer `None` = no-op; `Some(None)` = clear; `Some(Some(m))` = set.
     pub wrap_up_mode: Option<Option<WrapUpMode>>,
+    /// Double-Option: outer `None` = no-op; `Some(None)` = clear back to the
+    /// default model; `Some(Some(m))` = set (`tasks.allium: SetModel`).
+    pub model: Option<Option<TaskModel>>,
     /// `None` = leave untouched; `Some(v)` = write `v`.
     pub auto_run_plan: Option<bool>,
     /// `None` = leave untouched; `Some(v)` = write `v`. Arms or disarms the
@@ -87,6 +90,7 @@ impl UpdateTaskParams {
             base_branch,
             last_pre_tool_use_at,
             wrap_up_mode,
+            model,
             auto_run_plan,
             phoenix,
             schedule,
@@ -110,6 +114,7 @@ impl UpdateTaskParams {
             ("base_branch", base_branch.is_some()),
             ("last_pre_tool_use_at", last_pre_tool_use_at.is_some()),
             ("wrap_up_mode", wrap_up_mode.is_some()),
+            ("model", model.is_some()),
             ("auto_run_plan", auto_run_plan.is_some()),
             ("phoenix", phoenix.is_some()),
             ("schedule", schedule.is_some()),
@@ -140,6 +145,7 @@ impl UpdateTaskParams {
             base_branch: None,
             last_pre_tool_use_at: None,
             wrap_up_mode: None,
+            model: None,
             auto_run_plan: None,
             phoenix: None,
             schedule: None,
@@ -231,6 +237,11 @@ impl UpdateTaskParams {
         self
     }
 
+    pub fn model(mut self, model: Option<TaskModel>) -> Self {
+        self.model = Some(model);
+        self
+    }
+
     pub fn phoenix(mut self, value: bool) -> Self {
         self.phoenix = Some(value);
         self
@@ -261,6 +272,8 @@ pub struct CreateTaskParams {
     pub tag: Option<TaskTag>,
     pub base_branch: Option<String>,
     pub wrap_up_mode: Option<WrapUpMode>,
+    /// `None` launches on the default model (`core.allium: TaskModel`).
+    pub model: Option<TaskModel>,
     pub auto_run_plan: bool,
     /// Arms the recurrence at creation. Defaults to `false` everywhere except
     /// the phoenix respawn itself, which passes `true` so the flag moves to the

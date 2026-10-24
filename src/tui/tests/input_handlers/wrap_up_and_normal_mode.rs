@@ -30,9 +30,8 @@ fn submit_base_branch_transitions_to_wrap_up_mode() {
     );
 }
 
-/// A draft parked at the wrap-up step — the shared starting point for every
-/// test of the form's tail. Wrap-up is the form's LAST step: answering it is
-/// what creates the task. phoenix is decided earlier, at InputTag.
+/// A draft parked at the wrap-up step. phoenix is decided earlier, at
+/// InputTag; the model step follows this one and is the form's last.
 fn app_at_wrap_up_step() -> App {
     let mut app = make_app();
     app.input.mode = InputMode::InputWrapUpMode;
@@ -45,6 +44,14 @@ fn app_at_wrap_up_step() -> App {
     app
 }
 
+/// A draft parked at the model step, the form's LAST step: answering it is
+/// what creates the task (tasks.allium: CreateTask, ModelPicker).
+fn app_at_model_step() -> App {
+    let mut app = app_at_wrap_up_step();
+    app.input.mode = InputMode::InputModel;
+    app
+}
+
 /// The draft the form asked to create, or `None` if it emitted no Insert.
 fn insert_draft(cmds: &[Command]) -> Option<&TaskDraft> {
     cmds.iter().find_map(|c| match c {
@@ -53,63 +60,45 @@ fn insert_draft(cmds: &[Command]) -> Option<&TaskDraft> {
     })
 }
 
+/// Each wrap-up key records its mode and moves on to the model step,
+/// creating nothing yet.
 #[test]
-fn wrap_up_mode_r_selects_rebase_and_creates_task() {
-    let mut app = app_at_wrap_up_step();
+fn wrap_up_mode_keys_record_the_mode_and_open_the_model_step() {
+    use crate::models::WrapUpMode;
+    for (key, mode) in [
+        ('r', WrapUpMode::Rebase),
+        ('p', WrapUpMode::Pr),
+        ('d', WrapUpMode::Done),
+    ] {
+        let mut app = app_at_wrap_up_step();
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+        let cmds = app.handle_key(make_key(KeyCode::Char(key)));
 
-    assert_eq!(app.input.mode, InputMode::Normal);
-    let draft = insert_draft(&cmds).expect("expected Insert command");
-    assert_eq!(
-        draft.wrap_up_mode,
-        Some(crate::models::WrapUpMode::Rebase),
-        "expected Rebase wrap_up_mode"
-    );
+        assert_eq!(app.input.mode, InputMode::InputModel, "{key}");
+        assert!(
+            insert_draft(&cmds).is_none(),
+            "{key} created the task early"
+        );
+        assert_eq!(
+            app.input.task_draft.as_ref().unwrap().wrap_up_mode,
+            Some(mode)
+        );
+        assert_eq!(
+            app.status.message.as_deref(),
+            Some(crate::tui::ui::model_prompt(None).as_str()),
+            "the status message advertises the model step"
+        );
+    }
 }
 
 #[test]
-fn wrap_up_mode_p_selects_pr_and_creates_task() {
+fn wrap_up_mode_enter_skips_to_the_model_step_with_no_mode() {
     let mut app = app_at_wrap_up_step();
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    app.handle_key(make_key(KeyCode::Enter));
 
-    assert_eq!(app.input.mode, InputMode::Normal);
-    let draft = insert_draft(&cmds).expect("expected Insert command");
-    assert_eq!(
-        draft.wrap_up_mode,
-        Some(crate::models::WrapUpMode::Pr),
-        "expected Pr wrap_up_mode"
-    );
-}
-
-#[test]
-fn wrap_up_mode_d_selects_done_and_creates_task() {
-    let mut app = app_at_wrap_up_step();
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-
-    assert_eq!(app.input.mode, InputMode::Normal);
-    let draft = insert_draft(&cmds).expect("expected Insert command");
-    assert_eq!(
-        draft.wrap_up_mode,
-        Some(crate::models::WrapUpMode::Done),
-        "expected Done wrap_up_mode"
-    );
-}
-
-#[test]
-fn wrap_up_mode_enter_skips_and_creates_task_with_no_mode() {
-    let mut app = app_at_wrap_up_step();
-
-    let cmds = app.handle_key(make_key(KeyCode::Enter));
-
-    assert_eq!(app.input.mode, InputMode::Normal);
-    let draft = insert_draft(&cmds).expect("expected Insert command");
-    assert_eq!(
-        draft.wrap_up_mode, None,
-        "Enter should create task with no wrap-up mode"
-    );
+    assert_eq!(app.input.mode, InputMode::InputModel);
+    assert_eq!(app.input.task_draft.as_ref().unwrap().wrap_up_mode, None);
 }
 
 #[test]
@@ -124,6 +113,7 @@ fn wrap_up_mode_enter_keeps_prefilled_value_from_copy_task() {
         draft.wrap_up_mode = Some(crate::models::WrapUpMode::Pr);
     }
 
+    app.handle_key(make_key(KeyCode::Enter));
     let cmds = app.handle_key(make_key(KeyCode::Enter));
 
     let draft = insert_draft(&cmds).expect("expected Insert command");
@@ -136,6 +126,73 @@ fn wrap_up_mode_enter_keeps_prefilled_value_from_copy_task() {
         !draft.phoenix,
         "CopyTask does not carry the flag — the copy answers the tag step fresh"
     );
+}
+
+// ---------------------------------------------------------------------------
+// InputModel tests (tasks.allium: CreateTask, ModelPicker)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn model_keys_pick_the_model_and_create_the_task() {
+    use crate::models::TaskModel;
+    for (key, model) in [
+        ('h', TaskModel::Haiku),
+        ('s', TaskModel::Sonnet),
+        ('o', TaskModel::Opus),
+        ('f', TaskModel::Fable),
+    ] {
+        let mut app = app_at_model_step();
+
+        let cmds = app.handle_key(make_key(KeyCode::Char(key)));
+
+        assert_eq!(app.input.mode, InputMode::Normal, "{key}");
+        let draft = insert_draft(&cmds).expect("expected Insert command");
+        assert_eq!(draft.model, Some(model), "{key}");
+    }
+}
+
+#[test]
+fn model_enter_creates_the_task_with_no_model() {
+    let mut app = app_at_model_step();
+
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    let draft = insert_draft(&cmds).expect("expected Insert command");
+    assert_eq!(draft.model, None, "Enter leaves the default model");
+}
+
+#[test]
+fn model_enter_keeps_the_model_a_copy_seeded() {
+    let mut app = app_at_model_step();
+    app.input.task_draft.as_mut().unwrap().model = Some(crate::models::TaskModel::Opus);
+
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+
+    let draft = insert_draft(&cmds).expect("expected Insert command");
+    assert_eq!(draft.model, Some(crate::models::TaskModel::Opus));
+}
+
+#[test]
+fn model_step_ignores_other_keys_and_esc_cancels() {
+    let mut app = app_at_model_step();
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('x')));
+    assert!(insert_draft(&cmds).is_none());
+    assert_eq!(app.input.mode, InputMode::InputModel);
+
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(insert_draft(&cmds).is_none());
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.input.task_draft.is_none());
+}
+
+/// The prompt says what Enter means: the draft's own model, else sonnet.
+#[test]
+fn model_prompt_names_what_enter_picks() {
+    use crate::models::TaskModel;
+    assert!(crate::tui::ui::model_prompt(None).ends_with("[Enter] sonnet"));
+    assert!(crate::tui::ui::model_prompt(Some(TaskModel::Fable)).ends_with("[Enter] fable"));
 }
 
 // ---------------------------------------------------------------------------
@@ -529,15 +586,20 @@ fn draft_of(app: &App) -> &TaskDraft {
     app.input.task_draft.as_ref().expect("the form has a draft")
 }
 
-/// Wrap-up used to advance to a phoenix step. It is the form's last step now.
+/// Wrap-up advances to the model step, and answering that creates the task.
 #[test]
-fn submitting_wrap_up_mode_creates_the_task() {
+fn submitting_wrap_up_then_model_creates_the_task() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputWrapUpMode;
     app.input.task_draft = Some(TaskDraft::default());
 
-    let cmds = app.update(Message::Input(
+    app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
+    ));
+    // The model step is the form's last: answering it creates the task
+    // (tasks.allium: CreateTask, ModelPicker).
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitModel(None),
     ));
 
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -672,6 +734,11 @@ fn finishing_a_copy_clears_the_copy_marker() {
     app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
     ));
+    // The model step is the form's last: answering it creates the task
+    // (tasks.allium: CreateTask, ModelPicker).
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitModel(None),
+    ));
     assert_eq!(app.input.mode, InputMode::Normal, "the copy was created");
 
     // A fresh new-task form must reach the description editor as usual.
@@ -712,8 +779,13 @@ fn a_draft_armed_at_the_tag_step_is_created_as_a_phoenix() {
     app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
     ));
-    let cmds = app.update(Message::Input(
+    app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
+    ));
+    // The model step is the form's last: answering it creates the task
+    // (tasks.allium: CreateTask, ModelPicker).
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitModel(None),
     ));
 
     let draft = inserted_draft(&cmds).expect("the form creates the task");

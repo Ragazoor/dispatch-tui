@@ -294,7 +294,8 @@ pub fn apply_learning_verdicts(
             .task_id()
             .filter(&task_id)
             .find(|s| s.learning_id == v.learning_id);
-        let delta = verdict_score_change(standing.as_ref().map(|s| s.verdict.as_str()), &v.verdict)?;
+        let delta =
+            verdict_score_change(standing.as_ref().map(|s| s.verdict.as_str()), &v.verdict)?;
         match standing {
             Some(s) => {
                 ctx.db.learning_verdicts().id().update(LearningVerdict {

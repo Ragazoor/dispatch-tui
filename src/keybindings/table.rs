@@ -803,6 +803,25 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "wrap_up_mode_picker_cancel",
         "Cancel the task creation",
     ),
+    // ---- board.picker.model ----
+    r(
+        N::BoardPickerModel,
+        &["h", "s", "o", "f"],
+        "model_picker_select",
+        "Pick the model the agent runs on: [h]aiku, [s]onnet, [o]pus or [f]able",
+    ),
+    r(
+        N::BoardPickerModel,
+        &["Enter"],
+        "model_picker_default",
+        "Create the task with the model shown after [Enter] (sonnet unless copied)",
+    ),
+    r(
+        N::BoardPickerModel,
+        &["Esc"],
+        "model_picker_cancel",
+        "Cancel the task creation",
+    ),
     // ---- board.picker.quick_dispatch ----
     r(
         N::BoardPickerQuickDispatch,

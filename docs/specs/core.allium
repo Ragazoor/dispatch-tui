@@ -345,6 +345,15 @@ enum RetrievalSource { prompt_injection | procedural | query_learnings }
 --   done   — close without any git operations; task moves to Done directly
 enum WrapUpMode { rebase | pr | done }
 
+-- TaskModel is the Claude model a task's agent runs on. Each literal is a
+-- Claude Code model alias, passed verbatim as `claude --model <alias>`, so it
+-- always names the latest model of that family rather than a pinned version.
+-- A task with no model set runs on sonnet (dispatch.allium:
+-- EveryTaskAgentLaunchesOnItsModel): sonnet is the default everywhere, for a
+-- task made in the wizard, over MCP or by a feed alike, and for a task made
+-- before the field existed.
+enum TaskModel { haiku | sonnet | opus | fable }
+
 ------------------------------------------------------------
 -- Storage Boundary Validation
 ------------------------------------------------------------
@@ -360,7 +369,7 @@ enum WrapUpMode { rebase | pr | done }
 -- handle DB errors gracefully, so a hard error is safe.
 --
 -- This applies to all enum columns: TaskStatus, SubStatus, TaskTag,
--- WrapUpMode, LearningKind, LearningScope and LearningStatus.
+-- WrapUpMode, TaskModel, LearningKind, LearningScope and LearningStatus.
 -- It also applies to JSON-encoded columns (e.g. labels, tags): malformed
 -- JSON must return an error rather than an empty list.
 --
@@ -644,6 +653,7 @@ entity Task {
     -- their six columns, never written: the store cannot drop a column.
     pr_learnings_gate_shown_at: Timestamp?  -- set once when the PrLearningsGate fires; null means the gate has never fired for this task
     wrap_up_mode: WrapUpMode?  -- preferred wrap-up path; null means decide at wrap-up time
+    model: TaskModel?          -- the model the task's agent launches on; null means sonnet
     auto_run_plan: Boolean = false  -- when true and plan_path is set, build_prompt's
                                     -- has-plan addendum skips asking the dispatched
                                     -- agent to confirm before implementing (see

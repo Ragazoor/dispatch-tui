@@ -646,6 +646,7 @@ pub fn phoenix_successor(predecessor: &Task, epic_id: i64, now: &str, created_by
         labels: predecessor.labels.clone(),
         base_branch: predecessor.base_branch.clone(),
         wrap_up_mode: predecessor.wrap_up_mode.clone(),
+        model: predecessor.model.clone(),
         auto_run_plan: predecessor.auto_run_plan,
         phoenix: true,
         // schedules.allium (S3-S5): the schedule repeats with the flag. The

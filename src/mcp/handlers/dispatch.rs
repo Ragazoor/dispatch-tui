@@ -172,8 +172,8 @@ mcp_tools! {
     async idempotent "update_tasks" => tasks::handle_update_tasks,
         "Update one or many tasks. Pass task_ids (one id updates one task) plus the fields to set: \
 status, sub_status, title, description, repo_path, plan_path, sort_order, url, url_type, tag, \
-epic_id, base_branch, wrap_up_mode, auto_run_plan, phoenix, and schedule. At least one field must be \
-provided; every field left out is untouched. Every named task is updated whatever its status; \
+epic_id, base_branch, wrap_up_mode, model, auto_run_plan, phoenix, and schedule. At least one field \
+must be provided; every field left out is untouched. Every named task is updated whatever its status; \
 pick many ids with list_tasks (epic_id, recursive, status, base_branch). With one id the reply is \
 \"Task N updated (fields)\" or an error. With several it is not atomic: one line per task, success \
 or failure, then a count.",
@@ -238,6 +238,11 @@ usually the right answer.",
                     "type": "string",
                     "description": "Pre-set the wrap-up action: 'rebase' (rebase onto base_branch), 'pr' (create a PR), or 'done' (mark done immediately).",
                     "enum": crate::models::WrapUpMode::ALL.iter().map(|m| m.as_str()).collect::<Vec<_>>()
+                },
+                "model": {
+                    "type": "string",
+                    "description": "The model the task's agent launches on: 'haiku', 'sonnet', 'opus' or 'fable'. A task with no model runs on sonnet. Defaults to sonnet.",
+                    "enum": crate::models::TaskModel::ALL.iter().map(|m| m.as_str()).collect::<Vec<_>>()
                 },
                 "auto_run_plan": {
                     "type": "boolean",

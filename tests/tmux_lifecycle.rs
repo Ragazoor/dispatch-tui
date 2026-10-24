@@ -186,6 +186,7 @@ impl Fixture {
         dispatch::resume_agent(
             TaskId(id),
             "atlas",
+            dispatch_tui::models::TaskModel::DEFAULT,
             worktree.to_str().unwrap(),
             &self.server.runner(),
         )

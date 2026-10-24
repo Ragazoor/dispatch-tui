@@ -2,8 +2,8 @@
 pub(in crate::tui) const REPARENT_NO_PARENT_SENTINEL: &str = "__no_parent__";
 
 use crate::models::{
-    DispatchMode, Epic, EpicId, Task, TaskId, TaskStatus, TaskTag, WorkPackageId, WrapUpMode,
-    DEFAULT_BASE_BRANCH,
+    DispatchMode, Epic, EpicId, Task, TaskId, TaskModel, TaskStatus, TaskTag, WorkPackageId,
+    WrapUpMode, DEFAULT_BASE_BRANCH,
 };
 
 mod fold;
@@ -380,10 +380,13 @@ pub enum InputMode {
         epic_id: Option<EpicId>,
     },
     InputBaseBranch,
-    /// The creation form's last step. phoenix has no step of its own — it is
-    /// armed at [`InputMode::InputTag`] (CreateTask: PhoenixArming, in
+    /// The wrap-up picker. phoenix has no step of its own — it is armed at
+    /// [`InputMode::InputTag`] (CreateTask: PhoenixArming, in
     /// `docs/specs/tasks.allium`).
     InputWrapUpMode,
+    /// The creation form's last step: the model picker (CreateTask:
+    /// ModelPicker). Answering it creates the task.
+    InputModel,
     /// Sync confirmation for one repository (docs/specs/repo-sync.allium:
     /// surface RepoSyncConfirmation). Carries only the repo path: the
     /// measurement itself is re-read from `App.repo_sync` at confirm time, so a
@@ -435,6 +438,8 @@ pub struct TaskDraft {
     pub tag: Option<TaskTag>,
     pub base_branch: String,
     pub wrap_up_mode: Option<WrapUpMode>,
+    /// `None` launches on the default model (`core.allium: TaskModel`).
+    pub model: Option<TaskModel>,
     pub phoenix: bool,
     /// The package view the task was drafted in: the new task is linked to it
     /// once created (`work-packages.allium: CreateTaskInPackageView`). Set
@@ -451,6 +456,7 @@ impl Default for TaskDraft {
             tag: None,
             base_branch: DEFAULT_BASE_BRANCH.to_string(),
             wrap_up_mode: None,
+            model: None,
             phoenix: false,
             work_package: None,
         }
@@ -472,6 +478,7 @@ pub struct TaskEdit {
     pub tag: Option<TaskTag>,
     pub base_branch: Option<String>,
     pub wrap_up_mode: Option<crate::models::WrapUpMode>,
+    pub model: Option<crate::models::TaskModel>,
     /// Resolved post-edit url value (not a delta): `Some` to set, `None` to
     /// clear or leave absent. Applied directly to the in-memory task snapshot.
     pub url: Option<crate::models::TaskUrl>,

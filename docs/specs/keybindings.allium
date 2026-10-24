@@ -67,6 +67,7 @@ use "./observability.allium" as observability
 --   board_picker_base_branch     board.picker.base_branch     base-branch field with candidate list
 --   board_picker_tag             board.picker.tag             tag step of task creation (also arms phoenix)
 --   board_picker_wrap_up_mode    board.picker.wrap_up_mode    wrap-up-mode step of task creation
+--   board_picker_model           board.picker.model           model step of task creation
 --   board_picker_quick_dispatch  board.picker.quick_dispatch  quick-dispatch repo picker (`D`)
 --   board_picker_move_to_epic    board.picker.move_to_epic    epic tree picker for moving a task (`m`)
 --   board_picker_reparent_epic   board.picker.reparent_epic   epic tree picker for reparenting an epic (`m`)
@@ -190,7 +191,7 @@ enum KeyNamespace {
     board_normal | board_detail | board_search | board_help | board_error |
     board_text | board_filter | board_filter_search |
     board_picker_repo_path | board_picker_base_branch | board_picker_tag |
-    board_picker_wrap_up_mode | board_picker_quick_dispatch |
+    board_picker_wrap_up_mode | board_picker_model | board_picker_quick_dispatch |
     board_picker_move_to_epic | board_picker_reparent_epic |
     board_picker_work_package |
     board_confirm_quit | board_confirm_delete_task | board_confirm_batch_delete |

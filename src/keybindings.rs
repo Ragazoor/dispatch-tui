@@ -80,6 +80,7 @@ pub enum KeyNamespace {
     BoardPickerBaseBranch,
     BoardPickerTag,
     BoardPickerWrapUpMode,
+    BoardPickerModel,
     BoardPickerQuickDispatch,
     BoardPickerMoveToEpic,
     BoardPickerReparentEpic,
@@ -109,7 +110,7 @@ pub enum KeyNamespace {
 impl KeyNamespace {
     /// Every namespace, in the order the spec's enum lists them. This is the
     /// order `list_keybindings` and the help overlay group by.
-    pub const ALL: [KeyNamespace; 36] = [
+    pub const ALL: [KeyNamespace; 37] = [
         Self::BoardNormal,
         Self::BoardDetail,
         Self::BoardSearch,
@@ -122,6 +123,7 @@ impl KeyNamespace {
         Self::BoardPickerBaseBranch,
         Self::BoardPickerTag,
         Self::BoardPickerWrapUpMode,
+        Self::BoardPickerModel,
         Self::BoardPickerQuickDispatch,
         Self::BoardPickerMoveToEpic,
         Self::BoardPickerReparentEpic,
@@ -163,6 +165,7 @@ impl KeyNamespace {
             Self::BoardPickerBaseBranch => "board.picker.base_branch",
             Self::BoardPickerTag => "board.picker.tag",
             Self::BoardPickerWrapUpMode => "board.picker.wrap_up_mode",
+            Self::BoardPickerModel => "board.picker.model",
             Self::BoardPickerQuickDispatch => "board.picker.quick_dispatch",
             Self::BoardPickerMoveToEpic => "board.picker.move_to_epic",
             Self::BoardPickerReparentEpic => "board.picker.reparent_epic",

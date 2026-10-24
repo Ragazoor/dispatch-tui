@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::models::{EpicId, Task, TaskTag, WrapUpMode};
+use crate::models::{EpicId, Task, TaskModel, TaskTag, WrapUpMode};
 
 use super::super::types::*;
 use super::super::{filtered_repos, has_new_repo_option, InteractionState};
@@ -21,6 +21,7 @@ pub(in crate::tui) fn copy_task(
     let repo_path = task.repo_path.clone();
     let tag = task.tag;
     let wrap_up_mode = task.wrap_up_mode;
+    let model = task.model;
     // The copy runs the form from InputTag on (CopyTask in
     // docs/specs/tasks.allium): that step is where phoenix is armed, and a
     // copy that skipped it would be the one flow with no way to arm the
@@ -32,6 +33,7 @@ pub(in crate::tui) fn copy_task(
         repo_path,
         tag,
         wrap_up_mode,
+        model,
         ..Default::default()
     });
     input.clear_buffer();
@@ -93,6 +95,7 @@ pub(in crate::tui) fn submit_title(
             tag: None,
             base_branch: "main".to_string(),
             wrap_up_mode: None,
+            model: None,
             phoenix: false,
             work_package: None,
         });
@@ -223,13 +226,33 @@ pub(in crate::tui) fn submit_base_branch(
 ///
 /// The caller then runs `App::finish_task_creation`, which needs the whole
 /// app.
-pub(in crate::tui) fn apply_wrap_up_mode(input: &mut InputState, mode: Option<WrapUpMode>) {
+pub(in crate::tui) fn submit_wrap_up_mode(
+    input: &mut InputState,
+    status: &mut StatusState,
+    mode: Option<WrapUpMode>,
+) -> Vec<Command> {
     // `mode == None` means Enter was pressed without an explicit r/p/d
     // pick — leave the draft's existing value untouched rather than
     // clearing it, so CopyTask's prefilled source-task mode survives an
     // Enter-to-skip instead of being silently dropped.
     if let (Some(ref mut draft), Some(m)) = (input.task_draft.as_mut(), mode) {
         draft.wrap_up_mode = Some(m);
+    }
+    input.mode = InputMode::InputModel;
+    let seeded = input.task_draft.as_ref().and_then(|d| d.model);
+    status.set(crate::tui::ui::model_prompt(seeded));
+    vec![]
+}
+
+/// Record the model step's answer (CreateTask: ModelPicker). `None` is Enter
+/// and keeps the draft's model, so a copy's seeded model survives it — the
+/// same EnterKeepsTheDraft rule as the wrap-up and tag steps.
+///
+/// The caller then runs `App::finish_task_creation`, which needs the whole
+/// app.
+pub(in crate::tui) fn apply_model(input: &mut InputState, model: Option<TaskModel>) {
+    if let (Some(ref mut draft), Some(m)) = (input.task_draft.as_mut(), model) {
+        draft.model = Some(m);
     }
 }
 
@@ -261,7 +284,7 @@ pub(in crate::tui) fn arm_phoenix(
 /// `tag == None` means Enter was pressed without an explicit pick — leave
 /// the draft's existing value alone rather than clearing it, so CopyTask's
 /// seeded tag survives the step (CreateTask: EnterKeepsTheDraft). Same
-/// rule, and same reason, as `apply_wrap_up_mode` above.
+/// rule, and same reason, as `submit_wrap_up_mode` above.
 pub(in crate::tui) fn submit_tag(
     input: &mut InputState,
     status: &mut StatusState,

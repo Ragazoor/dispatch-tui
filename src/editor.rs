@@ -77,6 +77,10 @@ pub struct EditorFields {
     /// Parsed wrap-up mode, or `None` if the section was empty/absent or
     /// unparseable. `None` is applied as "clear" in `apply_task_editor_fields`.
     pub wrap_up_mode: Option<crate::models::WrapUpMode>,
+    /// Parsed model, or `None` if the section was empty/absent or unparseable.
+    /// `None` is applied as "clear" (back to the default model), like
+    /// WRAP_UP_MODE.
+    pub model: Option<crate::models::TaskModel>,
     /// Raw URL string. Empty means "clear the url".
     pub url: String,
     /// Parsed url_type, or `None` if the section was empty/absent or
@@ -219,6 +223,7 @@ pub fn format_editor_content(task: &Task) -> String {
     let plan = task.plan_path.as_deref().unwrap_or("");
     let tag = task.tag.map(|t| t.as_str()).unwrap_or("");
     let wrap_up_mode = task.wrap_up_mode.map(|m| m.as_str()).unwrap_or("");
+    let model = task.model.map(|m| m.as_str()).unwrap_or("");
     let url = task.url.as_ref().map(|u| u.url.as_str()).unwrap_or("");
     let url_type = task.url.as_ref().map(|u| u.url_type.as_str()).unwrap_or("");
     let phoenix = if task.phoenix { "true" } else { "false" };
@@ -231,6 +236,7 @@ pub fn format_editor_content(task: &Task) -> String {
          --- TAG ---\n{tag}\n\
          --- BASE_BRANCH ---\n{base_branch}\n\
          --- WRAP_UP_MODE ---\n{wrap_up_mode}\n\
+         --- MODEL ---\n{model}\n\
          --- PHOENIX ---\n{phoenix}\n\
          --- URL ---\n{url}\n\
          --- URL_TYPE ---\n{url_type}\n",
@@ -254,7 +260,7 @@ pub fn format_editor_content(task: &Task) -> String {
 ///   invalid/empty input falls back to the prior status.
 /// - **`base_branch`**: `Option<String>` where `None` = keep the prior value
 ///   (the column is non-nullable, so it is never cleared from the editor).
-/// - **Clearable fields** (`plan_path`, `tag`, `wrap_up_mode`): the editor
+/// - **Clearable fields** (`plan_path`, `tag`, `wrap_up_mode`, `model`): the editor
 ///   always states a definite intent (the section is always present), so an
 ///   empty section means *clear* and a filled section means *set*. `plan_path`
 ///   uses [`FieldUpdate`] (`Set`/`Clear`); the rest use `Option` where
@@ -276,6 +282,7 @@ pub struct TaskEditApplied {
     pub tag: Option<crate::models::TaskTag>,
     pub base_branch: Option<String>,
     pub wrap_up_mode: Option<crate::models::WrapUpMode>,
+    pub model: Option<crate::models::TaskModel>,
     pub url: Option<crate::service::UrlUpdate>,
     /// Post-edit url resolved once here (the value `url` diffs against the
     /// prior task to decide whether a DB write is needed), so callers get
@@ -331,9 +338,11 @@ pub fn apply_task_editor_fields(task: &Task, fields: EditorFields) -> TaskEditAp
     let status = fields.status.unwrap_or(task.status);
     // Clearable plan: empty section clears, filled section sets.
     let plan_path = FieldUpdate::from_string(fields.plan);
-    // Clearable tag/wrap_up_mode: `None` (empty/unparseable section) clears.
+    // Clearable tag/wrap_up_mode/model: `None` (empty/unparseable section)
+    // clears.
     let tag = fields.tag;
     let wrap_up_mode = fields.wrap_up_mode;
+    let model = fields.model;
     // base_branch is non-nullable: empty preserves the prior value (`None`
     // tells the service not to touch the column).
     let base_branch = if fields.base_branch.is_empty() {
@@ -365,6 +374,7 @@ pub fn apply_task_editor_fields(task: &Task, fields: EditorFields) -> TaskEditAp
         tag,
         base_branch,
         wrap_up_mode,
+        model,
         url,
         resolved_url: desired_url,
         phoenix,
@@ -427,6 +437,14 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
         &mut errors,
     );
 
+    let model = parse_section(
+        s.remove("MODEL").unwrap_or_default(),
+        "MODEL",
+        crate::models::TaskModel::parse,
+        |raw| format!("unknown model: {raw:?} (valid: haiku, sonnet, opus, fable)"),
+        &mut errors,
+    );
+
     let url_type = parse_section(
         s.remove("URL_TYPE").unwrap_or_default(),
         "URL_TYPE",
@@ -452,6 +470,7 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
         tag,
         base_branch: s.remove("BASE_BRANCH").unwrap_or_default(),
         wrap_up_mode,
+        model,
         url: s.remove("URL").unwrap_or_default(),
         url_type,
         phoenix,

@@ -162,7 +162,7 @@ fn family_names_select_every_namespace_of_the_family() {
         .iter()
         .all(|n| n.name().starts_with("board.confirm.")));
     let picker = namespaces_matching("board.picker").unwrap();
-    assert_eq!(picker.len(), 8);
+    assert_eq!(picker.len(), 9);
     assert_eq!(namespaces_matching("board.normal").unwrap().len(), 1);
     assert!(namespaces_matching("board").is_none());
     assert!(namespaces_matching("nonsense").is_none());

@@ -38,6 +38,7 @@ pub struct TaskPatch {
     pub owner: Option<String>,
     pub completed_at: Option<String>,
     pub schedule: Option<String>,
+    pub model: Option<String>,
 }
 
 impl __sdk::InModule for TaskPatch {

@@ -189,6 +189,10 @@ pub fn create_task_row(
         // The store arms `next_due` from it and ignores anything sent for the
         // other two (`schedules.allium: SetSchedule`).
         schedule: req.schedule.unwrap_or_default().to_string(),
+        model: req
+            .model
+            .map(|m| m.as_str().to_string())
+            .unwrap_or_default(),
         next_due: String::new(),
         schedule_error: String::new(),
     }
@@ -259,6 +263,8 @@ pub fn task_patch(patch: &TaskPatch<'_>) -> bindings::TaskPatch {
         completed_at: nullable(patch.completed_at, stamp, String::new()),
         // `""` clears it (`schedules.allium: ClearSchedule`).
         schedule: nullable(patch.schedule, str::to_string, String::new()),
+        // `""` clears it back to the default (`tasks.allium: SetModel`).
+        model: nullable(patch.model, |m| m.as_str().to_string(), String::new()),
     }
 }
 

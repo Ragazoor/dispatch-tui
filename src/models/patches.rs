@@ -7,8 +7,8 @@
 //! `store` (`tests/module_layering.rs`).
 
 use crate::models::{
-    EpicId, LearningKind, LearningScope, LearningStatus, SubStatus, TaskId, TaskStatus, TaskTag,
-    WrapUpMode,
+    EpicId, LearningKind, LearningScope, LearningStatus, SubStatus, TaskId, TaskModel, TaskStatus,
+    TaskTag, WrapUpMode,
 };
 
 // ---------------------------------------------------------------------------
@@ -100,6 +100,7 @@ patch_struct! {
         nullable last_peer_message_sent_at: chrono::DateTime<chrono::Utc>,
         nullable last_peer_message_received_at: chrono::DateTime<chrono::Utc>,
         nullable wrap_up_mode: WrapUpMode,
+        nullable model:        TaskModel,
         plain    auto_run_plan: bool,
         plain    phoenix:       bool,
         nullable schedule:      &'a str,
@@ -123,6 +124,7 @@ pub struct CreateTaskRequest<'a> {
     pub sort_order: Option<i64>,
     pub tag: Option<TaskTag>,
     pub wrap_up_mode: Option<WrapUpMode>,
+    pub model: Option<TaskModel>,
     pub auto_run_plan: bool,
     pub phoenix: bool,
     /// A five-field UTC cron string the store validates and arms

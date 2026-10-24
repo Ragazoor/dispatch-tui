@@ -4,17 +4,17 @@ use serde::Deserialize;
 
 use crate::mcp::McpState;
 use crate::models::{
-    Agent, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, UrlType, WrapUpMode,
+    Agent, EpicId, SubStatus, Task, TaskId, TaskModel, TaskStatus, TaskTag, UrlType, WrapUpMode,
 };
 use crate::service::{FieldUpdate, UpdateTaskParams};
 
 // Promoted to pub(super) so sub-modules can `use super::{parse_args, ...}`
 pub(super) use super::types::{
-    deserialize_flexible_id, deserialize_nullable_flexible_id, deserialize_nullable_wrap_up_mode,
-    deserialize_optional_flexible_i64, deserialize_optional_flexible_id,
-    deserialize_optional_limit, deserialize_optional_url_type, fetch_caller_task, parse_args,
-    service_err_to_response, tool_error, FlexibleId, JsonRpcResponse, StatusFilter, INTERNAL_ERROR,
-    INVALID_PARAMS,
+    deserialize_flexible_id, deserialize_nullable_flexible_id, deserialize_nullable_model,
+    deserialize_nullable_wrap_up_mode, deserialize_optional_flexible_i64,
+    deserialize_optional_flexible_id, deserialize_optional_limit, deserialize_optional_url_type,
+    fetch_caller_task, parse_args, service_err_to_response, tool_error, FlexibleId,
+    JsonRpcResponse, StatusFilter, INTERNAL_ERROR, INVALID_PARAMS,
 };
 
 mod crud;
@@ -143,6 +143,13 @@ mcp_args! {
         "enum": crate::models::WrapUpMode::ALL.iter().map(|m| Some(m.as_str())).chain(std::iter::once(None)).collect::<Vec<Option<&str>>>()
     };
 
+    #[serde(default, deserialize_with = "deserialize_nullable_model")]
+    optional model: Option<Option<TaskModel>> = [set(model)] {
+        "type": ["string", "null"],
+        "description": "The model the task's agent launches on: 'haiku', 'sonnet', 'opus' or 'fable'. A task with no model runs on sonnet. Takes effect at the agent's next launch. Pass null to clear.",
+        "enum": crate::models::TaskModel::ALL.iter().map(|m| Some(m.as_str())).chain(std::iter::once(None)).collect::<Vec<Option<&str>>>()
+    };
+
     #[serde(default)]
     optional auto_run_plan: Option<bool> = [set(auto_run_plan)] {
         "type": "boolean",
@@ -234,6 +241,8 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) base_branch: Option<String>,
     #[serde(default)]
     pub(super) wrap_up_mode: Option<WrapUpMode>,
+    #[serde(default)]
+    pub(super) model: Option<TaskModel>,
     #[serde(default)]
     pub(super) auto_run_plan: bool,
     #[serde(default)]
@@ -416,6 +425,12 @@ fn format_task_detail(
     }
     if let Some(wrap_up_mode) = task.wrap_up_mode {
         text.push_str(&format!("\nWrap-up mode: {wrap_up_mode}"));
+    }
+    // Always shown: a task with no model still launches on one
+    // (mcp-task-tools.allium: GetTaskViaMcp).
+    match task.model {
+        Some(model) => text.push_str(&format!("\nModel: {model}")),
+        None => text.push_str(&format!("\nModel: {} (default)", TaskModel::DEFAULT)),
     }
     // Reported here, where the `/wrap-up` skill reads the task, rather than only
     // at `wrap_up` — the last call of its sequence. An agent that learns the

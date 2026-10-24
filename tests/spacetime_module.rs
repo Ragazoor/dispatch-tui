@@ -267,6 +267,7 @@ fn task_json(id: i64, title: &str, status: &str, epic: i64, host: &str) -> serde
         "schedule": "",
         "next_due": "",
         "schedule_error": "",
+        "model": "",
     })
 }
 

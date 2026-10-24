@@ -653,16 +653,16 @@ fn created(cmds: Vec<Command>) -> (crate::tui::TaskDraft, Option<EpicId>) {
         .expect("a task-creating command")
 }
 
-/// Answer the new-task form's last step (wrap-up mode) with `r`, from a draft
+/// Answer the new-task form's last step (the model) with `s`, from a draft
 /// parked there, and return what it creates.
 fn finish_new_task(app: &mut App) -> (crate::tui::TaskDraft, Option<EpicId>) {
-    app.input.mode = InputMode::InputWrapUpMode;
+    app.input.mode = InputMode::InputModel;
     app.input.task_draft = Some(crate::tui::TaskDraft {
         title: "T".to_string(),
         repo_path: "/repo".to_string(),
         ..Default::default()
     });
-    created(app.handle_key(make_key(KeyCode::Char('r'))))
+    created(app.handle_key(make_key(KeyCode::Char('s'))))
 }
 
 #[test]

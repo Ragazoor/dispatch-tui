@@ -335,6 +335,33 @@ fn wrap_up_step_settled_lines_fit_one_row() {
     assert!(line_text(&lines[3]).starts_with("  Base branch: bbb"));
 }
 
+/// The model step restates the wrap-up answer, shows MODEL_STEP_LINES lines
+/// (what `input_panel_height` reserves from), and its active line is the one
+/// shared prompt (CreateTask: ModelPicker).
+#[test]
+fn model_step_restates_wrap_up_and_shows_the_shared_prompt() {
+    let mut app = crate::tui::App::new(vec![]);
+    app.input.task_draft = Some(crate::tui::TaskDraft {
+        wrap_up_mode: Some(crate::models::WrapUpMode::Pr),
+        model: Some(crate::models::TaskModel::Opus),
+        ..long_draft()
+    });
+    let area = Rect::new(0, 0, 80, 20);
+    let lines = input_model_lines(&app, area, &form_styles());
+    assert_eq!(lines.len(), MODEL_STEP_LINES as usize);
+    assert_one_row_each(&lines[..5], 78);
+    assert_eq!(line_text(&lines[4]), "  Wrap-up: pr");
+    assert_eq!(
+        line_text(&lines[5]),
+        format!("  {}", model_prompt(Some(crate::models::TaskModel::Opus)))
+    );
+
+    app.input.task_draft = Some(long_draft());
+    let lines = input_model_lines(&app, area, &form_styles());
+    assert_eq!(line_text(&lines[4]), "  Wrap-up: decide at wrap-up");
+    assert!(line_text(&lines[5]).ends_with("[Enter] sonnet"));
+}
+
 #[test]
 fn tag_description_and_epic_steps_settled_lines_fit_one_row() {
     let mut app = crate::tui::App::new(vec![]);

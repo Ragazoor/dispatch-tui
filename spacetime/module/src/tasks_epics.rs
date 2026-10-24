@@ -206,6 +206,9 @@ pub struct TaskPatch {
     /// the set can be refused, so `patch_task` applies it through
     /// [`apply_schedule`] after the rest of the patch.
     pub schedule: Patch<String>,
+    /// A model alias sets it, `""` clears it back to the sonnet default
+    /// (`tasks.allium: SetModel`).
+    pub model: Patch<String>,
 }
 
 /// The fields of an epic a patch may change.
@@ -257,6 +260,7 @@ pub fn apply_task_patch(row: &mut Task, patch: TaskPatch) {
         host,
         owner,
         completed_at,
+        model,
     );
 }
 

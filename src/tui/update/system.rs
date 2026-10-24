@@ -30,6 +30,7 @@ impl App {
                 t.base_branch = bb;
             }
             t.wrap_up_mode = edit.wrap_up_mode;
+            t.model = edit.model;
             t.url = edit.url;
             t.phoenix = edit.phoenix;
             t.updated_at = chrono::Utc::now();
@@ -75,6 +76,7 @@ impl App {
                     tag: None,
                     base_branch: DEFAULT_BASE_BRANCH.to_string(),
                     wrap_up_mode: None,
+                    model: None,
                     // Quick dispatch runs no tag picker, so there is nowhere
                     // for the p key that arms phoenix to live — and a quick
                     // task is a one-off by construction anyway. The agent can

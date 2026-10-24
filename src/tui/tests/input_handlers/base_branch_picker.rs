@@ -1299,9 +1299,13 @@ fn handle_key_text_input_repo_enter_selects_cursor_repo() {
         crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
     ));
     assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
-    // Wrap-up is the form's last step: answering it creates the task.
-    let cmds3 = app.update(Message::Input(
+    app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
+    ));
+    // The model step is the form's last: answering it creates the task
+    // (tasks.allium: CreateTask, ModelPicker).
+    let cmds3 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitModel(None),
     ));
     assert!(cmds3.iter().any(|c| matches!(
         c,
@@ -1328,9 +1332,13 @@ fn handle_key_text_input_enter_submits_typed_text() {
         crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
     ));
     assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
-    // Wrap-up is the form's last step: answering it creates the task.
-    let cmds3 = app.update(Message::Input(
+    app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
+    ));
+    // The model step is the form's last: answering it creates the task
+    // (tasks.allium: CreateTask, ModelPicker).
+    let cmds3 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitModel(None),
     ));
     assert!(cmds3.iter().any(|c| matches!(
         c,

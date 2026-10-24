@@ -78,7 +78,7 @@ boundaries — `Ctrl+←/→` steps through path segments, which is the point.
 Schema enum values may be added in a migration before all rows are upgraded. Never `panic!` (or `unwrap()`/`expect()`) on a value read from the DB — a poisoned row must not kill the TUI.
 
 <!-- allow-phantom-symbol: `Enum` below is a stand-in for any such enum, not a type -->
-**Field level.** An enum that can legitimately gain variants (a newer binary writing a value this one doesn't know) defaults with a warning: `Enum::parse(&s).unwrap_or_else(|| { tracing::warn!(...); Enum::Default })`. The `feed_role` and `origin` columns in `epic` (`src/sync/decode.rs::epic`) are the canonical examples. Fields where no default is meaningful — `status`, `sub_status`, `tag`, `wrap_up_mode`, the timestamps, the `url`/`url_type` pair — instead fail the row, and the row-level policy below decides what that costs.
+**Field level.** An enum that can legitimately gain variants (a newer binary writing a value this one doesn't know) defaults with a warning: `Enum::parse(&s).unwrap_or_else(|| { tracing::warn!(...); Enum::Default })`. The `feed_role` and `origin` columns in `epic` (`src/sync/decode.rs::epic`) are the canonical examples. Fields where no default is meaningful — `status`, `sub_status`, `tag`, `wrap_up_mode`, `model`, the timestamps, the `url`/`url_type` pair — instead fail the row, and the row-level policy below decides what that costs.
 
 **Row level — the decode-failure policy.** The board's rows arrive from the subscription (or from the in-memory store a test handle owns) and are decoded in `src/sync/decode.rs`; which reads tolerate an undecodable row is deliberate, not incidental:
 

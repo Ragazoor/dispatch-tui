@@ -72,7 +72,14 @@ fn resume_script_matches_a_real_resume() {
     let script = DispatchScript::resume();
     let mock = script.runner();
 
-    resume_agent(TaskId(42), "atlas", dir.path().to_str().unwrap(), &mock).unwrap();
+    resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        dir.path().to_str().unwrap(),
+        &mock,
+    )
+    .unwrap();
 
     script.assert_matches(&mock.recorded_calls());
 }
@@ -87,7 +94,14 @@ fn resume_script_matches_a_real_resume_when_window_already_alive() {
     let script = DispatchScript::resume().window_already_alive();
     let mock = script.runner();
 
-    resume_agent(TaskId(42), "atlas", dir.path().to_str().unwrap(), &mock).unwrap();
+    resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        dir.path().to_str().unwrap(),
+        &mock,
+    )
+    .unwrap();
 
     script.assert_matches(&mock.recorded_calls());
 }
@@ -643,7 +657,14 @@ fn assert_matches_rejects_a_reordered_call() {
 fn recorded_resume_calls() -> Vec<(String, Vec<String>)> {
     let (dir, _repo_path) = bare_repo();
     let mock = DispatchScript::resume().runner();
-    resume_agent(TaskId(42), "atlas", dir.path().to_str().unwrap(), &mock).unwrap();
+    resume_agent(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        dir.path().to_str().unwrap(),
+        &mock,
+    )
+    .unwrap();
     mock.recorded_calls()
 }
 

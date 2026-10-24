@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use std::fs;
 
 use crate::git::detect_default_branch;
-use crate::models::{expand_tilde, DispatchResult, ResumeResult, Task, TaskId, TmuxWindow};
+use crate::models::{
+    expand_tilde, DispatchResult, ResumeResult, Task, TaskId, TaskModel, TmuxWindow,
+};
 use crate::process::{ProcessRunner, SUBPROCESS_TIMEOUT};
 use crate::tmux;
 
@@ -34,7 +36,9 @@ fn session_name_flag(agent_name: &str) -> String {
 }
 
 /// The flags every TASK agent's `claude` command line carries: the plugin dir
-/// and settings, the session name, and this task's caller-identity MCP config.
+/// and settings, the session name, the model, and this task's caller-identity
+/// MCP config. The model is always named, never left to the operator's own
+/// Claude Code default (`EveryTaskAgentLaunchesOnItsModel`).
 ///
 /// One seam for both launch sites (`dispatch_with_prompt` and `resume_agent`),
 /// because forgetting one of these is silent. `AgentCarriesItsOwnCallerIdentity`
@@ -48,11 +52,15 @@ fn session_name_flag(agent_name: &str) -> String {
 fn agent_launch_flags(
     task_id: TaskId,
     agent_name: &str,
+    model: TaskModel,
     worktree_path: &str,
     runner: &dyn ProcessRunner,
 ) -> LaunchFlags {
     LaunchFlags {
-        base: format!("{DISPATCH_PLUGIN_DIR}{}", session_name_flag(agent_name)),
+        base: format!(
+            "{DISPATCH_PLUGIN_DIR}{} --model {model}",
+            session_name_flag(agent_name)
+        ),
         mcp_config: super::caller_identity::write_agent_mcp_config(runner, worktree_path, task_id)
             .map(|p| p.to_string_lossy().into_owned()),
     }
@@ -427,7 +435,13 @@ fn launch_agent(
 ) -> Result<()> {
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
     let claude = runner.agent_binaries().claude_quoted();
-    let launch_flags = agent_launch_flags(task.id, agent_name, &provision.worktree_path, runner);
+    let launch_flags = agent_launch_flags(
+        task.id,
+        agent_name,
+        task.launch_model(),
+        &provision.worktree_path,
+        runner,
+    );
     let claude_cmd = prompt_launch_command(&claude, &launch_flags);
 
     // Anything failing here happens after the worktree and tmux window both
@@ -783,6 +797,7 @@ pub async fn fetch_verify_command(
 pub fn resume_agent(
     task_id: TaskId,
     agent_name: &str,
+    model: TaskModel,
     worktree_path: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<ResumeResult> {
@@ -814,7 +829,7 @@ pub fn resume_agent(
     let claude = runner.agent_binaries().claude_quoted();
     // Below the live-window early return above, deliberately: these flags cost
     // a config write, and a resume that only reattaches launches nothing.
-    let launch_flags = agent_launch_flags(task_id, agent_name, worktree_path, runner);
+    let launch_flags = agent_launch_flags(task_id, agent_name, model, worktree_path, runner);
     tmux::send_keys(
         &tmux_window,
         &format!("{claude} {} --continue", launch_flags.inline()),

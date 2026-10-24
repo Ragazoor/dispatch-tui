@@ -786,6 +786,7 @@ fn phoenix_task() -> Task {
         labels: "[\"x\"]".into(),
         base_branch: "develop".into(),
         wrap_up_mode: "rebase".into(),
+        model: "opus".into(),
         auto_run_plan: true,
         phoenix: true,
         ..running_task()
@@ -844,6 +845,7 @@ fn the_successor_inherits_the_configuration_and_none_of_the_run() {
     assert_eq!(next.labels, "[\"x\"]");
     assert_eq!(next.base_branch, "develop");
     assert_eq!(next.wrap_up_mode, "rebase");
+    assert_eq!(next.model, "opus");
     assert!(next.auto_run_plan);
     assert!(next.phoenix);
     assert_eq!(next.epic_id, 9);

@@ -66,6 +66,10 @@ use super::*;
 ///    moved out of the service into `create_work_package_with_links` and
 ///    `update_work_package_with_links`, one transaction each (`packages.rs`).
 ///
+/// Not a bump: a new Task column the board validates, such as `model`. It
+/// widens `create_task`'s and `patch_task`'s argument types, but moves no rule
+/// into the module; `alias` (fbbd14c6) set the precedent.
+///
 /// Not a bump: eb73e7eb, which made `write_task` check sub-status legality on
 /// every write path and tightened `patch_task`, `close_task` and the epic caps.
 /// Each of those rules already lived in the module; the commit closed write

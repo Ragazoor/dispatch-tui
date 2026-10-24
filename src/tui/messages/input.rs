@@ -1,7 +1,7 @@
 //! Form input, text-entry, and confirmation-flow messages for the task
 //! creation, copy, edit, and delete flows.
 
-use crate::models::{TaskTag, WrapUpMode};
+use crate::models::{TaskModel, TaskTag, WrapUpMode};
 
 use crate::tui::types::Command;
 use crate::tui::update::forms;
@@ -29,6 +29,9 @@ pub enum InputMessage {
         replacing: String,
     },
     SubmitWrapUpMode(Option<WrapUpMode>),
+    /// The model step's answer; `None` is Enter, which keeps the draft's
+    /// model (CreateTask: ModelPicker, in `docs/specs/tasks.allium`).
+    SubmitModel(Option<TaskModel>),
     /// `p` at the tag picker: arm the phoenix flag and re-open the same step
     /// for the real tag. Carries no payload — there is no message that DISARMS
     /// the flag, because declining it is simply not pressing `p`
@@ -86,7 +89,10 @@ impl InputMessage {
                 forms::default_branch_detected(&mut app.input, branch, replacing)
             }
             InputMessage::SubmitWrapUpMode(mode) => {
-                forms::apply_wrap_up_mode(&mut app.input, mode);
+                forms::submit_wrap_up_mode(&mut app.input, &mut app.status, mode)
+            }
+            InputMessage::SubmitModel(model) => {
+                forms::apply_model(&mut app.input, model);
                 app.finish_task_creation()
             }
             InputMessage::ArmPhoenix => forms::arm_phoenix(&mut app.input, &mut app.status),

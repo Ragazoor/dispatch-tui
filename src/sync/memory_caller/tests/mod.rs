@@ -97,6 +97,7 @@ fn blank_task_patch() -> bindings::TaskPatch {
         owner: None,
         completed_at: None,
         schedule: None,
+        model: None,
     }
 }
 

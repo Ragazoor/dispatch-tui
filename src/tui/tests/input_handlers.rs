@@ -42,9 +42,13 @@ fn repo_path_empty_uses_saved_path() {
         crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
     ));
     assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
-    // Wrap-up is the form's last step: answering it creates the task.
-    let cmds3 = app.update(Message::Input(
+    app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
+    ));
+    // The model step is the form's last: answering it creates the task
+    // (tasks.allium: CreateTask, ModelPicker).
+    let cmds3 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitModel(None),
     ));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds3.iter().any(|c| matches!(
@@ -118,9 +122,13 @@ fn repo_path_nonempty_used_as_is() {
         crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
     ));
     assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
-    // Wrap-up is the form's last step: answering it creates the task.
-    let cmds3 = app.update(Message::Input(
+    app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
+    ));
+    // The model step is the form's last: answering it creates the task
+    // (tasks.allium: CreateTask, ModelPicker).
+    let cmds3 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitModel(None),
     ));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds3
@@ -143,6 +151,7 @@ fn task_edited_updates_fields() {
             tag: None,
             base_branch: None,
             wrap_up_mode: None,
+            model: None,
             url: None,
             phoenix: true,
         },

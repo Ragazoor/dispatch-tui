@@ -514,6 +514,7 @@ impl TaskService {
             sort_order: params.sort_order,
             tag: params.tag,
             wrap_up_mode: params.wrap_up_mode,
+            model: params.model,
             auto_run_plan: params.auto_run_plan,
             phoenix: params.phoenix,
             schedule: params.schedule.as_deref(),

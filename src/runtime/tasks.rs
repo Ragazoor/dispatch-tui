@@ -19,6 +19,7 @@ impl TuiRuntime {
             tag: draft.tag,
             base_branch: Some(draft.base_branch),
             wrap_up_mode: draft.wrap_up_mode,
+            model: draft.model,
             auto_run_plan: false,
             phoenix: draft.phoenix,
             schedule: None,
@@ -185,6 +186,7 @@ impl TuiRuntime {
                     // it binds every creation path have two implementations.
                     base_branch: None,
                     wrap_up_mode: None,
+                    model: None,
                     auto_run_plan: false,
                     phoenix: false,
                     schedule: None,
@@ -1114,12 +1116,19 @@ impl TuiRuntime {
                 return;
             }
         };
+        // Read at resume, not at dispatch: a model changed while the agent was
+        // stopped takes effect here (`tasks.allium: SetModel`).
+        let model = self
+            .database
+            .get_task(id)
+            .await
+            .map_or(models::TaskModel::DEFAULT, |t| t.launch_model());
         let worktree_path = worktree.unwrap_or_default();
         let runner = self.runner.clone();
 
         tokio::task::spawn_blocking(move || {
             tracing::info!(task_id = id.0, "resuming task");
-            match dispatch::resume_agent(id, &agent_name, &worktree_path, &*runner) {
+            match dispatch::resume_agent(id, &agent_name, model, &worktree_path, &*runner) {
                 Ok(result) => {
                     let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Resumed {
                         id,
