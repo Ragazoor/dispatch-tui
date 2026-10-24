@@ -304,7 +304,10 @@ fn merge_origin_base(
     ) {
         Ok(_) => return Ok(()),
         Err(GitFailure::Spawn(e)) => {
-            return Err(SyncError::Other(format!("Failed to run git merge: {e}")))
+            // A merge killed at the timeout can leave MERGE_HEAD, and every
+            // later sync would then find the checkout dirty.
+            crate::git::abort_merge_if_in_progress(runner, repo, SUBPROCESS_TIMEOUT);
+            return Err(SyncError::Other(format!("Failed to run git merge: {e}")));
         }
         Err(GitFailure::Exit(output)) => output,
     };
@@ -473,7 +476,7 @@ pub fn measure_repo(
     fetch_first: bool,
     runner: &dyn ProcessRunner,
 ) -> RepoSyncMeasurement {
-    let base_branch = crate::git::detect_default_branch(repo_path, runner);
+    let base_branch = crate::git::detect_default_branch(&expand_tilde(repo_path), runner);
     let fetch_error = if fetch_first {
         fetch_base(repo_path, &base_branch, runner).err()
     } else {

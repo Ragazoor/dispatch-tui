@@ -1234,3 +1234,50 @@ fn sync_repo_bounds_the_conflict_abort_path() {
         "the conflict read and the abort must be bounded too, got: {timeouts:?}"
     );
 }
+
+// ---------------------------------------------------------------------
+// Review 2026-10-23 A3/A4
+// ---------------------------------------------------------------------
+
+// A merge killed at the timeout can leave MERGE_HEAD behind, and every later
+// sync would then report the checkout as dirty. The killed merge is aborted
+// before the failure is reported.
+#[test]
+fn sync_repo_aborts_a_merge_that_could_not_finish() {
+    let mock = MockProcessRunner::new(responses(vec![
+        MockProcessRunner::ok(),                          // fetch
+        MockProcessRunner::ok_with_stdout(b"3\t1\n"),     // rev-list: diverged
+        Err(anyhow::anyhow!("git timed out after 120s")), // merge, killed
+        MockProcessRunner::ok_with_stdout(b"abc123\n"),   // rev-parse MERGE_HEAD
+        MockProcessRunner::ok(),                          // merge --abort
+    ]));
+    let err = sync_repo(REPO, BASE, &mock).unwrap_err();
+    assert!(
+        matches!(err, SyncError::Other(ref m) if m.contains("timed out")),
+        "the killed merge is reported as it failed, got: {err}"
+    );
+    let calls = mock.recorded_calls();
+    assert_eq!(
+        calls.last().map(|(_, a)| a.clone()),
+        Some(argv(&["-C", "/repo", "merge", "--abort"])),
+        "a half-done merge must be aborted: {calls:?}"
+    );
+}
+
+// The default-branch probe reads the same expanded path as its siblings, so a
+// `~/x` caller does not silently fall back to `main`.
+#[test]
+fn measure_repo_expands_the_tilde_for_the_default_branch_probe() {
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/master\n"), // symbolic-ref
+        MockProcessRunner::ok_with_stdout(b"0\t0\n"),                       // rev-list
+    ]);
+    measure_repo("~/x", false, &mock);
+    let calls = mock.recorded_calls();
+    let expanded = crate::models::expand_tilde("~/x");
+    assert_eq!(
+        calls[0].1,
+        argv(&["-C", &expanded, "symbolic-ref", "refs/remotes/origin/HEAD"]),
+        "got: {calls:?}"
+    );
+}
