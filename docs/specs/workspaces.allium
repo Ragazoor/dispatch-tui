@@ -1,0 +1,664 @@
+-- allium: 3
+-- workspaces.allium
+--
+-- Scope: Who may see and change what in the shared store. Workspaces, the
+--        people in them and their roles; the super-admin; display names;
+--        public and private epics and work packages; what every other row
+--        about a task inherits from it; how the store enforces all of that
+--        on reads as well as writes; and the one-time migration of a store
+--        that predates workspaces.
+-- Includes: UserProfile, the workspace and membership rules, epic and
+--           work-package visibility, the read predicate every table obeys,
+--           learning and setting visibility, the migration.
+-- Excludes: The Workspace, Membership, WorkspaceRole and Visibility
+--           declarations and the visible_to derivations on Epic and Task
+--           (core.allium — they are shared model); WorkPackage.visible_to
+--           (work-packages.allium); how the board asks for rows
+--           (sync.allium); host-scoped write checks (store-split.allium, D11),
+--           which stay as they are.
+-- Dependencies: UserIdentity, Host, Task, Epic, Learning, Setting, Workspace,
+--               Membership from core.allium; WorkPackage from
+--               work-packages.allium.
+--
+-- WHERE THIS STARTS FROM (task #98510). Before this spec the store had no
+-- authorisation model. Every table was public: any client that connected
+-- could read every row and call almost every reducer. The board chose what
+-- to ask for (followed epics plus own creations, sync.allium), but nothing
+-- in the store enforced it. The only write checks were D11's host
+-- ownership and the scheduled reducers' self-call check.
+--
+-- Decisions taken with the user (task #98510), recorded so they are not
+-- re-litigated:
+--   D1. A workspace is where people collaborate. A super-admin creates
+--       workspaces, adds people to them and gives anyone any role. A
+--       workspace admin adds people to their own workspace and sets roles
+--       inside it. Roles are fixed: super-admin (a flag on the person,
+--       across all workspaces), and per workspace admin or member. No custom
+--       roles.
+--   D2. Every epic lives in exactly one workspace; one person may belong to
+--       many workspaces. A task inherits its epic's visibility. A task with
+--       no epic sits on its owner's user board, which is always private to
+--       that owner.
+--   D3. A private epic or work package is seen by its creator and nobody
+--       else. No admin, workspace or super, reads it. Chosen for privacy
+--       over oversight. The cost, accepted: a person who leaves takes their
+--       private items out of everyone's sight. The one escape hatch is
+--       SuperAdminDeletesUnseenItem: a super-admin may DELETE such an item,
+--       never read it.
+--   D4. Every member of a workspace sees every public epic and work
+--       package in it, and who created it, by display name.
+--   D5. A sub-epic lives in its parent's workspace. A private epic hides its
+--       whole subtree. An epic never moves to another workspace.
+--   D6. A work package links only to items in its own workspace, except a
+--       main-board task, which may be linked but stays private to its owner.
+--       Seeing a package never reveals a linked item the viewer cannot see.
+--   D7. People have a display name. The directory of identities and display
+--       names is readable by every connected client, because admins must
+--       find people by name to add them.
+--   D8. Learnings belong to a workspace: an epic- or task-scoped learning to
+--       its item's workspace, a repo-scoped learning to the workspace it was
+--       recorded in. A user-scoped learning is private to its author.
+--   D9. Settings stay host-scoped (core.allium: Setting), as decided before;
+--       a host's settings are visible only to the host's owner.
+--   D10. An agent sees what its host's owner sees. Its MCP calls reach the
+--       store through its host's board, under that board's identity.
+--   D11. The first super-admin is claimed, not configured: claiming works
+--       only while the store has none. Accepted risk: in the window between
+--       the upgrade and the claim, any connected client could claim first.
+--       A super-admin can revoke another, so a wrong claim is recoverable.
+--   D12. Migration puts every existing epic and work package into one
+--       default workspace as public, and makes every person the store
+--       already knows a member of it.
+--
+-- READ ENFORCEMENT, BY DECISION: VIEWS, NOT ROW FILTERS. SpacetimeDB 2.12
+-- ships row-level filters (client_visibility_filter) behind an unstable
+-- flag, and its own source says they are not yet enforced. So the store
+-- enforces reads by making every table that holds task, epic, package,
+-- learning, membership or setting data private and serving clients through
+-- per-caller views that apply the visible_to predicates below. The store's
+-- publisher identity can still read private tables with one-off SQL; that
+-- identity is the operator, and is the trust boundary.
+--
+-- IMPLEMENTATION OBLIGATIONS the follow-up tasks inherit. Every new reducer
+-- and every new check lives in spacetime/module/src/ and is mirrored in
+-- src/sync/memory_caller/ with a pair test in tests/memory_caller_conformance.rs.
+-- RULES_VERSION and BOARD_RULES_VERSION move together. New columns are
+-- appended last with a default, or the module will not automigrate.
+
+use "./core.allium" as core
+use "./work-packages.allium" as wp
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- A person as the store presents them to others. One per UserIdentity,
+-- created the first time that identity connects (RegisterUserProfile).
+entity UserProfile {
+    identity: core/UserIdentity
+    display_name: String       -- "" until the person sets one; shown as the identity's short prefix meanwhile (config.identity_prefix_length)
+    is_super_admin: Boolean = false
+    created_at: Timestamp
+
+    invariant OneProfilePerIdentity {
+        for a in UserProfiles:
+            for b in UserProfiles:
+                a != b implies a.identity != b.identity
+    }
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    display_name_max_length: Integer = 64
+    workspace_name_max_length: Integer = 64
+    identity_prefix_length: Integer = 8
+    default_workspace_name: String = "Default"
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- People and display names --------------------------------
+
+rule RegisterUserProfile {
+    when: ClientConnected(identity)
+
+    let existing = UserProfile{identity: identity}
+
+    ensures:
+        if not exists existing:
+            UserProfile.created(identity: identity, display_name: "",
+                                is_super_admin: false, created_at: now)
+
+    @guidance
+        -- The module's client_connected lifecycle reducer, beside the
+        -- existing rules-version stamp. Idempotent: every reconnect runs it.
+}
+
+rule SetDisplayName {
+    when: SetDisplayName(name)
+
+    let profile = UserProfile{identity: caller()}
+    let trimmed = name.trim()
+
+    requires: exists profile
+    requires: trimmed != ""
+    requires: trimmed.length <= config.display_name_max_length
+
+    ensures: profile.display_name = trimmed
+
+    @guidance
+        -- A person sets only their own name. Names need not be unique: the
+        -- directory shows the identity prefix beside a duplicated name.
+}
+
+-- Super-admins ----------------------------------------------
+
+rule ClaimSuperAdmin {
+    when: ClaimSuperAdmin()
+
+    let profile = UserProfile{identity: caller()}
+
+    requires: exists profile
+    requires: not UserProfiles.any(p => p.is_super_admin)
+
+    ensures: profile.is_super_admin = true
+    ensures: AdoptOwnerlessUserBoardTasks(caller())
+
+    @guidance
+        -- D11. Works exactly once per store, until the last super-admin is
+        -- revoked, which RevokeSuperAdmin forbids. So in practice once.
+}
+
+rule AdoptOwnerlessUserBoardTasks {
+    when: AdoptOwnerlessUserBoardTasks(super_admin)
+
+    ensures:
+        for task in Tasks where task.epic = null and task.owner = null:
+            task.owner = super_admin
+
+    @guidance
+        -- An epic-less task with no owner predates owners and has nobody to
+        -- be private to (D2). The first super-admin takes them; they can
+        -- move or delete them from their own user board.
+}
+
+rule GrantSuperAdmin {
+    when: GrantSuperAdmin(user)
+
+    let granter = UserProfile{identity: caller()}
+    let profile = UserProfile{identity: user}
+
+    requires: exists granter and granter.is_super_admin
+    requires: exists profile
+
+    ensures: profile.is_super_admin = true
+}
+
+rule RevokeSuperAdmin {
+    when: RevokeSuperAdmin(user)
+
+    let revoker = UserProfile{identity: caller()}
+    let profile = UserProfile{identity: user}
+
+    requires: exists revoker and revoker.is_super_admin
+    requires: exists profile and profile.is_super_admin
+    requires: UserProfiles.where(p => p.is_super_admin).count > 1
+
+    ensures: profile.is_super_admin = false
+
+    @guidance
+        -- A super-admin may revoke themselves, but never the last one: a
+        -- store with no super-admin could only be recovered by a fresh
+        -- ClaimSuperAdmin race.
+}
+
+-- Workspaces ------------------------------------------------
+
+rule CreateWorkspace {
+    when: CreateWorkspace(name)
+
+    let creator = UserProfile{identity: caller()}
+    let trimmed = name.trim()
+
+    requires: exists creator and creator.is_super_admin
+    requires: trimmed != ""
+    requires: trimmed.length <= config.workspace_name_max_length
+    requires: not Workspaces.any(w => w.name = trimmed)
+
+    ensures: core/Workspace.created(name: trimmed, created_by: caller(), created_at: now)
+
+    @guidance
+        -- The creator is not made a member. A super-admin manages a
+        -- workspace without belonging to it, and sees its public content
+        -- only by adding themselves (AddMember).
+}
+
+rule RenameWorkspace {
+    when: RenameWorkspace(workspace, name)
+
+    let trimmed = name.trim()
+
+    requires: is_super_admin(caller()) or workspace.is_admin(caller())
+    requires: trimmed != ""
+    requires: trimmed.length <= config.workspace_name_max_length
+    requires: not Workspaces.any(w => w != workspace and w.name = trimmed)
+
+    ensures: workspace.name = trimmed
+}
+
+rule DeleteWorkspace {
+    when: DeleteWorkspace(workspace)
+
+    requires: is_super_admin(caller())
+    requires: workspace.epics.count = 0
+    requires: not WorkPackages.any(p => p.workspace = workspace)
+
+    ensures:
+        for m in workspace.memberships: not exists m
+        for learning in Learnings where learning.workspace = workspace: not exists learning
+        not exists workspace
+
+    @guidance
+        -- Refused while it holds any epic or package, private ones
+        -- included. A super-admin empties it first, using
+        -- SuperAdminDeletesUnseenItem for private items they cannot read.
+}
+
+-- Membership -------------------------------------------------
+
+rule AddMember {
+    when: AddMember(workspace, user, role)
+
+    requires: is_super_admin(caller()) or workspace.is_admin(caller())
+    requires: exists UserProfile{identity: user}
+    requires: not workspace.has_member(user)
+
+    ensures:
+        core/Membership.created(workspace: workspace, user: user, role: role,
+                                created_at: now)
+}
+
+rule SetMemberRole {
+    when: SetMemberRole(membership, role)
+
+    requires: is_super_admin(caller()) or membership.workspace.is_admin(caller())
+
+    ensures: membership.role = role
+
+    @guidance
+        -- A workspace may be left with no admin; its super-admins still
+        -- manage it. An admin may demote themselves.
+}
+
+rule RemoveMember {
+    when: RemoveMember(membership)
+
+    let workspace = membership.workspace
+    let user = membership.user
+
+    requires: is_super_admin(caller()) or workspace.is_admin(caller())
+
+    ensures:
+        not exists membership
+        for s in Subscriptions where s.subscriber = user and s.epic.workspace = workspace:
+            not exists s
+        for u in UnseenTasks where u.subscriber = user and u.task.epic != null and u.task.epic.workspace = workspace:
+            not exists u
+
+    @guidance
+        -- The person's epics, tasks and packages stay where they are: their
+        -- public items stay visible to the remaining members, their private
+        -- items are now seen by nobody (D3) until they rejoin or a
+        -- super-admin deletes them. A task of theirs that is running keeps
+        -- running: removal changes sight, not the host's worktree.
+}
+
+-- Epics -------------------------------------------------------
+
+rule CreateEpicInWorkspace {
+    when: EpicCreated(epic, workspace, parent_epic?, visibility)
+
+    let home = if parent_epic != null: parent_epic.workspace else: workspace
+
+    requires: parent_epic = null or parent_epic.visible_to(caller())
+    requires: home.has_member(caller())
+
+    ensures:
+        epic.workspace = home
+        epic.visibility = visibility
+
+    @guidance
+        -- Every epic-creating path (board, create_epic MCP tool, feed
+        -- grouping) names a workspace for a root epic. For a sub-epic the
+        -- workspace argument is ignored and the parent's is used (D5). A
+        -- feed's grouped and role-routed sub-epics are created by the
+        -- module under the feed epic and inherit the same way.
+}
+
+rule SetEpicVisibility {
+    when: SetEpicVisibility(epic, visibility)
+
+    requires: epic.visible_to(caller())
+    requires: caller() = epic.created_by
+              or epic.workspace.is_admin(caller())
+              or is_super_admin(caller())
+    requires: visibility = public or epic.created_by != null
+
+    ensures: epic.visibility = visibility
+
+    @guidance
+        -- An admin can act only on a public epic, because a private one is
+        -- invisible to them; making it private hands it to its creator
+        -- alone. Making a private epic public is therefore the creator's
+        -- call only.
+}
+
+rule EpicStaysInItsWorkspace {
+    when: EpicMoved(epic, destination)    -- destination null: the epic becomes a root epic
+
+    requires:
+        destination = null
+        or (destination.workspace = epic.workspace
+            and destination.visible_to(caller()))
+
+    ensures: EpicMoveAllowed(epic)
+
+    @guidance
+        -- Re-parenting inside one workspace is unchanged; across workspaces
+        -- it is refused (D5).
+}
+
+-- Tasks -----------------------------------------------------
+
+rule TaskEntersAnEpicTheCallerCanSee {
+    when: TaskPlacedInEpic(task, epic)
+
+    requires: epic.visible_to(caller())
+
+    ensures: TaskPlacementAllowed(task, epic)
+
+    @guidance
+        -- Covers task creation in an epic and moving a task into one. An
+        -- epic-less task needs no check: it lands on the caller's own user
+        -- board (core.allium: OwnerTracksUserBoardTask).
+}
+
+-- Work packages ----------------------------------------------
+
+rule CreateWorkPackageInWorkspace {
+    when: WorkPackageCreated(package, workspace, visibility)
+
+    requires: workspace.has_member(caller())
+
+    ensures:
+        package.workspace = workspace
+        package.visibility = visibility
+}
+
+rule SetWorkPackageVisibility {
+    when: SetWorkPackageVisibility(package, visibility)
+
+    requires: package.visible_to(caller())
+    requires: caller() = package.created_by
+              or package.workspace.is_admin(caller())
+              or is_super_admin(caller())
+
+    ensures: package.visibility = visibility
+}
+
+rule LinkOnlyInsideTheWorkspace {
+    when: LinkRequested(package, item)
+
+    requires: package.visible_to(caller())
+    requires: item.visible_to(caller())
+    requires: item_workspace(item) = null or item_workspace(item) = package.workspace
+
+    ensures: LinkItem(package, item)
+
+    @guidance
+        -- item_workspace is the epic's workspace for an epic, the epic's
+        -- workspace for an epic task, and null for a main-board task, which
+        -- may be linked anywhere and stays private to its owner (D6).
+}
+
+-- The escape hatch -------------------------------------------
+
+rule SuperAdminDeletesUnseenItem {
+    when: SuperAdminDeletesUnseenItem(item)
+
+    requires: is_super_admin(caller())
+    requires: item_is_private(item)
+
+    ensures: ItemDeleted(item)
+
+    @guidance
+        -- D3. item is a private epic (with its subtree, as any epic delete)
+        -- or a private work package. The super-admin chooses it from
+        -- UnseenItemListing, which shows no titles or contents, and the
+        -- delete goes through the normal delete path.
+}
+
+-- Writes ------------------------------------------------------
+
+rule WritesRequireSight {
+    when: WriteToItem(item)
+
+    requires: item.visible_to(caller())
+
+    ensures: WriteAllowed(item)
+
+    @guidance
+        -- Every reducer that changes, dispatches, wraps up, closes, links,
+        -- subscribes to or rates a task, epic, package or learning first
+        -- checks the caller can see it. A refusal names no detail of the
+        -- item, so a refusal cannot be used to probe for a private one.
+        -- Teammates may still act on each other's work in a workspace they
+        -- share (learning #90175); this narrows that to work they can see.
+}
+
+-- Learnings and settings -------------------------------------
+
+rule LearningVisibility {
+    when: LearningRecorded(learning, recorder)
+
+    ensures:
+        if learning.scope = user:
+            learning.workspace = null
+        else if learning.scope = epic or learning.scope = task:
+            learning.workspace = scope_item(learning).epic_workspace
+        else:
+            learning.workspace = recording_workspace(recorder)
+
+    @guidance
+        -- D8. A user-scoped learning is seen only by its author. Others are
+        -- seen by members of their workspace, and an epic- or task-scoped
+        -- one also only while its item is visible to the reader.
+        -- recording_workspace is the workspace of the recording agent's
+        -- task's epic; for a main-board task it is open (see Open
+        -- Questions).
+}
+
+-- Migration --------------------------------------------------
+
+rule MigrateStoreToWorkspaces {
+    when: StoreUpgradedToWorkspaces()
+
+    requires: Workspaces.count = 0
+
+    ensures:
+        let default = core/Workspace.created(name: config.default_workspace_name,
+                                             created_by: store_publisher(),
+                                             created_at: now)
+        for epic in Epics:
+            epic.workspace = default
+            epic.visibility = public
+        for package in WorkPackages:
+            package.workspace = default
+            package.visibility = public
+        for learning in Learnings where learning.scope != user:
+            learning.workspace = default
+        for person in known_identities():
+            UserProfile.created(identity: person, display_name: "",
+                                is_super_admin: false, created_at: now)
+            core/Membership.created(workspace: default, user: person,
+                                    role: member, created_at: now)
+
+    @guidance
+        -- D12. Runs once, on the first connection after the module that
+        -- adds workspaces is published, beside backfill_all_agents.
+        -- known_identities is every distinct non-empty Host.owner,
+        -- Task.owner, Task.created_by, Epic.created_by,
+        -- WorkPackage.created_by and Subscription.subscriber. Nobody is an
+        -- admin yet: the super-admin claims first (ClaimSuperAdmin), then
+        -- promotes. Existing epic-less tasks keep their owner and become
+        -- private to them; ownerless ones wait for the first super-admin
+        -- (AdoptOwnerlessUserBoardTasks).
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant SubEpicSharesItsParentsWorkspace {
+    for epic in Epics:
+        epic.parent != null implies epic.workspace = epic.parent.workspace
+}
+
+invariant LinkedItemsShareThePackagesWorkspace {
+    for link in WorkPackageLinks:
+        item_workspace(link.item) = null
+            or item_workspace(link.item) = link.work_package.workspace
+}
+
+invariant AtLeastOneSuperAdminOnceClaimed {
+    UserProfiles.any(p => p.is_super_admin)
+        or not ever_claimed_super_admin()
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+actor Person {
+    identified_by: UserProfile where identity != null
+}
+
+actor SuperAdmin {
+    identified_by: UserProfile where is_super_admin = true
+}
+
+actor WorkspaceAdmin {
+    within: core/Workspace
+    identified_by: UserProfile where within.is_admin(identity)
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- What a connected client receives from the store. One surface for all
+-- tables: the predicate is the same everywhere, only the item changes.
+surface StoreReads {
+    facing reader: Person
+
+    exposes:
+        for profile in UserProfiles:
+            profile.identity
+            profile.display_name
+            profile.is_super_admin
+        for w in Workspaces where w.has_member(reader.identity) or reader.is_super_admin:
+            w.name
+            w.memberships
+        for epic in Epics where epic.visible_to(reader.identity):
+            epic
+            epic.created_by
+        for task in Tasks where task.visible_to(reader.identity):
+            task
+            task.created_by
+        for package in WorkPackages where package.visible_to(reader.identity):
+            package
+            package.created_by
+            package.links where link_item_visible(link, reader.identity)
+        for setting in Settings where setting.host.owner = reader.identity:
+            setting
+
+    provides:
+        SetDisplayName(name)
+        SetEpicVisibility(epic, visibility)
+        SetWorkPackageVisibility(package, visibility)
+        ClaimSuperAdmin() when not UserProfiles.any(p => p.is_super_admin)
+
+    @guarantee AClientReceivesOnlyWhatItCanSee
+        -- A client never receives a row it cannot see: not by subscription,
+        -- not by one-off SQL, not by a reducer's error text. This holds for
+        -- every row ABOUT a task too: agents, dispatch and session
+        -- requests, unseen marks, watchers, subagent rows, usage events,
+        -- PR poll state and learning retrievals and verdicts are visible
+        -- exactly when the task they name is. Poll-owner rows follow their
+        -- epic. Host rows carry no task content and stay readable by all.
+
+    @guarantee CreatorIsShownByName
+        -- D4. Wherever a card or a tool result names who created an item,
+        -- it shows the creator's display name, or the identity prefix when
+        -- they have set none.
+
+    @guidance
+        -- Implemented as private tables plus per-caller views (see the
+        -- header). The board's own_creations and covered_epics asks
+        -- (sync.allium) are then answered from the views and can never
+        -- widen past them.
+}
+
+surface WorkspaceAdministration {
+    facing admin: WorkspaceAdmin
+    context workspace: core/Workspace
+
+    exposes:
+        workspace.name
+        workspace.memberships
+
+    provides:
+        AddMember(workspace, user, role)
+        SetMemberRole(membership, role)
+        RemoveMember(membership)
+        RenameWorkspace(workspace, name)
+
+    @guidance
+        -- Both a TUI surface and MCP tools (agents are first-class MCP
+        -- users), in the follow-up work.
+}
+
+surface SuperAdministration {
+    facing admin: SuperAdmin
+
+    exposes:
+        Workspaces
+        UnseenItemListing
+
+    provides:
+        CreateWorkspace(name)
+        RenameWorkspace(workspace, name)
+        DeleteWorkspace(workspace)
+        AddMember(workspace, user, role)
+        SetMemberRole(membership, role)
+        RemoveMember(membership)
+        GrantSuperAdmin(user)
+        RevokeSuperAdmin(user)
+        SuperAdminDeletesUnseenItem(item)
+
+    @guarantee UnseenItemListingShowsNoContent
+        -- The listing of private items whose creator is no longer a member
+        -- of their workspace shows kind, id, workspace, creator and created
+        -- date. Never a title, description or any child row.
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "A repo-scoped learning recorded by an agent working a main-board task has no workspace to inherit. Store it user-scoped, or ask the recorder to name a workspace?"

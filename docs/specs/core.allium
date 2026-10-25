@@ -354,6 +354,14 @@ enum WrapUpMode { rebase | pr | done }
 -- before the field existed.
 enum TaskModel { haiku | sonnet | opus | fable }
 
+-- Visibility of an epic or a work package inside its workspace
+-- (workspaces.allium). public: every member of the workspace sees it.
+-- private: only its creator does — no admin role, workspace or super, reads
+-- it (workspaces.allium: "Decisions", D3). A task has no visibility of its
+-- own: an epic task follows its epic, an epic-less task is private to its
+-- owner (Task.visible_to).
+enum Visibility { public | private }
+
 ------------------------------------------------------------
 -- Storage Boundary Validation
 ------------------------------------------------------------
@@ -720,6 +728,11 @@ entity Task {
     -- obey the graph.
 
     -- Derived
+    -- Whether `user` can see this task: an epic task exactly when its epic
+    -- is visible to them, an epic-less task only by its owner — the user
+    -- board is always private (workspaces.allium: "Decisions", D2).
+    visible_to(user): if epic != null: epic.visible_to(user) else: owner = user
+
     has_plan: plan_path != null
     is_stale: sub_status = stale
     is_crashed: sub_status = crashed
@@ -948,6 +961,42 @@ entity SubagentEntry {
     session_id: String
     started_at: Timestamp
 }
+-- A Workspace is a space where people collaborate: every epic and work
+-- package lives in exactly one, and a person sees only the workspaces they
+-- are a member of. One person may belong to many. Created, renamed and
+-- deleted by a super-admin; its members are managed by a super-admin or by
+-- one of its own admins. Rules: workspaces.allium.
+entity Workspace {
+    name: String               -- non-empty after trimming; unique across the store
+    created_by: UserIdentity
+    created_at: Timestamp
+
+    memberships: Membership with workspace = this
+    epics: Epic with workspace = this
+
+    has_member(user): memberships.any(m => m.user = user)
+    is_admin(user): memberships.any(m => m.user = user and m.role = admin)
+}
+
+-- A workspace role. A super-admin is not a workspace role: it is a flag on
+-- the person (workspaces.allium: UserProfile.is_super_admin) and holds across
+-- every workspace without being a member of any.
+enum WorkspaceRole { admin | member }
+
+-- One person's membership of one workspace, with their role there.
+entity Membership {
+    workspace: Workspace
+    user: UserIdentity
+    role: WorkspaceRole
+    created_at: Timestamp
+
+    invariant OneMembershipPerUserAndWorkspace {
+        for a in Memberships:
+            for b in Memberships:
+                a != b implies (a.workspace != b.workspace or a.user != b.user)
+    }
+}
+
 entity Epic {
     title: String
     description: String
@@ -964,12 +1013,33 @@ entity Epic {
     feed_role: FeedRole = none      -- routing role within a feed hierarchy; `none` for ordinary epics (see feeds.allium: Signal)
     origin: EpicOrigin = manual    -- system-assigned; never settable via MCP
     created_by: UserIdentity?  -- who created this epic; stamped once and never rewritten. The epic twin of Task.created_by — an epic has no `owner` field to begin with (nobody's user board holds an epic), so this is the only way sync.allium can subscribe a creator to an epic they just made, before anyone (including them) follows it. Null for an epic created before this field existed, or created by an unidentified process (e.g. a feed), and never backfilled.
+    workspace: Workspace     -- the workspace this epic lives in; chosen at creation for a root epic, inherited from the parent for a sub-epic, and never moved (workspaces.allium: EpicStaysInItsWorkspace). Every epic has one: the migration put every existing epic in the default workspace (workspaces.allium: MigrateStoreToWorkspaces)
+    visibility: Visibility = public  -- chosen at creation, changeable afterwards (workspaces.allium: SetEpicVisibility)
     created_at: Timestamp
     updated_at: Timestamp
 
     has_plan: plan_path != null
     is_root: parent = null
     is_feed: feed_command != null
+
+    -- The one person who may see this epic when it is private, or null when
+    -- it is public all the way up. A private epic hides its whole subtree: a
+    -- sub-epic of a private epic is private to that epic's creator whatever
+    -- its own visibility says, and the nearest private ancestor decides
+    -- (workspaces.allium: "Decisions", D5). A private epic with no creator
+    -- (created_by null) has nobody to be private to and is seen by no
+    -- member; workspaces.allium: EpicIsPrivateOnlyWithACreator refuses to
+    -- make one.
+    private_holder: if visibility = private: created_by
+                    else if parent != null: parent.private_holder
+                    else: null
+    is_effectively_private: visibility = private or (parent != null and parent.is_effectively_private)
+
+    -- Whether `user` can see this epic. The single read predicate every
+    -- surface and every write check uses (workspaces.allium:
+    -- AClientReceivesOnlyWhatItCanSee, WritesRequireSight).
+    visible_to(user): workspace.has_member(user)
+                      and (not is_effectively_private or private_holder = user)
 
     -- DB-level invariant: at most one epic per (parent, feed_role) when
     -- feed_role != none. Ordinary epics (feed_role = none) are exempt — any
@@ -1149,6 +1219,7 @@ entity Learning {
                           -- verdict. May be negative. Feeds retrieval ranking and
                           -- the stale-cleanup eligibility check (upvote_count <= 0).
     last_upvoted_at: Timestamp?
+    workspace: Workspace?    -- the workspace a learning belongs to; null exactly when scope = user, which is private to its author instead (workspaces.allium: LearningVisibility)
     created_at: Timestamp
     updated_at: Timestamp
 

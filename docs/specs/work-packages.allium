@@ -55,9 +55,18 @@ entity WorkPackage {
     title: String               -- non-empty after trimming
     description: String         -- free text, may be empty; holds the plan for the window
     sort_order: Integer?        -- manual ordering of the package's card, and nothing else; lower sorts first via sort_order ?? id (null falls back to the package id). Written by ReorderPackage and by the update_work_package tool
-    created_by: core/UserIdentity    -- stamped once, never rewritten; required (a create with no settled identity is refused); the board subscribes to its own creator's packages only
+    created_by: core/UserIdentity    -- stamped once, never rewritten; required (a create with no settled identity is refused). Today the board subscribes to its own creator's packages only; once workspaces land it receives every package visible_to it (workspaces.allium: WorkPackageVisibility)
+    workspace: core/Workspace         -- the workspace this package lives in; chosen at creation and never moved (workspaces.allium: CreateWorkPackageInWorkspace)
+    visibility: core/Visibility = public  -- chosen at creation, changeable afterwards (workspaces.allium: SetWorkPackageVisibility)
     created_at: Timestamp
     updated_at: Timestamp
+
+    -- Whether `user` can see this package (workspaces.allium:
+    -- WorkPackageVisibility). Seeing a package never reveals a linked item
+    -- the viewer cannot see on its own: the package view shows only linked
+    -- items that are themselves visible_to the viewer.
+    visible_to(user): workspace.has_member(user)
+                      and (visibility = public or created_by = user)
 
     links: WorkPackageLink with work_package = this
     linked_tasks: links where kind = task -> task
