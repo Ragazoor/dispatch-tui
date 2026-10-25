@@ -21,13 +21,13 @@ Read the output. Build a mental model of what shipped: which files changed and w
 
 Avoid `wip:`, `task #N:`, or anything that just restates the task title. The title should be useful in `git log --oneline`.
 
-**Body** — Markdown. There is no template: shape the body to the change. No heading or label is required. The review feed shows only the first 500 characters of a body as the card description, so the opening carries the PR. Write for a reviewer who has a minute, and apply these principles:
+**Body** — Markdown. There is no template: shape the body to the change. No heading or label is required. The review feed shows only the first 500 characters of a body as the card description, so the opening carries the PR. Write for a reviewer who has a minute. **Write short prose paragraphs, never bullet lists** (the operator banned them in PR bodies, even where a task template shows a bulleted body; the attribution footer your harness requires stays last). Apply these principles:
 
 1. **Open with the situation and the consequence**, in a sentence or two of plain words: why this PR exists and what goes wrong without it. No heading above them.
 2. **Show the change instead of describing it.** If the change has a shape, put the shape on the page: a before/after table for an interface, a few lines of example input and output for a behaviour. The reviewer then sees what changed without reading the diff.
-3. **Flag what a reviewer must not miss**, in a few short bullets: a breaking change, something left out on purpose and why, an edge case, what stays the same.
-4. **Cut what the diff or CI already shows**: category labels with one bullet each, a restatement of the tests, lists of files or functions, a limit written once in prose and again in a table.
-5. **Choose the form from the change.** A bug fix may need two sentences. A tool or API change suits a table plus an example. A migration may need a checklist. A TUI change may need a before/after snapshot excerpt or one line on the visual effect.
+3. **Flag what a reviewer must not miss**, in a sentence each: a breaking change, something left out on purpose and why, an edge case, what stays the same.
+4. **Cut what the diff or CI already shows**: category labels with one line each, a restatement of the tests, lists of files or functions, a limit written once in prose and again in a table.
+5. **Choose the form from the change.** A bug fix may need two sentences. A tool or API change suits a table plus an example. A TUI change may need a before/after snapshot excerpt or one line on the visual effect.
 6. **Test it:** could a reviewer parse this in under a minute, and would any line be missed if you deleted it? If not, delete it. This applies to your prose, not to the attribution footer your harness requires, which stays last.
 
 For an interface change, the interface (a tool name, a flag, a field) is the user-visible part, so show it.
@@ -47,8 +47,7 @@ One call now returns the same data.
 |---|---|
 | `GET /customers` + `GET /orders` + `GET /taxes` | `GET /invoice-view` |
 
-- Breaking: `GET /taxes` no longer accepts `region`.
-- Cancelled orders are left out on purpose; the page never showed them.
+`GET /taxes` no longer accepts `region`. Cancelled orders are left out on purpose; the page never showed them.
 ```
 
 Do not add a `## Test plan` section unless the PR is dangerous or breaking (a migration, a change to auth, a change to billing).
