@@ -231,6 +231,29 @@ rule ClosingCancelsThePendingRun {
         -- the successor its respawn creates, armed there.
 }
 
+rule LeavingRunningCancelsThePendingRun {
+    -- A hand status write that takes a task out of running, into review or
+    -- backlog (the TUI's moves and editor, update_tasks' status). Into done
+    -- is ClosingCancelsThePendingRun.
+    when: TaskStatusWrittenByHand(task, from, to)
+
+    requires: from = running and to != running
+
+    ensures: task.next_due = null
+
+    @guidance
+        -- Decided with the user (task #98509, from review 2026-10-23 C5): a
+        -- user-origin dispatch claim keeps a one-off's due time until the
+        -- launch ends, so a hand move out of running on a still-bare claim
+        -- would leave a passed time behind, and a later move back to backlog
+        -- would fire the one-off at once. Any hand write that leaves running
+        -- spends it, as a write out of backlog or into done already does. A
+        -- phoenix task moved to backlog is then re-armed from now
+        -- (EnteringBacklogRearmsAPhoenixTask); one moved to review keeps its
+        -- schedule and no due time, as LeavingBacklogCancelsThePendingRun
+        -- leaves it. task.schedule and task.schedule_error are kept.
+}
+
 rule DispatchConsumesTheDueTime {
     when: request: store_split/DispatchRequest.state transitions_to dispatched
 

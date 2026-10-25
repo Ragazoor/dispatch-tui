@@ -542,14 +542,50 @@ fn a_hand_write_into_done_cancels_the_pending_run() {
         ..due_task()
     };
     assert_eq!(
-        cancel_pending_run_on_done(claimed.clone()).next_due,
+        cancel_pending_run_on_close_or_leaving_running("running", claimed.clone()).next_due,
         "2026-10-19 09:00:00.000"
     );
     let done = Task {
         status: DONE.into(),
         ..claimed
     };
-    assert_eq!(cancel_pending_run_on_done(done).next_due, "");
+    assert_eq!(cancel_pending_run_on_close_or_leaving_running("review", done).next_due, "");
+}
+
+#[test]
+fn a_hand_write_leaving_running_cancels_the_pending_run() {
+    for to in ["review", "backlog", "done"] {
+        let moved = Task {
+            status: to.into(),
+            ..due_task()
+        };
+        assert_eq!(
+            schedule_after_status_write("running", moved, NOW).next_due,
+            "",
+            "running -> {to}"
+        );
+    }
+    let still_running = Task {
+        status: "running".into(),
+        ..due_task()
+    };
+    assert_eq!(
+        schedule_after_status_write("running", still_running, NOW).next_due,
+        "2026-10-19 09:00:00.000"
+    );
+}
+
+#[test]
+fn a_phoenix_task_moved_from_running_to_backlog_is_still_rearmed() {
+    let moved = Task {
+        status: "backlog".into(),
+        phoenix: true,
+        ..due_task()
+    };
+    assert_ne!(
+        schedule_after_status_write("running", moved, NOW).next_due,
+        ""
+    );
 }
 
 #[test]

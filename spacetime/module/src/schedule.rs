@@ -322,12 +322,14 @@ pub fn cancel_pending_run_on_leaving_backlog(prior_status: &str, task: Task) -> 
     }
 }
 
-/// `ClosingCancelsThePendingRun` for a hand status write: a task written into
-/// done is closed, so its pending run goes whatever the prior status. A
-/// one-off claimed by a user-origin request keeps its due time until the
+/// `ClosingCancelsThePendingRun` and `LeavingRunningCancelsThePendingRun` for
+/// a hand status write: a task written into done is closed, and one written
+/// out of running has ended its launch, so its pending run goes either way.
+/// A one-off claimed by a user-origin request keeps its due time until the
 /// launch ends, and would otherwise fire at once when moved back to backlog.
-pub fn cancel_pending_run_on_done(task: Task) -> Task {
-    if task.status == DONE {
+/// `prior_status` is the status before the write; `task` is the row after it.
+pub fn cancel_pending_run_on_close_or_leaving_running(prior_status: &str, task: Task) -> Task {
+    if task.status == DONE || (prior_status == RUNNING && task.status != RUNNING) {
         Task {
             next_due: String::new(),
             ..task
@@ -367,11 +369,11 @@ pub fn schedule_after_failed_launch(
 /// A hand status write's effect on the schedule, `prior_status` the status
 /// before the write and `task` the row after it:
 /// `LeavingBacklogCancelsThePendingRun`, `ClosingCancelsThePendingRun` for a
-/// write into done, and `EnteringBacklogRearmsAPhoenixTask`. The one call
+/// write into done, `LeavingRunningCancelsThePendingRun`, and `EnteringBacklogRearmsAPhoenixTask`. The one call
 /// `patch_task` and its in-memory twin make, so the two cannot drift.
 pub fn schedule_after_status_write(prior_status: &str, task: Task, now: &str) -> Task {
     let task = cancel_pending_run_on_leaving_backlog(prior_status, task);
-    let task = cancel_pending_run_on_done(task);
+    let task = cancel_pending_run_on_close_or_leaving_running(prior_status, task);
     rearm_phoenix_on_entering_backlog(prior_status, task, now)
 }
 
