@@ -104,15 +104,10 @@ fn publish_open_set(
         context.task_id,
         context.root,
         !state.open_diffs.is_empty(),
-        state.lower_pane_editor,
         runner,
     ) {
         tracing::warn!(error = %format!("{e:#}"), "failed to reconcile the diff pane");
         state.notice = Some(Notice::diff(format!("{e:#}")));
-    } else {
-        // Whatever the pane was running, it now runs the diff renderer or is
-        // gone (`ShowDiffInLowerPane`, `CloseAgentTreeDiffPaneWhenEmpty`).
-        state.lower_pane_editor = false;
     }
 }
 
@@ -131,23 +126,21 @@ fn open_in_editor(
             return;
         }
     };
-    match crate::agent_tree::diff_pane::show_in_editor(
+    if let Err(e) = crate::agent_tree::diff_pane::show_in_editor(
         &my_pane,
         context.root,
         relative,
         &crate::editor::editor_from_env(),
         runner,
     ) {
-        Ok(()) => state.lower_pane_editor = true,
-        Err(e) => {
-            tracing::warn!(error = %format!("{e:#}"), "failed to open the editor pane");
-            state.notice = Some(Notice::diff(format!("{e:#}")));
-        }
+        tracing::warn!(error = %format!("{e:#}"), "failed to open the editor pane");
+        state.notice = Some(Notice::diff(format!("{e:#}")));
     }
 }
 
 /// Leave nothing behind on the way out: empty the open set, which retires the
-/// diff pane with it.
+/// diff pane with it. An editor pane is left running: it may hold unsaved
+/// edits (`KeepEditorPaneWithPossiblyUnsavedWork`).
 ///
 /// A diff pane outliving its tree is orphaned — nothing drives its open set,
 /// nothing refreshes it, and the toggle that would bring the tree back does not

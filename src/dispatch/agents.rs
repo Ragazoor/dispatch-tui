@@ -289,11 +289,30 @@ fn discard_agent_tree_panes(
 ) -> Result<()> {
     // Diff panes first, so one cannot briefly outlive the tree that drives it.
     let mut had_diff_pane = false;
+    let mut editor_panes: Option<Vec<String>> = None;
     for (pane, _) in roles
         .iter()
         .filter(|(_, role)| role == tmux::PANE_ROLE_DIFF)
     {
         had_diff_pane = true;
+        // An editor pane may hold unsaved edits and outlives its tree
+        // (`KeepEditorPaneWithPossiblyUnsavedWork`). When the lookup fails the
+        // pane is kept: a stray pane costs less than lost work.
+        let editors = editor_panes.get_or_insert_with(|| {
+            tmux::pane_ids_with_option_value(
+                window.as_str(),
+                tmux::PANE_CONTENT_OPTION,
+                tmux::PANE_CONTENT_EDITOR,
+                runner,
+            )
+            .unwrap_or_else(|e| {
+                tracing::warn!(%window, error = %e, "failed to tell which pane runs the editor");
+                roles.iter().map(|(id, _)| id.clone()).collect()
+            })
+        });
+        if editors.contains(pane) {
+            continue;
+        }
         if let Err(e) = tmux::kill_pane(pane, runner) {
             tracing::warn!(%window, %pane, error = %e, "failed to retire the diff pane");
         }

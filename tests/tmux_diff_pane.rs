@@ -14,10 +14,13 @@ mod tmux_harness;
 
 use std::path::Path;
 
-use dispatch_tui::agent_tree::diff_pane::reconcile_diff_pane;
+use dispatch_tui::agent_tree::diff_pane::{reconcile_diff_pane, show_in_editor, QUIT_EDITOR_FIRST};
 use dispatch_tui::dispatch;
 use dispatch_tui::models::{test_tmux_window, TaskId};
-use dispatch_tui::tmux::{PANE_ROLE_AGENT_TREE, PANE_ROLE_DIFF, PANE_ROLE_OPTION};
+use dispatch_tui::tmux::{
+    PANE_CONTENT_EDITOR, PANE_CONTENT_OPTION, PANE_ROLE_AGENT_TREE, PANE_ROLE_DIFF,
+    PANE_ROLE_OPTION,
+};
 
 use tmux_harness::{await_stub_line, stub_lines, tmux_available_or_skip, StubLine, TmuxServer};
 
@@ -99,10 +102,24 @@ impl Fixture {
             TASK_ID,
             self.dir.path(),
             anything_open,
-            false,
             &self.server.runner(),
         )
         .expect("reconcile the diff pane");
+    }
+
+    /// `v` on `a.rs`, with a long-running stand-in for the user's editor. The
+    /// pane keeps running until the server is killed, as an editor with a
+    /// buffer open would.
+    fn open_editor(&self) -> anyhow::Result<()> {
+        std::fs::write(self.dir.path().join("a.rs"), "fn main() {}\n").expect("write a.rs");
+        let editor = ["sh", "-c", "sleep 600"].map(String::from);
+        show_in_editor(
+            &self.tree_pane,
+            self.dir.path(),
+            Path::new("a.rs"),
+            &editor,
+            &self.server.runner(),
+        )
     }
 
     fn diff_pane(&self) -> Option<String> {
@@ -350,4 +367,72 @@ fn pinning_drains_both_the_tree_and_the_diff_pane() {
         !fx.server.pane_exists(&diff),
         "the diff pane must not be orphaned"
     );
+}
+
+// ---- KeepEditorPaneWithPossiblyUnsavedWork --------------------------------
+
+/// The editor flag lives on the pane, so a renderer that restarts (a fresh
+/// call carrying no state) still knows the pane runs the editor.
+#[test]
+fn the_editor_pane_records_that_it_runs_the_editor() {
+    let Some(fx) = setup_or_skip() else { return };
+    fx.open_editor().expect("open the editor");
+
+    let pane = fx.diff_pane().expect("lower pane");
+
+    assert_eq!(
+        fx.server.pane_option(&pane, PANE_CONTENT_OPTION),
+        PANE_CONTENT_EDITOR
+    );
+}
+
+/// `v` on another file, or Space opening a diff, would respawn the pane and
+/// lose the buffer.
+#[test]
+fn opening_a_diff_or_another_file_leaves_a_running_editor_alone() {
+    let Some(fx) = setup_or_skip() else { return };
+    fx.open_editor().expect("open the editor");
+    let editor = fx.diff_pane().expect("lower pane");
+
+    let err = reconcile_diff_pane(
+        &fx.tree_pane,
+        Path::new("/data"),
+        TASK_ID,
+        fx.dir.path(),
+        true,
+        &fx.server.runner(),
+    )
+    .unwrap_err();
+    assert_eq!(format!("{err}"), QUIT_EDITOR_FIRST);
+    let err = fx.open_editor().unwrap_err();
+    assert_eq!(format!("{err}"), QUIT_EDITOR_FIRST);
+
+    assert_eq!(fx.diff_pane().as_deref(), Some(editor.as_str()));
+    assert_eq!(fx.server.pane_count(WINDOW), 3);
+}
+
+/// `v` with nothing open, then a toggle that leaves nothing open (`a`, `q`).
+#[test]
+fn emptying_the_open_set_does_not_kill_a_running_editor() {
+    let Some(fx) = setup_or_skip() else { return };
+    fx.open_editor().expect("open the editor");
+    let editor = fx.diff_pane().expect("lower pane");
+
+    fx.reconcile(false);
+
+    assert!(fx.server.pane_exists(&editor), "the editor must survive");
+}
+
+/// Hiding the tree kills the tree, not the editor beside it.
+#[test]
+fn the_toggle_leaves_a_running_editor_alone() {
+    let Some(fx) = setup_or_skip() else { return };
+    fx.open_editor().expect("open the editor");
+    let editor = fx.diff_pane().expect("lower pane");
+
+    dispatch::toggle_agent_tree_pane(&test_tmux_window(WINDOW), &fx.server.runner())
+        .expect("toggle");
+
+    assert!(fx.server.pane_exists(&editor), "the editor must survive");
+    assert!(!fx.server.pane_exists(&fx.tree_pane));
 }

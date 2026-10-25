@@ -150,11 +150,6 @@ pub struct RenderState {
     /// The browse section that had focus when the user flipped to the agents
     /// view — where Tab flips back to. Always `Tree` or `Commits`.
     pub browse_focus: Focus,
-    /// Whether the lower pane is running the editor rather than the diff
-    /// renderer (`pane.diff_pane_content = editor`). Written by the loop after
-    /// a successful tmux effect; a pane the user killed leaves it stale until
-    /// the next reconcile, which resets it.
-    pub lower_pane_editor: bool,
     /// The agents section beneath the tree, with its own cursor.
     pub agents: AgentsSection,
     /// The commits section between the tree and the agents section, with its
@@ -179,7 +174,6 @@ impl RenderState {
             viewport_rows: 0,
             focus: Focus::Tree,
             browse_focus: Focus::Tree,
-            lower_pane_editor: false,
             agents: AgentsSection::new(),
             commits: CommitsSection::new(),
             selected_commit: None,

@@ -1780,6 +1780,9 @@ rule OpenAgentTreeFileInEditor {
 
     requires: pane.focus = tree
     requires: node.kind = file
+    -- An editor already showing may hold unsaved edits, so it is never
+    -- replaced: see KeepEditorPaneWithPossiblyUnsavedWork.
+    requires: pane.diff_pane = null or pane.diff_pane_content = diff
 
     -- Splits the lower pane when there is none (same geometry and ownership as
     -- SplitAgentTreeDiffPane); otherwise replaces what the pane we own is
@@ -1804,14 +1807,19 @@ rule OpenAgentTreeFileInEditor {
         -- title is not changed. Use Space for the commit's diff.
         --
         -- The open set is NOT touched. `v` is a view of one file, not a
-        -- membership change: files already open stay marked in the tree, and
-        -- a later Space (OpenAgentTreeFileDiff or CloseAgentTreeFileDiff)
-        -- puts the diff renderer back in the same pane, replacing the editor.
-        -- Closing the last open file while the editor shows still closes the
-        -- pane (CloseAgentTreeDiffPaneWhenEmpty). With an empty open set the
-        -- editor pane exists WITHOUT an open file, which is the one exception
-        -- to DiffPaneExistsWhenSomethingIsOpen; it ends when the user quits
-        -- the editor, like any other process in a pane.
+        -- membership change: files already open stay marked in the tree. A
+        -- later Space changes the open set but cannot show the diff until the
+        -- user quits the editor (KeepEditorPaneWithPossiblyUnsavedWork); once
+        -- it is quit, the next Space splits the diff pane afresh. With an
+        -- empty open set the editor pane exists WITHOUT an open file, which is
+        -- the one exception to DiffPaneExistsWhenSomethingIsOpen; it ends when
+        -- the user quits the editor, like any other process in a pane.
+        --
+        -- What the pane runs is recorded on the pane itself, in a tmux pane
+        -- option beside the role marker (@dispatch_pane_content: diff or
+        -- editor), and read back from there. It is not held in the renderer's
+        -- memory, so a renderer that restarts while an editor is open still
+        -- knows the pane holds one. An unmarked pane counts as the diff.
         --
         -- Quitting the editor closes its pane and leaves diff_pane null
         -- exactly as a hand-killed diff pane does.
@@ -1825,6 +1833,8 @@ rule CloseAgentTreeDiffPaneWhenEmpty {
     requires: pane.open_diff_paths.is_empty()
     requires: pane.diff_pane != null
     requires: pane.diff_pane_is_ours = true
+    -- An editor pane is not killed here (KeepEditorPaneWithPossiblyUnsavedWork).
+    requires: pane.diff_pane_content = diff
 
     ensures: pane.diff_pane = null
 
@@ -1835,18 +1845,41 @@ rule CloseAgentTreeDiffPaneWhenEmpty {
         -- mechanism, to get their rows back.
 }
 
-rule ShowDiffInLowerPane {
-    -- The open set changed to something non-empty while the lower pane is
-    -- running the editor: put the diff renderer back in the same pane.
-    when: AgentTreeDiffOpenSetChanged(pane)
+rule KeepEditorPaneWithPossiblyUnsavedWork {
+    -- The lower pane is running the editor, and something would replace or
+    -- kill it: `v` on another file, Space opening a diff, Space closing the
+    -- last open file, `a`, `q`, or hiding the tree. The editor may hold
+    -- unsaved edits, so the pane is left exactly as it is.
+    when: AgentTreeEditorPaneWouldBeReplaced(pane)
 
-    requires: not pane.open_diff_paths.is_empty()
     requires: pane.diff_pane != null
     requires: pane.diff_pane_content = editor
 
-    ensures: pane.diff_pane_content = diff
-    ensures: pane.diff_task_resolution = waiting
-    ensures: pane.diff_renderer_started_at = now
+    ensures: pane.diff_pane != null
+    ensures: pane.diff_pane_content = editor
+
+    -- Where the key's effect needs the pane (`v`, or Space opening a diff),
+    -- the press says why instead of doing nothing.
+    ensures: AgentTreeDiffPaneOpenFailed(pane: pane, reason: "quit the editor first")
+
+    @guidance
+        -- Decided on 2026-10-25 (task 98506), over two alternatives: a second
+        -- pane for diffs (more panes and more geometry rules, and `q` would
+        -- still have to decide about the editor) and accepting the kill (users
+        -- lose unsaved work). Reuse, never takeover (SplitAgentTreeDiffPane)
+        -- already refuses to kill a pane whose process may hold the user's
+        -- work; this extends it to a pane we did create.
+        --
+        -- Refusal covers only the keys that need the pane. Keys that would
+        -- merely retire it (Space closing the last open file, `a`, `q`, hiding
+        -- the tree, a resync) leave it running and carry on: the tree goes, the
+        -- open set empties, and the editor pane outlives them until the user
+        -- quits the editor. An editor pane with no tree beside it is harmless,
+        -- unlike an orphaned diff pane.
+        --
+        -- The open set is still updated by a refused Space. The user asked for
+        -- the file to be open and it is; what is refused is showing it, and the
+        -- next Space after the editor is quit retries.
 }
 
 rule KillAgentTreeDiffPaneWithItsTree {
@@ -1854,10 +1887,12 @@ rule KillAgentTreeDiffPaneWithItsTree {
     -- exited. The diff pane goes with it, and the open set goes with them.
     when: pane: AgentTreePane.status transitions_to hidden
 
-    ensures: pane.diff_pane = null
+    ensures: pane.diff_pane = null or pane.diff_pane_content = editor
     ensures: pane.open_diff_paths = []
 
     @guidance
+        -- An editor pane survives its tree (KeepEditorPaneWithPossiblyUnsavedWork).
+        --
         -- A diff pane outliving its tree is orphaned: nothing drives its open
         -- set, nothing refreshes it, and the toggle that would bring the tree
         -- back does not act on it. So hiding takes both.

@@ -1524,9 +1524,10 @@ fn toggle_propagates_a_failed_kill_of_the_tree_pane() {
 fn toggle_survives_a_failed_kill_of_the_diff_pane() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"%1 \n%2 agent_tree\n%3 diff\n"),
-        MockProcessRunner::fail("no such pane"), // the diff pane
-        MockProcessRunner::ok_with_stdout(b"/wt\n"), // show-options
-        MockProcessRunner::ok(),                 // the tree
+        MockProcessRunner::ok_with_stdout(b"%3 diff\n"), // content lookup
+        MockProcessRunner::fail("no such pane"),         // the diff pane
+        MockProcessRunner::ok_with_stdout(b"/wt\n"),     // show-options
+        MockProcessRunner::ok(),                         // the tree
     ])
     .with_windows(&["task-42"]);
 
@@ -1542,12 +1543,13 @@ fn toggle_survives_a_failed_kill_of_the_diff_pane() {
 fn resync_retires_the_diff_pane_along_with_the_stale_tree() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"%1 \n%2 agent_tree\n%3 diff\n"),
-        MockProcessRunner::ok(), // kill-pane: the diff pane
-        MockProcessRunner::ok(), // kill-pane: the stale tree
-        MockProcessRunner::ok_with_stdout(b"/wt\n"), // show-options: clear the open set
-        MockProcessRunner::ok_with_stdout(b"/wt\n"), // show-options: the respawn's cwd
-        MockProcessRunner::ok_with_stdout(b"%9\n"), // split-window
-        MockProcessRunner::ok(), // set-option
+        MockProcessRunner::ok_with_stdout(b"%3 diff\n"), // content lookup
+        MockProcessRunner::ok(),                         // kill-pane: the diff pane
+        MockProcessRunner::ok(),                         // kill-pane: the stale tree
+        MockProcessRunner::ok_with_stdout(b"/wt\n"),     // show-options: clear the open set
+        MockProcessRunner::ok_with_stdout(b"/wt\n"),     // show-options: the respawn's cwd
+        MockProcessRunner::ok_with_stdout(b"%9\n"),      // split-window
+        MockProcessRunner::ok(),                         // set-option
     ])
     .with_windows(&["task-42"]);
 

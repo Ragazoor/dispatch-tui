@@ -1239,6 +1239,20 @@ pub const PANE_ROLE_AGENT_TREE: &str = "agent_tree";
 /// that companion pane.
 pub const PANE_ROLE_DIFF: &str = "diff";
 
+/// Pane option recording what the diff-role pane runs, beside
+/// [`PANE_ROLE_OPTION`]: [`PANE_CONTENT_DIFF`] or [`PANE_CONTENT_EDITOR`]. Held
+/// on the pane rather than in a renderer's memory so a renderer that restarts
+/// while an editor is open still knows the pane may hold unsaved work. A pane
+/// without it counts as the diff. See docs/specs/agent-tree.allium's
+/// `KeepEditorPaneWithPossiblyUnsavedWork`.
+pub const PANE_CONTENT_OPTION: &str = "@dispatch_pane_content";
+
+/// [`PANE_CONTENT_OPTION`] value for a pane running the diff renderer.
+pub const PANE_CONTENT_DIFF: &str = "diff";
+
+/// [`PANE_CONTENT_OPTION`] value for a pane running the user's editor.
+pub const PANE_CONTENT_EDITOR: &str = "editor";
+
 /// Set a pane-scoped tmux user option (`@name`). The pane-level sibling of
 /// [`set_window_dispatch_dir`]'s `set-option -w`.
 ///

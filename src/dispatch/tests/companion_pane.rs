@@ -32,9 +32,10 @@ fn toggle_kills_the_tree_pane_even_when_the_tree_pane_is_active() {
 fn toggle_with_a_diff_pane_open_kills_both_panes() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"%1 \n%2 agent_tree\n%3 diff\n"),
-        MockProcessRunner::ok(), // kill-pane: the diff pane
-        MockProcessRunner::ok_with_stdout(b"/wt\n"), // show-options @dispatch_dir
-        MockProcessRunner::ok(), // kill-pane: the tree
+        MockProcessRunner::ok_with_stdout(b"%3 diff\n"), // content lookup
+        MockProcessRunner::ok(),                         // kill-pane: the diff pane
+        MockProcessRunner::ok_with_stdout(b"/wt\n"),     // show-options @dispatch_dir
+        MockProcessRunner::ok(),                         // kill-pane: the tree
     ])
     .with_windows(&["task-42"]);
 
@@ -48,6 +49,52 @@ fn toggle_with_a_diff_pane_open_kills_both_panes() {
         .collect();
     // The diff pane first, so it cannot briefly outlive its tree.
     assert_eq!(killed, vec!["%3", "%2"]);
+}
+
+/// An editor pane may hold unsaved edits, so hiding the tree leaves it running
+/// (KeepEditorPaneWithPossiblyUnsavedWork in docs/specs/agent-tree.allium).
+#[test]
+fn toggle_with_an_editor_pane_open_kills_only_the_tree() {
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"%1 \n%2 agent_tree\n%3 diff\n"),
+        MockProcessRunner::ok_with_stdout(b"%3 editor\n"), // content lookup
+        MockProcessRunner::ok_with_stdout(b"/wt\n"),       // show-options @dispatch_dir
+        MockProcessRunner::ok(),                           // kill-pane: the tree
+    ])
+    .with_windows(&["task-42"]);
+
+    toggle_agent_tree_pane(&test_tmux_window("task-42"), &mock).unwrap();
+
+    let calls = mock.recorded_calls();
+    let killed: Vec<&str> = calls
+        .iter()
+        .filter(|(_, args)| args[0] == "kill-pane")
+        .map(|(_, args)| args[2].as_str())
+        .collect();
+    assert_eq!(killed, vec!["%2"], "calls: {calls:?}");
+}
+
+/// When tmux cannot say what the pane runs, keeping it costs a stray pane;
+/// killing it could cost unsaved work.
+#[test]
+fn toggle_keeps_a_diff_role_pane_whose_content_cannot_be_read() {
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"%1 \n%2 agent_tree\n%3 diff\n"),
+        MockProcessRunner::fail("no server running"), // content lookup
+        MockProcessRunner::ok_with_stdout(b"/wt\n"),
+        MockProcessRunner::ok(), // kill-pane: the tree
+    ])
+    .with_windows(&["task-42"]);
+
+    toggle_agent_tree_pane(&test_tmux_window("task-42"), &mock).unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(
+        !calls
+            .iter()
+            .any(|(_, args)| args == &vec!["kill-pane", "-t", "%3"]),
+        "calls: {calls:?}"
+    );
 }
 
 /// The agent's own pane carries no role, so it is never touched however many
