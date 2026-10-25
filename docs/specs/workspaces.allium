@@ -320,6 +320,20 @@ rule RemoveMember {
 
 -- Epics -------------------------------------------------------
 
+rule EpicIsPrivateOnlyWithACreator {
+    when: EpicVisibilityRequested(epic, visibility)
+
+    requires: visibility = public or epic.created_by != null
+
+    ensures: EpicVisibilityAllowed(epic)
+
+    @guidance
+        -- A private epic is seen only by its creator, so one with no creator
+        -- (created_by null: legacy or feed-made) would be seen by nobody.
+        -- Applies to creation (CreateEpicInWorkspace) and to
+        -- SetEpicVisibility alike.
+}
+
 rule CreateEpicInWorkspace {
     when: EpicCreated(epic, workspace, parent_epic?, visibility)
 
@@ -327,6 +341,7 @@ rule CreateEpicInWorkspace {
 
     requires: parent_epic = null or parent_epic.visible_to(caller())
     requires: home.has_member(caller())
+    requires: visibility = public or caller() != null
 
     ensures:
         epic.workspace = home
