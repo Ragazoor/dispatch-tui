@@ -292,9 +292,7 @@ impl MemoryReducerCaller {
                 Err(why) => return Ok(ReducerOutcome::Refused(why)),
             };
         }
-        row = module::cancel_pending_run_on_leaving_backlog(&prior_status, row);
-        row = module::cancel_pending_run_on_done(row);
-        row = module::rearm_phoenix_on_entering_backlog(&prior_status, row, &self.now());
+        row = module::schedule_after_status_write(&prior_status, row, &self.now());
         // Before the first side effect below: a refused patch leaves nothing
         // behind, as the module's rolled-back transaction does.
         if let Err(why) = Self::validate_task_write(&tables, &row, &self.now()) {

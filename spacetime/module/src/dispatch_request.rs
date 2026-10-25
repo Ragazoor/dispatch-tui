@@ -466,13 +466,14 @@ pub fn task_after_failed_request(
 ) -> (Option<Task>, bool) {
     let released = release_claim_after_failure(task.clone());
     let was_released = released.is_some();
-    let row = match released {
-        Some(base) => {
-            Some(schedule_after_failed_launch(base.clone(), origin, reason, stamp).unwrap_or(base))
-        }
-        None if task.status == BACKLOG => schedule_after_failed_launch(task, origin, reason, stamp),
-        None => None,
+    // A release always leaves the task in backlog.
+    let base = released.unwrap_or(task);
+    let marked = if base.status == BACKLOG {
+        schedule_after_failed_launch(base.clone(), origin, reason, stamp)
+    } else {
+        None
     };
+    let row = marked.or_else(|| was_released.then_some(base));
     let row = row.map(|row| Task {
         updated_at: stamp.into(),
         ..row

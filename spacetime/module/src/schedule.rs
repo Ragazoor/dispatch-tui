@@ -364,6 +364,17 @@ pub fn schedule_after_failed_launch(
     })
 }
 
+/// A hand status write's effect on the schedule, `prior_status` the status
+/// before the write and `task` the row after it:
+/// `LeavingBacklogCancelsThePendingRun`, `ClosingCancelsThePendingRun` for a
+/// write into done, and `EnteringBacklogRearmsAPhoenixTask`. The one call
+/// `patch_task` and its in-memory twin make, so the two cannot drift.
+pub fn schedule_after_status_write(prior_status: &str, task: Task, now: &str) -> Task {
+    let task = cancel_pending_run_on_leaving_backlog(prior_status, task);
+    let task = cancel_pending_run_on_done(task);
+    rearm_phoenix_on_entering_backlog(prior_status, task, now)
+}
+
 /// `EnteringBacklogRearmsAPhoenixTask`: a status write other than the respawn
 /// that brings a scheduled phoenix task back into backlog arms it from `now`,
 /// so a run that fired and was abandoned does not leave it unarmed for good.
