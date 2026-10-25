@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.4.0](https://github.com/Ragazoor/dispatch-tui/compare/v0.3.0...v0.4.0) (2026-10-23)
+
+
+### Features
+
+* **agent-tree:** two views, full-width lower pane, editor key ([a7ebe53](https://github.com/Ragazoor/dispatch-tui/commit/a7ebe5311577e91942502ed3d3486240ff3ccd42))
+* **feeds:** link each CVE alert to the open PR that fixes it ([32500da](https://github.com/Ragazoor/dispatch-tui/commit/32500da04e91e0f3a73a98893f78e0664228c1ba))
+* **feeds:** say how fetch-cve.sh matched a fix PR ([6266e21](https://github.com/Ragazoor/dispatch-tui/commit/6266e21cb2387c2fd35e41d604c1f572d633ea2b))
+* **hooks:** fail the pre-push hook early when rustc ignores the pin ([8417103](https://github.com/Ragazoor/dispatch-tui/commit/8417103623d4099e52b27bd1d5c9f8b4a22d63b7))
+* **learnings:** one verdict per task and learning, latest wins ([e9e1106](https://github.com/Ragazoor/dispatch-tui/commit/e9e1106696922f3c4c4dacad34433515e0106a57))
+* **mcp:** move agent-name conventions into MCP server instructions ([5a047ef](https://github.com/Ragazoor/dispatch-tui/commit/5a047ef8e2b9fb926c995f3d244348030fae6f19))
+* schedule tasks with a five-field UTC cron ([054df32](https://github.com/Ragazoor/dispatch-tui/commit/054df327852dd63f523e02c105cfdd01139d184f))
+* signal a new task in an epic until the user enters it ([dfdce54](https://github.com/Ragazoor/dispatch-tui/commit/dfdce54fe5f62e27d54637abe03ab191c70ef939))
+* **tui:** apply the flat lens in a work package view ([b6bccfd](https://github.com/Ragazoor/dispatch-tui/commit/b6bccfda2e5da179f010d40a60b7262f143e8503))
+* **tui:** lead task cards with the current agent's name ([bfb36c4](https://github.com/Ragazoor/dispatch-tui/commit/bfb36c45475650818b8b4b9480e3fe52c0f7a82c))
+* **tui:** link a task created in a package view to that package ([3651374](https://github.com/Ragazoor/dispatch-tui/commit/3651374d4b90f1ec23c22dd148331cda379fb06c))
+* **tui:** name the agent in the crash status message ([451f4b9](https://github.com/Ragazoor/dispatch-tui/commit/451f4b94408ac0fc2efc2b8031077f7043a31e0a))
+* **tui:** reorder work package cards with J/K via a sort order ([4c8a13b](https://github.com/Ragazoor/dispatch-tui/commit/4c8a13ba5e642e262d8095f684ffa5ac754c3c34))
+* **work-packages:** create and update are one reducer transaction each ([997d957](https://github.com/Ragazoor/dispatch-tui/commit/997d957779673c962f526f92492ae79a58ce857b))
+
+
+### Bug Fixes
+
+* adopt only a real store, refuse moves to missing epics, close test gaps ([bf42341](https://github.com/Ragazoor/dispatch-tui/commit/bf42341e20ac79e7845ef2886061ba45800b3983))
+* **cli:** prune-repo-paths only judges repo paths this host saved ([1d8c6dc](https://github.com/Ragazoor/dispatch-tui/commit/1d8c6dc617681c14482bd5003e883cc2d6d94195))
+* **deps:** bump async-trait to 0.1.92 for clippy 1.99 ([e4d388f](https://github.com/Ragazoor/dispatch-tui/commit/e4d388f3a3274b225658baa0c4ff9f42ad23d563))
+* **feeds:** only link CVE fix PRs from known dependency bots ([ee9504f](https://github.com/Ragazoor/dispatch-tui/commit/ee9504f6c9838670bf520d7a2e9712bdd4f499c0))
+* harden push classification, symlink writes and worktree git handling ([d84083f](https://github.com/Ragazoor/dispatch-tui/commit/d84083f6bceac5235474a39deae4e504cf3d86d9))
+* **mcp:** harden the origin guard, require JSON on the hook route ([a854286](https://github.com/Ragazoor/dispatch-tui/commit/a85428656f5e2231e1595c525907f60ae16ebc5e))
+* review cleanups from the 2026-10-22 follow-up ([26a3b89](https://github.com/Ragazoor/dispatch-tui/commit/26a3b89f753f5a897a46625e0b9e839cb6d6a425))
+* **skills:** keep Low findings and decision items in decompose-review ([e604909](https://github.com/Ragazoor/dispatch-tui/commit/e6049095b69fcbf5313ff20ae2a89795f52e4bce))
+* **split:** rejoin a pinned pane into the window it was pinned from ([1f96c69](https://github.com/Ragazoor/dispatch-tui/commit/1f96c697139e136ad5d1dfdeff67d5a9f1de7969))
+* **split:** settle a swap on what tmux did when a step after swap-pane fails ([6451392](https://github.com/Ragazoor/dispatch-tui/commit/64513924741a59299308c68197194b35e587b1e2))
+* stop tmux errors reading as absent windows; tidy feed and editor cleanup ([93e8cd9](https://github.com/Ragazoor/dispatch-tui/commit/93e8cd9cb0fbcb7c3de712a5fb4b014db8b837e7))
+* **tui:** correct task-detail scroll bound and char-safe hint labels ([2d73aa5](https://github.com/Ragazoor/dispatch-tui/commit/2d73aa52279ec9a8a7b73f275114078af1fbb9e0))
+
 ## [0.3.0](https://github.com/Ragazoor/dispatch-tui/compare/v0.2.0...v0.3.0) (2026-10-16)
 
 
