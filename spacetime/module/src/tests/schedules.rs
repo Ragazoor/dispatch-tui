@@ -551,3 +551,14 @@ fn a_hand_write_into_done_cancels_the_pending_run() {
     };
     assert_eq!(cancel_pending_run_on_done(done).next_due, "");
 }
+
+#[test]
+fn a_schedule_request_failed_after_a_hand_move_back_to_backlog_still_marks() {
+    // Moved back by hand while the launch was open: no claim left to
+    // release, but the one-off must not fire again on its passed due time.
+    let (row, released) = task_after_failed_request(due_task(), "schedule", "boom", NOW);
+    assert!(!released);
+    let row = row.expect("marked");
+    assert_eq!(row.schedule_error, "boom");
+    assert_eq!(row.next_due, "");
+}

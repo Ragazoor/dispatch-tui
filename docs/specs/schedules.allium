@@ -256,11 +256,13 @@ rule ScheduledLaunchFails {
     requires: request.origin = schedule
 
     let task = request.task
-    -- Only a failure that releases the task's claim
-    -- (store-split.allium: ReleaseClaimOfFailedRequest). A task that moved on
+    -- Only a failure that leaves the task in backlog: one that releases its
+    -- claim (store-split.allium: ReleaseClaimOfFailedRequest), or one whose
+    -- task a hand move put back in backlog meanwhile. A task that moved on
     -- first is not a launch that left it in backlog: a close above all, since
     -- CloseFailsOpenRequests fails the request after the Done write.
-    requires: exists task and task.status = running and task.worktree = null
+    requires: exists task and
+        (task.status = backlog or (task.status = running and task.worktree = null))
 
     ensures:
         if exists task and task.schedule != null:
@@ -273,8 +275,9 @@ rule ScheduledLaunchFails {
         -- release (store-split.allium: ReleaseClaimOfFailedRequest), so the
         -- task returns to backlog already disarmed or re-armed: no board can
         -- see it back in backlog with the old, passed due time and fire it
-        -- again. Every way a request fails while the claim still holds
-        -- reaches it (a reported failure, the backstop timer, a host restart);
+        -- again. Every way a request fails while the task is claimed or back
+        -- in backlog reaches it (a reported failure, the backstop timer, a
+        -- host restart);
         -- a deleted task has nothing left to mark, and a closed one is Done,
         -- its pending run already cancelled (ClosingCancelsThePendingRun). A
         -- request of any other origin that fails leaves the schedule
