@@ -322,6 +322,21 @@ pub fn cancel_pending_run_on_leaving_backlog(prior_status: &str, task: Task) -> 
     }
 }
 
+/// `ClosingCancelsThePendingRun` for a hand status write: a task written into
+/// done is closed, so its pending run goes whatever the prior status. A
+/// one-off claimed by a user-origin request keeps its due time until the
+/// launch ends, and would otherwise fire at once when moved back to backlog.
+pub fn cancel_pending_run_on_done(task: Task) -> Task {
+    if task.status == DONE {
+        Task {
+            next_due: String::new(),
+            ..task
+        }
+    } else {
+        task
+    }
+}
+
 /// `ScheduledLaunchFails`: a failed request of `origin` with `reason`, or
 /// `None` when it changes nothing. Only a schedule-origin failure on a
 /// scheduled task changes anything: it records the reason and disarms a

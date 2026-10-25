@@ -257,3 +257,23 @@ fn a_closed_one_off_moved_back_to_backlog_stays_spent() {
         .unwrap();
     assert_eq!(store.task(task).next_due, "");
 }
+
+/// Review 2026-10-23 C5: a hand move into done is a close too, so a claimed
+/// one-off moved there and back to backlog does not fire at once.
+#[test]
+fn a_hand_move_of_a_claimed_one_off_into_done_spends_it() {
+    let store = Store::new();
+    let task = scheduled_task(&store, false);
+    request(&store, task, "user").unwrap();
+    assert!(!store.task(task).next_due.is_empty(), "the claim keeps it");
+    store
+        .call("alice", |ctx| patch_task(ctx, task, status_patch("done")))
+        .unwrap();
+    assert_eq!(store.task(task).next_due, "");
+    store
+        .call("alice", |ctx| {
+            patch_task(ctx, task, status_patch("backlog"))
+        })
+        .unwrap();
+    assert_eq!(store.task(task).next_due, "");
+}

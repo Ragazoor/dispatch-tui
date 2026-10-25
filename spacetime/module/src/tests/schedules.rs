@@ -534,3 +534,20 @@ fn a_schedule_request_failed_by_a_close_does_not_mark_the_done_row() {
     assert!(!released);
     assert!(row.is_none(), "nothing to write: {row:?}");
 }
+
+#[test]
+fn a_hand_write_into_done_cancels_the_pending_run() {
+    let claimed = Task {
+        status: "running".into(),
+        ..due_task()
+    };
+    assert_eq!(
+        cancel_pending_run_on_done(claimed.clone()).next_due,
+        "2026-10-19 09:00:00.000"
+    );
+    let done = Task {
+        status: DONE.into(),
+        ..claimed
+    };
+    assert_eq!(cancel_pending_run_on_done(done).next_due, "");
+}

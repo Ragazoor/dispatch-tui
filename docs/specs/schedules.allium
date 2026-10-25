@@ -183,8 +183,9 @@ rule LeavingBacklogCancelsThePendingRun {
     ensures: task.next_due = null
 
     @guidance
-        -- A hand move (the TUI's moves and editor, update_tasks' status, the
-        -- done-path close) cancels the pending run. A one-off is then spent:
+        -- A hand move (the TUI's moves and editor, update_tasks' status)
+        -- cancels the pending run; a close cancels it from any status
+        -- (ClosingCancelsThePendingRun). A one-off is then spent:
         -- moving it back to backlog does not fire it; setting its schedule
         -- again re-arms it. A phoenix task keeps its schedule: the copy its
         -- done respawns is armed as usual, and a hand move back to backlog
@@ -213,8 +214,9 @@ rule EnteringBacklogRearmsAPhoenixTask {
 }
 
 rule ClosingCancelsThePendingRun {
-    -- Both closes, from any prior status: ExitSession (pr-workflow.allium),
-    -- either action, and RequestCloseTask (store-split.allium).
+    -- Every close, from any prior status: ExitSession (pr-workflow.allium),
+    -- either action, RequestCloseTask (store-split.allium), and a hand status
+    -- write into done (the TUI's moves and editor), which is a close too.
     when: TaskClosed(task)
 
     ensures: task.next_due = null
@@ -271,9 +273,11 @@ rule ScheduledLaunchFails {
         -- release (store-split.allium: ReleaseClaimOfFailedRequest), so the
         -- task returns to backlog already disarmed or re-armed: no board can
         -- see it back in backlog with the old, passed due time and fire it
-        -- again. Every way a request fails reaches it (a reported failure, the
-        -- backstop timer, a host restart); a deleted task has nothing left to
-        -- mark. A request of any other origin that fails leaves the schedule
+        -- again. Every way a request fails while the claim still holds
+        -- reaches it (a reported failure, the backstop timer, a host restart);
+        -- a deleted task has nothing left to mark, and a closed one is Done,
+        -- its pending run already cancelled (ClosingCancelsThePendingRun). A
+        -- request of any other origin that fails leaves the schedule
         -- untouched: the person who launched it by hand sees the failure on
         -- the request, and the schedule still fires at its own time.
 }
