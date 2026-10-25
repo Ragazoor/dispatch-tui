@@ -251,8 +251,13 @@ async fn run(
     }
     let snapshot = read_source(source).await?;
 
-    let connected =
-        crate::store_connection::open_cli_store(data_dir, Some(server.to_string())).await?;
+    // It names its own target, which may be a store this install never used.
+    let connected = crate::store_connection::open_cli_store_with_pin(
+        data_dir,
+        Some(server.to_string()),
+        crate::store_connection::StorePin::Unchecked,
+    )
+    .await?;
     let operator = crate::store::HostStore::user_identity(&*connected.database)
         .await?
         .context("connected to the store, but no user identity was stored")?;

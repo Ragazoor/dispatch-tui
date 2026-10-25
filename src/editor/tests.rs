@@ -86,11 +86,34 @@ fn epic_editor_roundtrip_colons_in_title() {
 }
 
 #[test]
-fn epic_editor_unknown_section_ignored() {
+fn epic_editor_unknown_header_is_content() {
     let input = "--- TITLE ---\nHello\n--- UNKNOWN ---\nStuff\n--- DESCRIPTION ---\nmy desc\n";
     let fields = parse_epic_editor_output(input);
-    assert_eq!(fields.title, "Hello");
+    assert_eq!(fields.title, "Hello\n--- UNKNOWN ---\nStuff");
     assert_eq!(fields.description, "my desc");
+}
+
+#[test]
+fn description_with_header_shaped_line_keeps_the_rest() {
+    let input = "--- DESCRIPTION ---\nbefore\n--- Notes ---\nafter\n--- STATUS ---\nstill text\n";
+    assert_eq!(
+        parse_description_editor_output(input),
+        "before\n--- Notes ---\nafter\n--- STATUS ---\nstill text"
+    );
+}
+
+#[test]
+fn task_description_with_unknown_header_keeps_the_rest() {
+    let input = "--- TITLE ---\nT\n--- DESCRIPTION ---\nbefore\n--- Notes ---\nafter\n--- STATUS ---\nbacklog\n";
+    let fields = parse_editor_content(input);
+    assert_eq!(fields.description, "before\n--- Notes ---\nafter");
+    assert_eq!(fields.status, Some(crate::models::TaskStatus::Backlog));
+}
+
+#[test]
+fn a_sections_first_line_keeps_its_indentation() {
+    let input = "--- DESCRIPTION ---\n\n    indented\nnext\n\n";
+    assert_eq!(parse_description_editor_output(input), "    indented\nnext");
 }
 
 #[test]
@@ -257,10 +280,10 @@ fn editor_multiline_description() {
 }
 
 #[test]
-fn editor_unknown_section_ignored() {
+fn editor_unknown_header_is_content() {
     let input = "--- TITLE ---\nHello\n--- UNKNOWN ---\nStuff\n--- STATUS ---\nbacklog\n";
     let fields = parse_editor_content(input);
-    assert_eq!(fields.title, "Hello");
+    assert_eq!(fields.title, "Hello\n--- UNKNOWN ---\nStuff");
     assert_eq!(fields.status, Some(TaskStatus::Backlog));
 }
 

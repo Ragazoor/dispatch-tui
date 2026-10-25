@@ -95,6 +95,32 @@ pub struct CliStore {
 /// shared rows (`repo`, `plan`, the agent-tree and diff panes): with the store
 /// mandatory, the local database no longer holds them.
 pub async fn open_cli_store(data_dir: &Path, server: Option<String>) -> Result<CliStore> {
+    open_cli_store_checked(data_dir, server, StorePin::Checked, store_database_identity).await
+}
+
+/// Whether a one-shot command compares the store with this install's pin.
+pub enum StorePin {
+    /// The default (`cli.allium: CliCommandsRefuseAStoreThisInstallDoesNotUse`).
+    Checked,
+    /// `store import`, which chooses its target and may name another store.
+    Unchecked,
+}
+
+/// [`open_cli_store`] for a command that has its own say on the pin.
+pub async fn open_cli_store_with_pin(
+    data_dir: &Path,
+    server: Option<String>,
+    pin: StorePin,
+) -> Result<CliStore> {
+    open_cli_store_checked(data_dir, server, pin, store_database_identity).await
+}
+
+async fn open_cli_store_checked(
+    data_dir: &Path,
+    server: Option<String>,
+    pin: StorePin,
+    store_identity: fn(&str) -> Option<String>,
+) -> Result<CliStore> {
     // Flag, then the operator's environment, then the address the board
     // published on its session, then the record a board left beside this
     // database, then the managed address (`CliCommandsReachTheStoreWithoutManagingIt`).
@@ -106,7 +132,15 @@ pub async fn open_cli_store(data_dir: &Path, server: Option<String>) -> Result<C
         data_dir,
     );
     let host_id = open_with_cli_identity(data_dir).await?;
-    let parts = StoreParts::build(data_dir, &host_id);
+    let parts = StoreParts {
+        store_identity,
+        ..StoreParts::build(data_dir, &host_id)
+    };
+    // Before the connection, which already writes. Never pins: only a board
+    // does (`startup.allium: PinTheStoreOnceItAnswers`).
+    if matches!(pin, StorePin::Checked) {
+        check_store_identity(&parts, data_dir, &server, false).await?;
+    }
     // No host-registry push: a short-lived command is not a board, and the
     // board already registers this host on every connect.
     let session = connect_first(server, &parts, None).await?;

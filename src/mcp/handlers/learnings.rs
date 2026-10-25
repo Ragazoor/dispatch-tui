@@ -73,13 +73,30 @@ pub(super) struct DeleteLearningArgs {
 
 /// The `scope_ref` a new learning is filed under: the caller's explicit one, else
 /// the one its `scope` implies for `task`.
+/// A repo `scope_ref` as stored: `~` expanded and no trailing `/`, so it
+/// compares equal to the task's `repo_path`.
+fn normalise_repo_scope_ref(raw: &str) -> String {
+    normalise_repo_scope_ref_with_home(raw, std::env::var("HOME").ok().as_deref())
+}
+
+fn normalise_repo_scope_ref_with_home(raw: &str, home: Option<&str>) -> String {
+    let expanded = crate::models::expand_tilde_with_home(raw.trim(), home);
+    match expanded.trim_end_matches('/') {
+        "" if expanded.starts_with('/') => "/".to_string(),
+        trimmed => trimmed.to_string(),
+    }
+}
+
 fn resolve_scope_ref(
     task: &crate::models::Task,
     scope: LearningScope,
     explicit: Option<String>,
 ) -> Result<Option<String>, crate::service::ServiceError> {
-    if explicit.is_some() {
-        return Ok(explicit);
+    if let Some(explicit) = explicit {
+        return Ok(Some(match scope {
+            LearningScope::Repo => normalise_repo_scope_ref(&explicit),
+            _ => explicit,
+        }));
     }
     match scope {
         LearningScope::User => Ok(None),
@@ -331,5 +348,19 @@ pub(super) async fn handle_delete_learning(
             }),
         ),
         Err(e) => service_err_to_response(id, e),
+    }
+}
+
+#[cfg(test)]
+mod scope_ref_tests {
+    use super::normalise_repo_scope_ref_with_home as norm;
+
+    #[test]
+    fn a_repo_scope_ref_loses_its_trailing_slash_and_expands_tilde() {
+        assert_eq!(norm("/a/repo/", Some("/home/u")), "/a/repo");
+        assert_eq!(norm("~/a/repo", Some("/home/u")), "/home/u/a/repo");
+        assert_eq!(norm("~/a/repo/", Some("/home/u")), "/home/u/a/repo");
+        assert_eq!(norm("/a/repo", Some("/home/u")), "/a/repo");
+        assert_eq!(norm("/", Some("/home/u")), "/");
     }
 }

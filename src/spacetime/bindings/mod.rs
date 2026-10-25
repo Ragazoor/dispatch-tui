@@ -106,6 +106,7 @@ pub mod seed_filter_presets_reducer;
 pub mod seed_handed_out_agent_names_reducer;
 pub mod seed_hosts_reducer;
 pub mod seed_learning_retrievals_reducer;
+pub mod seed_learning_verdicts_reducer;
 pub mod seed_learnings_reducer;
 pub mod seed_poll_owners_reducer;
 pub mod seed_repo_base_branches_reducer;
@@ -264,6 +265,7 @@ pub use seed_filter_presets_reducer::seed_filter_presets;
 pub use seed_handed_out_agent_names_reducer::seed_handed_out_agent_names;
 pub use seed_hosts_reducer::seed_hosts;
 pub use seed_learning_retrievals_reducer::seed_learning_retrievals;
+pub use seed_learning_verdicts_reducer::seed_learning_verdicts;
 pub use seed_learnings_reducer::seed_learnings;
 pub use seed_poll_owners_reducer::seed_poll_owners;
 pub use seed_repo_base_branches_reducer::seed_repo_base_branches;
@@ -583,6 +585,9 @@ pub enum Reducer {
     SeedLearningRetrievals {
         rows: Vec<LearningRetrieval>,
     },
+    SeedLearningVerdicts {
+        rows: Vec<LearningVerdict>,
+    },
     SeedLearnings {
         rows: Vec<Learning>,
     },
@@ -752,6 +757,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedHandedOutAgentNames { .. } => "seed_handed_out_agent_names",
             Reducer::SeedHosts { .. } => "seed_hosts",
             Reducer::SeedLearningRetrievals { .. } => "seed_learning_retrievals",
+            Reducer::SeedLearningVerdicts { .. } => "seed_learning_verdicts",
             Reducer::SeedLearnings { .. } => "seed_learnings",
             Reducer::SeedPollOwners { .. } => "seed_poll_owners",
             Reducer::SeedRepoBaseBranches { .. } => "seed_repo_base_branches",
@@ -1230,6 +1236,11 @@ Reducer::RecordBaseBranch{
             Reducer::SeedLearningRetrievals{
                 rows,
 }             => __sats::bsatn::to_vec(&seed_learning_retrievals_reducer::SeedLearningRetrievalsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedLearningVerdicts{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_learning_verdicts_reducer::SeedLearningVerdictsArgs {
                 rows: rows.clone(),
 }),
             Reducer::SeedLearnings{

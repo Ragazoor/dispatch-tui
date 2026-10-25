@@ -88,7 +88,7 @@ use "./core.allium" as core
 --
 -- What is NOT here is as load-bearing as what is, and it is shorter than an
 -- earlier revision of this note claimed: the knowledge base (`learnings`,
--- `learning_retrievals`) and host-scoped `settings` are shared and ARE below —
+-- `learning_retrievals`, `learning_verdicts`) and host-scoped `settings` are shared and ARE below —
 -- see `docs/conventions.md`'s "The store seam" for when each joined. What
 -- stays off this list, permanently, is the identity credential
 -- (`IdentityCredentialStore`'s `user_identity_token`): it is the proof this
@@ -127,6 +127,7 @@ enum SharedTable {
     filter_presets
     learnings
     learning_retrievals
+    learning_verdicts
     usage_events
     retired_feed_items
     work_packages
@@ -305,7 +306,7 @@ config {
     -- than written into the invariant so that the number and the SharedTable
     -- enumeration are visibly two statements of the same fact, and disagreeing
     -- is a spec-level error rather than a silent gap in a backup.
-    shared_table_count: Integer = 21
+    shared_table_count: Integer = 22
 
     -- Bumped when the snapshot layout changes in a way an older reader cannot
     -- interpret. A reader refuses a version it does not know rather than
@@ -916,7 +917,7 @@ rule ImportOldStore {
         -- repo_paths (with each repo's verify command), repo_base_branches,
         -- hosts, settings, task_watchers, task_subagents, poll_owners,
         -- subscriptions, learnings (with their embeddings and upvotes),
-        -- learning_retrievals, usage_events, retired_feed_items,
+        -- learning_retrievals, learning_verdicts, usage_events, retired_feed_items,
         -- work_packages, work_package_links, agents and
         -- handed_out_agent_names cross as well as tasks and epics. A table that cannot be imported is a
         -- refusal (incomplete), not a quiet omission.

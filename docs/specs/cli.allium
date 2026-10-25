@@ -208,6 +208,40 @@ rule CliCommandsReachTheStoreWithoutManagingIt {
         -- the data directory.
 }
 
+rule CliCommandsRefuseAStoreThisInstallDoesNotUse {
+    -- The store-identity pin the board checks (startup.allium:
+    -- AbortWhenTheStoreIsNotTheOneThisInstallUses) is checked by the commands
+    -- that read or write shared rows too, before they connect.
+    when: CliStoreRequested(invocation)
+    requires: invocation.subcommand != "store import"
+
+    let found = store_database_identity()
+    let pinned = pinned_store_identity()
+
+    ensures:
+        found = null or pinned = null or found = pinned
+            or CliConnectedTo(invocation: invocation, server: invocation.named_store)
+
+    @guidance
+        -- WHY (task #28710). A stale DISPATCH_SPACETIME_SERVER in the shell
+        -- sends `repo set-verify`, `plan` and `prune-repo-paths` to a store
+        -- the board is not using, and they write there without a word. The
+        -- board refuses that launch; these commands refuse it the same way.
+        --
+        -- SAME CHECK, SAME MESSAGE. A store whose database differs from the
+        -- pinned one ends the command with failure, before any connection
+        -- and so before any write, naming the address, both databases and
+        -- `dispatch tui --accept-store-switch`, which re-pins. A store that
+        -- cannot be asked, or an install with nothing pinned yet, goes
+        -- through. A command never pins: only a board does
+        -- (startup.allium: PinTheStoreOnceItAnswers), so a command run first
+        -- on a fresh --data-dir cannot choose what later boards are measured
+        -- against.
+        --
+        -- `store import` is exempt. It chooses its target and is the one
+        -- command meant to reach a store other than the pinned one.
+}
+
 rule CliCommandsNeedAHostFile {
     -- A one-shot command that needs this install's identity, run where there
     -- is no host file yet.

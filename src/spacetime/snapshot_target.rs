@@ -143,6 +143,7 @@ pub(super) fn key_columns(table: SharedTable) -> &'static [&'static str] {
         | SharedTable::FilterPresets
         | SharedTable::Learnings
         | SharedTable::LearningRetrievals
+        | SharedTable::LearningVerdicts
         | SharedTable::UsageEvents
         | SharedTable::RetiredFeedItems
         | SharedTable::WorkPackages

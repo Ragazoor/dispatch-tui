@@ -110,19 +110,46 @@ pub struct EpicEditorFields {
     pub errors: Vec<EditorParseError>,
 }
 
+const DESCRIPTION_SECTIONS: &[&str] = &["DESCRIPTION"];
+const EPIC_SECTIONS: &[&str] = &["TITLE", "DESCRIPTION", "FEED_COMMAND", "FEED_INTERVAL_SECS"];
+const TASK_SECTIONS: &[&str] = &[
+    "TITLE",
+    "DESCRIPTION",
+    "REPO_PATH",
+    "STATUS",
+    "PLAN",
+    "TAG",
+    "BASE_BRANCH",
+    "WRAP_UP_MODE",
+    "MODEL",
+    "PHOENIX",
+    "URL",
+    "URL_TYPE",
+];
+
 /// Parse `--- SECTION ---` delimited text into a map of section name → content.
-fn parse_sections(input: &str) -> std::collections::HashMap<&str, String> {
+///
+/// Only names in `known` start a section; any other line, headers included,
+/// is content of the current section.
+fn parse_sections_in<'a>(
+    input: &str,
+    known: &[&'a str],
+) -> std::collections::HashMap<&'a str, String> {
     let mut sections = std::collections::HashMap::new();
-    let mut current_section: Option<&str> = None;
+    let mut current_section: Option<&'a str> = None;
     let mut current_buf = String::new();
 
-    for line in input.lines() {
+    let section_name = |line: &str| -> Option<&'a str> {
         let trimmed = line.trim();
-        if trimmed.starts_with("--- ") && trimmed.ends_with(" ---") {
+        let name = trimmed.strip_prefix("--- ")?.strip_suffix(" ---")?;
+        known.iter().copied().find(|k| *k == name)
+    };
+
+    for line in input.lines() {
+        if let Some(section) = section_name(line) {
             if let Some(name) = current_section {
-                sections.insert(name, current_buf.trim().to_string());
+                sections.insert(name, section_value(&current_buf));
             }
-            let section = trimmed.trim_start_matches("--- ").trim_end_matches(" ---");
             current_section = Some(section);
             current_buf = String::new();
             continue;
@@ -135,9 +162,24 @@ fn parse_sections(input: &str) -> std::collections::HashMap<&str, String> {
         }
     }
     if let Some(name) = current_section {
-        sections.insert(name, current_buf.trim().to_string());
+        sections.insert(name, section_value(&current_buf));
     }
     sections
+}
+
+/// Drop the blank lines around a section's text but keep the first line's
+/// indentation.
+fn section_value(raw: &str) -> String {
+    let mut lines: Vec<&str> = raw.lines().collect();
+    while lines.first().is_some_and(|l| l.trim().is_empty()) {
+        lines.remove(0);
+    }
+    lines.join("\n").trim_end().to_string()
+}
+
+/// Parse the task editor's sections.
+fn parse_sections(input: &str) -> std::collections::HashMap<&'static str, String> {
+    parse_sections_in(input, TASK_SECTIONS)
 }
 
 pub fn format_description_for_editor(existing: &str) -> String {
@@ -145,7 +187,7 @@ pub fn format_description_for_editor(existing: &str) -> String {
 }
 
 pub fn parse_description_editor_output(input: &str) -> String {
-    let mut s = parse_sections(input);
+    let mut s = parse_sections_in(input, DESCRIPTION_SECTIONS);
     s.remove("DESCRIPTION").unwrap_or_default()
 }
 
@@ -201,7 +243,7 @@ fn interval_parse_failure_message(raw: &str) -> String {
 }
 
 pub fn parse_epic_editor_output(input: &str) -> EpicEditorFields {
-    let mut s = parse_sections(input);
+    let mut s = parse_sections_in(input, EPIC_SECTIONS);
     let mut errors = Vec::new();
     let feed_interval_secs = parse_section(
         s.remove("FEED_INTERVAL_SECS").unwrap_or_default(),

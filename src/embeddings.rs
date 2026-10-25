@@ -24,6 +24,37 @@ enum EmbedMsg {
     Batch(EmbedBatch),
 }
 
+/// Answer requests until every sender is gone. A panic in `embed_texts` or an
+/// empty result answers that one request with an error and the loop goes on, so
+/// one bad input cannot leave every later `embed` failing with "channel closed".
+// Only the non-test `new` and the tests call it.
+#[cfg_attr(test, allow(dead_code))]
+fn serve_requests<F>(rx: std::sync::mpsc::Receiver<EmbedMsg>, mut embed_texts: F)
+where
+    F: FnMut(Vec<&str>) -> Result<Vec<Vec<f32>>>,
+{
+    let mut run = |texts: Vec<&str>| -> Result<Vec<Vec<f32>>> {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| embed_texts(texts)))
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("embedding model panicked")))
+    };
+    while let Ok(msg) = rx.recv() {
+        match msg {
+            EmbedMsg::Single(EmbedSingle { text, reply }) => {
+                let result = run(vec![text.as_str()]).and_then(|vecs| {
+                    vecs.into_iter()
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("embedding model returned no vectors"))
+                });
+                let _ = reply.send(result);
+            }
+            EmbedMsg::Batch(EmbedBatch { texts, reply }) => {
+                let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+                let _ = reply.send(run(refs));
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct EmbeddingService {
     tx: std::sync::mpsc::Sender<EmbedMsg>,
@@ -40,21 +71,7 @@ impl EmbeddingService {
         )?;
         let (tx, rx) = std::sync::mpsc::channel::<EmbedMsg>();
         std::thread::spawn(move || {
-            while let Ok(msg) = rx.recv() {
-                match msg {
-                    EmbedMsg::Single(EmbedSingle { text, reply }) => {
-                        let result = model
-                            .embed(vec![text.as_str()], None)
-                            .map(|mut vecs| vecs.remove(0));
-                        let _ = reply.send(result);
-                    }
-                    EmbedMsg::Batch(EmbedBatch { texts, reply }) => {
-                        let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-                        let result = model.embed(refs, None);
-                        let _ = reply.send(result);
-                    }
-                }
-            }
+            serve_requests(rx, |texts| model.embed(texts, None));
         });
         Ok(Arc::new(Self { tx }))
     }
@@ -191,7 +208,8 @@ pub fn scope_multiplier_for(
 /// path separator, so one entry can serve repos sharing a parent directory.
 fn repo_ref_covers(scope_ref: &str, repo: &str) -> bool {
     let parent = scope_ref.trim_end_matches('/');
-    repo == scope_ref
+    let repo = repo.trim_end_matches('/');
+    repo == parent
         || repo
             .strip_prefix(parent)
             .is_some_and(|rest| rest.starts_with('/'))
@@ -280,6 +298,41 @@ pub fn rag_rank_learnings<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn service_over(
+        embed_texts: impl FnMut(Vec<&str>) -> Result<Vec<Vec<f32>>> + Send + 'static,
+    ) -> EmbeddingService {
+        let (tx, rx) = std::sync::mpsc::channel::<EmbedMsg>();
+        std::thread::spawn(move || serve_requests(rx, embed_texts));
+        EmbeddingService { tx }
+    }
+
+    #[tokio::test]
+    async fn a_panic_in_the_model_answers_with_an_error_and_the_thread_lives_on() {
+        let svc = service_over(|texts| {
+            if texts[0] == "boom" {
+                panic!("model blew up");
+            }
+            Ok(vec![vec![0.5]])
+        });
+        assert!(svc.embed("boom").await.is_err());
+        assert_eq!(svc.embed("fine").await.unwrap(), vec![0.5]);
+        assert!(svc.embed_batch(vec!["boom".into()]).await.is_err());
+        assert_eq!(svc.embed_batch(vec!["fine".into()]).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_empty_model_result_is_an_error_not_a_panic() {
+        let svc = service_over(|texts| {
+            Ok(if texts[0] == "empty" {
+                vec![]
+            } else {
+                vec![vec![1.0]]
+            })
+        });
+        assert!(svc.embed("empty").await.is_err());
+        assert_eq!(svc.embed("ok").await.unwrap(), vec![1.0]);
+    }
 
     #[tokio::test]
     async fn embedding_service_returns_384_dims() {
@@ -393,6 +446,8 @@ mod tests {
         assert!(m("/w/tf/gcp/a", "/w/tf/gcp/a"));
         assert!(m("/w/tf/gcp", "/w/tf/gcp/a"));
         assert!(m("/w/tf/gcp/", "/w/tf/gcp/a"));
+        assert!(m("/w/tf/gcp/a/", "/w/tf/gcp/a"));
+        assert!(m("/w/tf/gcp/a", "/w/tf/gcp/a/"));
         assert!(!m("/w/tf/gcp", "/w/tf/gcp-old/a"));
         assert!(!m("/w/tf/gcp", "/w/tf/gcpa"));
         assert!(!m("/w/tf/gcp/a", "/w/tf/gcp"));

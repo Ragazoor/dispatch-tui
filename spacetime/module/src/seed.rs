@@ -352,6 +352,24 @@ pub fn seed_learnings(ctx: &ReducerContext, rows: Vec<Learning>) -> Result<(), S
 }
 
 #[spacetimedb::reducer]
+pub fn seed_learning_verdicts(
+    ctx: &ReducerContext,
+    rows: Vec<LearningVerdict>,
+) -> Result<(), String> {
+    for row in rows {
+        if row.id == 0 {
+            return Err("seed_learning_verdicts needs each row's real id".into());
+        }
+        if ctx.db.learning_verdicts().id().find(row.id).is_some() {
+            ctx.db.learning_verdicts().id().update(row);
+        } else {
+            ctx.db.learning_verdicts().insert(row);
+        }
+    }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
 pub fn seed_learning_retrievals(
     ctx: &ReducerContext,
     rows: Vec<LearningRetrieval>,

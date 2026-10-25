@@ -35,8 +35,8 @@ pub mod hex;
 
 mod paths;
 pub use paths::{
-    expand_tilde, extract_github_repo, repo_name_from_path, repo_name_from_url, validate_repo_path,
-    UNKNOWN_REPO_GROUP,
+    expand_tilde, expand_tilde_with_home, extract_github_repo, repo_name_from_path,
+    repo_name_from_url, validate_repo_path, UNKNOWN_REPO_GROUP,
 };
 
 mod tmux_window;

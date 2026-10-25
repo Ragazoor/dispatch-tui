@@ -148,6 +148,36 @@ async fn record_learning_derives_scope_ref_for_repo() {
 }
 
 #[tokio::test]
+async fn record_learning_stores_an_explicit_repo_scope_ref_without_a_trailing_slash() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo/bar").await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "record_learning",
+            "arguments": {
+                "task_id": task_id.0,
+                "kind": "pitfall",
+                "summary": "Watch out for integer overflow",
+                "scope": "repo",
+                "scope_ref": "/repo/bar/"
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let filter = crate::store::LearningFilter {
+        status: Some(crate::models::LearningStatus::Approved),
+        ..Default::default()
+    };
+    let learnings = state.db.list_learnings(filter).await.unwrap();
+    assert_eq!(learnings[0].scope_ref.as_deref(), Some("/repo/bar"));
+}
+
+#[tokio::test]
 async fn record_learning_derives_scope_ref_for_epic() {
     let state = test_state().await;
     let epic = state.db_write().create_epic("E", "", None).await.unwrap();

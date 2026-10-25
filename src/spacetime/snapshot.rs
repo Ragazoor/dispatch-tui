@@ -35,8 +35,9 @@ pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 /// `usage_events`, the fifteenth, needed it once more; `retired_feed_items`,
 /// the sixteenth, needed it yet again; `work_packages` and
 /// `work_package_links`, the eighteenth and nineteenth, once more; `agents`
-/// and `handed_out_agent_names`, the twentieth and twenty-first, again).
-pub const SHARED_TABLE_COUNT: usize = 21;
+/// and `handed_out_agent_names`, the twentieth and twenty-first, again;
+/// `learning_verdicts`, the twenty-second, once more).
+pub const SHARED_TABLE_COUNT: usize = 22;
 
 /// One row, carried whole. Deliberately untyped: this module does not describe
 /// the shape of a task row — `core.allium` does — and a second description here
@@ -67,6 +68,7 @@ pub enum SharedTable {
     FilterPresets,
     Learnings,
     LearningRetrievals,
+    LearningVerdicts,
     UsageEvents,
     RetiredFeedItems,
     WorkPackages,
@@ -94,6 +96,7 @@ impl SharedTable {
         SharedTable::FilterPresets,
         SharedTable::Learnings,
         SharedTable::LearningRetrievals,
+        SharedTable::LearningVerdicts,
         SharedTable::UsageEvents,
         SharedTable::RetiredFeedItems,
         SharedTable::WorkPackages,
@@ -119,6 +122,7 @@ impl SharedTable {
             SharedTable::FilterPresets => "filter_presets",
             SharedTable::Learnings => "learnings",
             SharedTable::LearningRetrievals => "learning_retrievals",
+            SharedTable::LearningVerdicts => "learning_verdicts",
             SharedTable::UsageEvents => "usage_events",
             SharedTable::RetiredFeedItems => "retired_feed_items",
             SharedTable::WorkPackages => "work_packages",
@@ -151,6 +155,7 @@ impl SharedTable {
             | SharedTable::PollOwners
             | SharedTable::Learnings
             | SharedTable::LearningRetrievals
+            | SharedTable::LearningVerdicts
             | SharedTable::UsageEvents
             | SharedTable::RetiredFeedItems
             | SharedTable::WorkPackages
@@ -200,6 +205,7 @@ impl SharedTable {
             | SharedTable::FilterPresets
             | SharedTable::Learnings
             | SharedTable::LearningRetrievals
+            | SharedTable::LearningVerdicts
             | SharedTable::UsageEvents
             | SharedTable::RetiredFeedItems
             | SharedTable::WorkPackages
@@ -338,6 +344,7 @@ impl SharedTable {
             | SharedTable::FilterPresets
             | SharedTable::Learnings
             | SharedTable::LearningRetrievals
+            | SharedTable::LearningVerdicts
             | SharedTable::UsageEvents
             // `retired_feed_items.feed_epic_id` is already required on both
             // sides — nothing here to sentinel.
@@ -442,6 +449,7 @@ impl SharedTable {
             | SharedTable::Subscriptions
             | SharedTable::Learnings
             | SharedTable::LearningRetrievals
+            | SharedTable::LearningVerdicts
             | SharedTable::UsageEvents
             | SharedTable::RetiredFeedItems
             | SharedTable::WorkPackages
@@ -507,6 +515,7 @@ impl SharedTable {
             // reconcile.
             | SharedTable::Learnings
             | SharedTable::LearningRetrievals
+            | SharedTable::LearningVerdicts
             | SharedTable::UsageEvents
             | SharedTable::RetiredFeedItems
             | SharedTable::WorkPackages

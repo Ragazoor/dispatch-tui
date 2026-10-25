@@ -58,7 +58,9 @@ use "./core.allium" as core
 -- table (the SQLite table of that name was dropped in v74 and is unrelated):
 -- a repeat from the same task replaces the earlier verdict, so a task moves a
 -- learning's core/Learning.upvote_count by at most one in either direction
--- (see Retrievals & Verdicts below and core.allium).
+-- (see Retrievals & Verdicts below and core.allium). The table is part of the
+-- snapshot (spacetime-seed.allium: SharedTable), so a restore keeps who rated
+-- what and a task cannot rate a learning a second time after one.
 
 ------------------------------------------------------------
 -- Scope Model

@@ -430,8 +430,8 @@ pub struct LearningRetrieval {
 /// (`learnings.allium: RateLearningViaMcp`): at most one row per
 /// (`task_id`, `learning_id`), which a repeat replaces. The row exists so a
 /// repeat can move `Learning.upvote_count` by the difference instead of again.
-/// Not a snapshot table: it is derived from agents' ratings, and a restore
-/// that dropped it would let a task rate once more.
+/// A snapshot table (`SharedTable::LearningVerdicts`): a restore that dropped
+/// it would keep the learnings' scores and let a task rate once more.
 #[spacetimedb::table(accessor = learning_verdicts, public)]
 #[derive(Clone, Debug)]
 pub struct LearningVerdict {

@@ -411,6 +411,7 @@ fn seed_reducer(table: SharedTable) -> &'static str {
         SharedTable::FilterPresets => "seed_filter_presets",
         SharedTable::Learnings => "seed_learnings",
         SharedTable::LearningRetrievals => "seed_learning_retrievals",
+        SharedTable::LearningVerdicts => "seed_learning_verdicts",
         SharedTable::UsageEvents => "seed_usage_events",
         SharedTable::RetiredFeedItems => "seed_retired_feed_items",
         SharedTable::WorkPackages => "seed_work_packages",
