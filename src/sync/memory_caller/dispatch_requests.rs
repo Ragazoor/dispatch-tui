@@ -73,7 +73,7 @@ impl MemoryReducerCaller {
             None => (None, false),
         };
         if let Some(marked) = &marked {
-            Self::validate_task_write(tables, marked)?;
+            Self::validate_task_write(tables, marked, &self.now())?;
         }
         self.write_dispatch_request(tables, failed);
         if let Some(task) = tables.tasks.get(&task_id).cloned() {

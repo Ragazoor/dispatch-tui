@@ -374,8 +374,10 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
     if let Some(cron) = schedule {
         row = apply_schedule(row, &cron, &now(ctx))?;
     }
-    // schedules.allium: LeavingBacklogCancelsThePendingRun.
+    // schedules.allium: LeavingBacklogCancelsThePendingRun and
+    // EnteringBacklogRearmsAPhoenixTask.
     row = cancel_pending_run_on_leaving_backlog(&prior_status, row);
+    row = rearm_phoenix_on_entering_backlog(&prior_status, row, &now(ctx));
     // The session facts go to the current agent (`agents.allium`, A4).
     update_current_agent(&mut AgentTables(ctx), id, |agent| {
         apply_session_patch(agent, &session_patch)

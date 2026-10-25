@@ -25,13 +25,18 @@ use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 /// The dispatch origin of a board firing a due task (`FireDueTask`).
 pub const DISPATCH_ORIGIN_SCHEDULE: &str = "schedule";
 
-/// How many days ahead [`next_cron_match`] looks. Eight years plus a margin:
-/// the longest gap between two matches of a satisfiable five-field cron is a
-/// leap day across a century year that is not a leap year (2096 to 2104).
-const SEARCH_DAYS: i64 = 366 * 8 + 2;
+/// How many days ahead [`next_cron_match`] looks: more than the longest gap
+/// between two matches of any cron the grammar accepts, so a cron with no
+/// match in the window has none ever, from any start. That gap is measured
+/// over every (month, day of month, weekday) triple in the 400-year Gregorian
+/// cycle: 14609 days, e.g. `0 0 29 2 */7` (29 February on a Sunday, the two
+/// day fields AND-ed) matches in 2088 and next in 2128, across the leap day
+/// 2100 skips. Hours and minutes cannot lengthen it: every matching day has a
+/// matching minute. Cheap, as the search steps by day.
+const SEARCH_DAYS: i64 = 366 * 40;
 
-/// The instant [`validate_cron`] searches from. Any instant would do: within
-/// [`SEARCH_DAYS`] every satisfiable cron matches somewhere.
+/// The instant [`validate_cron`] searches from. Any instant would do: from
+/// any of them every satisfiable cron matches within [`SEARCH_DAYS`].
 const VALIDATION_ORIGIN: &str = "2000-01-01 00:00:00.000";
 
 /// A parsed five-field cron. Each set holds the values that field matches,
@@ -120,7 +125,11 @@ fn parse_field(text: &str, spec: &FieldSpec) -> Result<u64, String> {
         let mut v = low;
         while v <= high {
             bits |= 1 << v;
-            v += step;
+            // A step past `u32::MAX` is past every field's maximum too.
+            match v.checked_add(step) {
+                Some(next) => v = next,
+                None => break,
+            }
         }
     }
     Ok(bits)
@@ -327,7 +336,8 @@ pub fn schedule_after_failed_launch(
         return None;
     }
     let next_due = if task.phoenix {
-        // A stored schedule was validated when it was set, so this answers.
+        // A stored schedule was validated when it was set, and a valid cron
+        // matches within [`SEARCH_DAYS`] of any instant, so this answers.
         next_cron_match(&task.schedule, now).unwrap_or_default()
     } else {
         String::new()
@@ -337,4 +347,24 @@ pub fn schedule_after_failed_launch(
         next_due,
         ..task
     })
+}
+
+/// `EnteringBacklogRearmsAPhoenixTask`: a status write other than the respawn
+/// that brings a scheduled phoenix task back into backlog arms it from `now`,
+/// so a run that fired and was abandoned does not leave it unarmed for good.
+/// `prior_status` is the status before the write; `task` is the row after it.
+/// A recorded failure is kept.
+pub fn rearm_phoenix_on_entering_backlog(prior_status: &str, task: Task, now: &str) -> Task {
+    if prior_status == BACKLOG
+        || task.status != BACKLOG
+        || !task.phoenix
+        || task.schedule.is_empty()
+    {
+        return task;
+    }
+    Task {
+        // Answers for a stored schedule; see [`schedule_after_failed_launch`].
+        next_due: next_cron_match(&task.schedule, now).unwrap_or_default(),
+        ..task
+    }
 }

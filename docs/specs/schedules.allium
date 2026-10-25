@@ -82,7 +82,14 @@ config {
 -- `*/2` counts as unrestricted, as in Vixie cron), a day matches if EITHER
 -- does. A cron that matches no minute at all (e.g. "0 0 31 2 *") is
 -- refused when it is set, so next_match always has an answer for a stored
--- schedule.
+-- schedule, searched from any instant: a cron accepted today keeps
+-- recurring. The store searches a bounded window ahead, longer than the
+-- longest gap between two matches of any cron the grammar accepts. That gap
+-- is measured, not derived: over every (month, day of month, weekday) triple
+-- in the 400-year Gregorian cycle it is 14609 days (about 40 years). E.g.
+-- "0 0 29 2 */7" (29 February when it is a Sunday; AND, as the weekday field
+-- starts with `*`) matches in 2088 and next in 2128, across the leap day 2100
+-- skips.
 
 ------------------------------------------------------------
 -- Setting and clearing
@@ -179,9 +186,47 @@ rule LeavingBacklogCancelsThePendingRun {
         -- A hand move (the TUI's moves and editor, update_tasks' status, the
         -- done-path close) cancels the pending run. A one-off is then spent:
         -- moving it back to backlog does not fire it; setting its schedule
-        -- again re-arms it. A phoenix task keeps its schedule, and the copy
-        -- its done respawns is armed as usual. task.schedule and
+        -- again re-arms it. A phoenix task keeps its schedule: the copy its
+        -- done respawns is armed as usual, and a hand move back to backlog
+        -- re-arms it (EnteringBacklogRearmsAPhoenixTask). task.schedule and
         -- task.schedule_error are kept as a record.
+}
+
+rule EnteringBacklogRearmsAPhoenixTask {
+    -- The same writes as LeavingBacklogCancelsThePendingRun, the other way.
+    when: TaskStatusWrittenByHand(task, from, to)
+
+    requires: from != backlog and to = backlog
+    requires: task.phoenix and task.schedule != null
+
+    ensures: task.next_due = next_match(task.schedule, after: now)
+
+    @guidance
+        -- Decided with the user (task #98505, review 2026-10-23 C4): a phoenix
+        -- run that fired, was abandoned and is moved back to backlog would
+        -- otherwise sit there with a schedule and no due time, never firing
+        -- and showing nothing wrong. Computed from now, so a slot that passed
+        -- while the task was out of backlog is not fired late (S4).
+        -- task.schedule_error is kept: only a launch or setting the schedule
+        -- clears a recorded failure. A non-phoenix task is not re-armed; its
+        -- run is spent.
+}
+
+rule ClosingCancelsThePendingRun {
+    -- Both closes, from any prior status: ExitSession (pr-workflow.allium),
+    -- either action, and RequestCloseTask (store-split.allium).
+    when: TaskClosed(task)
+
+    ensures: task.next_due = null
+
+    @guidance
+        -- A close of a task that was not in backlog is no move out of backlog,
+        -- so LeavingBacklogCancelsThePendingRun does not reach it. Yet a task
+        -- closed while a user-origin request still held its claim kept its
+        -- due time (the claim keeps it until the launch ends), and a later
+        -- move back to backlog would fire it at once. A closed one-off is
+        -- spent. A phoenix task the close moves to done hands its schedule to
+        -- the successor its respawn creates, armed there.
 }
 
 rule DispatchConsumesTheDueTime {
@@ -209,6 +254,11 @@ rule ScheduledLaunchFails {
     requires: request.origin = schedule
 
     let task = request.task
+    -- Only a failure that releases the task's claim
+    -- (store-split.allium: ReleaseClaimOfFailedRequest). A task that moved on
+    -- first is not a launch that left it in backlog: a close above all, since
+    -- CloseFailsOpenRequests fails the request after the Done write.
+    requires: exists task and task.status = running and task.worktree = null
 
     ensures:
         if exists task and task.schedule != null:

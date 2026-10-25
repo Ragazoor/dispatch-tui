@@ -414,3 +414,123 @@ fn a_failed_request_that_changes_nothing_writes_nothing() {
         (None, false)
     ));
 }
+
+// -- Review 2026-10-23 (task #98505) ------------------------------------------
+
+#[test]
+fn an_and_combined_cron_with_a_decade_gap_keeps_recurring() {
+    // 1 February when it is a Monday: `*/31` is {1} but starts with `*`, so
+    // the two day fields AND. Matches 2027, then 2038.
+    assert_eq!(
+        next_cron_match("0 0 */31 2 1", "2027-02-01 00:00:00.000").unwrap(),
+        "2038-02-01 00:00:00.000"
+    );
+}
+
+#[test]
+fn the_longest_gap_any_cron_has_is_inside_the_search() {
+    // 29 February when it is a Sunday: 2088, then 2128, across the leap day
+    // 2100 skips. 14609 days, the measured longest gap of any accepted cron.
+    assert_eq!(
+        next_cron_match("0 0 29 2 */7", "2088-02-29 00:00:00.000").unwrap(),
+        "2128-02-29 00:00:00.000"
+    );
+    // Accepted whatever instant the check searches from.
+    validate_cron("0 0 29 2 */7").unwrap();
+}
+
+#[test]
+fn a_huge_step_does_not_overflow() {
+    // `1-59/4294967295` is {1}: the step past 59 ends the field.
+    assert_eq!(
+        next_cron_match("1-59/4294967295 * * * *", NOW).unwrap(),
+        "2026-10-21 11:01:00.000"
+    );
+}
+
+fn spent_phoenix() -> Task {
+    Task {
+        phoenix: true,
+        status: "running".into(),
+        schedule: "0 9 * * 1".into(),
+        schedule_error: "old".into(),
+        ..backlog_task()
+    }
+}
+
+#[test]
+fn a_hand_move_back_to_backlog_rearms_a_phoenix_task() {
+    let moved = Task {
+        status: BACKLOG.into(),
+        ..spent_phoenix()
+    };
+    let after = rearm_phoenix_on_entering_backlog("running", moved, NOW);
+    assert_eq!(after.next_due, "2026-10-26 09:00:00.000");
+    assert_eq!(after.schedule_error, "old", "a recorded failure is kept");
+}
+
+#[test]
+fn only_a_scheduled_phoenix_task_entering_backlog_is_rearmed() {
+    let in_backlog = Task {
+        status: BACKLOG.into(),
+        ..spent_phoenix()
+    };
+    // Already in backlog: no entry.
+    assert_eq!(
+        rearm_phoenix_on_entering_backlog(BACKLOG, in_backlog.clone(), NOW).next_due,
+        ""
+    );
+    // Not phoenix: a one-off's run is spent.
+    let one_off = Task {
+        phoenix: false,
+        ..in_backlog.clone()
+    };
+    assert_eq!(
+        rearm_phoenix_on_entering_backlog("review", one_off, NOW).next_due,
+        ""
+    );
+    // No schedule.
+    let unscheduled = Task {
+        schedule: String::new(),
+        ..in_backlog
+    };
+    assert_eq!(
+        rearm_phoenix_on_entering_backlog("review", unscheduled, NOW).next_due,
+        ""
+    );
+    // Not into backlog.
+    assert_eq!(
+        rearm_phoenix_on_entering_backlog(BACKLOG, spent_phoenix(), NOW).next_due,
+        ""
+    );
+}
+
+#[test]
+fn every_close_cancels_the_pending_run_whatever_the_prior_status() {
+    // A user-origin claim keeps the due time until its launch ends.
+    let claimed = Task {
+        status: "running".into(),
+        ..due_task()
+    };
+    assert_eq!(apply_done_close(claimed.clone(), NOW).next_due, "");
+    assert_eq!(
+        apply_session_close(claimed.clone(), ACTION_DONE, "", NOW).next_due,
+        ""
+    );
+    assert_eq!(
+        apply_session_close(claimed, ACTION_PR, "https://x/pr/1", NOW).next_due,
+        ""
+    );
+}
+
+#[test]
+fn a_schedule_request_failed_by_a_close_does_not_mark_the_done_row() {
+    let closed = Task {
+        status: "done".into(),
+        phoenix: true,
+        ..due_task()
+    };
+    let (row, released) = task_after_failed_request(closed, "schedule", "task closed", NOW);
+    assert!(!released);
+    assert!(row.is_none(), "nothing to write: {row:?}");
+}

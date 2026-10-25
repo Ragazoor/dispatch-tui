@@ -502,10 +502,12 @@ pub fn validate_exit_session(
 
 /// `ExitSession`'s writes to the task: the window cleared, then pr -> review
 /// with a pr-typed url, rebase or done -> done stamped complete. Both leave
-/// running, so both clear a deferred Stop.
+/// running, so both clear a deferred Stop, and both cancel a pending
+/// scheduled run (`schedules.allium: ClosingCancelsThePendingRun`).
 pub fn apply_session_close(task: Task, action: &str, pr_url: &str, now: &str) -> Task {
     let closed = Task {
         updated_at: now.into(),
+        next_due: String::new(),
         ..task
     };
     if action == ACTION_PR {
@@ -564,13 +566,9 @@ pub fn new_exit_session_request(
 /// `completed_at`.
 pub fn apply_done_close(task: Task, now: &str) -> Task {
     let was_already_done = task.status == DONE;
-    let prior_status = task.status.clone();
     let kept = task.completed_at.clone();
-    // schedules.allium: LeavingBacklogCancelsThePendingRun.
-    let closed = cancel_pending_run_on_leaving_backlog(
-        &prior_status,
-        apply_session_close(task, ACTION_DONE, "", now),
-    );
+    // schedules.allium: ClosingCancelsThePendingRun, from any prior status.
+    let closed = apply_session_close(task, ACTION_DONE, "", now);
     if was_already_done {
         Task {
             completed_at: kept,

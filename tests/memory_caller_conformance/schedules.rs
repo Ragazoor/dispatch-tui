@@ -167,7 +167,7 @@ fn memory_caller_keeps_schedules_like_the_real_module() {
             sub_status: Some("awaiting_review".into()),
             ..blank_task_patch()
         };
-        let (r, m) = patch_both(reviewed, to_review).await;
+        let (r, m) = patch_both(reviewed, to_review.clone()).await;
         assert!(r.won() && m.won(), "{r:?} / {m:?}");
         let (r, m) = patch_both(reviewed, schedule(YEARLY)).await;
         both_refuse(r, m);
@@ -224,5 +224,102 @@ fn memory_caller_keeps_schedules_like_the_real_module() {
                 .unwrap(),
         );
         same_task(armed);
+
+        // -- Review 2026-10-23 (task #98505) ---------------------------------------
+        // A refused cron in an auto-grouping epic leaves no repo sub-epic.
+        let grouped = bindings::Epic {
+            group_by_repo: true,
+            created_by: identity.clone(),
+            ..blank_epic()
+        };
+        let root = real.create_epic(grouped.clone()).await.unwrap().0;
+        wait_for!(rows_real.epic(EpicId(root)).is_some());
+        assert_eq!(mem.create_epic(grouped).await.unwrap().0, root);
+        let epics_before = rows_mem.epics().len();
+        let never = bindings::Task {
+            repo_path: "/x/alpha".into(),
+            epic_id: root,
+            ..mine("0 0 31 2 *")
+        };
+        assert!(real.create_task(never.clone()).await.is_err());
+        assert!(mem.create_task(never).await.is_err());
+        assert_eq!(
+            rows_mem.epics().len(),
+            epics_before,
+            "no sub-epic left behind"
+        );
+        assert_eq!(rows_real.epics().len(), rows_mem.epics().len());
+
+        // EnteringBacklogRearmsAPhoenixTask: out of backlog drops the run, a hand
+        // move back re-arms it.
+        let phoenix = create(bindings::Task {
+            phoenix: true,
+            ..mine(YEARLY)
+        })
+        .await;
+        wait_for!(rows_real.task(phoenix).is_some());
+        let (r, m) = patch_both(phoenix, to_review.clone()).await;
+        assert!(r.won() && m.won(), "{r:?} / {m:?}");
+        wait_for!(rows_real
+            .task(phoenix)
+            .is_some_and(|t| t.next_due.is_none()));
+        same_task(phoenix);
+        let to_backlog = bindings::TaskPatch {
+            status: Some("backlog".into()),
+            sub_status: Some("none".into()),
+            ..blank_task_patch()
+        };
+        let (r, m) = patch_both(phoenix, to_backlog.clone()).await;
+        assert!(r.won() && m.won(), "{r:?} / {m:?}");
+        wait_for!(rows_real
+            .task(phoenix)
+            .is_some_and(|t| t.next_due.is_some()));
+        same_task(phoenix);
+
+        // ClosingCancelsThePendingRun: a close while a user-origin request holds
+        // the claim spends the one-off, so a move back to backlog does not fire.
+        let claimed = create(bindings::Task {
+            repo_path: "/x/alpha".into(),
+            ..mine(YEARLY)
+        })
+        .await;
+        wait_for!(rows_real.task(claimed).is_some());
+        let (r, m) = (
+            real.request_dispatch(claimed, "host-a".into(), "user".into(), String::new())
+                .await
+                .unwrap(),
+            mem.request_dispatch(claimed, "host-a".into(), "user".into(), String::new())
+                .await
+                .unwrap(),
+        );
+        assert!(r.won() && m.won(), "{r:?} / {m:?}");
+        wait_for!(rows_real
+            .task(claimed)
+            .is_some_and(|t| t.status == TaskStatus::Running));
+        same_task(claimed);
+        assert!(
+            rows_real.task(claimed).unwrap().next_due.is_some(),
+            "the claim keeps it"
+        );
+        let (r, m) = (
+            real.close_task(claimed, "host-a".into()).await.unwrap(),
+            mem.close_task(claimed, "host-a".into()).await.unwrap(),
+        );
+        assert!(r.won() && m.won(), "{r:?} / {m:?}");
+        wait_for!(rows_real
+            .task(claimed)
+            .is_some_and(|t| t.next_due.is_none()));
+        same_task(claimed);
+        let (r, m) = patch_both(claimed, to_backlog).await;
+        assert!(r.won() && m.won(), "{r:?} / {m:?}");
+        wait_for!(rows_real
+            .task(claimed)
+            .is_some_and(|t| t.status == TaskStatus::Backlog));
+        same_task(claimed);
+        assert_eq!(
+            rows_real.task(claimed).unwrap().next_due,
+            None,
+            "a one-off is spent"
+        );
     });
 }

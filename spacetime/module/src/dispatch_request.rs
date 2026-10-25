@@ -454,7 +454,9 @@ pub fn release_claim_after_failure(task: Task) -> Option<Task> {
 /// Every failure's write to the task (`ReleaseClaimOfFailedRequest` and
 /// `schedules.allium: ScheduledLaunchFails` in one write): the row to write,
 /// stamped `updated_at = stamp`, or `None` when neither rule changes it, and
-/// whether the claim was released (which ends the task's agent).
+/// whether the claim was released (which ends the task's agent). The schedule
+/// is marked only with a release: a task that moved on first (a close fails
+/// its request after the Done write) is not a launch that left it in backlog.
 pub fn task_after_failed_request(
     task: Task,
     origin: &str,
@@ -463,11 +465,9 @@ pub fn task_after_failed_request(
 ) -> (Option<Task>, bool) {
     let released = release_claim_after_failure(task.clone());
     let was_released = released.is_some();
-    let base = released.unwrap_or(task);
-    let row = match schedule_after_failed_launch(base.clone(), origin, reason, stamp) {
-        Some(marked) => Some(marked),
-        None => was_released.then_some(base),
-    };
+    let row = released.map(|base| {
+        schedule_after_failed_launch(base.clone(), origin, reason, stamp).unwrap_or(base)
+    });
     let row = row.map(|row| Task {
         updated_at: stamp.into(),
         ..row

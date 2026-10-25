@@ -22,7 +22,7 @@ impl MemoryReducerCaller {
         tables: &mut Tables,
         mut row: module::Task,
     ) -> Result<(), String> {
-        Self::validate_task_write(tables, &row)?;
+        Self::validate_task_write(tables, &row, &self.now())?;
         // Mirrors the module's `store_task`: a created row is armed from its
         // own schedule (schedules.allium: SetSchedule).
         if row.id == 0 {
@@ -48,12 +48,21 @@ impl MemoryReducerCaller {
     /// The module's reducer rolls its whole transaction back on an `Err`; this
     /// double has no rollback (its writes reach `SharedRows` as they happen),
     /// so a reducer body asks here BEFORE its first side effect whenever a
-    /// later `write_task` could refuse.
-    pub(super) fn validate_task_write(tables: &Tables, row: &module::Task) -> Result<(), String> {
+    /// later `write_task` could refuse. A create (`row.id == 0`) is also
+    /// armed from its schedule, which refuses a cron that never matches.
+    pub(super) fn validate_task_write(
+        tables: &Tables,
+        row: &module::Task,
+        now: &str,
+    ) -> Result<(), String> {
         module::validate_task_ownership(row.epic_id, &row.owner)
             .map_err(|why| format!("task {}: {why}", row.id))?;
         module::validate_status("task", row.id, &row.status)?;
-        module::check_sub_status_write(tables.tasks.get(&row.id), row)
+        module::check_sub_status_write(tables.tasks.get(&row.id), row)?;
+        if row.id == 0 {
+            module::arm_created_task(row.clone(), now)?;
+        }
+        Ok(())
     }
 
     pub(super) fn delete_task_row(&self, tables: &mut Tables, id: i64) {
@@ -225,19 +234,19 @@ impl MemoryReducerCaller {
 
     pub(super) fn apply_create_task(&self, row: bindings::Task) -> Result<TaskId> {
         let mut tables = self.lock();
+        let row = module::Task {
+            id: 0,
+            ..module::Task::from(row)
+        };
+        // Before routing, which can create a repo sub-epic: the module rolls
+        // that back with a refused write, and this double has no rollback.
+        Self::validate_task_write(&tables, &row, &self.now()).map_err(StoreRefusal)?;
         let epic_id = self.route_to_repo_group(&mut tables, row.epic_id, &row.repo_path);
-        self.write_task(
-            &mut tables,
-            module::Task {
-                id: 0,
-                epic_id,
-                ..module::Task::from(row)
-            },
-        )
-        // Same wording `SdkReducerCaller::create_task`'s `generated_id` uses
-        // for a real refusal, so a caller cannot tell the two backends apart
-        // from the error text alone.
-        .map_err(StoreRefusal)?;
+        self.write_task(&mut tables, module::Task { epic_id, ..row })
+            // Same wording `SdkReducerCaller::create_task`'s `generated_id` uses
+            // for a real refusal, so a caller cannot tell the two backends apart
+            // from the error text alone.
+            .map_err(StoreRefusal)?;
         // The id `write_task` just assigned — read back off the table rather
         // than threaded out of `write_task`, since every other caller of it
         // (patch/claim/release) already knows its own id and does not need one
@@ -284,9 +293,10 @@ impl MemoryReducerCaller {
             };
         }
         row = module::cancel_pending_run_on_leaving_backlog(&prior_status, row);
+        row = module::rearm_phoenix_on_entering_backlog(&prior_status, row, &self.now());
         // Before the first side effect below: a refused patch leaves nothing
         // behind, as the module's rolled-back transaction does.
-        if let Err(why) = Self::validate_task_write(&tables, &row) {
+        if let Err(why) = Self::validate_task_write(&tables, &row, &self.now()) {
             return Ok(ReducerOutcome::Refused(why));
         }
         // The session facts go to the current agent (agents.allium, A4).

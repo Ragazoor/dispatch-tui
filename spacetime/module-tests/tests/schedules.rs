@@ -182,8 +182,78 @@ fn a_hand_move_out_of_backlog_cancels_the_run_and_a_move_back_does_not_rearm() {
         .unwrap();
     assert_eq!(store.task(task).next_due, "");
     store
-        .call("alice", |ctx| patch_task(ctx, task, status_patch("backlog")))
+        .call("alice", |ctx| {
+            patch_task(ctx, task, status_patch("backlog"))
+        })
         .unwrap();
     assert_eq!(store.task(task).next_due, "", "a spent one-off stays spent");
     assert_eq!(store.task(task).schedule, EVERY_MINUTE);
+}
+
+/// Review 2026-10-23 C4 (task #98505): a phoenix run that fired and was
+/// abandoned is re-armed by a hand move back to backlog.
+#[test]
+fn a_hand_move_back_to_backlog_rearms_a_fired_phoenix() {
+    let store = Store::new();
+    let task = scheduled_task(&store, true);
+    store.advance_secs(61);
+    request(&store, task, "schedule").unwrap();
+    let req = request_for(&store, task).id;
+    claim(&store, req);
+    store
+        .call("alice", |ctx| {
+            report_dispatch_provisioned(ctx, req, HOST_A.into(), "/wt".into(), "w".into(), false)
+        })
+        .unwrap();
+    assert_eq!(store.task(task).next_due, "", "the launch consumed it");
+
+    store
+        .call("alice", |ctx| {
+            patch_task(ctx, task, status_patch("backlog"))
+        })
+        .unwrap();
+    let after = store.task(task);
+    assert!(!after.next_due.is_empty(), "re-armed");
+    let why = request(&store, task, "schedule").unwrap_err();
+    assert_eq!(why, format!("task {task} is not due"), "armed ahead of now");
+}
+
+/// Review 2026-10-23 C5 (task #98505): a close fails the open schedule-origin
+/// request after the Done write, and the Done row keeps no schedule state.
+#[test]
+fn a_close_with_an_open_scheduled_launch_leaves_no_schedule_state_on_done() {
+    for phoenix in [false, true] {
+        let store = Store::new();
+        let task = scheduled_task(&store, phoenix);
+        store.advance_secs(61);
+        request(&store, task, "schedule").unwrap();
+        store
+            .call("alice", |ctx| close_task(ctx, task, HOST_A.into()))
+            .unwrap();
+
+        let after = store.task(task);
+        assert_eq!(after.status, "done");
+        assert_eq!(after.next_due, "", "phoenix {phoenix}");
+        assert_eq!(after.schedule_error, "", "phoenix {phoenix}");
+        assert_eq!(request_for(&store, task).state, DISPATCH_FAILED);
+    }
+}
+
+/// Review 2026-10-23 C5: a close while a user-origin request holds the claim
+/// spends a one-off, so a later move back to backlog does not fire it.
+#[test]
+fn a_closed_one_off_moved_back_to_backlog_stays_spent() {
+    let store = Store::new();
+    let task = scheduled_task(&store, false);
+    request(&store, task, "user").unwrap();
+    store
+        .call("alice", |ctx| close_task(ctx, task, HOST_A.into()))
+        .unwrap();
+    assert_eq!(store.task(task).next_due, "");
+    store
+        .call("alice", |ctx| {
+            patch_task(ctx, task, status_patch("backlog"))
+        })
+        .unwrap();
+    assert_eq!(store.task(task).next_due, "");
 }
