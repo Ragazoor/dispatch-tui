@@ -197,6 +197,12 @@ Two paths are excluded. Generated SpacetimeDB bindings (`src/spacetime/bindings/
 
 Coverage is not in the pre-push hook; every *other* CI gate is, and `tests/ci_gates.rs` asserts the hook's script list and the workflow's stay in sync.
 
+## Toolchain and pre-push hook
+
+`rust-toolchain.toml` pins the toolchain CI uses, and only rustup reads it. A distro cargo (Fedora's, no rustup) builds with its own rustc, and clippy then reports lints CI does not have. The hook's first step, `scripts/check-toolchain.sh`, stops the push when the host rustc differs from the pin; a distro toolchain works only while its version equals the pin. On a distro toolchain, install the wasm target with `sudo dnf install rust-std-static-wasm32-unknown-unknown`. The hook's last step builds the SpacetimeDB module and hard-fails without it, with no earlier warning on a docs-only push.
+
+The pre-push hook (`.githooks/pre-push`) runs `check-toolchain.sh` (with its self-test), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `check-rustdoc-links.sh` (rustdoc links in `src/`; its own CI job), the three doc checkers (`check-doc-paths.sh`, `check-doc-symbols.sh`, `check-doc-headings.sh`, each with a self-test), `check-no-test-sleep.sh`, `test-fetch-reviews.sh`, `test-fetch-cve.sh` and the spacetime module check.
+
 ## SpacetimeDB module and CI details
 
 **`spacetime/module/` is outside the workspace.** `cargo test` and `cargo clippy --all-targets` stop at the root package. The module is its own crate for wasm32. `./scripts/check-spacetime-module.sh` checks it for wasm, runs its unit tests, then runs the in-memory reducer tests (below). The pre-push hook and CI both run that script. It needs `sudo dnf install rust-std-static-wasm32-unknown-unknown gcc-c++ openssl-devel`.
