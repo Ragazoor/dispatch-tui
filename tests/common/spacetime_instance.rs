@@ -63,7 +63,8 @@ fn free_port() -> u16 {
 /// A standalone instance of its own, on its own port, with its own data and CLI
 /// config.
 ///
-/// Isolated through `--data-dir` and `--config-path` rather than `--root-dir`:
+/// Isolated through `--data-dir`, `--config-path` and its own JWT key pair
+/// rather than `--root-dir`:
 /// that flag also relocates where the CLI looks for its own binary, so passing
 /// a temp directory makes every later invocation fail with "exec failed".
 pub struct Instance {
@@ -87,6 +88,16 @@ impl Instance {
                 "start",
                 &format!("--listen-addr=127.0.0.1:{port}"),
                 &format!("--data-dir={}", dir.path().join("data").display()),
+                // Without these, `spacetime start` signs with the operator's
+                // `~/.config/spacetime/id_ecdsa`, creating it if missing.
+                &format!(
+                    "--jwt-priv-key-path={}",
+                    dir.path().join("keys/id_ecdsa").display()
+                ),
+                &format!(
+                    "--jwt-pub-key-path={}",
+                    dir.path().join("keys/id_ecdsa.pub").display()
+                ),
                 "--non-interactive",
             ],
         )
@@ -123,6 +134,11 @@ impl Instance {
             instance.port
         );
         instance
+    }
+
+    /// Where this instance's JWT signing key pair lives.
+    pub fn keys_dir(&self) -> std::path::PathBuf {
+        self.dir.path().join("keys")
     }
 
     pub fn database(&self) -> &str {

@@ -168,6 +168,21 @@ fn the_cli_does_not_inherit_the_tests_coverage_flags() {
     }
 }
 
+/// Left to itself, `spacetime start` signs every login with
+/// `~/.config/spacetime/id_ecdsa` — the operator's own key — and creates it
+/// when it is missing. An instance signs with a pair in its own directory.
+#[test]
+fn an_instance_signs_with_a_key_of_its_own() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = Instance::start("own-key");
+    assert!(
+        instance.keys_dir().join("id_ecdsa").is_file(),
+        "the instance's signing key is not in its own directory"
+    );
+}
+
 #[test]
 fn only_transport_errors_are_retried() {
     assert!(is_transport_error(
