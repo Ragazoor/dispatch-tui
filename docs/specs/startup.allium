@@ -514,6 +514,27 @@ contract ManagedStoreHost {
         -- a migration go through. A change the store refuses to migrate
         -- automatically comes back as needs_manual_migration, and what the
         -- operator's database holds is left exactly as it was.
+
+    @invariant OneManagedStoreAddress
+        -- The address probed, started, published to, named in a
+        -- managed_store_port_taken abort, and handed to the first connection
+        -- once the managed store is ready is one value:
+        -- config.managed_store_address as this launch laid the managed store
+        -- out. No step reads its own copy of the constant. With two copies, a
+        -- managed store laid out anywhere else (the startup smoke tests do
+        -- exactly that) would be brought up and published to there and then
+        -- connected to on the default address — the operator's own store.
+
+    @invariant StartupIsSmokeTestedAgainstARealStore
+        -- The suite runs the real composition root end to end against a real,
+        -- throwaway store (src/runtime/tests/startup_smoke.rs): once from a
+        -- fresh install, and once from a committed store directory the
+        -- previous module wrote (tests/fixtures/previous-store/). After the
+        -- upgrade, the same user sees exactly the same tasks and epics as
+        -- before it. A change that makes startup abort, or that hides a
+        -- user's existing rows, fails the suite rather than the operator's
+        -- next launch. Design:
+        -- docs/superpowers/specs/2026-10-26-startup-smoke-test-design.md.
 }
 
 -- The record of which NAMED store the board on this database is using, kept
