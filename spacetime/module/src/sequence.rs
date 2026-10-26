@@ -72,6 +72,12 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
         "poll_owners" => burn_table!(poll_owners, blank_poll_owner()),
         "learnings" => burn_table!(learnings, blank_learning()),
         "learning_retrievals" => burn_table!(learning_retrievals, blank_learning_retrieval()),
+        // Same gap again: 4cebdfee put `learning_verdicts` in snapshots without
+        // an arm, so every import of a store holding verdicts failed with the
+        // `unknown table` error below (2026-10-26).
+        // `every_shared_table_is_a_table_the_burn_accepts` now walks
+        // `SharedTable::ALL` against the live module so the next one fails a test.
+        "learning_verdicts" => burn_table!(learning_verdicts, blank_learning_verdict()),
         "usage_events" => burn_table!(usage_events, blank_usage_event()),
         // Same gap as the `poll_owners` one above, same fix: `retired_feed_items`
         // (task #4971) generates ids and had no arm here, so a restore or seed

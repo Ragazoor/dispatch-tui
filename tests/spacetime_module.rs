@@ -332,5 +332,7 @@ mod mutations;
 mod poll_owner;
 #[path = "spacetime_module/publish.rs"]
 mod publish;
+#[path = "spacetime_module/sequence.rs"]
+mod sequence;
 #[path = "spacetime_module/subscription.rs"]
 mod subscription;
