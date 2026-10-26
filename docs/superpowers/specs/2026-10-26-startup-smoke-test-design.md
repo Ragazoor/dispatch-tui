@@ -51,7 +51,10 @@ is expensive because dispatch is the tool the operator would fix it with.
 ## Anti-goals
 
 - **Never touch the operator's machine state.** No `127.0.0.1:3000`, no
-  `~/.local/share/dispatch`, no `~/.claude`, no `~/.config/spacetime`. A smoke
+  `~/.local/share/dispatch`, no `~/.claude`, no `~/.config/spacetime` (which
+  includes the signing key `spacetime start` falls back to; see "Where the
+  previous store comes from"). Test 1's fresh store is started with key paths
+  in its temp directory too. A smoke
   test that adopts the real store would stop it on exit (CLAUDE.md, "A bare
   `cargo run -- tui` runs the managed store").
 - **No green run that did not run.** Without `spacetime` on `PATH` the tests
@@ -101,20 +104,28 @@ the TCP-before-HTTP wait and the one transport retry, learning #806).
    wrote. No code under test has touched it.
 2. Write a `host.json` for the board from the fixture's committed *user*
    identity and its credential, so the board connects as the same person who
-   wrote the data. Point the managed store's CLI config at the fixture's
-   committed owner login, so the publish is made by the database owner.
-3. Record the "before" set: the ids of the tasks and epics *user* created,
-   plus the tasks in epics *user* created (`sync.allium`'s `own_creations`
-   and the epics it covers), read by SQL from the store as the previous module
-   serves them. *Decided (design author's call):* followed epics are left out
+   wrote the data. *user* is also the database owner: the managed store's CLI
+   config holds the same login, so one credential both publishes and connects.
+3. Read the "before" set from the fixture's committed `expected.json`: the ids
+   of the tasks and epics *user* created, plus the tasks in epics *user*
+   created (`sync.allium`'s `own_creations` and the epics it covers). The
+   generator wrote it when it made the fixture, under the previous module.
+   The test never queries the previous module's tables: a branch that renames
+   a column would otherwise break the test at the "before" read, not at the
+   upgrade (and SQL returns unordered positional arrays, learning #806).
+   *Decided (design author's call):* followed epics are left out
    of the first version — their rows arrive one round trip after bootstrap
    returns ("not waited for"), so an exact check on them would be racy. The
    fixture therefore holds no follow (Subscription) rows. Adding them, with a
    wait for the widened subscription, is a later step.
-4. Run the real `TuiRuntime::bootstrap` as in test 1. The store's recorded
-   hash differs from the embedded module, so it publishes the new module over
-   the old (`--delete-data=never` is already the publisher's behaviour,
-   `PublishingNeverClearsData`).
+4. Run the real `TuiRuntime::bootstrap` as in test 1. When the branch changed
+   the module, the store's recorded hash differs from the embedded module, so
+   it publishes the new module over the old (`--delete-data=never` is already
+   the publisher's behaviour, `PublishingNeverClearsData`). When the branch did
+   not change the module, the hashes match and startup only connects: the test
+   then proves "an existing store with data still starts and shows the same
+   rows", not "the module migrates". A green run on a branch that did not
+   touch the module says nothing about automigration.
 5. Assert bootstrap returns `Ok`, and that the board's reads
    (`BoardReads`, the seam the board draws from) contain **exactly** the
    "before" task ids and epic ids. Missing ids fail with the list of missing
@@ -140,16 +151,41 @@ exact path):
 - the SpacetimeDB standalone data directory, with the `dispatch` database
   published from `main`'s `module.wasm` and the fixture data in it, and the
   managed-store module-hash record for that module;
-- the CLI config holding the database owner's login, and the *user* and
-  *other* identities with their credentials. These are throwaway logins
+- the server's JWT signing key pair (`id_ecdsa`, `id_ecdsa.pub`). By default
+  `spacetime start` signs with `~/.config/spacetime/id_ecdsa` — the
+  operator's own key, which is what `tests/common/spacetime_instance.rs`'s
+  `Instance::start` uses today. The committed logins are only valid under the
+  key that signed them, so the fixture carries its key and the test starts the
+  store with `--jwt-priv-key-path` and `--jwt-pub-key-path` pointing at it.
+  Given paths that do not exist, `spacetime start` creates the pair there,
+  which is how the generator makes it;
+- `expected.json`: the task and epic id sets *user* sees, written by the
+  generator at the same time as the data;
+- the CLI config holding *user*'s login (the database owner), and the
+  *other* identity with its credential. These are throwaway logins
   minted by the throwaway server whose keys are in the same directory; they
   grant nothing outside it. Say so in a README beside them;
 - a README saying what the directory is, which `main` commit and which
   `spacetime` version made it, and how to rotate it.
 
-**Size.** The builder measures it first. If the directory is over about 10 MB
-after trimming what the store rebuilds on its own, stop and ask before
-committing; the agreed fallback is a hand-maintained snapshot file.
+**Verified by a spike (2026-10-26, spacetime 2.12.0).** A store started with
+explicit key paths, published to, stopped, copied, and started again on the
+copy (other port, same keys) accepts a re-publish from the original login,
+and refuses one from a different login with `403 Forbidden: <identity> is not
+authorized to perform action on database <db>: update database` — the
+operator's incident, reproduced.
+
+**Size.** With the module published and no data, the directory is 5.5 MB
+(about 1.6 MB of it the module bytes, 4 MB `replicas/`), and well under 2 MB
+gzipped. Leave out `cache/` (the store rebuilds it, 2.6 MB), `logs/` and
+`spacetime.pid`. Each rotation adds a new copy to git history, so rotate once
+per module change on `main`, not more. If the directory with data is over
+about 10 MB, stop and ask before committing; the agreed fallback is a
+hand-maintained snapshot file.
+
+**How the test starts it.** The test starts the store itself, with the key
+flags, on a free port; `bootstrap`'s managed store then *adopts* it (the
+address answers), so the production spawner needs no key flags.
 
 **Rotation.** The previous store must match what `main` runs. A script (new,
 or a mode of `scripts/build-managed-module.sh`) advances it: copy the
@@ -188,6 +224,10 @@ builder chooses) that is committed so the next person can rebuild it.
   with the instance helper made reachable from there, or a narrow test-facing
   entry point is added. The builder chooses; either way production gains no
   new behaviour.
+- `Instance::start` (`tests/common/spacetime_instance.rs`) passes no key
+  paths, so every live-store test today signs with the operator's
+  `~/.config/spacetime/id_ecdsa`, and creates it if it is missing. Fix it in
+  passing: key paths under the instance's temp directory.
 - `run_tui` checks `inside_tmux_session()` before bootstrap; the test calls
   bootstrap directly and so needs no tmux.
 - The managed store's address is fixed in production
