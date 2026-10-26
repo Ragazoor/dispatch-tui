@@ -960,6 +960,7 @@ mod dispatch_requests;
 mod event_loop;
 mod feeds;
 mod host_file_bootstrap;
+mod live_store;
 mod misc;
 mod refresh;
 mod session_requests;
