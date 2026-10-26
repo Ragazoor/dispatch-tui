@@ -152,13 +152,14 @@ pub fn select_store(
 }
 
 /// The three `ManagedStoreRequested` rules: adopt, start, or abort.
-pub fn address_action(state: ManagedAddressState) -> AddressAction {
+/// `address` is the managed store's own (`OneManagedStoreAddress`).
+pub fn address_action(state: ManagedAddressState, address: &str) -> AddressAction {
     match state {
         ManagedAddressState::StoreAnswering => AddressAction::Adopt,
         ManagedAddressState::NothingListening => AddressAction::Start,
         ManagedAddressState::HeldBySomethingElse => {
             AddressAction::Abort(StartupAbort::ManagedStorePortTaken {
-                address: MANAGED_STORE_ADDRESS.to_string(),
+                address: address.to_string(),
             })
         }
     }
@@ -305,6 +306,9 @@ pub fn probe_address(address: &str, timeout: Duration) -> ManagedAddressState {
 
 /// The CLI half of the `ManagedStoreHost` contract.
 pub trait ManagedStorePorts: Send + Sync {
+    /// The `host:port` every other port acts on, and the one the first
+    /// connection goes to (`startup.allium`: `OneManagedStoreAddress`).
+    fn managed_address(&self) -> String;
     fn probe_managed_address(&self) -> ManagedAddressState;
     /// Start detached, and return once it serves HTTP or the start timeout
     /// passes. `Err` carries the store's own failure message.
@@ -672,6 +676,9 @@ pub fn parse_lsof_pids(output: &str) -> Vec<u32> {
 }
 
 impl ManagedStorePorts for SpacetimeManagedStore {
+    fn managed_address(&self) -> String {
+        self.layout.address.clone()
+    }
     fn probe_managed_address(&self) -> ManagedAddressState {
         probe_address(&self.layout.address, PROBE_TIMEOUT)
     }
@@ -881,7 +888,8 @@ impl ManagedStore {
     /// Probe, adopt or start, check the module, publish if needed. Every abort
     /// it returns has already stopped a store this board holds.
     pub fn bring_up(&self) -> Result<ManagedStoreReady, StartupAbort> {
-        match address_action(self.ports.probe_managed_address()) {
+        let address = self.ports.managed_address();
+        match address_action(self.ports.probe_managed_address(), &address) {
             AddressAction::Abort(abort) => return Err(abort),
             AddressAction::Adopt => self.held.store(true, Ordering::SeqCst),
             AddressAction::Start => {
@@ -919,7 +927,7 @@ impl ManagedStore {
             }
         }
         Ok(ManagedStoreReady {
-            server: format!("http://{MANAGED_STORE_ADDRESS}"),
+            server: format!("http://{address}"),
             database: MANAGED_DATABASE_NAME.to_string(),
         })
     }

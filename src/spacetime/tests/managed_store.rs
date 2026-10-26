@@ -52,6 +52,7 @@ struct FakePorts {
     publish: ModulePublishOutcome,
     stop_in_time: bool,
     failed_to_save: bool,
+    address: String,
     calls: Mutex<Vec<Call>>,
 }
 
@@ -64,6 +65,7 @@ impl FakePorts {
             publish: ModulePublishOutcome::Published,
             stop_in_time: true,
             failed_to_save: false,
+            address: MANAGED_STORE_ADDRESS.to_string(),
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -82,6 +84,9 @@ impl FakePorts {
 }
 
 impl ManagedStorePorts for FakePorts {
+    fn managed_address(&self) -> String {
+        self.address.clone()
+    }
     fn probe_managed_address(&self) -> ManagedAddressState {
         self.log(Call::Probe);
         self.state
@@ -234,7 +239,7 @@ fn a_blank_named_store_counts_as_none() {
 #[test]
 fn a_store_answering_on_the_managed_address_is_adopted() {
     assert_eq!(
-        address_action(ManagedAddressState::StoreAnswering),
+        address_action(ManagedAddressState::StoreAnswering, MANAGED_STORE_ADDRESS),
         AddressAction::Adopt
     );
 }
@@ -242,7 +247,7 @@ fn a_store_answering_on_the_managed_address_is_adopted() {
 #[test]
 fn nothing_listening_on_the_managed_address_starts_a_store() {
     assert_eq!(
-        address_action(ManagedAddressState::NothingListening),
+        address_action(ManagedAddressState::NothingListening, MANAGED_STORE_ADDRESS),
         AddressAction::Start
     );
 }
@@ -250,9 +255,37 @@ fn nothing_listening_on_the_managed_address_starts_a_store() {
 #[test]
 fn something_else_on_the_managed_address_aborts_naming_it() {
     assert_eq!(
-        address_action(ManagedAddressState::HeldBySomethingElse),
+        address_action(
+            ManagedAddressState::HeldBySomethingElse,
+            MANAGED_STORE_ADDRESS
+        ),
         AddressAction::Abort(StartupAbort::ManagedStorePortTaken {
             address: MANAGED_STORE_ADDRESS.to_string()
+        })
+    );
+}
+
+/// startup.allium: OneManagedStoreAddress. A store laid out on another
+/// address is connected to there, never on the default one.
+#[test]
+fn bring_up_returns_the_layout_address_not_the_default() {
+    let ports = Arc::new(FakePorts {
+        address: "127.0.0.1:4123".to_string(),
+        ..FakePorts::new(ManagedAddressState::StoreAnswering)
+    });
+    let hashes = Arc::new(FakeHashes::new(Some(EMBEDDED)));
+    assert_eq!(
+        store(&ports, &hashes).bring_up().unwrap().server,
+        "http://127.0.0.1:4123"
+    );
+}
+
+#[test]
+fn a_taken_port_names_the_layout_address() {
+    assert_eq!(
+        address_action(ManagedAddressState::HeldBySomethingElse, "127.0.0.1:4123"),
+        AddressAction::Abort(StartupAbort::ManagedStorePortTaken {
+            address: "127.0.0.1:4123".to_string()
         })
     );
 }
