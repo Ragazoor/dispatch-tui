@@ -457,7 +457,7 @@ fn a_missing_cli_fails_the_live_test_in_ci() {
     live_store_test_should_run(false, true);
 }
 
-fn spacetime_available() -> bool {
+pub(crate) fn spacetime_available() -> bool {
     let present = Command::new("spacetime")
         .arg("--version")
         .stdout(Stdio::null())

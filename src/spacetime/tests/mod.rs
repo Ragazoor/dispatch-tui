@@ -11,7 +11,7 @@ mod completeness;
 mod idempotency;
 mod import;
 mod managed_store;
-mod managed_store_real;
+pub(crate) mod managed_store_real;
 mod module_schema;
 mod refusals;
 mod round_trip;

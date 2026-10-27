@@ -29,7 +29,7 @@ const ROW_DEADLINE: Duration = Duration::from_secs(20);
 
 /// A managed store laid out on `store`'s address, over `store_data_dir` (where
 /// the module hash is recorded), publishing with `cli_config`'s login.
-pub(super) fn managed_target(
+fn managed_target(
     store: &LiveStore,
     store_data_dir: &Path,
     log_dir: &Path,
@@ -57,7 +57,7 @@ pub(super) fn managed_target(
 
 /// A board data directory and temp `StartupPaths`, with the host already
 /// named (a launch with an unnamed host stops to ask).
-pub(super) fn board_dir(root: &Path) -> (std::path::PathBuf, StartupPaths) {
+fn board_dir(root: &Path) -> (std::path::PathBuf, StartupPaths) {
     let data_dir = root.join("board");
     std::fs::create_dir_all(&data_dir).unwrap();
     let paths = StartupPaths {
@@ -70,14 +70,9 @@ pub(super) fn board_dir(root: &Path) -> (std::path::PathBuf, StartupPaths) {
 }
 
 /// The real composition root over the real store wiring.
-pub(super) async fn boot(
-    data_dir: &Path,
-    paths: &StartupPaths,
-    target: StoreTarget,
-) -> Result<Bootstrap> {
+async fn boot(data_dir: &Path, paths: &StartupPaths, target: StoreTarget) -> Result<Bootstrap> {
     TuiRuntime::bootstrap(BootstrapInputs {
         target,
-        build_store: StoreParts::build,
         ..bootstrap_inputs(data_dir, paths, StoreParts::build)
     })
     .await
@@ -86,7 +81,7 @@ pub(super) async fn boot(
 /// Wait until the board's reads hold `task`, or panic on the deadline. Woken
 /// by the shared rows' change signal (which `dispatch_request_changes` hands
 /// out for every row, not only requests), never by a timer.
-pub(super) async fn await_task(b: &Bootstrap, task: TaskId) {
+async fn await_task(b: &Bootstrap, task: TaskId) {
     let deadline = tokio::time::Instant::now() + ROW_DEADLINE;
     let mut changes = b.runtime.board_reads.dispatch_request_changes();
     while !b
@@ -104,24 +99,13 @@ pub(super) async fn await_task(b: &Bootstrap, task: TaskId) {
     }
 }
 
-pub(super) fn new_task(
+fn new_task(
     title: &str,
     epic_id: Option<crate::models::EpicId>,
 ) -> crate::service::CreateTaskParams {
     crate::service::CreateTaskParams {
-        title: title.to_string(),
-        description: String::new(),
-        repo_path: "/tmp/smoke-repo".to_string(),
-        plan_path: None,
         epic_id,
-        sort_order: None,
-        tag: None,
-        base_branch: None,
-        wrap_up_mode: None,
-        model: None,
-        auto_run_plan: false,
-        phoenix: false,
-        schedule: None,
+        ..crate::service::CreateTaskParams::fixture(title, "/tmp/smoke-repo")
     }
 }
 
@@ -186,19 +170,19 @@ async fn a_fresh_install_starts_against_a_real_store() {
 
 /// `tests/fixtures/previous-store/`, the committed store directory the
 /// upgrade test starts from.
-pub(super) fn previous_store_fixture() -> std::path::PathBuf {
+fn previous_store_fixture() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/previous-store")
 }
 
 /// The ids *user* sees, in `expected.json`.
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(super) struct ExpectedRows {
-    pub tasks: Vec<i64>,
-    pub epics: Vec<i64>,
+struct ExpectedRows {
+    tasks: Vec<i64>,
+    epics: Vec<i64>,
 }
 
 /// What `b`'s board shows, ids ascending.
-pub(super) async fn visible_rows(b: &Bootstrap) -> ExpectedRows {
+async fn visible_rows(b: &Bootstrap) -> ExpectedRows {
     let mut tasks: Vec<i64> = b
         .runtime
         .board_reads
@@ -264,7 +248,7 @@ fn copy_dir(from: &Path, to: &Path, skip: &[&str]) {
 }
 
 /// What the store rebuilds on its own, or what only one run of it means.
-pub(super) const NOT_COMMITTED: &[&str] = &[
+const NOT_COMMITTED: &[&str] = &[
     "cache",
     "logs",
     "module_logs",
@@ -295,21 +279,20 @@ async fn generate_previous_store_fixture() {
     // publishes owns the database: that is *user*.
     let wasm = dir.path().join("module.wasm");
     std::fs::write(&wasm, EMBEDDED_MODULE).unwrap();
-    let wasm_arg = wasm.display().to_string();
-    let published = super::live_store::spacetime(
-        &cli_config,
-        &[
-            "publish",
-            "-b",
-            &wasm_arg,
-            "-s",
-            &store.url(),
-            "-y",
-            "--delete-data=never",
-            "dispatch",
-        ],
+    let published = crate::spacetime::managed_store::SpacetimeCliPublisher::new(
+        Arc::new(crate::process::RealProcessRunner::default()),
+        &wasm,
+    )
+    .with_server(store.url())
+    .with_config_path(&cli_config)
+    .publish();
+    assert!(
+        matches!(
+            published,
+            crate::spacetime::managed_store::ModulePublishOutcome::Published
+        ),
+        "{published:?}"
     );
-    assert!(published.status.success(), "{published:?}");
     let user = cli_identity(&cli_config);
     let token = cli_token(&cli_config);
 
@@ -324,14 +307,7 @@ async fn generate_previous_store_fixture() {
     let epic = ub
         .runtime
         .epic_svc
-        .create_epic(crate::service::CreateEpicParams {
-            title: "smoke epic".into(),
-            description: String::new(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(crate::service::CreateEpicParams::fixture("smoke epic"))
         .await
         .unwrap();
     let mut created = Vec::new();
@@ -364,14 +340,7 @@ async fn generate_previous_store_fixture() {
     let other_epic = ob
         .runtime
         .epic_svc
-        .create_epic(crate::service::CreateEpicParams {
-            title: "other's epic".into(),
-            description: String::new(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-        })
+        .create_epic(crate::service::CreateEpicParams::fixture("other's epic"))
         .await
         .unwrap();
     let other_task = ob
@@ -479,20 +448,5 @@ async fn an_upgrade_from_the_previous_store_keeps_every_task_and_epic() {
     );
 
     let seen = visible_rows(&b).await;
-    let missing = |want: &[i64], got: &[i64]| -> Vec<i64> {
-        want.iter()
-            .filter(|id| !got.contains(id))
-            .copied()
-            .collect()
-    };
-    assert_eq!(
-        seen,
-        expected,
-        "upgrade smoke: the user's rows changed. missing tasks {:?}, extra tasks {:?}, \
-         missing epics {:?}, extra epics {:?}",
-        missing(&expected.tasks, &seen.tasks),
-        missing(&seen.tasks, &expected.tasks),
-        missing(&expected.epics, &seen.epics),
-        missing(&seen.epics, &expected.epics),
-    );
+    assert_eq!(seen, expected, "upgrade smoke: the user's rows changed");
 }

@@ -39,7 +39,7 @@ EOF
 fi
 
 echo "previous-store: rebuilding from main's module ($MAIN_HASH)"
-cargo test --lib generate_previous_store_fixture -- --ignored --exact \
+cargo test --lib -- --ignored --exact \
     runtime::tests::startup_smoke::generate_previous_store_fixture
 
 RECORDED="$(tr -d '[:space:]' <"$FIXTURE/data/managed-module.sha256")"

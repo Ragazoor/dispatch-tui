@@ -42,7 +42,7 @@ mod snapshot;
 mod snapshot_target;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub use cli_store::SpacetimeCliStore;
 pub use import::{import_old_store, ImportReport};
