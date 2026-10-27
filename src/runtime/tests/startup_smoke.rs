@@ -395,3 +395,74 @@ async fn generate_previous_store_fixture() {
     )
     .unwrap();
 }
+
+/// The agreed bar: after an upgrade from the module `main` runs, the same
+/// user sees exactly the same tasks and epics as before it.
+///
+/// Startup always publishes here, as the store's owner. On a branch that
+/// changes the module that is a migration; on one that does not, it
+/// republishes the same module, so a green run there proves the owner can
+/// publish but nothing about automigration. Which of the two ran is printed.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_upgrade_from_the_previous_store_keeps_every_task_and_epic() {
+    if !live_store_tests_should_run() {
+        return;
+    }
+    let fixture = previous_store_fixture();
+    assert!(
+        fixture.join("keys/id_ecdsa").is_file(),
+        "the fixture has no signing key, so none of its logins can verify"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    copy_dir(&fixture, dir.path(), &[]);
+    let store_data = dir.path().join("data");
+    let cli_config = dir.path().join("cli.toml");
+    let store = LiveStore::start(&store_data, &dir.path().join("keys"), &cli_config);
+
+    let (data_dir, paths) = board_dir(&dir.path().join("user"));
+    std::fs::copy(
+        dir.path().join("host.json"),
+        crate::host_file::host_file_path(&data_dir),
+    )
+    .unwrap();
+    let expected: ExpectedRows =
+        serde_json::from_str(&std::fs::read_to_string(dir.path().join("expected.json")).unwrap())
+            .unwrap();
+
+    // Always publish. With the module unchanged the hashes would match and
+    // startup would only connect, never proving that the store's owner can
+    // still publish to it — the step that fails when the CLI login changed.
+    let record = FileModuleHashRecord::in_data_dir(&store_data);
+    if record.recorded_module_hash().as_deref() == Some(embedded_module_hash().as_str()) {
+        eprintln!("upgrade smoke: module unchanged; republishing it, not migrating");
+        std::fs::remove_file(record.path()).unwrap();
+    } else {
+        eprintln!("upgrade smoke: publishing over the previous module");
+    }
+
+    let b = boot(
+        &data_dir,
+        &paths,
+        managed_target(&store, &store_data, dir.path(), &cli_config),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("upgrade smoke: bootstrap aborted: {e}"));
+
+    let seen = visible_rows(&b).await;
+    let missing = |want: &[i64], got: &[i64]| -> Vec<i64> {
+        want.iter()
+            .filter(|id| !got.contains(id))
+            .copied()
+            .collect()
+    };
+    assert_eq!(
+        seen,
+        expected,
+        "upgrade smoke: the user's rows changed. missing tasks {:?}, extra tasks {:?}, \
+         missing epics {:?}, extra epics {:?}",
+        missing(&expected.tasks, &seen.tasks),
+        missing(&seen.tasks, &expected.tasks),
+        missing(&expected.epics, &seen.epics),
+        missing(&seen.epics, &expected.epics),
+    );
+}
