@@ -14,7 +14,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::live_store::{live_store_tests_should_run, LiveStore};
 use super::*;
@@ -83,9 +83,12 @@ pub(super) async fn boot(
     .await
 }
 
-/// Wait until the board's reads hold `task`, or panic on the deadline.
+/// Wait until the board's reads hold `task`, or panic on the deadline. Woken
+/// by the shared rows' change signal (which `dispatch_request_changes` hands
+/// out for every row, not only requests), never by a timer.
 pub(super) async fn await_task(b: &Bootstrap, task: TaskId) {
-    let deadline = Instant::now() + ROW_DEADLINE;
+    let deadline = tokio::time::Instant::now() + ROW_DEADLINE;
+    let mut changes = b.runtime.board_reads.dispatch_request_changes();
     while !b
         .runtime
         .board_reads
@@ -94,12 +97,10 @@ pub(super) async fn await_task(b: &Bootstrap, task: TaskId) {
         .iter()
         .any(|t| t.id == task)
     {
-        assert!(
-            Instant::now() < deadline,
-            "task {task:?} never reached the board's reads"
-        );
-        // allow-test-sleep: deadline-bounded poll on the subscription.
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::timeout_at(deadline, changes.changed())
+            .await
+            .unwrap_or_else(|_| panic!("task {task:?} never reached the board's reads"))
+            .expect("the rows outlive the board");
     }
 }
 
