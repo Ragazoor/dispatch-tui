@@ -2245,8 +2245,9 @@ rule NewMyReviewsTaskIsSignalled {
         --
         -- ONLY MY REVIEWS. Team Reviews, Bots, CVE and every flat or grouped
         -- feed insert without the signal: My Reviews is the queue of PRs
-        -- waiting on this person, and the other buckets would mark the board
-        -- on every poll.
+        -- waiting on this person. The other buckets hold PRs that are not,
+        -- and Bots inserts arrive in bulk, so marking them would bury the one
+        -- signal that matters.
         --
         -- The additive path (DegradedNonEmptyEmission, AppendOnlyFeed) inserts
         -- the same way and signals the same way.
@@ -2257,7 +2258,9 @@ rule NewMyReviewsTaskIsSignalled {
         -- in-memory double both implement.
         -- Tests: src/feed/ingest/tests/role_routing.rs::new_my_reviews_pr_is_signalled_and_a_refresh_is_not,
         -- src/feed/ingest/tests/role_routing.rs::new_team_reviews_pr_is_not_signalled,
-        -- src/feed/ingest/tests/role_routing.rs::pr_moved_into_my_reviews_is_not_signalled.
+        -- src/feed/ingest/tests/role_routing.rs::pr_moved_into_my_reviews_is_not_signalled,
+        -- src/feed/ingest/tests/role_routing.rs::new_pr_in_a_my_reviews_repo_group_is_signalled,
+        -- tests/memory_caller_conformance/feeds.rs::memory_caller_ingests_a_feed_like_the_real_module.
 }
 
 -- == Dispatch guard ==

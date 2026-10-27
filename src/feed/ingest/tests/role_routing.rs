@@ -804,3 +804,30 @@ async fn pr_moved_into_my_reviews_is_not_signalled() {
     assert_eq!(db.list_tasks_for_epic(my).await.len(), 1, "moved, not new");
     assert!(unseen(&db).await.is_empty());
 }
+
+#[tokio::test]
+async fn new_pr_in_a_my_reviews_repo_group_is_signalled() {
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let parent = followed_reviews_parent(&db).await;
+    // An empty first cycle creates the role sub-epics.
+    run_role_routed_feed_sync(&*db, parent, entries(&[], &[], &[]))
+        .await
+        .unwrap();
+    let my = role_sub_epic(&db, parent, FeedRole::MyReviews).await;
+    db.patch_epic(my, &EpicPatch::new().group_by_repo(true))
+        .await
+        .unwrap();
+
+    let items = vec![make_signal_item(
+        "pr-1",
+        "https://github.com/org/myrepo/pull/1",
+        vec![Signal::DirectRequest],
+    )];
+    run_role_routed_feed_sync(&*db, parent, entries(&items, &[""], &["main"]))
+        .await
+        .unwrap();
+
+    let group = db.list_sub_epics(my).await.remove(0).id;
+    let task = db.list_tasks_for_epic(group).await.remove(0);
+    assert_eq!(unseen(&db).await, vec![task.id]);
+}
