@@ -164,3 +164,234 @@ async fn a_fresh_install_starts_against_a_real_store() {
         .unwrap_or_else(|e| panic!("fresh-install smoke: second bootstrap aborted: {e}"));
     await_task(&second, task).await;
 }
+
+// ---------------------------------------------------------------------------
+// The previous-store fixture
+// ---------------------------------------------------------------------------
+
+/// `tests/fixtures/previous-store/`, the committed store directory the
+/// upgrade test starts from.
+pub(super) fn previous_store_fixture() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/previous-store")
+}
+
+/// The ids *user* sees, in `expected.json`.
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(super) struct ExpectedRows {
+    pub tasks: Vec<i64>,
+    pub epics: Vec<i64>,
+}
+
+/// What `b`'s board shows, ids ascending.
+pub(super) async fn visible_rows(b: &Bootstrap) -> ExpectedRows {
+    let mut tasks: Vec<i64> = b
+        .runtime
+        .board_reads
+        .list_all()
+        .await
+        .iter()
+        .map(|t| t.id.0)
+        .collect();
+    let mut epics: Vec<i64> = b
+        .runtime
+        .board_reads
+        .list_epics()
+        .await
+        .iter()
+        .map(|e| e.id.0)
+        .collect();
+    tasks.sort_unstable();
+    epics.sort_unstable();
+    ExpectedRows { tasks, epics }
+}
+
+/// The CLI login's token, read out of its config file.
+fn cli_token(cli_config: &Path) -> String {
+    std::fs::read_to_string(cli_config)
+        .unwrap()
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("spacetimedb_token = "))
+        .map(|v| v.trim_matches('"').to_string())
+        .expect("the CLI config holds no login token")
+}
+
+/// The CLI login's identity, in the hex the module stamps.
+fn cli_identity(cli_config: &Path) -> String {
+    let shown = super::live_store::spacetime(cli_config, &["login", "show"]);
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&shown.stdout),
+        String::from_utf8_lossy(&shown.stderr)
+    );
+    text.split(|c: char| !c.is_ascii_hexdigit())
+        .find(|w| w.len() == 64)
+        .unwrap_or_else(|| panic!("no identity in `spacetime login show`: {text}"))
+        .to_lowercase()
+}
+
+fn copy_dir(from: &Path, to: &Path, skip: &[&str]) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        if skip.iter().any(|s| name == **s) {
+            continue;
+        }
+        let target = to.join(&name);
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target, &[]);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+/// What the store rebuilds on its own, or what only one run of it means.
+pub(super) const NOT_COMMITTED: &[&str] =
+    &["cache", "logs", "spacetime.pid", "dispatch_module.wasm"];
+
+/// Make `tests/fixtures/previous-store/` from this binary's embedded module.
+/// Run by hand, only when the fixture must be rebuilt from scratch (to move
+/// it to a newer module, `scripts/rotate-previous-store.sh` publishes over it
+/// instead):
+/// `cargo test --lib generate_previous_store_fixture -- --ignored`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "writes the committed fixture; run by hand"]
+async fn generate_previous_store_fixture() {
+    assert!(
+        live_store_tests_should_run(),
+        "the generator needs spacetime"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let store_data = dir.path().join("data");
+    let keys = dir.path().join("keys");
+    let cli_config = dir.path().join("cli.toml");
+    let store = LiveStore::start(&store_data, &keys, &cli_config);
+
+    // The first CLI call gets a server-issued login, and the login that
+    // publishes owns the database: that is *user*.
+    let wasm = dir.path().join("module.wasm");
+    std::fs::write(&wasm, EMBEDDED_MODULE).unwrap();
+    let wasm_arg = wasm.display().to_string();
+    let published = super::live_store::spacetime(
+        &cli_config,
+        &[
+            "publish",
+            "-b",
+            &wasm_arg,
+            "-s",
+            &store.url(),
+            "-y",
+            "--delete-data=never",
+            "dispatch",
+        ],
+    );
+    assert!(published.status.success(), "{published:?}");
+    let user = cli_identity(&cli_config);
+    let token = cli_token(&cli_config);
+
+    let user_root = dir.path().join("user");
+    let (user_dir, user_paths) = board_dir(&user_root);
+    crate::host_file::adopt_user_identity(&user_dir, &user, &token).unwrap();
+    let target = || managed_target(&store, &store_data, dir.path(), &cli_config);
+
+    let ub = boot(&user_dir, &user_paths, target())
+        .await
+        .expect("user's board starts");
+    let epic = ub
+        .runtime
+        .epic_svc
+        .create_epic(crate::service::CreateEpicParams {
+            title: "smoke epic".into(),
+            description: String::new(),
+            sort_order: None,
+            parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
+        })
+        .await
+        .unwrap();
+    let mut created = Vec::new();
+    for title in ["subtask one", "subtask two", "subtask three"] {
+        created.push(
+            ub.runtime
+                .task_svc
+                .create_task(new_task(title, Some(epic.id)))
+                .await
+                .unwrap(),
+        );
+    }
+    created.push(
+        ub.runtime
+            .task_svc
+            .create_task(new_task("standalone", None))
+            .await
+            .unwrap(),
+    );
+    for task in &created {
+        await_task(&ub, *task).await;
+    }
+
+    // *other*: a second person on the same store, minting their own identity.
+    let other_root = dir.path().join("other");
+    let (other_dir, other_paths) = board_dir(&other_root);
+    let ob = boot(&other_dir, &other_paths, target())
+        .await
+        .expect("other's board starts");
+    let other_epic = ob
+        .runtime
+        .epic_svc
+        .create_epic(crate::service::CreateEpicParams {
+            title: "other's epic".into(),
+            description: String::new(),
+            sort_order: None,
+            parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
+        })
+        .await
+        .unwrap();
+    let other_task = ob
+        .runtime
+        .task_svc
+        .create_task(new_task("other's task", None))
+        .await
+        .unwrap();
+    await_task(&ob, other_task).await;
+
+    let expected = visible_rows(&ub).await;
+    for task in &created {
+        assert!(expected.tasks.contains(&task.0), "user cannot see {task:?}");
+    }
+    assert!(expected.epics.contains(&epic.id.0));
+    assert!(
+        !expected.tasks.contains(&other_task.0),
+        "other's task leaked to user"
+    );
+    assert!(
+        !expected.epics.contains(&other_epic.id.0),
+        "other's epic leaked to user"
+    );
+    drop(ob);
+    drop(ub);
+    store.stop();
+
+    let out = previous_store_fixture();
+    // Everything but the hand-written README, which says how this was made.
+    for generated in ["data", "keys"] {
+        let _ = std::fs::remove_dir_all(out.join(generated));
+    }
+    copy_dir(&store_data, &out.join("data"), NOT_COMMITTED);
+    copy_dir(&keys, &out.join("keys"), &[]);
+    std::fs::copy(&cli_config, out.join("cli.toml")).unwrap();
+    std::fs::copy(
+        crate::host_file::host_file_path(&user_dir),
+        out.join("host.json"),
+    )
+    .unwrap();
+    std::fs::write(
+        out.join("expected.json"),
+        serde_json::to_string_pretty(&expected).unwrap() + "\n",
+    )
+    .unwrap();
+}

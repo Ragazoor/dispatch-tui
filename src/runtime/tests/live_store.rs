@@ -117,6 +117,21 @@ impl LiveStore {
     }
 }
 
+impl LiveStore {
+    /// Stop with SIGTERM and wait for the exit, so the store flushes what it
+    /// holds before its data directory is copied. Drop's SIGKILL does not.
+    pub(super) fn stop(mut self) {
+        let pid = self.child.id().to_string();
+        let _ = Command::new("kill").args(["-TERM", &pid]).status();
+        let deadline = Instant::now() + START_DEADLINE;
+        while self.child.try_wait().expect("poll the store").is_none() {
+            assert!(Instant::now() < deadline, "the store ignored SIGTERM");
+            // allow-test-sleep: deadline-bounded poll for the exit.
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
 impl Drop for LiveStore {
     fn drop(&mut self) {
         let _ = self.child.kill();
