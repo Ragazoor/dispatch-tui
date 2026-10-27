@@ -118,7 +118,7 @@ fn a_merged_row_shows_the_counts_of_the_files_it_holds() {
 #[test]
 fn a_merged_row_dims_every_segment_but_the_last() {
     let tree = build_tree(&root(), &[modified("a/b/c/d.rs")]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.sync_expansion(&tree);
     let mut terminal = Terminal::new(TestBackend::new(60, 10)).expect("terminal");
     terminal
@@ -181,7 +181,7 @@ fn a_route_wider_than_the_pane_is_clipped_not_wrapped() {
 #[test]
 fn an_unmerged_directory_row_is_not_dimmed() {
     let tree = build_tree(&root(), &[modified("src/a.rs")]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.sync_expansion(&tree);
     let mut terminal = Terminal::new(TestBackend::new(60, 10)).expect("terminal");
     terminal
@@ -256,7 +256,7 @@ fn q_exits_the_renderer() {
 
 #[test]
 fn ctrl_c_exits_the_renderer() {
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     let tree = build_tree(&root(), &[]);
     let key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
     assert_eq!(handle_key(&mut state, &tree, key), KeyAction::Exit);
@@ -582,7 +582,7 @@ fn a_directory_row_carries_no_marker_and_no_blank() {
 #[test]
 fn snapshot_notice_is_shown_in_the_bottom_border() {
     let tree = build_tree(&root(), &three_node_changes());
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.sync_expansion(&tree);
     state.notice = Some(Notice::diff("could not split the diff pane"));
     let mut terminal = Terminal::new(TestBackend::new(50, 12)).expect("terminal");
@@ -604,7 +604,7 @@ fn snapshot_notice_is_shown_in_the_bottom_border() {
 #[test]
 fn a_notice_reddens_the_whole_border() {
     let tree = build_tree(&root(), &three_node_changes());
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.sync_expansion(&tree);
     let mut terminal = Terminal::new(TestBackend::new(50, 12)).expect("terminal");
 

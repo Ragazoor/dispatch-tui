@@ -56,7 +56,7 @@ fn a_file_under_a_merged_row_still_gets_its_open_marker() {
     let mut open = BTreeSet::new();
     open.insert(PathBuf::from("a/b/c/d.rs"));
     let tree = build_tree(&root(), &[modified("a/b/c/d.rs")]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.sync_expansion(&tree);
     let mut terminal = Terminal::new(TestBackend::new(60, 10)).expect("terminal");
     state.open_diffs = open;

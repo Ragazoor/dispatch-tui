@@ -5,8 +5,10 @@ use super::*;
 // ---- agents section (docs/specs/agent-tree.allium: Agents Section) ----
 
 #[test]
-fn the_pane_starts_with_the_tree_focused() {
-    assert_eq!(RenderState::new().focus, Focus::Tree);
+fn the_pane_starts_on_the_agents_view() {
+    let state = RenderState::new();
+    assert_eq!(state.focus, Focus::Agents);
+    assert_eq!(state.browse_focus, Focus::Tree);
 }
 
 /// SwitchAgentTreeView: Tab flips from the browse view to the agents view and
@@ -176,7 +178,7 @@ fn h_and_l_do_nothing_with_the_agents_section_focused() {
 
 #[test]
 fn a_failed_agent_read_keeps_the_last_list_and_says_why() {
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.adopt_agent_list(Ok(vec![agent(1, false)]));
     state.adopt_agent_list(Err("database is locked".to_string()));
     assert_eq!(state.agents.rows().len(), 1);
@@ -185,7 +187,7 @@ fn a_failed_agent_read_keeps_the_last_list_and_says_why() {
 
 #[test]
 fn a_working_agent_read_clears_only_its_own_notice() {
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.notice = Some(Notice::agent_list("database is locked"));
     state.adopt_agent_list(Ok(vec![]));
     assert_eq!(state.notice, None);
@@ -209,7 +211,7 @@ fn a_working_git_query_leaves_agent_notices_alone() {
         Notice::agent_jump("gone"),
         Notice::commit_list("no base branch"),
     ] {
-        let mut state = RenderState::new();
+        let mut state = browse_state();
         state.notice = Some(other.clone());
         state.clear_git_notice();
         assert_eq!(state.notice, Some(other));
@@ -222,7 +224,7 @@ fn a_working_git_query_leaves_agent_notices_alone() {
 fn a_failed_jump_leaves_a_notice() {
     use crate::process::MockProcessRunner;
     let runner = MockProcessRunner::new(vec![]).with_windows(&["dispatch"]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     jump_to_agent(&test_tmux_window("task-7"), &mut state, &runner);
     let Some(Notice::AgentJump(text)) = &state.notice else {
         panic!("expected an agent-jump notice, got {:?}", state.notice);
@@ -234,7 +236,7 @@ fn a_failed_jump_leaves_a_notice() {
 fn a_successful_jump_selects_the_window_and_leaves_no_notice() {
     use crate::process::MockProcessRunner;
     let runner = MockProcessRunner::new(vec![MockProcessRunner::ok()]).with_windows(&["task-7"]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     jump_to_agent(&test_tmux_window("task-7"), &mut state, &runner);
     assert_eq!(state.notice, None);
     assert!(runner
@@ -256,7 +258,7 @@ fn render_pane_to_string(state: &mut RenderState, tree: &TreeNode, height: u16) 
 #[test]
 fn the_browse_view_shows_the_tree_and_commits_and_no_agents() {
     let tree = build_tree(&root(), &[modified("a.rs")]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.sync_expansion(&tree);
     state.adopt_agent_list(Ok(vec![agent(4941, false)]));
     let out = render_pane_to_string(&mut state, &tree, 12);
@@ -267,7 +269,7 @@ fn the_browse_view_shows_the_tree_and_commits_and_no_agents() {
 #[test]
 fn the_agents_view_fills_the_pane_with_agents_and_hides_the_tree() {
     let tree = build_tree(&root(), &[modified("a.rs")]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.sync_expansion(&tree);
     state.adopt_agent_list(Ok(vec![agent(4941, false), agent(4942, true)]));
     state.focus = Focus::Agents;
@@ -280,7 +282,7 @@ fn the_agents_view_fills_the_pane_with_agents_and_hides_the_tree() {
 #[test]
 fn the_agents_view_shows_with_no_agents() {
     let tree = build_tree(&root(), &[modified("a.rs")]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.focus = Focus::Agents;
     let out = render_pane_to_string(&mut state, &tree, 12);
     assert!(out.contains("Agents"), "{out}");
@@ -289,7 +291,7 @@ fn the_agents_view_shows_with_no_agents() {
 #[test]
 fn the_commits_border_names_the_keys_that_leave_it() {
     let tree = build_tree(&root(), &[modified("a.rs")]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     let out = render_pane_to_string(&mut state, &tree, 12);
     assert!(out.contains("Commits (s, Tab: agents)"), "{out}");
 }

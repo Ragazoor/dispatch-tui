@@ -10,7 +10,7 @@ use super::*;
 /// the pane flicker empty.
 #[test]
 fn a_failed_git_query_keeps_the_last_good_tree_and_sets_a_notice() {
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     let mut tree = build_tree(&root(), &[]);
 
     let good = git_rig(&["M", "src/a.rs"], &[]);
@@ -36,7 +36,7 @@ fn a_failed_git_query_keeps_the_last_good_tree_and_sets_a_notice() {
 #[tokio::test]
 async fn a_git_query_that_could_not_run_logs_its_cause() {
     let log = crate::test_log::logged_during(|| async {
-        let mut state = RenderState::new();
+        let mut state = browse_state();
         let mut tree = build_tree(&root(), &[]);
         let timeout =
             || Err(anyhow::anyhow!("git timed out after 10s").context("could not run git"));
@@ -52,7 +52,7 @@ async fn a_git_query_that_could_not_run_logs_its_cause() {
 /// A working git retracts its own complaint on the next tick.
 #[test]
 fn a_recovering_git_query_clears_its_own_notice() {
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     let mut tree = build_tree(&root(), &[]);
 
     let bad = failing_git_rig("fatal: unable to read index.lock\n");
@@ -74,7 +74,7 @@ fn a_successful_git_query_leaves_other_writers_notices_alone() {
         Notice::diff("could not split the diff pane"),
         Notice::commit_list("not a valid object name main"),
     ] {
-        let mut state = RenderState::new();
+        let mut state = browse_state();
         let mut tree = build_tree(&root(), &[]);
         state.notice = Some(other.clone());
 
@@ -90,7 +90,7 @@ fn a_successful_git_query_leaves_other_writers_notices_alone() {
 /// not modified must not show as modified.
 #[test]
 fn a_reverted_file_disappears_from_the_tree() {
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     let mut tree = build_tree(&root(), &[]);
 
     let dirty = git_rig(&["M", "a.rs"], &[]);
@@ -110,7 +110,7 @@ fn a_reverted_file_disappears_from_the_tree() {
 /// untracked listing — and the tree shows that commit's files.
 #[test]
 fn a_refresh_with_a_commit_selected_shows_that_commit() {
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.selected_commit = Some(COMMIT.to_string());
     let mut tree = build_tree(&root(), &[]);
 

@@ -145,7 +145,7 @@ pub struct RenderState {
     /// motions are defined against the *visible* height, which only the
     /// renderer knows, and `handle_key` never sees a `Rect`.
     pub(super) viewport_rows: usize,
-    /// Which section the keys act on. Starts on the tree.
+    /// Which section the keys act on. Starts on the agents view.
     pub focus: Focus,
     /// The browse section that had focus when the user flipped to the agents
     /// view — where Tab flips back to. Always `Tree` or `Commits`.
@@ -172,7 +172,7 @@ impl RenderState {
             open_diffs: BTreeSet::new(),
             pending_g: false,
             viewport_rows: 0,
-            focus: Focus::Tree,
+            focus: Focus::Agents,
             browse_focus: Focus::Tree,
             agents: AgentsSection::new(),
             commits: CommitsSection::new(),

@@ -49,7 +49,7 @@ fn the_commits_sections_config_defaults() {
 /// starts on unstaged work, with nothing listed yet.
 #[test]
 fn the_pane_starts_on_unstaged_work_with_no_commits_listed() {
-    let state = RenderState::new();
+    let state = browse_state();
     assert_eq!(state.selected_commit, None);
     assert!(state.commits.commits().is_empty());
 }
@@ -58,7 +58,7 @@ fn the_pane_starts_on_unstaged_work_with_no_commits_listed() {
 
 #[test]
 fn a_working_commit_read_replaces_the_list() {
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.adopt_commit_list(Ok(commits(&[2, 1])));
     assert_eq!(state.commits.commits(), commits(&[2, 1]).as_slice());
 
@@ -70,7 +70,7 @@ fn a_working_commit_read_replaces_the_list() {
 /// leaves it on the same commit.
 #[test]
 fn a_new_commit_above_the_selection_does_not_move_it() {
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.adopt_commit_list(Ok(commits(&[2, 1])));
     state.selected_commit = Some(commit_id(1));
 
@@ -83,7 +83,7 @@ fn a_new_commit_above_the_selection_does_not_move_it() {
 /// unstaged work — silently: the list shows what happened.
 #[test]
 fn a_selected_commit_that_vanishes_falls_back_to_unstaged_work_silently() {
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.adopt_commit_list(Ok(commits(&[2, 1])));
     state.selected_commit = Some(commit_id(2));
 
@@ -97,7 +97,7 @@ fn a_selected_commit_that_vanishes_falls_back_to_unstaged_work_silently() {
 /// keeps the list AND the selection, and says why.
 #[test]
 fn a_failed_commit_read_keeps_the_list_and_the_selection_and_says_why() {
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.adopt_commit_list(Ok(commits(&[2, 1])));
     state.selected_commit = Some(commit_id(1));
 
@@ -114,7 +114,7 @@ fn a_failed_commit_read_keeps_the_list_and_the_selection_and_says_why() {
 /// A working read clears its own stale notice and nothing else.
 #[test]
 fn a_working_commit_read_clears_only_its_own_notice() {
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.notice = Some(Notice::commit_list("no base branch"));
     state.adopt_commit_list(Ok(vec![]));
     assert_eq!(state.notice, None);
@@ -327,7 +327,7 @@ fn selecting_a_source_empties_the_tree_at_once_and_publishes_the_selection() {
     let (worktree, _) = crate::worktree_admin::tests::make_linked_worktree(dir.path(), "task");
     let root = PathBuf::from(&worktree);
     let mut tree = build_tree(&root, &[modified("a.rs")]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.selected_commit = Some(commit_id(1));
 
     adopt_selected_source(&root, &mut tree, &mut state);
@@ -415,7 +415,7 @@ fn row_cells(buffer: &ratatui::buffer::Buffer, y: u16) -> Vec<(String, ratatui::
 #[test]
 fn the_commits_section_sits_below_the_tree() {
     let tree = build_tree(&root(), &[modified("a.rs")]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.sync_expansion(&tree);
 
     let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 16));
@@ -430,7 +430,7 @@ fn the_commits_section_sits_below_the_tree() {
 #[test]
 fn the_commits_section_shows_unstaged_work_with_no_commits() {
     let tree = build_tree(&root(), &[]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 16));
     assert!(out.contains("unstaged work"), "{out}");
 }
@@ -440,7 +440,7 @@ fn the_commits_section_shows_unstaged_work_with_no_commits() {
 #[test]
 fn a_commit_row_reads_its_short_id_then_its_subject_newest_first() {
     let tree = build_tree(&root(), &[]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.adopt_commit_list(Ok(commits(&[2, 1])));
 
     let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 20));
@@ -461,7 +461,7 @@ fn a_commit_row_reads_its_short_id_then_its_subject_newest_first() {
 fn the_commits_section_grows_with_its_commits_up_to_its_cap() {
     for (listed, rows) in [(0u32, 1usize), (1, 2), (10, COMMITS_MAX_ROWS)] {
         let tree = build_tree(&root(), &[]);
-        let mut state = RenderState::new();
+        let mut state = browse_state();
         if listed > 0 {
             state.adopt_commit_list(Ok((1..=listed).rev().map(commit).collect()));
         }
@@ -475,7 +475,7 @@ fn the_commits_section_grows_with_its_commits_up_to_its_cap() {
 #[test]
 fn the_commits_section_scrolls_to_keep_its_cursor_in_view() {
     let tree = build_tree(&root(), &[]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.adopt_commit_list(Ok((1..=10).rev().map(commit).collect()));
     state.focus = Focus::Commits;
     render_pane_buffer(&mut state, &tree, 30);
@@ -498,7 +498,7 @@ fn the_commits_section_scrolls_to_keep_its_cursor_in_view() {
 fn the_selected_source_is_marked_whatever_has_focus() {
     let tree = build_tree(&root(), &[]);
     let draw = |selected: Option<String>| {
-        let mut state = RenderState::new();
+        let mut state = browse_state();
         state.adopt_commit_list(Ok(commits(&[1])));
         state.selected_commit = selected;
         let buffer = render_pane_buffer(&mut state, &tree, 20);
@@ -521,12 +521,12 @@ fn the_tree_title_names_the_selected_commit() {
     let tree = build_tree(&root(), &[modified("a.rs")]);
     let short = &commit_id(1)[..7];
 
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 16));
     let title = out.lines().next().expect("title row");
     assert!(title.contains("wt") && !title.contains(short), "{title}");
 
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.selected_commit = Some(commit_id(1));
     let out = buffer_to_string(&render_pane_buffer(&mut state, &tree, 16));
     let title = out.lines().next().expect("title row");
@@ -541,13 +541,13 @@ fn the_commits_sections_border_shows_focus_and_reddens_with_a_notice() {
     use crate::palette::CYAN;
     let tree = build_tree(&root(), &[]);
 
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.focus = Focus::Commits;
     let buffer = render_pane_buffer(&mut state, &tree, 20);
     let y = row_of(&buffer, "Commits (s, Tab: agents)");
     assert_eq!(buffer[(0, y)].style().fg, Some(CYAN));
 
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.notice = Some(Notice::commit_list("no base branch"));
     let buffer = render_pane_buffer(&mut state, &tree, 20);
     let y = row_of(&buffer, "Commits (s, Tab: agents)");

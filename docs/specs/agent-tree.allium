@@ -416,8 +416,8 @@ entity AgentTreePane {
     -- has had barely a second to read.
     notice_source: NoticeSource when error_notice != null
 
-    -- Which section the pane's keys act on. Starts on the tree, because the
-    -- tree is what the pane is for. Tab and Shift+Tab flip between the browse
+    -- Which section the pane's keys act on. Starts on the agents view, because
+    -- who is working is the first thing the user wants to see. Tab and Shift+Tab flip between the browse
     -- view and the agents view (SwitchAgentTreeView); `s` moves between the
     -- tree and the commits section inside the browse view
     -- (SwitchAgentTreeBrowseFocus).
@@ -741,7 +741,7 @@ rule SplitAgentTreePaneOnAgentLaunch {
         tmux_pane: core/TmuxPane.created(),
         last_rendered_at: now,
         last_agents_listed_at: now - config.agent_tree_agents_refresh_interval,
-        focus: tree,
+        focus: agents,
         listed_agents: [],
         last_commits_listed_at: now - config.agent_tree_commits_refresh_interval,
         listed_commits: [],
@@ -991,9 +991,11 @@ rule ShowAgentTreePane {
     ensures: pane.status = shown
     ensures: pane.tmux_pane = core/TmuxPane.created()
     ensures: pane.last_rendered_at = now
-    -- A fresh renderer starts on the tree, like a fresh cursor starts at the
-    -- top: focus is view state and does not survive a hide.
-    ensures: pane.focus = tree
+    -- A fresh renderer starts on the agents view: who is working is the first
+    -- thing the user wants, and the changed files are one Tab away. Focus is
+    -- view state and does not survive a hide.
+    ensures: pane.focus = agents
+    ensures: pane.browse_focus = tree
 
     -- A fresh renderer also starts with an empty agents list and reads the
     -- board straight away, rather than one interval after it appears.

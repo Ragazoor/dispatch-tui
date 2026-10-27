@@ -29,6 +29,14 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::Path;
 use std::path::PathBuf;
 
+/// A fresh pane starts on the agents view; most tests are about the tree, so
+/// they start from the browse view instead.
+fn browse_state() -> RenderState {
+    let mut state = RenderState::new();
+    state.focus = Focus::Tree;
+    state
+}
+
 mod agents;
 mod changes;
 mod commits;
@@ -126,7 +134,7 @@ fn two_changed_roots_produce_two_top_level_items_sorted_by_name() {
 #[test]
 fn sync_expansion_opens_newly_changed_directory() {
     let tree = build_tree(&root(), &[modified("src/a.rs")]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.sync_expansion(&tree);
     assert!(state.tree_state.opened().contains(&vec!["src".to_string()]));
 }
@@ -211,7 +219,7 @@ fn a_directory_that_disappears_and_returns_opens_again() {
 /// bare `a/b/c.rs` would be one merged row and prove nothing about nesting.
 fn sync_expansion_opens_nested_ancestor_directories() {
     let tree = build_tree(&root(), &[modified("a/x.rs"), modified("a/b/c.rs")]);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.sync_expansion(&tree);
     let opened = state.tree_state.opened();
     assert!(opened.contains(&vec!["a".to_string()]));
@@ -220,7 +228,7 @@ fn sync_expansion_opens_nested_ancestor_directories() {
 
 fn render_to_string(changes: &[GitFileChange], title: &str, width: u16, height: u16) -> String {
     let tree = build_tree(&root(), changes);
-    let mut state = RenderState::new();
+    let mut state = browse_state();
     state.sync_expansion(&tree);
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
     terminal
@@ -255,7 +263,7 @@ impl KeyRig {
     /// count the half-page motions divide is `height - 2`.
     fn sized(changes: &[GitFileChange], height: u16) -> Self {
         let tree = build_tree(&root(), changes);
-        let mut state = RenderState::new();
+        let mut state = browse_state();
         state.sync_expansion(&tree);
         let terminal = Terminal::new(TestBackend::new(50, height)).expect("terminal");
         let mut rig = Self {
