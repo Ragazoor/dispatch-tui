@@ -62,6 +62,14 @@ bash ./scripts/test-bots-conf.sh
 echo "embedded module stamp..."
 bash ./scripts/build-managed-module.sh --check
 
+# The upgrade smoke test's committed store must hold a module main shipped.
+# Cheap: hashes committed blobs, builds nothing.
+echo "previous-store fixture..."
+./scripts/check-previous-store.sh
+
+echo "previous-store self-test..."
+bash ./scripts/test-check-previous-store.sh
+
 # Last: it builds a second crate for a second target, so it is the slowest step
 # and the one most worth reaching only after the cheap checks have spoken.
 echo "spacetime module..."
