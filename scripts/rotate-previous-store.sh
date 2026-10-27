@@ -1,84 +1,60 @@
 #!/usr/bin/env bash
-# Move tests/fixtures/previous-store/ to the module local `main` runs now.
+# Rebuild tests/fixtures/previous-store/ from the module local `main` runs now.
 #
-#   scripts/rotate-previous-store.sh [fixture-dir]
+#   scripts/rotate-previous-store.sh
 #
 # Run it after a module change lands on `main` (scripts/check-previous-store.sh
-# says when). It is itself an upgrade: it starts the committed store, publishes
-# main's src/spacetime/module.wasm over it with --delete-data=never, and keeps
-# the result. A module main cannot migrate to fails here the way it would for
-# an operator.
+# says when), on a checkout whose src/spacetime/module.wasm is main's — main
+# itself, or a branch that has merged main and not changed the module. It
+# refuses otherwise: the fixture must hold a module main shipped.
 #
-# expected.json is left alone: the rows must survive an upgrade. The upgrade
-# smoke test (src/runtime/tests/startup_smoke.rs) checks that they do.
-#
-# Uses local `main`, never `origin/main`, and never the working tree's module,
-# so a module rebuilt twice on a branch never becomes "previous".
+# It rebuilds the store from scratch with the generator in
+# src/runtime/tests/startup_smoke.rs (fresh keys, logins and rows), then
+# fills in the README's three fields. It does not publish over the old store:
+# every publish appends the module to the store's commit log, so a fixture
+# moved forward that way grows by about 1.6 MB each time. The upgrade from
+# the previous module is still tested, by the upgrade smoke test, on every
+# branch that changes the module.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
-FIXTURE="$(realpath "${1:-tests/fixtures/previous-store}")"
-WORK="$(mktemp -d)"
-PID=""
-cleanup() {
-    if [ -n "$PID" ]; then kill "$PID" 2>/dev/null || true; fi
-    rm -rf "$WORK"
-}
-trap cleanup EXIT
+FIXTURE="tests/fixtures/previous-store"
+MODULE="src/spacetime/module.wasm"
 
 if ! git rev-parse --verify -q main >/dev/null; then
     echo "error: no local main to take the module from" >&2
     exit 1
 fi
-git show main:src/spacetime/module.wasm >"$WORK/main.wasm"
-HASH="sha256:$(sha256sum "$WORK/main.wasm" | cut -d' ' -f1)"
+MAIN_HASH="sha256:$(git show "main:$MODULE" | sha256sum | cut -d' ' -f1)"
+HERE_HASH="sha256:$(sha256sum "$MODULE" | cut -d' ' -f1)"
+if [ "$MAIN_HASH" != "$HERE_HASH" ]; then
+    cat >&2 <<EOF
+error: this checkout's $MODULE is not main's.
+  main: $MAIN_HASH
+  here: $HERE_HASH
+Rebuild the fixture on main, or on a branch that merged main without changing
+the module.
+EOF
+    exit 1
+fi
+
+echo "previous-store: rebuilding from main's module ($MAIN_HASH)"
+cargo test --lib generate_previous_store_fixture -- --ignored --exact \
+    runtime::tests::startup_smoke::generate_previous_store_fixture
+
+RECORDED="$(tr -d '[:space:]' <"$FIXTURE/data/managed-module.sha256")"
+if [ "$RECORDED" != "$MAIN_HASH" ]; then
+    echo "error: the rebuilt store records $RECORDED, not main's $MAIN_HASH" >&2
+    exit 1
+fi
+
 COMMIT="$(git rev-parse --short=8 main)"
-
-cp -r "$FIXTURE" "$WORK/store"
-CONFIG="$WORK/store/cli.toml"
-PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
-URL="http://127.0.0.1:$PORT"
-
-echo "previous-store: starting the fixture's store on $URL"
-spacetime --config-path="$CONFIG" start \
-    --listen-addr="127.0.0.1:$PORT" \
-    --data-dir="$WORK/store/data" \
-    --jwt-priv-key-path="$WORK/store/keys/id_ecdsa" \
-    --jwt-pub-key-path="$WORK/store/keys/id_ecdsa.pub" \
-    --non-interactive >"$WORK/store.log" 2>&1 &
-PID=$!
-
-for _ in $(seq 1 300); do
-    if curl -s -o /dev/null "$URL/v1/identity"; then break; fi
-    if ! kill -0 "$PID" 2>/dev/null; then
-        echo "error: the store exited during startup:" >&2
-        cat "$WORK/store.log" >&2
-        exit 1
-    fi
-    sleep 0.1
-done
-
-echo "previous-store: publishing main's module ($COMMIT, $HASH)"
-spacetime --config-path="$CONFIG" publish -b "$WORK/main.wasm" -s "$URL" -y \
-    --delete-data=never dispatch
-
-echo "$HASH" >"$WORK/store/data/managed-module.sha256"
-
-# SIGTERM, then wait: the store flushes before its directory is copied.
-kill -TERM "$PID"
-wait "$PID" 2>/dev/null || true
-PID=""
-
-rm -rf "$WORK/store/data/cache" "$WORK/store/data/logs" \
-    "$WORK/store/data/spacetime.pid" "$WORK/store/data/dispatch_module.wasm"
-rm -rf "$FIXTURE/data"
-cp -r "$WORK/store/data" "$FIXTURE/data"
-
 SPACETIME_VERSION="$(spacetime --version 2>/dev/null | sed -n 's/^spacetimedb tool version \([^;]*\);.*/\1/p')"
 sed -i \
     -e "s/^- main commit: .*/- main commit: $COMMIT/" \
     -e "s/^- spacetime version: .*/- spacetime version: $SPACETIME_VERSION/" \
-    -e "s/^- module hash: .*/- module hash: $HASH/" \
+    -e "s/^- module hash: .*/- module hash: $MAIN_HASH/" \
     "$FIXTURE/README.md"
 
-echo "previous-store: now on $COMMIT; run the upgrade smoke test, then commit $FIXTURE"
+echo "previous-store: rebuilt on main $COMMIT, $(du -sh "$FIXTURE" | cut -f1)"
+echo "Run the upgrade smoke test, then commit $FIXTURE."

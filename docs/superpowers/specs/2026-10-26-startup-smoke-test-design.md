@@ -187,22 +187,24 @@ hand-maintained snapshot file.
 flags, on a free port; `bootstrap`'s managed store then *adopts* it (the
 address answers), so the production spawner needs no key flags.
 
-**Rotation.** The previous store must match what `main` runs. A script (new,
-or a mode of `scripts/build-managed-module.sh`) advances it: copy the
-committed directory, start a store on the copy, publish local `main`'s
-`module.wasm` with `--delete-data=never`, stop the store cleanly, replace the
-committed directory. It reads `main`'s module, never the working tree's, so
-rebuilding twice on a branch does not make an intermediate build "previous".
-The rotation is itself an upgrade, and fails the same way the test would. It
-is run after a module change lands on `main` (by whoever lands it next, or as
-the first step of the next module change); a lagging fixture still tests a
-real upgrade, only from further back.
+**Rotation (as built).** The previous store must match what `main` runs.
+`scripts/rotate-previous-store.sh` rebuilds it from scratch with the fixture
+generator, on a checkout whose `module.wasm` is local `main`'s (it refuses
+otherwise), so a module rebuilt twice on a branch never becomes "previous".
+*Changed during the build, agreed with the operator:* the first version
+published `main`'s module over the committed store, which made the rotation
+itself an upgrade, but every publish appends the module to the store's commit
+log, so the directory grew about 1.6 MB per rotation (14 MB after one). A
+fresh rebuild stays at about 10 MB on disk and 1 MB compressed. The upgrade
+is still tested, by the upgrade smoke test, on every branch that changes the
+module. A lagging fixture still tests a real upgrade, only from further back.
 
-**Gate.** `scripts/check-spacetime-module.sh` (already in the hook and CI)
-gains a check: the fixture README's recorded module hash must equal the hash
-of `main`'s `module.wasm`, when `main` is available. Where it is not (a
-shallow CI checkout), the builder chooses between fetching the base ref in
-the CI job and skipping this one check with a printed reason.
+**Gate (as built).** `scripts/check-previous-store.sh`, with a self-test, in
+the pre-push hook and CI. It fails when the fixture's recorded module hash
+matches no `module.wasm` `main` ever committed, and passes with a note when
+it matches an older one, so a module merge does not block every branch's push
+until someone rotates. It skips, saying so, without a local `main` or in a
+shallow checkout (CI's, including a push to `main`).
 
 **`spacetime` version.** The directory format belongs to the `spacetime`
 version that wrote it; CI pins that version. Bumping the pin starts the

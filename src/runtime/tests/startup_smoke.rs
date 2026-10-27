@@ -244,6 +244,8 @@ fn cli_identity(cli_config: &Path) -> String {
         .to_lowercase()
 }
 
+/// Copy `from` into `to`, leaving out any file or directory named in `skip`
+/// at any depth.
 fn copy_dir(from: &Path, to: &Path, skip: &[&str]) {
     std::fs::create_dir_all(to).unwrap();
     for entry in std::fs::read_dir(from).unwrap() {
@@ -254,7 +256,7 @@ fn copy_dir(from: &Path, to: &Path, skip: &[&str]) {
         }
         let target = to.join(&name);
         if entry.file_type().unwrap().is_dir() {
-            copy_dir(&entry.path(), &target, &[]);
+            copy_dir(&entry.path(), &target, skip);
         } else {
             std::fs::copy(entry.path(), target).unwrap();
         }
@@ -262,14 +264,20 @@ fn copy_dir(from: &Path, to: &Path, skip: &[&str]) {
 }
 
 /// What the store rebuilds on its own, or what only one run of it means.
-pub(super) const NOT_COMMITTED: &[&str] =
-    &["cache", "logs", "spacetime.pid", "dispatch_module.wasm"];
+pub(super) const NOT_COMMITTED: &[&str] = &[
+    "cache",
+    "logs",
+    "module_logs",
+    "spacetime.pid",
+    "db.lock",
+    "dispatch_module.wasm",
+];
 
-/// Make `tests/fixtures/previous-store/` from this binary's embedded module.
-/// Run by hand, only when the fixture must be rebuilt from scratch (to move
-/// it to a newer module, `scripts/rotate-previous-store.sh` publishes over it
-/// instead):
-/// `cargo test --lib generate_previous_store_fixture -- --ignored`.
+/// Make `tests/fixtures/previous-store/` from this binary's embedded module,
+/// with fresh keys and logins. Run through `scripts/rotate-previous-store.sh`,
+/// which first checks the embedded module is `main`'s. Rebuilt fresh rather
+/// than published over: every publish appends the module to the store's
+/// commit log, so a fixture moved forward that way grows ~1.6 MB a time.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "writes the committed fixture; run by hand"]
 async fn generate_previous_store_fixture() {
