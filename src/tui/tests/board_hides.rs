@@ -134,12 +134,12 @@ fn a_task_a_visible_package_links_stays_hidden_under_a_hidden_epic() {
         .tasks_for_current_view()
         .iter()
         .any(|t| t.id == TaskId(10)));
-    // Its only placement task is hidden, so the package falls back to Backlog.
+    // The hidden task still places the card: it is Running, so Backlog.
     assert_eq!(package_columns(&app, 7), vec![TaskStatus::Backlog]);
 }
 
 #[test]
-fn a_package_whose_only_link_is_a_hidden_epic_sits_in_backlog() {
+fn hiding_a_finished_packages_only_epic_leaves_it_in_done() {
     let mut app = App::new(vec![epic_task(10, 1, TaskStatus::Done)]);
     app.board.epics = vec![make_epic(1)];
     app.board.work_packages = vec![make_package(7, "P7")];
@@ -147,7 +147,7 @@ fn a_package_whose_only_link_is_a_hidden_epic_sits_in_backlog() {
     assert_eq!(package_columns(&app, 7), vec![TaskStatus::Done]);
 
     app.filter.hidden_epics.insert(EpicId(1));
-    assert_eq!(package_columns(&app, 7), vec![TaskStatus::Backlog]);
+    assert_eq!(package_columns(&app, 7), vec![TaskStatus::Done]);
 }
 
 #[test]

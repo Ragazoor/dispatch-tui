@@ -295,16 +295,18 @@ rule DeletingAnItemRemovesItsLinks {
 -- is finished. It never enters Running or Review: a package is a view, not
 -- work an agent runs.
 --
--- Placement looks at the package's VISIBLE placement tasks:
+-- Placement looks at ALL the package's placement tasks:
 --   - the linked tasks themselves, and
 --   - every task in the subtree of every linked epic.
--- Visible means the same as for epic cards: admitted by the repo filter, the
--- only-active filter and the search query, and not under a hidden epic
+-- No board filter has a say in the column: not the repo filter, the
+-- only-active filter, the search query or the epic hide-list
 -- (board-layout.allium, "Hidden Epics and Work Packages"). The card is in
--- Done when there is at least one visible placement task and every one of
--- them is done. In every other case it is in Backlog: no links yet,
--- everything hidden by a filter, or any visible task not done. So a package
--- whose only links are hidden epics sits in Backlog, as an empty one does.
+-- Done when there is at least one placement task and every one of them is
+-- done. In every other case it is in Backlog: no links yet, or any task not
+-- done. So changing a filter never moves a package card between columns
+-- (task #98570: a finished package dropped to Backlog under the only-active
+-- filter, which hides every done task). A package whose links reach no task
+-- at all sits in Backlog.
 -- Unlike an epic card, a package card is never hidden by the repo or
 -- only-active filter, or by hiding the epics it links: a package is the
 -- user's own grouping, not work in a repo. Two things take a package's card
@@ -321,7 +323,7 @@ rule PackageCardPlacement {
     -- is not in WorkPackages as this rule reads it: it draws no card at all.
     ensures:
         for package in WorkPackages:
-            let tasks = package.placement_tasks(visible)
+            let tasks = package.placement_tasks
             if tasks != {} and tasks.all(t => t.status = done):
                 CardShown(package, column: done)
             else:
@@ -339,7 +341,8 @@ rule PackageCardPlacement {
         -- whose title matches the query keeps its card even when no linked
         -- work matches, mirroring board_search_filter's own-match clause for
         -- epics. A package whose title does not match keeps its card only
-        -- through visible linked work. The title match is a case-insensitive
+        -- through visible linked work. The query only decides whether the
+        -- card is drawn; the column still comes from every placement task. The title match is a case-insensitive
         -- substring match on the title alone; a package id is not searched,
         -- because package ids are a sequence of their own and "#7" would
         -- match a package and a task at once.

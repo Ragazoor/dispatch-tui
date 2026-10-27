@@ -6,6 +6,7 @@ use super::*;
 use crate::models::{EpicId, TaskId, TaskStatus, WorkPackageId, WorkPackageItem};
 use crate::tui::commands::WorkPackageCommand;
 use crate::tui::messages::WorkPackageMessage;
+use crate::tui::types::RepoFilterMode;
 use crossterm::event::KeyCode;
 
 fn task_item(id: i64) -> WorkPackageItem {
@@ -160,13 +161,54 @@ fn an_empty_package_card_sits_in_backlog() {
 }
 
 #[test]
-fn a_package_whose_work_is_all_filtered_away_falls_back_to_backlog() {
+fn a_finished_package_stays_in_done_under_the_only_active_filter() {
+    // Task #98570: only-active hides every done task, which used to leave the
+    // package with no visible work and drop it to Backlog.
     let mut app = App::new(vec![make_task(3, TaskStatus::Done)]);
     app.board.work_packages = vec![make_package(7, "W")];
     app.board.work_package_links = vec![link(7, task_item(3))];
     app.filter.lens = app.filter.lens.with_only_active(true);
 
+    assert_eq!(package_columns(&app, 7), vec![TaskStatus::Done]);
+}
+
+#[test]
+fn a_finished_package_stays_in_done_when_the_repo_filter_hides_its_work() {
+    let mut done = make_task(3, TaskStatus::Done);
+    done.repo_path = "/repo-a".to_string();
+    let mut app = App::new(vec![done]);
+    app.board.work_packages = vec![make_package(7, "W")];
+    app.board.work_package_links = vec![link(7, task_item(3))];
+    app.filter.repos.insert("/repo-a".to_string());
+    app.filter.mode = RepoFilterMode::Exclude;
+
+    assert_eq!(package_columns(&app, 7), vec![TaskStatus::Done]);
+}
+
+#[test]
+fn work_a_filter_hides_still_keeps_the_package_in_backlog() {
+    // Filtering to the repo whose work is done does not make the package done.
+    let mut done = make_task(1, TaskStatus::Done);
+    done.repo_path = "/repo-a".to_string();
+    let mut open = make_task(2, TaskStatus::Backlog);
+    open.repo_path = "/repo-b".to_string();
+    let mut app = App::new(vec![done, open]);
+    app.board.work_packages = vec![make_package(7, "W")];
+    app.board.work_package_links = vec![link(7, task_item(1)), link(7, task_item(2))];
+    app.filter.repos.insert("/repo-b".to_string());
+    app.filter.mode = RepoFilterMode::Exclude;
+
     assert_eq!(package_columns(&app, 7), vec![TaskStatus::Backlog]);
+}
+
+#[test]
+fn a_title_search_keeps_a_finished_package_in_done() {
+    let mut app = App::new(vec![make_task(3, TaskStatus::Done)]);
+    app.board.work_packages = vec![make_package(7, "Window 1")];
+    app.board.work_package_links = vec![link(7, task_item(3))];
+    app.search.query = "window".to_string();
+
+    assert_eq!(package_columns(&app, 7), vec![TaskStatus::Done]);
 }
 
 #[test]

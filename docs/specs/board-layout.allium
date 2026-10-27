@@ -1036,8 +1036,9 @@ rule CycleLensBackward {
 -- Hidden work is invisible in the sense every visibility clause in this file
 -- uses: a task under a hidden epic cannot place an ancestor's epic card
 -- (EpicCardPlacement), keep an epic card alive under a search
--- (board_search_filter), or count toward a work package's placement
--- (work-packages.allium: PackageCardPlacement).
+-- (board_search_filter), or keep a work package's card alive under a search
+-- (work-packages.allium: PackageCardPlacement). It still counts toward which
+-- column a package card sits in: no filter moves a package card.
 --
 -- State model:
 --   - Persisted, like the repo selection and its include/exclude mode: both
