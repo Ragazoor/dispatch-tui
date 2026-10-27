@@ -712,16 +712,10 @@ async fn route_routed_preserves_per_item_repo_path_and_base_branch() {
 // --- feeds.allium: NewMyReviewsTaskIsSignalled ---
 
 /// A reviews parent the test user follows, so every role sub-epic under it
-/// has a follower to mark.
+/// has a follower to mark. `run_role_routed_feed_sync` sets its role.
 async fn followed_reviews_parent(db: &Store) -> crate::models::EpicId {
     use crate::store::SubscriptionStore;
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
-    db.patch_epic(
-        parent.id,
-        &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
-    )
-    .await
-    .unwrap();
     db.subscribe_to_epic(crate::store::MEMORY_USER_ID, parent.id)
         .await
         .unwrap();
@@ -814,9 +808,7 @@ async fn new_pr_in_a_my_reviews_repo_group_is_signalled() {
         .await
         .unwrap();
     let my = role_sub_epic(&db, parent, FeedRole::MyReviews).await;
-    db.patch_epic(my, &EpicPatch::new().group_by_repo(true))
-        .await
-        .unwrap();
+    set_strategy(&*db, my, None, Some(true)).await;
 
     let items = vec![make_signal_item(
         "pr-1",

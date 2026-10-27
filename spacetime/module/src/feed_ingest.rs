@@ -365,12 +365,12 @@ fn remember_feed_tasks(
 
 /// What `route_and_move` decided: the items to upsert per target epic, the
 /// external ids that stay, the repo groups it reached, and the new My Reviews
-/// PRs to signal once inserted (target epic, external id).
+/// PRs to signal once inserted, by target epic.
 struct RoutedItems {
     groups: HashMap<i64, Vec<FeedTaskUpsertItem>>,
     all_external_ids: HashSet<String>,
     repo_group_cache: HashMap<(i64, String), i64>,
-    new_in_my_reviews: Vec<(i64, String)>,
+    new_in_my_reviews: HashMap<i64, HashSet<String>>,
 }
 
 /// Index every feed task under the reviews `parent` by `external_id`, and
@@ -412,7 +412,7 @@ fn route_and_move(
     let mut groups: HashMap<i64, Vec<FeedTaskUpsertItem>> = HashMap::new();
     let mut all_external_ids: HashSet<String> = HashSet::new();
     let mut repo_group_cache: HashMap<(i64, String), i64> = HashMap::new();
-    let mut new_in_my_reviews: Vec<(i64, String)> = Vec::new();
+    let mut new_in_my_reviews: HashMap<i64, HashSet<String>> = HashMap::new();
     for entry in items {
         let item = &entry.item;
         if dropped.contains(item.external_id.as_str()) {
@@ -452,7 +452,10 @@ fn route_and_move(
                 });
             }
         } else if role_target == my {
-            new_in_my_reviews.push((target, item.external_id.clone()));
+            new_in_my_reviews
+                .entry(target)
+                .or_default()
+                .insert(item.external_id.clone());
         }
         groups.entry(target).or_default().push(item.clone());
     }
@@ -515,13 +518,12 @@ fn ingest_role_routed(
     }
     // `feeds.allium: NewMyReviewsTaskIsSignalled`: an insert into My Reviews
     // is a signalled create. A refresh or a move into it is not.
-    for (target, external_id) in new_in_my_reviews {
-        let inserted = store
-            .tasks_in_epic(target)
-            .into_iter()
-            .find(|t| t.external_id == external_id);
-        if let Some(task) = inserted {
-            store.mark_task_unseen_for_followers(task.id, target);
+    // A retired PR is never inserted, so it finds no row here and no mark.
+    for (target, new_ids) in new_in_my_reviews {
+        for task in store.tasks_in_epic(target) {
+            if new_ids.contains(&task.external_id) {
+                store.mark_task_unseen_for_followers(task.id, target);
+            }
         }
     }
     if !additive {
