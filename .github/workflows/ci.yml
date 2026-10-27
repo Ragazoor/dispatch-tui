@@ -409,8 +409,9 @@ jobs:
       - name: Check the embedded SpacetimeDB module is not stale
         run: bash ./scripts/build-managed-module.sh --check
 
-      # The checkout has no local `main`, so the fixture check itself skips
-      # here, saying so; the pre-push hook is where it bites. Its self-test is
+      # The checkout is shallow (and on a PR has no local `main`), so the
+      # fixture check itself skips here, saying so; the pre-push hook is where
+      # it bites. Its self-test is
       # hermetic and runs in full.
       - name: Check the previous-store fixture holds a module main shipped
         run: ./scripts/check-previous-store.sh

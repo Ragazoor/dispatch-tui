@@ -12,7 +12,7 @@ epics afterwards (`docs/specs/startup.allium`:
 - module hash: sha256:b04e1aeddf00111f431770d5145d742d48d79125531247b16dc0c5562b2c8441
 
 The module hash is also `data/managed-module.sha256`, the record the managed
-store keeps; `scripts/check-spacetime-module.sh` checks it against `main`'s
+store keeps; `scripts/check-previous-store.sh` checks it against `main`'s
 `src/spacetime/module.wasm`.
 
 ## What is here

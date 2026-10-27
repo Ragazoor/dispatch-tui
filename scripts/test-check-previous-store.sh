@@ -42,7 +42,14 @@ expect() {
     rm -f "$REPO/$RECORD"
     [ -n "$record" ] && printf '%s\n' "$record" >"$REPO/$RECORD"
     local dir="$REPO"
-    if [ "$where" = nomain ]; then
+    if [ "$where" = shallow ]; then
+        # CI on a push to main: a local main, but only its tip.
+        rm -rf "$WORKDIR/clone"
+        git clone -q --depth 1 "file://$REPO" "$WORKDIR/clone"
+        mkdir -p "$WORKDIR/clone/$(dirname "$RECORD")"
+        [ -n "$record" ] && printf '%s\n' "$record" >"$WORKDIR/clone/$RECORD"
+        dir="$WORKDIR/clone"
+    elif [ "$where" = nomain ]; then
         rm -rf "$WORKDIR/clone"
         git clone -q --no-local "$REPO" "$WORKDIR/clone"
         (cd "$WORKDIR/clone" && git checkout -q --detach && git branch -qD main)
@@ -71,6 +78,7 @@ expect 0 "$OLD" 'rotate-previous-store.sh' 'fixture on an older main module pass
 expect 1 'sha256:0000' 'rotate-previous-store.sh' 'fixture on a module main never had fails'
 expect 1 '' 'no module hash record' 'fixture without a hash record fails'
 expect 0 "$NEW" 'skipping' 'no local main skips with a reason' nomain
+expect 0 "$OLD" 'skipping' 'a shallow main skips: it cannot see older modules' shallow
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures case(s) failed"

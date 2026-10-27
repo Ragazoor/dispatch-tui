@@ -11,8 +11,8 @@
 # moment a module change merges would block everyone until someone rotates.
 # Rotate with scripts/rotate-previous-store.sh.
 #
-# Compares against local `main` (never `origin/main`). Without one — a shallow
-# CI checkout — it skips, saying so.
+# Compares against local `main` (never `origin/main`). Without one, or in a
+# shallow checkout (CI's, including a push to main), it skips, saying so.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -27,6 +27,12 @@ fixture="$(tr -d '[:space:]' <"$RECORD")"
 
 if ! git rev-parse --verify -q main >/dev/null; then
     echo "previous-store: skipping: no local main to compare against"
+    exit 0
+fi
+# CI on a push to main checks out a local main one commit deep: it cannot see
+# the older modules a lagging fixture is allowed to hold.
+if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+    echo "previous-store: skipping: shallow checkout, main's history is not here"
     exit 0
 fi
 
