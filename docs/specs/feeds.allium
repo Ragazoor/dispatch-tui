@@ -2209,6 +2209,57 @@ rule RoleRoutedFeedSync {
         -- settle; this is documented, not a bug.
 }
 
+-- == New PRs in My Reviews are signalled ==
+
+rule NewMyReviewsTaskIsSignalled {
+    when: FeedCommandCompleted(epic, items)
+
+    requires: epic.feed_role = reviews_parent
+
+    -- A PR that RoleRoutedFeedSync INSERTS (the "Absent from the subtree"
+    -- branch) and whose route(item.signals) is my_reviews is created with the
+    -- new-task signal on. It marks exactly the people
+    -- mcp-task-tools.allium: SignalMarksTheTaskForEveryFollower marks: every
+    -- follower of the epic the task lands in or of any ancestor, in the same
+    -- store transaction as the insert. "The epic it lands in" is the repo
+    -- group under My Reviews when that sub-epic groups by repo, else My
+    -- Reviews itself; either way My Reviews and PR Reviews are ancestors.
+    ensures:
+        for task in inserted_tasks(epic, items).where(t => route(t.signals) = my_reviews):
+            for s in core/Subscription.where(s => Epic.ancestor_chain(task.epic.id).contains(s.epic.id)):
+                core/UnseenTask.created(subscriber: s.subscriber, task: task)
+
+    @guidance
+        -- The signal is the create-time flag create_task already has; the feed
+        -- is one caller of it, not a second mechanism. Who is marked, how the
+        -- mark is drawn and how it clears are all the signal's own rules
+        -- (tasks.allium: SeeTasksByEnteringTheirEpic,
+        -- UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing).
+        --
+        -- ONLY AN INSERT IS SIGNALLED. A refresh of a PR already on the board
+        -- (new commits, a new title, a changed CI label) writes no mark, and
+        -- neither does a MOVE into My Reviews from Team Reviews or Bots: the
+        -- task is not new, and the signal says "something new landed here".
+        -- A retired PR is never re-inserted (IngestSkipsRetiredFeedItems), so
+        -- it is never re-signalled either.
+        --
+        -- ONLY MY REVIEWS. Team Reviews, Bots, CVE and every flat or grouped
+        -- feed insert without the signal: My Reviews is the queue of PRs
+        -- waiting on this person, and the other buckets would mark the board
+        -- on every poll.
+        --
+        -- The additive path (DegradedNonEmptyEmission, AppendOnlyFeed) inserts
+        -- the same way and signals the same way.
+        --
+        -- Implementation: spacetime/module/src/feed_ingest.rs::ingest_into
+        -- (role-routed branch), through IngestStore's
+        -- mark_task_unseen_for_followers, which the module and the board's
+        -- in-memory double both implement.
+        -- Tests: src/feed/ingest/tests/role_routing.rs::new_my_reviews_pr_is_signalled_and_a_refresh_is_not,
+        -- src/feed/ingest/tests/role_routing.rs::new_team_reviews_pr_is_not_signalled,
+        -- src/feed/ingest/tests/role_routing.rs::pr_moved_into_my_reviews_is_not_signalled.
+}
+
 -- == Dispatch guard ==
 
 rule DispatchRequiresRepoPath {

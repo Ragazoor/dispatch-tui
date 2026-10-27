@@ -860,9 +860,12 @@ rule CreateTaskViaMcp {
         -- The caller's own subscription counts like anyone's. An agent that
         -- wants no mark for its operator omits signal.
         --
-        -- Only create_task takes it. update_tasks does not, and no other
-        -- creation path (TUI form, quick dispatch, feeds) writes UnseenTask
-        -- rows; a task created there is never marked.
+        -- Only create_task takes it as an argument. update_tasks does not.
+        -- The one other creation path that turns it on is the reviews feed:
+        -- a PR newly inserted into My Reviews is created with the signal on,
+        -- marking the same followers this rule names (feeds.allium:
+        -- NewMyReviewsTaskIsSignalled). The TUI form, quick dispatch and
+        -- every other feed insert write no UnseenTask rows.
 
     -- BaseBranchIsResolvedNotAssumed. An omitted base_branch is resolved
     -- against the repository named by repo_path, by detect_default_branch --

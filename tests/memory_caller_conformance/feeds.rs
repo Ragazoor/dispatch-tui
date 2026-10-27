@@ -114,6 +114,29 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
         wait_for!(rows_real.epic(EpicId(root)).is_some());
         assert_eq!(mem.create_epic(parent).await.unwrap().0, root);
 
+        // Follow the reviews parent so a new My Reviews PR has someone to mark
+        // (`feeds.allium: NewMyReviewsTaskIsSignalled`).
+        real.subscribe_to_epic(identity.clone(), EpicId(root))
+            .await
+            .unwrap();
+        wait_for!(rows_real.subscribed_epics(&identity) == vec![EpicId(root)]);
+        mem.subscribe_to_epic(identity.clone(), EpicId(root))
+            .await
+            .unwrap();
+        // Task ids are not compared across the two stores: each numbers the
+        // role groups' inserts in its own order. The PR names a task in both.
+        let unseen_prs = |rows: &SharedRows| {
+            let unseen = rows.unseen_task_ids();
+            let mut prs: Vec<String> = rows
+                .tasks()
+                .into_iter()
+                .filter(|t| unseen.contains(&t.id))
+                .filter_map(|t| t.external_id)
+                .collect();
+            prs.sort();
+            prs
+        };
+
         let pr = |n: u32| format!("https://github.com/org/repo-{n}/pull/{n}");
         let ingest = |items: Vec<bindings::FeedIngestItem>, additive: bool| {
             let real = &real;
@@ -160,6 +183,9 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
                 ("pr-3".into(), "Reviews".into(), "Bots".into()),
             ]
         );
+        // Only the new My Reviews PR is signalled.
+        assert_eq!(unseen_prs(&rows_mem), vec!["pr-1".to_string()]);
+        wait_for!(unseen_prs(&rows_real) == unseen_prs(&rows_mem));
 
         // -- cycle 2: pr-2 is reviewed (a move), pr-3 is gone (a delete) ----------
         let (r, m) = ingest(
@@ -174,6 +200,9 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
         m.applied().unwrap();
         let want = same_layout(2);
         wait_for!(feed_layout(&rows_real, EpicId(root)) == want);
+        // A move into My Reviews is not a new task, so pr-2 stays unmarked.
+        assert_eq!(unseen_prs(&rows_mem), vec!["pr-1".to_string()]);
+        assert_eq!(unseen_prs(&rows_real), unseen_prs(&rows_mem));
 
         // -- cycle 3: additive removes nothing ------------------------------------
         let (r, m) = ingest(vec![ingest_item("pr-5", &pr(5), &["team-request"])], true).await;

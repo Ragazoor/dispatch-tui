@@ -74,6 +74,10 @@ pub trait IngestStore {
     ) -> Result<(), String>;
     fn delete_stale_feed_tasks_in_epic(&mut self, epic_id: i64, keep: &HashSet<&str>);
     fn recalculate_epic_chain(&mut self, epic_id: i64);
+    /// Mark `task_id` unseen for every follower of `epic_id` or an ancestor,
+    /// as a signalled create does (`mcp-task-tools.allium:
+    /// SignalMarksTheTaskForEveryFollower`).
+    fn mark_task_unseen_for_followers(&mut self, task_id: i64, epic_id: i64);
 }
 
 /// [`IngestStore`] over a reducer's live tables.
@@ -130,6 +134,9 @@ impl IngestStore for ReducerStore<'_> {
     }
     fn recalculate_epic_chain(&mut self, epic_id: i64) {
         recalculate_epic_chain(self.0, epic_id)
+    }
+    fn mark_task_unseen_for_followers(&mut self, task_id: i64, epic_id: i64) {
+        mark_task_unseen_for_followers(self.0, task_id, epic_id)
     }
 }
 
@@ -357,11 +364,13 @@ fn remember_feed_tasks(
 }
 
 /// What `route_and_move` decided: the items to upsert per target epic, the
-/// external ids that stay, and the repo groups it reached.
+/// external ids that stay, the repo groups it reached, and the new My Reviews
+/// PRs to signal once inserted (target epic, external id).
 struct RoutedItems {
     groups: HashMap<i64, Vec<FeedTaskUpsertItem>>,
     all_external_ids: HashSet<String>,
     repo_group_cache: HashMap<(i64, String), i64>,
+    new_in_my_reviews: Vec<(i64, String)>,
 }
 
 /// Index every feed task under the reviews `parent` by `external_id`, and
@@ -403,6 +412,7 @@ fn route_and_move(
     let mut groups: HashMap<i64, Vec<FeedTaskUpsertItem>> = HashMap::new();
     let mut all_external_ids: HashSet<String> = HashSet::new();
     let mut repo_group_cache: HashMap<(i64, String), i64> = HashMap::new();
+    let mut new_in_my_reviews: Vec<(i64, String)> = Vec::new();
     for entry in items {
         let item = &entry.item;
         if dropped.contains(item.external_id.as_str()) {
@@ -441,6 +451,8 @@ fn route_and_move(
                     ..task.clone()
                 });
             }
+        } else if role_target == my {
+            new_in_my_reviews.push((target, item.external_id.clone()));
         }
         groups.entry(target).or_default().push(item.clone());
     }
@@ -448,6 +460,7 @@ fn route_and_move(
         groups,
         all_external_ids,
         repo_group_cache,
+        new_in_my_reviews,
     }
 }
 
@@ -494,10 +507,22 @@ fn ingest_role_routed(
         groups,
         all_external_ids,
         repo_group_cache,
+        new_in_my_reviews,
     } = routed;
 
     for (sub, group) in groups {
         store.upsert_feed_tasks(sub, group, created_by, !additive)?;
+    }
+    // `feeds.allium: NewMyReviewsTaskIsSignalled`: an insert into My Reviews
+    // is a signalled create. A refresh or a move into it is not.
+    for (target, external_id) in new_in_my_reviews {
+        let inserted = store
+            .tasks_in_epic(target)
+            .into_iter()
+            .find(|t| t.external_id == external_id);
+        if let Some(task) = inserted {
+            store.mark_task_unseen_for_followers(task.id, target);
+        }
     }
     if !additive {
         let keep: HashSet<&str> = all_external_ids.iter().map(String::as_str).collect();

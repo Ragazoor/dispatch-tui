@@ -1192,7 +1192,8 @@ rule MoveTaskToEpic {
 -- == New-task signal ==
 --
 -- A task created with the signal on (mcp-task-tools.allium:
--- CreateTaskViaMcp's `signal`) is marked unseen for every follower of its
+-- CreateTaskViaMcp's `signal`, or a new My Reviews PR — feeds.allium:
+-- NewMyReviewsTaskIsSignalled) is marked unseen for every follower of its
 -- epic (core/UnseenTask). The mark drives the board's "new" glyph and stripe
 -- (board-visuals.allium, "New-task signal"). These rules end it.
 

@@ -708,3 +708,99 @@ async fn route_routed_preserves_per_item_repo_path_and_base_branch() {
     assert_eq!(bots_task.repo_path, "/repo-bots");
     assert_eq!(bots_task.base_branch, "bots-branch");
 }
+
+// --- feeds.allium: NewMyReviewsTaskIsSignalled ---
+
+/// A reviews parent the test user follows, so every role sub-epic under it
+/// has a follower to mark.
+async fn followed_reviews_parent(db: &Store) -> crate::models::EpicId {
+    use crate::store::SubscriptionStore;
+    let parent = db.create_epic("Reviews", "", None).await.unwrap();
+    db.patch_epic(
+        parent.id,
+        &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+    )
+    .await
+    .unwrap();
+    db.subscribe_to_epic(crate::store::MEMORY_USER_ID, parent.id)
+        .await
+        .unwrap();
+    parent.id
+}
+
+async fn unseen(db: &Store) -> Vec<TaskId> {
+    crate::store::BoardReads::unseen_task_ids(db).await
+}
+
+#[tokio::test]
+async fn new_my_reviews_pr_is_signalled_and_a_refresh_is_not() {
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let parent = followed_reviews_parent(&db).await;
+    let items = vec![make_signal_item(
+        "pr-1",
+        "https://github.com/org/repo/pull/1",
+        vec![Signal::DirectRequest],
+    )];
+
+    run_role_routed_feed_sync(&*db, parent, entries(&items, &[""], &["main"]))
+        .await
+        .unwrap();
+
+    let my = role_sub_epic(&db, parent, FeedRole::MyReviews).await;
+    let task = db.list_tasks_for_epic(my).await.remove(0);
+    assert_eq!(unseen(&db).await, vec![task.id], "a new PR is signalled");
+
+    // Seen, then refreshed by the next poll: the refresh writes no new mark.
+    db.mark_epic_seen(my).await.unwrap();
+    assert!(unseen(&db).await.is_empty());
+    run_role_routed_feed_sync(&*db, parent, entries(&items, &[""], &["main"]))
+        .await
+        .unwrap();
+    assert!(unseen(&db).await.is_empty(), "a refresh is not signalled");
+}
+
+#[tokio::test]
+async fn new_team_reviews_pr_is_not_signalled() {
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let parent = followed_reviews_parent(&db).await;
+    let items = vec![make_signal_item(
+        "pr-1",
+        "https://github.com/org/repo/pull/1",
+        vec![Signal::TeamRequest],
+    )];
+
+    run_role_routed_feed_sync(&*db, parent, entries(&items, &[""], &["main"]))
+        .await
+        .unwrap();
+
+    let team = role_sub_epic(&db, parent, FeedRole::TeamReviews).await;
+    assert_eq!(db.list_tasks_for_epic(team).await.len(), 1);
+    assert!(unseen(&db).await.is_empty());
+}
+
+#[tokio::test]
+async fn pr_moved_into_my_reviews_is_not_signalled() {
+    let db = Arc::new(Store::open_in_memory().unwrap());
+    let parent = followed_reviews_parent(&db).await;
+    let team_item = vec![make_signal_item(
+        "pr-1",
+        "https://github.com/org/repo/pull/1",
+        vec![Signal::TeamRequest],
+    )];
+    run_role_routed_feed_sync(&*db, parent, entries(&team_item, &[""], &["main"]))
+        .await
+        .unwrap();
+
+    let my_item = vec![make_signal_item(
+        "pr-1",
+        "https://github.com/org/repo/pull/1",
+        vec![Signal::TeamRequest, Signal::DirectRequest],
+    )];
+    run_role_routed_feed_sync(&*db, parent, entries(&my_item, &[""], &["main"]))
+        .await
+        .unwrap();
+
+    let my = role_sub_epic(&db, parent, FeedRole::MyReviews).await;
+    assert_eq!(db.list_tasks_for_epic(my).await.len(), 1, "moved, not new");
+    assert!(unseen(&db).await.is_empty());
+}

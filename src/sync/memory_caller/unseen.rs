@@ -20,7 +20,12 @@ impl MemoryReducerCaller {
         Ok(id)
     }
 
-    fn mark_task_unseen_for_followers(&self, tables: &mut Tables, task_id: i64, epic_id: i64) {
+    pub(super) fn mark_task_unseen_for_followers(
+        &self,
+        tables: &mut Tables,
+        task_id: i64,
+        epic_id: i64,
+    ) {
         if epic_id == 0 {
             return;
         }
