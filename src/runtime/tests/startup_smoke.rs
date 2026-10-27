@@ -160,9 +160,23 @@ async fn a_fresh_install_starts_against_a_real_store() {
     await_task(&first, task).await;
     drop(first);
 
+    // The design's "without publishing": a publish rewrites the hash record.
+    let record = FileModuleHashRecord::in_data_dir(&store_data);
+    let recorded_at = || {
+        std::fs::metadata(record.path())
+            .unwrap()
+            .modified()
+            .unwrap()
+    };
+    let before = recorded_at();
     let second = boot(&data_dir, &paths, target())
         .await
         .unwrap_or_else(|e| panic!("fresh-install smoke: second bootstrap aborted: {e}"));
+    assert_eq!(
+        recorded_at(),
+        before,
+        "a second launch on an unchanged module published again"
+    );
     await_task(&second, task).await;
 }
 
@@ -448,6 +462,13 @@ async fn an_upgrade_from_the_previous_store_keeps_every_task_and_epic() {
     )
     .await
     .unwrap_or_else(|e| panic!("upgrade smoke: bootstrap aborted: {e}"));
+    // The record was removed above, so only a publish brings it back: this
+    // is what proves the owner's publish ran, not just that startup finished.
+    assert_eq!(
+        record.recorded_module_hash(),
+        Some(embedded_module_hash()),
+        "upgrade smoke: startup did not publish the embedded module"
+    );
 
     let seen = visible_rows(&b).await;
     let missing = |want: &[i64], got: &[i64]| -> Vec<i64> {
