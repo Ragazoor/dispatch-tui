@@ -472,11 +472,24 @@ pub trait StoreSpawner: Send + Sync {
 /// stdio pointed at a log file rather than the TUI's terminal.
 pub struct SpacetimeStartSpawner {
     config_path: Option<PathBuf>,
+    key_dir: Option<PathBuf>,
 }
 
 impl SpacetimeStartSpawner {
     pub fn new() -> Self {
-        Self { config_path: None }
+        Self {
+            config_path: None,
+            key_dir: None,
+        }
+    }
+
+    /// Sign with the JWT key pair in `dir` (created there when absent)
+    /// instead of the operator's `~/.config/spacetime/id_ecdsa`, which
+    /// `spacetime start` falls back to.
+    #[cfg(test)]
+    pub fn with_key_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.key_dir = Some(dir.into());
+        self
     }
 
     /// Run the CLI against this config file instead of the operator's own.
@@ -494,8 +507,19 @@ impl SpacetimeStartSpawner {
         command
             .arg("start")
             .arg(format!("--listen-addr={address}"))
-            .arg(format!("--data-dir={}", data_dir.display()))
-            .arg("--non-interactive");
+            .arg(format!("--data-dir={}", data_dir.display()));
+        if let Some(keys) = &self.key_dir {
+            command
+                .arg(format!(
+                    "--jwt-priv-key-path={}",
+                    keys.join("id_ecdsa").display()
+                ))
+                .arg(format!(
+                    "--jwt-pub-key-path={}",
+                    keys.join("id_ecdsa.pub").display()
+                ));
+        }
+        command.arg("--non-interactive");
         command
     }
 }

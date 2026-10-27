@@ -130,6 +130,27 @@ fn the_store_is_started_detached_on_loopback_over_its_own_data_directory() {
     );
 }
 
+/// A test's store signs with its own key pair: left to itself,
+/// `spacetime start` uses the operator's `~/.config/spacetime/id_ecdsa`.
+#[test]
+fn a_key_dir_is_passed_to_spacetime_start() {
+    let command = SpacetimeStartSpawner::new()
+        .with_key_dir("/tmp/keys")
+        .command("127.0.0.1:4000", Path::new("/data/spacetime"));
+    let args: Vec<String> = command
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        args.contains(&"--jwt-priv-key-path=/tmp/keys/id_ecdsa".to_string()),
+        "{args:?}"
+    );
+    assert!(
+        args.contains(&"--jwt-pub-key-path=/tmp/keys/id_ecdsa.pub".to_string()),
+        "{args:?}"
+    );
+}
+
 #[test]
 fn a_hash_record_is_read_back_from_the_store_data_directory_not_the_board_one() {
     let store = tempfile::tempdir().unwrap();
@@ -469,7 +490,11 @@ fn a_real_store_is_brought_up_published_to_and_stopped() {
     let real = Arc::new(
         SpacetimeManagedStore::new(
             Arc::new(crate::process::RealProcessRunner::default()),
-            Arc::new(SpacetimeStartSpawner::new().with_config_path(&config)),
+            Arc::new(
+                SpacetimeStartSpawner::new()
+                    .with_config_path(&config)
+                    .with_key_dir(dir.path().join("keys")),
+            ),
             layout.clone(),
             EMBEDDED_MODULE,
         )
