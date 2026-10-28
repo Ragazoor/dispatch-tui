@@ -300,6 +300,9 @@ pub enum Command {
     /// Work-package side-effect commands — see
     /// [`crate::tui::commands::WorkPackageCommand`].
     WorkPackage(crate::tui::commands::WorkPackageCommand),
+    /// People side-effect commands — see
+    /// [`crate::tui::commands::PeopleCommand`].
+    People(crate::tui::commands::PeopleCommand),
 }
 
 // ---------------------------------------------------------------------------
@@ -406,6 +409,9 @@ pub enum InputMode {
     InputWorkPackageTitle(crate::models::WorkPackageItem),
     /// `e` on a package card: the one-line rename input.
     RenameWorkPackage(crate::models::WorkPackageId),
+    /// `u`: the one-line input for the person's own display name
+    /// (`workspaces.allium: SetOwnNameFromBoard`).
+    InputDisplayName,
     /// `x` on a package card: delete the package (its links only).
     ConfirmDeleteWorkPackage(crate::models::WorkPackageId),
 }

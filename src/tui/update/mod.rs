@@ -15,6 +15,7 @@ pub(in crate::tui) mod forms;
 mod lifecycle;
 mod move_task;
 mod navigation;
+mod people;
 mod pr;
 mod repo_sync;
 mod retry;

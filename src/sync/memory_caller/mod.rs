@@ -62,6 +62,7 @@ mod pr_status;
 mod session_requests;
 mod tasks_epics;
 mod unseen;
+mod user_profiles;
 mod work_packages;
 
 #[cfg(test)]
@@ -110,6 +111,7 @@ struct Tables {
     repo_base_branches: BTreeMap<i64, module::RepoBaseBranch>,
     subscriptions: BTreeMap<String, module::Subscription>,
     unseen_tasks: BTreeMap<String, module::UnseenTask>,
+    user_profiles: BTreeMap<String, module::UserProfile>,
     settings: BTreeMap<String, module::Setting>,
     usage_events: BTreeMap<i64, module::UsageEvent>,
     poll_owners: BTreeMap<i64, module::PollOwner>,
@@ -320,6 +322,10 @@ impl ReducerCaller for MemoryReducerCaller {
 
     async fn create_task_signalled(&self, row: bindings::Task) -> Result<TaskId> {
         self.apply_create_task_signalled(row)
+    }
+
+    async fn set_display_name(&self, name: String) -> Result<ReducerOutcome> {
+        self.apply_set_display_name(name)
     }
 
     async fn mark_epic_seen(&self, subscriber: String, epic_id: EpicId) -> Result<ReducerOutcome> {

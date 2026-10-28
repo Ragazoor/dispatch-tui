@@ -1,4 +1,4 @@
-//! [`Services`] — the four services, built once per process.
+//! [`Services`] — the services, built once per process.
 //!
 //! The board's composition root (`TuiRuntime::bootstrap`) builds one set and
 //! hands it to both the TUI runtime and the MCP server, so a keypress and an
@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 use super::{
-    EpicService, EpicServiceApi, LearningService, LearningServiceApi, TaskService, TaskServiceApi,
-    WorkPackageService, WorkPackageServiceApi,
+    EpicService, EpicServiceApi, LearningService, LearningServiceApi, PeopleService, TaskService,
+    TaskServiceApi, WorkPackageService, WorkPackageServiceApi,
 };
 use crate::embeddings::EmbeddingService;
 use crate::process::ProcessRunner;
@@ -22,6 +22,7 @@ pub struct Services {
     pub epics: Arc<dyn EpicServiceApi>,
     pub learnings: Arc<dyn LearningServiceApi>,
     pub work_packages: Arc<dyn WorkPackageServiceApi>,
+    pub people: Arc<PeopleService>,
 }
 
 impl Services {
@@ -34,6 +35,7 @@ impl Services {
             tasks: Arc::new(TaskService::new(db.clone(), runner)),
             epics: Arc::new(EpicService::new(db.clone())),
             work_packages: Arc::new(WorkPackageService::new(db.clone())),
+            people: Arc::new(PeopleService::new(db.clone())),
             learnings: Arc::new(LearningService::new(db, embedding_service)),
         }
     }

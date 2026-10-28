@@ -18,7 +18,9 @@ pub struct WorkPackage {
     pub description: String,
     /// Manual card order; see [`Self::sort_key`].
     pub sort_order: Option<i64>,
-    /// Who created it; `None` when the store holds no name.
+    /// Who created it, as shown (`workspaces.allium: CreatorIsShownByName`):
+    /// the creator's display name, or their identity's prefix when they have
+    /// set none. `None` when the store holds no creator.
     pub created_by: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

@@ -4,6 +4,7 @@ pub mod epics;
 mod fixtures;
 pub mod learnings;
 pub mod managed_feeds;
+pub mod people;
 mod services;
 pub mod tasks;
 pub mod usage;
@@ -20,6 +21,7 @@ pub use managed_feeds::{
     provision_managed_feeds_from_settings, read_managed_feed_settings, write_managed_feed_settings,
     ManagedFeedSettings, ManagedFeedSettingsPatch,
 };
+pub use people::PeopleService;
 pub use services::Services;
 pub use tasks::wrap_up_block_message;
 pub use tasks::{

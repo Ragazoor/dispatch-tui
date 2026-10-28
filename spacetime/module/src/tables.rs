@@ -656,3 +656,24 @@ pub struct UnseenTask {
     /// The `UserIdentity` that has not yet seen the task.
     pub subscriber: String,
 }
+
+/// One person as the store presents them to others
+/// (`workspaces.allium: UserProfile`). One row per identity, created the first
+/// time that identity connects.
+///
+/// Public: the directory of identities and display names is readable by every
+/// connected client (`workspaces.allium`, D7).
+#[spacetimedb::table(accessor = user_profiles, public)]
+#[derive(Clone, Debug)]
+pub struct UserProfile {
+    /// The `UserIdentity`, in `caller_identity`'s spelling.
+    #[primary_key]
+    pub identity: String,
+    /// `""` until the person sets one; [`shown_name`](crate::shown_name)
+    /// stands in for it meanwhile.
+    pub display_name: String,
+    /// Stays false here; the super-admin rules own it
+    /// (`workspaces.allium: ClaimSuperAdmin`).
+    pub is_super_admin: bool,
+    pub created_at: String,
+}

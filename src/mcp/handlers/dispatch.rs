@@ -18,6 +18,7 @@ use super::epics;
 use super::keybindings;
 use super::learnings;
 use super::managed_feeds;
+use super::people;
 use super::tasks;
 use super::types::{
     tool_error, JsonRpcRequest, JsonRpcResponse, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND,
@@ -626,6 +627,20 @@ default feed interval.",
                 "cve_command": { "type": ["string", "null"], "description": "Script emitting the security/CVE feed. Pass null to clear (disables the CVE epic). Omit to leave unchanged." },
                 "cve_interval_secs": { "type": ["integer", "null"], "description": "Poll cadence for the CVE feed, in seconds. Minimum 60; a lower value is rejected. Pass null to clear (falls back to the 60s default). Omit to leave unchanged." }
             }
+        };
+
+    async idempotent "set_display_name" => people::handle_set_display_name,
+        "Set your display name: the name the board and other tools show beside what you create, \
+instead of the short prefix of your identity. It names the person whose board this agent runs \
+under, not the agent. The name is trimmed, must not be blank and can be at most 64 characters; \
+a blank or longer name is refused with the reason. Repeating the same call changes nothing. \
+Returns the saved name.",
+        {
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "description": "The display name, 1 to 64 characters after trimming." }
+            },
+            "required": ["name"]
         };
 
     async idempotent "set_verify_command" => tasks::handle_set_verify_command,

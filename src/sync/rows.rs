@@ -155,6 +155,9 @@ struct Rows {
     /// subscription's `WHERE subscriber = …`, so nothing here filters by
     /// subscriber.
     unseen_tasks: BTreeMap<String, bindings::UnseenTask>,
+    /// `workspaces.allium: UserProfile`. Unfiltered (`SubscribeToUserProfiles`):
+    /// the directory of identities and names is readable by every client.
+    user_profiles: BTreeMap<String, bindings::UserProfile>,
     settings: BTreeMap<String, bindings::Setting>,
     /// Task #4971. Unconditionally subscribed, like `learnings`/`usage_events`
     /// above — a retirement record is not scoped by owner or host either.
@@ -221,6 +224,7 @@ impl Rows {
             && self.usage_events.is_empty()
             && self.subscriptions.is_empty()
             && self.unseen_tasks.is_empty()
+            && self.user_profiles.is_empty()
             && self.settings.is_empty()
             && self.retired_feed_items.is_empty()
             && self.work_packages.is_empty()
@@ -504,6 +508,40 @@ impl SharedRows {
         })
     }
 
+    pub fn upsert_user_profile(&self, row: &bindings::UserProfile) {
+        self.write(|rows| {
+            rows.user_profiles.insert(row.identity.clone(), row.clone());
+            true
+        });
+    }
+
+    pub fn remove_user_profile(&self, identity: String) {
+        self.write(|rows| rows.user_profiles.remove(&identity).is_some());
+    }
+
+    /// The display name `identity` has set, or `""` when none is set or no
+    /// profile is held.
+    pub fn display_name_of(&self, identity: &str) -> String {
+        self.read(|rows| {
+            rows.user_profiles
+                .get(identity)
+                .map(|p| p.display_name.clone())
+                .unwrap_or_default()
+        })
+    }
+
+    /// `identity` as a card or tool result names them
+    /// (`workspaces.allium: ShownName`).
+    pub fn shown_name_of(&self, identity: &str) -> String {
+        self.read(|rows| {
+            let name = rows
+                .user_profiles
+                .get(identity)
+                .map_or("", |p| p.display_name.as_str());
+            crate::models::shown_name(name, identity)
+        })
+    }
+
     pub fn upsert_setting(&self, row: &bindings::Setting) {
         self.write(|rows| {
             rows.settings.insert(row.id.clone(), row.clone());
@@ -752,9 +790,26 @@ impl SharedRows {
         self.read(|rows| rows.epics.get(&id.0).cloned())
     }
 
-    /// Every work package, oldest first (by id).
+    /// Every work package, oldest first (by id). `created_by` is the creator
+    /// AS SHOWN (`workspaces.allium: CreatorIsShownByName`): their display
+    /// name, or the identity's prefix when they have set none.
     pub fn work_packages(&self) -> Vec<WorkPackage> {
-        self.read(|rows| rows.work_packages.values().cloned().collect())
+        self.read(|rows| {
+            rows.work_packages
+                .values()
+                .cloned()
+                .map(|mut package| {
+                    if let Some(identity) = package.created_by.take() {
+                        let name = rows
+                            .user_profiles
+                            .get(&identity)
+                            .map_or("", |p| p.display_name.as_str());
+                        package.created_by = Some(crate::models::shown_name(name, &identity));
+                    }
+                    package
+                })
+                .collect()
+        })
     }
 
     /// Every work package link, ordered by package id, then the item's kind

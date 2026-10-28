@@ -75,6 +75,8 @@ pub use agent_events::*;
 pub mod epics;
 pub use epics::*;
 
+pub mod people;
+pub use people::shown_name;
 pub mod work_packages;
 pub use work_packages::*;
 

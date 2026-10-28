@@ -46,8 +46,8 @@ impl App {
         label: &str,
     ) -> Option<Vec<Command>> {
         use crate::tui::messages::{
-            BoardFilterMessage, EpicMessage, RepoSyncMessage, SplitMessage, SystemMessage,
-            TaskMessage,
+            BoardFilterMessage, EpicMessage, InputMessage, RepoSyncMessage, SplitMessage,
+            SystemMessage, TaskMessage,
         };
         let action = b.action;
         let keyed = |app: &mut App, msg: Message| app.dispatch_keyed(msg, action, label);
@@ -76,6 +76,7 @@ impl App {
             "toggle_notifications" => {
                 keyed(self, Message::System(SystemMessage::ToggleNotifications))
             }
+            "set_display_name" => keyed(self, Message::Input(InputMessage::StartSetDisplayName)),
             "open_board_filter" => keyed(self, Message::BoardFilter(BoardFilterMessage::Start)),
             "search_tasks" => {
                 self.search.saved = Some(self.search.query.clone());

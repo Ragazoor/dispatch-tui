@@ -85,6 +85,7 @@ mod support;
 mod tables;
 mod tasks_epics;
 mod unseen;
+mod user_profile;
 
 pub use agent::*;
 pub use agent_state::*;
@@ -108,6 +109,7 @@ pub use support::*;
 pub use tables::*;
 pub use tasks_epics::*;
 pub use unseen::*;
+pub use user_profile::*;
 
 #[cfg(test)]
 mod tests;
@@ -240,6 +242,9 @@ pub struct RulesVersion {
 /// when the number differs, so a steady-state connection costs one read.
 #[spacetimedb::reducer(client_connected)]
 pub fn stamp_rules_version_on_connect(ctx: &ReducerContext) {
+    // Before the early return below: every reconnect registers the caller, not
+    // only the first after a publish (`workspaces.allium: RegisterUserProfile`).
+    register_user_profile(ctx);
     let row = RulesVersion {
         id: 1,
         version: RULES_VERSION,

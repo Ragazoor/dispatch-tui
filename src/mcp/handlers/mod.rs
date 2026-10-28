@@ -10,6 +10,7 @@ mod hooks;
 mod keybindings;
 mod learnings;
 mod managed_feeds;
+mod people;
 mod task_refs;
 mod tasks;
 mod types;

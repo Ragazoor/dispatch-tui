@@ -126,6 +126,7 @@ pub mod session_request_timeout_type;
 pub mod session_request_timeouts_table;
 pub mod session_request_type;
 pub mod session_requests_table;
+pub mod set_display_name_reducer;
 pub mod set_schema_version_reducer;
 pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
@@ -158,6 +159,8 @@ pub mod unsubscribe_from_epic_reducer;
 pub mod update_work_package_with_links_reducer;
 pub mod usage_event_type;
 pub mod usage_events_table;
+pub mod user_profile_type;
+pub mod user_profiles_table;
 pub mod work_package_item_ref_type;
 pub mod work_package_link_type;
 pub mod work_package_links_table;
@@ -285,6 +288,7 @@ pub use session_request_timeout_type::SessionRequestTimeout;
 pub use session_request_timeouts_table::*;
 pub use session_request_type::SessionRequest;
 pub use session_requests_table::*;
+pub use set_display_name_reducer::set_display_name;
 pub use set_schema_version_reducer::set_schema_version;
 pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
@@ -317,6 +321,8 @@ pub use unsubscribe_from_epic_reducer::unsubscribe_from_epic;
 pub use update_work_package_with_links_reducer::update_work_package_with_links;
 pub use usage_event_type::UsageEvent;
 pub use usage_events_table::*;
+pub use user_profile_type::UserProfile;
+pub use user_profiles_table::*;
 pub use work_package_item_ref_type::WorkPackageItemRef;
 pub use work_package_link_type::WorkPackageLink;
 pub use work_package_links_table::*;
@@ -633,6 +639,9 @@ pub enum Reducer {
     SeedWorkPackages {
         rows: Vec<WorkPackage>,
     },
+    SetDisplayName {
+        name: String,
+    },
     SetSchemaVersion {
         version: i64,
     },
@@ -773,6 +782,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedUsageEvents { .. } => "seed_usage_events",
             Reducer::SeedWorkPackageLinks { .. } => "seed_work_package_links",
             Reducer::SeedWorkPackages { .. } => "seed_work_packages",
+            Reducer::SetDisplayName { .. } => "set_display_name",
             Reducer::SetSchemaVersion { .. } => "set_schema_version",
             Reducer::SetTaskEpic { .. } => "set_task_epic",
             Reducer::SetVerifyCommand { .. } => "set_verify_command",
@@ -1318,6 +1328,11 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&seed_work_packages_reducer::SeedWorkPackagesArgs {
                 rows: rows.clone(),
 }),
+            Reducer::SetDisplayName{
+                name,
+}             => __sats::bsatn::to_vec(&set_display_name_reducer::SetDisplayNameArgs {
+                name: name.clone(),
+}),
             Reducer::SetSchemaVersion{
                 version,
 }             => __sats::bsatn::to_vec(&set_schema_version_reducer::SetSchemaVersionArgs {
@@ -1446,6 +1461,7 @@ pub struct DbUpdate {
     todos: __sdk::TableUpdate<Todo>,
     unseen_tasks: __sdk::TableUpdate<UnseenTask>,
     usage_events: __sdk::TableUpdate<UsageEvent>,
+    user_profiles: __sdk::TableUpdate<UserProfile>,
     work_package_links: __sdk::TableUpdate<WorkPackageLink>,
     work_packages: __sdk::TableUpdate<WorkPackage>,
 }
@@ -1537,6 +1553,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "usage_events" => db_update
                     .usage_events
                     .append(usage_events_table::parse_table_update(table_update)?),
+                "user_profiles" => db_update
+                    .user_profiles
+                    .append(user_profiles_table::parse_table_update(table_update)?),
                 "work_package_links" => db_update
                     .work_package_links
                     .append(work_package_links_table::parse_table_update(table_update)?),
@@ -1659,6 +1678,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.usage_events = cache
             .apply_diff_to_table::<UsageEvent>("usage_events", &self.usage_events)
             .with_updates_by_pk(|row| &row.id);
+        diff.user_profiles = cache
+            .apply_diff_to_table::<UserProfile>("user_profiles", &self.user_profiles)
+            .with_updates_by_pk(|row| &row.identity);
         diff.work_package_links = cache
             .apply_diff_to_table::<WorkPackageLink>("work_package_links", &self.work_package_links)
             .with_updates_by_pk(|row| &row.id);
@@ -1752,6 +1774,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "usage_events" => db_update
                     .usage_events
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "user_profiles" => db_update
+                    .user_profiles
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "work_package_links" => db_update
                     .work_package_links
@@ -1853,6 +1878,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "usage_events" => db_update
                     .usage_events
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "user_profiles" => db_update
+                    .user_profiles
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "work_package_links" => db_update
                     .work_package_links
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1901,6 +1929,7 @@ pub struct AppliedDiff<'r> {
     todos: __sdk::TableAppliedDiff<'r, Todo>,
     unseen_tasks: __sdk::TableAppliedDiff<'r, UnseenTask>,
     usage_events: __sdk::TableAppliedDiff<'r, UsageEvent>,
+    user_profiles: __sdk::TableAppliedDiff<'r, UserProfile>,
     work_package_links: __sdk::TableAppliedDiff<'r, WorkPackageLink>,
     work_packages: __sdk::TableAppliedDiff<'r, WorkPackage>,
     __unused: std::marker::PhantomData<&'r ()>,
@@ -2009,6 +2038,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<UsageEvent>(
             "usage_events",
             &self.usage_events,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<UserProfile>(
+            "user_profiles",
+            &self.user_profiles,
             event,
         );
         callbacks.invoke_table_row_callbacks::<WorkPackageLink>(
@@ -2708,6 +2742,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         todos_table::register_table(client_cache);
         unseen_tasks_table::register_table(client_cache);
         usage_events_table::register_table(client_cache);
+        user_profiles_table::register_table(client_cache);
         work_package_links_table::register_table(client_cache);
         work_packages_table::register_table(client_cache);
     }
@@ -2739,6 +2774,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "todos",
         "unseen_tasks",
         "usage_events",
+        "user_profiles",
         "work_package_links",
         "work_packages",
     ];

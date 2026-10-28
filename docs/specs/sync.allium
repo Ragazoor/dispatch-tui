@@ -682,6 +682,25 @@ rule SubscribeToThisHostsSessionRequests {
         -- like the rest.
 }
 
+rule SubscribeToUserProfiles {
+    when: UserIdentitySettled(identity)
+
+    let connection = the_board_connection()
+
+    requires: connection.status = connected
+
+    ensures: UserProfileSubscriptionAsserted(connection: connection)
+
+    @guidance
+        -- Every UserProfile row (workspaces.allium), unfiltered: the
+        -- directory of identities and display names is readable by every
+        -- connected client (workspaces.allium, D7). A row holds an identity,
+        -- a name, the super-admin flag and a creation stamp, nothing private.
+        -- The board needs it to show a creator by name
+        -- (CreatorIsShownByName). Re-asserted on every connection, like the
+        -- rest.
+}
+
 rule SubscribeToAgents {
     when: UserIdentitySettled(identity)
 

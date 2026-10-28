@@ -407,6 +407,12 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "toggle_split_mode",
         "Toggle split view: the board side by side with an agent pane. With the pane open, Space swaps the selected task into it",
     ),
+    normal(
+        &["u"],
+        None,
+        "set_display_name",
+        "Set your display name, shown beside what you create",
+    ),
     normal(&["?"], None, "toggle_help", "Toggle the help overlay"),
     // ---- board.detail ----
     r(

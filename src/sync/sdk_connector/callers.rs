@@ -35,9 +35,9 @@ use crate::spacetime::bindings::{
     report_pr_unreadable as _, report_session_request_done as _,
     report_session_request_failed as _, request_dispatch as _, request_exit_session as _,
     request_wrap_up as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
-    save_repo_path as _, save_setting as _, set_task_epic as _, set_verify_command as _,
-    subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
-    subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
+    save_repo_path as _, save_setting as _, set_display_name as _, set_task_epic as _,
+    set_verify_command as _, subagent_clear as _, subagent_clear_and_void_pending_stop as _,
+    subagent_start as _, subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
     unlink_work_package_item as _, unsubscribe_from_epic as _, update_work_package_with_links as _,
     DbConnection, DispatchRequestsTableAccess as _, EpicsTableAccess as _,
     LearningsTableAccess as _, SessionRequestsTableAccess as _, TasksTableAccess as _,
@@ -205,6 +205,10 @@ impl ReducerCaller for SdkReducerCaller {
             |t| matches_create(t, &wanted)
         )
         .map(TaskId)
+    }
+
+    async fn set_display_name(&self, name: String) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the display name change", set_display_name_then(name))
     }
 
     async fn mark_epic_seen(

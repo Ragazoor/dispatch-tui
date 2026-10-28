@@ -20,6 +20,10 @@ pub enum InputMessage {
     SubmitRepoPath(String),
     SubmitTag(Option<TaskTag>),
     SubmitBaseBranch(String),
+    /// `u` on the board (`workspaces.allium: SetOwnNameFromBoard`).
+    StartSetDisplayName,
+    /// Enter in the display-name input.
+    SubmitDisplayName(String),
     /// A repository's own default branch, come back from
     /// `SettingsCommand::DetectDefaultBranch`. Applied only while the
     /// base-branch step is still open and its buffer still holds `replacing` —
@@ -85,6 +89,8 @@ impl InputMessage {
             InputMessage::SubmitBaseBranch(value) => {
                 forms::submit_base_branch(&mut app.input, &mut app.status, value)
             }
+            InputMessage::StartSetDisplayName => app.handle_start_set_display_name(),
+            InputMessage::SubmitDisplayName(name) => app.handle_submit_display_name(name),
             InputMessage::DefaultBranchDetected { branch, replacing } => {
                 forms::default_branch_detected(&mut app.input, branch, replacing)
             }

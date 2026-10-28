@@ -40,7 +40,8 @@ impl App {
             | InputMode::InputEpicTitle
             | InputMode::InputEpicDescription
             | InputMode::InputWorkPackageTitle(_)
-            | InputMode::RenameWorkPackage(_) => N::BoardText,
+            | InputMode::RenameWorkPackage(_)
+            | InputMode::InputDisplayName => N::BoardText,
             InputMode::LinkWorkPackage { .. } => N::BoardPickerWorkPackage,
             InputMode::ConfirmDeleteWorkPackage(_) => N::BoardConfirmDeleteWorkPackage,
             InputMode::InputRepoPath => N::BoardPickerRepoPath,

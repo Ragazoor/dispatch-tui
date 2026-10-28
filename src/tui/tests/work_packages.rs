@@ -1125,6 +1125,75 @@ fn the_package_view_names_the_package_in_its_border() {
     assert!(buffer_contains(&buf, "Window 1"));
 }
 
+/// `workspaces.allium: CreatorIsShownByName` on the card: the line under the
+/// title ends with the creator as shown.
+#[test]
+fn the_package_card_names_its_creator() {
+    let mut app = board_with_package();
+    app.board.work_packages[0].created_by = Some("Alice".to_string());
+    let buf = render_to_buffer(&mut app, 160, 40);
+    assert!(buffer_contains(&buf, "by Alice"));
+}
+
+// ---------------------------------------------------------------------------
+// The person's own display name (workspaces.allium: SetOwnNameFromBoard)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn i_opens_an_empty_display_name_input() {
+    let mut app = board_with_package();
+    app.handle_key(make_key(KeyCode::Char('u')));
+    assert_eq!(app.input.mode, InputMode::InputDisplayName);
+    assert_eq!(app.input.buffer, "");
+}
+
+#[test]
+fn enter_in_the_display_name_input_sends_the_trimmed_name() {
+    use crate::tui::commands::PeopleCommand;
+    let mut app = board_with_package();
+    app.handle_key(make_key(KeyCode::Char('u')));
+    for c in " Al ".chars() {
+        app.handle_key(make_key(KeyCode::Char(c)));
+    }
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Enter)));
+    assert!(
+        matches!(
+            cmds.as_slice(),
+            [Command::People(PeopleCommand::SetDisplayName(name))] if name == "Al"
+        ),
+        "{cmds:?}"
+    );
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn a_blank_display_name_sends_nothing() {
+    let mut app = board_with_package();
+    app.handle_key(make_key(KeyCode::Char('u')));
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Enter)));
+    assert!(cmds.is_empty(), "{cmds:?}");
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn esc_in_the_display_name_input_sends_nothing() {
+    let mut app = board_with_package();
+    app.handle_key(make_key(KeyCode::Char('u')));
+    app.handle_key(make_key(KeyCode::Char('A')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Esc)));
+    assert!(cmds.is_empty(), "{cmds:?}");
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn the_display_name_input_draws_its_box() {
+    let mut app = board_with_package();
+    app.handle_key(make_key(KeyCode::Char('u')));
+    let buf = render_to_buffer(&mut app, 160, 40);
+    assert!(buffer_contains(&buf, "Your display name"));
+}
+
 // ---------------------------------------------------------------------------
 // Snapshots (120×40, as in `snapshots.rs`)
 // ---------------------------------------------------------------------------

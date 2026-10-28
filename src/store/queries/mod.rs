@@ -6,6 +6,7 @@ mod board;
 mod dispatch_requests;
 mod epics;
 mod learnings;
+mod people;
 mod pr_status;
 mod session_requests;
 mod settings;

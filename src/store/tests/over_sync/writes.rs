@@ -50,6 +50,7 @@ enum Sent {
     CreateTask(Box<bindings::Task>),
     CreateTaskSignalled(Box<bindings::Task>),
     MarkEpicSeen(String, EpicId),
+    SetDisplayName(String),
     PatchTask(TaskId, Box<bindings::TaskPatch>),
     DeleteTask(TaskId),
     SetTaskEpic(TaskId, i64, String),
@@ -268,6 +269,10 @@ impl ReducerCaller for RecordingCaller {
     async fn create_task_signalled(&self, row: bindings::Task) -> anyhow::Result<TaskId> {
         self.record(Sent::CreateTaskSignalled(Box::new(row)))?;
         Ok(TaskId(42))
+    }
+
+    async fn set_display_name(&self, name: String) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::SetDisplayName(name))
     }
 
     async fn mark_epic_seen(

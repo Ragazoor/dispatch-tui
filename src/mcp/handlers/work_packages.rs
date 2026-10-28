@@ -154,6 +154,9 @@ fn format_view(view: &WorkPackageView) -> String {
     if let Some(order) = p.sort_order {
         out.push_str(&format!("\nSort order: {order}"));
     }
+    if let Some(creator) = &p.created_by {
+        out.push_str(&format!("\nCreated by: {creator}"));
+    }
     out.push_str(&format!(
         "\nCreated: {}\nUpdated: {}",
         p.created_at.format("%Y-%m-%d %H:%M:%S UTC"),

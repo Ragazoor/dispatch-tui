@@ -278,6 +278,61 @@ fn memory_caller_matches_the_real_reducers() {
             "subscribed_epics after unsubscribe"
         );
 
+        // -- people and display names -----------------------------------------------
+        // The real module registers a profile when the connection opens
+        // (`RegisterUserProfile`); the memory store has no connect event, so it
+        // is told. Then the same name rules apply on both sides.
+        let me = accepted.identity.as_str();
+        wait_for!(
+            rows_real.display_name_of(me).is_empty() && rows_real.shown_name_of(me) == me[..8]
+        );
+        mem.register_user_profile();
+        mem.register_user_profile(); // idempotent
+        assert_eq!(
+            rows_real.shown_name_of(me),
+            rows_mem.shown_name_of(me),
+            "the prefix shown before any name is set"
+        );
+        for refused in ["", "   ", &"x".repeat(65)] {
+            let real_outcome = real.set_display_name(refused.into()).await.unwrap();
+            let mem_outcome = mem.set_display_name(refused.into()).await.unwrap();
+            assert!(
+                matches!(real_outcome, ReducerOutcome::Refused(_)),
+                "real store accepted {refused:?}"
+            );
+            assert!(
+                matches!(mem_outcome, ReducerOutcome::Refused(_)),
+                "memory store accepted {refused:?}"
+            );
+        }
+        real.set_display_name("  Alice  ".into())
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        wait_for!(rows_real.display_name_of(me) == "Alice");
+        mem.set_display_name("  Alice  ".into())
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        assert_eq!(
+            rows_real.display_name_of(me),
+            rows_mem.display_name_of(me),
+            "the trimmed name after set_display_name"
+        );
+        assert_eq!(rows_real.shown_name_of(me), "Alice");
+        assert_eq!(
+            dispatch_spacetime_module::shown_name("", me),
+            me[..8],
+            "the module's shown_name is the 8-character prefix"
+        );
+        assert_eq!(
+            dispatch_tui::models::shown_name("", me),
+            dispatch_spacetime_module::shown_name("", me),
+            "the board's shown_name and the module's agree"
+        );
+
         // -- new-task signal --------------------------------------------------------
         // A task created with the signal on is marked for each follower of its
         // epic; entering the epic clears it; moving it out clears it too.

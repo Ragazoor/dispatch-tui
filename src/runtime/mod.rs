@@ -660,6 +660,7 @@ struct TuiRuntime {
     task_svc: Arc<dyn crate::service::TaskServiceApi>,
     epic_svc: Arc<dyn crate::service::EpicServiceApi>,
     work_package_svc: Arc<dyn crate::service::WorkPackageServiceApi>,
+    people_svc: Arc<crate::service::PeopleService>,
     learning_svc: Arc<dyn crate::service::LearningServiceApi>,
     msg_tx: mpsc::UnboundedSender<Message>,
     runner: Arc<dyn ProcessRunner>,
@@ -736,6 +737,7 @@ mod editor;
 mod epics;
 mod event_loop;
 mod learnings;
+mod people;
 mod pr;
 mod repo_sync;
 mod session_host;
@@ -972,6 +974,7 @@ impl TuiRuntime {
             task_svc: services.tasks,
             epic_svc: services.epics,
             work_package_svc: services.work_packages,
+            people_svc: services.people,
             learning_svc: services.learnings,
             feed_runner: Some(feed_runner),
             feed_invalidate_tx,

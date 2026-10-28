@@ -200,6 +200,16 @@ mirror!(
 );
 
 mirror!(
+    module::UserProfile,
+    bindings::UserProfile {
+        identity,
+        display_name,
+        is_super_admin,
+        created_at
+    }
+);
+
+mirror!(
     module::Setting,
     bindings::Setting {
         id,

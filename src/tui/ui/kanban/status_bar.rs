@@ -230,6 +230,10 @@ fn status_line(app: &App) -> (Line<'static>, Style) {
             "New work package: type a title  [Enter] create  [Esc] back",
             CYAN,
         ),
+        InputMode::InputDisplayName => hint(
+            "Display name: type a name  [Enter] save  [Esc] cancel",
+            CYAN,
+        ),
         InputMode::RenameWorkPackage(_) => {
             hint("Rename work package: [Enter] save  [Esc] cancel", CYAN)
         }

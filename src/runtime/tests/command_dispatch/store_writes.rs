@@ -674,3 +674,23 @@ async fn dispatch_repo_filter_delete_repo_path_forgets_the_path() {
         "the path should no longer be known"
     );
 }
+
+/// `workspaces.allium: SetOwnNameFromBoard`: the command sets the caller's own
+/// name through the people service, and says so on the status line.
+#[tokio::test]
+async fn setting_a_display_name_saves_it_and_reports_it() {
+    let db = test_db().await;
+    let (rt, mut app) = test_runtime_over(db.clone()).await;
+
+    dispatch_one(
+        &rt,
+        &mut app,
+        Command::People(crate::tui::commands::PeopleCommand::SetDisplayName(
+            "Alice".into(),
+        )),
+    )
+    .await;
+
+    assert_eq!(db.shown_name_of(crate::store::MEMORY_USER_ID), "Alice");
+    assert_eq!(app.status_message(), Some("Display name set to Alice"));
+}

@@ -156,6 +156,54 @@ rule SetDisplayName {
         -- directory shows the identity prefix beside a duplicated name.
 }
 
+rule SetOwnNameFromBoard {
+    when: SetOwnNameKeyPressed()
+
+    ensures: NameInputOpened()
+
+    @guidance
+        -- The TUI twin of SetDisplayName, bound to `u` ("user") in the
+        -- board's normal mode and listed in the keybinding table. The input
+        -- opens empty. Enter sends
+        -- SetDisplayName(typed); an empty or all-blank entry sends nothing
+        -- and Esc sends nothing, so the name stays as it was. A refusal from
+        -- the store (name too long) shows in the error popup; success shows
+        -- "Display name set to <name>" on the status line.
+}
+
+rule SetDisplayNameViaMcp {
+    when: SetDisplayNameToolCalled(name)
+
+    ensures: SetDisplayName(name)
+
+    @guidance
+        -- Agents are first-class users: the MCP twin of SetOwnNameFromBoard.
+        -- It sets the name of the identity the agent's host board runs under
+        -- (D10). write, idempotent, not destructive. The result names the
+        -- saved (trimmed) name. An empty or too-long name is refused with
+        -- the store's reason.
+}
+
+rule ShownName {
+    when: ANameIsShown(identity)
+
+    let profile = UserProfile{identity: identity}
+
+    ensures: shown_name(identity) =
+        if exists profile and profile.display_name != "": profile.display_name
+        else: identity.prefix(config.identity_prefix_length)
+
+    @guidance
+        -- Two twins, because the board cannot link the module crate in a
+        -- release build: `shown_name` in the module's user_profile.rs, used
+        -- by the module and MemoryReducerCaller, and `models::shown_name`,
+        -- used by the board. The conformance scenario asserts they agree;
+        -- nothing else re-slices an identity. A creator with no UserProfile row
+        -- (a row written before profiles existed) is shown by prefix.
+        -- list_work_packages and the package card are today's surfaces that
+        -- name a creator: each shows the shown name (CreatorIsShownByName).
+}
+
 -- Super-admins ----------------------------------------------
 
 rule ClaimSuperAdmin {

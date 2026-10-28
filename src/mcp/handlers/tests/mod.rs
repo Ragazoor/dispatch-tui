@@ -1350,6 +1350,7 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ),
         ("delete_learning", json!({"learning_id": 1})),
         ("set_verify_command", json!({"repo_path": "/r"})),
+        ("set_display_name", json!({"name": "n"})),
         (
             "exit_session",
             json!({"task_id": 1, "token": "t", "action": "rebase"}),

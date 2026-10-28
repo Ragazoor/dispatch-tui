@@ -69,6 +69,10 @@ pub(super) async fn dispatch(
             rt.exec_work_package_command(app, cmd).await;
             vec![]
         }
+        People(cmd) => {
+            rt.exec_people_command(app, cmd).await;
+            vec![]
+        }
     }
 }
 

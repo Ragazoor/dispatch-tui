@@ -350,6 +350,9 @@ rule PackageCardPlacement {
         -- identity is PURPLE — board-visuals.allium: WorkPackageCard), and a
         -- second line "N items · M done" counting the linked items the board
         -- holds and how many of them are done; "no items" when it holds none.
+        -- When the package has a creator, the line ends " · by <creator>",
+        -- the creator shown by display name or identity prefix
+        -- (workspaces.allium: CreatorIsShownByName).
         -- A package card is a view onto work counted elsewhere, so the
         -- column header's card count does not include it, select-all and
         -- multi-select skip it, and H/L do nothing on it. J/K moves it among

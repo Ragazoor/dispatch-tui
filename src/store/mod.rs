@@ -740,6 +740,20 @@ pub trait TaskAndEpicStore: TaskCrud + EpicCrud {}
 impl<T: TaskCrud + EpicCrud> TaskAndEpicStore for T {}
 
 // ---------------------------------------------------------------------------
+// PeopleStore — the caller's own profile (`workspaces.allium`)
+// ---------------------------------------------------------------------------
+
+/// People and display names. A board reads the directory through
+/// [`BoardReads`]-style row accessors; what it WRITES is only its own name.
+#[async_trait::async_trait]
+pub trait PeopleStore: Send + Sync {
+    /// `workspaces.allium: SetDisplayName`: set the display name of the
+    /// identity this connection writes as. The store trims, bounds and refuses
+    /// a blank or over-long name; answers the name it saved.
+    async fn set_display_name(&self, name: &str) -> Result<String>;
+}
+
+// ---------------------------------------------------------------------------
 // WorkPackageStore — composite for the work-package service
 // ---------------------------------------------------------------------------
 
@@ -936,6 +950,7 @@ pub trait UsageStore: Send + Sync {
 pub trait TaskStore:
     TaskAndEpicStore
     + WorkPackageStore
+    + PeopleStore
     + RepoConfigStore
     + HostStore
     + SubscriptionStore
@@ -954,6 +969,7 @@ pub trait TaskStore:
 impl<
         T: TaskAndEpicStore
             + WorkPackageStore
+            + PeopleStore
             + RepoConfigStore
             + HostStore
             + SubscriptionStore
@@ -1115,6 +1131,13 @@ pub const MEMORY_HOST_ID: &str = "test-host";
 pub const MEMORY_USER_ID: &str = "test-user";
 
 impl Store {
+    /// `identity` as a card or tool result names them: their display name, or
+    /// the identity's prefix when they have set none
+    /// (`workspaces.allium: ShownName`).
+    pub fn shown_name_of(&self, identity: &str) -> String {
+        self.rows.shown_name_of(identity)
+    }
+
     /// A handle over `rows`, writing through `caller`, with this install's
     /// identity in `<data_dir>/host.json`.
     ///
@@ -1187,6 +1210,10 @@ impl Store {
                 .with_sender(MEMORY_USER_ID)
                 .with_registered_host(MEMORY_HOST_ID, MEMORY_USER_ID),
         );
+        // A real connection registers its profile on connect
+        // (`workspaces.allium: RegisterUserProfile`); a memory store has no
+        // connect event, so the fixture does it.
+        memory.register_user_profile();
         let caller: Arc<dyn s::ReducerCaller> = memory.clone();
         let identity = Arc::new(s::SettledIdentity::default());
         identity.settle(MEMORY_USER_ID);

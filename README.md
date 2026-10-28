@@ -94,6 +94,8 @@ In a hurry? Press `D` instead. It skips the form, dispatches at once, and the ag
 
 **Work packages** — a set of epics and tasks that serve one goal. `w` links the selected card to a package; `Space` on a package card opens it.
 
+**Your name** — `u` sets the display name other people see beside what you create; agents can set it with the `set_display_name` tool. Until you set one, people see the first eight characters of your identity.
+
 **Knowledge base** — agents record what they learn. Dispatch injects the relevant entries into the next agent's prompt.
 
 **Feeds** — a shell command that pulls work onto the board on a schedule, such as open pull requests or CVE alerts.

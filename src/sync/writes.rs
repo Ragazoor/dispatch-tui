@@ -130,6 +130,10 @@ pub trait ReducerCaller: Send + Sync {
     /// its epic and ancestors in the same transaction
     /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryFollower`).
     async fn create_task_signalled(&self, row: bindings::Task) -> Result<TaskId>;
+    /// `workspaces.allium: SetDisplayName`: set the CALLER's own display name.
+    /// The store trims, bounds and refuses; the caller is whoever the
+    /// connection is, so there is no identity argument to forge.
+    async fn set_display_name(&self, name: String) -> Result<ReducerOutcome>;
     /// `tasks.allium: SeeTasksByEnteringTheirEpic`.
     async fn mark_epic_seen(&self, subscriber: String, epic_id: EpicId) -> Result<ReducerOutcome>;
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome>;

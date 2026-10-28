@@ -28,12 +28,15 @@ fn overlay_width(area: Rect) -> u16 {
 /// The title field line, the caret drawn where `app.input.caret` puts it and
 /// a long title scrolled to keep it visible (`shared::caret_line`).
 fn title_field_line(app: &App, overlay_width: u16) -> Line<'static> {
-    const LABEL: &str = "Title: ";
+    field_line(app, overlay_width, "Title: ")
+}
+
+fn field_line(app: &App, overlay_width: u16, label: &str) -> Line<'static> {
     let value_width = usize::from(overlay_width.saturating_sub(BORDER_ROWS))
-        .saturating_sub(LABEL.len())
+        .saturating_sub(label.len())
         .max(1);
     caret_line(
-        LABEL.to_string(),
+        label.to_string(),
         &app.input.buffer,
         app.input.caret,
         value_width,
@@ -133,24 +136,24 @@ pub(in crate::tui::ui::kanban) fn render_work_package_picker_overlay(
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// Draw the one-line rename input over a package card.
+/// Draw the one-line rename input over a package card, or the one-line
+/// display-name input (`workspaces.allium: SetOwnNameFromBoard`): the same
+/// box with a different title and label.
 pub(in crate::tui::ui::kanban) fn render_work_package_rename_overlay(
     frame: &mut Frame,
     app: &App,
     area: Rect,
 ) {
-    if !matches!(app.input.mode, InputMode::RenameWorkPackage(_)) {
-        return;
-    }
+    let (title, label) = match app.input.mode {
+        InputMode::RenameWorkPackage(_) => (" Rename work package ", "Title: "),
+        InputMode::InputDisplayName => (" Your display name ", "Name: "),
+        _ => return,
+    };
     let width = overlay_width(area);
-    let block = titled_block(
-        CYAN,
-        BorderType::Rounded,
-        " Rename work package ".to_string(),
-    );
+    let block = titled_block(CYAN, BorderType::Rounded, title.to_string());
     let inner = open_overlay(frame, centered_rect(area, width, 3 + BORDER_ROWS), block);
     let lines = vec![
-        title_field_line(app, width),
+        field_line(app, width, label),
         Line::raw(""),
         Line::from(Span::styled(
             "[Enter] save  [Esc] cancel",
