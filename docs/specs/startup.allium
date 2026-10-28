@@ -446,6 +446,15 @@ contract ManagedStoreHost {
     -- that is not published anywhere.
     managed_database_exists: () -> Boolean
 
+    -- The identity that owns config.managed_database_name, as the store
+    -- reports it, and the identity the `spacetime` CLI is currently logged in
+    -- as (the token in the operator's CLI config). Only the owner may publish.
+    -- Each is null when it cannot be read: a database that is not there has no
+    -- owner, and the CLI may not say who it is. Both are hex, without the
+    -- `0x` prefix the store puts on an owner.
+    managed_database_owner: () -> String?
+    cli_identity: () -> String?
+
     -- A hash of the module .wasm embedded in this binary, and the hash the
     -- managed store records for the module last published to
     -- config.managed_database_name (null when none is recorded). The record
@@ -706,6 +715,7 @@ enum StartupAbortReason {
     | managed_store_did_not_start -- no store is named, nothing answered on the managed address, and the store started there exited or did not serve HTTP within config.managed_store_start_timeout
     | module_needs_manual_migration -- the embedded module differs from the managed store's, and the store would accept it only by deleting data
     | module_publish_failed       -- the embedded module differs from the managed store's, and publishing it failed for any other reason
+    | managed_database_not_owned  -- the `spacetime` CLI is logged in as someone other than the identity that owns the managed database, so it could not publish
     | store_unavailable           -- the first connection to the store failed: unreachable, refused, timed out, not subscribable, or it identified this install as somebody else
     | store_switched              -- the store holds a different database from the one this install's boards last used, and the operator did not pass --accept-store-switch
 }
@@ -718,7 +728,7 @@ enum StartupAbortReason {
 -- failure any more; the reasons that replace it are the ways the managed store
 -- itself can fail to come up.
 --
--- Why the managed store's failures are five values and not one. Each is
+-- Why the managed store's failures are six values and not one. Each is
 -- repaired by a different act, and the operator reads this enum as a list of
 -- distinct things to go and fix. spacetime_cli_missing: install the CLI (the
 -- message says how). managed_store_port_taken: stop whatever holds the port,
@@ -726,7 +736,9 @@ enum StartupAbortReason {
 -- own error, which is attached. module_needs_manual_migration: decide what
 -- to do about data the new schema cannot keep, which dispatch will not decide
 -- for them (AbortWhenTheModuleCannotMigrateAutomatically). module_publish_failed:
--- read the publish error, which is attached. The two start failures — the
+-- read the publish error, which is attached. managed_database_not_owned: log
+-- back in as the database's owner or restore the old CLI config (the message
+-- names both identities). The two start failures — the
 -- process exiting and the wait running out — share one value because both are
 -- "the store dispatch started is not serving" and the attached message is what
 -- tells them apart, the same reasoning store_unavailable applies below.
@@ -1659,11 +1671,56 @@ rule RestartTheManagedStoreWhenItStopsSaving {
         -- sync.allium's RetryAfterBackoff.
 }
 
+rule AbortWhenTheCliDoesNotOwnTheManagedDatabase {
+    when: ManagedStoreReady(operator)
+    requires:
+        managed_database_owner() != null
+        cli_identity() != null
+        managed_database_owner() != cli_identity()
+
+    ensures: StartupAborted(reason: managed_database_not_owned)
+
+    @guidance
+        -- ONLY THE DATABASE'S OWNER MAY PUBLISH TO IT. `spacetime login` in
+        -- another session replaces the token in the operator's CLI config, and
+        -- the identity that token names is a different one. The next publish
+        -- then fails with `403 Forbidden: <identity> is not authorized to
+        -- perform action on database <db>: update database`, and the old
+        -- token cannot be recovered. This rule says so before the publish is
+        -- tried, in terms the operator can act on.
+        --
+        -- ON EVERY LAUNCH THAT FINDS THE DATABASE, not only when a publish is
+        -- due, so that a changed login is noticed the day it happens and not
+        -- at the next module change, when the old token may already be gone.
+        -- It is an abort even when nothing would be published: the board
+        -- itself does not need the CLI's login, but the operator's next
+        -- publish does, and an owner they can no longer act as is a
+        -- loss they should hear about while the old config can still be
+        -- restored.
+        --
+        -- The message names both identities and the two fixes: log back in as
+        -- the owner (`spacetime login`), or restore the previous CLI config.
+        -- Dispatch does not publish under a different identity, move the
+        -- database or take it over.
+        --
+        -- A missing owner (no database yet: the first publish creates it as
+        -- the CLI's identity) or a CLI that cannot say who it is does not
+        -- abort: nothing shows a mismatch, so the launch goes on and a publish
+        -- that then fails reaches AbortWhenTheModulePublishFails as before.
+        --
+        -- The store is stopped with the abort
+        -- (StopTheManagedStoreWhenStartupAborts). Nothing is published and
+        -- nothing is connected to.
+}
+
 rule ConnectWhenTheManagedModuleIsCurrent {
     when: ManagedStoreReady(operator)
     requires:
         recorded_module_hash() = embedded_module_hash()
         managed_database_exists()
+        not (managed_database_owner() != null
+            and cli_identity() != null
+            and managed_database_owner() != cli_identity())
 
     ensures: StoreChosenAtStartup(operator)
 
@@ -1692,6 +1749,9 @@ rule PublishTheEmbeddedModuleWhenTheStoreDiffers {
     requires:
         recorded_module_hash() != embedded_module_hash()
             or not managed_database_exists()
+        not (managed_database_owner() != null
+            and cli_identity() != null
+            and managed_database_owner() != cli_identity())
 
     ensures: ModulePublishFinished(operator, outcome: publish_embedded_module())
 
@@ -2162,15 +2222,16 @@ rule AbortWhenTheAgentPortIsTaken {
 -- and a future startup step that wants to abort belongs in this invariant —
 -- count and list both — or it does not belong at startup.
 --
--- The fourteen values of StartupAbortReason cover those seven: tmux_unavailable
+-- The fifteen values of StartupAbortReason cover those seven: tmux_unavailable
 -- and launch_rejected are the two ways the first fails, and the launch path
 -- cannot tell them apart without asking, which is the distinction
--- DistinguishesAbsentFromBroken exists for; and six are ways the last fails.
+-- DistinguishesAbsentFromBroken exists for; and seven are ways the last fails.
 -- store_unavailable is the store — named or managed — refusing the first
 -- connection; the other five (spacetime_cli_missing, managed_store_port_taken,
 -- managed_store_did_not_start, module_needs_manual_migration,
--- module_publish_failed) are the managed store failing to come up in a state
--- the board can use, for the reasons given beside StartupAbortReason.
+-- module_publish_failed, managed_database_not_owned) are the managed store
+-- failing to come up in a state the board can use, for the reasons given
+-- beside StartupAbortReason.
 --
 -- A store that is merely absent is no longer among them. Until task #12296 a
 -- launch naming no store aborted (store_unconfigured); that condition is now

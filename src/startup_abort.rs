@@ -57,6 +57,10 @@ pub enum StartupAbort {
     /// Publishing the embedded module failed for any other reason.
     /// `AbortWhenTheModulePublishFails`.
     ModulePublishFailed { reason: String },
+    /// The `spacetime` CLI is logged in as `cli`, not `owner`, the identity
+    /// that owns the managed database, so it could not publish.
+    /// `AbortWhenTheCliDoesNotOwnTheManagedDatabase`.
+    ManagedDatabaseNotOwned { cli: String, owner: String },
     /// A store is named and the first connection to it failed, or it
     /// identified this install as somebody else. `startup.allium`'s
     /// `AbortWhenTheStoreCannotBeReached`. Carries the attempt's own reason.

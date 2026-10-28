@@ -52,6 +52,8 @@ struct FakePorts {
     publish: ModulePublishOutcome,
     stop_in_time: bool,
     failed_to_save: bool,
+    owner: Option<String>,
+    cli_identity: Option<String>,
     address: String,
     calls: Mutex<Vec<Call>>,
 }
@@ -65,6 +67,8 @@ impl FakePorts {
             publish: ModulePublishOutcome::Published,
             stop_in_time: true,
             failed_to_save: false,
+            owner: None,
+            cli_identity: None,
             address: MANAGED_STORE_ADDRESS.to_string(),
             calls: Mutex::new(Vec::new()),
         }
@@ -98,6 +102,12 @@ impl ManagedStorePorts for FakePorts {
     fn managed_database_exists(&self) -> bool {
         self.log(Call::DatabaseExists);
         self.database_exists
+    }
+    fn managed_database_owner(&self) -> Option<String> {
+        self.owner.clone()
+    }
+    fn cli_identity(&self) -> Option<String> {
+        self.cli_identity.clone()
     }
     fn publish_embedded_module(&self) -> ModulePublishOutcome {
         self.log(Call::Publish);
@@ -551,6 +561,82 @@ fn a_module_needing_manual_migration_aborts_records_nothing_and_stops_the_store(
     );
     assert_eq!(hashes.current().as_deref(), Some(OLDER));
     assert_eq!(ports.count(Call::Stop), 1);
+}
+
+// ---------------------------------------------------------------------------
+// AbortWhenTheCliDoesNotOwnTheManagedDatabase
+// ---------------------------------------------------------------------------
+
+fn owned_by(owner: Option<&str>, cli: Option<&str>) -> Arc<FakePorts> {
+    let mut fake = FakePorts::new(ManagedAddressState::StoreAnswering);
+    fake.owner = owner.map(str::to_string);
+    fake.cli_identity = cli.map(str::to_string);
+    Arc::new(fake)
+}
+
+#[test]
+fn the_owner_and_the_cli_identity_are_read_from_their_outputs() {
+    use crate::spacetime::managed_store::{parse_database_owner, parse_login_identity};
+    let body = "HTTP/1.1 200 OK\r\n\r\n{\"database_identity\":{\"__identity__\":\"0xc200aa\"},\"owner_identity\":{\"__identity__\":\"0xC200BB12\"},\"host_type\":{}}";
+    assert_eq!(parse_database_owner(body).as_deref(), Some("c200bb12"));
+    assert_eq!(parse_database_owner("{}"), None);
+    assert_eq!(
+        parse_login_identity("You are logged in as c200bb12\n").as_deref(),
+        Some("c200bb12")
+    );
+    assert_eq!(parse_login_identity("You are not logged in"), None);
+}
+
+#[test]
+fn a_cli_logged_in_as_someone_else_aborts_before_publishing_and_stops_the_store() {
+    let ports = owned_by(Some("aaaa"), Some("bbbb"));
+    let hashes = Arc::new(FakeHashes::new(Some(OLDER)));
+
+    assert_eq!(
+        store(&ports, &hashes).bring_up(),
+        Err(StartupAbort::ManagedDatabaseNotOwned {
+            cli: "bbbb".into(),
+            owner: "aaaa".into()
+        })
+    );
+    assert_eq!(ports.count(Call::Publish), 0);
+    assert!(hashes.writes().is_empty());
+    assert_eq!(ports.count(Call::Stop), 1);
+}
+
+#[test]
+fn the_ownership_check_runs_even_when_no_publish_is_due() {
+    let ports = owned_by(Some("aaaa"), Some("bbbb"));
+    let hashes = Arc::new(FakeHashes::new(Some(EMBEDDED)));
+
+    assert_eq!(
+        store(&ports, &hashes).bring_up(),
+        Err(StartupAbort::ManagedDatabaseNotOwned {
+            cli: "bbbb".into(),
+            owner: "aaaa".into()
+        })
+    );
+    assert_eq!(ports.count(Call::Stop), 1);
+}
+
+#[test]
+fn the_owner_logged_in_publishes_as_usual() {
+    let ports = owned_by(Some("aaaa"), Some("aaaa"));
+    let hashes = Arc::new(FakeHashes::new(Some(OLDER)));
+
+    assert_eq!(store(&ports, &hashes).bring_up(), Ok(ready()));
+    assert_eq!(ports.count(Call::Publish), 1);
+}
+
+#[test]
+fn an_unreadable_owner_or_cli_identity_does_not_abort() {
+    for (owner, cli) in [(None, Some("bbbb")), (Some("aaaa"), None), (None, None)] {
+        let ports = owned_by(owner, cli);
+        let hashes = Arc::new(FakeHashes::new(Some(OLDER)));
+
+        assert_eq!(store(&ports, &hashes).bring_up(), Ok(ready()));
+        assert_eq!(ports.count(Call::Publish), 1);
+    }
 }
 
 #[test]

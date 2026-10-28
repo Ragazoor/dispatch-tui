@@ -314,6 +314,14 @@ impl StartupAbort {
                  The board has not started, and the store was stopped. Run `dispatch tui` \
                  again once the cause is fixed."
             ),
+            Self::ManagedDatabaseNotOwned { cli, owner } => format!(
+                "The `spacetime` CLI is logged in as {cli}, but the `dispatch` database in the \
+                 local store is owned by {owner}, and only the owner may publish to it. This \
+                 usually follows a `spacetime login` that replaced the CLI's token. The board \
+                 has not started and the store was stopped. Log back in as the owner, or restore \
+                 the previous CLI config (`~/.config/spacetime/cli.toml`), then run `dispatch \
+                 tui` again. Dispatch will not publish as anyone else."
+            ),
             Self::StoreSwitched {
                 address,
                 pinned,

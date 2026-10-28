@@ -285,6 +285,44 @@ fn http_get(address: &str, path: &str, timeout: Duration) -> HttpReply {
     }
 }
 
+/// The text of a `200` reply to `GET path`, headers included, read to the end
+/// (capped). `None` for anything else. The database's description is small, so
+/// the cap is generous; the body is searched, not decoded, so a chunked reply
+/// reads the same as a plain one.
+fn http_get_body(address: &str, path: &str, timeout: Duration) -> Option<String> {
+    let target = address.to_socket_addrs().ok()?.next()?;
+    let mut stream = TcpStream::connect_timeout(&target, timeout).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut seen = Vec::new();
+    stream.take(64 * 1024).read_to_end(&mut seen).ok()?;
+    let text = String::from_utf8_lossy(&seen).into_owned();
+    let code = text.split_whitespace().nth(1)?.parse::<u16>().ok()?;
+    (code == 200).then_some(text)
+}
+
+/// The hex identity after `owner_identity` in the store's description of a
+/// database (`"owner_identity":{"__identity__":"0x<hex>"}`), without the `0x`.
+pub fn parse_database_owner(body: &str) -> Option<String> {
+    let after = &body[body.find("owner_identity")?..];
+    let hex = &after[after.find("0x")? + 2..];
+    let end = hex
+        .find(|c: char| !c.is_ascii_hexdigit())
+        .unwrap_or(hex.len());
+    (end > 0).then(|| hex[..end].to_ascii_lowercase())
+}
+
+/// The identity in `spacetime login show`'s `You are logged in as <hex>`.
+pub fn parse_login_identity(output: &str) -> Option<String> {
+    let rest = output.split("logged in as").nth(1)?;
+    let word = rest.split_whitespace().next()?;
+    let word = word.strip_prefix("0x").unwrap_or(word);
+    (!word.is_empty() && word.chars().all(|c| c.is_ascii_hexdigit()))
+        .then(|| word.to_ascii_lowercase())
+}
+
 /// Whether an HTTP reply head is what the store's HTTP layer produces for a
 /// ping: an empty body and the CORS headers it adds to every answer. Another
 /// server's bare 200 has neither, so it is not adopted as a store.
@@ -315,6 +353,12 @@ pub trait ManagedStorePorts: Send + Sync {
     fn start_managed_store(&self) -> Result<(), String>;
     /// Whether the store holds [`MANAGED_DATABASE_NAME`] at all.
     fn managed_database_exists(&self) -> bool;
+    /// The identity that owns [`MANAGED_DATABASE_NAME`], hex without a `0x`
+    /// prefix; `None` when the database is absent or the store does not say.
+    fn managed_database_owner(&self) -> Option<String>;
+    /// The identity the `spacetime` CLI is logged in as, hex; `None` when it
+    /// cannot say.
+    fn cli_identity(&self) -> Option<String>;
     fn publish_embedded_module(&self) -> ModulePublishOutcome;
     /// True when it stopped within the stop timeout.
     fn stop_managed_store(&self) -> bool;
@@ -757,6 +801,26 @@ impl ManagedStorePorts for SpacetimeManagedStore {
         )
     }
 
+    fn managed_database_owner(&self) -> Option<String> {
+        let path = format!("/v1/database/{MANAGED_DATABASE_NAME}");
+        let body = http_get_body(&self.layout.address, &path, PROBE_TIMEOUT)?;
+        parse_database_owner(&body)
+    }
+
+    fn cli_identity(&self) -> Option<String> {
+        let mut argv: Vec<String> = Vec::new();
+        if let Some(config) = &self.config_path {
+            argv.push(format!("--config-path={}", config.display()));
+        }
+        argv.extend(["login", "show"].map(String::from));
+        let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+        let output = self.runner.run("spacetime", &args).ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        parse_login_identity(&String::from_utf8_lossy(&output.stdout))
+    }
+
     fn publish_embedded_module(&self) -> ModulePublishOutcome {
         let wasm_path = self.layout.data_dir.join(EXTRACTED_MODULE_FILE);
         let written = std::fs::create_dir_all(&self.layout.data_dir)
@@ -927,6 +991,18 @@ impl ManagedStore {
                     let stopped = self.stop_once(|| self.ports.stop_spawned_store());
                     return Err(StartupAbort::ManagedStoreDidNotStart { reason, stopped });
                 }
+            }
+        }
+
+        // `AbortWhenTheCliDoesNotOwnTheManagedDatabase`: on every launch, so a
+        // changed login is noticed before the publish that would fail on it.
+        if let (Some(owner), Some(cli)) = (
+            self.ports.managed_database_owner(),
+            self.ports.cli_identity(),
+        ) {
+            if owner != cli {
+                self.stop_once(|| self.ports.stop_managed_store());
+                return Err(StartupAbort::ManagedDatabaseNotOwned { cli, owner });
             }
         }
 

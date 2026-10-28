@@ -41,6 +41,10 @@ fn every_startup_abort_message_reads_as_prose() {
         ModulePublishFailed {
             reason: "upload refused".to_string(),
         },
+        ManagedDatabaseNotOwned {
+            cli: "bbbb".to_string(),
+            owner: "aaaa".to_string(),
+        },
         StoreUnavailable {
             reason: "connection refused".to_string(),
         },

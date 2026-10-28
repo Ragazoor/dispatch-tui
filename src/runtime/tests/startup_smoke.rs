@@ -489,3 +489,56 @@ async fn an_upgrade_from_the_previous_store_keeps_every_task_and_epic() {
     let seen = visible_rows(&b).await;
     assert_eq!(seen, expected, "upgrade smoke: the user's rows changed");
 }
+
+/// `AbortWhenTheCliDoesNotOwnTheManagedDatabase` against a real store: the
+/// previous store's database is owned by *user*, and the CLI config the board
+/// is given holds a different login, so startup stops before publishing
+/// instead of failing on the store's 403.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cli_login_that_does_not_own_the_database_aborts_before_publishing() {
+    if !live_store_tests_should_run() {
+        return;
+    }
+    let fixture = previous_store_fixture();
+    let dir = tempfile::tempdir().unwrap();
+    copy_dir(&fixture, dir.path(), &[]);
+    let store_data = dir.path().join("data");
+    let owner_config = dir.path().join("cli.toml");
+    let keys = dir.path().join("keys");
+    let store = LiveStore::start(&store_data, &keys, &owner_config);
+    let owner = cli_identity(&owner_config);
+
+    // A config of its own: its first call against this store gets a
+    // server-issued login, which is not the owner's.
+    let other_config = dir.path().join("other-cli.toml");
+    super::live_store::spacetime(&other_config, &["list", "-s", &store.url()]);
+    let other = cli_identity(&other_config);
+    assert_ne!(other, owner, "the second login must be someone else");
+
+    let (data_dir, paths) = board_dir(&dir.path().join("user"));
+    let record = FileModuleHashRecord::in_data_dir(&store_data);
+    // Make a publish due, so the abort is shown to come before it.
+    let _ = std::fs::remove_file(record.path());
+
+    let aborted = boot(
+        &data_dir,
+        &paths,
+        managed_target(
+            store.address(),
+            &store_data,
+            dir.path(),
+            &other_config,
+            &keys,
+        ),
+    )
+    .await;
+    let message = match aborted {
+        Ok(_) => panic!("startup went on with a CLI login that does not own the database"),
+        Err(e) => e.to_string(),
+    };
+    assert!(
+        message.contains(&other) && message.contains(&owner),
+        "the abort names both identities: {message}"
+    );
+    assert_eq!(record.recorded_module_hash(), None, "nothing was published");
+}
