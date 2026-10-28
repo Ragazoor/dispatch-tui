@@ -15,7 +15,7 @@ use ratatui::Frame;
 
 use crate::agent_tree::list_cursor::ListCursor;
 use crate::hooks::wire::PaneEpic;
-use crate::models::{EpicId, TaskId, TmuxWindow};
+use crate::models::{TaskId, TmuxWindow};
 
 /// One listed agent, as its row draws it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,19 +121,17 @@ pub(crate) enum DrawnLine {
 /// the end-of-epics rule where the epicless agents follow an epic group.
 /// `rows` arrive already grouped (`read_agent_rows`).
 pub(crate) fn drawn_lines(rows: &[AgentRow]) -> Vec<DrawnLine> {
+    let epic_of = |row: &AgentRow| row.epic.as_ref().map(|e| e.id);
     let mut lines = Vec::with_capacity(rows.len());
-    // The epic of the row before; `None` before the first row.
-    let mut previous: Option<Option<EpicId>> = None;
     for (index, row) in rows.iter().enumerate() {
-        let epic = row.epic.as_ref().map(|e| e.id);
-        if previous != Some(epic) {
-            match (epic, previous) {
-                (Some(_), _) => lines.push(DrawnLine::EpicHeader(index)),
-                (None, Some(_)) => lines.push(DrawnLine::EndOfEpics),
-                (None, None) => {}
+        let previous = index.checked_sub(1).map(|above| epic_of(&rows[above]));
+        match (epic_of(row), previous) {
+            (Some(epic), previous) if previous != Some(Some(epic)) => {
+                lines.push(DrawnLine::EpicHeader(index))
             }
+            (None, Some(Some(_))) => lines.push(DrawnLine::EndOfEpics),
+            _ => {}
         }
-        previous = Some(epic);
         lines.push(DrawnLine::Agent(index));
     }
     lines
@@ -163,6 +161,15 @@ pub(crate) fn test_row(id: i64, own: bool) -> AgentRow {
         window: crate::models::test_tmux_window(&format!("task-{id}")),
         is_own: own,
         epic: None,
+    }
+}
+
+/// A [`PaneEpic`] for tests, from its id and breadcrumb.
+#[cfg(test)]
+pub(crate) fn test_pane_epic(id: i64, breadcrumb: &[&str]) -> PaneEpic {
+    PaneEpic {
+        id: crate::models::EpicId(id),
+        breadcrumb: breadcrumb.iter().map(|s| s.to_string()).collect(),
     }
 }
 
@@ -225,11 +232,9 @@ pub fn render_agents(
                 DrawnLine::Agent(index) => index,
                 DrawnLine::EpicHeader(index) => {
                     let epic = section.rows.get(index)?.epic.as_ref()?;
-                    let breadcrumb: Vec<&str> =
-                        epic.breadcrumb.iter().map(String::as_str).collect();
                     return Some(crate::epic_header::epic_header_line(
                         epic.id,
-                        &breadcrumb,
+                        &epic.breadcrumb,
                         width,
                     ));
                 }
@@ -275,10 +280,7 @@ mod tests {
 
     fn in_epic(id: i64, epic: i64, breadcrumb: &[&str]) -> AgentRow {
         AgentRow {
-            epic: Some(PaneEpic {
-                id: crate::models::EpicId(epic),
-                breadcrumb: breadcrumb.iter().map(|s| s.to_string()).collect(),
-            }),
+            epic: Some(test_pane_epic(epic, breadcrumb)),
             ..row(id, false)
         }
     }

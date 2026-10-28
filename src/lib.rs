@@ -38,6 +38,7 @@ pub mod sync;
 pub mod test_git;
 #[cfg(test)]
 mod test_log;
+pub(crate) mod text;
 pub mod tmux;
 pub mod tui;
 pub mod worktree_admin;

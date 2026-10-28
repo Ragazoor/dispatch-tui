@@ -321,10 +321,7 @@ fn pane_agent(id: i64) -> crate::hooks::wire::PaneAgent {
 }
 
 fn pane_epic(id: i64, breadcrumb: &[&str]) -> crate::hooks::wire::PaneEpic {
-    crate::hooks::wire::PaneEpic {
-        id: crate::models::EpicId(id),
-        breadcrumb: breadcrumb.iter().map(|s| s.to_string()).collect(),
-    }
+    crate::agent_tree::render::agents::test_pane_epic(id, breadcrumb)
 }
 
 /// `AgentListGroupsByEpic` / RefreshAgentTreeAgentList's order: groups by

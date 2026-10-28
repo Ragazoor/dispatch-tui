@@ -152,7 +152,7 @@ fn feed_role_label_shows_kebab_role() {
 
 #[test]
 fn empty_is_empty() {
-    assert_eq!(fair_truncate_segments(&[], 20, " › "), "");
+    assert_eq!(fair_truncate_segments::<&str>(&[], 20, " › "), "");
 }
 
 #[test]

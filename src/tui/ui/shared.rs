@@ -190,7 +190,7 @@ pub(in crate::tui::ui) fn scroll_offset(cursor: usize, count: usize, visible: us
     }
 }
 
-pub use crate::epic_header::{fair_truncate_segments, truncate, BREADCRUMB_SEPARATOR};
+pub use crate::text::{fair_truncate_segments, truncate, BREADCRUMB_SEPARATOR};
 
 /// Compact indicator for an epic's feed routing role, shown in the epic header.
 /// `None` for ordinary epics (`FeedRole::None`); `Some("role:<role>  ")` for

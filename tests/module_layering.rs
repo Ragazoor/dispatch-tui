@@ -6,11 +6,11 @@
 //! drives it; `sync` and `dispatch` below `service`; `cli` below `runtime`,
 //! sharing the store wiring (`store_connection`) with it instead. `agent_tree` is a feature of its own:
 //! `cli` is its entry point, so it never reaches back up into `cli`, nor across
-//! into the board's `tui` (both draw with the shared `palette` and `epic_header`). A shared type both sides need belongs in a leaf module
+//! into the board's `tui` (both draw with the shared `palette`, `epic_header` and `text`). A shared type both sides need belongs in a leaf module
 //! (`models`, `clock`, `embeddings`, …) that each depends on downward.
 //! The board's `tui` sits below `runtime`, which drives it: it turns messages
 //! into commands and draws, and never reaches into an adapter or service
-//! itself: what it may import is the leaf layer (`models`, `palette`, `epic_header`,
+//! itself: what it may import is the leaf layer (`models`, `palette`, `epic_header`, `text`,
 //! `keybindings`, `editor`, `backoff`, and `repo_sync`'s types).
 //! Test files are scanned too: a test reaching upward pins the edge just as
 //! firmly as production code does.
@@ -49,6 +49,7 @@ const RULES: &[(&str, &[&str])] = &[
     ),
     ("palette", &["tui", "agent_tree"]),
     ("epic_header", &["tui", "agent_tree"]),
+    ("text", &["tui", "agent_tree"]),
     ("store_connection", &["runtime", "cli"]),
     (
         "tui",

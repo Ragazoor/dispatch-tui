@@ -115,6 +115,23 @@ pub async fn handle_pane_view(
         state.db.list_agents(),
         state.db.list_epics()
     );
+    // Each epic's breadcrumb once, however many of its agents are live.
+    let by_id = crate::models::epics::epic_id_lookup(&epics);
+    let mut pane_epics: std::collections::HashMap<crate::models::EpicId, PaneEpic> =
+        std::collections::HashMap::new();
+    for id in live_tasks.iter().filter_map(|task| task.epic_id) {
+        if let (Some(epic), std::collections::hash_map::Entry::Vacant(slot)) =
+            (by_id.get(&id), pane_epics.entry(id))
+        {
+            slot.insert(PaneEpic {
+                id,
+                breadcrumb: crate::models::epics::ancestor_titles(epic, &epics)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+            });
+        }
+    }
     let live_agents = live_tasks
         .into_iter()
         .filter_map(|task| {
@@ -127,16 +144,7 @@ pub async fn handle_pane_view(
                     .find(|a| a.task_id == task.id && a.is_current())
                     .map(|a| a.name.clone())
                     .unwrap_or_default(),
-                epic: task
-                    .epic_id
-                    .and_then(|id| epics.iter().find(|e| e.id == id))
-                    .map(|epic| PaneEpic {
-                        id: epic.id,
-                        breadcrumb: crate::models::epics::ancestor_titles(epic, &epics)
-                            .into_iter()
-                            .map(str::to_owned)
-                            .collect(),
-                    }),
+                epic: task.epic_id.and_then(|id| pane_epics.get(&id).cloned()),
             })
         })
         .collect();
