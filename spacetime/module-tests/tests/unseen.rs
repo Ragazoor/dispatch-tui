@@ -58,7 +58,11 @@ fn a_signalled_task_is_unseen_for_followers_of_its_epic_and_ancestors() {
         .expect("reparent");
     follow(&store, "of-root", root);
     follow(&store, "of-child", child);
-    follow(&store, "elsewhere", store.create_epic("alice", "other", false));
+    follow(
+        &store,
+        "elsewhere",
+        store.create_epic("alice", "other", false),
+    );
 
     let task = create_signalled(&store, epic_task("new", child, "backlog"));
 

@@ -59,7 +59,14 @@ fn report_dispatched(
     worktree: &str,
 ) -> Result<(), String> {
     store.call(who, |ctx| {
-        report_dispatch_provisioned(ctx, req, host.into(), worktree.into(), "task-1".into(), false)
+        report_dispatch_provisioned(
+            ctx,
+            req,
+            host.into(),
+            worktree.into(),
+            "task-1".into(),
+            false,
+        )
     })
 }
 
@@ -827,7 +834,12 @@ fn a_request_naming_an_ownerless_or_unregistered_host_is_refused() {
         })
         .unwrap_err();
     assert!(ownerless.contains("owner"), "{ownerless}");
-    assert!(store.db().hosts().id().find("fresh-host".to_string()).is_none());
+    assert!(store
+        .db()
+        .hosts()
+        .id()
+        .find("fresh-host".to_string())
+        .is_none());
 
     for host in ["fresh-host", "nowhere"] {
         let refused = request_as(&store, "alice", id, host, "user", "").unwrap_err();
@@ -884,7 +896,16 @@ fn a_teammate_cannot_overwrite_another_persons_host() {
     };
     assert!(register("bob", "", &them).is_err(), "takeover");
     assert!(register("bob", "mine now", &me).is_err(), "relabel");
-    assert_eq!(store.db().hosts().id().find(HOST_A.to_string()).unwrap().owner, me);
+    assert_eq!(
+        store
+            .db()
+            .hosts()
+            .id()
+            .find(HOST_A.to_string())
+            .unwrap()
+            .owner,
+        me
+    );
 }
 
 #[test]
@@ -895,7 +916,12 @@ fn a_host_cannot_be_registered_to_someone_elses_identity() {
         register_host(ctx, "new-host".into(), String::new(), them)
     });
     assert!(gifted.is_err());
-    assert!(store.db().hosts().id().find("new-host".to_string()).is_none());
+    assert!(store
+        .db()
+        .hosts()
+        .id()
+        .find("new-host".to_string())
+        .is_none());
 }
 
 #[test]

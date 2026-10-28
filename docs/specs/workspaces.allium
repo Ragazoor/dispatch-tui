@@ -148,6 +148,7 @@ rule SetDisplayName {
     requires: exists profile
     requires: trimmed != ""
     requires: trimmed.length <= config.display_name_max_length
+    requires: not trimmed.has_control_or_format_characters
 
     ensures: profile.display_name = trimmed
 

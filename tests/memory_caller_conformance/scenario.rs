@@ -293,7 +293,7 @@ fn memory_caller_matches_the_real_reducers() {
             rows_mem.shown_name_of(me),
             "the prefix shown before any name is set"
         );
-        for refused in ["", "   ", &"x".repeat(65)] {
+        for refused in ["", "   ", &"x".repeat(65), "Al\nice"] {
             let real_outcome = real.set_display_name(refused.into()).await.unwrap();
             let mem_outcome = mem.set_display_name(refused.into()).await.unwrap();
             assert!(

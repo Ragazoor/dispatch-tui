@@ -18,7 +18,11 @@ fn connect(store: &Store, who: &str) {
 }
 
 fn profile(store: &Store, who: &str) -> Option<UserProfile> {
-    store.db().user_profiles().identity().find(&identity_of(who))
+    store
+        .db()
+        .user_profiles()
+        .identity()
+        .find(&identity_of(who))
 }
 
 fn set_name(store: &Store, who: &str, name: &str) -> Result<(), String> {
@@ -51,7 +55,10 @@ fn a_name_is_trimmed() {
     let store = Store::new();
     connect(&store, "alice");
     set_name(&store, "alice", "  Alice Smith \n").expect("set");
-    assert_eq!(profile(&store, "alice").unwrap().display_name, "Alice Smith");
+    assert_eq!(
+        profile(&store, "alice").unwrap().display_name,
+        "Alice Smith"
+    );
 }
 
 #[test]
@@ -102,4 +109,20 @@ fn a_person_with_no_name_is_shown_by_the_identity_prefix() {
     let id = identity_of("alice");
     assert_eq!(shown_name("", &id), id[..8]);
     assert_eq!(shown_name("Alice", &id), "Alice");
+}
+
+#[test]
+fn a_name_with_control_or_invisible_characters_is_refused() {
+    let store = Store::new();
+    connect(&store, "alice");
+    for bad in [
+        "Al\nice",
+        "Al\u{202E}ice",
+        "Al\u{200B}ice",
+        "Al\tice",
+        "\u{FEFF}Alice",
+    ] {
+        assert!(set_name(&store, "alice", bad).is_err(), "{bad:?}");
+    }
+    assert_eq!(profile(&store, "alice").unwrap().display_name, "");
 }

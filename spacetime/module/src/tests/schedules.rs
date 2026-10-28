@@ -549,7 +549,10 @@ fn a_hand_write_into_done_cancels_the_pending_run() {
         status: DONE.into(),
         ..claimed
     };
-    assert_eq!(cancel_pending_run_on_close_or_leaving_running("review", done).next_due, "");
+    assert_eq!(
+        cancel_pending_run_on_close_or_leaving_running("review", done).next_due,
+        ""
+    );
 }
 
 #[test]

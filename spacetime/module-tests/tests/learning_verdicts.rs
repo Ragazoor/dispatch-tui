@@ -114,7 +114,10 @@ fn a_verdict_needs_a_retrieval_for_the_same_task() {
     let store = store_with_a_retrieved_learning();
     let refused = rate(&store, 9, vec![verdict(1, "helped")]);
     let message = refused.expect_err("task 9 never saw the learning");
-    assert!(message.contains("was not retrieved during task 9"), "{message}");
+    assert!(
+        message.contains("was not retrieved during task 9"),
+        "{message}"
+    );
     assert_eq!(score(&store), 0);
     assert_eq!(store.db().learning_verdicts().iter().count(), 0);
 }
