@@ -55,10 +55,19 @@ fn a_usage_event_recorded_elsewhere_is_visible_from_here() {
         );
         assert!(recorded.status.success(), "{}", describe(&recorded));
 
-        woken
-            .changed()
-            .await
-            .expect("the subscription must deliver the usage event");
+        // A wake can come from another subscription update before the usage
+        // row lands, so wait for the row itself. Bounded by a timeout, not a
+        // sleep.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while rows.usage_summary(&UsageQuery::default()).is_empty() {
+                woken
+                    .changed()
+                    .await
+                    .expect("the subscription must deliver the usage event");
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("the usage event never arrived"));
 
         let summary = rows.usage_summary(&UsageQuery::default());
         assert_eq!(summary.len(), 1);
