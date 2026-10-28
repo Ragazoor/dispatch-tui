@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{HookEventKind, SubagentEvent, TaskId};
+use crate::models::{EpicId, HookEventKind, SubagentEvent, TaskId};
 
 /// The path the board serves hook deliveries on, beside `/mcp`.
 pub const HOOK_PATH: &str = "/hook";
@@ -195,6 +195,19 @@ pub struct PaneAgent {
     /// agent.
     #[serde(default)]
     pub agent_name: String,
+    /// The task's own epic, which the section groups agents under
+    /// (`agent-tree.allium: AgentListGroupsByEpic`). Absent for a task with
+    /// no epic, and from a board that predates grouping.
+    #[serde(default)]
+    pub epic: Option<PaneEpic>,
+}
+
+/// The epic a [`PaneAgent`] belongs to, as its group header draws it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneEpic {
+    pub id: EpicId,
+    /// The epic's ancestor titles, root first and its own title last.
+    pub breadcrumb: Vec<String>,
 }
 
 /// The board's answer to a [`Question`].

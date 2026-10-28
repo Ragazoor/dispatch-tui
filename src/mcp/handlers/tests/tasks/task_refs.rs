@@ -225,6 +225,71 @@ async fn the_pane_view_carries_the_current_agents_name() {
     assert!(view.live_agents.iter().all(|a| a.id != nameless));
 }
 
+/// The pane view carries each live agent's own epic and its breadcrumb, root
+/// first, for the section's group headers (agent-tree.allium:
+/// AgentListGroupsByEpic); an epicless agent carries none.
+#[tokio::test]
+async fn the_pane_view_carries_each_agents_epic_and_breadcrumb() {
+    use axum::extract::State;
+    use axum::Json;
+
+    let state = test_state().await;
+    let root = state
+        .db_write()
+        .create_epic("Dispatch", "", None)
+        .await
+        .unwrap();
+    let sub = state
+        .db_write()
+        .create_epic("Store", "", Some(root.id))
+        .await
+        .unwrap();
+    let in_sub = state
+        .db_write()
+        .create_task(CreateTaskRequest {
+            epic_id: Some(sub.id),
+            ..CreateTaskRequest::fixture("S", "/repo")
+        })
+        .await
+        .unwrap();
+    let (bare, _) = task_with_agent(&state).await;
+    state
+        .task_svc
+        .request_dispatch(in_sub, crate::models::DispatchOrigin::Mcp, None)
+        .await
+        .unwrap();
+    for id in [in_sub, bare] {
+        let window = crate::models::test_tmux_window(&format!("task-{}", id.0));
+        state
+            .db_write()
+            .patch_task(
+                id,
+                &crate::store::TaskPatch::new()
+                    .status(crate::models::TaskStatus::Running)
+                    .tmux_window(Some(&window)),
+            )
+            .await
+            .unwrap();
+    }
+
+    let Json(view) = crate::mcp::handlers::handle_pane_view(
+        State(state.clone()),
+        Json(crate::hooks::wire::PaneViewRequest { task_id: bare }),
+    )
+    .await
+    .unwrap();
+
+    let by_id = |id| view.live_agents.iter().find(|a| a.id == id).unwrap();
+    assert_eq!(
+        by_id(in_sub).epic,
+        Some(crate::hooks::wire::PaneEpic {
+            id: sub.id,
+            breadcrumb: vec!["Dispatch".into(), "Store".into()],
+        })
+    );
+    assert_eq!(by_id(bare).epic, None);
+}
+
 /// The board's task carries its current agent's name, for the card's lead
 /// word (board-visuals.allium: CardLeadsWithTheAgentName); with no current
 /// agent it carries none.

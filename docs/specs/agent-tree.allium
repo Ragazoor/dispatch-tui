@@ -442,7 +442,7 @@ entity AgentTreePane {
 
     -- The tasks the agents section shows: what the last SUCCESSFUL read of the
     -- board's task list returned, filtered to tasks with a live agent window
-    -- (see is_live_agent) and ordered by task id. A failed read leaves it
+    -- (see is_live_agent) and grouped by epic (AgentListGroupsByEpic). A failed read leaves it
     -- alone, exactly as a failed git query leaves rendered_changes alone
     -- (AgentTreeAgentListFailureKeepsLastList). Empty before the first read.
     --
@@ -2292,7 +2292,7 @@ rule RefreshAgentTreeAgentList {
     let live = board_tasks().value.filter(t => is_live_agent(t))
 
     ensures: pane.last_agents_listed_at = now
-    ensures: pane.listed_agents = sorted_by_id(live)
+    ensures: pane.listed_agents = grouped_by_epic(live)
 
     -- A working read clears its own stale notice and nothing else, exactly
     -- as RefreshAgentTree does for git.
@@ -2324,8 +2324,14 @@ rule RefreshAgentTreeAgentList {
         -- (PanesReadThroughTheBoard).
         --
         -- == Order ==
-        -- sorted_by_id orders by task id, ascending. The order therefore never
-        -- changes under the cursor except when an agent starts or finishes.
+        -- grouped_by_epic puts the tasks of one epic next to each other: the
+        -- groups in ascending epic id, the tasks inside a group in ascending
+        -- task id, and the tasks with no epic last, also by task id. A task's
+        -- group is its own epic, never an ancestor's, so a sub-epic's tasks
+        -- form a group of their own. How the groups are drawn is
+        -- AgentListGroupsByEpic. The order therefore never changes under the
+        -- cursor except when an agent starts or finishes, or a task moves to
+        -- another epic.
         --
         -- == The cursor follows its task ==
         -- A read that changes the list keeps the agents cursor on the task it
@@ -2888,6 +2894,34 @@ surface AgentTreeCompanionPane {
         -- The cursor highlight is drawn only in the focused section. The
         -- unfocused section keeps its cursor position without showing it, so
         -- Tab back returns the user to where they were.
+
+    @guarantee AgentListGroupsByEpic
+        -- The agents section reads like a flattened board column
+        -- (board-layout.allium, "Flattening"): each epic's agents sit under a
+        -- header row, so the user sees at a glance which agents work on the
+        -- same epic. The header is the board's epic header, drawn the same
+        -- way: `── #<epic id> <breadcrumb> ───`, the rule and id muted and the
+        -- breadcrumb purple, filling the pane's width. The id is the group's
+        -- own epic; the breadcrumb is its ancestor titles, root first, joined
+        -- with " › ", each segment truncated fairly when the pane is narrow.
+        --
+        -- The agents with no epic come last, under the board's dashed rule
+        -- (`╌╌ · ╌╌╌`, muted). The rule is drawn only where the epic groups
+        -- end, so a list with no epic agents shows no rule, and a list with
+        -- only epic agents shows none either. No blank line is drawn before
+        -- a header or the rule: the pane is short.
+        --
+        -- Headers and the rule are decoration. They are never selectable and
+        -- never a jump target: the cursor motions move from agent to agent
+        -- and step over them, and half a page counts agent rows. The section
+        -- scrolls by drawn line, so the cursor's row is always in view, and
+        -- when the cursor is on a group's first agent the group's header is
+        -- in view too.
+        --
+        -- The pane reads the epic and its breadcrumb from the board's answer
+        -- (the hooks wire's PaneAgent.epic). A board that predates it sends
+        -- none, and every agent then reads as epicless: the list is the plain
+        -- id-ordered list with no headers and no rule.
 
     @guarantee AgentKeysFollowFocus
         -- With the commits or the agents section focused, the cursor motions

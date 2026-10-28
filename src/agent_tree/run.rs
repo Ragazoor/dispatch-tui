@@ -453,10 +453,13 @@ pub(crate) async fn read_agent_rows(
                 agent_name: agent.agent_name,
                 window: TmuxWindow::parse(&agent.tmux_window)?,
                 is_own: agent.id == own,
+                epic: agent.epic,
             })
         })
         .collect();
-    rows.sort_by_key(|row| row.id);
+    // Grouped by epic: epics by id, epicless last, tasks by id inside a group
+    // (RefreshAgentTreeAgentList's grouped_by_epic).
+    rows.sort_by_key(|row| (row.epic.is_none(), row.epic.as_ref().map(|e| e.id), row.id));
     Ok(rows)
 }
 

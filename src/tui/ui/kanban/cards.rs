@@ -393,31 +393,11 @@ pub(super) fn render_epic_header_item(
 ) -> ListItem<'static> {
     // The id is the epic's own — the one whose task group this header
     // precedes — never one per breadcrumb ancestor (board-layout.allium,
-    // "Flattening"). Digit count matches the `id_len` convention
-    // `render_epic_item`/`build_task_list_item` use for their own id badge.
-    let id_digits = epic.id.0.unsigned_abs().max(1).ilog10() as usize + 1;
-    let id_prefix = format!("#{} ", epic.id);
-    let id_prefix_len = id_digits + 2; // '#' and the trailing space
-
-    // Text budget matches the prior single-title layout: "── " + text + " " + rule
-    // reserves `text_len + 5`, plus the id prefix's own width, so the text may
-    // use up to `col_width - 5 - id_prefix_len` chars.
-    let reserved = 5 + id_prefix_len;
-    let budget = (col_width as usize).saturating_sub(reserved);
+    // "Flattening").
     let segments = crate::models::epics::ancestor_titles(epic, epics);
-    let title = crate::tui::ui::shared::fair_truncate_segments(
-        &segments,
-        budget,
-        crate::tui::ui::shared::BREADCRUMB_SEPARATOR,
-    );
-    let rule_count = (col_width as usize).saturating_sub(title.chars().count() + reserved);
-    let right_rule = "\u{2500}".repeat(rule_count);
-    ListItem::new(Line::from(vec![
-        Span::styled("\u{2500}\u{2500} ", Style::default().fg(MUTED)),
-        Span::styled(id_prefix, Style::default().fg(MUTED)),
-        Span::styled(title, Style::default().fg(PURPLE)),
-        Span::styled(format!(" {}", right_rule), Style::default().fg(MUTED)),
-    ]))
+    ListItem::new(crate::epic_header::epic_header_line(
+        epic.id, &segments, col_width,
+    ))
 }
 
 /// A folded epic group's header: the same id and ancestor breadcrumb

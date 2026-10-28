@@ -14,7 +14,8 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::agent_tree::list_cursor::ListCursor;
-use crate::models::{TaskId, TmuxWindow};
+use crate::hooks::wire::PaneEpic;
+use crate::models::{EpicId, TaskId, TmuxWindow};
 
 /// One listed agent, as its row draws it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +28,9 @@ pub struct AgentRow {
     pub window: TmuxWindow,
     /// Whether this is the pane's own task — marked, dimmed, and not jumpable.
     pub is_own: bool,
+    /// The task's own epic, which the row is grouped under; `None` for an
+    /// epicless task (`AgentListGroupsByEpic`).
+    pub epic: Option<PaneEpic>,
 }
 
 impl AgentRow {
@@ -47,7 +51,8 @@ impl AgentRow {
 pub struct AgentsSection {
     rows: Vec<AgentRow>,
     cursor: usize,
-    /// First row drawn, so the cursor stays in view in a short pane.
+    /// First drawn line shown, headers counted, so the cursor stays in view
+    /// in a short pane.
     offset: usize,
     /// Rows drawn at the last render — the half-page motions' page.
     viewport_rows: usize,
@@ -101,6 +106,39 @@ impl ListCursor for AgentsSection {
     }
 }
 
+/// One line the section draws (`AgentListGroupsByEpic`). Only an agent line
+/// holds the cursor; the other two are decoration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DrawnLine {
+    /// The header over the group that starts at this row.
+    EpicHeader(usize),
+    /// The rule between the last epic group and the epicless agents.
+    EndOfEpics,
+    Agent(usize),
+}
+
+/// The lines `rows` draw as: a header wherever a new epic's group starts, and
+/// the end-of-epics rule where the epicless agents follow an epic group.
+/// `rows` arrive already grouped (`read_agent_rows`).
+pub(crate) fn drawn_lines(rows: &[AgentRow]) -> Vec<DrawnLine> {
+    let mut lines = Vec::with_capacity(rows.len());
+    // The epic of the row before; `None` before the first row.
+    let mut previous: Option<Option<EpicId>> = None;
+    for (index, row) in rows.iter().enumerate() {
+        let epic = row.epic.as_ref().map(|e| e.id);
+        if previous != Some(epic) {
+            match (epic, previous) {
+                (Some(_), _) => lines.push(DrawnLine::EpicHeader(index)),
+                (None, Some(_)) => lines.push(DrawnLine::EndOfEpics),
+                (None, None) => {}
+            }
+        }
+        previous = Some(epic);
+        lines.push(DrawnLine::Agent(index));
+    }
+    lines
+}
+
 /// A section's border: red while a notice is up, whatever has focus
 /// (`AgentTreeNoticeRedensBorder`), else the focus colour on the focused
 /// section, else the ordinary border. One rule for both of the pane's sections.
@@ -124,6 +162,7 @@ pub(crate) fn test_row(id: i64, own: bool) -> AgentRow {
         agent_name: String::new(),
         window: crate::models::test_tmux_window(&format!("task-{id}")),
         is_own: own,
+        epic: None,
     }
 }
 
@@ -142,10 +181,22 @@ pub fn render_agents(
 
     let visible = usize::from(area.height.saturating_sub(2));
     section.viewport_rows = visible;
-    if section.cursor < section.offset {
-        section.offset = section.cursor;
-    } else if visible > 0 && section.cursor >= section.offset + visible {
-        section.offset = section.cursor + 1 - visible;
+    let drawn = drawn_lines(&section.rows);
+    if let Some(cursor_line) = drawn
+        .iter()
+        .position(|line| *line == DrawnLine::Agent(section.cursor))
+    {
+        // On a group's first agent, its header (or the rule) comes into view
+        // with it (AgentListGroupsByEpic).
+        let top_line = match cursor_line.checked_sub(1).map(|above| drawn[above]) {
+            Some(DrawnLine::EpicHeader(_) | DrawnLine::EndOfEpics) => cursor_line - 1,
+            _ => cursor_line,
+        };
+        if top_line < section.offset {
+            section.offset = top_line;
+        } else if visible > 0 && cursor_line >= section.offset + visible {
+            section.offset = cursor_line + 1 - visible;
+        }
     }
 
     let border = border_style(focused, alert);
@@ -162,13 +213,27 @@ pub fn render_agents(
         )));
     }
 
-    let lines: Vec<Line> = section
-        .rows
+    let width = area.width.saturating_sub(2);
+    let lines: Vec<Line> = drawn
         .iter()
-        .enumerate()
         .skip(section.offset)
         .take(visible)
-        .map(|(index, row)| {
+        .filter_map(|line| {
+            let index = match *line {
+                DrawnLine::Agent(index) => index,
+                DrawnLine::EpicHeader(index) => {
+                    let epic = section.rows.get(index)?.epic.as_ref()?;
+                    let breadcrumb: Vec<&str> =
+                        epic.breadcrumb.iter().map(String::as_str).collect();
+                    return Some(crate::epic_header::epic_header_line(
+                        epic.id,
+                        &breadcrumb,
+                        width,
+                    ));
+                }
+                DrawnLine::EndOfEpics => return Some(crate::epic_header::end_of_epics_line(width)),
+            };
+            let row = section.rows.get(index)?;
             let mut style = Style::default();
             if row.is_own {
                 style = style.fg(MUTED);
@@ -180,7 +245,7 @@ pub fn render_agents(
             if row.is_own {
                 text.push_str(" ●");
             }
-            Line::from(Span::styled(text, style))
+            Some(Line::from(Span::styled(text, style)))
         })
         .collect();
 
@@ -204,6 +269,140 @@ mod tests {
             .draw(|frame| render_agents(frame, frame.area(), section, focused, false, None))
             .expect("draw");
         crate::agent_tree::pane::buffer_to_string(terminal.backend().buffer())
+    }
+
+    fn in_epic(id: i64, epic: i64, breadcrumb: &[&str]) -> AgentRow {
+        AgentRow {
+            epic: Some(PaneEpic {
+                id: crate::models::EpicId(epic),
+                breadcrumb: breadcrumb.iter().map(|s| s.to_string()).collect(),
+            }),
+            ..row(id, false)
+        }
+    }
+
+    /// The drawn line each text fragment first appears on.
+    fn line_of(out: &str, needle: &str) -> usize {
+        out.lines()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle:?} not drawn:\n{out}"))
+    }
+
+    // ---- AgentListGroupsByEpic -------------------------------------------
+
+    #[test]
+    fn the_drawn_lines_put_a_header_over_each_epic_and_a_rule_before_the_epicless() {
+        let rows = vec![
+            in_epic(7, 3, &["Three"]),
+            in_epic(2, 5, &["Five"]),
+            in_epic(9, 5, &["Five"]),
+            row(4, false),
+        ];
+        assert_eq!(
+            drawn_lines(&rows),
+            vec![
+                DrawnLine::EpicHeader(0),
+                DrawnLine::Agent(0),
+                DrawnLine::EpicHeader(1),
+                DrawnLine::Agent(1),
+                DrawnLine::Agent(2),
+                DrawnLine::EndOfEpics,
+                DrawnLine::Agent(3),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_list_with_no_epic_agents_draws_no_header_and_no_rule() {
+        let rows = vec![row(1, false), row(2, false)];
+        assert_eq!(
+            drawn_lines(&rows),
+            vec![DrawnLine::Agent(0), DrawnLine::Agent(1)]
+        );
+    }
+
+    #[test]
+    fn a_list_of_only_epic_agents_draws_no_rule() {
+        let rows = vec![in_epic(1, 3, &["Three"]), in_epic(2, 3, &["Three"])];
+        assert_eq!(
+            drawn_lines(&rows),
+            vec![
+                DrawnLine::EpicHeader(0),
+                DrawnLine::Agent(0),
+                DrawnLine::Agent(1)
+            ]
+        );
+    }
+
+    #[test]
+    fn an_epic_header_reads_id_then_breadcrumb_above_its_agents() {
+        let mut section = AgentsSection::new();
+        section.set_rows(vec![
+            in_epic(41, 314, &["Dispatch"]),
+            in_epic(42, 320, &["Dispatch", "Pane"]),
+            row(43, false),
+        ]);
+        let out = rendered(&mut section, true, 10);
+        let first = line_of(&out, "── #314 Dispatch ──");
+        let nested = line_of(&out, "── #320 Dispatch › Pane ──");
+        let rule = line_of(&out, "╌╌ · ╌╌");
+        assert_eq!(line_of(&out, "#41 task 41"), first + 1, "{out}");
+        assert_eq!(line_of(&out, "#42 task 42"), nested + 1, "{out}");
+        assert_eq!(line_of(&out, "#43 task 43"), rule + 1, "{out}");
+    }
+
+    #[test]
+    fn the_cursor_steps_over_headers_from_agent_to_agent() {
+        let mut section = AgentsSection::new();
+        section.set_rows(vec![in_epic(1, 3, &["Three"]), in_epic(2, 5, &["Five"])]);
+        section.down();
+        assert_eq!(section.selected().unwrap().id, TaskId(2));
+    }
+
+    #[test]
+    fn with_headers_a_short_pane_still_scrolls_the_last_agent_into_view() {
+        let mut section = AgentsSection::new();
+        section.set_rows(
+            (1..=20)
+                .map(|id| in_epic(id, id, &[&format!("E{id}")]))
+                .collect(),
+        );
+        section.bottom();
+        let out = rendered(&mut section, true, 10);
+        assert!(out.contains("#20 task 20"), "{out}");
+    }
+
+    #[test]
+    fn scrolling_up_onto_a_groups_first_agent_brings_its_header_into_view() {
+        let mut section = AgentsSection::new();
+        let mut rows: Vec<AgentRow> = (1..=10).map(|id| in_epic(id, 3, &["Three"])).collect();
+        rows.extend((11..=20).map(|id| in_epic(id, 5, &["Five"])));
+        section.set_rows(rows);
+        section.bottom();
+        rendered(&mut section, true, 10);
+        for _ in 0..9 {
+            section.up();
+        }
+        assert_eq!(section.selected().unwrap().id, TaskId(11));
+        let out = rendered(&mut section, true, 10);
+        assert_eq!(
+            line_of(&out, "#11 task 11"),
+            line_of(&out, "── #5 Five") + 1,
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn at_the_top_the_first_groups_header_is_in_view() {
+        let mut section = AgentsSection::new();
+        let mut rows: Vec<AgentRow> = (1..=10).map(|id| in_epic(id, 3, &["Three"])).collect();
+        rows.extend((11..=20).map(|id| in_epic(id, 5, &["Five"])));
+        section.set_rows(rows);
+        section.bottom();
+        rendered(&mut section, true, 10);
+        section.top();
+        let out = rendered(&mut section, true, 10);
+        assert!(out.contains("── #3 Three"), "{out}");
     }
 
     // ---- label -----------------------------------------------------------

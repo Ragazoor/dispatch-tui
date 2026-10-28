@@ -16,8 +16,8 @@ use axum::{
 };
 
 use crate::hooks::wire::{
-    Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, PaneAgent, PaneTask,
-    PaneView, PaneViewRequest, Question,
+    Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, PaneAgent, PaneEpic,
+    PaneTask, PaneView, PaneViewRequest, Question,
 };
 use crate::mcp::{trajectory, BackgroundWrite, McpState};
 use crate::models::TaskId;
@@ -110,8 +110,11 @@ pub async fn handle_pane_view(
             worktree: task.worktree,
             base_branch: task.base_branch,
         });
-    let (live_tasks, agents) =
-        tokio::join!(state.db.list_live_agent_tasks(), state.db.list_agents());
+    let (live_tasks, agents, epics) = tokio::join!(
+        state.db.list_live_agent_tasks(),
+        state.db.list_agents(),
+        state.db.list_epics()
+    );
     let live_agents = live_tasks
         .into_iter()
         .filter_map(|task| {
@@ -124,6 +127,16 @@ pub async fn handle_pane_view(
                     .find(|a| a.task_id == task.id && a.is_current())
                     .map(|a| a.name.clone())
                     .unwrap_or_default(),
+                epic: task
+                    .epic_id
+                    .and_then(|id| epics.iter().find(|e| e.id == id))
+                    .map(|epic| PaneEpic {
+                        id: epic.id,
+                        breadcrumb: crate::models::epics::ancestor_titles(epic, &epics)
+                            .into_iter()
+                            .map(str::to_owned)
+                            .collect(),
+                    }),
             })
         })
         .collect();

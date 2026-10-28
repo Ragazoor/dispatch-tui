@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use ratatui::{
     layout::{Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::Line,
     widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
@@ -23,16 +23,7 @@ use super::{board_column_constraints, column_bg_color, column_color, render_colu
 use crate::palette::{CYAN, MUTED, PURPLE};
 
 fn render_orphan_separator(col_width: u16, is_first: bool) -> ListItem<'static> {
-    // ╌╌ · ╌╌╌╌╌╌╌╌╌╌╌ — dashed rule with centre dot, all muted.
-    // Visually distinct from: epic headers (purple + named), card rules (solid ─).
-    const DASH: &str = "\u{254C}"; // ╌ BOX DRAWINGS LIGHT DOUBLE DASH HORIZONTAL
-    let prefix = format!("{} \u{00B7} ", DASH.repeat(2)); // "╌╌ · "
-    let prefix_chars = prefix.chars().count();
-    let fill_count = (col_width as usize).saturating_sub(prefix_chars);
-    let line = Line::from(Span::styled(
-        format!("{}{}", prefix, DASH.repeat(fill_count)),
-        Style::default().fg(MUTED),
-    ));
+    let line = crate::epic_header::end_of_epics_line(col_width);
     if is_first {
         ListItem::new(vec![line])
     } else {

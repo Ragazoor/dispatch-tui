@@ -316,7 +316,52 @@ fn pane_agent(id: i64) -> crate::hooks::wire::PaneAgent {
         title: format!("task {id}"),
         tmux_window: format!("task-{id}"),
         agent_name: String::new(),
+        epic: None,
     }
+}
+
+fn pane_epic(id: i64, breadcrumb: &[&str]) -> crate::hooks::wire::PaneEpic {
+    crate::hooks::wire::PaneEpic {
+        id: crate::models::EpicId(id),
+        breadcrumb: breadcrumb.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+/// `AgentListGroupsByEpic` / RefreshAgentTreeAgentList's order: groups by
+/// epic id, agents by id inside a group, epicless agents last; each row keeps
+/// the epic the board sent.
+#[tokio::test]
+async fn the_agent_list_groups_agents_by_epic_with_epicless_last() {
+    let five = pane_epic(5, &["Five"]);
+    let three = pane_epic(3, &["Root", "Three"]);
+    let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
+        task: None,
+        live_agents: vec![
+            crate::hooks::wire::PaneAgent {
+                epic: Some(five.clone()),
+                ..pane_agent(9)
+            },
+            pane_agent(4),
+            crate::hooks::wire::PaneAgent {
+                epic: Some(three.clone()),
+                ..pane_agent(7)
+            },
+            crate::hooks::wire::PaneAgent {
+                epic: Some(five.clone()),
+                ..pane_agent(2)
+            },
+        ],
+    }));
+
+    let rows = read_agent_rows(&board, TaskId(1)).await.unwrap();
+
+    let order: Vec<(i64, Option<crate::models::EpicId>)> = rows
+        .iter()
+        .map(|row| (row.id.0, row.epic.as_ref().map(|e| e.id)))
+        .collect();
+    let (e3, e5) = (Some(three.id), Some(five.id));
+    assert_eq!(order, vec![(7, e3), (2, e5), (9, e5), (4, None)]);
+    assert_eq!(rows[0].epic, Some(three));
 }
 
 /// `AgentRowShowsAgentName`: the agent name the board sends reaches the row.
