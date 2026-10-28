@@ -9,7 +9,9 @@
 //! where dispatch, the tool they would fix it with, is the thing that is down.
 //!
 //! The store is never the operator's: a free port, and a data directory, CLI
-//! config and JWT key pair of the test's own. The board's `StartupPaths` are
+//! config and JWT key pair of the test's own. The fresh-install test leaves
+//! the port empty and lets bootstrap start the store; the upgrade test starts
+//! it itself (`LiveStore`) so it can copy a committed directory in first. The board's `StartupPaths` are
 //! temp paths too, so the configuration check never reaches `$HOME`.
 
 use std::path::Path;
@@ -27,23 +29,38 @@ use crate::spacetime::managed_store::{
 /// How long a write may take to come back through the subscription.
 const ROW_DEADLINE: Duration = Duration::from_secs(20);
 
-/// A managed store laid out on `store`'s address, over `store_data_dir` (where
-/// the module hash is recorded), publishing with `cli_config`'s login.
+/// A free loopback port with nothing on it, as `host:port`.
+fn free_address() -> String {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|l| l.local_addr())
+        .expect("pick a free port")
+        .to_string()
+}
+
+/// A managed store laid out on `address`, over `store_data_dir` (where the
+/// module hash is recorded). It starts the store itself when nothing answers
+/// there, with `cli_config`'s login and `keys_dir`'s JWT key pair, so neither
+/// reaches the operator's own.
 fn managed_target(
-    store: &LiveStore,
+    address: String,
     store_data_dir: &Path,
     log_dir: &Path,
     cli_config: &Path,
+    keys_dir: &Path,
 ) -> StoreTarget {
     let layout = ManagedStoreLayout {
-        address: store.address(),
+        address,
         data_dir: store_data_dir.to_path_buf(),
         log_path: log_dir.join("managed-store.log"),
     };
     let hashes = Arc::new(FileModuleHashRecord::in_data_dir(store_data_dir));
     let ports = SpacetimeManagedStore::new(
         Arc::new(crate::process::RealProcessRunner::default()),
-        Arc::new(SpacetimeStartSpawner::new().with_config_path(cli_config)),
+        Arc::new(
+            SpacetimeStartSpawner::new()
+                .with_config_path(cli_config)
+                .with_key_dir(keys_dir),
+        ),
         layout,
         EMBEDDED_MODULE,
     )
@@ -109,6 +126,11 @@ fn new_task(
     }
 }
 
+/// A real first launch: nothing is listening, so bootstrap's managed store
+/// takes the start branch itself -- spawns `spacetime start`, waits until it
+/// serves, publishes. Each launch's store is stopped by the board's own guard
+/// when the launch ends, as on a real quit, so the second launch starts it
+/// again over the data the first left.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fresh_install_starts_against_a_real_store() {
     if !live_store_tests_should_run() {
@@ -117,22 +139,31 @@ async fn a_fresh_install_starts_against_a_real_store() {
     let dir = tempfile::tempdir().unwrap();
     let store_data = dir.path().join("store");
     let cli_config = dir.path().join("cli.toml");
-    let store = LiveStore::start(&store_data, &dir.path().join("keys"), &cli_config);
+    let keys = dir.path().join("keys");
+    let address = free_address();
     let (data_dir, paths) = board_dir(dir.path());
-    let target = || managed_target(&store, &store_data, dir.path(), &cli_config);
+    let target = || managed_target(address.clone(), &store_data, dir.path(), &cli_config, &keys);
 
-    let first = boot(&data_dir, &paths, target())
+    let first_target = target();
+    // Declared before `first`, so the store outlives the board it serves and
+    // is still stopped when an assertion panics.
+    let first_guard = ManagedStoreGuard(first_target.managed().cloned());
+    let first = boot(&data_dir, &paths, first_target)
         .await
         .unwrap_or_else(|e| panic!("fresh-install smoke: bootstrap aborted: {e}"));
     assert_eq!(
         first.store_server,
-        store.url(),
+        format!("http://{address}"),
         "the board connected somewhere other than the store it brought up"
     );
     assert_eq!(
         FileModuleHashRecord::in_data_dir(&store_data).recorded_module_hash(),
         Some(embedded_module_hash()),
         "the embedded module was not recorded as published"
+    );
+    assert!(
+        keys.join("id_ecdsa").is_file(),
+        "the store signed with a key other than the test's own"
     );
 
     let task = first
@@ -143,6 +174,11 @@ async fn a_fresh_install_starts_against_a_real_store() {
         .expect("create a task through the service");
     await_task(&first, task).await;
     drop(first);
+    drop(first_guard);
+    assert!(
+        std::net::TcpListener::bind(&address).is_ok(),
+        "the store still holds {address} after the board's guard dropped"
+    );
 
     // The design's "without publishing": a publish rewrites the hash record.
     let record = FileModuleHashRecord::in_data_dir(&store_data);
@@ -153,7 +189,9 @@ async fn a_fresh_install_starts_against_a_real_store() {
             .unwrap()
     };
     let before = recorded_at();
-    let second = boot(&data_dir, &paths, target())
+    let second_target = target();
+    let _second_guard = ManagedStoreGuard(second_target.managed().cloned());
+    let second = boot(&data_dir, &paths, second_target)
         .await
         .unwrap_or_else(|e| panic!("fresh-install smoke: second bootstrap aborted: {e}"));
     assert_eq!(
@@ -299,7 +337,7 @@ async fn generate_previous_store_fixture() {
     let user_root = dir.path().join("user");
     let (user_dir, user_paths) = board_dir(&user_root);
     crate::host_file::adopt_user_identity(&user_dir, &user, &token).unwrap();
-    let target = || managed_target(&store, &store_data, dir.path(), &cli_config);
+    let target = || managed_target(store.address(), &store_data, dir.path(), &cli_config, &keys);
 
     let ub = boot(&user_dir, &user_paths, target())
         .await
@@ -409,7 +447,8 @@ async fn an_upgrade_from_the_previous_store_keeps_every_task_and_epic() {
     copy_dir(&fixture, dir.path(), &[]);
     let store_data = dir.path().join("data");
     let cli_config = dir.path().join("cli.toml");
-    let store = LiveStore::start(&store_data, &dir.path().join("keys"), &cli_config);
+    let keys = dir.path().join("keys");
+    let store = LiveStore::start(&store_data, &keys, &cli_config);
 
     let (data_dir, paths) = board_dir(&dir.path().join("user"));
     std::fs::copy(
@@ -435,7 +474,7 @@ async fn an_upgrade_from_the_previous_store_keeps_every_task_and_epic() {
     let b = boot(
         &data_dir,
         &paths,
-        managed_target(&store, &store_data, dir.path(), &cli_config),
+        managed_target(store.address(), &store_data, dir.path(), &cli_config, &keys),
     )
     .await
     .unwrap_or_else(|e| panic!("upgrade smoke: bootstrap aborted: {e}"));

@@ -528,9 +528,11 @@ contract ManagedStoreHost {
     @invariant StartupIsSmokeTestedAgainstARealStore
         -- The suite runs the real composition root end to end against a real,
         -- throwaway store (src/runtime/tests/startup_smoke.rs): once from a
-        -- fresh install, and once from a committed store directory the
-        -- previous module wrote (tests/fixtures/previous-store/). After the
-        -- upgrade, the same user sees exactly the same tasks and epics as
+        -- fresh install (nothing listening: the managed store spawns
+        -- `spacetime start` itself, with a CLI config and JWT key pair of the
+        -- test's own, and the board's exit stops it), and once from a
+        -- committed store directory the previous module wrote
+        -- (tests/fixtures/previous-store/). After the upgrade, the same user sees exactly the same tasks and epics as
         -- before it. A change that makes startup abort, or that hides a
         -- user's existing rows, fails the suite rather than the operator's
         -- next launch. Design:
