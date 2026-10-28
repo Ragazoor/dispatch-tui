@@ -364,7 +364,6 @@ impl EpicService {
         validate_feed_interval("feed_interval_secs", params.feed_interval_secs.flatten())?;
 
         let epic_id = params.epic_id;
-        let existing = self.db.get_epic(epic_id).await;
 
         // The data checks on this update — a parent cycle, moving a repo-group
         // sub-epic, feed_append_only with grouping or a feed role — are the
@@ -373,15 +372,11 @@ impl EpicService {
         // the request, and the not-found answer.
         let mut patch = Self::base_patch(&params);
 
-        // A transition into Done is stamped by the module's `patch_epic`, not
-        // here: a stale cached status or the board clock must not decide it.
-        // `base_patch` forwards `params.completed_at` only when the caller
-        // named one (a manual Done reorder), and the module lets that win.
-        let entering_done = params.status == Some(TaskStatus::Done)
-            && params.completed_at.is_none()
-            && existing
-                .as_ref()
-                .is_some_and(|e| e.status != TaskStatus::Done);
+        // A transition into Done is stamped by the module's `patch_epic`
+        // (a value this patch names is overwritten there), not here: a stale
+        // cached status or the board clock must not decide it. A `completed_at`
+        // the caller names on an epic already done (a manual Done reorder) is
+        // kept.
 
         match params.parent_epic_id {
             Some(Some(new_parent_id)) => {
@@ -399,9 +394,10 @@ impl EpicService {
         // it left, in the same transaction (store-split.allium X3).
         self.db.patch_epic(epic_id, &patch).await?;
 
-        // What this call wrote to completed_at. A stamp the module chose is
-        // read back rather than computed. See `UpdateEpicResult`.
-        let completed_at_after_write = if entering_done {
+        // What this call wrote to completed_at. A call that sets Done may have
+        // been stamped by the module, so the stamp is read back rather than
+        // computed or taken from the patch. See `UpdateEpicResult`.
+        let completed_at_after_write = if params.status == Some(TaskStatus::Done) {
             self.db.get_epic(epic_id).await.map(|e| e.completed_at)
         } else {
             patch.completed_at
@@ -487,10 +483,12 @@ impl EpicService {
     /// empty subtree qualifies. Permanent: there is no archived fallback for
     /// an epic to land in instead. The DB-layer delete itself (`self.db`'s
     /// `delete_epic`) writes the `RetiredFeedItem` retirement records and
-    /// performs the actual recursive removal; this guard is the one thing it
-    /// does not check, since `FlattenEpic` and the feed's empty repo-group
-    /// cleanup call the DB method directly and apply their own, narrower
-    /// guarantee (no tasks left at all) rather than this one.
+    /// performs the actual recursive removal. The module's `delete_epic`
+    /// reducer re-checks this guard against the true rows (a stale board view
+    /// must not pass it); this pre-check gives the caller the typed error
+    /// early. `FlattenEpic` and the feed's empty repo-group cleanup call the
+    /// DB method directly and apply their own, narrower guarantee (no tasks
+    /// left at all) rather than this one.
     pub async fn delete_epic(&self, epic_id: EpicId) -> Result<(), ServiceError> {
         self.ensure_deletable(epic_id).await?;
 

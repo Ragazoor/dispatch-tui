@@ -435,17 +435,14 @@ rule UpdateTaskViaMcp {
         -- and deletes the sub-epic it left if that is now empty
         -- (epics.allium's routing note above RegroupEpic).
         --
-        -- ORDER OF THE WRITES. The service applies an explicit epic_id
-        -- FIRST, as its own set_task_epic call routed by the repo the task
-        -- has before this call, and the patch (repo_path, sub_status, status,
-        -- the rest) SECOND, as one patch_task call. A call that changes both
-        -- epic_id (to a grouped root) and repo_path therefore lands where
-        -- routing by the NEW repo_path puts it: the relink routes by the old
-        -- repo, and the patch's repo change re-routes within that subtree.
-        -- The two are separate store transactions, not one. The epic_id never
-        -- rides in the patch: the store's patch_task refuses one, and
-        -- set_task_epic is the only move (store-split.allium:
-        -- PatchTaskNeverMovesAnEpic).
+        -- ONE CALL. The service sends an explicit epic_id and the patch
+        -- (repo_path, sub_status, status, the rest) to the store as one
+        -- update_task call (store-split.allium: UpdateTaskIsOneTransaction),
+        -- one transaction: a patch the store refuses leaves the epic, the
+        -- repo and every other field as they were. A call that changes both
+        -- epic_id (to a grouped root) and repo_path lands where routing by the
+        -- NEW repo_path puts it. The epic_id never rides in patch_task, which
+        -- refuses one (store-split.allium: PatchTaskNeverMovesAnEpic).
 }
 
 rule MarkTaskDoneViaMcp {
@@ -2300,5 +2297,3 @@ surface McpContextResources {
 open question "update_tasks' typed-url contract is now to be stated by the schema: url_type as an enum, and url_type required whenever url is non-empty. The second is a conditional requirement (JSON Schema if/then or a top-level combinator), and tool input schemas reaching Claude may not accept one at the top level. If the conditional cannot be expressed, does the url description keep one clause stating the dependency, or does the contract live only in the validation error?"
 
 open question "update_tasks naming a specific repo-group sub-epic in epic_id while also changing repo_path to a different repo: UpdateTaskViaMcp's ensures says the assignment is direct (route_target of a sub-epic is the sub-epic), but since store-split M2 the relink is written first and patch_task's repo change then re-routes the task to the sub-epic for the new repo, so the explicit sub-epic is overridden (and deleted if left empty). Before M2 the explicit sub-epic won. Which is intended: does an explicit sub-epic win over the new repo, or does the repo always decide inside a grouped subtree?"
-
-open question "update_tasks writes an explicit epic_id relink (set_task_epic) and the patch (patch_task) as two store transactions. The service writes the patch first unless the call also changes repo_path (then the relink goes first, so the repo change re-routes inside the new subtree). In that repo_path case a patch the store refuses (an illegal sub_status) still leaves the relink applied. Should the relink and the patch become one transaction? Since task #94222 patch_task refuses epic_id outright (store-split.allium: PatchTaskNeverMovesAnEpic), so this now means a new combined reducer, not letting the relink ride in the patch."

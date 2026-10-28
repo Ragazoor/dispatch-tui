@@ -160,6 +160,15 @@ pub trait ReducerCaller: Send + Sync {
     /// `tasks.allium: SeeTasksByEnteringTheirEpic`.
     async fn mark_epic_seen(&self, subscriber: String, epic_id: EpicId) -> Result<ReducerOutcome>;
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome>;
+    /// `store-split.allium: UpdateTaskIsOneTransaction`: the relink and the
+    /// patch in one reducer call. `epic_id` is `None` to leave the epic alone.
+    async fn update_task(
+        &self,
+        id: TaskId,
+        epic_id: Option<Option<EpicId>>,
+        owner: String,
+        patch: bindings::TaskPatch,
+    ) -> Result<ReducerOutcome>;
     async fn delete_task(&self, id: TaskId) -> Result<ReducerOutcome>;
     async fn set_task_epic(
         &self,

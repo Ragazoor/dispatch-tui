@@ -569,7 +569,8 @@
 --             phoenix respawn in the same transaction (tasks.allium:
 --             PhoenixRespawn; the trigger is unchanged: the phoenix flag, a
 --             task no feed owns, entering Done). completed_at on entering
---             Done was already stamped by the module. The board no longer
+--             Done was already stamped by the module, and update_task now
+--             overwrites a value its patch names (UpdateTaskIsOneTransaction). The board no longer
 --             stamps, clears or respawns itself; a board that needs the stamp
 --             re-reads the task.
 --           - X3, epic rollups. The board-side epic status recalculations that
@@ -954,10 +955,11 @@ rule PatchTaskNeverMovesAnEpic {
         -- patch_task refuses a patch that names epic_id at all, even one that
         -- clears it (a detach), with "epic_id cannot
         -- be changed by patch_task; use set_task_epic", and writes nothing.
-        -- set_task_epic is the ONLY way a task changes epic; it routes into a
+        -- set_task_epic and update_task (UpdateTaskIsOneTransaction) are the ONLY
+        -- ways a task changes epic; the move routes into a
         -- repo-group sub-epic, sets the owner and rolls up both the old and
         -- the new epic. No host patch names epic_id: update_tasks sends an
-        -- explicit epic_id as its own set_task_epic call
+        -- explicit epic_id through update_task
         -- (mcp-task-tools.allium: UpdateTaskViaMcp).
         --
         -- With the epic fixed, patch_task rolls up the task's epic only when
@@ -975,6 +977,50 @@ rule PatchTaskNeverMovesAnEpic {
         --
         -- The repo-group sweep deletes a sub-epic only when it holds no task and
         -- no child, so validate_epic_deletable has nothing to refuse there.
+}
+
+rule UpdateTaskIsOneTransaction {
+    when: TaskUpdateRequested(task, epic?, patch)
+
+    -- The board's update of a task (relink and field patch) is ONE reducer,
+    -- update_task, so it cannot half-apply and does not depend on the board's
+    -- cached rows. A refusal of either half (the epic does not exist, a
+    -- sub_status illegal for the status the row will hold, a schedule the
+    -- module refuses) leaves the task, its epic and its repo as they were.
+    requires: task.exists
+
+    ensures: TaskPatchAccepted(task: task, patch: patch)
+    ensures:
+        if epic != null: task.epic = route_target(epic, task.repo_path)
+
+    @guidance
+        -- epic is absent to leave the epic alone, 0 to detach onto a user
+        -- board (the call carries the owner), n to move into epic n. The move
+        -- is set_task_epic's (routing, owner, epic-exists check, rollups of
+        -- both epics); the patch is patch_task's, and patch_task still refuses
+        -- epic_id. A missing task is an error here ("task <id> not found"),
+        -- unlike patch_task's silent no-op: the board no longer pre-reads a
+        -- possibly stale view to decide that. A missing epic is refused with
+        -- "task <id>: epic <n> does not exist", which the board maps to the
+        -- same NotFound the create and move paths answer.
+        --
+        -- ORDER INSIDE THE CALL. A call that also changes repo_path relinks
+        -- first, then patches, so the repo change re-routes inside the subtree
+        -- the relink named and the task ends where routing by the NEW repo
+        -- puts it. Otherwise it patches first, then relinks. The order no
+        -- longer matters for atomicity: both halves share one transaction.
+        --
+        -- COMPLETION STAMP. Entering Done stamps completed_at from the store
+        -- clock whatever the patch names, in update_task: a board that
+        -- forwarded a stale row's value cannot misorder the Done column, and
+        -- no longer reads its cache to strip the value first. A patch that
+        -- names a completion on a task already done (a manual reorder of the
+        -- Done column) is kept. patch_task and patch_epic are unchanged: a
+        -- completion they are given explicitly (a seed, a feed, an epic's
+        -- manual reorder) still wins over the module's own stamp.
+        --
+        -- RULES_VERSION moves to 18: the board calls update_task, which an
+        -- older module does not have.
 }
 
 rule RespawnPhoenixSuccessorNeedsTheFlag {

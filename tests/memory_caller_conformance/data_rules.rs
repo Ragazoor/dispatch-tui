@@ -293,6 +293,110 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         assert!(why.contains("does not exist"), "{why}");
         same_task(task.0);
 
+        // -- update_task: the relink and the patch are one transaction -----------
+        let plain = bindings::Epic {
+            created_by: identity.clone(),
+            ..blank_epic()
+        };
+        let other = real.create_epic(plain.clone()).await.unwrap().0;
+        wait_for!(rows_real.epic(EpicId(other)).is_some());
+        assert_eq!(mem.create_epic(plain).await.unwrap().0, other);
+        let before = rows_real.task(task).unwrap();
+        let illegal_with_repo = bindings::TaskPatch {
+            repo_path: Some("/x/elsewhere".into()),
+            sub_status: Some("active".into()),
+            ..blank_task_patch()
+        };
+        let why = refused(
+            real.update_task(
+                task,
+                Some(Some(EpicId(other))),
+                String::new(),
+                illegal_with_repo.clone(),
+            )
+            .await
+            .unwrap(),
+            mem.update_task(
+                task,
+                Some(Some(EpicId(other))),
+                String::new(),
+                illegal_with_repo,
+            )
+            .await
+            .unwrap(),
+        );
+        assert!(why.contains("is not valid for status"), "{why}");
+        same_task(task.0);
+        let after = rows_real.task(task).unwrap();
+        assert_eq!(after.epic_id, before.epic_id, "the task did not move");
+        assert_eq!(after.repo_path, before.repo_path, "the repo did not change");
+        same_epic(other);
+
+        let retitle = bindings::TaskPatch {
+            title: Some("never written".into()),
+            ..blank_task_patch()
+        };
+        let why = refused(
+            real.update_task(task, Some(Some(missing)), String::new(), retitle.clone())
+                .await
+                .unwrap(),
+            mem.update_task(task, Some(Some(missing)), String::new(), retitle)
+                .await
+                .unwrap(),
+        );
+        assert!(why.contains("does not exist"), "{why}");
+        same_task(task.0);
+
+        let gone = TaskId(9_999_999);
+        let why = refused(
+            real.update_task(gone, None, String::new(), blank_task_patch())
+                .await
+                .unwrap(),
+            mem.update_task(gone, None, String::new(), blank_task_patch())
+                .await
+                .unwrap(),
+        );
+        assert!(why.contains("not found"), "{why}");
+
+        // -- Done is stamped by the store, whatever the patch names ---------------
+        let finishing = |title: &str| bindings::Task {
+            title: title.into(),
+            created_by: identity.clone(),
+            ..blank_task_in_epic(other)
+        };
+        let done_real = real.create_task(finishing("finishing")).await.unwrap();
+        wait_for!(rows_real.task(done_real).is_some());
+        let done_mem = mem.create_task(finishing("finishing")).await.unwrap();
+        let stale = "2001-01-01 00:00:00.000";
+        let to_done = bindings::TaskPatch {
+            status: Some("done".into()),
+            completed_at: Some(stale.into()),
+            ..blank_task_patch()
+        };
+        real.update_task(done_real, None, String::new(), to_done.clone())
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        mem.update_task(done_mem, None, String::new(), to_done)
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        wait_for!(rows_real
+            .task(done_real)
+            .is_some_and(|t| t.status == TaskStatus::Done));
+        for (side, rows, id) in [
+            ("real", &rows_real, done_real),
+            ("memory", &rows_mem, done_mem),
+        ] {
+            let stamped = rows.task(id).unwrap().completed_at;
+            assert!(
+                stamped.is_some_and(|at| at.timestamp() > 1_577_836_800),
+                "{side} store kept the stale completion: {stamped:?}"
+            );
+        }
+
         // -- respawn_phoenix_successor on a task that is not a phoenix -----------
         let successor = bindings::Task {
             title: "never respawned".into(),

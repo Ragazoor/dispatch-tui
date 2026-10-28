@@ -174,22 +174,16 @@ impl TaskService {
         }
 
         let task_id = params.task_id;
-        // The shared store's `patch_task` is a deliberate no-op on a missing
-        // id (hooks race with deletes), so the not-found answer is this
-        // service's to give — see `UpdateTaskViaMcp` in mcp-task-tools.allium.
-        if !self.db.task_exists(task_id).await {
-            return Err(Self::task_not_found(task_id));
-        }
         let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
 
-        // The sub-status goes through as given: the store's `patch_task`
-        // refuses one that is illegal for the status the row will hold
-        // (`UpdateTaskViaMcp`, store-split M2).
-        let mut patch = build_task_patch(&params, expanded_repo_path.as_deref(), params.sub_status);
+        // The sub-status goes through as given: the store refuses one that is
+        // illegal for the status the row will hold (`UpdateTaskViaMcp`,
+        // store-split M2).
+        let patch = build_task_patch(&params, expanded_repo_path.as_deref(), params.sub_status);
 
-        // Snapshot the task before the patch, whenever `status` changes: the
-        // PR-finalisation check, ClosePrOnDone and the Done-transition echo
-        // below all read the prior row. Nothing else here needs it.
+        // Snapshot the task before the write, whenever `status` changes: the
+        // PR-finalisation check and ClosePrOnDone below read the prior row.
+        // Nothing else here needs it.
         let is_pr_url_set = matches!(
             params.url.as_ref(),
             Some(UrlUpdate::Set(u)) if u.is_pr()
@@ -203,43 +197,18 @@ impl TaskService {
             && is_pr_url_set
             && prior.as_ref().is_some_and(|t| t.url.is_none());
 
-        // A transition into Done is stamped by the module's `patch_task`
-        // (`completed_at`, and the transition rules that go with it,
-        // store-split.allium X2), not here. The stamp must win over anything the
-        // caller's params already set for completed_at —
-        // exec_persist_task (src/runtime/tasks.rs) forwards whatever is
-        // sitting on the in-memory Task struct alongside a status change, and a
-        // stale snapshot must not overwrite a fresh completion — and the module
-        // lets a completion the patch names win, so the caller's is dropped
-        // from the patch rather than overwritten. Not a computation of the
-        // stamp: the module still decides it.
-        let entering_done = params.status == Some(TaskStatus::Done)
-            && prior.as_ref().is_some_and(|p| p.status != TaskStatus::Done);
-        if entering_done {
-            patch.completed_at = None;
-        }
-
-        // ORDER OF THE WRITES (mcp-task-tools.allium: UpdateTaskViaMcp). An
-        // explicit relink goes BEFORE the patch when the call also changes the
-        // repo: the store routes the relink by the repo the task has now, and
-        // the patch's repo change then re-routes it within that subtree, so the
-        // call ends where routing by the new repo puts it. Patch-first would
-        // let the patch's re-route delete an explicitly named sub-epic before
-        // the relink lands in it. Otherwise the patch goes first, so a patch
-        // the store refuses (an illegal sub_status) leaves the task where it
-        // was.
-        let relink_first = params.repo_path.is_some();
-        if relink_first {
-            if let Some(epic_id) = params.epic_id {
-                self.db.set_task_epic_id(task_id, Some(epic_id)).await?;
-            }
-        }
-        self.db.patch_task(task_id, &patch).await?;
-        if !relink_first {
-            if let Some(epic_id) = params.epic_id {
-                self.db.set_task_epic_id(task_id, Some(epic_id)).await?;
-            }
-        }
+        // ONE STORE CALL (store-split.allium: UpdateTaskIsOneTransaction). The
+        // relink and the patch go to the module's `update_task` together, so a
+        // refusal of either leaves the task as it was, and the order between
+        // them is the module's. The completion stamp on entering Done is the
+        // module's too, whatever completed_at the patch names, so nothing here
+        // reads the board's cache to decide it. A task or epic deleted since
+        // the caller looked is answered by the module, and mapped to the
+        // `NotFound` the pre-checks used to give.
+        self.db
+            .update_task(task_id, params.epic_id.map(Some), &patch)
+            .await
+            .map_err(|e| Self::refusal_as_not_found(e, task_id, params.epic_id))?;
 
         // ClosePrOnDone (docs/specs/pr-workflow.allium): resolved from the
         // final url this call leaves the task with — an explicit `params.url`
@@ -253,13 +222,14 @@ impl TaskService {
         self.close_pr_on_done(task_id, prior.as_ref(), params.status, final_url);
 
         // No epic recalculation, no stop_pending clear and no phoenix respawn
-        // here: `patch_task` and `set_task_epic` do all three in their own
-        // transactions (store-split.allium X2, X3).
+        // here: `update_task` does all three in its transaction
+        // (store-split.allium X2, X3).
 
-        // What this call wrote to completed_at. A stamp the module chose is
-        // read back rather than computed, so the TUI's in-memory copy agrees
-        // with the store. See `UpdateTaskResult`.
-        let completed_at_after_write = if entering_done {
+        // What this call wrote to completed_at. A call that sets Done may have
+        // been stamped by the module, so the stamp is read back rather than
+        // computed, and the TUI's in-memory copy agrees with the store. See
+        // `UpdateTaskResult`.
+        let completed_at_after_write = if params.status == Some(TaskStatus::Done) {
             self.db.get_task(task_id).await.map(|t| t.completed_at)
         } else {
             patch.completed_at
@@ -851,6 +821,32 @@ impl TaskService {
     /// error; this is for the existence-only checks, which have no row to fail on.
     fn task_not_found(id: TaskId) -> ServiceError {
         ServiceError::NotFound(format!("Task {} not found", id.0))
+    }
+
+    /// Map the module's "task N not found" / "epic M does not exist" refusals
+    /// of `update_task` to the `NotFound` the service's own pre-checks answer,
+    /// so a delete that lands between the caller's look and the write reads the
+    /// same as one that landed before it. Any other refusal stays what
+    /// [`ServiceError::from`] makes of it.
+    fn refusal_as_not_found(
+        e: anyhow::Error,
+        task_id: TaskId,
+        epic_id: Option<EpicId>,
+    ) -> ServiceError {
+        if let Some(refusal) = e.downcast_ref::<crate::sync::writes::StoreRefusal>() {
+            if refusal.0 == format!("task {} not found", task_id.0) {
+                return Self::task_not_found(task_id);
+            }
+            if let Some(epic_id) = epic_id {
+                if refusal
+                    .0
+                    .contains(&format!("epic {} does not exist", epic_id.0))
+                {
+                    return ServiceError::NotFound(format!("Epic {} not found", epic_id.0));
+                }
+            }
+        }
+        ServiceError::from(e)
     }
 
     /// Clear a task's subagent entries and void any pending Stop **without**

@@ -316,3 +316,111 @@ fn recording_usage_events_prunes_beyond_the_cap() {
     assert!(!actions.contains(&"action_1".to_string()), "oldest pruned");
     assert!(actions.contains(&"action_5".to_string()), "newest kept");
 }
+
+// -- update_task: the relink and the patch are one transaction ---------------
+
+#[test]
+fn update_task_relinks_and_patches_in_one_call() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "Shared", false);
+    let id = store.create("alice", user_task("t", "alice"));
+    let patch = TaskPatch {
+        title: Some("renamed".into()),
+        ..TaskPatch::default()
+    };
+    store
+        .call("alice", |ctx| {
+            update_task(ctx, id, Some(epic), String::new(), patch)
+        })
+        .expect("update_task");
+    let task = store.task(id);
+    assert_eq!(task.epic_id, epic);
+    assert_eq!(task.title, "renamed");
+}
+
+#[test]
+fn update_task_with_an_illegal_patch_leaves_the_relink_undone() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "Shared", false);
+    let id = store.create("alice", user_task("t", "alice"));
+    // Backlog allows only `none`; `repo_path` makes the call relink first.
+    let patch = TaskPatch {
+        repo_path: Some("/other".into()),
+        sub_status: Some("active".into()),
+        ..TaskPatch::default()
+    };
+    let why = store
+        .call("alice", |ctx| {
+            update_task(ctx, id, Some(epic), String::new(), patch)
+        })
+        .expect_err("the sub_status is illegal for backlog");
+    assert!(why.contains("not valid for status"), "{why}");
+    let task = store.task(id);
+    assert_eq!(task.epic_id, 0, "the task did not move");
+    assert_eq!(task.repo_path, "/repo", "the repo did not change");
+}
+
+#[test]
+fn update_task_into_a_missing_epic_changes_nothing() {
+    let store = Store::new();
+    let id = store.create("alice", user_task("t", "alice"));
+    let patch = TaskPatch {
+        title: Some("renamed".into()),
+        ..TaskPatch::default()
+    };
+    let why = store
+        .call("alice", |ctx| {
+            update_task(ctx, id, Some(9_999), String::new(), patch)
+        })
+        .expect_err("a missing epic is refused");
+    assert!(why.contains("does not exist"), "{why}");
+    assert_eq!(store.task(id).title, "t");
+}
+
+#[test]
+fn update_task_on_a_missing_task_is_refused() {
+    let store = Store::new();
+    let why = store
+        .call("alice", |ctx| {
+            update_task(ctx, 404, None, String::new(), status_patch("done"))
+        })
+        .expect_err("the caller learns the task is gone");
+    assert!(why.contains("not found"), "{why}");
+}
+
+#[test]
+fn update_task_stamps_done_from_the_store_clock_over_a_named_completion() {
+    let store = Store::new();
+    let id = store.create("alice", user_task("t", "alice"));
+    store.advance_secs(90);
+    let patch = TaskPatch {
+        status: Some("done".into()),
+        completed_at: Some("2001-01-01 00:00:00.000".into()),
+        ..TaskPatch::default()
+    };
+    store
+        .call("alice", |ctx| {
+            update_task(ctx, id, None, String::new(), patch)
+        })
+        .expect("update_task");
+    assert_eq!(store.task(id).completed_at, "2026-10-10 12:01:30.000");
+}
+
+#[test]
+fn update_task_keeps_a_named_completion_on_a_task_already_done() {
+    let store = Store::new();
+    let id = store.create("alice", user_task("t", "alice"));
+    store
+        .call("alice", |ctx| patch_task(ctx, id, status_patch("done")))
+        .expect("patch_task");
+    let patch = TaskPatch {
+        completed_at: Some("2001-01-01 00:00:00.000".into()),
+        ..TaskPatch::default()
+    };
+    store
+        .call("alice", |ctx| {
+            update_task(ctx, id, None, String::new(), patch)
+        })
+        .expect("update_task");
+    assert_eq!(store.task(id).completed_at, "2001-01-01 00:00:00.000");
+}

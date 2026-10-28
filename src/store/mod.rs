@@ -133,6 +133,17 @@ pub trait TaskCrud: TaskRead {
     /// operation, or nothing at all" has to hold up against.
     async fn batch_delete(&self, task_ids: &[TaskId], epic_ids: &[EpicId]) -> Result<()>;
     async fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
+    /// The relink and the patch of one task update as ONE store transaction
+    /// (`store-split.allium: UpdateTaskIsOneTransaction`). `epic` is `None` to
+    /// leave the epic alone, `Some(None)` to detach onto the caller's board,
+    /// `Some(Some(id))` to move. A missing task is an error here, unlike
+    /// [`patch_task`](Self::patch_task)'s no-op.
+    async fn update_task(
+        &self,
+        id: TaskId,
+        epic: Option<Option<EpicId>>,
+        patch: &TaskPatch<'_>,
+    ) -> Result<()>;
     /// Atomically set `pr_learnings_gate_shown_at` to now if it is currently null.
     /// Returns `true` if this call set it (first `gh pr create` for the task →
     /// caller should block), `false` if it was already set or the task does not

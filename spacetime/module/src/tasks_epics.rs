@@ -346,6 +346,22 @@ pub fn create_task_signalled(ctx: &ReducerContext, row: Task) -> Result<(), Stri
 /// SQLite side already makes.
 #[spacetimedb::reducer]
 pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(), String> {
+    patch_task_row(ctx, id, patch, false)
+}
+
+/// [`patch_task`]'s body, shared with [`update_task`] so the two cannot drift.
+///
+/// `store_owns_completion` is the one difference: when set, a move into Done
+/// stamps `completed_at` whatever the patch names. `patch_task` leaves a named
+/// completion alone, because its callers (seeds, feeds, a manual Done reorder)
+/// name one on purpose; the board's `update_task` does not, and what it
+/// forwards is whatever its in-memory row holds, which may be stale.
+fn patch_task_row(
+    ctx: &ReducerContext,
+    id: i64,
+    patch: TaskPatch,
+    store_owns_completion: bool,
+) -> Result<(), String> {
     let Some(mut row) = ctx.db.tasks().id().find(id) else {
         return Ok(());
     };
@@ -383,7 +399,11 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
     // The completion stamp is the store's, not the caller's, unless the caller
     // named one explicitly. A client that computed it from its own clock would
     // make the Done column's ordering depend on whose laptop was fast.
-    if !caller_named_a_completion && stamps_completion(&prior_status, &row.status) {
+    // `update_task` takes that exception away: a value it names on entering
+    // Done is a stale row's, so the stamp wins.
+    if (store_owns_completion || !caller_named_a_completion)
+        && stamps_completion(&prior_status, &row.status)
+    {
         row.completed_at = now(ctx);
     }
     row.updated_at = now(ctx);
@@ -501,6 +521,11 @@ pub fn set_task_epic(
     epic_id: i64,
     owner: String,
 ) -> Result<(), String> {
+    move_task_row(ctx, id, epic_id, owner)
+}
+
+/// [`set_task_epic`]'s body, shared with [`update_task`].
+fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> Result<(), String> {
     let Some(task) = ctx.db.tasks().id().find(id) else {
         return Ok(());
     };
@@ -531,6 +556,54 @@ pub fn set_task_epic(
     recalculate_epic_chain(ctx, was_in);
     recalculate_epic_chain(ctx, epic_id);
     Ok(())
+}
+
+/// Change a task's fields and, in the same call, its epic: one transaction, so
+/// a refusal of either half leaves the task exactly as it was
+/// (`store-split.allium: UpdateTaskIsOneTransaction`).
+///
+/// `epic_id` is `None` to leave the epic alone, `Some(0)` to detach onto a user
+/// board (taking `owner`), `Some(n)` to move into epic `n`. Unlike
+/// [`patch_task`], a missing task is an error: this is the board's
+/// user-facing update, and the caller owes the operator a not-found answer
+/// that a pre-read of a stale view cannot give.
+///
+/// The order of the two halves is the one the board used to choose: a call
+/// that also changes the repo relinks first, so the patch's repo change
+/// re-routes inside the subtree the relink named and the task ends where
+/// routing by the NEW repo puts it; otherwise the patch goes first.
+#[spacetimedb::reducer]
+pub fn update_task(
+    ctx: &ReducerContext,
+    id: i64,
+    epic_id: Option<i64>,
+    owner: String,
+    patch: TaskPatch,
+) -> Result<(), String> {
+    if ctx.db.tasks().id().find(id).is_none() {
+        return Err(format!("task {id} not found"));
+    }
+    // Every refusal that can be read off the row and the patch is raised
+    // before the first write. What only the write can see (the legality of the
+    // sub-status the row will hold) is raised by a write, and the reducer's
+    // rolled-back transaction undoes the half already done.
+    if let Some(epic_id) = epic_id {
+        if epic_id != 0 && ctx.db.epics().id().find(epic_id).is_none() {
+            return Err(format!("task {id}: epic {epic_id} does not exist"));
+        }
+    }
+    let relink_first = patch.repo_path.is_some();
+    match epic_id {
+        Some(epic_id) if relink_first => {
+            move_task_row(ctx, id, epic_id, owner)?;
+            patch_task_row(ctx, id, patch, true)
+        }
+        Some(epic_id) => {
+            patch_task_row(ctx, id, patch, true)?;
+            move_task_row(ctx, id, epic_id, owner)
+        }
+        None => patch_task_row(ctx, id, patch, true),
+    }
 }
 
 /// `PhoenixRespawn`, atomic: inserts the successor and clears the

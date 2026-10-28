@@ -41,9 +41,10 @@ use crate::spacetime::bindings::{
     set_member_role as _, set_task_epic as _, set_verify_command as _, subagent_clear as _,
     subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
     subscribe_to_epic as _, try_record_stop as _, unlink_work_package_item as _,
-    unsubscribe_from_epic as _, update_work_package_with_links as _, DbConnection,
-    DispatchRequestsTableAccess as _, EpicsTableAccess as _, LearningsTableAccess as _,
-    SessionRequestsTableAccess as _, TasksTableAccess as _, WorkPackagesTableAccess as _,
+    unsubscribe_from_epic as _, update_task as _, update_work_package_with_links as _,
+    DbConnection, DispatchRequestsTableAccess as _, EpicsTableAccess as _,
+    LearningsTableAccess as _, SessionRequestsTableAccess as _, TasksTableAccess as _,
+    WorkPackagesTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -304,6 +305,20 @@ impl ReducerCaller for SdkReducerCaller {
         patch: bindings::TaskPatch,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(self, "the task change", patch_task_then(id.0, patch))
+    }
+
+    async fn update_task(
+        &self,
+        id: TaskId,
+        epic_id: Option<Option<EpicId>>,
+        owner: String,
+        patch: bindings::TaskPatch,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the task update",
+            update_task_then(id.0, epic_id.map(encode::epic_ref), owner, patch)
+        )
     }
 
     async fn delete_task(&self, id: TaskId) -> anyhow::Result<ReducerOutcome> {

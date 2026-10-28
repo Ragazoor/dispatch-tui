@@ -261,6 +261,17 @@ impl MemoryReducerCaller {
         id: TaskId,
         patch: bindings::TaskPatch,
     ) -> Result<ReducerOutcome> {
+        self.patch_task_row(id, patch, false)
+    }
+
+    /// `apply_patch_task`'s body; `store_owns_completion` is the module's
+    /// `patch_task_row` flag, set only by `update_task`.
+    fn patch_task_row(
+        &self,
+        id: TaskId,
+        patch: bindings::TaskPatch,
+        store_owns_completion: bool,
+    ) -> Result<ReducerOutcome> {
         let mut tables = self.lock();
         let Some(mut row) = tables.tasks.get(&id.0).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
@@ -303,7 +314,9 @@ impl MemoryReducerCaller {
             module::apply_session_patch(agent, &session_patch)
         });
 
-        if !caller_named_a_completion && module::stamps_completion(&prior_status, &row.status) {
+        if (store_owns_completion || !caller_named_a_completion)
+            && module::stamps_completion(&prior_status, &row.status)
+        {
             row.completed_at = self.now();
         }
         row.updated_at = self.now();
@@ -341,6 +354,81 @@ impl MemoryReducerCaller {
             }
         }
         Ok(ReducerOutcome::Applied(vec![]))
+    }
+
+    /// Mirrors the module's `update_task`: the relink and the patch of one
+    /// task, whole or not at all.
+    ///
+    /// The module leans on its rolled-back transaction; this double has none
+    /// (see [`Self::validate_task_write`]), so every refusal either half can
+    /// make is raised here BEFORE the first write, by running the patch's
+    /// validation against a copy of the row. The two writes that follow, in
+    /// the module's order, then cannot refuse.
+    pub(super) fn apply_update_task(
+        &self,
+        id: TaskId,
+        epic_id: Option<i64>,
+        owner: String,
+        patch: bindings::TaskPatch,
+    ) -> Result<ReducerOutcome> {
+        {
+            let mut tables = self.lock();
+            let Some(row) = tables.tasks.get(&id.0).cloned() else {
+                return Ok(ReducerOutcome::Refused(format!("task {} not found", id.0)));
+            };
+            if let Some(epic_id) = epic_id {
+                if epic_id != 0 && !tables.epics.contains_key(&epic_id) {
+                    return Ok(ReducerOutcome::Refused(format!(
+                        "task {}: epic {epic_id} does not exist",
+                        id.0
+                    )));
+                }
+            }
+            let patch = module::TaskPatch::from(patch.clone());
+            if let Err(why) = self.check_patch_would_apply(&mut tables, id, row, patch) {
+                return Ok(ReducerOutcome::Refused(why));
+            }
+        }
+        let relink_first = patch.repo_path.is_some();
+        let Some(epic_id) = epic_id else {
+            return self.patch_task_row(id, patch, true);
+        };
+        let epic = (epic_id != 0).then_some(EpicId(epic_id));
+        if relink_first {
+            let moved = self.apply_set_task_epic(id, epic, owner)?;
+            if matches!(moved, ReducerOutcome::Refused(_)) {
+                return Ok(moved);
+            }
+            self.patch_task_row(id, patch, true)
+        } else {
+            let patched = self.patch_task_row(id, patch, true)?;
+            if matches!(patched, ReducerOutcome::Refused(_)) {
+                return Ok(patched);
+            }
+            self.apply_set_task_epic(id, epic, owner)
+        }
+    }
+
+    /// The refusals `apply_patch_task` can make, read off a copy of `row`:
+    /// the same checks in the same order, with no write.
+    fn check_patch_would_apply(
+        &self,
+        tables: &mut Tables,
+        id: TaskId,
+        mut row: module::Task,
+        patch: module::TaskPatch,
+    ) -> Result<(), String> {
+        module::check_task_patch(&row, &patch)?;
+        let has_agent = module::current_agent(&self.agent_store(tables), id.0).is_some();
+        module::check_session_patch(has_agent, &patch)?;
+        let prior_status = row.status.clone();
+        let schedule = patch.schedule.clone();
+        module::apply_task_patch(&mut row, patch);
+        if let Some(cron) = schedule {
+            row = module::apply_schedule(row, &cron, &self.now())?;
+        }
+        row = module::schedule_after_status_write(&prior_status, row, &self.now());
+        Self::validate_task_write(tables, &row, &self.now())
     }
 
     pub(super) fn apply_delete_task(&self, id: TaskId) -> Result<ReducerOutcome> {

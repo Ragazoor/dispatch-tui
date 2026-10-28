@@ -170,6 +170,7 @@ pub mod unlink_work_package_item_reducer;
 pub mod unseen_task_type;
 pub mod unseen_tasks_table;
 pub mod unsubscribe_from_epic_reducer;
+pub mod update_task_reducer;
 pub mod update_work_package_with_links_reducer;
 pub mod usage_event_type;
 pub mod usage_events_table;
@@ -348,6 +349,7 @@ pub use unlink_work_package_item_reducer::unlink_work_package_item;
 pub use unseen_task_type::UnseenTask;
 pub use unseen_tasks_table::*;
 pub use unsubscribe_from_epic_reducer::unsubscribe_from_epic;
+pub use update_task_reducer::update_task;
 pub use update_work_package_with_links_reducer::update_work_package_with_links;
 pub use usage_event_type::UsageEvent;
 pub use usage_events_table::*;
@@ -758,6 +760,12 @@ pub enum Reducer {
         subscriber: String,
         epic_id: i64,
     },
+    UpdateTask {
+        id: i64,
+        epic_id: Option<i64>,
+        owner: String,
+        patch: TaskPatch,
+    },
     UpdateWorkPackageWithLinks {
         id: i64,
         patch: WorkPackagePatch,
@@ -878,6 +886,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::TryRecordStop { .. } => "try_record_stop",
             Reducer::UnlinkWorkPackageItem { .. } => "unlink_work_package_item",
             Reducer::UnsubscribeFromEpic { .. } => "unsubscribe_from_epic",
+            Reducer::UpdateTask { .. } => "update_task",
             Reducer::UpdateWorkPackageWithLinks { .. } => "update_work_package_with_links",
             _ => unreachable!(),
         }
@@ -1560,6 +1569,17 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&unsubscribe_from_epic_reducer::UnsubscribeFromEpicArgs {
                 subscriber: subscriber.clone(),
                 epic_id: epic_id.clone(),
+}),
+            Reducer::UpdateTask{
+                id,
+                epic_id,
+                owner,
+                patch,
+}             => __sats::bsatn::to_vec(&update_task_reducer::UpdateTaskArgs {
+                id: id.clone(),
+                epic_id: epic_id.clone(),
+                owner: owner.clone(),
+                patch: patch.clone(),
 }),
             Reducer::UpdateWorkPackageWithLinks{
                 id,

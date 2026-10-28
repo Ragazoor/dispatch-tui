@@ -54,6 +54,7 @@ enum Sent {
     /// Any of the workspace and super-admin reducers, by name.
     Workspace(&'static str),
     PatchTask(TaskId, Box<bindings::TaskPatch>),
+    UpdateTask(TaskId, Option<i64>, String, Box<bindings::TaskPatch>),
     DeleteTask(TaskId),
     SetTaskEpic(TaskId, i64, String),
     CreateEpic(Box<bindings::Epic>),
@@ -332,6 +333,17 @@ impl ReducerCaller for RecordingCaller {
         patch: bindings::TaskPatch,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::PatchTask(id, Box::new(patch)))
+    }
+
+    async fn update_task(
+        &self,
+        id: TaskId,
+        epic_id: Option<Option<EpicId>>,
+        owner: String,
+        patch: bindings::TaskPatch,
+    ) -> anyhow::Result<ReducerOutcome> {
+        let epic_id = epic_id.map(encode::epic_ref);
+        self.answer(Sent::UpdateTask(id, epic_id, owner, Box::new(patch)))
     }
 
     async fn delete_task(&self, id: TaskId) -> anyhow::Result<ReducerOutcome> {

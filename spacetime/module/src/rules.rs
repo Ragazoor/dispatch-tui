@@ -58,6 +58,9 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 18: `update_task` — the board's relink and patch of a task in one
+///    transaction, and the completion stamp on entering Done that its patch
+///    cannot override (`tasks_epics.rs`).
 /// 17: workspace and visibility columns on epics and work packages, a
 ///    workspace column on learnings, and `MigrateStoreToWorkspaces` on the first
 ///    connection after the publish; `delete_workspace` refuses an occupied
@@ -88,7 +91,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 17;
+pub const RULES_VERSION: i64 = 18;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:
