@@ -137,6 +137,48 @@ async fn apply_loop_event_message_applies_and_marks_dirty() {
     assert_eq!(app.status_message(), Some("hello"));
 }
 
+/// A `resume_task` event is the board's own resume, not a reload: it reaches
+/// the App's handler and comes back as the same command the Space key issues.
+#[tokio::test]
+async fn apply_loop_event_resume_task_issues_the_resume_command() {
+    let db = test_db().await;
+    let id = db
+        .create_task(CreateTaskRequest {
+            status: models::TaskStatus::Running,
+            ..CreateTaskRequest::fixture("detached", "/repo")
+        })
+        .await
+        .unwrap();
+    db.patch_task(
+        id,
+        &crate::store::TaskPatch::new().worktree(Some("/repo/.worktrees/1-detached")),
+    )
+    .await
+    .unwrap();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, runner).await;
+    let mut app = App::new(db.list_all().await);
+
+    let cmds = apply_loop_event(
+        &mut app,
+        LoopEvent::Mcp(crate::board_event::BoardEvent::ResumeTask {
+            id,
+            message: Some("hi".to_string()),
+        }),
+        &rt,
+    );
+
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Resume { message: Some(m), .. })
+                if m == "hi"
+        )),
+        "got: {cmds:?}"
+    );
+}
+
 /// A `Tick` loop event routes through `App::handle_tick`, which emits a single
 /// batched window-staleness check for the windowed tasks on the board.
 #[tokio::test]

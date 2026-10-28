@@ -2,7 +2,7 @@
 -- mcp-task-tools.allium
 --
 -- Scope: MCP tools for task management (create, get, update, list,
---        dispatch, query-usage,
+--        dispatch, resume, query-usage,
 --        set-verify-command) and the CLI plan-attachment surface; the
 --        standard every tool description and agent-facing skill is held to;
 --        context via MCP — the read-only resources the dispatch MCP server
@@ -1302,6 +1302,56 @@ rule DispatchTaskViaMcp {
         -- does. A caller resuming a task is about to call dispatch_task, so
         -- that is where it reads the story, and a second copy was a second
         -- wording to keep in step by hand.
+}
+
+rule ResumeTaskViaMcp {
+    when: McpResumeTask(task, message?)
+
+    -- The refusals, each an error naming the reason. The board's own view of
+    -- the task decides, the same view Space acts on.
+    requires: task.status in {running, review, done}
+    requires: task.worktree != null
+    requires: current_agent(task).tmux_window = null
+    requires: task.is_locally_owned
+
+    -- The same rule the TUI's Space key raises, not a second launch path.
+    ensures: ResumeTask(task: task, message: message)
+
+    @guidance
+        -- resume_task wakes a detached (paused) agent WITH its context. It
+        -- reattaches the task's worktree and starts `claude --continue`, so
+        -- the agent's previous conversation is restored, and puts the task
+        -- back to running. The older route — update_tasks status=backlog,
+        -- then dispatch_task — starts a NEW agent in the reused worktree
+        -- with none of that context (DispatchTaskViaMcp).
+        --
+        -- == Arguments ==
+        -- task_id (a task id or agent name, like every task tool) and an
+        -- optional message, delivered as the resumed session's first input
+        -- (dispatch.allium: ResumeTask). The message is the one place to say
+        -- why the agent was woken; the task description is not rewritten.
+        --
+        -- == Errors ==
+        -- Each refused precondition is an error that says what is wrong in
+        -- plain words: the task has no worktree (it never ran, so there is
+        -- no session to resume; dispatch it); its status is not running,
+        -- review or done (backlog tasks are dispatched, not resumed); an agent
+        -- is already attached to it (ListAgents/SendMessage reach it); its
+        -- worktree is on another machine. "No resumable session" is the
+        -- umbrella: the tool never starts a fresh agent as a fallback.
+        --
+        -- == Answer ==
+        -- The call hands the resume to the board and answers that it was
+        -- requested, naming the task and its tmux window. It does not wait for
+        -- the session to finish starting. A launch that fails after the hand-off
+        -- (tmux or claude missing) shows in the board's status line, and
+        -- get_task shows the task still detached.
+        --
+        -- == Not for crashed worktrees ==
+        -- A task whose worktree is gone cannot resume; it is re-dispatched
+        -- from backlog (DispatchTaskViaMcp). The tool description and the
+        -- agent-facing skills say resume_task first, and dispatch_task only
+        -- when there is no session to resume.
 }
 
 -- Inter-agent messaging no longer has a dispatch MCP tool. It was

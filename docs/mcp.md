@@ -17,7 +17,7 @@ MCP handler (e.g. handle_update_task)
 ```
 
 Key types in the chain:
-- `BoardEvent` (`src/board_event.rs::BoardEvent`) — `Refresh` (catch-all full reload), `TaskChanged(TaskId)` / `EpicChanged(EpicId)` (targeted single-row reloads, preferred when the changed entity is known)
+- `BoardEvent` (`src/board_event.rs::BoardEvent`) — `Refresh` (catch-all full reload), `TaskChanged(TaskId)` / `EpicChanged(EpicId)` (targeted single-row reloads, preferred when the changed entity is known), and `ResumeTask { id, message }` (not a reload: `resume_task` asks the board to run its own resume; see "MCP State Machines")
 - `McpState::notify()` — fire-and-forget send on the channel
 - `TuiRuntime::exec_refresh_from_db()` (`src/runtime/tasks.rs`) — reloads tasks, epics, and usage from DB
 - `TaskMessage::Refresh` (`src/tui/messages/task.rs`) — carries the fresh task list into the App, wrapped as `Message::Task`
@@ -75,6 +75,8 @@ This closes a race that existed when `wrap_up("pr")` used to set `status = revie
 A crash before the closing call leaves no stranded state: the task simply hasn't transitioned yet, and the token (a row) stays valid until a newer wrap-up, a dispatch or the close replaces it. A board that restarts mid-rebase fails that row `host restarted` at startup and does not resume it; the agent's waiting `wrap_up` died with the board and it calls `wrap_up` again. `update_tasks(status="done")` closes in the module too (`close_task`, store-split M7): no token and no chain, and a `close` row for the host's teardown when the task has a window or a PR.
 
 Do not add new ad-hoc state machines on `McpState` without documenting them here.
+
+**`resume_task`** (`src/mcp/handlers/tasks/resume.rs`; `docs/specs/mcp-task-tools.allium`: `ResumeTaskViaMcp`) wakes a detached agent with its conversation. It is not a request row: the handler refuses what the task row already shows (not running, review or done; no worktree; a window already attached) in words that say there is "no resumable session", then sends `BoardEvent::ResumeTask { id, message }` and answers that the resume was requested, without waiting for the session. The runtime routes the event to `App::handle_resume_requested`, which applies the host gate and issues the same `TaskCommand::Resume` the Space key does, so `exec_resume` and `dispatch::resume_agent_with_message` are the one launch path. A message becomes the positional prompt of the `claude --continue` launch (via `.claude-prompt`, behind a bare `--`), never keys typed into the pane. For a task with no session to resume, `dispatch_task` after `update_tasks(status="backlog")` still starts a new agent with none of the old context.
 
 ## MCP Error Codes
 

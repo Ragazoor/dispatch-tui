@@ -219,6 +219,8 @@ pub enum TaskCommand {
     Resume {
         id: TaskId,
         worktree: Option<String>,
+        /// First input of the resumed session (`dispatch.allium: ResumeTask`).
+        message: Option<String>,
     },
     JumpToTmux {
         window: TmuxWindow,

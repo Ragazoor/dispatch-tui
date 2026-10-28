@@ -3,6 +3,7 @@ use super::*;
 mod crud;
 mod dispatch;
 mod dispatch_requests;
+mod resume;
 mod session_requests;
 mod task_refs;
 mod verify;

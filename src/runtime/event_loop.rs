@@ -89,6 +89,12 @@ pub(super) fn apply_loop_event(app: &mut App, event: LoopEvent, rt: &TuiRuntime)
             // Spawn DB work so this never blocks key-event processing. Results
             // arrive back via msg_rx and are applied on the next iteration.
             app.dirty = true;
+            if let crate::board_event::BoardEvent::ResumeTask { id, message } = event {
+                // Not a reload: the board's own handler decides and launches.
+                return app.update(Message::Task(
+                    crate::tui::messages::TaskMessage::ResumeRequested { id, message },
+                ));
+            }
             apply_board_event(event, rt)
         }
         // Handlers set app.dirty themselves when they detect visible changes.
@@ -122,6 +128,8 @@ fn apply_board_event(event: crate::board_event::BoardEvent, rt: &TuiRuntime) -> 
             drop(rt.spawn_refresh_epic(epic_id));
             vec![]
         }
+        // Routed to the App before this function is reached.
+        BoardEvent::ResumeTask { .. } => vec![],
     }
 }
 

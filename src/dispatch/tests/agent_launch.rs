@@ -60,6 +60,63 @@ fn resume_agent_includes_plugin_dir() {
     );
 }
 
+/// `dispatch.allium: ResumeTask` — a message is the first input of the
+/// resumed session: the positional prompt behind a bare `--`, read from a file
+/// so no tmux key press ever types it into the pane.
+#[test]
+fn resume_agent_with_message_continues_and_passes_the_message_as_the_prompt() {
+    let (_dir, worktree_path) = make_test_repo();
+
+    let script = DispatchScript::resume();
+    let mock = script.runner();
+
+    resume_agent_with_message(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        &worktree_path,
+        Some("rebase on main"),
+        &mock,
+    )
+    .unwrap();
+
+    let calls = mock.recorded_calls();
+    let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
+    assert!(
+        send_keys_arg.contains("--continue"),
+        "the message must ride on the resumed conversation, got: {send_keys_arg}"
+    );
+    assert!(
+        send_keys_arg.contains("-- \"$prompt\""),
+        "the prompt follows a bare `--`, got: {send_keys_arg}"
+    );
+    assert!(
+        !send_keys_arg.contains("rebase on main"),
+        "the message is read from a file, never typed into the pane, got: {send_keys_arg}"
+    );
+    let written = std::fs::read_to_string(format!("{worktree_path}/.claude-prompt")).unwrap();
+    assert_eq!(written, "rebase on main");
+}
+
+#[test]
+fn resume_agent_without_message_writes_no_prompt_file() {
+    let (_dir, worktree_path) = make_test_repo();
+    let script = DispatchScript::resume();
+    let mock = script.runner();
+
+    resume_agent_with_message(
+        TaskId(42),
+        "atlas",
+        crate::models::TaskModel::DEFAULT,
+        &worktree_path,
+        None,
+        &mock,
+    )
+    .unwrap();
+
+    assert!(!std::path::Path::new(&format!("{worktree_path}/.claude-prompt")).exists());
+}
+
 // --- sccache env tests (task #4899:
 // DispatchedAgentsShareASccacheNotATargetDir) ---
 

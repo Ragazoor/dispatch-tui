@@ -453,9 +453,10 @@ A task tagged pr-review, dependabot or release-please is refused.",
 no worktree directory yet, one is CREATED — from the task's base branch, or from the PR's head \
 branch for a review task carrying a PR url. If it already exists it is \
 REUSED as-is — its branch, its commits and its uncommitted changes are all still there, and the \
-agent starts in them. So a crashed or stalled task is resumed in place: set it back to backlog \
-with update_tasks, then dispatch_task it. Tell the resumed agent in the task what its worktree \
-already holds — it is a new agent and has none of the previous session's context. Waits up to 30 \
+agent starts in them. So a crashed or stalled task is restarted in place: set it back to backlog \
+with update_tasks, then dispatch_task it. Tell the new agent in the task what its worktree \
+already holds — it is a new agent and has none of the previous session's context. To wake a \
+paused agent WITH its context, use resume_task instead. Waits up to 30 \
 seconds for the dispatch to complete; the success text says whether the worktree was created or \
 reused, and names it along with the tmux window. If provisioning takes longer, it returns the \
 dispatch request's id and state instead, and the dispatch carries on. Errors if the task is not in \
@@ -466,6 +467,30 @@ backlog status or the dispatch fails.",
                 "task_id": {
                     "type": "integer",
                     "description": "The task ID to dispatch"
+                }
+            },
+            "required": ["task_id"]
+        };
+
+    async write "resume_task" => tasks::handle_resume_task,
+        "Wake a detached (paused) agent WITH its context. Reattaches the task's worktree, starts \
+the Claude session so it continues the agent's previous conversation, and puts the task back to \
+running — what pressing space on a detached agent in the TUI does. Prefer this over update_tasks \
+status=backlog plus dispatch_task, which starts a NEW agent that has none of the old context. \
+The optional message is delivered as the first input after the session resumes; use it to say why \
+the agent was woken. Returns once the board has been asked to resume, not when the session is \
+up. Errors with 'no resumable session' when the task has no worktree or is in backlog (use \
+dispatch_task for those), and when its agent is already attached (use SendMessage).",
+        {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "integer",
+                    "description": "The task ID of the detached agent to resume"
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Optional first message for the resumed session"
                 }
             },
             "required": ["task_id"]

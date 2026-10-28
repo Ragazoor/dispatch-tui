@@ -18,4 +18,12 @@ pub enum BoardEvent {
     /// A single epic changed — reload just that row (and the epic's task list,
     /// since feed-sync changes appear here as a batch update for the epic).
     EpicChanged(EpicId),
+    /// Resume a detached task's agent with its previous conversation
+    /// (`mcp-task-tools.allium: ResumeTaskViaMcp`). The runtime hands it to
+    /// the same handler the Space key reaches (`dispatch.allium: ResumeTask`).
+    ResumeTask {
+        id: TaskId,
+        /// Delivered as the resumed session's first input.
+        message: Option<String>,
+    },
 }

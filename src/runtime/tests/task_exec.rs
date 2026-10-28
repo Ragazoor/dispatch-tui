@@ -1497,7 +1497,7 @@ async fn exec_resume_sends_resumed_message() {
     task.worktree = Some("/repo/.worktrees/1-resume-me".into());
     let id = task.id;
 
-    rt.exec_resume(task.id, task.worktree.clone()).await;
+    rt.exec_resume(task.id, task.worktree.clone(), None).await;
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -1536,7 +1536,7 @@ async fn exec_resume_sends_error_on_failure() {
     .await
     .unwrap();
     give_current_agent(&rt, task.id).await;
-    rt.exec_resume(task.id, task.worktree.clone()).await;
+    rt.exec_resume(task.id, task.worktree.clone(), None).await;
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -1571,7 +1571,7 @@ async fn exec_resume_without_a_current_agent_sends_error() {
     .await
     .unwrap();
 
-    rt.exec_resume(task.id, Some("/repo/.worktrees/x".into()))
+    rt.exec_resume(task.id, Some("/repo/.worktrees/x".into()), None)
         .await;
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())

@@ -724,6 +724,27 @@ fn tool_description(name: &str) -> String {
 /// survive, and that the way back into a crashed task is update_tasks to backlog
 /// then dispatch_task again.
 #[test]
+fn resume_task_description_says_it_keeps_the_context_and_points_dispatch_at_fresh_starts() {
+    let desc = tool_description("resume_task");
+    for needle in [
+        "context",
+        "message",
+        "dispatch_task",
+        "no resumable session",
+    ] {
+        assert!(
+            desc.contains(needle),
+            "resume_task description must mention '{needle}', got: {desc}"
+        );
+    }
+}
+
+#[test]
+fn dispatch_task_description_points_a_paused_agent_at_resume_task() {
+    assert!(tool_description("dispatch_task").contains("resume_task"));
+}
+
+#[test]
 fn dispatch_task_description_advertises_worktree_reuse_and_the_recovery_move() {
     let desc = tool_description("dispatch_task");
     for needle in ["reused", "uncommitted", "update_tasks", "backlog"] {
@@ -1317,6 +1338,7 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("update_epic", json!({"epic_id": 1})),
         ("wrap_up", json!({"task_id": 1, "action": "rebase"})),
         ("dispatch_task", json!({"task_id": 1})),
+        ("resume_task", json!({"task_id": 1})),
         (
             "record_learning",
             json!({"task_id": 1, "kind": "pitfall", "summary": "s", "scope": "user"}),

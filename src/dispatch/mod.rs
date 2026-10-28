@@ -43,7 +43,8 @@ mod worktree;
 pub use agents::{
     agent_tree_pane_id, companion_pane_ids, current_agent_name, dispatch_agent,
     fetch_verify_command, prepare_inputs, quick_dispatch_agent, research_agent, resume_agent,
-    resync_agent_tree_pane, run_agent_for_mode, toggle_agent_tree_pane, DispatchInputs,
+    resume_agent_with_message, resync_agent_tree_pane, run_agent_for_mode, toggle_agent_tree_pane,
+    DispatchInputs,
 };
 pub use build_output::{clear_build_output, BuildOutputCleared, CACHEDIR_TAG_SIGNATURE};
 pub use finish::{finish_task, finish_task_with_abort_runner, FinishContext, FinishError};

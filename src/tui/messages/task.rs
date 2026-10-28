@@ -40,6 +40,12 @@ pub enum TaskMessage {
     /// Splice a single fresh task into `app.board.tasks`.
     Updated(Box<Task>),
     Resume(TaskId),
+    /// The MCP tool `resume_task` asks to resume `id`, optionally with a
+    /// first message for the resumed session.
+    ResumeRequested {
+        id: TaskId,
+        message: Option<String>,
+    },
     Resumed {
         id: TaskId,
         tmux_window: TmuxWindow,
@@ -145,7 +151,10 @@ impl TaskMessage {
             TaskMessage::WindowGone(id) => app.handle_window_gone(id),
             TaskMessage::Refresh(tasks) => app.handle_refresh_tasks(tasks),
             TaskMessage::Updated(task) => app.handle_task_updated(*task),
-            TaskMessage::Resume(id) => app.handle_resume_task(id),
+            TaskMessage::Resume(id) => app.handle_resume_task(id, None),
+            TaskMessage::ResumeRequested { id, message } => {
+                app.handle_resume_requested(id, message)
+            }
             TaskMessage::Resumed { id, tmux_window } => app.handle_resumed(id, tmux_window),
             TaskMessage::DispatchAbandoned(id) => app.handle_dispatch_abandoned(id),
             TaskMessage::MarkDispatching(id) => app.handle_mark_dispatching(id),

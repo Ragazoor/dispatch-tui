@@ -142,6 +142,7 @@ lifecycle (`managed_store.rs`), generated `bindings/` and snapshot tooling.
 | `src/mcp/handlers/tasks/mod.rs` | Task arg structs, shared response helpers, re-exports |
 | `src/mcp/handlers/tasks/crud.rs` | CRUD task handlers: `update_tasks`, `create_task`, `get_task`, `list_tasks`, `query_usage` |
 | `src/mcp/handlers/tasks/dispatch.rs` | Dispatch handler: `dispatch_task` (the epic chain that `exit_session` fires is the module's, in `request_exit_session`'s transaction) |
+| `src/mcp/handlers/tasks/resume.rs` | Resume handler: `resume_task` (refuses a task with no resumable session, then sends `BoardEvent::ResumeTask`; the board runs the Space key's resume) |
 | `src/mcp/handlers/tasks/wrap_up.rs` | Wrap-up handlers: `wrap_up` (checks, then a request row, then a wait on it for a rebase) and `exit_session` (one `request_exit_session` call, answered without waiting for the teardown); `update_tasks(status="done")` lives in `crud.rs` and makes one `close_task` call |
 | `src/mcp/handlers/tasks/verify.rs` | Verify handler: `set_verify_command` |
 | `src/mcp/handlers/epics.rs` | Epic tool handlers (thin wrappers): parse JSON-RPC args → call `EpicService` → format response |

@@ -21,6 +21,7 @@ mod crud;
 // `pub(super)` so the handler tests under `handlers::tests` can reach
 // `dispatched_text`, the success wording `dispatch_task` pins.
 pub(super) mod dispatch;
+mod resume;
 mod verify;
 mod wrap_up;
 
@@ -28,6 +29,7 @@ pub(super) use crud::{
     handle_create_task, handle_get_task, handle_list_tasks, handle_query_usage, handle_update_tasks,
 };
 pub(super) use dispatch::handle_dispatch_task;
+pub(super) use resume::handle_resume_task;
 pub(super) use verify::handle_set_verify_command;
 pub(super) use wrap_up::{handle_exit_session, handle_wrap_up};
 
@@ -295,6 +297,15 @@ pub(super) struct SetVerifyCommandArgs {
 pub(super) struct DispatchTaskArgs {
     #[serde(deserialize_with = "deserialize_flexible_id")]
     pub(super) task_id: TaskId,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ResumeTaskArgs {
+    #[serde(deserialize_with = "deserialize_flexible_id")]
+    pub(super) task_id: TaskId,
+    #[serde(default)]
+    pub(super) message: Option<String>,
 }
 
 #[derive(Deserialize)]

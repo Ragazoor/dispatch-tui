@@ -1116,7 +1116,7 @@ rule DispatchResearchTask {
 }
 
 rule ResumeTask {
-    when: ResumeTask(task)
+    when: ResumeTask(task, message?)
 
     requires: task.status in {running, review, done}
     requires: task.worktree != null
@@ -1142,6 +1142,23 @@ rule ResumeTask {
             AgentLaunched(task: task, mode: resume)
 
     @guidance
+        -- == Who triggers it, and the optional message ==
+        -- Two callers raise ResumeTask: Space on a detached card in the TUI
+        -- (no message) and the MCP tool resume_task
+        -- (mcp-task-tools.allium: ResumeTaskViaMcp), which may carry a
+        -- message. Both reach the same board handler and the same launch, so
+        -- every precondition and ensures here holds for both.
+        --
+        -- A message is delivered as the FIRST INPUT of the resumed session:
+        -- it is the positional prompt of the same `claude ... --continue`
+        -- launch, behind the bare `--` PromptIsSeparatedFromTheLaunchFlags
+        -- requires. It is not typed into the pane afterwards: keys sent into
+        -- a pane can land on a dialog instead of the chat input (see the
+        -- note on inter-agent messaging in mcp-task-tools.allium). With no
+        -- message the launch is unchanged. When a live window is found
+        -- nothing is launched, so a message has nowhere to go and is
+        -- dropped; the caller is told the agent is already running.
+        --
         -- == Why the host gate, when the other preconditions look sufficient ==
         -- They are sufficient on one machine and dangerous on two, and the
         -- failure is silent rather than loud.

@@ -415,7 +415,13 @@ pub fn resync_agent_tree_pane(window: &TmuxWindow, runner: &dyn ProcessRunner) {
 /// the worktree, and the launch fails with "Invalid MCP configuration" before
 /// the agent starts.
 pub(super) fn prompt_launch_command(claude: &str, flags: &LaunchFlags) -> String {
-    let base = &flags.base;
+    prompt_launch_command_with(claude, flags, "")
+}
+
+/// [`prompt_launch_command`] with `extra` flags after the fixed ones, e.g. the
+/// `--continue` of a resume that carries a message.
+fn prompt_launch_command_with(claude: &str, flags: &LaunchFlags, extra: &str) -> String {
+    let base = format!("{}{extra}", flags.base);
     // The config path is a positional (`$1`) after the body, like `$0`, so it is
     // quoted once, outside the body, and never inside it.
     let (config_flag, config_arg) = match &flags.mcp_config {
@@ -820,6 +826,22 @@ pub fn resume_agent(
     worktree_path: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<ResumeResult> {
+    resume_agent_with_message(task_id, agent_name, model, worktree_path, None, runner)
+}
+
+/// [`resume_agent`] that hands the resumed session `message` as its first
+/// input (`dispatch.allium: ResumeTask`). The message is the positional
+/// prompt of the `--continue` launch, read from `.claude-prompt` like a
+/// dispatch prompt, so it is never typed into the pane. A live window means
+/// nothing is launched and the message is dropped.
+pub fn resume_agent_with_message(
+    task_id: TaskId,
+    agent_name: &str,
+    model: TaskModel,
+    worktree_path: &str,
+    message: Option<&str>,
+    runner: &dyn ProcessRunner,
+) -> Result<ResumeResult> {
     let tmux_window = TmuxWindow::for_task(task_id);
 
     if tmux::has_window(&tmux_window, runner)
@@ -849,12 +871,17 @@ pub fn resume_agent(
     // Below the live-window early return above, deliberately: these flags cost
     // a config write, and a resume that only reattaches launches nothing.
     let launch_flags = agent_launch_flags(task_id, agent_name, model, worktree_path, runner);
-    tmux::send_keys(
-        &tmux_window,
-        &format!("{claude} {} --continue", launch_flags.inline()),
-        runner,
-    )
-    .context("failed to send resume keys to tmux window")?;
+    let launch = match message {
+        Some(message) => {
+            let prompt_file = format!("{worktree_path}/.claude-prompt");
+            fs::write(&prompt_file, message)
+                .with_context(|| format!("failed to write {prompt_file}"))?;
+            prompt_launch_command_with(&claude, &launch_flags, " --continue")
+        }
+        None => format!("{claude} {} --continue", launch_flags.inline()),
+    };
+    tmux::send_keys(&tmux_window, &launch, runner)
+        .context("failed to send resume keys to tmux window")?;
 
     spawn_agent_tree_pane(&tmux_window, task_id, Some(worktree_path), runner);
 

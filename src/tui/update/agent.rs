@@ -623,7 +623,31 @@ impl App {
         cmds
     }
 
-    pub(in crate::tui) fn handle_resume_task(&mut self, id: TaskId) -> Vec<Command> {
+    /// `resume_task` (`mcp-task-tools.allium: ResumeTaskViaMcp`): the same
+    /// resume the Space key starts, with the caller's message. Unlike Space,
+    /// nobody upstream has refused a foreign worktree, so say so here.
+    pub(in crate::tui) fn handle_resume_requested(
+        &mut self,
+        id: TaskId,
+        message: Option<String>,
+    ) -> Vec<Command> {
+        let local_host_id = self.local_host_id().map(str::to_string);
+        if let Some(task) = self.board.find_task(id) {
+            if !task.is_locally_owned(local_host_id.as_deref()) {
+                self.status.set(format!(
+                    "resume_task refused: task {id}'s worktree is on another machine"
+                ));
+                return vec![];
+            }
+        }
+        self.handle_resume_task(id, message)
+    }
+
+    pub(in crate::tui) fn handle_resume_task(
+        &mut self,
+        id: TaskId,
+        message: Option<String>,
+    ) -> Vec<Command> {
         let local_host_id = self.local_host_id().map(str::to_string);
         if let Some(task) = self.board.find_task(id) {
             if !matches!(
@@ -654,6 +678,7 @@ impl App {
                 vec![Command::Task(crate::tui::commands::TaskCommand::Resume {
                     id: task.id,
                     worktree: task.worktree.clone(),
+                    message,
                 })]
             } else {
                 vec![]

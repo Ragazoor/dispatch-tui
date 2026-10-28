@@ -302,6 +302,49 @@ fn resume_task_allows_a_task_owned_by_this_host() {
         .any(|c| matches!(c, Command::Task(TaskCommand::Resume { .. }))));
 }
 
+/// `resume_task` (`mcp-task-tools.allium: ResumeTaskViaMcp`) reaches the same
+/// launch as Space, carrying the caller's message.
+#[test]
+fn resume_requested_launches_the_resume_with_the_message() {
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
+    app.set_local_host_id("this-machine".to_string());
+    app.board.tasks[0].tmux_window = None;
+    app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
+    app.board.tasks[0].host = Some("this-machine".to_string());
+
+    let cmds = app.update(Message::Task(TaskMessage::ResumeRequested {
+        id: TaskId(4),
+        message: Some("rebase on main".to_string()),
+    }));
+
+    match cmds.as_slice() {
+        [Command::Task(TaskCommand::Resume { id, message, .. })] => {
+            assert_eq!(*id, TaskId(4));
+            assert_eq!(message.as_deref(), Some("rebase on main"));
+        }
+        other => panic!("expected one Resume command, got: {other:?}"),
+    }
+}
+
+#[test]
+fn resume_requested_for_a_foreign_task_says_so_instead_of_staying_silent() {
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
+    app.set_local_host_id("this-machine".to_string());
+    app.board.tasks[0].tmux_window = None;
+    app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
+    app.board.tasks[0].host = Some("other-machine".to_string());
+
+    let cmds = app.update(Message::Task(TaskMessage::ResumeRequested {
+        id: TaskId(4),
+        message: None,
+    }));
+
+    assert!(cmds.is_empty());
+    assert!(app
+        .status_message()
+        .is_some_and(|m| m.contains("another machine")));
+}
+
 #[test]
 fn crashed_card_with_no_window_shows_detached_not_crashed() {
     // Detached out-prioritizes Crashed when tmux_window is None

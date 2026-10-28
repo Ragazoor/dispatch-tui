@@ -213,8 +213,12 @@ async fn dispatch_task(
             drop(rt.exec_clear_build_output(worktrees));
             vec![]
         }
-        Resume { id, worktree } => {
-            rt.exec_resume(id, worktree).await;
+        Resume {
+            id,
+            worktree,
+            message,
+        } => {
+            rt.exec_resume(id, worktree, message).await;
             vec![]
         }
         JumpToTmux { window } => {

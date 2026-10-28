@@ -75,6 +75,7 @@ impl App {
             cmds.push(Command::Task(crate::tui::commands::TaskCommand::Resume {
                 id,
                 worktree,
+                message: None,
             }));
             cmds.extend(self.maybe_respawn_split_pane(id));
             cmds
