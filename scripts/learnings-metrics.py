@@ -26,12 +26,15 @@ SERVER = os.environ.get("DISPATCH_SPACETIME_NICKNAME", "local")
 DB = "dispatch"
 TRAJ = os.path.expanduser("~/.local/share/dispatch/trajectories/*.jsonl")
 RULES_FROM = "2026-08-21"  # b1c78a32 added the PR-body rules to the wrap-up skill
+PROSE_RULE_AT = "2026-10-28 17:26"  # 215c89e2: pr.md says PR bodies are prose, no bullet lists
 
 # Run 5 (task 94228) moved these user-scoped entries to repo scope in place, keeping their
 # ids. The store keeps only the current scope, so a retrieval before this time is read
 # with the scope the entry had then (user); otherwise the rescope would rewrite history.
 RESCOPED_AT = "2026-10-22 11:30"
+# Run 7 (task 98511) did the same for #565 and #500 on 2026-10-28; read it with the same table.
 RESCOPED_FROM_USER = {
+    565, 500,
     574, 578, 579, 580, 598, 599, 600, 601, 606, 614, 617, 621, 630, 632, 633, 637, 670,
     671, 683, 700, 701, 724, 737, 742, 767, 770, 772, 775, 776, 777, 780, 791, 831, 4107,
     12292, 12304, 69635, 69637,
@@ -40,7 +43,9 @@ RESCOPED_FROM_USER = {
 
 def scope_at(learning, retrieval):
     """The (scope, scope_ref) a learning had when the retrieval happened."""
-    if learning["id"] in RESCOPED_FROM_USER and retrieval["retrieved_at"] < RESCOPED_AT:
+    if learning["id"] in RESCOPED_FROM_USER and retrieval["retrieved_at"] < (
+        "2026-10-28 18:00" if learning["id"] in (565, 500) else RESCOPED_AT
+    ):
         return "user", None
     return learning["scope"], opt(learning["scope_ref"])
 
@@ -185,12 +190,13 @@ def user_scope_metrics():
     """
     L, R, tasks = table("learnings"), table("learning_retrievals"), {t["id"]: t for t in table("tasks")}
     by = {r["id"]: r for r in L}
-    helped = {
-        (e["task_id"], (e.get("args") or {}).get("learning_id"))
-        for e in trajectory_events()
-        if e["method"] == "rate_learning" and (e.get("args") or {}).get("verdict") == "helped"
-    }
-    weeks = collections.defaultdict(lambda: [0, 0])
+    helped, raters = set(), set()
+    for e in trajectory_events():
+        if e["method"] == "rate_learning":
+            raters.add(e["task_id"])
+            if (e.get("args") or {}).get("verdict") == "helped":
+                helped.add((e["task_id"], (e.get("args") or {}).get("learning_id")))
+    weeks = collections.defaultdict(lambda: [0, 0, 0, 0])
     per_entry = collections.Counter()
     for r in R:
         l = by.get(r["learning_id"])
@@ -201,13 +207,18 @@ def user_scope_metrics():
         y, w, _ = datetime.date.fromisoformat(r["retrieved_at"][:10]).isocalendar()
         c = weeks[f"{y}-W{w:02d}"]
         c[0] += 1
+        rated = r["task_id"] in raters
+        c[2] += rated
         if (r["task_id"], r["learning_id"]) not in helped:
             c[1] += 1
+            c[3] += rated
             per_entry[r["learning_id"]] += 1
     print("user-scoped injection rows with no helped verdict, per week (unhelped/rows):")
+    print("  (all rows; then only rows on tasks that rated something, where 'no helped' is a")
+    print("   real signal. There is no 'not applicable' verdict, so an unrated task counts as unhelped.)")
     for wk in sorted(weeks)[-4:]:
-        n, bad = weeks[wk]
-        print(f"  {wk}  {bad:>5}/{n:<5} {100 * bad // n}%")
+        n, bad, rn, rbad = weeks[wk]
+        print(f"  {wk}  {bad:>5}/{n:<5} {100 * bad // n}%   rated tasks only {rbad:>4}/{rn:<4} {100 * rbad // max(rn, 1)}%")
     total = sum(per_entry.values())
     top = sum(v for _, v in per_entry.most_common(30))
     print(f"  top-30 entries cause {100 * top // max(total, 1)}% of the unhelped rows ({total} rows)")
@@ -223,9 +234,10 @@ def pr_metrics():
                 continue
             url = (e.get("args") or {}).get("pr_url")
             if e.get("method") == "exit_session" and url and e["timestamp"][:10] >= RULES_FROM:
-                prs[url] = e["task_id"]
+                prs[url] = (e["task_id"], e["timestamp"])
     fetched = impl = taskid = plan = 0
-    for url, task in prs.items():
+    bullets = collections.Counter()  # (after the prose rule?, has a bullet) -> PRs
+    for url, (task, ts) in prs.items():
         r = subprocess.run(["gh", "pr", "view", url, "--json", "body"], capture_output=True, text=True)
         if r.returncode:
             continue
@@ -234,8 +246,12 @@ def pr_metrics():
         impl += bool(re.search(r"Implements\s+#\d+", body))
         taskid += bool(re.search(rf"#{task}\b", body))
         plan += bool(re.search(r"(?im)^#+\s*test plan", body))
+        bullets[(ts.replace("T", " ")[:16] >= PROSE_RULE_AT, bool(re.search(r"(?m)^\s*(?:[-*]|\d+\.)\s", body)))] += 1
     print(f"PRs since {RULES_FROM}: {len(prs)} recorded, {fetched} fetched")
     print(f"breaches: 'Implements #N' {impl}, task id {taskid}, Test plan section {plan}")
+    for after in (False, True):
+        n = bullets[(after, True)] + bullets[(after, False)]
+        print(f"PRs with a bullet or numbered list, {'after' if after else 'before'} the prose rule: {bullets[(after, True)]}/{n}")
 
 
 if __name__ == "__main__":
