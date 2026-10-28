@@ -100,6 +100,8 @@ fn blank_epic() -> bindings::Epic {
         feed_append_only: false,
         completed_at: String::new(),
         created_by: String::new(),
+        workspace_id: 0,
+        visibility: "public".into(),
     }
 }
 
@@ -229,6 +231,7 @@ fn blank_learning() -> bindings::Learning {
         created_at: "2020-01-01 00:00:00.000".into(),
         updated_at: "2020-01-01 00:00:00.000".into(),
         embedding: None,
+        workspace_id: 0,
     }
 }
 

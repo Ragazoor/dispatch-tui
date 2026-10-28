@@ -150,6 +150,8 @@ fn a_row_written_elsewhere_arrives_through_the_subscription() {
                 "feed_append_only": false,
                 "completed_at": "",
                 "created_by": "",
+                "workspace_id": 0,
+                "visibility": "public",
             }])
             .to_string()],
         );
@@ -541,5 +543,6 @@ fn learning_json(
         "created_at": "2026-09-26 10:00:00",
         "updated_at": "2026-09-26 10:00:00",
         "embedding": {"some": embedding},
+        "workspace_id": 0,
     })
 }

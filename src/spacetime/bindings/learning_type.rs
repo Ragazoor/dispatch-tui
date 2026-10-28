@@ -21,6 +21,7 @@ pub struct Learning {
     pub created_at: String,
     pub updated_at: String,
     pub embedding: Option<Vec<u8>>,
+    pub workspace_id: i64,
 }
 
 impl __sdk::InModule for Learning {
@@ -45,6 +46,7 @@ pub struct LearningCols {
     pub created_at: __sdk::__query_builder::Col<Learning, String>,
     pub updated_at: __sdk::__query_builder::Col<Learning, String>,
     pub embedding: __sdk::__query_builder::Col<Learning, Option<Vec<u8>>>,
+    pub workspace_id: __sdk::__query_builder::Col<Learning, i64>,
 }
 
 impl __sdk::__query_builder::HasCols for Learning {
@@ -65,6 +67,7 @@ impl __sdk::__query_builder::HasCols for Learning {
             created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
             updated_at: __sdk::__query_builder::Col::new(table_name, "updated_at"),
             embedding: __sdk::__query_builder::Col::new(table_name, "embedding"),
+            workspace_id: __sdk::__query_builder::Col::new(table_name, "workspace_id"),
         }
     }
 }

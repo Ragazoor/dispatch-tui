@@ -60,6 +60,8 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
         "task_watchers" => burn_table!(task_watchers, blank_watcher()),
         "work_packages" => burn_table!(work_packages, blank_work_package()),
         "agents" => burn_table!(agents, blank_agent()),
+        "workspaces" => burn_table!(workspaces, blank_workspace()),
+        "memberships" => burn_table!(memberships, blank_membership()),
         "repo_paths" => burn_table!(repo_paths, blank_repo_path()),
         "repo_base_branches" => burn_table!(repo_base_branches, blank_repo_base_branch()),
         // Found in passing while adding the two arms below: `poll_owners` DOES
@@ -86,8 +88,8 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
         // once task #4916's seed path started burning every generating table.
         "retired_feed_items" => burn_table!(retired_feed_items, blank_retired_feed_item()),
         // `task_shells`, `task_subagents`, `hosts`, `subscriptions`, `settings`,
-        // `filter_presets`, `work_package_links` and `handed_out_agent_names`
-        // generate no ids, so there is nothing to burn.
+        // `filter_presets`, `work_package_links`, `user_profiles` and
+        // `handed_out_agent_names` generate no ids, so there is nothing to burn.
         // Accepted rather than rejected so a caller can loop over every shared
         // table without a special case.
         "task_shells"
@@ -97,6 +99,7 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
         | "settings"
         | "filter_presets"
         | "work_package_links"
+        | "user_profiles"
         | "handed_out_agent_names" => {}
         other => return Err(format!("unknown table {other}")),
     }

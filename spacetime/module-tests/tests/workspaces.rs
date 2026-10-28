@@ -206,7 +206,9 @@ fn creating_a_workspace_needs_super_admin_and_a_good_unique_name() {
     assert!(store
         .call("root", |ctx| create_workspace(ctx, " Platform ".into()))
         .is_err());
-    assert_eq!(store.db().workspaces().iter().count(), 2);
+    // The default workspace every store gets on its first connection, plus the
+    // two created here.
+    assert_eq!(store.db().workspaces().iter().count(), 3);
 }
 
 #[test]

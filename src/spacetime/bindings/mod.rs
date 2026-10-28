@@ -118,6 +118,7 @@ pub mod seed_hosts_reducer;
 pub mod seed_learning_retrievals_reducer;
 pub mod seed_learning_verdicts_reducer;
 pub mod seed_learnings_reducer;
+pub mod seed_memberships_reducer;
 pub mod seed_poll_owners_reducer;
 pub mod seed_repo_base_branches_reducer;
 pub mod seed_repo_paths_reducer;
@@ -130,8 +131,10 @@ pub mod seed_task_watchers_reducer;
 pub mod seed_tasks_reducer;
 pub mod seed_todos_reducer;
 pub mod seed_usage_events_reducer;
+pub mod seed_user_profiles_reducer;
 pub mod seed_work_package_links_reducer;
 pub mod seed_work_packages_reducer;
+pub mod seed_workspaces_reducer;
 pub mod session_request_timeout_type;
 pub mod session_request_timeouts_table;
 pub mod session_request_type;
@@ -293,6 +296,7 @@ pub use seed_hosts_reducer::seed_hosts;
 pub use seed_learning_retrievals_reducer::seed_learning_retrievals;
 pub use seed_learning_verdicts_reducer::seed_learning_verdicts;
 pub use seed_learnings_reducer::seed_learnings;
+pub use seed_memberships_reducer::seed_memberships;
 pub use seed_poll_owners_reducer::seed_poll_owners;
 pub use seed_repo_base_branches_reducer::seed_repo_base_branches;
 pub use seed_repo_paths_reducer::seed_repo_paths;
@@ -305,8 +309,10 @@ pub use seed_task_watchers_reducer::seed_task_watchers;
 pub use seed_tasks_reducer::seed_tasks;
 pub use seed_todos_reducer::seed_todos;
 pub use seed_usage_events_reducer::seed_usage_events;
+pub use seed_user_profiles_reducer::seed_user_profiles;
 pub use seed_work_package_links_reducer::seed_work_package_links;
 pub use seed_work_packages_reducer::seed_work_packages;
+pub use seed_workspaces_reducer::seed_workspaces;
 pub use session_request_timeout_type::SessionRequestTimeout;
 pub use session_request_timeouts_table::*;
 pub use session_request_type::SessionRequest;
@@ -648,6 +654,9 @@ pub enum Reducer {
     SeedLearnings {
         rows: Vec<Learning>,
     },
+    SeedMemberships {
+        rows: Vec<Membership>,
+    },
     SeedPollOwners {
         rows: Vec<PollOwner>,
     },
@@ -684,11 +693,17 @@ pub enum Reducer {
     SeedUsageEvents {
         rows: Vec<UsageEvent>,
     },
+    SeedUserProfiles {
+        rows: Vec<UserProfile>,
+    },
     SeedWorkPackageLinks {
         rows: Vec<WorkPackageLink>,
     },
     SeedWorkPackages {
         rows: Vec<WorkPackage>,
+    },
+    SeedWorkspaces {
+        rows: Vec<Workspace>,
     },
     SetDisplayName {
         name: String,
@@ -831,6 +846,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedLearningRetrievals { .. } => "seed_learning_retrievals",
             Reducer::SeedLearningVerdicts { .. } => "seed_learning_verdicts",
             Reducer::SeedLearnings { .. } => "seed_learnings",
+            Reducer::SeedMemberships { .. } => "seed_memberships",
             Reducer::SeedPollOwners { .. } => "seed_poll_owners",
             Reducer::SeedRepoBaseBranches { .. } => "seed_repo_base_branches",
             Reducer::SeedRepoPaths { .. } => "seed_repo_paths",
@@ -843,8 +859,10 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedTasks { .. } => "seed_tasks",
             Reducer::SeedTodos { .. } => "seed_todos",
             Reducer::SeedUsageEvents { .. } => "seed_usage_events",
+            Reducer::SeedUserProfiles { .. } => "seed_user_profiles",
             Reducer::SeedWorkPackageLinks { .. } => "seed_work_package_links",
             Reducer::SeedWorkPackages { .. } => "seed_work_packages",
+            Reducer::SeedWorkspaces { .. } => "seed_workspaces",
             Reducer::SetDisplayName { .. } => "set_display_name",
             Reducer::SetMemberRole { .. } => "set_member_role",
             Reducer::SetSchemaVersion { .. } => "set_schema_version",
@@ -1365,6 +1383,11 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&seed_learnings_reducer::SeedLearningsArgs {
                 rows: rows.clone(),
 }),
+            Reducer::SeedMemberships{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_memberships_reducer::SeedMembershipsArgs {
+                rows: rows.clone(),
+}),
             Reducer::SeedPollOwners{
                 rows,
 }             => __sats::bsatn::to_vec(&seed_poll_owners_reducer::SeedPollOwnersArgs {
@@ -1425,6 +1448,11 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&seed_usage_events_reducer::SeedUsageEventsArgs {
                 rows: rows.clone(),
 }),
+            Reducer::SeedUserProfiles{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_user_profiles_reducer::SeedUserProfilesArgs {
+                rows: rows.clone(),
+}),
             Reducer::SeedWorkPackageLinks{
                 rows,
 }             => __sats::bsatn::to_vec(&seed_work_package_links_reducer::SeedWorkPackageLinksArgs {
@@ -1433,6 +1461,11 @@ Reducer::RecordBaseBranch{
             Reducer::SeedWorkPackages{
                 rows,
 }             => __sats::bsatn::to_vec(&seed_work_packages_reducer::SeedWorkPackagesArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedWorkspaces{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_workspaces_reducer::SeedWorkspacesArgs {
                 rows: rows.clone(),
 }),
             Reducer::SetDisplayName{

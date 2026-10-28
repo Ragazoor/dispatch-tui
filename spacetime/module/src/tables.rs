@@ -184,6 +184,16 @@ pub struct Epic {
     /// backfilled.
     #[default("")]
     pub created_by: String,
+    /// The workspace this epic lives in (`core.allium: Epic.workspace`), as
+    /// [`Workspace::id`]. `0` until [`migrate_store_to_workspaces`] puts every
+    /// existing epic in the default workspace; a sub-epic shares its parent's.
+    /// Appended last, with a default, so the module still automigrates.
+    #[default(0)]
+    pub workspace_id: i64,
+    /// [`VISIBILITY_PUBLIC`] or [`VISIBILITY_PRIVATE`]
+    /// (`core.allium: Epic.visibility`).
+    #[default("public")]
+    pub visibility: String,
 }
 
 /// DEAD TABLE, kept for the same reason `TaskShell` is: this store's
@@ -403,6 +413,12 @@ pub struct Learning {
     /// binary rather than JSON. `None` until the embedding backfill computes
     /// one (`docs/specs/learnings.allium`'s embedding backfill note).
     pub embedding: Option<Vec<u8>>,
+    /// The workspace this learning belongs to (`core.allium:
+    /// Learning.workspace`), as [`Workspace::id`]; `0` for a user-scoped
+    /// learning, which is private to its author instead. Appended last, with
+    /// a default, so the module still automigrates.
+    #[default(0)]
+    pub workspace_id: i64,
 }
 
 /// One row per surfacing event of a learning to a task
@@ -608,6 +624,14 @@ pub struct WorkPackage {
     /// the module no longer automigrates over a live store.
     #[default(None)]
     pub sort_order: Option<i64>,
+    /// The workspace this package lives in (`work-packages.allium:
+    /// WorkPackage.workspace`); `0` until the migration places it. Appended
+    /// last, with a default, like every column since `sort_order`.
+    #[default(0)]
+    pub workspace_id: i64,
+    /// [`VISIBILITY_PUBLIC`] or [`VISIBILITY_PRIVATE`].
+    #[default("public")]
+    pub visibility: String,
 }
 
 /// One link from a work package to one task or one epic
@@ -635,6 +659,11 @@ pub struct WorkPackageLink {
 }
 
 pub const WORK_PACKAGE_ITEM_TASK: &str = "task";
+
+/// `core.allium: Visibility`, in the store's spelling.
+pub const VISIBILITY_PUBLIC: &str = "public";
+
+pub const VISIBILITY_PRIVATE: &str = "private";
 
 pub const WORK_PACKAGE_ITEM_EPIC: &str = "epic";
 

@@ -18,6 +18,7 @@ pub(super) fn blank_learning() -> bindings::Learning {
         created_at: TEST_STAMP.into(),
         updated_at: TEST_STAMP.into(),
         embedding: None,
+        workspace_id: 0,
     }
 }
 

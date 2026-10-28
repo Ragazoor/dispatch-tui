@@ -354,6 +354,12 @@ invariant StopOnlyWhatIsHeld {
         h.stop_requested implies h.held
 }
 
+-- The workspace columns (workspaces.allium: epics, work_packages and learnings
+-- each carry workspace_id) are zero-sentinel columns: 0 is "in no workspace",
+-- which is a user-scoped learning's real state and an epic's state until the
+-- migration places it. The visibility columns are plain text, never absent.
+-- user_profiles.is_super_admin is a canonical boolean like every other.
+
 -- sort_order is never given a sentinel: zero is a real sort order there, and
 -- absence means "fall back to the id" (see SentinelsNeverReachTheSnapshot).
 invariant SortOrderHasNoSentinel {

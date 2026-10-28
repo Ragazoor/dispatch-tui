@@ -48,5 +48,5 @@ fn every_table_answers_its_column_questions() {
     }
     assert!(!SharedTable::RepoPaths.sentinel_columns().is_empty());
     assert!(!SharedTable::Hosts.sentinel_columns().is_empty());
-    assert!(SharedTable::Learnings.module_only_columns().is_empty());
+    assert!(!SharedTable::Learnings.module_only_columns().is_empty());
 }

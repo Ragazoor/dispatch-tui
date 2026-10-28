@@ -86,6 +86,14 @@ use "./core.allium" as core
 -- that for people who may have looked since. Losing the marks on a restore is
 -- accepted. These are the only exceptions to "every table it holds" below.
 --
+-- `user_profiles`, `workspaces` and `memberships` (workspaces.allium) ARE
+-- here, because epics, work packages and learnings now point at a workspace
+-- by id: a restore without them would leave every one of those ids dangling,
+-- and the migration (MigrateStoreToWorkspaces) cannot repair that, since it
+-- runs once, on the first connection after the publish. The identities they
+-- name are the store's own, as `hosts`, `subscriptions` and `Task.owner`
+-- already are. A restore keeps display names and super-admin flags too.
+--
 -- What is NOT here is as load-bearing as what is, and it is shorter than an
 -- earlier revision of this note claimed: the knowledge base (`learnings`,
 -- `learning_retrievals`, `learning_verdicts`) and host-scoped `settings` are shared and ARE below —
@@ -134,6 +142,9 @@ enum SharedTable {
     work_package_links
     agents
     handed_out_agent_names
+    user_profiles
+    workspaces
+    memberships
 }
 
 -- Why a restore refused a snapshot. Every arm is a refusal to write anything
@@ -306,7 +317,7 @@ config {
     -- than written into the invariant so that the number and the SharedTable
     -- enumeration are visibly two statements of the same fact, and disagreeing
     -- is a spec-level error rather than a silent gap in a backup.
-    shared_table_count: Integer = 22
+    shared_table_count: Integer = 25
 
     -- Bumped when the snapshot layout changes in a way an older reader cannot
     -- interpret. A reader refuses a version it does not know rather than

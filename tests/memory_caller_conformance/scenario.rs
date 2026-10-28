@@ -48,6 +48,10 @@ fn memory_caller_matches_the_real_reducers() {
         // D11 lets only their owner do (`store-split.allium`): register both
         // as this connection's own, on both sides.
         let mem = mem.with_sender(accepted.identity.clone());
+        // The first connection to the real store also migrated it, while it was
+        // empty (`MigrateStoreToWorkspaces`): it gets its default workspace.
+        mem.migrate_store_to_workspaces();
+        mem.migrate_store_to_workspaces(); // once
         for host in ["host-a", "host-b"] {
             for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
                 caller
@@ -360,7 +364,16 @@ fn memory_caller_matches_the_real_reducers() {
         let workspace_view = |rows: &SharedRows| {
             rows.workspaces()
                 .into_iter()
-                .map(|w| (w.id, w.name, w.created_by))
+                // The default workspace's creator is the store itself, which a
+                // memory store has no identity for.
+                .map(|w| {
+                    let by = if w.name == "Default" {
+                        String::new()
+                    } else {
+                        w.created_by
+                    };
+                    (w.id, w.name, by)
+                })
                 .collect::<Vec<_>>()
         };
         let membership_view = |rows: &SharedRows| {
@@ -381,7 +394,7 @@ fn memory_caller_matches_the_real_reducers() {
         both!(create_workspace("Platform".to_string()), Applied);
         both!(create_workspace(" Platform ".to_string()), Refused); // unique
         both!(create_workspace("Other".to_string()), Applied);
-        wait_for!(rows_real.workspaces().len() == 2);
+        wait_for!(rows_real.workspaces().len() == 3); // Default, Platform, Other
         assert_eq!(workspace_view(&rows_real), workspace_view(&rows_mem));
         let platform = rows_real
             .workspaces()
@@ -432,7 +445,7 @@ fn memory_caller_matches_the_real_reducers() {
         // Deleting takes the workspace's memberships with it and leaves the rest.
         both!(delete_workspace(99), Refused);
         both!(delete_workspace(platform), Applied);
-        wait_for!(rows_real.workspaces().len() == 1 && rows_real.memberships().is_empty());
+        wait_for!(rows_real.workspaces().len() == 2 && rows_real.memberships().is_empty());
         assert_eq!(workspace_view(&rows_real), workspace_view(&rows_mem));
         assert_eq!(membership_view(&rows_real), membership_view(&rows_mem));
 
@@ -1134,6 +1147,8 @@ fn memory_caller_matches_the_real_reducers() {
             created_by: accepted.identity.clone(),
             created_at: "2026-01-01 00:00:00.000".into(),
             updated_at: "2026-01-01 00:00:00.000".into(),
+            workspace_id: 0,
+            visibility: "public".into(),
         };
         let package_real = real.create_work_package(package_row()).await.unwrap();
         wait_for!(!rows_real.work_packages().is_empty());

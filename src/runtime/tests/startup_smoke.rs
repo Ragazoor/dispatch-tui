@@ -488,6 +488,36 @@ async fn an_upgrade_from_the_previous_store_keeps_every_task_and_epic() {
 
     let seen = visible_rows(&b).await;
     assert_eq!(seen, expected, "upgrade smoke: the user's rows changed");
+
+    // The first connection after the publish migrated the store
+    // (`workspaces.allium: MigrateStoreToWorkspaces`): one default workspace,
+    // every epic public in it.
+    let sql = |query: &str| {
+        let out = std::process::Command::new("spacetime")
+            .arg("--config-path")
+            .arg(&cli_config)
+            .args(["sql", "-s", &store.url(), "--format", "json"])
+            .arg(crate::spacetime::managed_store::MANAGED_DATABASE_NAME)
+            .arg(query)
+            .output()
+            .expect("run spacetime sql");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let workspaces = sql("SELECT id, name FROM workspaces");
+    assert!(
+        workspaces.contains("Default"),
+        "upgrade smoke: no default workspace after the upgrade: {workspaces}"
+    );
+    let strays = sql("SELECT id FROM epics WHERE workspace_id = 0 OR visibility != 'public'");
+    assert!(
+        !strays.contains("\"rows\":[[") && !strays.contains("\"rows\": [["),
+        "upgrade smoke: an epic was left outside the default workspace: {strays}"
+    );
 }
 
 /// `AbortWhenTheCliDoesNotOwnTheManagedDatabase` against a real store: the

@@ -159,6 +159,28 @@ impl MemoryReducerCaller {
         if !tables.workspaces.contains_key(&workspace_id) {
             return refused(format!("workspace {workspace_id} does not exist"));
         }
+        if tables
+            .epics
+            .values()
+            .any(|e| e.workspace_id == workspace_id)
+            || tables
+                .work_packages
+                .values()
+                .any(|p| p.workspace_id == workspace_id)
+        {
+            return refused(format!(
+                "workspace {workspace_id} still holds epics or work packages; empty it first"
+            ));
+        }
+        let learnings: Vec<i64> = tables
+            .learnings
+            .values()
+            .filter(|l| l.workspace_id == workspace_id)
+            .map(|l| l.id)
+            .collect();
+        for id in learnings {
+            self.delete_learning_cascade(&mut tables, id);
+        }
         let memberships: Vec<i64> = tables
             .memberships
             .values()
@@ -251,8 +273,116 @@ impl MemoryReducerCaller {
         if !self.caller_administers(&tables, workspace_id) {
             return refused("only a super-admin or an admin of this workspace may do this");
         }
-        tables.memberships.remove(&membership_id);
+        let Some(membership) = tables.memberships.remove(&membership_id) else {
+            return applied();
+        };
         self.rows.remove_membership(membership_id);
+        self.drop_follows_in_workspace(&mut tables, &membership.user, workspace_id);
         applied()
+    }
+
+    /// `RemoveMember`: end `user`'s subscriptions and unseen marks inside
+    /// `workspace_id`, and nothing in their other workspaces.
+    fn drop_follows_in_workspace(&self, tables: &mut Tables, user: &str, workspace_id: i64) {
+        let in_workspace = |tables: &Tables, epic_id: i64| {
+            tables
+                .epics
+                .get(&epic_id)
+                .is_some_and(|e| e.workspace_id == workspace_id)
+        };
+        let subscriptions: Vec<String> = tables
+            .subscriptions
+            .values()
+            .filter(|s| s.subscriber == user && in_workspace(tables, s.epic_id))
+            .map(|s| s.id.clone())
+            .collect();
+        for id in subscriptions {
+            tables.subscriptions.remove(&id);
+            self.rows.remove_subscription(id);
+        }
+        let marks: Vec<String> = tables
+            .unseen_tasks
+            .values()
+            .filter(|u| {
+                u.subscriber == user
+                    && tables
+                        .tasks
+                        .get(&u.task_id)
+                        .is_some_and(|t| t.epic_id != 0 && in_workspace(tables, t.epic_id))
+            })
+            .map(|u| u.id.clone())
+            .collect();
+        for id in marks {
+            tables.unseen_tasks.remove(&id);
+            self.rows.remove_unseen_task(id);
+        }
+    }
+
+    /// `MigrateStoreToWorkspaces`, as the module's connect handler runs it on
+    /// the first connection after the publish. A memory store has no connect
+    /// event, so a fixture calls this where one would. Does nothing once a
+    /// workspace exists.
+    pub fn migrate_store_to_workspaces(&self) {
+        let mut tables = self.lock();
+        if !tables.workspaces.is_empty() {
+            return;
+        }
+        let stamp = self.now();
+        let id = Self::assign_id(0, &mut tables.next_workspace_id);
+        let default = module::Workspace {
+            id,
+            name: module::DEFAULT_WORKSPACE_NAME.to_string(),
+            // `store_publisher()`: a memory store has no database identity.
+            created_by: String::new(),
+            created_at: stamp.clone(),
+        };
+        tables.workspaces.insert(id, default.clone());
+        self.rows.upsert_workspace(&default.into());
+        for epic in tables.epics.values_mut() {
+            epic.workspace_id = id;
+            epic.visibility = module::VISIBILITY_PUBLIC.to_string();
+            self.rows.upsert_epic(&epic.clone().into());
+        }
+        for package in tables.work_packages.values_mut() {
+            package.workspace_id = id;
+            package.visibility = module::VISIBILITY_PUBLIC.to_string();
+            self.rows.upsert_work_package(&package.clone().into());
+        }
+        for learning in tables.learnings.values_mut().filter(|l| l.scope != "user") {
+            learning.workspace_id = id;
+            self.rows.upsert_learning(&learning.clone().into());
+        }
+        let mut people = std::collections::BTreeSet::new();
+        people.extend(tables.hosts.values().map(|h| h.owner.clone()));
+        for task in tables.tasks.values() {
+            people.insert(task.owner.clone());
+            people.insert(task.created_by.clone());
+        }
+        people.extend(tables.epics.values().map(|e| e.created_by.clone()));
+        people.extend(tables.work_packages.values().map(|p| p.created_by.clone()));
+        people.extend(tables.subscriptions.values().map(|s| s.subscriber.clone()));
+        people.retain(|p| !p.trim().is_empty());
+        for person in people {
+            if !tables.user_profiles.contains_key(&person) {
+                let profile = module::UserProfile {
+                    identity: person.clone(),
+                    display_name: String::new(),
+                    is_super_admin: false,
+                    created_at: stamp.clone(),
+                };
+                tables.user_profiles.insert(person.clone(), profile.clone());
+                self.rows.upsert_user_profile(&profile.into());
+            }
+            let membership_id = Self::assign_id(0, &mut tables.next_membership_id);
+            let membership = module::Membership {
+                id: membership_id,
+                workspace_id: id,
+                user: person,
+                role: module::ROLE_MEMBER.to_string(),
+                created_at: stamp.clone(),
+            };
+            tables.memberships.insert(membership_id, membership.clone());
+            self.rows.upsert_membership(&membership.into());
+        }
     }
 }

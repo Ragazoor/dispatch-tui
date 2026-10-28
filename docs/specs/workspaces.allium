@@ -319,10 +319,7 @@ rule DeleteWorkspace {
         -- Refused while it holds any epic or package, private ones
         -- included. A super-admin empties it first, using
         -- SuperAdminDeletesUnseenItem for private items they cannot read.
-        -- Until Epic.workspace and WorkPackage.workspace exist in the store
-        -- (a later task of epic #69657), nothing can be in a workspace, so the
-        -- refusal has nothing to see; that task adds it, and the matching
-        -- subscription and unseen-mark cleanup of RemoveMember.
+        -- A workspace's learnings go with it (they have no other home).
 }
 
 -- Membership -------------------------------------------------
@@ -574,21 +571,40 @@ rule MigrateStoreToWorkspaces {
         for learning in Learnings where learning.scope != user:
             learning.workspace = default
         for person in known_identities():
-            UserProfile.created(identity: person, display_name: "",
-                                is_super_admin: false, created_at: now)
+            if not exists UserProfile where identity = person:
+                UserProfile.created(identity: person, display_name: "",
+                                    is_super_admin: false, created_at: now)
             core/Membership.created(workspace: default, user: person,
                                     role: member, created_at: now)
 
     @guidance
         -- D12. Runs once, on the first connection after the module that
-        -- adds workspaces is published, beside backfill_all_agents.
+        -- adds workspaces is published, beside backfill_all_agents. "Once"
+        -- means once per store, not once per rules version: the module runs it
+        -- only when the store's stamped rules version is older than the one
+        -- that added workspaces (rules.rs: WORKSPACES_RULES_VERSION), so a
+        -- later bump never brings back a default workspace a super-admin
+        -- deleted. A brand-new store counts as older and gets an empty
+        -- default workspace, which is where its first people are added.
+        -- store_publisher is the store's own identity (the database
+        -- identity, in the spelling of caller()), not a person: the migration
+        -- is not any client's act.
         -- known_identities is every distinct non-empty Host.owner,
         -- Task.owner, Task.created_by, Epic.created_by,
-        -- WorkPackage.created_by and Subscription.subscriber. Nobody is an
+        -- WorkPackage.created_by and Subscription.subscriber. A person who
+        -- already has a profile keeps it, name included. Nobody is an
         -- admin yet: the super-admin claims first (ClaimSuperAdmin), then
         -- promotes. Existing epic-less tasks keep their owner and become
         -- private to them; ownerless ones wait for the first super-admin
         -- (AdoptOwnerlessUserBoardTasks).
+        --
+        -- Until CreateEpicInWorkspace lands (task #98519), an epic or package
+        -- created after the migration carries workspace 0 and visibility
+        -- public: the columns exist, the create path does not yet fill them.
+        --
+        -- Snapshots: user_profiles, workspaces and memberships are shared
+        -- tables (spacetime-seed.allium: SharedTable), so a restore keeps
+        -- every workspace id the epics point at.
 }
 
 ------------------------------------------------------------

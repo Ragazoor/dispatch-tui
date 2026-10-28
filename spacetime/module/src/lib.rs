@@ -251,18 +251,28 @@ pub fn stamp_rules_version_on_connect(ctx: &ReducerContext) {
         id: 1,
         version: RULES_VERSION,
     };
-    match ctx.db.rules_version().id().find(1) {
+    // 0 for a store whose module predates the gate, as `RULES_VERSION` says.
+    let previous = match ctx.db.rules_version().id().find(1) {
         Some(existing) if existing.version == RULES_VERSION => return,
-        Some(_) => {
+        Some(existing) => {
             ctx.db.rules_version().id().update(row);
+            existing.version
         }
         None => {
             ctx.db.rules_version().insert(row);
+            0
         }
-    }
+    };
     // The first connection after a publish that changed the rules: the one
     // moment every upgraded store passes through before a board reads it
     // (`agents.allium: BackfillCurrentAgents`). Idempotent, so a store already
     // backfilled loses nothing to a later bump.
     backfill_all_agents(ctx);
+    // Likewise once, and only when the store comes from a module older than
+    // the one that added workspaces, so a later bump never brings back a
+    // default workspace a super-admin deleted
+    // (`workspaces.allium: MigrateStoreToWorkspaces`).
+    if previous < WORKSPACES_RULES_VERSION {
+        migrate_store_to_workspaces(ctx);
+    }
 }

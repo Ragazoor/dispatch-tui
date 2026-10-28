@@ -58,6 +58,11 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 17: workspace and visibility columns on epics and work packages, a
+///    workspace column on learnings, and `MigrateStoreToWorkspaces` on the first
+///    connection after the publish; `delete_workspace` refuses an occupied
+///    workspace and `remove_member` drops the person's subscriptions and unseen
+///    marks in it (`workspace.rs`).
 /// 16: super-admins, workspaces and membership — `claim_super_admin` and the
 ///    grant/revoke pair, `create_workspace`, `rename_workspace`,
 ///    `delete_workspace`, `add_member`, `set_member_role` and `remove_member`
@@ -83,7 +88,12 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 16;
+pub const RULES_VERSION: i64 = 17;
+
+/// The rules version that added workspaces: a store stamped with anything
+/// older is migrated once on its first connection (`workspace.rs:
+/// migrate_store_to_workspaces`).
+pub const WORKSPACES_RULES_VERSION: i64 = 17;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///

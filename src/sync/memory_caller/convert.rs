@@ -137,6 +137,8 @@ mirror!(
         feed_append_only,
         completed_at,
         created_by,
+        workspace_id,
+        visibility,
     }
 );
 
@@ -337,6 +339,7 @@ mirror!(
         created_at,
         updated_at,
         embedding,
+        workspace_id,
     }
 );
 
@@ -369,7 +372,9 @@ mirror!(
         sort_order,
         created_by,
         created_at,
-        updated_at
+        updated_at,
+        workspace_id,
+        visibility
     }
 );
 

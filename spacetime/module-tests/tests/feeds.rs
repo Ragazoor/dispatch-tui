@@ -599,6 +599,7 @@ fn deleting_an_epic_detaches_its_subtasks_learnings_and_cascades_their_retrieval
                     created_at: "2026-09-19 10:00:00".into(),
                     updated_at: "2026-09-19 10:00:00".into(),
                     embedding: None,
+                    workspace_id: 0,
                 }],
             )
         })

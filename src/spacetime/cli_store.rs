@@ -418,6 +418,9 @@ fn seed_reducer(table: SharedTable) -> &'static str {
         SharedTable::WorkPackageLinks => "seed_work_package_links",
         SharedTable::Agents => "seed_agents",
         SharedTable::HandedOutAgentNames => "seed_handed_out_agent_names",
+        SharedTable::UserProfiles => "seed_user_profiles",
+        SharedTable::Workspaces => "seed_workspaces",
+        SharedTable::Memberships => "seed_memberships",
     }
 }
 

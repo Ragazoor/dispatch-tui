@@ -25,6 +25,7 @@ fn learning(id: i64) -> Learning {
         created_at: "2026-09-19 10:00:00".into(),
         updated_at: "2026-09-19 10:00:00".into(),
         embedding: None,
+        workspace_id: 0,
     }
 }
 

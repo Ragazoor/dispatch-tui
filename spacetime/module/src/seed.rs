@@ -29,6 +29,7 @@ pub fn seed_epics(ctx: &ReducerContext, rows: Vec<Epic>) -> Result<(), String> {
             return Err("seed_epics needs each epic's real id".into());
         }
         validate_status("epic", row.id, &row.status)?;
+        validate_visibility("epic", row.id, &row.visibility)?;
         if ctx.db.epics().id().find(row.id).is_some() {
             ctx.db.epics().id().update(row);
         } else {
@@ -74,6 +75,7 @@ pub fn seed_work_packages(ctx: &ReducerContext, rows: Vec<WorkPackage>) -> Resul
         if row.id == 0 {
             return Err("seed_work_packages needs each package's real id".into());
         }
+        validate_visibility("work package", row.id, &row.visibility)?;
         if ctx.db.work_packages().id().find(row.id).is_some() {
             ctx.db.work_packages().id().update(row);
         } else {
@@ -415,6 +417,70 @@ pub fn seed_retired_feed_items(
             ctx.db.retired_feed_items().id().update(row);
         } else {
             ctx.db.retired_feed_items().insert(row);
+        }
+    }
+    Ok(())
+}
+
+/// Refuse a visibility other than `public` or `private`, so a snapshot cannot
+/// plant a row the read predicate has no rule for.
+fn validate_visibility(kind: &str, id: i64, visibility: &str) -> Result<(), String> {
+    if visibility == VISIBILITY_PUBLIC || visibility == VISIBILITY_PRIVATE {
+        Ok(())
+    } else {
+        Err(format!(
+            "{kind} {id} has visibility '{visibility}'; it is '{VISIBILITY_PUBLIC}' or '{VISIBILITY_PRIVATE}'"
+        ))
+    }
+}
+
+#[spacetimedb::reducer]
+pub fn seed_user_profiles(ctx: &ReducerContext, rows: Vec<UserProfile>) -> Result<(), String> {
+    for row in rows {
+        if row.identity.trim().is_empty() {
+            return Err("a profile needs an identity".into());
+        }
+        if ctx
+            .db
+            .user_profiles()
+            .identity()
+            .find(&row.identity)
+            .is_some()
+        {
+            ctx.db.user_profiles().identity().update(row);
+        } else {
+            ctx.db.user_profiles().insert(row);
+        }
+    }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn seed_workspaces(ctx: &ReducerContext, rows: Vec<Workspace>) -> Result<(), String> {
+    for row in rows {
+        if row.id == 0 {
+            return Err("seed_workspaces needs each workspace's real id".into());
+        }
+        if ctx.db.workspaces().id().find(row.id).is_some() {
+            ctx.db.workspaces().id().update(row);
+        } else {
+            ctx.db.workspaces().insert(row);
+        }
+    }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn seed_memberships(ctx: &ReducerContext, rows: Vec<Membership>) -> Result<(), String> {
+    for row in rows {
+        if row.id == 0 {
+            return Err("seed_memberships needs each membership's real id".into());
+        }
+        validate_workspace_role(&row.role)?;
+        if ctx.db.memberships().id().find(row.id).is_some() {
+            ctx.db.memberships().id().update(row);
+        } else {
+            ctx.db.memberships().insert(row);
         }
     }
     Ok(())

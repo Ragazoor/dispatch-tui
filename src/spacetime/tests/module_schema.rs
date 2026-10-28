@@ -120,13 +120,6 @@ fn parse_field(accessor: &str, line: &str) -> Column {
 /// too: a mark says "you have not looked yet", which a restore into another
 /// store would invent for people who may have looked since.
 ///
-/// `user_profiles` (`workspaces.allium: UserProfile`) is excluded too: a
-/// profile belongs to an identity of the store it was made in, and a restore
-/// into another store would carry names for people who never connected.
-///
-/// `workspaces` and `memberships` (`workspaces.allium`) are excluded for the
-/// same reason: they name identities of the store they were made in.
-///
 /// `dispatch_requests`, `dispatch_request_timeouts`, `session_requests` and
 /// `session_request_timeouts` (store-split M5, W10) are excluded too: they
 /// are in-flight state, not domain, and no snapshot carries them
@@ -151,9 +144,6 @@ fn the_module_declares_every_shared_table_and_nothing_else() {
                     | "session_requests"
                     | "session_request_timeouts"
                     | "unseen_tasks"
-                    | "user_profiles"
-                    | "workspaces"
-                    | "memberships"
             )
         })
         .collect();

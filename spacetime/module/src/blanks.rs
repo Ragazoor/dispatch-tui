@@ -80,6 +80,27 @@ pub fn blank_epic() -> Epic {
         feed_append_only: false,
         completed_at: String::new(),
         created_by: String::new(),
+        workspace_id: 0,
+        visibility: VISIBILITY_PUBLIC.into(),
+    }
+}
+
+pub(crate) fn blank_workspace() -> Workspace {
+    Workspace {
+        id: 0,
+        name: String::new(),
+        created_by: String::new(),
+        created_at: String::new(),
+    }
+}
+
+pub(crate) fn blank_membership() -> Membership {
+    Membership {
+        id: 0,
+        workspace_id: 0,
+        user: String::new(),
+        role: String::new(),
+        created_at: String::new(),
     }
 }
 
@@ -115,6 +136,8 @@ pub(crate) fn blank_work_package() -> WorkPackage {
         created_at: String::new(),
         updated_at: String::new(),
         sort_order: None,
+        workspace_id: 0,
+        visibility: VISIBILITY_PUBLIC.into(),
     }
 }
 
@@ -163,6 +186,7 @@ pub(crate) fn blank_learning() -> Learning {
         created_at: String::new(),
         updated_at: String::new(),
         embedding: None,
+        workspace_id: 0,
     }
 }
 

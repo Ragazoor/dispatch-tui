@@ -115,8 +115,18 @@ impl MemoryReducerCaller {
     pub(super) fn apply_delete_learning(&self, id: LearningId) -> Result<ReducerOutcome> {
         let id = id.0;
         let mut tables = self.lock();
-        if !self.delete_learning_row(&mut tables, id) {
+        if !self.delete_learning_cascade(&mut tables, id) {
             return Ok(ReducerOutcome::Refused(format!("learning {id} not found")));
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
+    }
+
+    /// The learning row and every retrieval and verdict that names it, as the
+    /// module's `delete_learning` removes them. False when there was no such
+    /// learning.
+    pub(super) fn delete_learning_cascade(&self, tables: &mut Tables, id: i64) -> bool {
+        if !self.delete_learning_row(tables, id) {
+            return false;
         }
         let retrievals: Vec<i64> = tables
             .learning_retrievals
@@ -124,9 +134,9 @@ impl MemoryReducerCaller {
             .filter(|r| r.learning_id == id)
             .map(|r| r.id)
             .collect();
-        self.delete_learning_retrieval_rows(&mut tables, retrievals);
+        self.delete_learning_retrieval_rows(tables, retrievals);
         tables.learning_verdicts.retain(|_, v| v.learning_id != id);
-        Ok(ReducerOutcome::Applied(vec![]))
+        true
     }
 
     /// Mirrors the module's `rescope_learnings`, callable from another

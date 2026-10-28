@@ -14,6 +14,8 @@ pub struct WorkPackage {
     pub created_at: String,
     pub updated_at: String,
     pub sort_order: Option<i64>,
+    pub workspace_id: i64,
+    pub visibility: String,
 }
 
 impl __sdk::InModule for WorkPackage {
@@ -31,6 +33,8 @@ pub struct WorkPackageCols {
     pub created_at: __sdk::__query_builder::Col<WorkPackage, String>,
     pub updated_at: __sdk::__query_builder::Col<WorkPackage, String>,
     pub sort_order: __sdk::__query_builder::Col<WorkPackage, Option<i64>>,
+    pub workspace_id: __sdk::__query_builder::Col<WorkPackage, i64>,
+    pub visibility: __sdk::__query_builder::Col<WorkPackage, String>,
 }
 
 impl __sdk::__query_builder::HasCols for WorkPackage {
@@ -44,6 +48,8 @@ impl __sdk::__query_builder::HasCols for WorkPackage {
             created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
             updated_at: __sdk::__query_builder::Col::new(table_name, "updated_at"),
             sort_order: __sdk::__query_builder::Col::new(table_name, "sort_order"),
+            workspace_id: __sdk::__query_builder::Col::new(table_name, "workspace_id"),
+            visibility: __sdk::__query_builder::Col::new(table_name, "visibility"),
         }
     }
 }

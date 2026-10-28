@@ -36,8 +36,9 @@ pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 /// the sixteenth, needed it yet again; `work_packages` and
 /// `work_package_links`, the eighteenth and nineteenth, once more; `agents`
 /// and `handed_out_agent_names`, the twentieth and twenty-first, again;
-/// `learning_verdicts`, the twenty-second, once more).
-pub const SHARED_TABLE_COUNT: usize = 22;
+/// `learning_verdicts`, the twenty-second, once more; `user_profiles`,
+/// `workspaces` and `memberships`, the twenty-third to twenty-fifth, again).
+pub const SHARED_TABLE_COUNT: usize = 25;
 
 /// One row, carried whole. Deliberately untyped: this module does not describe
 /// the shape of a task row — `core.allium` does — and a second description here
@@ -75,6 +76,9 @@ pub enum SharedTable {
     WorkPackageLinks,
     Agents,
     HandedOutAgentNames,
+    UserProfiles,
+    Workspaces,
+    Memberships,
 }
 
 impl SharedTable {
@@ -103,6 +107,9 @@ impl SharedTable {
         SharedTable::WorkPackageLinks,
         SharedTable::Agents,
         SharedTable::HandedOutAgentNames,
+        SharedTable::UserProfiles,
+        SharedTable::Workspaces,
+        SharedTable::Memberships,
     ];
 
     pub fn name(self) -> &'static str {
@@ -129,6 +136,9 @@ impl SharedTable {
             SharedTable::WorkPackageLinks => "work_package_links",
             SharedTable::Agents => "agents",
             SharedTable::HandedOutAgentNames => "handed_out_agent_names",
+            SharedTable::UserProfiles => "user_profiles",
+            SharedTable::Workspaces => "workspaces",
+            SharedTable::Memberships => "memberships",
         }
     }
 
@@ -159,12 +169,16 @@ impl SharedTable {
             | SharedTable::UsageEvents
             | SharedTable::RetiredFeedItems
             | SharedTable::WorkPackages
+            | SharedTable::Workspaces
+            | SharedTable::Memberships
             | SharedTable::Agents => Some("id"),
             // A link's id is derived (`"<package>/<kind>/<item>"`), like a
             // subscription's: nothing generated, nothing to burn.
             SharedTable::WorkPackageLinks
             // A ledger row is its name.
             | SharedTable::HandedOutAgentNames
+            // A profile is its identity, minted by the store.
+            | SharedTable::UserProfiles
             | SharedTable::TaskShells
             | SharedTable::TaskSubagents
             | SharedTable::Hosts
@@ -190,6 +204,7 @@ impl SharedTable {
         match self {
             SharedTable::Tasks => &["auto_run_plan", "stop_pending", "phoenix"],
             SharedTable::Epics => &["auto_dispatch", "group_by_repo", "feed_append_only"],
+            SharedTable::UserProfiles => &["is_super_admin"],
             // `todos` is dumped as always-empty since #4970, so it never
             // passes through the SQLite read that applies this list.
             SharedTable::Todos
@@ -211,7 +226,9 @@ impl SharedTable {
             | SharedTable::WorkPackages
             | SharedTable::WorkPackageLinks
             | SharedTable::Agents
-            | SharedTable::HandedOutAgentNames => &[],
+            | SharedTable::HandedOutAgentNames
+            | SharedTable::Workspaces
+            | SharedTable::Memberships => &[],
         }
     }
 
@@ -321,6 +338,9 @@ impl SharedTable {
                 ("completed_at", S),
                 // The epic twin of `Task.created_by` above.
                 ("created_by", S),
+                // The workspace it lives in (`core.allium: Epic.workspace`);
+                // 0 is "none yet", as the store spells every absent id.
+                ("workspace_id", Z),
             ],
             SharedTable::Todos => &[
                 ("task_id", Z),
@@ -342,7 +362,6 @@ impl SharedTable {
             | SharedTable::PollOwners
             | SharedTable::Settings
             | SharedTable::FilterPresets
-            | SharedTable::Learnings
             | SharedTable::LearningRetrievals
             | SharedTable::LearningVerdicts
             | SharedTable::UsageEvents
@@ -350,13 +369,20 @@ impl SharedTable {
             // sides — nothing here to sentinel.
             | SharedTable::RetiredFeedItems
             | SharedTable::WorkPackageLinks
-            | SharedTable::HandedOutAgentNames => &[],
+            | SharedTable::HandedOutAgentNames
+            | SharedTable::UserProfiles
+            | SharedTable::Workspaces
+            | SharedTable::Memberships => &[],
             // An ended agent's stamp and reason, and a paused one's window,
             // are absent while they do not apply (`agents.allium: Agent`).
             SharedTable::Agents => &[("ended_at", S), ("end_reason", S), ("tmux_window", S)],
             // The package twin of `Epic.created_by` above: the board
             // subscribes by it, so it cannot be optional.
-            SharedTable::WorkPackages => &[("created_by", S)],
+            // `workspace_id`: the package's workspace, absent as 0.
+            SharedTable::WorkPackages => &[("created_by", S), ("workspace_id", Z)],
+            // A user-scoped learning has no workspace
+            // (`core.allium: Learning.workspace`), which the store spells 0.
+            SharedTable::Learnings => &[("workspace_id", Z)],
         }
     }
 
@@ -455,7 +481,10 @@ impl SharedTable {
             | SharedTable::WorkPackages
             | SharedTable::WorkPackageLinks
             | SharedTable::Agents
-            | SharedTable::HandedOutAgentNames => &[],
+            | SharedTable::HandedOutAgentNames
+            | SharedTable::UserProfiles
+            | SharedTable::Workspaces
+            | SharedTable::Memberships => &[],
         }
     }
 
@@ -494,7 +523,10 @@ impl SharedTable {
             // Who created the epic (`core.allium: Epic.created_by`) — an
             // epic has no `owner` counterpart, since nobody's user board
             // holds one.
-            SharedTable::Epics => &["created_by"],
+            SharedTable::Epics => &["created_by", "workspace_id", "visibility"],
+            // The workspace columns (`workspaces.allium`); SQLite had none.
+            SharedTable::WorkPackages => &["workspace_id", "visibility"],
+            SharedTable::Learnings => &["workspace_id"],
             SharedTable::Todos
             | SharedTable::TaskWatchers
             | SharedTable::TaskShells
@@ -513,15 +545,16 @@ impl SharedTable {
             // order matches their SQLite column order exactly (see the
             // module's own doc comment), so none has a module-only column to
             // reconcile.
-            | SharedTable::Learnings
             | SharedTable::LearningRetrievals
             | SharedTable::LearningVerdicts
             | SharedTable::UsageEvents
             | SharedTable::RetiredFeedItems
-            | SharedTable::WorkPackages
             | SharedTable::WorkPackageLinks
             | SharedTable::Agents
-            | SharedTable::HandedOutAgentNames => &[],
+            | SharedTable::HandedOutAgentNames
+            | SharedTable::UserProfiles
+            | SharedTable::Workspaces
+            | SharedTable::Memberships => &[],
         }
     }
 

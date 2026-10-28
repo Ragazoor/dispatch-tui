@@ -1,11 +1,8 @@
 //! Super-admins, workspaces and membership (`workspaces.allium`, "Super-admins",
 //! "Workspaces", "Membership").
 //!
-//! Epics and packages carry no workspace yet, so a workspace cannot hold one:
-//! `DeleteWorkspace`'s "refused while it holds epics or packages" and
-//! `RemoveMember`'s "drops that person's subscriptions and unseen marks in the
-//! workspace" have nothing to look at until the task that adds
-//! `Epic.workspace` lands. That task adds both checks.
+//! Also `MigrateStoreToWorkspaces`, which puts a pre-workspace store into one
+//! default workspace.
 
 use super::*;
 
@@ -15,6 +12,9 @@ pub const WORKSPACE_NAME_MAX_LENGTH: usize = 64;
 /// `core.allium: WorkspaceRole`, in the store's spelling.
 pub const ROLE_ADMIN: &str = "admin";
 pub const ROLE_MEMBER: &str = "member";
+
+/// `workspaces.allium: config.default_workspace_name`.
+pub const DEFAULT_WORKSPACE_NAME: &str = "Default";
 
 /// Validate a workspace name: trimmed, non-empty, at most
 /// [`WORKSPACE_NAME_MAX_LENGTH`] characters, no control or invisible
@@ -200,8 +200,33 @@ pub fn delete_workspace(ctx: &ReducerContext, workspace_id: i64) -> Result<(), S
     if ctx.db.workspaces().id().find(workspace_id).is_none() {
         return Err(format!("workspace {workspace_id} does not exist"));
     }
-    // The "holds epics or packages" refusal waits for `Epic.workspace`
-    // (see the module header).
+    // Private epics and packages count: a super-admin empties the workspace
+    // first, deleting what they cannot read.
+    if ctx
+        .db
+        .epics()
+        .iter()
+        .any(|e| e.workspace_id == workspace_id)
+        || ctx
+            .db
+            .work_packages()
+            .iter()
+            .any(|p| p.workspace_id == workspace_id)
+    {
+        return Err(format!(
+            "workspace {workspace_id} still holds epics or work packages; empty it first"
+        ));
+    }
+    let learnings: Vec<i64> = ctx
+        .db
+        .learnings()
+        .iter()
+        .filter(|l| l.workspace_id == workspace_id)
+        .map(|l| l.id)
+        .collect();
+    for id in learnings {
+        delete_learning(ctx, id)?;
+    }
     let memberships: Vec<i64> = ctx
         .db
         .memberships()
@@ -278,5 +303,123 @@ pub fn remove_member(ctx: &ReducerContext, membership_id: i64) -> Result<(), Str
     };
     require_admin_of(ctx, membership.workspace_id)?;
     ctx.db.memberships().id().delete(membership_id);
+    drop_follows_in_workspace(ctx, &membership.user, membership.workspace_id);
     Ok(())
+}
+
+/// `RemoveMember`: end `user`'s subscriptions and unseen marks inside
+/// `workspace_id`, and nothing in their other workspaces.
+fn drop_follows_in_workspace(ctx: &ReducerContext, user: &str, workspace_id: i64) {
+    let in_workspace = |epic_id: i64| {
+        ctx.db
+            .epics()
+            .id()
+            .find(epic_id)
+            .is_some_and(|e| e.workspace_id == workspace_id)
+    };
+    let subscriptions: Vec<String> = ctx
+        .db
+        .subscriptions()
+        .iter()
+        .filter(|s| s.subscriber == user && in_workspace(s.epic_id))
+        .map(|s| s.id)
+        .collect();
+    for id in subscriptions {
+        ctx.db.subscriptions().id().delete(&id);
+    }
+    let marks: Vec<String> = ctx
+        .db
+        .unseen_tasks()
+        .iter()
+        .filter(|u| {
+            u.subscriber == user
+                && ctx
+                    .db
+                    .tasks()
+                    .id()
+                    .find(u.task_id)
+                    .is_some_and(|t| t.epic_id != 0 && in_workspace(t.epic_id))
+        })
+        .map(|u| u.id)
+        .collect();
+    for id in marks {
+        ctx.db.unseen_tasks().id().delete(&id);
+    }
+}
+
+/// `workspaces.allium: MigrateStoreToWorkspaces` (D12). Does nothing once any
+/// workspace exists. `pub` for `MemoryReducerCaller`.
+pub fn migrate_store_to_workspaces(ctx: &ReducerContext) {
+    if ctx.db.workspaces().iter().next().is_some() {
+        return;
+    }
+    let stamp = now(ctx);
+    // `store_publisher()`: the store itself, in `caller_identity`'s spelling.
+    let default = ctx.db.workspaces().insert(Workspace {
+        id: 0,
+        name: DEFAULT_WORKSPACE_NAME.into(),
+        created_by: ctx.database_identity().to_hex().to_string(),
+        created_at: stamp.clone(),
+    });
+    let epics: Vec<Epic> = ctx.db.epics().iter().collect();
+    for epic in epics {
+        ctx.db.epics().id().update(Epic {
+            workspace_id: default.id,
+            visibility: VISIBILITY_PUBLIC.into(),
+            ..epic
+        });
+    }
+    let packages: Vec<WorkPackage> = ctx.db.work_packages().iter().collect();
+    for package in packages {
+        ctx.db.work_packages().id().update(WorkPackage {
+            workspace_id: default.id,
+            visibility: VISIBILITY_PUBLIC.into(),
+            ..package
+        });
+    }
+    let learnings: Vec<Learning> = ctx
+        .db
+        .learnings()
+        .iter()
+        .filter(|l| l.scope != "user")
+        .collect();
+    for learning in learnings {
+        ctx.db.learnings().id().update(Learning {
+            workspace_id: default.id,
+            ..learning
+        });
+    }
+    for person in known_identities(ctx) {
+        if profile_of(ctx, &person).is_none() {
+            ctx.db.user_profiles().insert(UserProfile {
+                identity: person.clone(),
+                display_name: String::new(),
+                is_super_admin: false,
+                created_at: stamp.clone(),
+            });
+        }
+        ctx.db.memberships().insert(Membership {
+            id: 0,
+            workspace_id: default.id,
+            user: person,
+            role: ROLE_MEMBER.into(),
+            created_at: stamp.clone(),
+        });
+    }
+}
+
+/// Every distinct non-empty `Host.owner`, `Task.owner`, `Task.created_by`,
+/// `Epic.created_by`, `WorkPackage.created_by` and `Subscription.subscriber`.
+fn known_identities(ctx: &ReducerContext) -> std::collections::BTreeSet<String> {
+    let mut people = std::collections::BTreeSet::new();
+    people.extend(ctx.db.hosts().iter().map(|h| h.owner));
+    for task in ctx.db.tasks().iter() {
+        people.insert(task.owner);
+        people.insert(task.created_by);
+    }
+    people.extend(ctx.db.epics().iter().map(|e| e.created_by));
+    people.extend(ctx.db.work_packages().iter().map(|p| p.created_by));
+    people.extend(ctx.db.subscriptions().iter().map(|s| s.subscriber));
+    people.retain(|p| !p.trim().is_empty());
+    people
 }

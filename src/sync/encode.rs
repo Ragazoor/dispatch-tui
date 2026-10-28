@@ -339,6 +339,10 @@ pub fn create_epic_row_with(
         // `sync.allium`'s `own_creations` subscription can find it before
         // anyone follows it. `core.allium: Epic.created_by`.
         created_by: created_by.to_string(),
+        // Placed by the workspace-aware create path (`workspaces.allium:
+        // CreateEpicInWorkspace`); until then the store's own defaults.
+        workspace_id: 0,
+        visibility: "public".to_string(),
     }
 }
 
@@ -381,6 +385,8 @@ pub fn create_work_package_row(
         created_by: created_by.to_string(),
         created_at: now.to_string(),
         updated_at: now.to_string(),
+        workspace_id: 0,
+        visibility: "public".to_string(),
     }
 }
 
@@ -471,6 +477,8 @@ pub fn create_learning_row(
         created_at: now.to_string(),
         updated_at: now.to_string(),
         embedding: row.embedding.map(<[u8]>::to_vec),
+        // Placed by `workspaces.allium: LearningVisibility`'s create path.
+        workspace_id: 0,
     }
 }
 
