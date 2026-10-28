@@ -109,6 +109,16 @@ impl IngestStore for ReducerStore<'_> {
         self.0.db.epics().insert(row).id
     }
     fn update_task(&mut self, row: Task) {
+        let left_its_epic = self
+            .0
+            .db
+            .tasks()
+            .id()
+            .find(row.id)
+            .is_some_and(|old| old.epic_id != row.epic_id);
+        if left_its_epic {
+            clear_unseen_for_task(self.0, row.id);
+        }
         self.0.db.tasks().id().update(row);
     }
     fn find_or_create_repo_group(&mut self, root: i64, title: &str, created_by: String) -> i64 {

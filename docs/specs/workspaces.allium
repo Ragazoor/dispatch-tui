@@ -155,6 +155,9 @@ rule SetDisplayName {
     @guidance
         -- A person sets only their own name. Names need not be unique: the
         -- directory shows the identity prefix beside a duplicated name.
+        -- "Control or format characters" means Unicode categories Cc and Cf
+        -- in full (tag characters and Arabic number signs included), plus the
+        -- line and paragraph separators U+2028 and U+2029.
 }
 
 rule SetOwnNameFromBoard {

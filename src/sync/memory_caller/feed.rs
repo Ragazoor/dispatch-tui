@@ -438,6 +438,14 @@ impl module::IngestStore for TablesIngest<'_> {
     }
 
     fn update_task(&mut self, row: module::Task) {
+        let left_its_epic = self
+            .tables
+            .tasks
+            .get(&row.id)
+            .is_some_and(|old| old.epic_id != row.epic_id);
+        if left_its_epic {
+            self.caller.clear_unseen_for_task(self.tables, row.id);
+        }
         self.tables.tasks.insert(row.id, row.clone());
         self.caller.rows.upsert_task(&row.into());
     }

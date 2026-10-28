@@ -204,6 +204,23 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
         assert_eq!(unseen_prs(&rows_mem), vec!["pr-1".to_string()]);
         assert_eq!(unseen_prs(&rows_real), unseen_prs(&rows_mem));
 
+        // -- cycle 2b: pr-1 leaves My Reviews, so its mark ends -------------------
+        // (`tasks.allium: UnseenMarkEndsWithTheTaskLeavingItsEpicOrFinishing`).
+        let (r, m) = ingest(
+            vec![
+                ingest_item("pr-1", &pr(1), &["team-request"]),
+                ingest_item("pr-2", &pr(2), &["team-request", "reviewed"]),
+            ],
+            false,
+        )
+        .await;
+        r.applied().unwrap();
+        m.applied().unwrap();
+        let want = same_layout(2);
+        wait_for!(feed_layout(&rows_real, EpicId(root)) == want);
+        assert_eq!(unseen_prs(&rows_mem), Vec::<String>::new());
+        wait_for!(unseen_prs(&rows_real).is_empty());
+
         // -- cycle 3: additive removes nothing ------------------------------------
         let (r, m) = ingest(vec![ingest_item("pr-5", &pr(5), &["team-request"])], true).await;
         r.applied().unwrap();
