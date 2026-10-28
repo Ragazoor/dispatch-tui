@@ -188,3 +188,29 @@ async fn a_board_that_does_not_answer_is_unreachable_not_missing() {
     };
     assert_eq!(lookup_from_board(&board, TaskId(7)).await, unreachable());
 }
+
+// ---- RefreshSchedule ---------------------------------------------------
+
+/// Held keys must not starve the refresh: it is due on elapsed time alone.
+#[test]
+fn a_refresh_is_due_once_the_interval_has_elapsed_whatever_arrived_meanwhile() {
+    use std::time::{Duration, Instant};
+    let start = Instant::now();
+    let interval = Duration::from_secs(1);
+    let mut schedule = RefreshSchedule::new(interval, start);
+
+    assert!(!schedule.due(start + Duration::from_millis(900)));
+    assert_eq!(
+        schedule.wait(start + Duration::from_millis(900)),
+        Duration::from_millis(100)
+    );
+    assert!(schedule.due(start + interval));
+    assert_eq!(
+        schedule.wait(start + Duration::from_secs(5)),
+        Duration::ZERO
+    );
+
+    schedule.mark(start + Duration::from_secs(5));
+    assert!(!schedule.due(start + Duration::from_millis(5500)));
+    assert!(schedule.due(start + Duration::from_secs(6)));
+}

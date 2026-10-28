@@ -364,6 +364,40 @@ pub(crate) fn with_pane_task(
     )
 }
 
+/// When the next timed refresh is due, as a function of the instants it is
+/// shown, so a loop refreshes on elapsed time whether or not keys arrive
+/// (`RefreshAgentTree` is defined on elapsed time) and a test can pass instants
+/// instead of sleeping.
+pub(crate) struct RefreshSchedule {
+    interval: std::time::Duration,
+    last: std::time::Instant,
+}
+
+impl RefreshSchedule {
+    pub(crate) fn new(interval: std::time::Duration, now: std::time::Instant) -> Self {
+        Self {
+            interval,
+            last: now,
+        }
+    }
+
+    /// True once a full interval has passed since the last refresh.
+    pub(crate) fn due(&self, now: std::time::Instant) -> bool {
+        now.saturating_duration_since(self.last) >= self.interval
+    }
+
+    /// Record a refresh at `now`, whatever caused it.
+    pub(crate) fn mark(&mut self, now: std::time::Instant) {
+        self.last = now;
+    }
+
+    /// How long the loop may wait for a key before the next refresh is due.
+    pub(crate) fn wait(&self, now: std::time::Instant) -> std::time::Duration {
+        self.interval
+            .saturating_sub(now.saturating_duration_since(self.last))
+    }
+}
+
 /// Take the terminal, run `body`, and give the terminal back — whatever `body`
 /// did.
 ///
@@ -376,17 +410,37 @@ pub(crate) fn with_pane_terminal<T>(
     body: impl FnOnce(&mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<T>,
 ) -> Result<T> {
     enable_raw_mode()?;
+    // Guards, not trailing calls: a `?` below, or a panic in `body`, must still
+    // leave raw mode and the alternate screen.
+    let _raw = RawModeGuard;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
+    let _alt_screen = AlternateScreenGuard;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
 
     let result = body(&mut terminal);
 
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
     result
+}
+
+/// Leaves raw mode when dropped.
+struct RawModeGuard;
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+    }
+}
+
+/// Leaves the alternate screen when dropped.
+struct AlternateScreenGuard;
+
+impl Drop for AlternateScreenGuard {
+    fn drop(&mut self) {
+        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+    }
 }
 
 #[cfg(test)]

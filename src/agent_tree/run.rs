@@ -8,7 +8,7 @@
 //! sections, and keeping the diff pane below in step with the open set.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyEventKind};
@@ -18,6 +18,7 @@ use ratatui::Terminal;
 use crate::agent_tree::changes::{git_branch_commits, git_changes};
 use crate::agent_tree::keys::{handle_key, KeyAction};
 use crate::agent_tree::model::{build_tree, TreeNode};
+use crate::agent_tree::pane::RefreshSchedule;
 use crate::agent_tree::render::agents::AgentRow;
 use crate::agent_tree::render::commits::AgentCommit;
 use crate::agent_tree::render::render_pane;
@@ -54,7 +55,7 @@ pub(crate) fn jump_to_agent(
 /// Bundled because they travel together and none means anything without the
 /// others — `root` alone cannot name the pane's task, and the task id alone
 /// cannot say which database holds it.
-struct DiffPaneContext<'a> {
+pub(crate) struct DiffPaneContext<'a> {
     pub root: &'a Path,
     pub data_dir: &'a Path,
     pub task_id: TaskId,
@@ -137,9 +138,24 @@ fn open_in_editor(
         state.notice = Some(Notice::diff(format!("{e:#}")));
         return;
     }
-    if !state.open_diffs.is_empty() {
-        state.open_diffs.clear();
-        publish_open_set(context, state, runner);
+    record_editor_took_over(context, state);
+}
+
+/// Once the editor is up no diff is showing, so the open set is emptied and
+/// written — but NOT reconciled. Emptying the set this way is not an
+/// `AgentTreeDiffOpenSetChanged`: reconciling would take the close path, and a
+/// pane whose content mark failed to stick reads as a diff and would be killed
+/// with the editor in it (`OpenAgentTreeFileInEditor`).
+pub(crate) fn record_editor_took_over(context: &DiffPaneContext<'_>, state: &mut RenderState) {
+    if state.open_diffs.is_empty() {
+        return;
+    }
+    state.open_diffs.clear();
+    if let Err(e) =
+        crate::agent_tree::open_set::write_open_set(&context.root.to_string_lossy(), &[])
+    {
+        tracing::warn!(error = %format!("{e:#}"), "failed to record the emptied open set");
+        state.notice = Some(Notice::diff(format!("{e:#}")));
     }
 }
 
@@ -161,6 +177,20 @@ fn tear_down_diff_pane(
 ) {
     state.open_diffs.clear();
     publish_open_set(context, state, runner);
+}
+
+/// Runs [`tear_down_diff_pane`] when dropped, so a loop that leaves through a
+/// `?` cannot orphan the diff pane. Its state is a fresh one: nothing is open,
+/// and the notice it might set goes unread.
+struct DiffPaneTeardown<'a> {
+    context: &'a DiffPaneContext<'a>,
+    runner: &'a dyn ProcessRunner,
+}
+
+impl Drop for DiffPaneTeardown<'_> {
+    fn drop(&mut self) {
+        tear_down_diff_pane(self.context, &mut RenderState::new(), self.runner);
+    }
 }
 
 /// The loop's answer to [`KeyAction::SourceChanged`]: the tree switches now
@@ -279,6 +309,9 @@ fn run_loop<B: Backend>(
     usage: &mut crate::agent_tree::pane::PaneUsage,
 ) -> Result<()> {
     let root = context.root;
+    // Retires the diff pane on every way out, an error from a draw or a poll
+    // included (`KillAgentTreeDiffPaneWithItsTree`).
+    let _teardown = DiffPaneTeardown { context, runner };
     let mut state = RenderState::new();
     let mut tree = build_tree(root, &[]);
     // `build_tree` names the root node after the worktree directory, which is
@@ -292,45 +325,50 @@ fn run_loop<B: Backend>(
     // a stale one; the query below fills it in immediately after.
     terminal.draw(|frame| render_pane(frame, frame.area(), &tree, &mut state, &title))?;
     refresh(root, runner, &mut tree, &mut state);
+    let mut schedule = RefreshSchedule::new(REFRESH_INTERVAL, Instant::now());
 
     loop {
         drain_agent_reads(agent_reads, &mut state);
         if drain_commit_reads(commit_reads, root, &mut tree, &mut state) {
             refresh(root, runner, &mut tree, &mut state);
+            schedule.mark(Instant::now());
         }
         terminal.draw(|frame| render_pane(frame, frame.area(), &tree, &mut state, &title))?;
 
-        if event::poll(REFRESH_INTERVAL)? {
-            let Event::Key(key) = event::read()? else {
-                continue;
-            };
-            if key.kind != KeyEventKind::Press {
-                continue;
+        if event::poll(schedule.wait(Instant::now()))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    let action = handle_key(&mut state, &tree, key);
+                    usage.record(std::mem::take(&mut state.usage));
+                    match action {
+                        KeyAction::Exit => {
+                            usage.flush();
+                            return Ok(());
+                        }
+                        KeyAction::Continue => {}
+                        KeyAction::DiffSetChanged => {
+                            publish_open_set(context, &mut state, runner);
+                        }
+                        KeyAction::OpenInEditor(path) => {
+                            open_in_editor(context, &path, &mut state, runner)
+                        }
+                        KeyAction::JumpTo(window) => jump_to_agent(&window, &mut state, runner),
+                        KeyAction::SourceChanged => {
+                            adopt_selected_source(root, &mut tree, &mut state);
+                            refresh(root, runner, &mut tree, &mut state);
+                            schedule.mark(Instant::now());
+                        }
+                    }
+                }
             }
-            let action = handle_key(&mut state, &tree, key);
-            usage.record(std::mem::take(&mut state.usage));
-            match action {
-                KeyAction::Exit => {
-                    tear_down_diff_pane(context, &mut state, runner);
-                    usage.flush();
-                    return Ok(());
-                }
-                KeyAction::Continue => {}
-                KeyAction::DiffSetChanged => {
-                    publish_open_set(context, &mut state, runner);
-                }
-                KeyAction::OpenInEditor(path) => open_in_editor(context, &path, &mut state, runner),
-                KeyAction::JumpTo(window) => jump_to_agent(&window, &mut state, runner),
-                KeyAction::SourceChanged => {
-                    adopt_selected_source(root, &mut tree, &mut state);
-                    refresh(root, runner, &mut tree, &mut state);
-                }
-            }
-            continue;
         }
 
-        // Poll timed out with no key event: the ~1s timer tick.
-        refresh(root, runner, &mut tree, &mut state);
+        // Due on elapsed time, key or no key: held keys must not starve the
+        // refresh.
+        if schedule.due(Instant::now()) {
+            refresh(root, runner, &mut tree, &mut state);
+            schedule.mark(Instant::now());
+        }
     }
 }
 

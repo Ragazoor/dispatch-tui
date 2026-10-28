@@ -44,13 +44,10 @@ fn selected_source_path(worktree_path: &str) -> Option<PathBuf> {
 
 /// Replace the recorded open set.
 ///
-/// Takes a SLICE, not a set, and the order is part of the message: the diff
-/// pane renders these in the order the tree's rows appear, and the tree is the
-/// only party that knows that order — where a directory chain compresses
-/// depends on the whole change set, not on the subset the user opened. A set
-/// here would throw the order away and leave the diff pane re-deriving it from
-/// the paths alone, which cannot be done. The JSON body is an array either
-/// way, so nothing about the file format changes.
+/// Takes a slice and writes it as a JSON array, in the order given. The tree
+/// holds at most one open path (it is a `BTreeSet`, one file at a time), so the
+/// slice has no order to carry; the array form stays so the file format does
+/// not change.
 ///
 /// Written to a sibling temporary file and renamed into place, because the diff
 /// pane reads this on its own timer and the two are not synchronised. A rename
@@ -102,8 +99,7 @@ pub fn read_open_set(worktree_path: &str) -> Vec<PathBuf> {
         );
         return Vec::new();
     };
-    // A `Vec`, in the order written — see `write_open_set` for why the order is
-    // the message rather than an artefact of the container.
+    // A `Vec`, in the order written; the tree writes at most one path.
     //
     // A path that escapes the worktree cannot name a file the tree ever showed,
     // so it is dropped rather than trusted — the same fail-closed rule

@@ -126,3 +126,33 @@ fn a_refresh_with_a_commit_selected_shows_that_commit() {
         assert!(!call.contains("ls-files"), "{call}");
     }
 }
+
+// ---- v: the editor takes over without the close path -------------------
+
+/// `OpenAgentTreeFileInEditor`: emptying the open set when the editor opens is
+/// not an `AgentTreeDiffOpenSetChanged`, so it must not reach tmux at all —
+/// a reconcile there kills the editor if its content mark failed.
+#[test]
+fn opening_the_editor_empties_the_open_set_without_touching_tmux() {
+    let dir = tempfile::tempdir().unwrap();
+    let (worktree, _) = crate::worktree_admin::tests::make_linked_worktree(dir.path(), "42-fix");
+    let worktree = PathBuf::from(worktree);
+    crate::agent_tree::open_set::write_open_set(
+        &worktree.to_string_lossy(),
+        &[PathBuf::from("a.rs")],
+    )
+    .unwrap();
+    let mut state = browse_state();
+    state.open_diffs.insert(PathBuf::from("a.rs"));
+    let context = DiffPaneContext {
+        root: &worktree,
+        data_dir: Path::new("/data"),
+        task_id: TaskId(42),
+    };
+
+    record_editor_took_over(&context, &mut state);
+
+    assert!(state.open_diffs().is_empty());
+    assert!(state.notice.is_none(), "got {:?}", state.notice);
+    assert!(crate::agent_tree::open_set::read_open_set(&worktree.to_string_lossy()).is_empty());
+}

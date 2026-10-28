@@ -36,14 +36,11 @@ const DIFF_PANE_PERCENT: u8 = 50;
 /// The pane this process is running in, from `$TMUX_PANE`.
 ///
 /// tmux exports it into every pane it creates, so it is present whenever the
-/// renderer runs where it is meant to. Its absence means the renderer was
-/// started outside tmux, which is a real (if unusual) way to run it — hence an
-/// error the caller can show, not a panic.
+/// renderer runs where it is meant to. Its absence (or a malformed value) means
+/// the renderer was started outside tmux, which is a real (if unusual) way to
+/// run it — hence an error the caller can show, not a panic.
 pub fn current_pane_from_env() -> Result<String> {
-    std::env::var("TMUX_PANE")
-        .ok()
-        .filter(|p| !p.is_empty())
-        .context("not running inside tmux ($TMUX_PANE is unset)")
+    tmux::self_pane_id().context("not running inside tmux ($TMUX_PANE is unset)")
 }
 
 /// This agent window's lower pane, if it has one, and whether it runs the
@@ -51,24 +48,19 @@ pub fn current_pane_from_env() -> Result<String> {
 ///
 /// Value-matched, not presence-matched: the tree pane this is called from
 /// carries the same option under a different role, and mistaking one for the
-/// other would let a close take the tree away.
+/// other would let a close take the tree away. Role and content come from one
+/// `list-panes`, so a pane closed in between cannot read as a diff.
 fn existing_lower_pane(
     my_pane: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<Option<(String, bool)>> {
-    let Some(pane) =
-        tmux::pane_ids_with_option_value(my_pane, PANE_ROLE_OPTION, PANE_ROLE_DIFF, runner)
+    Ok(
+        tmux::pane_roles_with_content(my_pane, PANE_ROLE_OPTION, PANE_CONTENT_OPTION, runner)
             .context("failed to look for an existing diff pane")?
             .into_iter()
-            .next()
-    else {
-        return Ok(None);
-    };
-    let editor =
-        tmux::pane_ids_with_option_value(my_pane, PANE_CONTENT_OPTION, PANE_CONTENT_EDITOR, runner)
-            .context("failed to tell whether the lower pane runs the editor")?
-            .contains(&pane);
-    Ok(Some((pane, editor)))
+            .find(|(_, role, _)| role == PANE_ROLE_DIFF)
+            .map(|(pane, _, content)| (pane, content == PANE_CONTENT_EDITOR)),
+    )
 }
 
 /// Make the open set and the panes agree: split a diff pane when something is
@@ -266,23 +258,21 @@ mod tests {
     /// A diff pane already exists, running the diff renderer, then whatever the
     /// caller does with it.
     fn existing_pane(rest: Vec<anyhow::Result<std::process::Output>>) -> MockProcessRunner {
-        pane_running(b"%9 diff\n", rest)
+        pane_running("diff", rest)
     }
 
     /// A lower pane already exists, running the editor.
     fn existing_editor_pane(rest: Vec<anyhow::Result<std::process::Output>>) -> MockProcessRunner {
-        pane_running(b"%9 editor\n", rest)
+        pane_running("editor", rest)
     }
 
-    /// Role lookup finds `%9`; the content lookup answers `content_rows`.
+    /// The one lookup finds `%9` in the diff role, running `content`.
     fn pane_running(
-        content_rows: &[u8],
+        content: &str,
         rest: Vec<anyhow::Result<std::process::Output>>,
     ) -> MockProcessRunner {
-        let mut queued = vec![
-            MockProcessRunner::ok_with_stdout(b"%1 \n%2 agent_tree\n%9 diff\n"),
-            MockProcessRunner::ok_with_stdout(content_rows),
-        ];
+        let rows = format!("%1 \n%2 agent_tree \n%9 diff {content}\n");
+        let mut queued = vec![MockProcessRunner::ok_with_stdout(rows.as_bytes())];
         queued.extend(rest);
         MockProcessRunner::new(queued)
     }
@@ -337,7 +327,7 @@ mod tests {
 
         reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
 
-        assert_eq!(runner.flattened_calls().len(), 3, "lookups and focus only");
+        assert_eq!(runner.flattened_calls().len(), 2, "lookup and focus only");
         assert_focus_moved_to_the_lower_pane(&runner);
     }
 
@@ -357,7 +347,7 @@ mod tests {
         reconcile_diff_pane("%2", db(), TaskId(42), worktree(), false, &runner).unwrap();
 
         assert_eq!(
-            runner.flattened_calls()[2],
+            runner.flattened_calls()[1],
             "tmux kill-pane -t %9".to_string()
         );
     }
@@ -481,14 +471,14 @@ mod tests {
         show_in_editor("%2", wt.path(), Path::new("a.rs"), &editor(), &runner).unwrap();
 
         let calls = runner.flattened_calls();
-        assert_eq!(calls.len(), 5, "{calls:?}");
+        assert_eq!(calls.len(), 4, "{calls:?}");
         assert!(
-            calls[2].contains("respawn-pane -k") && calls[2].contains("-t %9"),
+            calls[1].contains("respawn-pane -k") && calls[1].contains("-t %9"),
             "{calls:?}"
         );
-        assert!(calls[2].contains("vim -p"), "{calls:?}");
+        assert!(calls[1].contains("vim -p"), "{calls:?}");
         assert!(
-            calls[3].contains("@dispatch_pane_content") && calls[3].ends_with("editor"),
+            calls[2].contains("@dispatch_pane_content") && calls[2].ends_with("editor"),
             "{calls:?}"
         );
         assert_focus_moved_to_the_lower_pane(&runner);
@@ -532,13 +522,13 @@ mod tests {
 
         let calls = runner.flattened_calls();
         assert!(
-            calls[2].contains("respawn-pane -k")
-                && calls[2].contains("-t %9")
-                && calls[2].contains("agent-diff 42"),
+            calls[1].contains("respawn-pane -k")
+                && calls[1].contains("-t %9")
+                && calls[1].contains("agent-diff 42"),
             "{calls:?}"
         );
         assert!(
-            calls[3].contains("@dispatch_pane_content") && calls[3].ends_with("diff"),
+            calls[2].contains("@dispatch_pane_content") && calls[2].ends_with("diff"),
             "the pane must be re-marked as running the diff; {calls:?}"
         );
         assert!(
@@ -573,8 +563,8 @@ mod tests {
 
         let calls = runner.flattened_calls();
         assert!(
-            calls[2].contains("respawn-pane -k")
-                && calls[2].ends_with(&format!("vim -p {}", wt.path().join("a.rs").display())),
+            calls[1].contains("respawn-pane -k")
+                && calls[1].ends_with(&format!("vim -p {}", wt.path().join("a.rs").display())),
             "{calls:?}"
         );
         assert_focus_moved_to_the_lower_pane(&runner);
@@ -585,27 +575,13 @@ mod tests {
     /// the pane now, so a fresh call (no state carried) still sees the editor.
     #[test]
     fn a_pane_without_a_content_mark_counts_as_the_diff() {
-        let runner = pane_running(b"", vec![MockProcessRunner::ok()]);
+        let runner = pane_running("", vec![MockProcessRunner::ok()]);
 
         reconcile_diff_pane("%2", db(), TaskId(42), worktree(), false, &runner).unwrap();
 
         assert_eq!(
-            runner.flattened_calls()[2],
+            runner.flattened_calls()[1],
             "tmux kill-pane -t %9".to_string()
         );
-    }
-
-    #[test]
-    fn a_failed_content_lookup_is_an_error_rather_than_a_kill() {
-        let runner = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"%2 agent_tree\n%9 diff\n"),
-            MockProcessRunner::fail("no server running"),
-        ]);
-
-        let err =
-            reconcile_diff_pane("%2", db(), TaskId(42), worktree(), false, &runner).unwrap_err();
-
-        assert!(format!("{err:#}").contains("runs the editor"), "{err:#}");
-        assert_no_pane_mutation(&runner);
     }
 }

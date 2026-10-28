@@ -1503,6 +1503,40 @@ pub fn pane_roles(
         .collect())
 }
 
+/// Every pane in `target`'s window marked with `role_option`, with the value of
+/// `content_option` on it (empty when unset), read in ONE `list-panes`.
+///
+/// Two lookups would read the window at two moments, and a pane closed between
+/// them would be reported by the first and gone for the second.
+pub fn pane_roles_with_content(
+    target: &str,
+    role_option: &str,
+    content_option: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<Vec<(String, String, String)>> {
+    let resolved = window_target(target, runner)?;
+    let format = format!(
+        "#{{pane_id}} {} {}",
+        option_format(role_option),
+        option_format(content_option)
+    );
+    let out = run_checked_stdout(
+        runner,
+        &["list-panes", "-t", &resolved, "-F", &format],
+        "list-panes",
+    )?;
+    Ok(out
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.splitn(3, ' ');
+            let id = fields.next().filter(|id| !id.is_empty())?;
+            let role = fields.next().filter(|role| !role.is_empty())?;
+            let content = fields.next().unwrap_or("");
+            Some((id.to_string(), role.to_string(), content.to_string()))
+        })
+        .collect())
+}
+
 /// Pane ids in `target`'s window whose pane-scoped user option `option` is set to
 /// a non-empty value — *any* value.
 ///

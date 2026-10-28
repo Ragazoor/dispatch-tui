@@ -19,6 +19,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
@@ -30,6 +31,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{Frame, Terminal};
 
 use crate::agent_tree::model::parse_untracked;
+use crate::agent_tree::pane::RefreshSchedule;
 use crate::agent_tree::{changes::GIT_TIMEOUT, run::REFRESH_INTERVAL};
 use crate::git::{git_error, git_in, run_git, COULD_NOT_RUN_GIT};
 use crate::models::TaskId;
@@ -612,8 +614,8 @@ fn open_files_fingerprint(
 /// anything moved.
 #[derive(Default)]
 struct LastSeen {
-    /// The open paths as the tree last published them, ORDER INCLUDED — a
-    /// reorder is a reason to rebuild, because the document is rendered in it.
+    /// The open paths as the tree last published them (at most one: the set is
+    /// a `BTreeSet`) — a change of file is a reason to rebuild.
     open: Vec<PathBuf>,
     /// The source the document was built for; a selection change is a reason
     /// to rebuild even when nothing else moved.
@@ -724,30 +726,33 @@ fn run_loop<B: Backend>(
     // cell.
     terminal.draw(|frame| render(frame, frame.area(), &lines, &mut state))?;
     refresh(root, runner, &mut last, &mut lines, &mut state);
+    let mut schedule = RefreshSchedule::new(REFRESH_INTERVAL, Instant::now());
 
     loop {
         terminal.draw(|frame| render(frame, frame.area(), &lines, &mut state))?;
 
-        if event::poll(REFRESH_INTERVAL)? {
-            let Event::Key(key) = event::read()? else {
-                continue;
-            };
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-            let action = handle_key(&mut state, lines.len(), key);
-            usage.record(std::mem::take(&mut state.usage));
-            match action {
-                DiffKeyAction::Exit => {
-                    usage.flush();
-                    return Ok(());
+        if event::poll(schedule.wait(Instant::now()))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    let action = handle_key(&mut state, lines.len(), key);
+                    usage.record(std::mem::take(&mut state.usage));
+                    match action {
+                        DiffKeyAction::Exit => {
+                            usage.flush();
+                            return Ok(());
+                        }
+                        DiffKeyAction::Continue => {}
+                    }
                 }
-                DiffKeyAction::Continue => {}
             }
-            continue;
         }
 
-        refresh(root, runner, &mut last, &mut lines, &mut state);
+        // Due on elapsed time, key or no key: held keys must not starve the
+        // refresh.
+        if schedule.due(Instant::now()) {
+            refresh(root, runner, &mut last, &mut lines, &mut state);
+            schedule.mark(Instant::now());
+        }
     }
 }
 
