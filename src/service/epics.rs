@@ -372,11 +372,11 @@ impl EpicService {
         // the request, and the not-found answer.
         let mut patch = Self::base_patch(&params);
 
-        // A transition into Done is stamped by the module's `patch_epic`
-        // (a value this patch names is overwritten there), not here: a stale
-        // cached status or the board clock must not decide it. A `completed_at`
-        // the caller names on an epic already done (a manual Done reorder) is
-        // kept.
+        // A transition into Done is stamped by the module's `patch_epic`, not
+        // here: a stale cached status or the board clock must not decide it.
+        // The module lets a `completed_at` the patch names win, so
+        // `base_patch` forwards one only when the caller named it (a manual
+        // Done reorder).
 
         match params.parent_epic_id {
             Some(Some(new_parent_id)) => {

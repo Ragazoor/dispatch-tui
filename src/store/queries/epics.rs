@@ -107,19 +107,7 @@ impl super::super::EpicCrud for Store {
     }
 
     async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()> {
-        // A task leaving its epic lands on a user board and needs an owner;
-        // one joining an epic gives its owner up. The store enforces both arms
-        // (`core.allium: OwnerTracksUserBoardTask`), so the only job here is to
-        // supply the name it may need.
-        let owner = match epic_id {
-            Some(_) => String::new(),
-            None => {
-                self.require_identity(
-                    "a task cannot be moved out of its epic onto a user board; nothing was changed",
-                )
-                .await?
-            }
-        };
+        let owner = self.owner_for_epic_move(epic_id).await?;
         self.caller
             .set_task_epic(task_id, epic_id, owner)
             .await?

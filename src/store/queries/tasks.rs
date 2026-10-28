@@ -148,15 +148,9 @@ impl TaskCrud for Store {
         epic: Option<Option<EpicId>>,
         patch: &TaskPatch<'_>,
     ) -> Result<()> {
-        // The owner a detach needs, as `set_task_epic_id` supplies it.
         let owner = match epic {
-            Some(None) => {
-                self.require_identity(
-                    "a task cannot be moved out of its epic onto a user board; nothing was changed",
-                )
-                .await?
-            }
-            _ => String::new(),
+            Some(target) => self.owner_for_epic_move(target).await?,
+            None => String::new(),
         };
         self.caller
             .update_task(id, epic, owner, encode::task_patch(patch))

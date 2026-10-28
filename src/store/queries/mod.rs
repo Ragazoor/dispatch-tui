@@ -58,6 +58,23 @@ impl Store {
             .ok_or_else(|| anyhow::anyhow!("this board has no user identity yet, so {unable_to}"))
     }
 
+    /// The owner a task takes when it moves to `epic`. A task leaving its epic
+    /// lands on a user board and needs an owner; one joining an epic gives its
+    /// owner up. The store enforces both arms (`core.allium:
+    /// OwnerTracksUserBoardTask`), so the only job here is to supply the name
+    /// it may need.
+    async fn owner_for_epic_move(&self, epic: Option<EpicId>) -> Result<String> {
+        match epic {
+            Some(_) => Ok(String::new()),
+            None => {
+                self.require_identity(
+                    "a task cannot be moved out of its epic onto a user board; nothing was changed",
+                )
+                .await
+            }
+        }
+    }
+
     /// Whether `id` was in status `want` just before an agent-session-state
     /// call, read from `rows` before the reducer runs.
     ///
