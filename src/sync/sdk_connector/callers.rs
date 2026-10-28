@@ -19,29 +19,31 @@ use crate::models::{
 };
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
-    apply_learning_verdicts as _, archive_stale_learnings as _, batch_delete as _,
+    add_member as _, apply_learning_verdicts as _, archive_stale_learnings as _, batch_delete as _,
     batch_patch_sub_status as _, claim_dispatch_request as _, claim_poll_owner as _,
-    claim_session_request as _, clear_setting as _, close_task as _, create_epic as _,
-    create_learning as _, create_task as _, create_task_signalled as _, create_work_package as _,
-    create_work_package_with_links as _, delete_epic as _, delete_learning as _,
-    delete_repo_path as _, delete_task as _, delete_work_package as _, ensure_managed_epics as _,
+    claim_session_request as _, claim_super_admin as _, clear_setting as _, close_task as _,
+    create_epic as _, create_learning as _, create_task as _, create_task_signalled as _,
+    create_work_package as _, create_work_package_with_links as _, create_workspace as _,
+    delete_epic as _, delete_learning as _, delete_repo_path as _, delete_task as _,
+    delete_work_package as _, delete_workspace as _, ensure_managed_epics as _,
     fail_interrupted_dispatch_requests as _, fail_interrupted_session_requests as _,
-    flatten_epic as _, ingest_feed as _, link_work_package_item as _, mark_epic_seen as _,
-    mark_pr_learnings_gate_shown as _, override_poll_owner as _, patch_epic as _,
-    patch_learning as _, patch_task as _, patch_work_package as _, record_base_branch as _,
-    record_learning_retrieval as _, record_notification as _, record_pre_tool_use as _,
-    record_usage_event as _, record_user_prompt_submit as _, register_host as _, regroup_epic as _,
+    flatten_epic as _, grant_super_admin as _, ingest_feed as _, link_work_package_item as _,
+    mark_epic_seen as _, mark_pr_learnings_gate_shown as _, override_poll_owner as _,
+    patch_epic as _, patch_learning as _, patch_task as _, patch_work_package as _,
+    record_base_branch as _, record_learning_retrieval as _, record_notification as _,
+    record_pre_tool_use as _, record_usage_event as _, record_user_prompt_submit as _,
+    register_host as _, regroup_epic as _, remove_member as _, rename_workspace as _,
     report_dispatch_failed as _, report_dispatch_provisioned as _, report_pr_status as _,
     report_pr_unreadable as _, report_session_request_done as _,
     report_session_request_failed as _, request_dispatch as _, request_exit_session as _,
     request_wrap_up as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
-    save_repo_path as _, save_setting as _, set_display_name as _, set_task_epic as _,
-    set_verify_command as _, subagent_clear as _, subagent_clear_and_void_pending_stop as _,
-    subagent_start as _, subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
-    unlink_work_package_item as _, unsubscribe_from_epic as _, update_work_package_with_links as _,
-    DbConnection, DispatchRequestsTableAccess as _, EpicsTableAccess as _,
-    LearningsTableAccess as _, SessionRequestsTableAccess as _, TasksTableAccess as _,
-    WorkPackagesTableAccess as _,
+    revoke_super_admin as _, save_repo_path as _, save_setting as _, set_display_name as _,
+    set_member_role as _, set_task_epic as _, set_verify_command as _, subagent_clear as _,
+    subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
+    subscribe_to_epic as _, try_record_stop as _, unlink_work_package_item as _,
+    unsubscribe_from_epic as _, update_work_package_with_links as _, DbConnection,
+    DispatchRequestsTableAccess as _, EpicsTableAccess as _, LearningsTableAccess as _,
+    SessionRequestsTableAccess as _, TasksTableAccess as _, WorkPackagesTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -209,6 +211,79 @@ impl ReducerCaller for SdkReducerCaller {
 
     async fn set_display_name(&self, name: String) -> anyhow::Result<ReducerOutcome> {
         answered_call!(self, "the display name change", set_display_name_then(name))
+    }
+
+    async fn claim_super_admin(&self) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the super-admin claim", claim_super_admin_then())
+    }
+
+    async fn grant_super_admin(&self, user: String) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the super-admin grant", grant_super_admin_then(user))
+    }
+
+    async fn revoke_super_admin(&self, user: String) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the super-admin revoke",
+            revoke_super_admin_then(user)
+        )
+    }
+
+    async fn create_workspace(&self, name: String) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the workspace creation", create_workspace_then(name))
+    }
+
+    async fn rename_workspace(
+        &self,
+        workspace_id: i64,
+        name: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the workspace rename",
+            rename_workspace_then(workspace_id, name)
+        )
+    }
+
+    async fn delete_workspace(&self, workspace_id: i64) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the workspace deletion",
+            delete_workspace_then(workspace_id)
+        )
+    }
+
+    async fn add_member(
+        &self,
+        workspace_id: i64,
+        user: String,
+        role: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the membership addition",
+            add_member_then(workspace_id, user, role)
+        )
+    }
+
+    async fn set_member_role(
+        &self,
+        membership_id: i64,
+        role: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the member role change",
+            set_member_role_then(membership_id, role)
+        )
+    }
+
+    async fn remove_member(&self, membership_id: i64) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the membership removal",
+            remove_member_then(membership_id)
+        )
     }
 
     async fn mark_epic_seen(

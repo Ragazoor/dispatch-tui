@@ -36,6 +36,12 @@ fn is_format_char(c: char) -> bool {
     )
 }
 
+/// Whether `text` holds a control or invisible formatting character. `pub` so
+/// the workspace-name check refuses the same set.
+pub fn has_control_or_format_characters(text: &str) -> bool {
+    text.chars().any(|c| c.is_control() || is_format_char(c))
+}
+
 /// Validate a name for `set_display_name`: trimmed, non-empty, at most
 /// [`DISPLAY_NAME_MAX_LENGTH`] characters. `pub` for `MemoryReducerCaller`.
 pub fn validate_display_name(name: &str) -> Result<String, String> {
@@ -46,7 +52,7 @@ pub fn validate_display_name(name: &str) -> Result<String, String> {
     // A name is shown inside other people's cards and tool results, including
     // text an agent reads: a newline or a bidi override could pass as
     // something else. Control and format characters are refused.
-    if trimmed.chars().any(|c| c.is_control() || is_format_char(c)) {
+    if has_control_or_format_characters(trimmed) {
         return Err(
             "a display name cannot contain control or invisible formatting characters".into(),
         );

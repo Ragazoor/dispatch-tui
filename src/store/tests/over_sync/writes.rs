@@ -51,6 +51,8 @@ enum Sent {
     CreateTaskSignalled(Box<bindings::Task>),
     MarkEpicSeen(String, EpicId),
     SetDisplayName(String),
+    /// Any of the workspace and super-admin reducers, by name.
+    Workspace(&'static str),
     PatchTask(TaskId, Box<bindings::TaskPatch>),
     DeleteTask(TaskId),
     SetTaskEpic(TaskId, i64, String),
@@ -273,6 +275,47 @@ impl ReducerCaller for RecordingCaller {
 
     async fn set_display_name(&self, name: String) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::SetDisplayName(name))
+    }
+
+    async fn claim_super_admin(&self) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Workspace("claim_super_admin"))
+    }
+
+    async fn grant_super_admin(&self, _user: String) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Workspace("grant_super_admin"))
+    }
+
+    async fn revoke_super_admin(&self, _user: String) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Workspace("revoke_super_admin"))
+    }
+
+    async fn create_workspace(&self, _name: String) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Workspace("create_workspace"))
+    }
+
+    async fn rename_workspace(&self, _id: i64, _name: String) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Workspace("rename_workspace"))
+    }
+
+    async fn delete_workspace(&self, _id: i64) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Workspace("delete_workspace"))
+    }
+
+    async fn add_member(
+        &self,
+        _id: i64,
+        _user: String,
+        _role: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Workspace("add_member"))
+    }
+
+    async fn set_member_role(&self, _id: i64, _role: String) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Workspace("set_member_role"))
+    }
+
+    async fn remove_member(&self, _id: i64) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Workspace("remove_member"))
     }
 
     async fn mark_epic_seen(

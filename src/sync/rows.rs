@@ -158,6 +158,10 @@ struct Rows {
     /// `workspaces.allium: UserProfile`. Unfiltered (`SubscribeToUserProfiles`):
     /// the directory of identities and names is readable by every client.
     user_profiles: BTreeMap<String, bindings::UserProfile>,
+    /// `core.allium: Workspace` and `Membership`. Unfiltered until the
+    /// read-enforcement task serves them through per-caller views.
+    workspaces: BTreeMap<i64, bindings::Workspace>,
+    memberships: BTreeMap<i64, bindings::Membership>,
     settings: BTreeMap<String, bindings::Setting>,
     /// Task #4971. Unconditionally subscribed, like `learnings`/`usage_events`
     /// above — a retirement record is not scoped by owner or host either.
@@ -225,6 +229,8 @@ impl Rows {
             && self.subscriptions.is_empty()
             && self.unseen_tasks.is_empty()
             && self.user_profiles.is_empty()
+            && self.workspaces.is_empty()
+            && self.memberships.is_empty()
             && self.settings.is_empty()
             && self.retired_feed_items.is_empty()
             && self.work_packages.is_empty()
@@ -517,6 +523,47 @@ impl SharedRows {
 
     pub fn remove_user_profile(&self, identity: String) {
         self.write(|rows| rows.user_profiles.remove(&identity).is_some());
+    }
+
+    pub fn upsert_workspace(&self, row: &bindings::Workspace) {
+        self.write(|rows| {
+            rows.workspaces.insert(row.id, row.clone());
+            true
+        });
+    }
+
+    pub fn remove_workspace(&self, id: i64) {
+        self.write(|rows| rows.workspaces.remove(&id).is_some());
+    }
+
+    pub fn upsert_membership(&self, row: &bindings::Membership) {
+        self.write(|rows| {
+            rows.memberships.insert(row.id, row.clone());
+            true
+        });
+    }
+
+    pub fn remove_membership(&self, id: i64) {
+        self.write(|rows| rows.memberships.remove(&id).is_some());
+    }
+
+    /// Every workspace, by id.
+    pub fn workspaces(&self) -> Vec<bindings::Workspace> {
+        self.read(|rows| rows.workspaces.values().cloned().collect())
+    }
+
+    /// Every membership, by id.
+    pub fn memberships(&self) -> Vec<bindings::Membership> {
+        self.read(|rows| rows.memberships.values().cloned().collect())
+    }
+
+    /// Whether `identity` holds the super-admin flag.
+    pub fn is_super_admin(&self, identity: &str) -> bool {
+        self.read(|rows| {
+            rows.user_profiles
+                .get(identity)
+                .is_some_and(|p| p.is_super_admin)
+        })
     }
 
     /// The display name `identity` has set, or `""` when none is set or no

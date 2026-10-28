@@ -60,6 +60,10 @@ pub(in crate::sync) fn subscription_queries(
         // The directory of people (`workspaces.allium: UserProfile`, D7).
         // Unfiltered: admins find people by name, and a card names its creator.
         "SELECT * FROM user_profiles".to_string(),
+        // Workspaces and their memberships (`workspaces.allium`). Unfiltered
+        // until the read-enforcement task replaces them with views.
+        "SELECT * FROM workspaces".to_string(),
+        "SELECT * FROM memberships".to_string(),
         // The user board: epic-less tasks this person owns.
         format!("SELECT * FROM tasks WHERE owner = '{owner}'"),
         // own_creations (sync.allium: SubscribeOnceIdentityIsSettled):

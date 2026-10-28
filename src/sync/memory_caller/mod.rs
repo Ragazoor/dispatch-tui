@@ -64,6 +64,7 @@ mod tasks_epics;
 mod unseen;
 mod user_profiles;
 mod work_packages;
+mod workspaces;
 
 #[cfg(test)]
 mod tests;
@@ -112,6 +113,8 @@ struct Tables {
     subscriptions: BTreeMap<String, module::Subscription>,
     unseen_tasks: BTreeMap<String, module::UnseenTask>,
     user_profiles: BTreeMap<String, module::UserProfile>,
+    workspaces: BTreeMap<i64, module::Workspace>,
+    memberships: BTreeMap<i64, module::Membership>,
     settings: BTreeMap<String, module::Setting>,
     usage_events: BTreeMap<i64, module::UsageEvent>,
     poll_owners: BTreeMap<i64, module::PollOwner>,
@@ -152,6 +155,8 @@ struct Tables {
     next_poll_owner_id: i64,
     next_retired_feed_item_id: i64,
     next_learning_id: i64,
+    next_workspace_id: i64,
+    next_membership_id: i64,
     next_learning_retrieval_id: i64,
     next_learning_verdict_id: i64,
     next_work_package_id: i64,
@@ -171,6 +176,8 @@ impl Tables {
             next_poll_owner_id: 1,
             next_retired_feed_item_id: 1,
             next_learning_id: 1,
+            next_workspace_id: 1,
+            next_membership_id: 1,
             next_learning_retrieval_id: 1,
             next_learning_verdict_id: 1,
             next_work_package_id: 1,
@@ -326,6 +333,47 @@ impl ReducerCaller for MemoryReducerCaller {
 
     async fn set_display_name(&self, name: String) -> Result<ReducerOutcome> {
         self.apply_set_display_name(name)
+    }
+
+    async fn claim_super_admin(&self) -> Result<ReducerOutcome> {
+        self.apply_claim_super_admin()
+    }
+
+    async fn grant_super_admin(&self, user: String) -> Result<ReducerOutcome> {
+        self.apply_set_super_admin(user, true)
+    }
+
+    async fn revoke_super_admin(&self, user: String) -> Result<ReducerOutcome> {
+        self.apply_set_super_admin(user, false)
+    }
+
+    async fn create_workspace(&self, name: String) -> Result<ReducerOutcome> {
+        self.apply_create_workspace(name)
+    }
+
+    async fn rename_workspace(&self, workspace_id: i64, name: String) -> Result<ReducerOutcome> {
+        self.apply_rename_workspace(workspace_id, name)
+    }
+
+    async fn delete_workspace(&self, workspace_id: i64) -> Result<ReducerOutcome> {
+        self.apply_delete_workspace(workspace_id)
+    }
+
+    async fn add_member(
+        &self,
+        workspace_id: i64,
+        user: String,
+        role: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_add_member(workspace_id, user, role)
+    }
+
+    async fn set_member_role(&self, membership_id: i64, role: String) -> Result<ReducerOutcome> {
+        self.apply_set_member_role(membership_id, role)
+    }
+
+    async fn remove_member(&self, membership_id: i64) -> Result<ReducerOutcome> {
+        self.apply_remove_member(membership_id)
     }
 
     async fn mark_epic_seen(&self, subscriber: String, epic_id: EpicId) -> Result<ReducerOutcome> {

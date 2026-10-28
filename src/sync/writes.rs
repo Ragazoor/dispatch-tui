@@ -134,6 +134,29 @@ pub trait ReducerCaller: Send + Sync {
     /// The store trims, bounds and refuses; the caller is whoever the
     /// connection is, so there is no identity argument to forge.
     async fn set_display_name(&self, name: String) -> Result<ReducerOutcome>;
+    /// `workspaces.allium: ClaimSuperAdmin` (with `AdoptOwnerlessUserBoardTasks`).
+    async fn claim_super_admin(&self) -> Result<ReducerOutcome>;
+    /// `workspaces.allium: GrantSuperAdmin`.
+    async fn grant_super_admin(&self, user: String) -> Result<ReducerOutcome>;
+    /// `workspaces.allium: RevokeSuperAdmin`; refused for the last one.
+    async fn revoke_super_admin(&self, user: String) -> Result<ReducerOutcome>;
+    /// `workspaces.allium: CreateWorkspace`.
+    async fn create_workspace(&self, name: String) -> Result<ReducerOutcome>;
+    /// `workspaces.allium: RenameWorkspace`.
+    async fn rename_workspace(&self, workspace_id: i64, name: String) -> Result<ReducerOutcome>;
+    /// `workspaces.allium: DeleteWorkspace`.
+    async fn delete_workspace(&self, workspace_id: i64) -> Result<ReducerOutcome>;
+    /// `workspaces.allium: AddMember`; `role` is `admin` or `member`.
+    async fn add_member(
+        &self,
+        workspace_id: i64,
+        user: String,
+        role: String,
+    ) -> Result<ReducerOutcome>;
+    /// `workspaces.allium: SetMemberRole`.
+    async fn set_member_role(&self, membership_id: i64, role: String) -> Result<ReducerOutcome>;
+    /// `workspaces.allium: RemoveMember`.
+    async fn remove_member(&self, membership_id: i64) -> Result<ReducerOutcome>;
     /// `tasks.allium: SeeTasksByEnteringTheirEpic`.
     async fn mark_epic_seen(&self, subscriber: String, epic_id: EpicId) -> Result<ReducerOutcome>;
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome>;

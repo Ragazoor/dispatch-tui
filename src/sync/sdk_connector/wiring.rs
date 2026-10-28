@@ -10,11 +10,12 @@ use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
     AgentsTableAccess as _, DbConnection, DispatchRequestsTableAccess as _, EpicsTableAccess as _,
     HostsTableAccess as _, LearningRetrievalsTableAccess as _, LearningsTableAccess as _,
-    PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
-    RetiredFeedItemsTableAccess as _, SessionRequestsTableAccess as _, SettingsTableAccess as _,
-    SubscriptionHandle, SubscriptionsTableAccess as _, TasksTableAccess as _,
-    UnseenTasksTableAccess as _, UsageEventsTableAccess as _, UserProfilesTableAccess as _,
-    WorkPackageLinksTableAccess as _, WorkPackagesTableAccess as _,
+    MembershipsTableAccess as _, PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _,
+    RepoPathsTableAccess as _, RetiredFeedItemsTableAccess as _, SessionRequestsTableAccess as _,
+    SettingsTableAccess as _, SubscriptionHandle, SubscriptionsTableAccess as _,
+    TasksTableAccess as _, UnseenTasksTableAccess as _, UsageEventsTableAccess as _,
+    UserProfilesTableAccess as _, WorkPackageLinksTableAccess as _, WorkPackagesTableAccess as _,
+    WorkspacesTableAccess as _,
 };
 use crate::sync::subtree::SubtreeCover;
 
@@ -191,6 +192,22 @@ impl SpacetimeSdkConnector {
             upsert_unseen_task,
             remove_unseen_task,
             |row: &bindings::UnseenTask| row.id.clone()
+        );
+        wire!(
+            self,
+            db,
+            workspaces,
+            upsert_workspace,
+            remove_workspace,
+            |row: &bindings::Workspace| row.id
+        );
+        wire!(
+            self,
+            db,
+            memberships,
+            upsert_membership,
+            remove_membership,
+            |row: &bindings::Membership| row.id
         );
         wire!(
             self,

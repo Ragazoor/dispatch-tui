@@ -316,6 +316,10 @@ rule DeleteWorkspace {
         -- Refused while it holds any epic or package, private ones
         -- included. A super-admin empties it first, using
         -- SuperAdminDeletesUnseenItem for private items they cannot read.
+        -- Until Epic.workspace and WorkPackage.workspace exist in the store
+        -- (a later task of epic #69657), nothing can be in a workspace, so the
+        -- refusal has nothing to see; that task adds it, and the matching
+        -- subscription and unseen-mark cleanup of RemoveMember.
 }
 
 -- Membership -------------------------------------------------

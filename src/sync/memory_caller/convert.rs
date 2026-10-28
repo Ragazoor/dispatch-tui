@@ -210,6 +210,27 @@ mirror!(
 );
 
 mirror!(
+    module::Workspace,
+    bindings::Workspace {
+        id,
+        name,
+        created_by,
+        created_at
+    }
+);
+
+mirror!(
+    module::Membership,
+    bindings::Membership {
+        id,
+        workspace_id,
+        user,
+        role,
+        created_at
+    }
+);
+
+mirror!(
     module::Setting,
     bindings::Setting {
         id,

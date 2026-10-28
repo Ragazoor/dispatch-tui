@@ -672,8 +672,46 @@ pub struct UserProfile {
     /// `""` until the person sets one; [`shown_name`](crate::shown_name)
     /// stands in for it meanwhile.
     pub display_name: String,
-    /// Stays false here; the super-admin rules own it
+    /// The super-admin flag; only the rules in `workspace.rs` write it
     /// (`workspaces.allium: ClaimSuperAdmin`).
     pub is_super_admin: bool,
+    pub created_at: String,
+}
+
+/// A workspace (`core.allium: Workspace`): where people collaborate.
+///
+/// Public for now, like `user_profiles`. The read-enforcement task makes it
+/// private and serves it through a per-caller view
+/// (`workspaces.allium`, "READ ENFORCEMENT, BY DECISION").
+#[spacetimedb::table(accessor = workspaces, public)]
+#[derive(Clone, Debug)]
+pub struct Workspace {
+    #[primary_key]
+    #[auto_inc]
+    pub id: i64,
+    /// Trimmed, non-empty and unique across the store.
+    pub name: String,
+    /// The `UserIdentity` of the super-admin who created it.
+    pub created_by: String,
+    pub created_at: String,
+}
+
+/// One person's membership of one workspace (`core.allium: Membership`).
+///
+/// At most one row per (workspace, user): `add_member` refuses a second.
+/// Public for now, for the reason [`Workspace`] is.
+#[spacetimedb::table(accessor = memberships, public)]
+#[derive(Clone, Debug)]
+pub struct Membership {
+    #[primary_key]
+    #[auto_inc]
+    pub id: i64,
+    #[index(btree)]
+    pub workspace_id: i64,
+    /// The member's `UserIdentity`.
+    #[index(btree)]
+    pub user: String,
+    /// `"admin"` or `"member"` (`core.allium: WorkspaceRole`).
+    pub role: String,
     pub created_at: String,
 }

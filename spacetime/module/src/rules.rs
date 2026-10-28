@@ -58,6 +58,10 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 16: super-admins, workspaces and membership — `claim_super_admin` and the
+///    grant/revoke pair, `create_workspace`, `rename_workspace`,
+///    `delete_workspace`, `add_member`, `set_member_role` and `remove_member`
+///    (`workspace.rs`).
 /// 15: user profiles — `user_profiles`, registered on every connect, and
 ///    `set_display_name`, which trims and bounds a person's own name
 ///    (`user_profile.rs`).
@@ -79,7 +83,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 15;
+pub const RULES_VERSION: i64 = 16;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///

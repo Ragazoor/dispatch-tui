@@ -333,6 +333,102 @@ fn memory_caller_matches_the_real_reducers() {
             "the board's shown_name and the module's agree"
         );
 
+        // -- super-admins, workspaces and membership --------------------------------
+        // Both sides hold one profile for `me`. Each step runs on both callers and
+        // asserts the same verdict, then that the rows they hold agree.
+        macro_rules! both {
+            ($call:ident($($arg:expr),*), $verdict:ident) => {{
+                let r = real.$call($($arg),*).await.unwrap();
+                let m = mem.$call($($arg),*).await.unwrap();
+                assert!(
+                    matches!(
+                        (&r, &m),
+                        (ReducerOutcome::$verdict(..), ReducerOutcome::$verdict(..))
+                    ),
+                    "{} disagreed: real {r:?}, memory {m:?}",
+                    stringify!($call)
+                );
+            }};
+        }
+        let workspace_view = |rows: &SharedRows| {
+            rows.workspaces()
+                .into_iter()
+                .map(|w| (w.id, w.name, w.created_by))
+                .collect::<Vec<_>>()
+        };
+        let membership_view = |rows: &SharedRows| {
+            rows.memberships()
+                .into_iter()
+                .map(|m| (m.id, m.workspace_id, m.user, m.role))
+                .collect::<Vec<_>>()
+        };
+        // Not a super-admin yet: creating is refused.
+        both!(create_workspace("Platform".to_string()), Refused);
+        both!(claim_super_admin(), Applied);
+        wait_for!(rows_real.is_super_admin(me));
+        assert!(rows_mem.is_super_admin(me));
+        both!(claim_super_admin(), Refused); // only while none exists
+        both!(revoke_super_admin(me.to_string()), Refused); // never the last
+        both!(grant_super_admin("nobody".to_string()), Refused);
+        both!(create_workspace("  ".to_string()), Refused);
+        both!(create_workspace("Platform".to_string()), Applied);
+        both!(create_workspace(" Platform ".to_string()), Refused); // unique
+        both!(create_workspace("Other".to_string()), Applied);
+        wait_for!(rows_real.workspaces().len() == 2);
+        assert_eq!(workspace_view(&rows_real), workspace_view(&rows_mem));
+        let platform = rows_real
+            .workspaces()
+            .iter()
+            .find(|w| w.name == "Platform")
+            .map(|w| w.id)
+            .unwrap();
+        both!(rename_workspace(platform, "Other".to_string()), Refused);
+        both!(rename_workspace(platform, " Core ".to_string()), Applied);
+        both!(rename_workspace(99, "X".to_string()), Refused);
+        both!(
+            add_member(platform, me.to_string(), "owner".to_string()),
+            Refused
+        );
+        both!(
+            add_member(platform, "nobody".to_string(), "member".to_string()),
+            Refused
+        );
+        both!(
+            add_member(99, me.to_string(), "member".to_string()),
+            Refused
+        );
+        both!(
+            add_member(platform, me.to_string(), "member".to_string()),
+            Applied
+        );
+        both!(
+            add_member(platform, me.to_string(), "admin".to_string()),
+            Refused
+        ); // duplicate
+        wait_for!(rows_real.memberships().len() == 1);
+        let membership = rows_real.memberships()[0].id;
+        both!(set_member_role(membership, "owner".to_string()), Refused);
+        both!(set_member_role(999, "admin".to_string()), Refused);
+        both!(set_member_role(membership, "admin".to_string()), Applied);
+        wait_for!(rows_real.memberships()[0].role == "admin");
+        assert_eq!(workspace_view(&rows_real), workspace_view(&rows_mem));
+        assert_eq!(membership_view(&rows_real), membership_view(&rows_mem));
+        both!(remove_member(999), Refused);
+        both!(remove_member(membership), Applied);
+        both!(
+            add_member(platform, me.to_string(), "member".to_string()),
+            Applied
+        );
+        wait_for!(
+            rows_real.memberships().len() == 1 && rows_real.memberships()[0].id != membership
+        );
+        // Deleting takes the workspace's memberships with it and leaves the rest.
+        both!(delete_workspace(99), Refused);
+        both!(delete_workspace(platform), Applied);
+        wait_for!(rows_real.workspaces().len() == 1 && rows_real.memberships().is_empty());
+        assert_eq!(workspace_view(&rows_real), workspace_view(&rows_mem));
+        assert_eq!(membership_view(&rows_real), membership_view(&rows_mem));
+
         // -- new-task signal --------------------------------------------------------
         // A task created with the signal on is marked for each follower of its
         // epic; entering the epic clears it; moving it out clears it too.

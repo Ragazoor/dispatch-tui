@@ -6,6 +6,7 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+pub mod add_member_reducer;
 pub mod agent_type;
 pub mod agents_table;
 pub mod apply_learning_verdicts_reducer;
@@ -17,6 +18,7 @@ pub mod burn_id_sequence_reducer;
 pub mod claim_dispatch_request_reducer;
 pub mod claim_poll_owner_reducer;
 pub mod claim_session_request_reducer;
+pub mod claim_super_admin_reducer;
 pub mod clear_setting_reducer;
 pub mod close_task_reducer;
 pub mod create_epic_reducer;
@@ -25,11 +27,13 @@ pub mod create_task_reducer;
 pub mod create_task_signalled_reducer;
 pub mod create_work_package_reducer;
 pub mod create_work_package_with_links_reducer;
+pub mod create_workspace_reducer;
 pub mod delete_epic_reducer;
 pub mod delete_learning_reducer;
 pub mod delete_repo_path_reducer;
 pub mod delete_task_reducer;
 pub mod delete_work_package_reducer;
+pub mod delete_workspace_reducer;
 pub mod dispatch_request_timeout_type;
 pub mod dispatch_request_timeouts_table;
 pub mod dispatch_request_type;
@@ -45,6 +49,7 @@ pub mod feed_task_upsert_item_type;
 pub mod filter_preset_type;
 pub mod filter_presets_table;
 pub mod flatten_epic_reducer;
+pub mod grant_super_admin_reducer;
 pub mod handed_out_agent_name_type;
 pub mod handed_out_agent_names_table;
 pub mod host_type;
@@ -61,6 +66,8 @@ pub mod learnings_table;
 pub mod link_work_package_item_reducer;
 pub mod mark_epic_seen_reducer;
 pub mod mark_pr_learnings_gate_shown_reducer;
+pub mod membership_type;
+pub mod memberships_table;
 pub mod override_poll_owner_reducer;
 pub mod patch_epic_reducer;
 pub mod patch_learning_reducer;
@@ -77,6 +84,8 @@ pub mod record_usage_event_reducer;
 pub mod record_user_prompt_submit_reducer;
 pub mod register_host_reducer;
 pub mod regroup_epic_reducer;
+pub mod remove_member_reducer;
+pub mod rename_workspace_reducer;
 pub mod repo_base_branch_type;
 pub mod repo_base_branches_table;
 pub mod repo_path_type;
@@ -94,6 +103,7 @@ pub mod rescope_epic_learnings_reducer;
 pub mod respawn_phoenix_successor_reducer;
 pub mod retired_feed_item_type;
 pub mod retired_feed_items_table;
+pub mod revoke_super_admin_reducer;
 pub mod rules_version_table;
 pub mod rules_version_type;
 pub mod save_repo_path_reducer;
@@ -127,6 +137,7 @@ pub mod session_request_timeouts_table;
 pub mod session_request_type;
 pub mod session_requests_table;
 pub mod set_display_name_reducer;
+pub mod set_member_role_reducer;
 pub mod set_schema_version_reducer;
 pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
@@ -167,7 +178,10 @@ pub mod work_package_links_table;
 pub mod work_package_patch_type;
 pub mod work_package_type;
 pub mod work_packages_table;
+pub mod workspace_type;
+pub mod workspaces_table;
 
+pub use add_member_reducer::add_member;
 pub use agent_type::Agent;
 pub use agents_table::*;
 pub use apply_learning_verdicts_reducer::apply_learning_verdicts;
@@ -179,6 +193,7 @@ pub use burn_id_sequence_reducer::burn_id_sequence;
 pub use claim_dispatch_request_reducer::claim_dispatch_request;
 pub use claim_poll_owner_reducer::claim_poll_owner;
 pub use claim_session_request_reducer::claim_session_request;
+pub use claim_super_admin_reducer::claim_super_admin;
 pub use clear_setting_reducer::clear_setting;
 pub use close_task_reducer::close_task;
 pub use create_epic_reducer::create_epic;
@@ -187,11 +202,13 @@ pub use create_task_reducer::create_task;
 pub use create_task_signalled_reducer::create_task_signalled;
 pub use create_work_package_reducer::create_work_package;
 pub use create_work_package_with_links_reducer::create_work_package_with_links;
+pub use create_workspace_reducer::create_workspace;
 pub use delete_epic_reducer::delete_epic;
 pub use delete_learning_reducer::delete_learning;
 pub use delete_repo_path_reducer::delete_repo_path;
 pub use delete_task_reducer::delete_task;
 pub use delete_work_package_reducer::delete_work_package;
+pub use delete_workspace_reducer::delete_workspace;
 pub use dispatch_request_timeout_type::DispatchRequestTimeout;
 pub use dispatch_request_timeouts_table::*;
 pub use dispatch_request_type::DispatchRequest;
@@ -207,6 +224,7 @@ pub use feed_task_upsert_item_type::FeedTaskUpsertItem;
 pub use filter_preset_type::FilterPreset;
 pub use filter_presets_table::*;
 pub use flatten_epic_reducer::flatten_epic;
+pub use grant_super_admin_reducer::grant_super_admin;
 pub use handed_out_agent_name_type::HandedOutAgentName;
 pub use handed_out_agent_names_table::*;
 pub use host_type::Host;
@@ -223,6 +241,8 @@ pub use learnings_table::*;
 pub use link_work_package_item_reducer::link_work_package_item;
 pub use mark_epic_seen_reducer::mark_epic_seen;
 pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
+pub use membership_type::Membership;
+pub use memberships_table::*;
 pub use override_poll_owner_reducer::override_poll_owner;
 pub use patch_epic_reducer::patch_epic;
 pub use patch_learning_reducer::patch_learning;
@@ -239,6 +259,8 @@ pub use record_usage_event_reducer::record_usage_event;
 pub use record_user_prompt_submit_reducer::record_user_prompt_submit;
 pub use register_host_reducer::register_host;
 pub use regroup_epic_reducer::regroup_epic;
+pub use remove_member_reducer::remove_member;
+pub use rename_workspace_reducer::rename_workspace;
 pub use repo_base_branch_type::RepoBaseBranch;
 pub use repo_base_branches_table::*;
 pub use repo_path_type::RepoPath;
@@ -256,6 +278,7 @@ pub use rescope_epic_learnings_reducer::rescope_epic_learnings;
 pub use respawn_phoenix_successor_reducer::respawn_phoenix_successor;
 pub use retired_feed_item_type::RetiredFeedItem;
 pub use retired_feed_items_table::*;
+pub use revoke_super_admin_reducer::revoke_super_admin;
 pub use rules_version_table::*;
 pub use rules_version_type::RulesVersion;
 pub use save_repo_path_reducer::save_repo_path;
@@ -289,6 +312,7 @@ pub use session_request_timeouts_table::*;
 pub use session_request_type::SessionRequest;
 pub use session_requests_table::*;
 pub use set_display_name_reducer::set_display_name;
+pub use set_member_role_reducer::set_member_role;
 pub use set_schema_version_reducer::set_schema_version;
 pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
@@ -329,6 +353,8 @@ pub use work_package_links_table::*;
 pub use work_package_patch_type::WorkPackagePatch;
 pub use work_package_type::WorkPackage;
 pub use work_packages_table::*;
+pub use workspace_type::Workspace;
+pub use workspaces_table::*;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -338,6 +364,11 @@ pub use work_packages_table::*;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
+    AddMember {
+        workspace_id: i64,
+        user: String,
+        role: String,
+    },
     ApplyLearningVerdicts {
         task_id: i64,
         verdicts: Vec<LearningVerdictInput>,
@@ -370,6 +401,7 @@ pub enum Reducer {
         request_id: i64,
         host: String,
     },
+    ClaimSuperAdmin,
     ClearSetting {
         host: String,
         key: String,
@@ -397,6 +429,9 @@ pub enum Reducer {
         row: WorkPackage,
         links: Vec<WorkPackageItemRef>,
     },
+    CreateWorkspace {
+        name: String,
+    },
     DeleteEpic {
         id: i64,
     },
@@ -412,6 +447,9 @@ pub enum Reducer {
     DeleteWorkPackage {
         id: i64,
     },
+    DeleteWorkspace {
+        workspace_id: i64,
+    },
     EnsureManagedEpics {
         reviews_command: String,
         reviews_interval_secs: i64,
@@ -426,6 +464,9 @@ pub enum Reducer {
     },
     FlattenEpic {
         root_id: i64,
+    },
+    GrantSuperAdmin {
+        user: String,
     },
     IngestFeed {
         epic_id: i64,
@@ -505,6 +546,13 @@ pub enum Reducer {
     RegroupEpic {
         root_id: i64,
     },
+    RemoveMember {
+        membership_id: i64,
+    },
+    RenameWorkspace {
+        workspace_id: i64,
+        name: String,
+    },
     ReportDispatchFailed {
         request_id: i64,
         reporter: String,
@@ -562,6 +610,9 @@ pub enum Reducer {
     RespawnPhoenixSuccessor {
         predecessor: i64,
         successor: Task,
+    },
+    RevokeSuperAdmin {
+        user: String,
     },
     SaveRepoPath {
         path: String,
@@ -642,6 +693,10 @@ pub enum Reducer {
     SetDisplayName {
         name: String,
     },
+    SetMemberRole {
+        membership_id: i64,
+        role: String,
+    },
     SetSchemaVersion {
         version: i64,
     },
@@ -703,6 +758,7 @@ impl __sdk::InModule for Reducer {
 impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
+            Reducer::AddMember { .. } => "add_member",
             Reducer::ApplyLearningVerdicts { .. } => "apply_learning_verdicts",
             Reducer::ArchiveStaleLearnings { .. } => "archive_stale_learnings",
             Reducer::BackfillAgents => "backfill_agents",
@@ -712,6 +768,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::ClaimDispatchRequest { .. } => "claim_dispatch_request",
             Reducer::ClaimPollOwner { .. } => "claim_poll_owner",
             Reducer::ClaimSessionRequest { .. } => "claim_session_request",
+            Reducer::ClaimSuperAdmin => "claim_super_admin",
             Reducer::ClearSetting { .. } => "clear_setting",
             Reducer::CloseTask { .. } => "close_task",
             Reducer::CreateEpic { .. } => "create_epic",
@@ -720,15 +777,18 @@ impl __sdk::Reducer for Reducer {
             Reducer::CreateTaskSignalled { .. } => "create_task_signalled",
             Reducer::CreateWorkPackage { .. } => "create_work_package",
             Reducer::CreateWorkPackageWithLinks { .. } => "create_work_package_with_links",
+            Reducer::CreateWorkspace { .. } => "create_workspace",
             Reducer::DeleteEpic { .. } => "delete_epic",
             Reducer::DeleteLearning { .. } => "delete_learning",
             Reducer::DeleteRepoPath { .. } => "delete_repo_path",
             Reducer::DeleteTask { .. } => "delete_task",
             Reducer::DeleteWorkPackage { .. } => "delete_work_package",
+            Reducer::DeleteWorkspace { .. } => "delete_workspace",
             Reducer::EnsureManagedEpics { .. } => "ensure_managed_epics",
             Reducer::FailInterruptedDispatchRequests { .. } => "fail_interrupted_dispatch_requests",
             Reducer::FailInterruptedSessionRequests { .. } => "fail_interrupted_session_requests",
             Reducer::FlattenEpic { .. } => "flatten_epic",
+            Reducer::GrantSuperAdmin { .. } => "grant_super_admin",
             Reducer::IngestFeed { .. } => "ingest_feed",
             Reducer::LinkWorkPackageItem { .. } => "link_work_package_item",
             Reducer::MarkEpicSeen { .. } => "mark_epic_seen",
@@ -747,6 +807,8 @@ impl __sdk::Reducer for Reducer {
             Reducer::RecordUserPromptSubmit { .. } => "record_user_prompt_submit",
             Reducer::RegisterHost { .. } => "register_host",
             Reducer::RegroupEpic { .. } => "regroup_epic",
+            Reducer::RemoveMember { .. } => "remove_member",
+            Reducer::RenameWorkspace { .. } => "rename_workspace",
             Reducer::ReportDispatchFailed { .. } => "report_dispatch_failed",
             Reducer::ReportDispatchProvisioned { .. } => "report_dispatch_provisioned",
             Reducer::ReportPrStatus { .. } => "report_pr_status",
@@ -758,6 +820,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::RequestWrapUp { .. } => "request_wrap_up",
             Reducer::RescopeEpicLearnings { .. } => "rescope_epic_learnings",
             Reducer::RespawnPhoenixSuccessor { .. } => "respawn_phoenix_successor",
+            Reducer::RevokeSuperAdmin { .. } => "revoke_super_admin",
             Reducer::SaveRepoPath { .. } => "save_repo_path",
             Reducer::SaveSetting { .. } => "save_setting",
             Reducer::SeedAgents { .. } => "seed_agents",
@@ -783,6 +846,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedWorkPackageLinks { .. } => "seed_work_package_links",
             Reducer::SeedWorkPackages { .. } => "seed_work_packages",
             Reducer::SetDisplayName { .. } => "set_display_name",
+            Reducer::SetMemberRole { .. } => "set_member_role",
             Reducer::SetSchemaVersion { .. } => "set_schema_version",
             Reducer::SetTaskEpic { .. } => "set_task_epic",
             Reducer::SetVerifyCommand { .. } => "set_verify_command",
@@ -803,7 +867,16 @@ impl __sdk::Reducer for Reducer {
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
-                        Reducer::ApplyLearningVerdicts{
+                        Reducer::AddMember{
+                workspace_id,
+                user,
+                role,
+}             => __sats::bsatn::to_vec(&add_member_reducer::AddMemberArgs {
+                workspace_id: workspace_id.clone(),
+                user: user.clone(),
+                role: role.clone(),
+}),
+            Reducer::ApplyLearningVerdicts{
                 task_id,
                 verdicts,
 }             => __sats::bsatn::to_vec(&apply_learning_verdicts_reducer::ApplyLearningVerdictsArgs {
@@ -859,7 +932,9 @@ Reducer::BatchDelete{
                 request_id: request_id.clone(),
                 host: host.clone(),
 }),
-            Reducer::ClearSetting{
+            Reducer::ClaimSuperAdmin => __sats::bsatn::to_vec(&claim_super_admin_reducer::ClaimSuperAdminArgs {
+                }),
+Reducer::ClearSetting{
                 host,
                 key,
 }             => __sats::bsatn::to_vec(&clear_setting_reducer::ClearSettingArgs {
@@ -905,6 +980,11 @@ Reducer::BatchDelete{
                 row: row.clone(),
                 links: links.clone(),
 }),
+            Reducer::CreateWorkspace{
+                name,
+}             => __sats::bsatn::to_vec(&create_workspace_reducer::CreateWorkspaceArgs {
+                name: name.clone(),
+}),
             Reducer::DeleteEpic{
                 id,
 }             => __sats::bsatn::to_vec(&delete_epic_reducer::DeleteEpicArgs {
@@ -929,6 +1009,11 @@ Reducer::BatchDelete{
                 id,
 }             => __sats::bsatn::to_vec(&delete_work_package_reducer::DeleteWorkPackageArgs {
                 id: id.clone(),
+}),
+            Reducer::DeleteWorkspace{
+                workspace_id,
+}             => __sats::bsatn::to_vec(&delete_workspace_reducer::DeleteWorkspaceArgs {
+                workspace_id: workspace_id.clone(),
 }),
             Reducer::EnsureManagedEpics{
                 reviews_command,
@@ -955,6 +1040,11 @@ Reducer::BatchDelete{
                 root_id,
 }             => __sats::bsatn::to_vec(&flatten_epic_reducer::FlattenEpicArgs {
                 root_id: root_id.clone(),
+}),
+            Reducer::GrantSuperAdmin{
+                user,
+}             => __sats::bsatn::to_vec(&grant_super_admin_reducer::GrantSuperAdminArgs {
+                user: user.clone(),
 }),
             Reducer::IngestFeed{
                 epic_id,
@@ -1095,6 +1185,18 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&regroup_epic_reducer::RegroupEpicArgs {
                 root_id: root_id.clone(),
 }),
+            Reducer::RemoveMember{
+                membership_id,
+}             => __sats::bsatn::to_vec(&remove_member_reducer::RemoveMemberArgs {
+                membership_id: membership_id.clone(),
+}),
+            Reducer::RenameWorkspace{
+                workspace_id,
+                name,
+}             => __sats::bsatn::to_vec(&rename_workspace_reducer::RenameWorkspaceArgs {
+                workspace_id: workspace_id.clone(),
+                name: name.clone(),
+}),
             Reducer::ReportDispatchFailed{
                 request_id,
                 reporter,
@@ -1199,6 +1301,11 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&respawn_phoenix_successor_reducer::RespawnPhoenixSuccessorArgs {
                 predecessor: predecessor.clone(),
                 successor: successor.clone(),
+}),
+            Reducer::RevokeSuperAdmin{
+                user,
+}             => __sats::bsatn::to_vec(&revoke_super_admin_reducer::RevokeSuperAdminArgs {
+                user: user.clone(),
 }),
             Reducer::SaveRepoPath{
                 path,
@@ -1333,6 +1440,13 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&set_display_name_reducer::SetDisplayNameArgs {
                 name: name.clone(),
 }),
+            Reducer::SetMemberRole{
+                membership_id,
+                role,
+}             => __sats::bsatn::to_vec(&set_member_role_reducer::SetMemberRoleArgs {
+                membership_id: membership_id.clone(),
+                role: role.clone(),
+}),
             Reducer::SetSchemaVersion{
                 version,
 }             => __sats::bsatn::to_vec(&set_schema_version_reducer::SetSchemaVersionArgs {
@@ -1444,6 +1558,7 @@ pub struct DbUpdate {
     learning_retrievals: __sdk::TableUpdate<LearningRetrieval>,
     learning_verdicts: __sdk::TableUpdate<LearningVerdict>,
     learnings: __sdk::TableUpdate<Learning>,
+    memberships: __sdk::TableUpdate<Membership>,
     poll_owners: __sdk::TableUpdate<PollOwner>,
     repo_base_branches: __sdk::TableUpdate<RepoBaseBranch>,
     repo_paths: __sdk::TableUpdate<RepoPath>,
@@ -1464,6 +1579,7 @@ pub struct DbUpdate {
     user_profiles: __sdk::TableUpdate<UserProfile>,
     work_package_links: __sdk::TableUpdate<WorkPackageLink>,
     work_packages: __sdk::TableUpdate<WorkPackage>,
+    workspaces: __sdk::TableUpdate<Workspace>,
 }
 
 impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
@@ -1502,6 +1618,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "learnings" => db_update
                     .learnings
                     .append(learnings_table::parse_table_update(table_update)?),
+                "memberships" => db_update
+                    .memberships
+                    .append(memberships_table::parse_table_update(table_update)?),
                 "poll_owners" => db_update
                     .poll_owners
                     .append(poll_owners_table::parse_table_update(table_update)?),
@@ -1562,6 +1681,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "work_packages" => db_update
                     .work_packages
                     .append(work_packages_table::parse_table_update(table_update)?),
+                "workspaces" => db_update
+                    .workspaces
+                    .append(workspaces_table::parse_table_update(table_update)?),
 
                 unknown => {
                     return Err(__sdk::InternalError::unknown_name(
@@ -1627,6 +1749,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.learnings = cache
             .apply_diff_to_table::<Learning>("learnings", &self.learnings)
             .with_updates_by_pk(|row| &row.id);
+        diff.memberships = cache
+            .apply_diff_to_table::<Membership>("memberships", &self.memberships)
+            .with_updates_by_pk(|row| &row.id);
         diff.poll_owners = cache
             .apply_diff_to_table::<PollOwner>("poll_owners", &self.poll_owners)
             .with_updates_by_pk(|row| &row.id);
@@ -1687,6 +1812,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.work_packages = cache
             .apply_diff_to_table::<WorkPackage>("work_packages", &self.work_packages)
             .with_updates_by_pk(|row| &row.id);
+        diff.workspaces = cache
+            .apply_diff_to_table::<Workspace>("workspaces", &self.workspaces)
+            .with_updates_by_pk(|row| &row.id);
 
         diff
     }
@@ -1723,6 +1851,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "learnings" => db_update
                     .learnings
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "memberships" => db_update
+                    .memberships
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "poll_owners" => db_update
                     .poll_owners
@@ -1783,6 +1914,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "work_packages" => db_update
                     .work_packages
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "workspaces" => db_update
+                    .workspaces
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -1827,6 +1961,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "learnings" => db_update
                     .learnings
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "memberships" => db_update
+                    .memberships
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "poll_owners" => db_update
                     .poll_owners
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1887,6 +2024,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "work_packages" => db_update
                     .work_packages
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "workspaces" => db_update
+                    .workspaces
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 unknown => {
                     return Err(
                         __sdk::InternalError::unknown_name("table", unknown, "QueryRows").into(),
@@ -1912,6 +2052,7 @@ pub struct AppliedDiff<'r> {
     learning_retrievals: __sdk::TableAppliedDiff<'r, LearningRetrieval>,
     learning_verdicts: __sdk::TableAppliedDiff<'r, LearningVerdict>,
     learnings: __sdk::TableAppliedDiff<'r, Learning>,
+    memberships: __sdk::TableAppliedDiff<'r, Membership>,
     poll_owners: __sdk::TableAppliedDiff<'r, PollOwner>,
     repo_base_branches: __sdk::TableAppliedDiff<'r, RepoBaseBranch>,
     repo_paths: __sdk::TableAppliedDiff<'r, RepoPath>,
@@ -1932,6 +2073,7 @@ pub struct AppliedDiff<'r> {
     user_profiles: __sdk::TableAppliedDiff<'r, UserProfile>,
     work_package_links: __sdk::TableAppliedDiff<'r, WorkPackageLink>,
     work_packages: __sdk::TableAppliedDiff<'r, WorkPackage>,
+    workspaces: __sdk::TableAppliedDiff<'r, Workspace>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
 
@@ -1979,6 +2121,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<Learning>("learnings", &self.learnings, event);
+        callbacks.invoke_table_row_callbacks::<Membership>("memberships", &self.memberships, event);
         callbacks.invoke_table_row_callbacks::<PollOwner>("poll_owners", &self.poll_owners, event);
         callbacks.invoke_table_row_callbacks::<RepoBaseBranch>(
             "repo_base_branches",
@@ -2055,6 +2198,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.work_packages,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<Workspace>("workspaces", &self.workspaces, event);
     }
 }
 
@@ -2725,6 +2869,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         learning_retrievals_table::register_table(client_cache);
         learning_verdicts_table::register_table(client_cache);
         learnings_table::register_table(client_cache);
+        memberships_table::register_table(client_cache);
         poll_owners_table::register_table(client_cache);
         repo_base_branches_table::register_table(client_cache);
         repo_paths_table::register_table(client_cache);
@@ -2745,6 +2890,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         user_profiles_table::register_table(client_cache);
         work_package_links_table::register_table(client_cache);
         work_packages_table::register_table(client_cache);
+        workspaces_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "agents",
@@ -2757,6 +2903,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "learning_retrievals",
         "learning_verdicts",
         "learnings",
+        "memberships",
         "poll_owners",
         "repo_base_branches",
         "repo_paths",
@@ -2777,5 +2924,6 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "user_profiles",
         "work_package_links",
         "work_packages",
+        "workspaces",
     ];
 }
