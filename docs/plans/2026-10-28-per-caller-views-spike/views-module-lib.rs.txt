@@ -1,0 +1,188 @@
+use spacetimedb::{reducer, table, view, Identity, ReducerContext, Table, ViewContext};
+
+// All private (no `public`): the point of the spike.
+#[derive(Clone)]
+#[table(accessor = epic)]
+pub struct Epic {
+    #[primary_key]
+    pub id: u64,
+    #[index(btree)]
+    pub parent_id: u64, // 0 = root
+    #[index(btree)]
+    pub created_by: Identity,
+    pub is_private: bool,
+    #[index(btree)]
+    pub workspace: u64,
+    pub private_holder: Option<Identity>, // denormalised: creator of the nearest private ancestor-or-self
+    pub title: String,
+}
+
+#[table(accessor = task)]
+pub struct Task {
+    #[primary_key]
+    pub id: u64,
+    #[index(btree)]
+    pub epic_id: u64,
+    #[index(btree)]
+    pub created_by: Identity,
+    pub title: String,
+    pub counter: u64,
+}
+
+#[table(accessor = subscription)]
+pub struct Subscription {
+    #[primary_key]
+    pub id: u64,
+    #[index(btree)]
+    pub subscriber: Identity,
+    pub epic_id: u64,
+}
+
+#[table(accessor = member)]
+pub struct Member {
+    #[primary_key]
+    pub id: u64,
+    #[index(btree)]
+    pub identity: Identity,
+    pub workspace: u64,
+}
+
+fn is_member(ctx: &ViewContext, ws: u64) -> bool {
+    ctx.db.member().identity().filter(ctx.sender()).any(|m| m.workspace == ws)
+}
+
+// Visible = member of workspace AND (public chain OR caller is private holder).
+fn epic_visible(ctx: &ViewContext, e: &Epic) -> bool {
+    is_member(ctx, e.workspace)
+        && match e.private_holder {
+            None => true,
+            Some(h) => h == ctx.sender(),
+        }
+}
+
+// V1: denormalised. Everything the caller may see.
+#[view(accessor = visible_epics, public)]
+fn visible_epics(ctx: &ViewContext) -> Vec<Epic> {
+    let mut out = Vec::new();
+    for m in ctx.db.member().identity().filter(ctx.sender()) {
+        out.extend(ctx.db.epic().workspace().filter(m.workspace).filter(|e| epic_visible(ctx, e)));
+    }
+    out
+}
+
+// V2: own_creations
+#[view(accessor = my_created_epics, public)]
+fn my_created_epics(ctx: &ViewContext) -> Vec<Epic> {
+    ctx.db.epic().created_by().filter(ctx.sender()).collect()
+}
+
+// V3: covered_epics by walking the tree at read time (no denormalisation, uses parent_id index).
+#[view(accessor = covered_epics, public)]
+fn covered_epics(ctx: &ViewContext) -> Vec<Epic> {
+    let mut out = Vec::new();
+    let mut stack: Vec<u64> = ctx
+        .db
+        .subscription()
+        .subscriber()
+        .filter(ctx.sender())
+        .map(|s| s.epic_id)
+        .collect();
+    while let Some(id) = stack.pop() {
+        if let Some(e) = ctx.db.epic().id().find(id) {
+            if epic_visible(ctx, &e) {
+                for c in ctx.db.epic().parent_id().filter(id) {
+                    stack.push(c.id);
+                }
+                out.push(e);
+            }
+        }
+    }
+    out
+}
+
+// V4: tasks in covered epics (join through the view logic)
+#[view(accessor = covered_tasks, public)]
+fn covered_tasks(ctx: &ViewContext) -> Vec<Task> {
+    let mut out = Vec::new();
+    for e in covered_epics(ctx) {
+        out.extend(ctx.db.task().epic_id().filter(e.id));
+    }
+    out
+}
+
+// V5: tasks, denormalised-free: visible via epic.
+#[view(accessor = my_created_tasks, public)]
+fn my_created_tasks(ctx: &ViewContext) -> Vec<Task> {
+    ctx.db.task().created_by().filter(ctx.sender()).collect()
+}
+
+#[reducer]
+pub fn add_member(ctx: &ReducerContext, id: u64, identity: Identity, workspace: u64) {
+    ctx.db.member().insert(Member { id, identity, workspace });
+}
+
+#[reducer]
+pub fn add_epic(ctx: &ReducerContext, id: u64, parent_id: u64, is_private: bool, workspace: u64, title: String) {
+    let inherited = if parent_id == 0 { None } else { ctx.db.epic().id().find(parent_id).and_then(|p| p.private_holder) };
+    let holder = inherited.or(if is_private { Some(ctx.sender()) } else { None });
+    ctx.db.epic().insert(Epic { id, parent_id, created_by: ctx.sender(), is_private, workspace, private_holder: holder, title });
+}
+
+#[reducer]
+pub fn add_task(ctx: &ReducerContext, id: u64, epic_id: u64, title: String) {
+    ctx.db.task().insert(Task { id, epic_id, created_by: ctx.sender(), title, counter: 0 });
+}
+
+#[reducer]
+pub fn bump_task(ctx: &ReducerContext, id: u64) {
+    if let Some(mut t) = ctx.db.task().id().find(id) {
+        t.counter += 1;
+        ctx.db.task().id().update(t);
+    }
+}
+
+#[reducer]
+pub fn follow(ctx: &ReducerContext, id: u64, epic_id: u64) {
+    ctx.db.subscription().insert(Subscription { id, subscriber: ctx.sender(), epic_id });
+}
+
+// Bulk seed for cost tests: n epics (chain of depth d), m tasks each; one workspace, public.
+#[reducer]
+pub fn seed(ctx: &ReducerContext, epics: u64, tasks_per_epic: u64, depth: u64) {
+    for i in 1..=epics {
+        let parent = if i % depth == 1 || depth == 1 { 0 } else { i - 1 };
+        ctx.db.epic().insert(Epic { id: 100000 + i, parent_id: if parent == 0 { 0 } else { 100000 + parent }, created_by: ctx.sender(), is_private: false, workspace: 1, private_holder: None, title: format!("e{i}") });
+        for j in 0..tasks_per_epic {
+            ctx.db.task().insert(Task { id: (100000 + i) * 1000 + j, epic_id: 100000 + i, created_by: ctx.sender(), title: format!("t{i}-{j}"), counter: 0 });
+        }
+    }
+}
+
+// V6: no denormalisation: derive the private holder by walking parent_id upward.
+fn holder_by_walk(ctx: &ViewContext, e: &Epic) -> Option<Identity> {
+    let mut cur = e.clone();
+    loop {
+        if cur.is_private {
+            return Some(cur.created_by);
+        }
+        if cur.parent_id == 0 {
+            return None;
+        }
+        match ctx.db.epic().id().find(cur.parent_id) {
+            Some(p) => cur = p,
+            None => return None,
+        }
+    }
+}
+
+#[view(accessor = visible_epics_walk, public)]
+fn visible_epics_walk(ctx: &ViewContext) -> Vec<Epic> {
+    let mut out = Vec::new();
+    for m in ctx.db.member().identity().filter(ctx.sender()) {
+        out.extend(ctx.db.epic().workspace().filter(m.workspace).filter(|e| match holder_by_walk(ctx, e) {
+            None => true,
+            Some(h) => h == ctx.sender(),
+        }));
+    }
+    out
+}

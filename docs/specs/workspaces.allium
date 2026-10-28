@@ -79,6 +79,20 @@
 -- publisher identity can still read private tables with one-off SQL; that
 -- identity is the operator, and is the trust boundary.
 --
+-- Proven on a throwaway module (docs/plans/2026-10-28-per-caller-views-spike.md).
+-- A client can subscribe to a view with a WHERE; a non-owner's one-off SQL
+-- and subscriptions are refused on a private table. Four facts shape the
+-- build: (1) a view reads only through indexes, so every column it filters
+-- on needs a btree index, and a range read re-runs the view on EVERY write
+-- to that table; (2) a view cannot be joined with a private table by the
+-- client, so each board ask is its own view; (3) a view's rows have no
+-- primary key in the generated bindings, so an update arrives as INSERT(new)
+-- then DELETE(old) with no on_update, and the board's apply path must not let
+-- the delete erase the updated row; (4) one write re-runs every follower's
+-- view, so cost is followers x covered-view size. A view derives a private
+-- epic's holder by walking parent_id upward; no private_holder column is
+-- stored, so SetEpicVisibility and re-parenting need no subtree cascade.
+--
 -- IMPLEMENTATION OBLIGATIONS the follow-up tasks inherit. Every new reducer
 -- and every new check lives in spacetime/module/src/ and is mirrored in
 -- src/sync/memory_caller/ with a pair test in tests/memory_caller_conformance.rs.
