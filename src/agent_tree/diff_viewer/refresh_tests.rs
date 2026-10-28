@@ -291,3 +291,35 @@ fn the_notice_clears_on_the_next_good_pass() {
 
     assert_eq!(pane.state.notice, None);
 }
+
+/// OneOpenFileAtATime: opening another file replaces the document, so it
+/// starts at the top rather than where the user had scrolled the last one.
+#[test]
+fn opening_another_file_scrolls_back_to_the_top() {
+    let mut pane = Pane::new();
+    pane.repo.write("long.rs", &"line\n".repeat(40));
+    pane.repo.write("short.rs", "one\n");
+    pane.open(&["long.rs"]);
+    pane.refresh();
+    pane.state.offset = 30;
+
+    pane.open(&["short.rs"]);
+    pane.refresh();
+
+    assert_eq!(pane.state.offset(), 0);
+}
+
+/// A plain refresh of the same file keeps the user's place.
+#[test]
+fn a_refresh_of_the_same_file_keeps_the_scroll_position() {
+    let mut pane = Pane::new();
+    pane.repo.write("long.rs", &"line\n".repeat(40));
+    pane.open(&["long.rs"]);
+    pane.refresh();
+    pane.state.offset = 30;
+
+    pane.repo.append("long.rs", "more\n");
+    pane.refresh();
+
+    assert_eq!(pane.state.offset(), 30);
+}

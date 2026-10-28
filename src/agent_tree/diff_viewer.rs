@@ -645,11 +645,17 @@ fn refresh(
         return;
     }
 
+    // Another file replaces the document, so it starts at the top
+    // (OneOpenFileAtATime); a refresh of the same file keeps the user's place.
+    let switched = open != last.open;
     match rebuild(root, &open, runner, last) {
         Ok(fresh) => {
             state.notice = None;
             if let Some(fresh) = fresh {
                 *lines = fresh;
+                if switched {
+                    state.offset = 0;
+                }
             }
         }
         Err(e) => {

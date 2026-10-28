@@ -1741,6 +1741,10 @@ rule SplitAgentTreeDiffPane {
         -- of open files and nowhere to see them. The repair is deliberately
         -- NOT on the refresh tick: a pane the user closed a second ago must
         -- stay closed until they ask again.
+        --
+        -- With the pane killed by hand and one file still open, Space on that
+        -- same file closes it (CloseAgentTreeFileDiff) and splits nothing; the
+        -- next Space opens it again, and this rule splits the pane.
 }
 
 rule ReplaceAgentTreeEditorWithDiff {
@@ -1991,8 +1995,10 @@ rule RefreshAgentTreeDiff {
         -- show different sources, and that lag is accepted.
         --
         -- == Order ==
-        -- Diffs are rendered in the order the paths appear in the TREE, not in
-        -- the order the user opened them. The tree is the index the user reads
+        -- With one file open at a time (OneOpenFileAtATime) there is nothing
+        -- to order in practice; the rule stays because the pane still reads
+        -- the open set as a list. Diffs are rendered in the order the paths
+        -- appear in the TREE, not in the order the user opened them. The tree is the index the user reads
         -- the pane through, so the two must scroll the same way.
         --
         -- Tree order is NOT the paths' own lexicographic order, and stopped
@@ -3494,10 +3500,15 @@ surface AgentTreeDiffPane {
         -- than the tree that spawned it.
 
     @guidance
-        -- The pane scrolls as ONE document: every open file's diff, in tree
-        -- order, under its own path heading. It is not one scroll region per
-        -- file and there is no per-file cursor, so scrolling past the end of
-        -- one file reaches the top of the next without a keystroke in between.
+        -- The pane shows the one open file's diff under its path heading
+        -- (OneOpenFileAtATime). The document is built from the open set as a
+        -- list, so it would stack several files in tree order, but the tree
+        -- never publishes more than one.
+        --
+        -- Opening another file replaces the document, and it starts at the
+        -- top: the scroll position is reset whenever the open set differs
+        -- from the one the document was built for, and kept on a refresh of
+        -- the same file.
         --
         -- Its scroll position lives in the renderer process and is not modelled
         -- here, the same way the tree's cursor is not — see the
