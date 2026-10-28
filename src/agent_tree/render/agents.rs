@@ -194,7 +194,9 @@ pub fn render_agents(
         };
         if top_line < section.offset {
             section.offset = top_line;
-        } else if visible > 0 && cursor_line >= section.offset + visible {
+        }
+        // Then the cursor's own row, which wins in a pane too short for both.
+        if visible > 0 && cursor_line >= section.offset + visible {
             section.offset = cursor_line + 1 - visible;
         }
     }
@@ -390,6 +392,17 @@ mod tests {
             line_of(&out, "── #5 Five") + 1,
             "{out}"
         );
+    }
+
+    #[test]
+    fn in_a_one_line_pane_the_cursors_row_wins_over_its_header() {
+        let mut section = AgentsSection::new();
+        section.set_rows(vec![in_epic(1, 3, &["Three"]), in_epic(2, 5, &["Five"])]);
+        section.down();
+        for _ in 0..2 {
+            let out = rendered(&mut section, true, 3);
+            assert!(out.contains("#2 task 2"), "{out}");
+        }
     }
 
     #[test]

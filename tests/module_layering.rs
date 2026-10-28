@@ -10,7 +10,7 @@
 //! (`models`, `clock`, `embeddings`, …) that each depends on downward.
 //! The board's `tui` sits below `runtime`, which drives it: it turns messages
 //! into commands and draws, and never reaches into an adapter or service
-//! itself: what it may import is the leaf layer (`models`, `palette`,
+//! itself: what it may import is the leaf layer (`models`, `palette`, `epic_header`,
 //! `keybindings`, `editor`, `backoff`, and `repo_sync`'s types).
 //! Test files are scanned too: a test reaching upward pins the edge just as
 //! firmly as production code does.

@@ -2913,10 +2913,12 @@ surface AgentTreeCompanionPane {
         --
         -- Headers and the rule are decoration. They are never selectable and
         -- never a jump target: the cursor motions move from agent to agent
-        -- and step over them, and half a page counts agent rows. The section
-        -- scrolls by drawn line, so the cursor's row is always in view, and
-        -- when the cursor is on a group's first agent the group's header is
-        -- in view too.
+        -- and step over them. A half-page motion moves the cursor by agent
+        -- rows, half as many as the section has drawn lines visible. The
+        -- section scrolls by drawn line, so the cursor's row is always in
+        -- view, and when the cursor is on a group's first agent the line
+        -- above it (the header or the rule) is in view too, unless the pane
+        -- is too short to show both, where the cursor's row wins.
         --
         -- The pane reads the epic and its breadcrumb from the board's answer
         -- (the hooks wire's PaneAgent.epic). A board that predates it sends
