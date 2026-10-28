@@ -2001,21 +2001,11 @@ rule RefreshAgentTreeDiff {
         -- show different sources, and that lag is accepted.
         --
         -- == Order ==
-        -- With one file open at a time (OneOpenFileAtATime) there is nothing
-        -- to order in practice; the rule stays because the pane still reads
-        -- the open set as a list. Diffs are rendered in the order the paths
-        -- appear in the TREE, not in the order the user opened them. The tree is the index the user reads
-        -- the pane through, so the two must scroll the same way.
-        --
-        -- Tree order is NOT the paths' own lexicographic order, and stopped
-        -- being it when a folder's own files started sorting ahead of its
-        -- subfolders (RowsPutAFoldersOwnFilesFirst): a top-level `z.rs` has a
-        -- row above `src/lib.rs` while sorting after it as a path. This pane
-        -- holds paths and never sees the tree, so it must apply that rule to
-        -- the paths itself rather than take a sorted set of them as already
-        -- being in row order. An implementation with a second expression of
-        -- the ordering rule — one over nodes, one over paths — owes a test
-        -- that the two agree; dispatch has both and pins them together.
+        -- There is nothing to order: one file is open at a time
+        -- (OneOpenFileAtATime). The tree used to publish several paths in
+        -- row order, and keep an ordering rule over paths that matched its
+        -- rule over nodes; both went with task 98620. Were a list of several
+        -- ever published again, the pane renders it in the order given.
         --
         -- == Untracked files ==
         -- In the unstaged-work view an open UNTRACKED path — a new file, or one
@@ -3508,8 +3498,8 @@ surface AgentTreeDiffPane {
     @guidance
         -- The pane shows the one open file's diff under its path heading
         -- (OneOpenFileAtATime). The document is built from the open set as a
-        -- list, so it would stack several files in tree order, but the tree
-        -- never publishes more than one.
+        -- list, so it would stack several files in the order given, but the
+        -- tree never publishes more than one.
         --
         -- Opening another file replaces the document, and it starts at the
         -- top: the scroll position is reset whenever the open set differs

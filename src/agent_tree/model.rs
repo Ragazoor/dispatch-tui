@@ -525,38 +525,6 @@ fn kind_rank(kind: TreeNodeKind) -> u8 {
     }
 }
 
-/// Every FILE path in the tree, relative to the root, in TREE ORDER — the
-/// order the rows appear in the pane.
-///
-/// Directories contribute their descendants but never themselves: a directory
-/// has no contents of its own to diff, which is what the spec's
-/// `OnlyFilesOpenDiffs` says.
-///
-/// A `Vec`, not a set, because the order is the point: it is the order the
-/// tree publishes to the diff pane, which renders the paths as received (see
-/// `crate::agent_tree::open_set::write_open_set`).
-pub fn file_paths_in_tree_order(root: &TreeNode) -> Vec<PathBuf> {
-    // `join`, not a shared `PathBuf` pushed and popped down the walk. A
-    // chain-merged directory's name spans several components, and
-    // `PathBuf::pop` removes one component rather than undoing one `push` — so
-    // an accumulator would need to know each name's arity to stay in step, and
-    // getting it wrong truncates every path below that row while still looking
-    // like a valid relative path. Joining cannot get it wrong.
-    fn walk(node: &TreeNode, prefix: &Path, out: &mut Vec<PathBuf>) {
-        for child in &node.children {
-            let path = prefix.join(&child.name);
-            match child.kind {
-                TreeNodeKind::File => out.push(path),
-                TreeNodeKind::Directory => walk(child, &path, out),
-            }
-        }
-    }
-
-    let mut out = Vec::new();
-    walk(root, Path::new(""), &mut out);
-    out
-}
-
 fn compute_expansion(node: &mut TreeNode) -> bool {
     if node.kind == TreeNodeKind::File {
         return node.badge.is_some();

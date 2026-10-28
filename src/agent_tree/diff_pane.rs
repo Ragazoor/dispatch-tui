@@ -96,24 +96,28 @@ pub fn reconcile_diff_pane(
     anything_open: bool,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
-    let pane = match (anything_open, existing_lower_pane(my_pane, runner)?) {
-        (true, None) => split_diff_pane(my_pane, data_dir, task_id, worktree, runner)?,
-        (true, Some((pane, true))) => {
-            let command = diff_command(data_dir, task_id, runner);
-            run_in(worktree, &command, |cwd, argv| {
-                tmux::respawn_pane_running(&pane, cwd, argv, runner)
-            })?;
-            mark_content(&pane, PANE_CONTENT_DIFF, runner);
-            pane
-        }
+    match (anything_open, existing_lower_pane(my_pane, runner)?) {
         // The diff renderer already there reads the new open set by itself.
-        (true, Some((pane, false))) => pane,
-        (false, Some((pane, false))) => return tmux::kill_pane(&pane, runner),
+        (true, Some((pane, false))) => {
+            focus(&pane, runner);
+            Ok(())
+        }
+        // No pane yet, or the editor: start the diff renderer in its place.
+        (true, existing) => {
+            let command = diff_command(data_dir, task_id, runner);
+            show_in_lower_pane(
+                my_pane,
+                existing.map(|(pane, _)| pane),
+                worktree,
+                &command,
+                PANE_CONTENT_DIFF,
+                runner,
+            )
+        }
+        (false, Some((pane, false))) => tmux::kill_pane(&pane, runner),
         // Nothing is open and there is no pane, or an editor pane is left be.
-        (false, None) | (false, Some((_, true))) => return Ok(()),
-    };
-    focus(&pane, runner);
-    Ok(())
+        (false, None) | (false, Some((_, true))) => Ok(()),
+    }
 }
 
 /// Show `relative` — a path below `worktree` — in the user's editor in the
@@ -138,29 +142,45 @@ pub fn show_in_editor(
             relative.display()
         );
     }
-    let cwd = worktree.to_string_lossy().into_owned();
-    let file_arg = file.to_string_lossy().into_owned();
-    let mut command: Vec<&str> = editor.iter().map(String::as_str).collect();
-    command.push(file_arg.as_str());
+    let mut command = editor.to_vec();
+    command.push(file.to_string_lossy().into_owned());
+    let existing = existing_lower_pane(my_pane, runner)?.map(|(pane, _)| pane);
+    show_in_lower_pane(
+        my_pane,
+        existing,
+        worktree,
+        &command,
+        PANE_CONTENT_EDITOR,
+        runner,
+    )
+}
 
-    let pane = match existing_lower_pane(my_pane, runner)? {
-        Some((pane, _)) => {
-            tmux::respawn_pane_running(&pane, &cwd, &command, runner)?;
+/// Run `command` in the lower pane: respawn `existing` (a pane we created), or
+/// split a fresh one below `my_pane` when there is none. Then record what it
+/// runs and move focus to it (`FocusFollowsTheOpenedFile`).
+fn show_in_lower_pane(
+    my_pane: &str,
+    existing: Option<String>,
+    worktree: &Path,
+    command: &[String],
+    content: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<()> {
+    let cwd = worktree.to_string_lossy();
+    let argv: Vec<&str> = command.iter().map(String::as_str).collect();
+    let pane = match existing {
+        Some(pane) => {
+            tmux::respawn_pane_running(&pane, &cwd, &argv, runner)?;
             pane
         }
         None => {
-            let pane = tmux::split_window_below_running(
-                my_pane,
-                DIFF_PANE_PERCENT,
-                &cwd,
-                &command,
-                runner,
-            )?;
+            let pane =
+                tmux::split_window_below_running(my_pane, DIFF_PANE_PERCENT, &cwd, &argv, runner)?;
             mark_diff_pane(&pane, runner);
             pane
         }
     };
-    mark_content(&pane, PANE_CONTENT_EDITOR, runner);
+    mark_content(&pane, content, runner);
     focus(&pane, runner);
     Ok(())
 }
@@ -172,14 +192,6 @@ fn focus(pane: &str, runner: &dyn ProcessRunner) {
     if let Err(e) = tmux::select_pane(pane, runner) {
         tracing::warn!(%pane, error = %e, "failed to move focus to the lower pane");
     }
-}
-
-/// Hand a tmux helper the worktree as its working directory and `command` as
-/// borrowed argv, the shape every pane-running helper takes.
-fn run_in<T>(worktree: &Path, command: &[String], f: impl FnOnce(&str, &[&str]) -> T) -> T {
-    let cwd = worktree.to_string_lossy();
-    let argv: Vec<&str> = command.iter().map(String::as_str).collect();
-    f(&cwd, &argv)
 }
 
 /// The diff renderer's argv. `--data-dir` is named explicitly rather than left
@@ -215,22 +227,6 @@ fn mark_content(pane: &str, content: &str, runner: &dyn ProcessRunner) {
     if let Err(e) = tmux::set_pane_option(pane, PANE_CONTENT_OPTION, content, runner) {
         tracing::warn!(%pane, content, error = %e, "failed to mark what the lower pane runs");
     }
-}
-
-fn split_diff_pane(
-    my_pane: &str,
-    data_dir: &Path,
-    task_id: TaskId,
-    worktree: &Path,
-    runner: &dyn ProcessRunner,
-) -> Result<String> {
-    let command = diff_command(data_dir, task_id, runner);
-    let pane = run_in(worktree, &command, |cwd, argv| {
-        tmux::split_window_below_running(my_pane, DIFF_PANE_PERCENT, cwd, argv, runner)
-    })?;
-    mark_diff_pane(&pane, runner);
-    mark_content(&pane, PANE_CONTENT_DIFF, runner);
-    Ok(pane)
 }
 
 #[cfg(test)]

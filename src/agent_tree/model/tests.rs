@@ -694,29 +694,6 @@ fn a_folders_own_files_sort_ahead_of_its_subfolders() {
     assert_eq!(names, vec!["build.rs", "main.rs", "aa", "zz"]);
 }
 
-/// The ordered walk yields files only, and through a compressed chain it
-/// yields the path the file really has — not the shortened row label.
-#[test]
-fn the_ordered_walk_yields_whole_paths_through_a_merged_row() {
-    let tree = build_tree(
-        &root(),
-        &[
-            modified("a/b/c/d.rs"),
-            modified("a/b/c/e.rs"),
-            modified("f.rs"),
-        ],
-    );
-
-    assert_eq!(
-        file_paths_in_tree_order(&tree),
-        vec![
-            PathBuf::from("f.rs"),
-            PathBuf::from("a/b/c/d.rs"),
-            PathBuf::from("a/b/c/e.rs"),
-        ]
-    );
-}
-
 #[test]
 fn children_are_sorted_by_name() {
     let tree = build_tree(

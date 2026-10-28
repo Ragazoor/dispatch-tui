@@ -86,22 +86,6 @@ fn a_file_under_a_merged_row_still_gets_its_open_marker() {
     );
 }
 
-/// A path the tree no longer knows about is still published: the open set
-/// outlives its files on purpose (`OpenDiffPathsMaySurviveTheirFiles`), and
-/// dropping it here would silently un-open a file the user opened.
-#[test]
-fn a_published_path_the_tree_no_longer_knows_is_kept() {
-    let mut rig = KeyRig::new(&[modified("a.rs"), modified("src/lib.rs")]);
-    rig.press(KeyCode::Char('j'));
-    rig.press(KeyCode::Char(' '));
-    rig.refresh(&[modified("src/lib.rs")]);
-
-    assert_eq!(
-        rig.state.open_diffs_in_tree_order(&rig.tree),
-        vec![PathBuf::from("a.rs")],
-    );
-}
-
 /// `l`/`Right` are expansion keys only — they must NOT have picked up the
 /// open behaviour along with Space/Enter (#3834's guard stays a guard).
 #[test]

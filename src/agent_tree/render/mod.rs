@@ -156,7 +156,7 @@ fn node_to_item(
     // name spans several components, and `PathBuf::pop` removes one component
     // rather than undoing one `push`, so an accumulator would have to track
     // each name's arity to unwind correctly. One allocation per node per frame
-    // is the cheaper mistake — `file_paths_in_tree_order` made the same trade.
+    // is the cheaper mistake.
     let relative = parent.join(&node.name);
     let diff_open = ctx.open_diffs.contains(&relative);
     // `path` is the widget's identifier for this node — see `build_tree_items`

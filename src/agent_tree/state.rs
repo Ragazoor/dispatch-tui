@@ -189,41 +189,9 @@ impl RenderState {
         crate::agent_tree::pane::half_page(self.viewport_rows)
     }
 
-    /// The paths whose diffs are open, in the set's own order — which is NOT
-    /// tree order, and has not been since a folder's own files started sorting
-    /// ahead of its subfolders. The diff pane re-applies the row order itself
-    /// (`crate::agent_tree::model::file_paths_in_tree_order`); nothing here depends on
-    /// the order the set happens to iterate in.
+    /// The path whose diff is open, if any — a set of at most one.
     pub fn open_diffs(&self) -> &BTreeSet<PathBuf> {
         &self.open_diffs
-    }
-
-    /// The open paths in TREE ORDER — the order their rows appear in the pane,
-    /// which is the order the diff pane renders them in.
-    ///
-    /// The tree is the only party that can answer this. Where a directory chain
-    /// compresses depends on the whole change set, so a reader holding only the
-    /// opened subset could never re-derive it (see the spec's
-    /// `RowsPutAFoldersOwnFilesFirst`). That is why the order travels with the
-    /// paths rather than being recomputed at the far end.
-    ///
-    /// A path the tree no longer knows about is appended rather than dropped:
-    /// the open set outlives its files on purpose (`OpenDiffPathsMaySurviveTheirFiles`),
-    /// and such a path renders nothing, so where it sits cannot be seen.
-    pub(super) fn open_diffs_in_tree_order(&self, tree: &TreeNode) -> Vec<PathBuf> {
-        let mut ordered: Vec<PathBuf> = crate::agent_tree::model::file_paths_in_tree_order(tree)
-            .into_iter()
-            .filter(|path| self.open_diffs.contains(path))
-            .collect();
-        let known: BTreeSet<&PathBuf> = ordered.iter().collect();
-        let mut orphans: Vec<PathBuf> = self
-            .open_diffs
-            .iter()
-            .filter(|path| !known.contains(path))
-            .cloned()
-            .collect();
-        ordered.append(&mut orphans);
-        ordered
     }
 
     #[cfg(test)]

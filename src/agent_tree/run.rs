@@ -77,14 +77,12 @@ struct DiffPaneContext<'a> {
 /// must stay in step.
 fn publish_open_set(
     context: &DiffPaneContext<'_>,
-    tree: &TreeNode,
     state: &mut RenderState,
     runner: &dyn ProcessRunner,
 ) {
     let root = context.root.to_string_lossy().into_owned();
-    if let Err(e) =
-        crate::agent_tree::open_set::write_open_set(&root, &state.open_diffs_in_tree_order(tree))
-    {
+    let open: Vec<PathBuf> = state.open_diffs().iter().cloned().collect();
+    if let Err(e) = crate::agent_tree::open_set::write_open_set(&root, &open) {
         tracing::warn!(root, error = %format!("{e:#}"), "failed to record the open set");
         state.notice = Some(Notice::diff(format!("{e:#}")));
         return;
@@ -113,8 +111,8 @@ fn publish_open_set(
 
 /// `v`: show one file in the user's editor in the lower pane, in place of
 /// whatever it showed (`OpenAgentTreeFileInEditor`). Once the editor is up no
-/// diff is showing, so the open set is emptied — but only recorded, never
-/// reconciled, because reconciling an empty set would close the pane.
+/// diff is showing, so the open set is emptied and published; the pane is now
+/// marked as the editor, which an empty set leaves running.
 fn open_in_editor(
     context: &DiffPaneContext<'_>,
     relative: &Path,
@@ -139,10 +137,9 @@ fn open_in_editor(
         state.notice = Some(Notice::diff(format!("{e:#}")));
         return;
     }
-    state.open_diffs.clear();
-    let root = context.root.to_string_lossy();
-    if let Err(e) = crate::agent_tree::open_set::write_open_set(&root, &[]) {
-        tracing::warn!(%root, error = %format!("{e:#}"), "failed to record the open set");
+    if !state.open_diffs.is_empty() {
+        state.open_diffs.clear();
+        publish_open_set(context, state, runner);
     }
 }
 
@@ -159,12 +156,11 @@ fn open_in_editor(
 /// renderer is already leaving and there is nowhere left to show one.
 fn tear_down_diff_pane(
     context: &DiffPaneContext<'_>,
-    tree: &TreeNode,
     state: &mut RenderState,
     runner: &dyn ProcessRunner,
 ) {
     state.open_diffs.clear();
-    publish_open_set(context, tree, state, runner);
+    publish_open_set(context, state, runner);
 }
 
 /// The loop's answer to [`KeyAction::SourceChanged`]: the tree switches now
@@ -315,13 +311,13 @@ fn run_loop<B: Backend>(
             usage.record(std::mem::take(&mut state.usage));
             match action {
                 KeyAction::Exit => {
-                    tear_down_diff_pane(context, &tree, &mut state, runner);
+                    tear_down_diff_pane(context, &mut state, runner);
                     usage.flush();
                     return Ok(());
                 }
                 KeyAction::Continue => {}
                 KeyAction::DiffSetChanged => {
-                    publish_open_set(context, &tree, &mut state, runner);
+                    publish_open_set(context, &mut state, runner);
                 }
                 KeyAction::OpenInEditor(path) => open_in_editor(context, &path, &mut state, runner),
                 KeyAction::JumpTo(window) => jump_to_agent(&window, &mut state, runner),
