@@ -193,13 +193,6 @@ fn run_tree_action(
             selected_node(root, selected)?;
             KeyAction::OpenInEditor(selected.iter().collect())
         }
-        // The all-files key. Unlike Space/Enter it does NOT dispatch on the
-        // selection — it acts on the whole tree, whatever the cursor is on,
-        // including a directory or nothing at all.
-        "toggle_all_diffs" => {
-            state.toggle_all_diffs(root);
-            KeyAction::DiffSetChanged
-        }
         // `TreeState`'s navigation methods return whether anything changed;
         // the loop redraws unconditionally, so the answer is discarded. The
         // jump motions resolve against the identifiers of the last render —

@@ -296,7 +296,7 @@ fn discard_agent_tree_panes(
     {
         had_diff_pane = true;
         // An editor pane may hold unsaved edits and outlives its tree
-        // (`KeepEditorPaneWithPossiblyUnsavedWork`). When the lookup fails the
+        // (`EditorPaneOutlivesItsTree`). When the lookup fails the
         // pane is kept: a stray pane costs less than lost work.
         let editors = editor_panes.get_or_insert_with(|| {
             tmux::pane_ids_with_option_value(

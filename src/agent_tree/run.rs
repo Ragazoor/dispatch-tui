@@ -111,8 +111,10 @@ fn publish_open_set(
     }
 }
 
-/// `v`: show one file in the user's editor in the lower pane
-/// (`OpenAgentTreeFileInEditor`). The open set is not touched.
+/// `v`: show one file in the user's editor in the lower pane, in place of
+/// whatever it showed (`OpenAgentTreeFileInEditor`). Once the editor is up no
+/// diff is showing, so the open set is emptied — but only recorded, never
+/// reconciled, because reconciling an empty set would close the pane.
 fn open_in_editor(
     context: &DiffPaneContext<'_>,
     relative: &Path,
@@ -135,12 +137,18 @@ fn open_in_editor(
     ) {
         tracing::warn!(error = %format!("{e:#}"), "failed to open the editor pane");
         state.notice = Some(Notice::diff(format!("{e:#}")));
+        return;
+    }
+    state.open_diffs.clear();
+    let root = context.root.to_string_lossy();
+    if let Err(e) = crate::agent_tree::open_set::write_open_set(&root, &[]) {
+        tracing::warn!(%root, error = %format!("{e:#}"), "failed to record the open set");
     }
 }
 
 /// Leave nothing behind on the way out: empty the open set, which retires the
 /// diff pane with it. An editor pane is left running: it may hold unsaved
-/// edits (`KeepEditorPaneWithPossiblyUnsavedWork`).
+/// edits (`EditorPaneOutlivesItsTree`).
 ///
 /// A diff pane outliving its tree is orphaned — nothing drives its open set,
 /// nothing refreshes it, and the toggle that would bring the tree back does not

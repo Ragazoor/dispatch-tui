@@ -52,7 +52,7 @@ fn toggle_with_a_diff_pane_open_kills_both_panes() {
 }
 
 /// An editor pane may hold unsaved edits, so hiding the tree leaves it running
-/// (KeepEditorPaneWithPossiblyUnsavedWork in docs/specs/agent-tree.allium).
+/// (EditorPaneOutlivesItsTree in docs/specs/agent-tree.allium).
 #[test]
 fn toggle_with_an_editor_pane_open_kills_only_the_tree() {
     let mock = MockProcessRunner::new(vec![

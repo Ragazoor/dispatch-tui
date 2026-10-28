@@ -601,7 +601,6 @@ fn the_commits_namespace_shares_the_pane_wide_keys_with_the_tree() {
     for action in [
         "exit_pane",
         "toggle_focus",
-        "toggle_all_diffs",
         "navigate_row",
         "navigate_row_first",
         "navigate_row_last",
@@ -644,7 +643,6 @@ fn the_commits_namespace_has_only_the_pane_wide_rows_and_select_source() {
             "exit_pane",
             "toggle_focus",
             "switch_section",
-            "toggle_all_diffs",
             "navigate_row",
             "navigate_row_first",
             "navigate_row_last",
@@ -813,5 +811,22 @@ fn guide_declares_only_real_bindings() {
                 "guide binds {key} to {ns_name}/{action}, which the table does not"
             );
         }
+    }
+}
+
+/// One file is open at a time (agent-tree.allium: OneOpenFileAtATime), so the
+/// key that opened every changed file's diff at once is gone from every
+/// agent-tree namespace.
+#[test]
+fn no_agent_tree_namespace_binds_an_all_files_key() {
+    for ns in [
+        KeyNamespace::AgentTreeTree,
+        KeyNamespace::AgentTreeCommits,
+        KeyNamespace::AgentTreeAgents,
+    ] {
+        assert!(
+            bindings_in(ns).all(|b| b.action != "toggle_all_diffs" && !b.keys.contains(&"a")),
+            "{ns:?}"
+        );
     }
 }

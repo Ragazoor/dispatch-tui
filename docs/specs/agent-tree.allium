@@ -371,9 +371,11 @@ entity AgentTreePane {
     -- Which files' diffs the user has opened, relative to root. One of the
     -- two pieces of state in this spec that the user builds up rather than
     -- git supplying (the other is selected_commit); everything else the pane
-    -- shows is re-derived from a git query every tick. It is a set, not a cursor — the pane shows every open file's diff
-    -- at once, which is what makes ToggleAllAgentTreeFileDiffs a bulk version
-    -- of the single-file toggle rather than a separate mode.
+    -- shows is re-derived from a git query every tick. It holds at most ONE
+    -- path (OneOpenFileAtATime): the lower pane shows one file, and opening
+    -- another replaces it. It stays a list because the diff pane reads it as
+    -- one from beside the tree (OpenSetIsNotWorktreeState); the tree simply
+    -- never fills it past one.
     --
     -- It holds PATHS, not nodes, so it survives a refresh that rebuilds every
     -- node — and it survives a change of selected source too: a path open
@@ -439,6 +441,12 @@ entity AgentTreePane {
     -- dispatch never takes over a pane it did not create. Kept as a field so a
     -- reader sees the ownership rule instead of inferring it.
     diff_pane_is_ours: Boolean when diff_pane != null
+
+    -- Whether tmux focus is in the lower pane. Every rule that opens a file
+    -- sets it (FocusFollowsTheOpenedFile and its siblings); nothing in this
+    -- spec clears it, because the user leaves the lower pane with tmux's own
+    -- pane navigation.
+    lower_pane_has_focus: Boolean
 
     -- The tasks the agents section shows: what the last SUCCESSFUL read of the
     -- board's task list returned, filtered to tasks with a live agent window
@@ -754,7 +762,8 @@ rule SplitAgentTreePaneOnAgentLaunch {
         -- No diff pane yet. The first split starts its wait
         -- (SplitAgentTreeDiffPane); these values are never read before then.
         diff_task_resolution: waiting,
-        diff_renderer_started_at: now
+        diff_renderer_started_at: now,
+        lower_pane_has_focus: false
     )
 
     @guidance
@@ -1618,15 +1627,23 @@ rule ExitAgentTreeRenderer {
 }
 
 rule OpenAgentTreeFileDiff {
-    -- Space or Enter on a file node whose diff is not open: open it.
+    -- Space or Enter on a file node whose diff is not open: open it, in place
+    -- of whatever the lower pane was showing — another file's diff, or the
+    -- editor (OneOpenFileAtATime).
     when: ToggleSelectedAgentTreeFileDiff(user, pane, node)
 
     requires: pane.focus = tree
     requires: node.kind = file
     requires: not pane.open_diff_paths.contains(node.path)
 
-    ensures: pane.open_diff_paths = old(pane.open_diff_paths).append(node.path)
+    ensures: pane.open_diff_paths = [node.path]
     ensures: AgentTreeDiffOpenSetChanged(pane: pane)
+
+    @guidance
+        -- Decided on 2026-10-28 (task 98620): one file at a time. The pane
+        -- used to show every open file's diff at once, stacked, and an
+        -- all-files key filled the set in one press; both are gone. Opening a
+        -- file never asks the user to close the last one first.
 
     @guidance
         -- == A deleted file opens like any other ==
@@ -1653,9 +1670,10 @@ rule OpenAgentTreeFileDiff {
 }
 
 rule CloseAgentTreeFileDiff {
-    -- Space or Enter on a file node whose diff IS open: close it. The same key
-    -- both ways, which is what makes it a toggle rather than an open command
-    -- with a separate close to remember.
+    -- Space or Enter on the file node whose diff IS open: close it. The same
+    -- key both ways, which is what makes it a toggle rather than an open
+    -- command with a separate close to remember. On any other file the same
+    -- key opens that file instead (OpenAgentTreeFileDiff).
     when: ToggleSelectedAgentTreeFileDiff(user, pane, node)
 
     requires: pane.focus = tree
@@ -1663,51 +1681,6 @@ rule CloseAgentTreeFileDiff {
     requires: pane.open_diff_paths.contains(node.path)
 
     ensures: pane.open_diff_paths = old(pane.open_diff_paths).remove(node.path)
-    ensures: AgentTreeDiffOpenSetChanged(pane: pane)
-}
-
-rule OpenAllAgentTreeFileDiffs {
-    -- The all-files key, pressed while nothing is open: open every changed
-    -- file's diff at once.
-    when: ToggleAllAgentTreeFileDiffs(user, pane)
-
-    requires: pane.open_diff_paths.is_empty()
-
-    ensures: pane.open_diff_paths = changed_file_paths(pane.rendered_changes)
-    ensures: AgentTreeDiffOpenSetChanged(pane: pane)
-
-    @guidance
-        -- Reads from rendered_changes, the last SUCCESSFUL query, and not from
-        -- a fresh one. Two consequences, both wanted: the key acts on exactly
-        -- the tree the user is looking at, and it still works while git is
-        -- failing and the pane is showing its last good tree.
-        --
-        -- changed_file_paths is the paths of the tree's FILE nodes, not the raw
-        -- paths of the change set, and the difference is load-bearing in two
-        -- ways. Directories are excluded, because a directory has no contents
-        -- of its own to diff (OnlyFilesOpenDiffs). And a path the tree rejected
-        -- for escaping the root — which changed_tree drops and git never
-        -- produces — has no row, so it must not be openable either; taking the
-        -- change set directly would put a path in the open set that the user
-        -- can neither see nor close.
-        --
-        -- Every changed file, with no cap on how many. The per-file byte cap
-        -- (config.agent_tree_diff_max_bytes) is what bounds the cost, and it
-        -- bounds it per file whether one file was opened or four hundred were.
-        -- A separate "too many files" refusal here would only move the same
-        -- limit somewhere the user cannot see it coming.
-}
-
-rule CloseAllAgentTreeFileDiffs {
-    -- The same key, pressed while ANYTHING is open: close everything. Not
-    -- "close what I opened with this key" — the two directions are decided by
-    -- whether the set is empty, so one press always empties a non-empty set
-    -- however it got filled.
-    when: ToggleAllAgentTreeFileDiffs(user, pane)
-
-    requires: not pane.open_diff_paths.is_empty()
-
-    ensures: pane.open_diff_paths = []
     ensures: AgentTreeDiffOpenSetChanged(pane: pane)
 }
 
@@ -1724,6 +1697,7 @@ rule SplitAgentTreeDiffPane {
     ensures: pane.diff_pane_is_ours = true
     ensures: pane.diff_pane_content = diff
     ensures: pane.error_notice = null
+    ensures: pane.lower_pane_has_focus = true
 
     -- The diff pane's renderer is its own process and resolves the task for
     -- itself (AgentTreeDiffPaneResolvesItsTask and its two siblings).
@@ -1749,14 +1723,14 @@ rule SplitAgentTreeDiffPane {
         -- cost the user work. "Already split" therefore means "dispatch
         -- already split it".
         --
-        -- == Focus does not move ==
-        -- The keystroke that opens a diff leaves tmux focus in the tree, so
-        -- browsing stays a one-handed loop: move the cursor, open, move on.
-        -- Reaching the lower pane is tmux's own pane navigation and nothing
-        -- this spec invents. That is also why it needs no focus indicator of
-        -- its own: tmux already draws one. (The editor is the exception worth
-        -- noting: typing into it needs focus, so the user moves there with
-        -- tmux's keys.)
+        -- == Focus moves to the file ==
+        -- Opening a file moves tmux focus to the lower pane, so the user can
+        -- scroll the diff or type in the editor straight away
+        -- (FocusFollowsTheOpenedFile). Getting back to the tree is tmux's own
+        -- pane navigation, and nothing this spec invents. This reverses the
+        -- earlier rule, which left focus in the tree so browsing was a
+        -- one-handed loop; that loop mattered while many files could be open
+        -- at once, and one file at a time removed it (task 98620).
         --
         -- == Why this is a rule and not an ensures on the four toggles ==
         -- A user can kill the lower pane themselves, with tmux or by pressing
@@ -1767,32 +1741,71 @@ rule SplitAgentTreeDiffPane {
         -- of open files and nowhere to see them. The repair is deliberately
         -- NOT on the refresh tick: a pane the user closed a second ago must
         -- stay closed until they ask again.
-        --
-        -- One consequence is accepted and slightly odd: pressing Space to
-        -- CLOSE one file, while the pane is gone and other files remain open,
-        -- re-splits it. The alternative is to distinguish opening presses from
-        -- closing ones here, which buys consistency in a case the user reaches
-        -- only after killing the pane by hand.
+}
+
+rule ReplaceAgentTreeEditorWithDiff {
+    -- A file's diff was opened while the lower pane runs the editor: the
+    -- editor is replaced by the diff renderer in the same pane (tmux
+    -- respawn-pane -k). Unsaved edits in the editor are lost.
+    when: AgentTreeDiffOpenSetChanged(pane)
+
+    requires: not pane.open_diff_paths.is_empty()
+    requires: pane.diff_pane != null
+    requires: pane.diff_pane_content = editor
+
+    ensures: pane.diff_pane_content = diff
+    ensures: pane.error_notice = null
+    ensures: pane.lower_pane_has_focus = true
+    ensures: pane.diff_task_resolution = waiting
+    ensures: pane.diff_renderer_started_at = now
+    ensures: pane.diff_startup_failure = null
+
+    @guidance
+        -- Decided on 2026-10-28 (task 98620), reversing task 98506's
+        -- KeepEditorPaneWithPossiblyUnsavedWork, which refused with "quit the
+        -- editor first". The user chose replacement over the refusal, knowing
+        -- unsaved edits are lost: having to quit the editor before every next
+        -- file was the larger cost.
+}
+
+rule FocusFollowsTheOpenedFile {
+    -- A file's diff was opened while a diff pane was already showing another
+    -- file. The diff renderer stays and redraws the new file on its own (it
+    -- reads the open set), but focus still moves to it, exactly as it does
+    -- when the pane is split or respawned.
+    when: AgentTreeDiffOpenSetChanged(pane)
+
+    requires: not pane.open_diff_paths.is_empty()
+    requires: pane.diff_pane != null
+    requires: pane.diff_pane_content = diff
+
+    ensures: pane.error_notice = null
+    ensures: pane.lower_pane_has_focus = true
 }
 
 rule OpenAgentTreeFileInEditor {
     -- `v` on a file node: show that one file in the user's editor in the lower
-    -- pane, instead of its diff.
+    -- pane, in place of whatever it was showing — a diff, or the editor on
+    -- another file (or the same one).
     when: OpenSelectedAgentTreeFileInEditor(user, pane, node)
 
     requires: pane.focus = tree
     requires: node.kind = file
-    -- An editor already showing may hold unsaved edits, so it is never
-    -- replaced: see KeepEditorPaneWithPossiblyUnsavedWork.
-    requires: pane.diff_pane = null or pane.diff_pane_content = diff
 
     -- Splits the lower pane when there is none (same geometry and ownership as
     -- SplitAgentTreeDiffPane); otherwise replaces what the pane we own is
-    -- running (tmux respawn-pane -k), which ends the diff renderer.
+    -- running (tmux respawn-pane -k), which ends the diff renderer or the
+    -- editor that was there. An editor's unsaved edits are lost
+    -- (ReplaceAgentTreeEditorWithDiff's guidance says why that is accepted).
     ensures: pane.diff_pane != null
     ensures: pane.diff_pane_is_ours = true
     ensures: pane.diff_pane_content = editor
     ensures: pane.error_notice = null
+    ensures: pane.lower_pane_has_focus = true
+    -- The pane no longer shows a diff, so no row is marked open
+    -- (OneOpenFileAtATime). Emptying the set this way does NOT close the
+    -- pane: it is not an AgentTreeDiffOpenSetChanged.
+    ensures: pane.open_diff_paths = []
 
     @guidance
         -- The editor is the resolved $VISUAL, then $EDITOR, then the fallback
@@ -1808,14 +1821,13 @@ rule OpenAgentTreeFileInEditor {
         -- the commit changed; the editor shows the working tree, and the
         -- title is not changed. Use Space for the commit's diff.
         --
-        -- The open set is NOT touched. `v` is a view of one file, not a
-        -- membership change: files already open stay marked in the tree. A
-        -- later Space changes the open set but cannot show the diff until the
-        -- user quits the editor (KeepEditorPaneWithPossiblyUnsavedWork); once
-        -- it is quit, the next Space splits the diff pane afresh. With an
-        -- empty open set the editor pane exists WITHOUT an open file, which is
-        -- the one exception to DiffPaneExistsWhenSomethingIsOpen; it ends when
-        -- the user quits the editor, like any other process in a pane.
+        -- The open set is emptied, because the diff it named is no longer
+        -- shown. A later Space on any file replaces the editor with that
+        -- file's diff (ReplaceAgentTreeEditorWithDiff). The editor pane exists
+        -- with an empty open set, which is the one exception to
+        -- DiffPaneExistsWhenSomethingIsOpen; it ends when the user quits the
+        -- editor, like any other process in a pane, or when a diff replaces
+        -- it.
         --
         -- What the pane runs is recorded on the pane itself, in a tmux pane
         -- option beside the role marker (@dispatch_pane_content: diff or
@@ -1835,7 +1847,8 @@ rule CloseAgentTreeDiffPaneWhenEmpty {
     requires: pane.open_diff_paths.is_empty()
     requires: pane.diff_pane != null
     requires: pane.diff_pane_is_ours = true
-    -- An editor pane is not killed here (KeepEditorPaneWithPossiblyUnsavedWork).
+    -- An editor pane is not killed here: closing a diff says nothing about
+    -- the editor (EditorPaneOutlivesItsTree).
     requires: pane.diff_pane_content = diff
 
     ensures: pane.diff_pane = null
@@ -1847,12 +1860,11 @@ rule CloseAgentTreeDiffPaneWhenEmpty {
         -- mechanism, to get their rows back.
 }
 
-rule KeepEditorPaneWithPossiblyUnsavedWork {
-    -- The lower pane is running the editor, and something would replace or
-    -- kill it: `v` on another file, Space opening a diff, Space closing the
-    -- last open file, `a`, `q`, or hiding the tree. The editor may hold
-    -- unsaved edits, so the pane is left exactly as it is.
-    when: AgentTreeEditorPaneWouldBeReplaced(pane)
+rule EditorPaneOutlivesItsTree {
+    -- Keys that would only retire the lower pane — `q`, hiding the tree, a
+    -- resync — leave an editor running. Only opening another file replaces it
+    -- (OpenAgentTreeFileInEditor, ReplaceAgentTreeEditorWithDiff).
+    when: pane: AgentTreePane.status transitions_to hidden
 
     requires: pane.diff_pane != null
     requires: pane.diff_pane_content = editor
@@ -1860,28 +1872,13 @@ rule KeepEditorPaneWithPossiblyUnsavedWork {
     ensures: pane.diff_pane != null
     ensures: pane.diff_pane_content = editor
 
-    -- Where the key's effect needs the pane (`v`, or Space opening a diff),
-    -- the press says why instead of doing nothing.
-    ensures: AgentTreeDiffPaneOpenFailed(pane: pane, reason: "quit the editor first")
-
     @guidance
-        -- Decided on 2026-10-25 (task 98506), over two alternatives: a second
-        -- pane for diffs (more panes and more geometry rules, and `q` would
-        -- still have to decide about the editor) and accepting the kill (users
-        -- lose unsaved work). Reuse, never takeover (SplitAgentTreeDiffPane)
-        -- already refuses to kill a pane whose process may hold the user's
-        -- work; this extends it to a pane we did create.
-        --
-        -- Refusal covers only the keys that need the pane. Keys that would
-        -- merely retire it (Space closing the last open file, `a`, `q`, hiding
-        -- the tree, a resync) leave it running and carry on: the tree goes, the
-        -- open set empties, and the editor pane outlives them until the user
-        -- quits the editor. An editor pane with no tree beside it is harmless,
-        -- unlike an orphaned diff pane.
-        --
-        -- The open set is still updated by a refused Space. The user asked for
-        -- the file to be open and it is; what is refused is showing it, and the
-        -- next Space after the editor is quit retries.
+        -- Task 98506 (2026-10-25) protected the editor from every key; task
+        -- 98620 (2026-10-28) narrowed that to keys that do not open a file.
+        -- Opening a file is the user asking for the pane, so it is replaced.
+        -- Leaving the tree is not, so the editor and any unsaved work in it
+        -- stay. An editor pane with no tree beside it is harmless, unlike an
+        -- orphaned diff pane.
 }
 
 rule KillAgentTreeDiffPaneWithItsTree {
@@ -1893,7 +1890,7 @@ rule KillAgentTreeDiffPaneWithItsTree {
     ensures: pane.open_diff_paths = []
 
     @guidance
-        -- An editor pane survives its tree (KeepEditorPaneWithPossiblyUnsavedWork).
+        -- An editor pane survives its tree (EditorPaneOutlivesItsTree).
         --
         -- A diff pane outliving its tree is orphaned: nothing drives its open
         -- set, nothing refreshes it, and the toggle that would bring the tree
@@ -2525,6 +2522,15 @@ invariant DiffPaneExistsWhenSomethingIsOpen {
             implies not p.open_diff_paths.is_empty()
 }
 
+-- The lower pane shows one file at a time. Opening a file replaces the one
+-- that was open (OpenAgentTreeFileDiff); nothing adds a second. The diff pane
+-- still reads the open set as a list, and would render each entry, but the
+-- tree never writes more than one.
+invariant OneOpenFileAtATime {
+    for p in AgentTreePanes:
+        p.open_diff_paths.count <= 1
+}
+
 -- Only files ever have an open diff. A directory has no contents of its own —
 -- it is in the tree solely as a route to changed files — so Space and Enter on
 -- one toggle its expansion instead, and nothing can put its path in the open
@@ -2741,13 +2747,8 @@ surface AgentTreeCompanionPane {
         ToggleSelectedAgentTreeNode(user, pane)           -- Space, Enter (directory)
         ToggleSelectedAgentTreeFileDiff(user, pane, node) -- Space, Enter (file, tree focus)
 
-        -- The bulk form of the file toggle, on its own key. It does not
-        -- dispatch on the selection at all: it acts on the whole tree, whatever
-        -- the cursor happens to be on, a directory or nothing included.
-        -- Direction is decided by the set rather than by a remembered mode — a
-        -- non-empty set empties, an empty one fills — so one key always has one
-        -- meaning for the state the user can see.
-        ToggleAllAgentTreeFileDiffs(user, pane)           -- a
+        -- There is no all-files key: one file is open at a time
+        -- (OneOpenFileAtATime). `a` used to open every diff at once.
 
         -- The commits and agents sections. Tab and Shift+Tab flip between the
         -- browse view (tree and commits) and the agents view; `s` moves between
@@ -3429,9 +3430,9 @@ surface AgentTreeDiffPane {
         -- (AgentTreeCompanionPane: PanesReadThroughTheBoard).
 
     @guarantee DiffPaneHasNoToggleOfItsOwn
-        -- The diff pane cannot open or close a file's diff. Space, Enter and
-        -- the all-files key do nothing here; the open set is decided in the
-        -- tree and only in the tree.
+        -- The diff pane cannot open or close a file's diff. Space and Enter
+        -- do nothing here; the open set is decided in the tree and only in
+        -- the tree.
         --
         -- That is what makes one file the user is looking at have one open
         -- state. Two places to toggle from would mean two writers to the open

@@ -24,7 +24,9 @@ pane's own view only. The keys are the `agent_tree.tree`, `agent_tree.commits` a
 `agent_tree.agents` rows of the table. The pane has two views. The browse view shows the file tree above the
 **Commits** section; `s` moves the keys between them. Tab or Shift+Tab flips to the **Agents**
 list and back. Space opens a file's diff, and `v` opens the file in `$VISUAL`/`$EDITOR`, in a
-pane across the bottom of the window.
+pane across the bottom of the window. One file is open at a time: opening another file
+replaces what that pane shows, the editor included (unsaved edits in it are lost), and
+moves focus to it. Space on the file whose diff is open closes it.
 
 By default the tree and the diff pane show only your agent's **unstaged** work: the
 working tree against the index, plus untracked files (shown as added, without counts).
@@ -45,23 +47,20 @@ which would read as "nothing changed in there".
 
 ### Agent-tree diff pane
 
-Splits the companion pane's column when you open your first diff: the tree keeps the
-top third, the diff takes the rest. Your agent's own pane is untouched. It closes when
-you close the last diff, and the tree's global toggle takes it away too. Move between
-the two panes with tmux's own pane navigation (`Prefix+↑`/`Prefix+↓`). Its keys are the
-`agent_diff` rows of the table.
+Splits across the bottom of the window when you open a diff, and takes focus. It
+closes when you close the diff, and the tree's global toggle takes it away too. Move
+back to the tree with tmux's own pane navigation (`Prefix+↑`/`Prefix+↓`). Its keys are
+the `agent_diff` rows of the table.
 
-It shows every open file's diff as one document, in the same order as the tree's rows, so scrolling past the
-end of one file reaches the top of the next. Lines wider than the pane are cut at its
-edge rather than wrapped — the pane is narrow, and one long line would otherwise push
-several files off screen. Nothing here can open or close a file: the open set is
+It shows the open file's diff. Lines wider than the pane are cut at its edge rather
+than wrapped. Nothing here can open or close a file: the open set is
 decided in the tree and only in the tree.
 
 The diff pane follows the tree's selected source. An untracked file is shown whole, as
 additions. Two things show a one-line stand-in instead of contents, and each is a fact
 about the file: git reports it binary, or its diff is over 1 MB.
 
-The cursor position, the manual expansions and the set of open diffs all live in that
+The cursor position, the manual expansions and the open diff all live in that
 process, so none of them survives closing and reopening the pane. Use `Prefix+e` to
 toggle it (the `tmux.global` rows of the table).
 

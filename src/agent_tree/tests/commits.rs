@@ -310,11 +310,9 @@ fn h_l_left_and_right_do_nothing_with_the_commits_section_focused() {
 
 /// The pane-wide keys act from the commits section too.
 #[test]
-fn a_and_q_still_act_with_the_commits_section_focused() {
+fn q_still_acts_with_the_commits_section_focused() {
     let mut rig = KeyRig::with_commits(&[modified("a.rs")], commits(&[1]));
     rig.state.focus = Focus::Commits;
-    assert_eq!(rig.press(KeyCode::Char('a')), KeyAction::DiffSetChanged);
-    assert!(rig.state.is_diff_open(Path::new("a.rs")));
     assert_eq!(rig.press(KeyCode::Char('q')), KeyAction::Exit);
 }
 
@@ -341,7 +339,7 @@ fn selecting_a_source_empties_the_tree_at_once_and_publishes_the_selection() {
 
 /// press_every_row_key / RecordedActionMatchesRow for the commits section.
 /// The namespace's rows are exactly the pane-wide keys plus select_source:
-/// q, Ctrl+C, Tab, BackTab, s, a, j, Down, k, Up, gg, G, Ctrl+D, Ctrl+U, Space, Enter.
+/// q, Ctrl+C, Tab, BackTab, s, j, Down, k, Up, gg, G, Ctrl+D, Ctrl+U, Space, Enter.
 #[test]
 fn pressing_each_key_of_each_commits_row_records_the_rows_action() {
     let mut pressed = 0;
@@ -374,7 +372,7 @@ fn pressing_each_key_of_each_commits_row_records_the_rows_action() {
             );
         }
     }
-    assert_eq!(pressed, 16);
+    assert_eq!(pressed, 15);
 }
 
 // -- TwoViewsShareThePane / CommitRowShowsShortIdAndSubject

@@ -125,7 +125,6 @@ use "./observability.allium" as observability
 --     exit_pane                  q, Ctrl+C
 --     toggle_focus               Tab, BackTab
 --     switch_section             s
---     toggle_all_diffs           a
 --     navigate_row               j, Down, k, Up
 --     navigate_row_first         gg
 --     navigate_row_last          G
@@ -138,7 +137,7 @@ use "./observability.allium" as observability
 --     open_in_editor             v              context on_file
 --     toggle_directory           Space, Enter   context on_directory
 --   agent_tree.commits
---     exit_pane, toggle_focus, switch_section, toggle_all_diffs, navigate_row,
+--     exit_pane, toggle_focus, switch_section, navigate_row,
 --     navigate_row_first, navigate_row_last, navigate_half_page — the same
 --     keys as in agent_tree.tree
 --     select_source              Space, Enter   selects the row under the
@@ -152,7 +151,7 @@ use "./observability.allium" as observability
 --                                               records nothing
 --     h, l, Left and Right have no row here and do nothing.
 --   agent_tree.agents
---     exit_pane, toggle_focus, toggle_all_diffs, navigate_row,
+--     exit_pane, toggle_focus, navigate_row,
 --     navigate_row_first, navigate_row_last, navigate_half_page — the same
 --     keys as in agent_tree.tree
 --     jump_to_agent              Space, Enter   takes effect (and records)

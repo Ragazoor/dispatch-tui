@@ -14,12 +14,12 @@ mod tmux_harness;
 
 use std::path::Path;
 
-use dispatch_tui::agent_tree::diff_pane::{reconcile_diff_pane, show_in_editor, QUIT_EDITOR_FIRST};
+use dispatch_tui::agent_tree::diff_pane::{reconcile_diff_pane, show_in_editor};
 use dispatch_tui::dispatch;
 use dispatch_tui::models::{test_tmux_window, TaskId};
 use dispatch_tui::tmux::{
-    PANE_CONTENT_EDITOR, PANE_CONTENT_OPTION, PANE_ROLE_AGENT_TREE, PANE_ROLE_DIFF,
-    PANE_ROLE_OPTION,
+    PANE_CONTENT_DIFF, PANE_CONTENT_EDITOR, PANE_CONTENT_OPTION, PANE_ROLE_AGENT_TREE,
+    PANE_ROLE_DIFF, PANE_ROLE_OPTION,
 };
 
 use tmux_harness::{await_stub_line, stub_lines, tmux_available_or_skip, StubLine, TmuxServer};
@@ -188,19 +188,27 @@ fn opening_the_first_diff_adds_one_marked_pane() {
     );
 }
 
-/// `-d`: the user keeps browsing the tree after opening a diff. Reaching the
-/// diff to scroll it is a deliberate second act, and tmux's own navigation.
+/// FocusFollowsTheOpenedFile: opening a file moves focus to the lower pane,
+/// whether it was just split or was already showing another file.
 #[test]
-fn opening_a_diff_does_not_move_focus() {
+fn opening_a_diff_moves_focus_to_the_diff_pane() {
     let Some(fx) = setup_or_skip() else { return };
     fx.server.tmux_ok(&["select-pane", "-t", &fx.tree_pane]);
 
     fx.reconcile(true);
-
+    let diff = fx.diff_pane().expect("diff pane");
     assert_eq!(
         fx.server.active_pane_id(WINDOW).as_deref(),
-        Some(fx.tree_pane.as_str()),
-        "focus must stay in the tree pane"
+        Some(diff.as_str()),
+        "a freshly split pane takes focus"
+    );
+
+    fx.server.tmux_ok(&["select-pane", "-t", &fx.tree_pane]);
+    fx.reconcile(true);
+    assert_eq!(
+        fx.server.active_pane_id(WINDOW).as_deref(),
+        Some(diff.as_str()),
+        "a reused pane takes focus too"
     );
 }
 
@@ -369,7 +377,7 @@ fn pinning_drains_both_the_tree_and_the_diff_pane() {
     );
 }
 
-// ---- KeepEditorPaneWithPossiblyUnsavedWork --------------------------------
+// ---- ReplaceAgentTreeEditorWithDiff / EditorPaneOutlivesItsTree ----------
 
 /// The editor flag lives on the pane, so a renderer that restarts (a fresh
 /// call carrying no state) still knows the pane runs the editor.
@@ -386,15 +394,25 @@ fn the_editor_pane_records_that_it_runs_the_editor() {
     );
 }
 
-/// `v` on another file, or Space opening a diff, would respawn the pane and
-/// lose the buffer.
+/// One file at a time: `v` on another file replaces the editor, and Space
+/// opening a diff replaces it with the diff renderer — in the same pane,
+/// never a second one, with focus in it each time.
 #[test]
-fn opening_a_diff_or_another_file_leaves_a_running_editor_alone() {
+fn opening_a_diff_or_another_file_replaces_a_running_editor() {
     let Some(fx) = setup_or_skip() else { return };
     fx.open_editor().expect("open the editor");
-    let editor = fx.diff_pane().expect("lower pane");
+    let lower = fx.diff_pane().expect("lower pane");
 
-    let err = reconcile_diff_pane(
+    fx.server.tmux_ok(&["select-pane", "-t", &fx.tree_pane]);
+    fx.open_editor().expect("v replaces the editor");
+    assert_eq!(fx.diff_pane().as_deref(), Some(lower.as_str()));
+    assert_eq!(
+        fx.server.active_pane_id(WINDOW).as_deref(),
+        Some(lower.as_str())
+    );
+
+    fx.server.tmux_ok(&["select-pane", "-t", &fx.tree_pane]);
+    reconcile_diff_pane(
         &fx.tree_pane,
         Path::new("/data"),
         TASK_ID,
@@ -402,16 +420,21 @@ fn opening_a_diff_or_another_file_leaves_a_running_editor_alone() {
         true,
         &fx.server.runner(),
     )
-    .unwrap_err();
-    assert_eq!(format!("{err}"), QUIT_EDITOR_FIRST);
-    let err = fx.open_editor().unwrap_err();
-    assert_eq!(format!("{err}"), QUIT_EDITOR_FIRST);
+    .expect("Space replaces the editor");
 
-    assert_eq!(fx.diff_pane().as_deref(), Some(editor.as_str()));
+    assert_eq!(fx.diff_pane().as_deref(), Some(lower.as_str()));
+    assert_eq!(
+        fx.server.pane_option(&lower, PANE_CONTENT_OPTION),
+        PANE_CONTENT_DIFF
+    );
+    assert_eq!(
+        fx.server.active_pane_id(WINDOW).as_deref(),
+        Some(lower.as_str())
+    );
     assert_eq!(fx.server.pane_count(WINDOW), 3);
 }
 
-/// `v` with nothing open, then a toggle that leaves nothing open (`a`, `q`).
+/// `v` with nothing open, then a toggle that leaves nothing open (`q`).
 #[test]
 fn emptying_the_open_set_does_not_kill_a_running_editor() {
     let Some(fx) = setup_or_skip() else { return };

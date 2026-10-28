@@ -10,11 +10,12 @@
 //! pure function of the keys pressed.
 //!
 //! Replaces the editor pane this feature removed, and inherits its pane-role
-//! marker, its focus rule and its accepted marker gap — the differences are
-//! that the new pane spans the window's full width, and that it is killed when
-//! nothing is open. It is also reused to show the editor (`show_in_editor`).
-//! An editor pane may hold unsaved edits, so nothing here replaces or kills one
-//! (`KeepEditorPaneWithPossiblyUnsavedWork`).
+//! marker and its accepted marker gap — the differences are that the new pane
+//! spans the window's full width, and that it is killed when nothing is open.
+//! It is also reused to show the editor (`show_in_editor`). The pane shows one
+//! file at a time: opening a file replaces what it shows, an editor included,
+//! and moves focus to it (`FocusFollowsTheOpenedFile`). Only emptying the open
+//! set leaves an editor running (`EditorPaneOutlivesItsTree`).
 
 use std::path::Path;
 
@@ -44,9 +45,6 @@ pub fn current_pane_from_env() -> Result<String> {
         .filter(|p| !p.is_empty())
         .context("not running inside tmux ($TMUX_PANE is unset)")
 }
-
-/// The notice for a key that needs the lower pane while it runs the editor.
-pub const QUIT_EDITOR_FIRST: &str = "quit the editor first";
 
 /// This agent window's lower pane, if it has one, and whether it runs the
 /// editor.
@@ -82,9 +80,10 @@ fn existing_lower_pane(
 /// the refresh tick: a pane the user closed a second ago must stay closed until
 /// they ask again.
 ///
-/// A pane running the editor is never killed or replaced, because it may hold
-/// unsaved edits: an emptied set leaves it be, and a non-empty one is refused
-/// with [`QUIT_EDITOR_FIRST`] (`KeepEditorPaneWithPossiblyUnsavedWork`).
+/// A pane running the editor is replaced by the diff renderer when something
+/// is open (`ReplaceAgentTreeEditorWithDiff`) and left running when nothing is
+/// (`EditorPaneOutlivesItsTree`). Whenever something is open, focus ends in the
+/// lower pane (`FocusFollowsTheOpenedFile`).
 ///
 /// `my_pane` is the calling renderer's own pane id, used both as the split
 /// target and to identify the window to look in — every pane involved is in the
@@ -97,23 +96,34 @@ pub fn reconcile_diff_pane(
     anything_open: bool,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
-    match (anything_open, existing_lower_pane(my_pane, runner)?) {
-        (true, None) => split_diff_pane(my_pane, data_dir, task_id, worktree, runner),
-        (false, Some((pane, false))) => tmux::kill_pane(&pane, runner),
-        (true, Some((_, true))) => anyhow::bail!(QUIT_EDITOR_FIRST),
-        // Already agreeing: something is open and a pane is showing it, or
-        // nothing is open and there is no pane; or an editor pane is left be.
-        (true, Some((_, false))) | (false, None) | (false, Some((_, true))) => Ok(()),
-    }
+    let pane = match (anything_open, existing_lower_pane(my_pane, runner)?) {
+        (true, None) => split_diff_pane(my_pane, data_dir, task_id, worktree, runner)?,
+        (true, Some((pane, true))) => {
+            let command = diff_command(data_dir, task_id, runner);
+            run_in(worktree, &command, |cwd, argv| {
+                tmux::respawn_pane_running(&pane, cwd, argv, runner)
+            })?;
+            mark_content(&pane, PANE_CONTENT_DIFF, runner);
+            pane
+        }
+        // The diff renderer already there reads the new open set by itself.
+        (true, Some((pane, false))) => pane,
+        (false, Some((pane, false))) => return tmux::kill_pane(&pane, runner),
+        // Nothing is open and there is no pane, or an editor pane is left be.
+        (false, None) | (false, Some((_, true))) => return Ok(()),
+    };
+    focus(&pane, runner);
+    Ok(())
 }
 
 /// Show `relative` — a path below `worktree` — in the user's editor in the
 /// lower pane (`OpenAgentTreeFileInEditor`): respawn the pane we created, or
 /// split a fresh one when there is none. Never touches a pane we did not
-/// create. A path with no working-tree file is refused, because an editor
-/// handed a missing path opens a misleading empty buffer. So is a lower pane
-/// already running the editor ([`QUIT_EDITOR_FIRST`]): it may hold unsaved
-/// edits.
+/// create. A pane already running the editor is replaced too, losing any
+/// unsaved edits: the user chose that over having to quit it first (task
+/// 98620). A path with no working-tree file is refused, because an editor
+/// handed a missing path opens a misleading empty buffer. Focus ends in the
+/// pane.
 pub fn show_in_editor(
     my_pane: &str,
     worktree: &Path,
@@ -133,12 +143,10 @@ pub fn show_in_editor(
     let mut command: Vec<&str> = editor.iter().map(String::as_str).collect();
     command.push(file_arg.as_str());
 
-    match existing_lower_pane(my_pane, runner)? {
-        Some((_, true)) => anyhow::bail!(QUIT_EDITOR_FIRST),
-        Some((pane, false)) => {
+    let pane = match existing_lower_pane(my_pane, runner)? {
+        Some((pane, _)) => {
             tmux::respawn_pane_running(&pane, &cwd, &command, runner)?;
-            mark_content(&pane, PANE_CONTENT_EDITOR, runner);
-            Ok(())
+            pane
         }
         None => {
             let pane = tmux::split_window_below_running(
@@ -149,9 +157,20 @@ pub fn show_in_editor(
                 runner,
             )?;
             mark_diff_pane(&pane, runner);
-            mark_content(&pane, PANE_CONTENT_EDITOR, runner);
-            Ok(())
+            pane
         }
+    };
+    mark_content(&pane, PANE_CONTENT_EDITOR, runner);
+    focus(&pane, runner);
+    Ok(())
+}
+
+/// Move tmux focus to the lower pane the user just opened a file in
+/// (`FocusFollowsTheOpenedFile`). The pane is already showing the file, so a
+/// failure is logged rather than reported as a failed open.
+fn focus(pane: &str, runner: &dyn ProcessRunner) {
+    if let Err(e) = tmux::select_pane(pane, runner) {
+        tracing::warn!(%pane, error = %e, "failed to move focus to the lower pane");
     }
 }
 
@@ -204,14 +223,14 @@ fn split_diff_pane(
     task_id: TaskId,
     worktree: &Path,
     runner: &dyn ProcessRunner,
-) -> Result<()> {
+) -> Result<String> {
     let command = diff_command(data_dir, task_id, runner);
     let pane = run_in(worktree, &command, |cwd, argv| {
         tmux::split_window_below_running(my_pane, DIFF_PANE_PERCENT, cwd, argv, runner)
     })?;
     mark_diff_pane(&pane, runner);
     mark_content(&pane, PANE_CONTENT_DIFF, runner);
-    Ok(())
+    Ok(pane)
 }
 
 #[cfg(test)]
@@ -227,15 +246,25 @@ mod tests {
         Path::new("/work/wt")
     }
 
-    /// No pane carries the diff role, then the split and the two markers
-    /// (role, content) succeed.
+    /// No pane carries the diff role, then the split, the two markers (role,
+    /// content) and the focus move succeed.
     fn no_pane_then_split() -> MockProcessRunner {
         MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"%1 \n%2 agent_tree\n"),
             MockProcessRunner::ok_with_stdout(b"%9\n"),
             MockProcessRunner::ok(),
             MockProcessRunner::ok(),
+            MockProcessRunner::ok(),
         ])
+    }
+
+    fn assert_focus_moved_to_the_lower_pane(runner: &MockProcessRunner) {
+        let calls = runner.flattened_calls();
+        assert_eq!(
+            calls.last().map(String::as_str),
+            Some("tmux select-pane -t %9"),
+            "opening a file must move focus to it; got {calls:?}"
+        );
     }
 
     /// A diff pane already exists, running the diff renderer, then whatever the
@@ -273,6 +302,7 @@ mod tests {
             calls[1].contains("split-window") && calls[1].contains("-t %2"),
             "must split from the tree's own pane; got {calls:?}"
         );
+        assert_focus_moved_to_the_lower_pane(&runner);
     }
 
     /// The pane must read the SAME database as the tree, so it sees the same
@@ -303,14 +333,25 @@ mod tests {
     }
 
     /// Splitting again on every toggle would subdivide the column until the
-    /// window ran out of room.
+    /// window ran out of room. The renderer redraws the new file by itself;
+    /// only focus moves (FocusFollowsTheOpenedFile).
     #[test]
-    fn opening_a_second_diff_reuses_the_pane_that_is_already_there() {
-        let runner = existing_pane(vec![]);
+    fn opening_another_diff_reuses_the_pane_and_moves_focus_to_it() {
+        let runner = existing_pane(vec![MockProcessRunner::ok()]);
 
         reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
 
-        assert_eq!(runner.flattened_calls().len(), 2, "lookups only");
+        assert_eq!(runner.flattened_calls().len(), 3, "lookups and focus only");
+        assert_focus_moved_to_the_lower_pane(&runner);
+    }
+
+    /// Focus is a convenience: the pane is open and showing the file, so a
+    /// failed move is logged, not reported as a failed open.
+    #[test]
+    fn a_failed_focus_move_still_counts_as_opened() {
+        let runner = existing_pane(vec![MockProcessRunner::fail("no such pane")]);
+
+        assert!(reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).is_ok());
     }
 
     #[test]
@@ -348,6 +389,7 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"%9\n"),
             MockProcessRunner::ok(),
             MockProcessRunner::ok(),
+            MockProcessRunner::ok(),
         ]);
 
         reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
@@ -383,6 +425,7 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"%2 agent_tree\n"),
             MockProcessRunner::ok_with_stdout(b"%9\n"),
             MockProcessRunner::fail("unknown option"),
+            MockProcessRunner::ok(),
             MockProcessRunner::ok(),
         ]);
 
@@ -426,18 +469,23 @@ mod tests {
             calls[3].contains("@dispatch_pane_content") && calls[3].ends_with("editor"),
             "the pane must be marked as running the editor; {calls:?}"
         );
+        assert_focus_moved_to_the_lower_pane(&runner);
     }
 
     /// The pane we created is reused, never split again.
     #[test]
     fn v_with_a_lower_pane_respawns_it_with_the_editor() {
         let wt = worktree_with_file();
-        let runner = existing_pane(vec![MockProcessRunner::ok(), MockProcessRunner::ok()]);
+        let runner = existing_pane(vec![
+            MockProcessRunner::ok(),
+            MockProcessRunner::ok(),
+            MockProcessRunner::ok(),
+        ]);
 
         show_in_editor("%2", wt.path(), Path::new("a.rs"), &editor(), &runner).unwrap();
 
         let calls = runner.flattened_calls();
-        assert_eq!(calls.len(), 4, "{calls:?}");
+        assert_eq!(calls.len(), 5, "{calls:?}");
         assert!(
             calls[2].contains("respawn-pane -k") && calls[2].contains("-t %9"),
             "{calls:?}"
@@ -447,6 +495,7 @@ mod tests {
             calls[3].contains("@dispatch_pane_content") && calls[3].ends_with("editor"),
             "{calls:?}"
         );
+        assert_focus_moved_to_the_lower_pane(&runner);
     }
 
     #[test]
@@ -461,7 +510,7 @@ mod tests {
         assert!(runner.flattened_calls().is_empty());
     }
 
-    // ---- KeepEditorPaneWithPossiblyUnsavedWork ----------------------------
+    // ---- ReplaceAgentTreeEditorWithDiff / EditorPaneOutlivesItsTree ------
 
     fn assert_no_pane_mutation(runner: &MockProcessRunner) {
         let calls = runner.flattened_calls();
@@ -473,19 +522,38 @@ mod tests {
         );
     }
 
+    /// Opening a diff while the editor shows replaces the editor in the same
+    /// pane: the user chose that over "quit the editor first" (task 98620).
     #[test]
-    fn opening_a_diff_while_the_editor_shows_is_refused_and_leaves_the_pane() {
-        let runner = existing_editor_pane(vec![]);
+    fn opening_a_diff_while_the_editor_shows_replaces_it_with_the_diff() {
+        let runner = existing_editor_pane(vec![
+            MockProcessRunner::ok(),
+            MockProcessRunner::ok(),
+            MockProcessRunner::ok(),
+        ]);
 
-        let err =
-            reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap_err();
+        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
 
-        assert_eq!(format!("{err}"), QUIT_EDITOR_FIRST);
-        assert_no_pane_mutation(&runner);
+        let calls = runner.flattened_calls();
+        assert!(
+            calls[2].contains("respawn-pane -k")
+                && calls[2].contains("-t %9")
+                && calls[2].contains("agent-diff 42"),
+            "{calls:?}"
+        );
+        assert!(
+            calls[3].contains("@dispatch_pane_content") && calls[3].ends_with("diff"),
+            "the pane must be re-marked as running the diff; {calls:?}"
+        );
+        assert!(
+            !calls.iter().any(|c| c.contains("split-window")),
+            "{calls:?}"
+        );
+        assert_focus_moved_to_the_lower_pane(&runner);
     }
 
-    /// Space closing the last diff, `a`, `q` and hiding the tree all empty the
-    /// set; the editor must survive each.
+    /// Space closing the last diff, `q` and hiding the tree all empty the
+    /// set; the editor must survive each (EditorPaneOutlivesItsTree).
     #[test]
     fn emptying_the_open_set_while_the_editor_shows_does_not_kill_it() {
         let runner = existing_editor_pane(vec![]);
@@ -495,16 +563,25 @@ mod tests {
         assert_no_pane_mutation(&runner);
     }
 
+    /// `v` while the editor shows another file replaces it.
     #[test]
-    fn v_while_the_editor_shows_is_refused_and_leaves_the_pane() {
+    fn v_while_the_editor_shows_replaces_it_with_the_new_file() {
         let wt = worktree_with_file();
-        let runner = existing_editor_pane(vec![]);
+        let runner = existing_editor_pane(vec![
+            MockProcessRunner::ok(),
+            MockProcessRunner::ok(),
+            MockProcessRunner::ok(),
+        ]);
 
-        let err =
-            show_in_editor("%2", wt.path(), Path::new("a.rs"), &editor(), &runner).unwrap_err();
+        show_in_editor("%2", wt.path(), Path::new("a.rs"), &editor(), &runner).unwrap();
 
-        assert_eq!(format!("{err}"), QUIT_EDITOR_FIRST);
-        assert_no_pane_mutation(&runner);
+        let calls = runner.flattened_calls();
+        assert!(
+            calls[2].contains("respawn-pane -k")
+                && calls[2].ends_with(&format!("vim -p {}", wt.path().join("a.rs").display())),
+            "{calls:?}"
+        );
+        assert_focus_moved_to_the_lower_pane(&runner);
     }
 
     /// The flag used to live in the renderer's memory: a restarted renderer

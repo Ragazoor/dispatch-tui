@@ -1,17 +1,43 @@
-//! Key handling: the all-files key, jump motions and the keybinding table.
+//! Key handling: one open file at a time, jump motions and the keybinding table.
 
 use super::*;
 
-// ---- the all-files key ------------------------------------------------
+// ---- one file at a time ----------------------------------------------
 
+/// OneOpenFileAtATime: Space on a second file replaces the first rather
+/// than adding to it, and never asks for the first to be closed.
 #[test]
-fn a_opens_every_changed_files_diff() {
-    let mut rig = KeyRig::new(&three_node_changes());
-
-    assert_eq!(rig.press(KeyCode::Char('a')), KeyAction::DiffSetChanged);
-
+fn space_on_another_file_replaces_the_open_one() {
+    let mut rig = KeyRig::new(&[modified("a.rs"), modified("b.rs")]);
+    rig.press(KeyCode::Char('j'));
+    assert_eq!(rig.press(KeyCode::Char(' ')), KeyAction::DiffSetChanged);
     assert!(rig.state.is_diff_open(Path::new("a.rs")));
-    assert!(rig.state.is_diff_open(Path::new("src/lib.rs")));
+
+    rig.press(KeyCode::Char('j'));
+    assert_eq!(rig.press(KeyCode::Char(' ')), KeyAction::DiffSetChanged);
+
+    let open: Vec<&Path> = rig.state.open_diffs().iter().map(|p| p.as_path()).collect();
+    assert_eq!(open, vec![Path::new("b.rs")]);
+}
+
+/// CloseAgentTreeFileDiff: Space on the file that is open closes it.
+#[test]
+fn space_on_the_open_file_closes_it() {
+    let mut rig = KeyRig::new(&[modified("a.rs"), modified("b.rs")]);
+    rig.press(KeyCode::Char('j'));
+    rig.press(KeyCode::Char(' '));
+
+    assert_eq!(rig.press(KeyCode::Char(' ')), KeyAction::DiffSetChanged);
+    assert!(rig.state.open_diffs().is_empty());
+}
+
+/// The all-files key is gone: `a` opens nothing and records nothing.
+#[test]
+fn a_no_longer_opens_anything() {
+    let mut rig = KeyRig::new(&three_node_changes());
+    assert_eq!(rig.press(KeyCode::Char('a')), KeyAction::Continue);
+    assert!(rig.state.open_diffs().is_empty());
+    assert!(rig.state.usage.is_empty(), "{:?}", rig.state.usage);
 }
 
 /// MergedDirectoryChainRows: merging shortens what is drawn, never what is
@@ -31,21 +57,6 @@ fn opening_a_file_under_a_merged_row_records_its_whole_relative_path() {
         rig.state.is_diff_open(Path::new("a/b/c/d.rs")),
         "open set: {:?}",
         rig.state.open_diffs()
-    );
-}
-
-/// The bulk form walks the tree rather than the selection, so it is the
-/// other place a merged name could truncate a path.
-#[test]
-fn a_records_whole_paths_through_merged_rows() {
-    let mut rig = KeyRig::new(&[modified("a/b/c/d.rs"), modified("src/x.rs")]);
-    rig.press(KeyCode::Char('a'));
-
-    let open: Vec<&Path> = rig.state.open_diffs().iter().map(|p| p.as_path()).collect();
-    assert_eq!(
-        open,
-        vec![Path::new("a/b/c/d.rs"), Path::new("src/x.rs")],
-        "merged rows must not shorten the paths beneath them"
     );
 }
 
@@ -75,99 +86,20 @@ fn a_file_under_a_merged_row_still_gets_its_open_marker() {
     );
 }
 
-/// What the tree publishes to the diff pane: the open paths in ROW order,
-/// which is not their sorted order. `z.rs` is a top-level file so its row
-/// is above `src/lib.rs` (`RowsPutAFoldersOwnFilesFirst`), and the diff
-/// pane renders what it is handed — it cannot re-derive this.
+/// A path the tree no longer knows about is still published: the open set
+/// outlives its files on purpose (`OpenDiffPathsMaySurviveTheirFiles`), and
+/// dropping it here would silently un-open a file the user opened.
 #[test]
-fn the_published_open_set_is_in_row_order_not_path_order() {
-    let mut rig = KeyRig::new(&[modified("a.rs"), modified("z.rs"), modified("src/lib.rs")]);
-    rig.press(KeyCode::Char('a'));
-
-    assert_eq!(
-        rig.state.open_diffs_in_tree_order(&rig.tree),
-        vec![
-            PathBuf::from("a.rs"),
-            PathBuf::from("z.rs"),
-            PathBuf::from("src/lib.rs"),
-        ]
-    );
-}
-
-/// A path the tree no longer knows about is appended, not dropped: the open
-/// set outlives its files on purpose (`OpenDiffPathsMaySurviveTheirFiles`),
-/// and dropping it here would silently un-open a file the user opened.
-#[test]
-fn a_published_path_the_tree_no_longer_knows_is_kept_at_the_end() {
+fn a_published_path_the_tree_no_longer_knows_is_kept() {
     let mut rig = KeyRig::new(&[modified("a.rs"), modified("src/lib.rs")]);
-    rig.press(KeyCode::Char('a'));
+    rig.press(KeyCode::Char('j'));
+    rig.press(KeyCode::Char(' '));
     rig.refresh(&[modified("src/lib.rs")]);
 
     assert_eq!(
         rig.state.open_diffs_in_tree_order(&rig.tree),
-        vec![PathBuf::from("src/lib.rs"), PathBuf::from("a.rs")],
-        "the reverted file keeps its place in the set, at the end"
+        vec![PathBuf::from("a.rs")],
     );
-}
-
-/// Directories are routes to files, not things with contents, so `a` must
-/// not put one in the set — see OnlyFilesOpenDiffs in the spec.
-#[test]
-fn a_opens_no_directories() {
-    let mut rig = KeyRig::new(&three_node_changes());
-    rig.press(KeyCode::Char('a'));
-    assert!(!rig.state.is_diff_open(Path::new("src")));
-}
-
-/// Direction is decided by the SET, not by a remembered mode: one press
-/// always empties a non-empty set, however it came to be non-empty.
-#[test]
-fn a_closes_everything_when_anything_is_open() {
-    let mut rig = KeyRig::new(&three_node_changes());
-    rig.press(KeyCode::Char('a'));
-    assert!(!rig.state.open_diffs().is_empty());
-
-    assert_eq!(rig.press(KeyCode::Char('a')), KeyAction::DiffSetChanged);
-    assert!(rig.state.open_diffs().is_empty());
-}
-
-/// Even one file opened with Space is enough to make `a` mean "close",
-/// because the set is what decides and the set is what the user can see.
-#[test]
-fn a_closes_a_set_that_space_filled() {
-    let mut rig = KeyRig::new(&three_node_changes());
-    rig.press(KeyCode::Char('j'));
-    rig.press(KeyCode::Char(' '));
-    assert_eq!(rig.state.open_diffs().len(), 1);
-
-    rig.press(KeyCode::Char('a'));
-    assert!(rig.state.open_diffs().is_empty());
-}
-
-/// `a` does not dispatch on the selection at all, so it works with the
-/// cursor parked on a directory or on nothing.
-#[test]
-fn a_acts_on_the_whole_tree_whatever_the_cursor_is_on() {
-    let mut rig = KeyRig::new(&three_node_changes());
-    assert!(rig.selected().is_empty());
-    rig.press(KeyCode::Char('a'));
-    assert!(rig.state.is_diff_open(Path::new("src/lib.rs")));
-
-    let mut rig = KeyRig::new(&three_node_changes());
-    rig.press(KeyCode::Char('j'));
-    rig.press(KeyCode::Char('j'));
-    rig.press(KeyCode::Char('j'));
-    assert_eq!(rig.selected(), vec!["src".to_string()]);
-    rig.press(KeyCode::Char('a'));
-    assert!(rig.state.is_diff_open(Path::new("a.rs")));
-}
-
-/// On an empty tree there is nothing to open, and the press is harmless.
-#[test]
-fn a_on_an_empty_tree_opens_nothing() {
-    let mut rig = KeyRig::new(&[]);
-    assert_eq!(rig.press(KeyCode::Char('a')), KeyAction::DiffSetChanged);
-    assert!(rig.state.open_diffs().is_empty());
 }
 
 /// `l`/`Right` are expansion keys only — they must NOT have picked up the
@@ -523,7 +455,11 @@ fn v_on_a_file_asks_for_the_editor_and_elsewhere_does_nothing() {
         rig.press(KeyCode::Char('v')),
         KeyAction::OpenInEditor(std::path::PathBuf::from("a.rs"))
     );
-    assert_eq!(rig.state.open_diffs().len(), 0, "the open set is untouched");
+    assert_eq!(
+        rig.state.open_diffs().len(),
+        0,
+        "the loop empties the set only once the editor opens"
+    );
 
     let mut empty = KeyRig::new(&[modified("a.rs")]);
     assert_eq!(empty.press(KeyCode::Char('v')), KeyAction::Continue);

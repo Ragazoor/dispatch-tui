@@ -214,7 +214,7 @@ fn a_key_between_the_two_gs_disarms_the_chord() {
 
 // -- the pane has no toggle of its own ----------------------------------
 
-/// Space, Enter and the all-files key do nothing here. The open set is
+/// Space, Enter and `a` (once the tree's all-files key) do nothing here. The open set is
 /// decided in the tree and only in the tree, which is what makes one file
 /// have one open state — see DiffPaneHasNoToggleOfItsOwn in the spec.
 #[test]

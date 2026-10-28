@@ -564,7 +564,9 @@ fn closing_a_diff_removes_its_marker() {
 #[test]
 fn a_directory_row_carries_no_marker_and_no_blank() {
     let mut rig = KeyRig::new(&three_node_changes());
-    rig.press(KeyCode::Char('a'));
+    rig.state
+        .open_diffs
+        .insert(std::path::PathBuf::from("src/lib.rs"));
 
     let out = render_rig(&mut rig);
     assert!(

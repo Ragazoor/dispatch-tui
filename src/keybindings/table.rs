@@ -1185,14 +1185,6 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeTree,
-        &["a"],
-        None,
-        "toggle_all_diffs",
-        "Open the diff of every changed file, or close them all when any is open",
-        None,
-    ),
-    row(
-        N::AgentTreeTree,
         &["j", "Down", "k", "Up"],
         None,
         "navigate_row",
@@ -1289,14 +1281,6 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     row(
         N::AgentTreeCommits,
-        &["a"],
-        None,
-        "toggle_all_diffs",
-        "Open the diff of every changed file, or close them all when any is open",
-        None,
-    ),
-    row(
-        N::AgentTreeCommits,
         &["j", "Down", "k", "Up"],
         None,
         "navigate_row",
@@ -1349,14 +1333,6 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         None,
         "toggle_focus",
         "Flip back to browsing (file tree and Commits)",
-        None,
-    ),
-    row(
-        N::AgentTreeAgents,
-        &["a"],
-        None,
-        "toggle_all_diffs",
-        "Open the diff of every changed file, or close them all when any is open",
         None,
     ),
     row(

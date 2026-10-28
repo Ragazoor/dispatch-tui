@@ -146,14 +146,6 @@ fn space_with_the_agents_section_focused_never_toggles_a_diff() {
 }
 
 #[test]
-fn a_still_toggles_every_diff_with_the_agents_section_focused() {
-    let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, false)]);
-    rig.state.focus = Focus::Agents;
-    assert_eq!(rig.press(KeyCode::Char('a')), KeyAction::DiffSetChanged);
-    assert!(rig.state.is_diff_open(Path::new("a.rs")));
-}
-
-#[test]
 fn q_still_exits_with_the_agents_section_focused() {
     let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, false)]);
     rig.state.focus = Focus::Agents;

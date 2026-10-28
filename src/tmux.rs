@@ -1195,8 +1195,8 @@ pub fn split_window_below_running(
 /// in `cwd`. `-k` kills the pane's current process first.
 ///
 /// The pane object itself survives, which is what makes this the way the editor
-/// pane shows a second file: it keeps its geometry and its pane options, so
-/// nothing has to be re-marked, and focus is untouched. Sibling of
+/// pane shows a second file: it keeps its geometry and its role marker, and
+/// focus is untouched. Sibling of
 /// [`respawn_pane`], which respawns a plain shell in place.
 pub fn respawn_pane_running(
     pane_id: &str,
@@ -1242,9 +1242,10 @@ pub const PANE_ROLE_DIFF: &str = "diff";
 /// Pane option recording what the diff-role pane runs, beside
 /// [`PANE_ROLE_OPTION`]: [`PANE_CONTENT_DIFF`] or [`PANE_CONTENT_EDITOR`]. Held
 /// on the pane rather than in a renderer's memory so a renderer that restarts
-/// while an editor is open still knows the pane may hold unsaved work. A pane
-/// without it counts as the diff. See docs/specs/agent-tree.allium's
-/// `KeepEditorPaneWithPossiblyUnsavedWork`.
+/// while an editor is open still knows the pane may hold unsaved work, and
+/// that opening a diff must respawn it. A pane without it counts as the diff.
+/// See docs/specs/agent-tree.allium's `EditorPaneOutlivesItsTree` and
+/// `ReplaceAgentTreeEditorWithDiff`.
 pub const PANE_CONTENT_OPTION: &str = "@dispatch_pane_content";
 
 /// [`PANE_CONTENT_OPTION`] value for a pane running the diff renderer.

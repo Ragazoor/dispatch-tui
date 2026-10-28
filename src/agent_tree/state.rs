@@ -120,14 +120,14 @@ pub struct RenderState {
     /// and a failed diff-pane split. While it is set the border is drawn red —
     /// see `AgentTreeNoticeRedensBorder` in docs/specs/agent-tree.allium.
     pub notice: Option<Notice>,
-    /// Which files' diffs the user has opened, as paths relative to the pane
-    /// root.
+    /// Which file's diff the user has opened, as a path relative to the pane
+    /// root. Never more than one (`OneOpenFileAtATime` in
+    /// docs/specs/agent-tree.allium): opening a file replaces the open one.
+    /// It stays a set because the diff pane reads the open set as a list.
     ///
     /// The only state here the user builds up rather than git supplying:
     /// everything else the pane shows is re-derived from a git query every
-    /// tick. A set rather than a cursor, because the diff pane shows every open
-    /// file at once — which is what makes the all-files key a bulk version of
-    /// the single-file toggle rather than a second mode.
+    /// tick.
     ///
     /// It holds PATHS, not nodes, so it survives a refresh that rebuilds every
     /// node. A path whose file git stops reporting simply stops matching
@@ -231,27 +231,14 @@ impl RenderState {
         self.open_diffs.contains(path)
     }
 
-    /// Open `path`'s diff if it is closed, close it if it is open.
+    /// Close `path`'s diff if it is the open one; otherwise open it in place
+    /// of whatever was open (`OpenAgentTreeFileDiff`, `CloseAgentTreeFileDiff`).
     pub(super) fn toggle_diff(&mut self, path: PathBuf) {
-        if !self.open_diffs.remove(&path) {
+        let was_open = self.open_diffs.contains(&path);
+        self.open_diffs.clear();
+        if !was_open {
             self.open_diffs.insert(path);
         }
-    }
-
-    /// Open every changed file's diff, or close everything if anything is
-    /// already open.
-    ///
-    /// Direction is decided by the set rather than by a remembered mode, so one
-    /// press always has one meaning for the state the user can see. The paths
-    /// come from the last rendered tree — the one the user is looking at —
-    /// which is also why the key still works while a notice is showing and the
-    /// pane is holding its last good answer.
-    pub(super) fn toggle_all_diffs(&mut self, root: &TreeNode) {
-        if !self.open_diffs.is_empty() {
-            self.open_diffs.clear();
-            return;
-        }
-        self.open_diffs = collect_file_paths(root);
     }
 
     /// Clear a notice left by a failed git query, leaving a diff-open notice
@@ -429,17 +416,4 @@ impl Default for RenderState {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Every FILE path in the tree, relative to the root, as the open set holds
-/// them.
-///
-/// The walk itself belongs to `crate::agent_tree::model`, where the tree does — the
-/// diff pane needs the same walk's ORDER, so one home for it is the point (see
-/// `file_paths_in_tree_order`). The set here keeps only membership: the open
-/// set is asked "is this path open", never "what came first".
-fn collect_file_paths(root: &TreeNode) -> BTreeSet<PathBuf> {
-    crate::agent_tree::model::file_paths_in_tree_order(root)
-        .into_iter()
-        .collect()
 }
