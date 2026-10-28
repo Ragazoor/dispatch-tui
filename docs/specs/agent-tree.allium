@@ -2902,8 +2902,9 @@ surface AgentTreeCompanionPane {
         -- same epic. The header is the board's epic header, drawn the same
         -- way: `── #<epic id> <breadcrumb> ───`, the rule and id muted and the
         -- breadcrumb purple, filling the pane's width. The id is the group's
-        -- own epic; the breadcrumb is its ancestor titles, root first, joined
-        -- with " › ", each segment truncated fairly when the pane is narrow.
+        -- own epic; the breadcrumb is its ancestor titles, root first and its
+        -- own title last, joined with " › ", each segment truncated fairly
+        -- when the pane is narrow.
         --
         -- The agents with no epic come last, under the board's dashed rule
         -- (`╌╌ · ╌╌╌`, muted). The rule is drawn only where the epic groups
