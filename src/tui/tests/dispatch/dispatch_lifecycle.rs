@@ -468,3 +468,71 @@ fn manual_move_review_to_running_seeds_last_pre_tool_use_at() {
         "no SeedActivity in {cmds:?}",
     );
 }
+
+/// A resume the board refuses never vanishes without a status message.
+fn detached_running_app() -> App {
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
+    app.set_local_host_id("this-machine".to_string());
+    app.board.tasks[0].tmux_window = None;
+    app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
+    app.board.tasks[0].host = Some("this-machine".to_string());
+    app
+}
+
+fn resume_requested(app: &mut App, id: i64) -> Vec<Command> {
+    app.update(Message::Task(TaskMessage::ResumeRequested {
+        id: TaskId(id),
+        message: None,
+    }))
+}
+
+#[test]
+fn resume_requested_for_a_task_left_off_the_board_says_so() {
+    let mut app = detached_running_app();
+
+    let cmds = resume_requested(&mut app, 99);
+
+    assert!(cmds.is_empty());
+    assert!(app
+        .status_message()
+        .is_some_and(|m| m.contains("not on the board")));
+}
+
+#[test]
+fn resume_requested_for_a_task_that_changed_status_says_so() {
+    let mut app = detached_running_app();
+    app.board.tasks[0].status = TaskStatus::Backlog;
+
+    let cmds = resume_requested(&mut app, 4);
+
+    assert!(cmds.is_empty());
+    assert!(app
+        .status_message()
+        .is_some_and(|m| m.contains("no resumable session")));
+}
+
+#[test]
+fn resume_requested_for_a_task_that_gained_a_window_says_so() {
+    let mut app = detached_running_app();
+    app.board.tasks[0].tmux_window = Some(crate::models::TmuxWindow::for_task(TaskId(4)));
+
+    let cmds = resume_requested(&mut app, 4);
+
+    assert!(cmds.is_empty());
+    assert!(app
+        .status_message()
+        .is_some_and(|m| m.contains("already has an agent")));
+}
+
+#[test]
+fn resume_requested_for_a_task_without_a_worktree_says_so() {
+    let mut app = detached_running_app();
+    app.board.tasks[0].worktree = None;
+
+    let cmds = resume_requested(&mut app, 4);
+
+    assert!(cmds.is_empty());
+    assert!(app
+        .status_message()
+        .is_some_and(|m| m.contains("no worktree")));
+}

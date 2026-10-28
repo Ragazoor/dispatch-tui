@@ -123,3 +123,17 @@ async fn resume_task_refuses_an_unknown_task() {
 
     assert!(is_error(&resp));
 }
+
+#[tokio::test]
+async fn resume_task_refuses_a_task_whose_worktree_is_on_another_machine() {
+    let (state, mut rx) = test_state_with_notify().await;
+    let id = create_detached_task(&state).await;
+    let patch = crate::store::TaskPatch::new().host(Some("other-machine"));
+    state.db_write().patch_task(id, &patch).await.unwrap();
+
+    let resp = resume(&state, json!({ "task_id": id.0 })).await;
+
+    let msg = error_message(&resp);
+    assert!(msg.contains("another machine"), "{}", msg);
+    assert!(rx.try_recv().is_err(), "a refusal must not reach the board");
+}

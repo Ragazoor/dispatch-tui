@@ -109,6 +109,9 @@ pub struct McpState {
     /// Dispatch data directory (where the store's local files live). Trajectory files are
     /// written here under `trajectories/<task_id>.jsonl`.
     pub data_dir: std::path::PathBuf,
+    /// This install's host id (`HostStore::host_id`): what `resume_task`
+    /// compares a task's `host` against (`Task::is_locally_owned`).
+    pub(crate) host_id: String,
     /// How long `dispatch_task` waits on its request — [`DISPATCH_TASK_WAIT_CAP`]
     /// outside tests, which shorten it to drive the pending answer.
     pub(crate) dispatch_task_wait_cap: std::time::Duration,
@@ -167,6 +170,7 @@ impl McpState {
         // Narrow the write-capable dependency handle to the read-only surface
         // consumers are allowed to touch. Mutations go through the services above.
         let db: Arc<dyn store::TaskReadStore> = deps.db.clone();
+        let host_id = deps.db.host_id().to_string();
         Self {
             db,
             task_svc,
@@ -177,6 +181,7 @@ impl McpState {
             notify_tx,
             embedding_service: deps.embedding_service,
             data_dir: deps.data_dir,
+            host_id,
             dispatch_task_wait_cap: DISPATCH_TASK_WAIT_CAP,
             wrap_up_wait_cap: WRAP_UP_WAIT_CAP,
             test_hooks: TestHooks {

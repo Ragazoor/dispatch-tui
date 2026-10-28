@@ -32,7 +32,7 @@ pub(crate) async fn handle_resume_task(
         Ok(t) => t,
         Err(e) => return service_err_to_response(id, e),
     };
-    if let Some(why) = refusal(&task) {
+    if let Some(why) = refusal(&task, &state.host_id) {
         return JsonRpcResponse::err(id, INVALID_PARAMS, why);
     }
     let Some(tx) = &state.notify_tx else {
@@ -65,9 +65,9 @@ pub(crate) async fn handle_resume_task(
 }
 
 /// Why `task` has no session to resume, or `None` when it has one. Mirrors the
-/// board's own `ResumeTask` preconditions that the row shows (the host gate is
-/// the board's: only it knows this install's host id).
-fn refusal(task: &Task) -> Option<String> {
+/// board's own `ResumeTask` preconditions, host gate included: `host_id` is
+/// this install's own id.
+fn refusal(task: &Task, host_id: &str) -> Option<String> {
     let n = task.id.0;
     if !matches!(
         task.status,
@@ -84,6 +84,12 @@ fn refusal(task: &Task) -> Option<String> {
             "task #{n} has no resumable session: it has no worktree, so there is no \
              conversation to continue. Set it back to backlog with update_tasks and \
              dispatch_task it to start a new agent."
+        ));
+    }
+    if !task.is_locally_owned(Some(host_id)) {
+        return Some(format!(
+            "task #{n}'s worktree is on another machine, so this machine cannot resume \
+             it; resume it from the machine that holds the worktree."
         ));
     }
     if task.tmux_window.is_some() {

@@ -649,43 +649,49 @@ impl App {
         message: Option<String>,
     ) -> Vec<Command> {
         let local_host_id = self.local_host_id().map(str::to_string);
-        if let Some(task) = self.board.find_task(id) {
-            if !matches!(
-                task.status,
-                TaskStatus::Running | TaskStatus::Review | TaskStatus::Done
-            ) {
-                return vec![];
-            }
-            // ResumeTask's `requires: task.is_locally_owned`
-            // (docs/specs/dispatch.allium): gated here too, not only by the
-            // one caller that currently reaches this handler
-            // (`run_activation`'s priority-0 branch) — a handler that
-            // acts on `worktree`/`tmux_window` owes its own check, the same
-            // way `handle_retry_resume`/`handle_retry_fresh` do, so a future
-            // second caller cannot silently bypass the gate.
-            //
-            // Silent, unlike its three siblings' shared
-            // `foreign_worktree_refusal` message: the only caller that
-            // reaches here (`run_activation`'s priority-0 branch) has
-            // already refused with that message, and setting a second status
-            // would overwrite the one the operator is reading. A future
-            // caller that is NOT already gated upstream owes the message —
-            // add it here rather than assuming the silence was the point.
-            if !task.is_locally_owned(local_host_id.as_deref()) {
-                return vec![];
-            }
-            if task.worktree.is_some() && task.tmux_window.is_none() {
-                vec![Command::Task(crate::tui::commands::TaskCommand::Resume {
-                    id: task.id,
-                    worktree: task.worktree.clone(),
-                    message,
-                })]
-            } else {
-                vec![]
-            }
-        } else {
-            vec![]
+        let Some(task) = self.board.find_task(id) else {
+            self.status.set(format!(
+                "Cannot resume: task {id} is not on the board any more"
+            ));
+            return vec![];
+        };
+        if !matches!(
+            task.status,
+            TaskStatus::Running | TaskStatus::Review | TaskStatus::Done
+        ) {
+            let msg = format!(
+                "Cannot resume: task {id} has no resumable session (it is {})",
+                task.status
+            );
+            self.status.set(msg);
+            return vec![];
         }
+        // ResumeTask's `requires: task.is_locally_owned`
+        // (docs/specs/dispatch.allium): gated here too, not only by the
+        // callers that reach this handler — a handler that acts on
+        // `worktree`/`tmux_window` owes its own check, the same way
+        // `handle_retry_resume`/`handle_retry_fresh` do. The message is the one
+        // `run_activation` already set, so repeating it overwrites nothing.
+        if !task.is_locally_owned(local_host_id.as_deref()) {
+            self.status
+                .set(crate::tui::foreign_worktree_refusal(Some("resume")));
+            return vec![];
+        }
+        if task.worktree.is_none() {
+            self.status
+                .set("Cannot resume: task has no worktree".to_string());
+            return vec![];
+        }
+        if task.tmux_window.is_some() {
+            self.status
+                .set("Cannot resume: task already has an agent attached".to_string());
+            return vec![];
+        }
+        vec![Command::Task(crate::tui::commands::TaskCommand::Resume {
+            id: task.id,
+            worktree: task.worktree.clone(),
+            message,
+        })]
     }
 
     pub(in crate::tui) fn handle_resumed(
