@@ -415,8 +415,8 @@ pub enum DiffKeyAction {
     /// Leave the loop, which exits the process and so closes the tmux pane.
     ///
     /// The open set is deliberately NOT cleared on the way out: the user closed
-    /// this pane, not their selection, and the next toggle in the tree brings
-    /// it back with everything still open. See SplitAgentTreeDiffPane in
+    /// this pane, not their selection; the file stays marked open in the
+    /// tree. See SplitAgentTreeDiffPane in
     /// docs/specs/agent-tree.allium.
     Exit,
 }
@@ -425,8 +425,7 @@ pub enum DiffKeyAction {
 ///
 /// The same vocabulary the tree pane uses for the same motions, so moving
 /// between the two panes does not mean changing keyboards. What it does NOT
-/// have is any way to open or close a file — Space, Enter and the all-files key
-/// do nothing here, because the open set is decided in the tree and only in the
+/// have is any way to open or close a file — Space and Enter do nothing here, because the open set is decided in the tree and only in the
 /// tree (`DiffPaneHasNoToggleOfItsOwn`).
 pub fn handle_key(state: &mut DiffState, line_count: usize, key: KeyEvent) -> DiffKeyAction {
     // Any key acknowledges a notice, exactly as in the tree pane: the next

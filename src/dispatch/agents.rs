@@ -328,9 +328,11 @@ fn discard_agent_tree_panes(
         }
     }
 
-    // No diff pane means nothing was open, so there is no set to clear and no
-    // reason to pay a `show-options` round-trip resolving the worktree. This is
-    // the common case: most toggles happen with no diff open.
+    // No diff pane usually means nothing was open, so skip the `show-options`
+    // round-trip resolving the worktree. This is the common case: most toggles
+    // happen with no diff open. A file can still be open after the user killed
+    // the diff pane by hand; that set is left behind, and the next tree clears
+    // it on start (`agent_tree::run::run`), so nothing ever reads it.
     if !had_diff_pane {
         return tree_result;
     }

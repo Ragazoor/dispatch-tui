@@ -1380,7 +1380,7 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &["q", "Ctrl+C"],
         None,
         "exit_pane",
-        "Close the pane; your open files stay open and the next toggle in the tree brings it back",
+        "Close the pane; the file stays marked open in the tree, and Space there closes it",
         None,
     ),
     row(

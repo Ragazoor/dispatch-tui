@@ -1685,9 +1685,9 @@ rule CloseAgentTreeFileDiff {
 }
 
 rule SplitAgentTreeDiffPane {
-    -- The open set changed to something non-empty, or the user asked for the
-    -- editor, and there is no lower pane to show it in: split one across the
-    -- bottom of the window.
+    -- The open set changed to something non-empty and there is no lower pane
+    -- to show it in: split one across the bottom of the window. (The editor
+    -- splits its own the same way: OpenAgentTreeFileInEditor.)
     when: AgentTreeDiffOpenSetChanged(pane)
 
     requires: not pane.open_diff_paths.is_empty()
@@ -1732,7 +1732,7 @@ rule SplitAgentTreeDiffPane {
         -- one-handed loop; that loop mattered while many files could be open
         -- at once, and one file at a time removed it (task 98620).
         --
-        -- == Why this is a rule and not an ensures on the four toggles ==
+        -- == Why this is a rule and not an ensures on the two toggles ==
         -- A user can kill the lower pane themselves, with tmux or by pressing
         -- the exit key inside the diff (ExitAgentTreeDiffRenderer) or by
         -- quitting the editor, while the open set is still non-empty. Routing
@@ -1795,6 +1795,11 @@ rule OpenAgentTreeFileInEditor {
 
     requires: pane.focus = tree
     requires: node.kind = file
+    -- The editor needs the working-tree file: file_exists(node) holds when
+    -- root/node.path names a file on disk at the moment of the press. A
+    -- missing one is refused with AgentTreeDiffPaneOpenFailed and nothing
+    -- else changes (the guidance below).
+    requires: file_exists(node)
 
     -- Splits the lower pane when there is none (same geometry and ownership as
     -- SplitAgentTreeDiffPane); otherwise replaces what the pane we own is
@@ -1932,16 +1937,17 @@ rule AgentTreeDiffPaneFailureIsVisible {
         -- not take the tree with it. pane.status = shown above is that
         -- guarantee, not a state change.
         --
-        -- Two failures, not the four its predecessor covered. The deleted-file
-        -- refusal and the file-is-gone case are gone with the editor, because a
-        -- diff needs no file on disk; the out-of-root case is gone because no
-        -- path is handed to anything that resolves it — the diff pane is given
-        -- the task, and re-derives every path from git itself.
+        -- A diff needs no file on disk, so opening one is never refused for a
+        -- missing file; the out-of-root case is gone because no path is
+        -- handed to anything that resolves it — the diff pane is given the
+        -- task, and re-derives every path from git itself. The editor (`v`)
+        -- does need the file, and its refusal of a deleted one is raised
+        -- through this rule too (OpenAgentTreeFileInEditor).
         --
         -- The open set is left ALONE by a failed split. The user asked for a
         -- file to be open and it is open; what failed is showing it. The next
         -- toggle retries the split (SplitAgentTreeDiffPane) rather than
-        -- requiring the user to re-open everything.
+        -- requiring the user to open it again.
 }
 
 rule RefreshAgentTreeDiff {
@@ -2048,13 +2054,13 @@ rule RefreshAgentTreeDiff {
         -- be closed. See OpenDiffPathsMaySurviveTheirFiles.
         --
         -- == Only re-read the diffs when the answer changes ==
-        -- Fetching every open file's contents is the expensive part, and the
+        -- Fetching the open file's contents is the expensive part, and the
         -- tick would otherwise pay it once a second forever. So the pass first
         -- asks for the open paths' line counts — one command git answers from
         -- the index without materialising a patch — and re-reads the contents
         -- only when that answer, the open set, or the selected source has
         -- moved since the last pass. The steady-state cost of the poll is
-        -- therefore a few short git processes however many files are open. A
+        -- therefore a few short git processes. A
         -- selected commit never changes, so with one selected only the open
         -- set or a new selection can trigger a re-read.
         --
@@ -2939,8 +2945,8 @@ surface AgentTreeCompanionPane {
         -- with the same clamp and half-page rules they have in the tree (half
         -- a page is half the section's visible height). h/l and Left/Right do
         -- nothing in either: there is nothing to expand. q and Ctrl-C exit
-        -- the renderer, and `a` still toggles every file diff, from any
-        -- section — both act on the pane as a whole, not on a cursor.
+        -- the renderer from any section — they act on the pane as a whole,
+        -- not on a cursor.
         --
         -- Every key the pane handles, Tab included, still clears a notice
         -- (ClearAgentTreeErrorNotice).
@@ -2950,7 +2956,7 @@ surface AgentTreeCompanionPane {
         -- (keybindings.allium), in three namespaces: agent_tree.tree while the
         -- tree has focus, agent_tree.commits while the commits section does,
         -- and agent_tree.agents while the agents section does. The pane-wide
-        -- keys (q, Ctrl-C, Tab, Shift+Tab, a) are rows of all three, and no key in the
+        -- keys (q, Ctrl-C, Tab, Shift+Tab) are rows of all three, and no key in the
         -- commits namespace means anything new: Space/Enter is select_source
         -- there as it is jump_to_agent in the agents namespace, so focus, not
         -- a new key, decides the meaning. A press is
@@ -3479,10 +3485,10 @@ surface AgentTreeDiffPane {
         --
         -- Wrapping is the tempting alternative and it is worse here, because
         -- the pane is no wider than the window (config.agent_tree_diff_pane_percent sets its height): one
-        -- long line would wrap into many rows and push several files' diffs off
-        -- screen, so the cost of a single minified or generated line would be
-        -- paid by everything the user opened alongside it. Truncation costs
-        -- only the line it happens to. The lower pane spans the window, so
+        -- long line would wrap into many rows and push the rest of the diff
+        -- off screen, so the cost of a single minified or generated line would
+        -- be paid by every line around it. Truncation costs only the line it
+        -- happens to. The lower pane spans the window, so
         -- truncation bites rarely.
 
     @guarantee DiffPaneIsGitDerivedToo

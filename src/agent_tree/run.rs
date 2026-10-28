@@ -69,7 +69,7 @@ struct DiffPaneContext<'a> {
 ///
 /// The open set is left ALONE by a failure here. The user asked for a file to
 /// be open and it is open; what failed is showing it, and the next toggle
-/// retries rather than making them re-open everything.
+/// retries rather than making them open it again.
 ///
 /// Also the teardown path, called with an emptied set — see
 /// [`tear_down_diff_pane`]. Publishing "nothing is open" is exactly what
