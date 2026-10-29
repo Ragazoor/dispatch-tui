@@ -506,6 +506,29 @@ mod repo_sync {
         );
     }
 
+    // A dropped runtime must not leave its detached background tasks running:
+    // the startup smoke test relaunches on the same address and directory.
+    #[tokio::test]
+    async fn dropping_the_runtime_aborts_its_background_tasks() {
+        let db = test_db().await;
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![]))).await;
+
+        let witness = Arc::new(());
+        let held = Arc::clone(&witness);
+        let handle = tokio::spawn(async move {
+            let _held = held;
+            std::future::pending::<()>().await;
+        });
+        rt.abort_on_drop(&handle);
+        tokio::task::yield_now().await;
+        assert_eq!(Arc::strong_count(&witness), 2, "the task is running");
+
+        drop(rt);
+        assert!(handle.await.unwrap_err().is_cancelled());
+        assert_eq!(Arc::strong_count(&witness), 1, "the task was dropped");
+    }
+
     // rule-success.RefreshRepoSyncStateOnStartup + OneRepoSetForDriftMeasurement:
     // one fetching refresh per saved repo path, and no other repository.
     #[tokio::test]

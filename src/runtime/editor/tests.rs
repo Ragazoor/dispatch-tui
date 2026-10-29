@@ -280,6 +280,7 @@ pub(super) fn editor_runtime_on_host(
         budget_snapshot_path: std::path::PathBuf::from("/nonexistent-test-path/rate-limits.json"),
         claude_json_path: std::path::PathBuf::from("/nonexistent-test-path/.claude.json"),
         split_restores: std::sync::Mutex::new(Vec::new()),
+        background_tasks: std::sync::Mutex::new(Vec::new()),
         dispatch_observer: Arc::new(Mutex::new(crate::dispatch::DispatchRequestObserver::new(
             host_id,
         ))),

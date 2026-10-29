@@ -15,6 +15,9 @@ use std::time::{Duration, Instant};
 
 use crate::spacetime::managed_store::{probe_address, ManagedAddressState, SpacetimeStartSpawner};
 
+/// How many free ports `LiveStore::start` tries before giving up.
+const PORT_ATTEMPTS: usize = 5;
+
 /// How long a started store has to answer as a store.
 const START_DEADLINE: Duration = Duration::from_secs(30);
 
@@ -40,8 +43,21 @@ pub(super) struct LiveStore {
 impl LiveStore {
     /// Start a store over `data_dir`, signing with the key pair in
     /// `keys_dir` (created there when absent), and return once it answers as
-    /// a store. Panics on the deadline or when the store exits first.
+    /// a store. Panics on the deadline, or when every port tried was taken.
     pub(super) fn start(data_dir: &Path, keys_dir: &Path, cli_config: &Path) -> LiveStore {
+        // A port picked by binding and dropping can be taken before the store
+        // binds it; the store then exits, and the next attempt picks again.
+        for _ in 0..PORT_ATTEMPTS {
+            if let Some(store) = Self::try_start(data_dir, keys_dir, cli_config) {
+                return store;
+            }
+        }
+        panic!("no store stayed up on a free port in {PORT_ATTEMPTS} attempts");
+    }
+
+    /// One attempt on a fresh port. `None` when the store exited during
+    /// startup; panics on the deadline.
+    fn try_start(data_dir: &Path, keys_dir: &Path, cli_config: &Path) -> Option<LiveStore> {
         let port = std::net::TcpListener::bind("127.0.0.1:0")
             .and_then(|l| l.local_addr())
             .expect("pick a free port")
@@ -57,12 +73,18 @@ impl LiveStore {
             .expect("spawn spacetime start");
         let mut store = LiveStore { child, port };
         let deadline = Instant::now() + START_DEADLINE;
-        while probe_address(&address, Duration::from_secs(2)) != ManagedAddressState::StoreAnswering
-        {
-            assert!(
-                store.child.try_wait().expect("poll the store").is_none(),
-                "the store on port {port} exited during startup"
-            );
+        loop {
+            // Our own child first: a probe that answers while it is dead is
+            // another test's store on this port.
+            if store.child.try_wait().expect("poll the store").is_some() {
+                return None;
+            }
+            if probe_address(&address, Duration::from_secs(2))
+                == ManagedAddressState::StoreAnswering
+                && store.child.try_wait().expect("poll the store").is_none()
+            {
+                return Some(store);
+            }
             assert!(
                 Instant::now() < deadline,
                 "the store never answered on port {port}"
@@ -70,7 +92,6 @@ impl LiveStore {
             // allow-test-sleep: deadline-bounded poll, not a fixed wait.
             std::thread::sleep(Duration::from_millis(50));
         }
-        store
     }
 
     /// `127.0.0.1:<port>`.

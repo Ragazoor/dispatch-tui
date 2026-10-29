@@ -720,6 +720,10 @@ struct TuiRuntime {
     /// pane, and keeping only the newest would quit out from under the older
     /// one.
     split_restores: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// Detached tasks that serve this runtime (the row pump, the shared-store
+    /// connection loop). Aborted when the runtime drops, so a dropped runtime
+    /// cannot keep reconnecting behind a later launch on the same address.
+    background_tasks: std::sync::Mutex<Vec<tokio::task::AbortHandle>>,
     /// Which of this host's `requested` dispatch request rows the reactor has
     /// already handed out (`dispatch_host`). Shared with the row pump, so a
     /// redelivered row is served once.
@@ -929,8 +933,8 @@ impl TuiRuntime {
         // Keep the board redrawing behind the connection, and keep the
         // connection up: the first attempt is already answered (above), so the
         // loop starts from `connected` and only ever handles later drops.
-        drop(self.spawn_row_change_pump(parts.rows.clone()));
-        drop(self.spawn_shared_store_connection(
+        self.abort_on_drop(&self.spawn_row_change_pump(parts.rows.clone()));
+        self.abort_on_drop(&self.spawn_shared_store_connection(
             session,
             sync_store,
             parts.settled_identity.clone(),
@@ -941,6 +945,13 @@ impl TuiRuntime {
         // this feature introduces — one fetch per saved repo path. Fire-and-forget,
         // so a slow or offline network never delays startup.
         drop(self.exec_refresh_all_repo_sync(saved_repo_paths));
+    }
+
+    /// Tie a detached task's life to this runtime: it is aborted on drop.
+    fn abort_on_drop(&self, handle: &tokio::task::JoinHandle<()>) {
+        if let Ok(mut tasks) = self.background_tasks.lock() {
+            tasks.push(handle.abort_handle());
+        }
     }
 
     /// Wire the services, the feed runner and the message channel around an
@@ -996,6 +1007,7 @@ impl TuiRuntime {
             budget_snapshot_path: crate::budget_snapshot_path(),
             claude_json_path: inputs.paths.claude_json_path.clone(),
             split_restores: std::sync::Mutex::new(Vec::new()),
+            background_tasks: std::sync::Mutex::new(Vec::new()),
             dispatch_observer: Arc::new(std::sync::Mutex::new(
                 crate::dispatch::DispatchRequestObserver::new(host_id),
             )),
@@ -1031,6 +1043,19 @@ impl TuiRuntime {
                 )));
                 None
             }
+        }
+    }
+}
+
+impl Drop for TuiRuntime {
+    fn drop(&mut self) {
+        let tasks = self
+            .background_tasks
+            .get_mut()
+            .map(std::mem::take)
+            .unwrap_or_default();
+        for task in tasks {
+            task.abort();
         }
     }
 }
