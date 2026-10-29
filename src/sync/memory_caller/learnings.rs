@@ -228,10 +228,7 @@ impl MemoryReducerCaller {
             let Some(row) = learnings.get(&learning_id).cloned() else {
                 continue;
             };
-            let verdict = match verdict {
-                LearningVerdict::Helped => "helped",
-                LearningVerdict::Wrong => "wrong",
-            };
+            let verdict = verdict.as_str();
             let previous = standing
                 .values()
                 .find(|s| s.task_id == task_id && s.learning_id == learning_id)

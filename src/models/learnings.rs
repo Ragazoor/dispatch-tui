@@ -176,15 +176,23 @@ pub struct Learning {
 pub enum LearningVerdict {
     Helped,
     Wrong,
+    /// Read, and did not fit this task. Counts 0: a signal for measuring the
+    /// store, not a ranking input (`learnings.allium: RateLearningViaMcp`).
+    NotApplicable,
 }
 
 impl LearningVerdict {
-    pub const ALL: &'static [LearningVerdict] = &[LearningVerdict::Helped, LearningVerdict::Wrong];
+    pub const ALL: &'static [LearningVerdict] = &[
+        LearningVerdict::Helped,
+        LearningVerdict::Wrong,
+        LearningVerdict::NotApplicable,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
             LearningVerdict::Helped => "helped",
             LearningVerdict::Wrong => "wrong",
+            LearningVerdict::NotApplicable => "not_applicable",
         }
     }
 
@@ -192,6 +200,7 @@ impl LearningVerdict {
         match s {
             "helped" => Ok(LearningVerdict::Helped),
             "wrong" => Ok(LearningVerdict::Wrong),
+            "not_applicable" => Ok(LearningVerdict::NotApplicable),
             other => Err(format!("unknown verdict: {other}")),
         }
     }
@@ -273,7 +282,7 @@ mod validation_tests {
     fn learning_enum_all_consts_have_every_variant() {
         assert_eq!(LearningKind::ALL.len(), 6);
         assert_eq!(LearningScope::ALL.len(), 4);
-        assert_eq!(LearningVerdict::ALL.len(), 2);
+        assert_eq!(LearningVerdict::ALL.len(), 3);
     }
 
     #[test]
@@ -298,6 +307,11 @@ mod validation_tests {
         assert!(LearningVerdict::parse("bogus").is_err());
         assert_eq!(LearningVerdict::Helped.as_str(), "helped");
         assert_eq!(LearningVerdict::Wrong.as_str(), "wrong");
+        assert_eq!(
+            LearningVerdict::parse("not_applicable").unwrap(),
+            LearningVerdict::NotApplicable
+        );
+        assert_eq!(LearningVerdict::NotApplicable.as_str(), "not_applicable");
     }
 
     #[test]

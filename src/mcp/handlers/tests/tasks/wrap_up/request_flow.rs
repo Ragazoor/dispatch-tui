@@ -535,6 +535,10 @@ async fn wrap_up_pr_response_contains_token_and_no_retro_instruction() {
         text.contains("rate_learning"),
         "PR wrap_up response should nudge rate_learning; got: {text}"
     );
+    assert!(
+        text.contains("not_applicable"),
+        "the nudge should offer the not_applicable verdict; got: {text}"
+    );
 }
 
 // ---------------------------------------------------------------------------

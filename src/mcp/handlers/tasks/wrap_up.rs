@@ -77,7 +77,7 @@ fn wrap_up_complete(
                 WrapUpAction::Pr => {
                     "\n\n\
                     Before you finish: if any knowledge base entry was surfaced to you this task \
-                    and you haven't rated it yet, call `rate_learning` now (helped or wrong). \
+                    and you haven't rated it yet, call `rate_learning` now (helped, wrong, or not_applicable if it did not fit). \
                     You can only rate learnings that were surfaced to you during this session."
                 }
                 WrapUpAction::Done | WrapUpAction::Rebase => "",

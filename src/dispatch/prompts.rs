@@ -613,7 +613,7 @@ pub(super) fn render_validated_knowledge_block(picked: &[&Learning]) -> String {
         "## Validated knowledge for this task\n\n\
 The following knowledge has been validated by previous agents. Apply it where relevant. \
 When you act on an entry, call `rate_learning(learning_id, task_id, verdict)` — `helped` if it \
-applied, `wrong` if it misled you.\n\n",
+applied, `wrong` if it misled you, `not_applicable` if it did not fit this task.\n\n",
     );
     for l in picked {
         out.push_str(&format!(

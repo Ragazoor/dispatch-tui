@@ -26,7 +26,7 @@ use "./core.allium" as core
 --   core/LearningKind     — pitfall | convention | preference |
 --                           tool_recommendation | procedural | landscape
 --   core/LearningStatus   — approved | rejected | archived
---   core/VerdictKind      — helped | wrong
+--   core/VerdictKind      — helped | wrong | not_applicable
 --   core/RetrievalSource  — prompt_injection | procedural | query_learnings
 --   core/Retrieval        — one row per surfacing event of a learning to a task
 
@@ -216,14 +216,15 @@ use "./core.allium" as core
 --   source = query_learnings (see Retrievals & Verdicts below).
 --
 -- rate_learning(learning_id, task_id, verdict)
---   verdict in {helped, wrong}. Callable at any point during a task — typically
---   right after the agent acts on a retrieved learning.
+--   verdict in {helped, wrong, not_applicable}. Callable at any point during a
+--   task — typically right after the agent acts on a retrieved learning, or, for
+--   not_applicable, after it read an injected learning that did not fit.
 --   Requires: a prior core/Retrieval row exists for (task, learning) — the agent
 --             can only rate a learning it was actually surfaced (via prompt
 --             injection or query_learnings).
 --   Applies the verdict as described in Retrievals & Verdicts below
---   (helped → upvote_count + 1; wrong → upvote_count - 1). Neither verdict
---   changes status. A task rates a learning once: a repeat replaces its earlier
+--   (helped → upvote_count + 1; wrong → upvote_count - 1; not_applicable → no
+--   change). No verdict changes status. A task rates a learning once: a repeat replaces its earlier
 --   verdict and moves the score by the difference (see RateLearningViaMcp).
 --
 -- delete_learning(learning_id)
@@ -258,8 +259,8 @@ use "./core.allium" as core
 --
 -- Wrap-up nudge (WrapUpRateLearningNudge): for action = pr, and only that action, the
 -- MCP wrap_up response appends a nudge asking the agent to call rate_learning
--- (helped | wrong) on any learning that was surfaced to it this session but not
--- yet rated. This nudge is unconditional — no config parameter gates it — and it
+-- (helped | wrong | not_applicable) on any learning that was surfaced to it this
+-- session but not yet rated. This nudge is unconditional — no config parameter gates it — and it
 -- says nothing about record_learning. The rebase and done actions append nothing.
 -- The agent may proceed to exit_session without rating anything; it is a nudge,
 -- not a gate.
@@ -308,10 +309,16 @@ use "./core.allium" as core
 -- active pool but ranks lower, and becomes eligible for stale cleanup once its
 -- score is non-positive and it has gone untouched for the configured threshold.
 --
+-- Rule: a `not_applicable` verdict counts 0. It does not touch upvote_count,
+-- last_upvoted_at, updated_at or status, so it neither ranks an entry down nor
+-- keeps a stale one alive. It is stored like any verdict, one per (task,
+-- learning), so a later helped or wrong from the same task replaces it, and it
+-- replacing a helped or wrong moves the score back by that verdict's weight.
+--
 -- Rule: a repeat verdict from the same task on the same learning replaces the
 -- earlier one. The same verdict again changes nothing; helped then wrong moves
--- upvote_count by -2, wrong then helped by +2. last_upvoted_at is set when the
--- standing verdict becomes helped and is not rolled back when it is replaced.
+-- upvote_count by -2, wrong then helped by +2, helped then not_applicable by
+-- -1. last_upvoted_at is set when the standing verdict becomes helped and is not rolled back when it is replaced.
 --
 -- Rule: a verdict is valid only if the same (task_id, learning_id) appears in
 -- at least one prior core/Retrieval row. Verdicts referencing learnings that
@@ -408,7 +415,8 @@ rule AugmentDispatchPromptWithLearnings {
         --
         -- The block's own header owns the rating instruction: it names the full
         -- call ("rate_learning(learning_id, task_id, verdict) — helped if it
-        -- applied, wrong if it misled you"). The shared trailing line therefore
+        -- applied, wrong if it misled you, not_applicable if it did not fit this
+        -- task"). The shared trailing line therefore
         -- does not repeat it. That split is not arbitrary — the header renders
         -- only when learnings were injected, which is exactly when there is
         -- something surfaced to rate, whereas the trailing line is
@@ -430,8 +438,9 @@ rule WrapUpRateLearningNudge {
     @guidance
         -- The MCP wrap_up handler appends a rate_learning nudge to its response
         -- text for the pr action only; rebase and done append nothing. The nudge
-        -- asks the agent to rate (helped | wrong) any knowledge base entry that
-        -- was surfaced to it this session and not yet rated, and states that only
+        -- asks the agent to rate (helped | wrong | not_applicable) any knowledge
+        -- base entry that was surfaced to it this session and not yet rated, and
+        -- states that only
         -- surfaced learnings can be rated (see RateLearningViaMcp for the
         -- retrieval precondition that enforces this). wrap_up itself no longer
         -- accepts verdicts.
@@ -646,20 +655,26 @@ rule RateLearningViaMcp {
     ensures:
         -- previous is the verdict this task already gave this learning, if any.
         -- The standing verdict is now `verdict`; the score moves by the
-        -- difference between the two (helped = +1, wrong = -1, none = 0).
+        -- difference between the two (helped = +1, wrong = -1,
+        -- not_applicable = 0, none = 0).
         learning.upvote_count = learning.upvote_count + weight(verdict) - weight(previous)
         if verdict = helped and previous != helped:
             learning.last_upvoted_at = now
-        if verdict != previous:
+        if weight(verdict) != weight(previous):
             learning.updated_at = now
 
     @guidance
         -- Agents call this (MCP tool: rate_learning) when they act on a
-        -- retrieved learning. verdict in {helped, wrong}:
+        -- retrieved learning. verdict in {helped, wrong, not_applicable}:
         --   helped → upvote_count + 1, last_upvoted_at = now.
         --   wrong  → upvote_count - 1 (a downvote; may go negative). updated_at
         --            is touched but last_upvoted_at is not.
-        -- Neither verdict changes status: there is no human-approval queue. A
+        --   not_applicable → the agent read an injected entry and it did not
+        --            fit this task. Weight 0: on a first verdict the learning
+        --            row is not written at all (not even updated_at, so it
+        --            cannot keep a stale entry from ArchiveStaleLearning). It
+        --            is a measurement signal, not a ranking input.
+        -- No verdict changes status: there is no human-approval queue. A
         -- downvoted entry stays active but ranks lower and becomes eligible for
         -- ArchiveStaleLearning once its score is non-positive and it goes
         -- untouched for config.stale_learning_threshold.

@@ -219,7 +219,8 @@ pub fn record_learning_retrieval(
     Ok(())
 }
 
-/// One verdict in a batch — mirrors `db::LearningVerdict` (`helped` | `wrong`)
+/// One verdict in a batch — mirrors `db::LearningVerdict` (`helped` | `wrong` |
+/// `not_applicable`)
 /// as an opaque string, the same treatment every other enum-typed column in
 /// this module gets.
 #[derive(spacetimedb::SpacetimeType, Clone, Debug)]
@@ -229,12 +230,13 @@ pub struct LearningVerdictInput {
 }
 
 /// What one verdict is worth to `Learning.upvote_count`: `helped` +1, `wrong`
-/// -1. `pub`, like [`validate_learning_scope`], so `MemoryReducerCaller` shares
+/// -1, `not_applicable` 0 (a measurement signal, not a ranking input). `pub`, like [`validate_learning_scope`], so `MemoryReducerCaller` shares
 /// it rather than re-deriving it.
 pub fn verdict_weight(verdict: &str) -> Result<i64, String> {
     match verdict {
         "helped" => Ok(1),
         "wrong" => Ok(-1),
+        "not_applicable" => Ok(0),
         other => Err(format!("unknown verdict {other}")),
     }
 }
@@ -267,6 +269,9 @@ pub fn not_retrieved_message(learning_id: i64, task_id: i64) -> String {
 /// order. A verdict on a learning the task was never shown (no
 /// `learning_retrievals` row) refuses the whole batch, as does an unknown
 /// verdict string. A missing learning is skipped rather than failing the batch.
+/// A verdict that leaves the score where it was (a repeat, or a first
+/// `not_applicable`) stores the verdict and does not write the learning, so it
+/// cannot keep a stale entry alive.
 #[spacetimedb::reducer]
 pub fn apply_learning_verdicts(
     ctx: &ReducerContext,

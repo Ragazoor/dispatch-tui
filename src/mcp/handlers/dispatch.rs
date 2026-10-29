@@ -587,7 +587,7 @@ into your prompt or returned by query_learnings).",
                 "verdict": {
                     "type": "string",
                     "enum": crate::models::LearningVerdict::ALL.iter().map(|v| v.as_str()).collect::<Vec<_>>(),
-                    "description": "'helped' — the entry applied and was useful (upvotes it). 'wrong' — the entry misled you or is inaccurate (downvotes it; may go negative). Neither changes the entry's status."
+                    "description": "'helped' — the entry applied and was useful (upvotes it). 'wrong' — the entry misled you or is inaccurate (downvotes it; may go negative). 'not_applicable' — you read an injected entry and it did not fit this task (score unchanged; it tells the store the entry was off-topic here). No verdict changes the entry's status."
                 }
             },
             "required": ["learning_id", "task_id", "verdict"]

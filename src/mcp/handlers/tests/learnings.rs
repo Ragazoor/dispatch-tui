@@ -739,6 +739,57 @@ async fn rate_learning_wrong_decrements_upvote_count() {
 }
 
 #[tokio::test]
+async fn rate_learning_not_applicable_leaves_the_score_alone() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo").await;
+    let learning_id = create_retrieved_learning(&state, task_id, "Off-topic tip").await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "rate_learning",
+            "arguments": { "learning_id": learning_id, "task_id": task_id.0, "verdict": "not_applicable" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+    let text = resp.result.as_ref().unwrap()["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(text.contains("not_applicable"), "{text}");
+
+    let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();
+    assert_eq!(learning.upvote_count, 0);
+    assert_eq!(learning.status, crate::models::LearningStatus::Approved);
+}
+
+#[tokio::test]
+async fn rate_learning_schema_offers_not_applicable() {
+    let state = test_state().await;
+    let resp = call(&state, "tools/list", None).await;
+    let tools = resp.result.unwrap()["tools"].as_array().unwrap().clone();
+    let rate = tools
+        .iter()
+        .find(|t| t["name"] == "rate_learning")
+        .expect("rate_learning listed");
+    let verdict = &rate["inputSchema"]["properties"]["verdict"];
+    assert_eq!(
+        verdict["enum"],
+        json!(["helped", "wrong", "not_applicable"]),
+        "{verdict}"
+    );
+    assert!(
+        verdict["description"]
+            .as_str()
+            .unwrap()
+            .contains("not_applicable"),
+        "{verdict}"
+    );
+}
+
+#[tokio::test]
 async fn rate_learning_without_retrieval_is_rejected() {
     let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo").await;

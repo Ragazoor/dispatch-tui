@@ -316,12 +316,19 @@ enum LearningKind {
 enum LearningStatus { approved | rejected | archived }
 
 -- VerdictKind captures an agent's evaluation of a retrieved learning, submitted
--- via the rate_learning MCP tool at any point during a task. Both verdicts adjust
--- the learning's net score; neither changes its status.
---   helped  — the learning applied and was useful (an upvote: upvote_count + 1)
---   wrong   — the learning misled the agent or is no longer accurate
---             (a downvote: upvote_count - 1, may go negative)
-enum VerdictKind { helped | wrong }
+-- via the rate_learning MCP tool at any point during a task. helped and wrong
+-- adjust the learning's net score; not_applicable does not. None changes its
+-- status.
+--   helped         — the learning applied and was useful (an upvote:
+--                    upvote_count + 1)
+--   wrong          — the learning misled the agent or is no longer accurate
+--                    (a downvote: upvote_count - 1, may go negative)
+--   not_applicable — the agent read the learning and it did not fit this task.
+--                    A signal only: it counts 0 toward upvote_count and leaves
+--                    the learning row untouched. It exists so "read, did not
+--                    fit" is told apart from "never rated" when measuring the
+--                    store (docs/plans/2026-10-29-98645-learnings-iteration-8.md).
+enum VerdictKind { helped | wrong | not_applicable }
 
 -- RetrievalSource records how a learning was surfaced to a task's agent.
 --   prompt_injection — included in the single RAG-ranked "Validated knowledge"
@@ -1277,6 +1284,7 @@ entity Retrieval {
 --   helped → counts +1 toward learning.upvote_count and updates last_upvoted_at
 --   wrong  → counts -1 toward learning.upvote_count (a downvote; may go negative);
 --            no status change
+--   not_applicable → counts 0; the learning row is not written
 -- See learnings.allium for the rule that applies these effects.
 
 -- BoardSelection is a runtime-only UI concept (not persisted): the set of

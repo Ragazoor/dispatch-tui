@@ -130,7 +130,7 @@ Four MCP tools manage the knowledge base from within an agent session:
 **When to call these tools:**
 - Call `query_learnings` at the right moment — not just at task start.
 - Call `record_learning` when you discover a pattern worth capturing for future agents (pitfall, convention, landscape, etc.).
-- Call `rate_learning` when you act on a retrieved entry — `helped` if it applied, `wrong` if it misled you. Only entries surfaced to you this task (injected or returned by `query_learnings`) can be rated.
+- Call `rate_learning` when you act on a retrieved entry — `helped` if it applied, `wrong` if it misled you. Rate an injected entry that did not fit the task `not_applicable` (score unchanged; a measurement signal). Only entries surfaced to you this task (injected or returned by `query_learnings`) can be rated.
 
 **Scope auto-derivation:** omit `scope_ref` — the MCP handler derives it from the task's repo or epic automatically. Pass `scope_ref` explicitly only to override.
 

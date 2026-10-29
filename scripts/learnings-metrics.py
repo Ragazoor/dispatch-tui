@@ -215,13 +215,48 @@ def user_scope_metrics():
             per_entry[r["learning_id"]] += 1
     print("user-scoped injection rows with no helped verdict, per week (unhelped/rows):")
     print("  (all rows; then only rows on tasks that rated something, where 'no helped' is a")
-    print("   real signal. There is no 'not applicable' verdict, so an unrated task counts as unhelped.)")
+    print("   real signal. Before run 8 there was no 'not_applicable' verdict, so an unrated")
+    print("   task counts as unhelped; verdict_coverage_metrics splits the two from W45.)")
     for wk in sorted(weeks)[-4:]:
         n, bad, rn, rbad = weeks[wk]
         print(f"  {wk}  {bad:>5}/{n:<5} {100 * bad // n}%   rated tasks only {rbad:>4}/{rn:<4} {100 * rbad // max(rn, 1)}%")
     total = sum(per_entry.values())
     top = sum(v for _, v in per_entry.most_common(30))
     print(f"  top-30 entries cause {100 * top // max(total, 1)}% of the unhelped rows ({total} rows)")
+
+
+NOT_APPLICABLE_FROM = "2026-10-29"  # run 8 (task 98645) added the not_applicable verdict
+
+
+def verdict_coverage_metrics():
+    """Injected (task, learning) pairs by the task's standing verdict, per week, all scopes.
+
+    The outcome signal run 8 added: before it, "no helped" mixed "read, did not fit" with
+    "never rated". Read the split: mostly not_applicable means a precision problem (rescope
+    or prune those entries); mostly unrated means agents skip rating (a prompt problem).
+    """
+    R, V = table("learning_retrievals"), table("learning_verdicts")
+    standing = {(v["task_id"], v["learning_id"]): v["verdict"] for v in V}
+    pairs = {}
+    for r in R:
+        if r["source"] == "prompt_injection" and r["retrieved_at"] >= NOT_APPLICABLE_FROM:
+            pairs.setdefault((r["task_id"], r["learning_id"]), r["retrieved_at"])
+    kinds = ("helped", "wrong", "not_applicable", "unrated")
+    weeks = collections.defaultdict(collections.Counter)
+    na = collections.Counter()
+    for key, at in pairs.items():
+        y, w, _ = datetime.date.fromisoformat(at[:10]).isocalendar()
+        v = standing.get(key, "unrated")
+        weeks[f"{y}-W{w:02d}"][v] += 1
+        if v == "not_applicable":
+            na[key[1]] += 1
+    print(f"injected (task, learning) pairs by standing verdict, since {NOT_APPLICABLE_FROM}:")
+    print("  week      " + "".join(f"{k:>16}" for k in kinds))
+    for wk in sorted(weeks)[-4:]:
+        c, n = weeks[wk], sum(weeks[wk].values())
+        print(f"  {wk}  " + "".join(f"{c[k]:>8}/{n:<4}{100 * c[k] // n:>3}%" for k in kinds))
+    if na:
+        print("  most often not_applicable: " + ", ".join(f"#{i} ({n})" for i, n in na.most_common(10)))
 
 
 def pr_metrics():
@@ -258,5 +293,6 @@ if __name__ == "__main__":
     store_metrics()
     mistakes_metrics()
     user_scope_metrics()
+    verdict_coverage_metrics()
     if "--prs" in sys.argv:
         pr_metrics()

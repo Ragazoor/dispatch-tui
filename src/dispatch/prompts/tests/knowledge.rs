@@ -17,6 +17,10 @@ fn render_validated_knowledge_block_formats_entries() {
         "validated-knowledge block should instruct rate_learning, got: {out}"
     );
     assert!(
+        out.contains("`not_applicable` if it did not fit this task"),
+        "the block should offer the not_applicable verdict, got: {out}"
+    );
+    assert!(
         !out.contains("learning_verdicts"),
         "validated-knowledge block should no longer reference wrap_up verdicts, got: {out}"
     );

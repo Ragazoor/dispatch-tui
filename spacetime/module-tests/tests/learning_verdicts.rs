@@ -140,3 +140,34 @@ fn deleting_a_learning_removes_its_verdicts() {
         .expect("delete_learning");
     assert_eq!(store.db().learning_verdicts().iter().count(), 0);
 }
+
+/// `not_applicable` is a signal only: weight 0, and a first one does not write
+/// the learning row, so it cannot keep a stale entry alive.
+#[test]
+fn a_not_applicable_verdict_is_stored_and_leaves_the_learning_untouched() {
+    let store = store_with_a_retrieved_learning();
+    let before = store.db().learnings().id().find(1).expect("the learning");
+    rate(&store, 7, vec![verdict(1, "not_applicable")]).expect("not_applicable");
+    let after = store.db().learnings().id().find(1).expect("the learning");
+    assert_eq!(after.upvote_count, 0);
+    assert_eq!(after.updated_at, before.updated_at);
+    assert_eq!(after.last_upvoted_at, None);
+    let stored: Vec<_> = store.db().learning_verdicts().iter().collect();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].verdict, "not_applicable");
+}
+
+#[test]
+fn not_applicable_replacing_helped_moves_the_score_back_and_helped_replaces_it() {
+    let store = store_with_a_retrieved_learning();
+    rate(&store, 7, vec![verdict(1, "helped")]).expect("helped");
+    rate(&store, 7, vec![verdict(1, "not_applicable")]).expect("not_applicable");
+    assert_eq!(
+        score(&store),
+        0,
+        "helped (+1) is replaced by not_applicable (0)"
+    );
+    rate(&store, 7, vec![verdict(1, "helped")]).expect("helped again");
+    assert_eq!(score(&store), 1);
+    assert_eq!(store.db().learning_verdicts().iter().count(), 1);
+}

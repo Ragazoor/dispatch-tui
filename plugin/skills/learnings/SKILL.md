@@ -21,7 +21,7 @@ When you act on an entry that was surfaced to you (injected into your prompt or 
 rate_learning(learning_id=<id>, task_id=<your task id>, verdict="helped")
 ```
 
-Use `helped` when the entry saved you from a pitfall or guided a decision, and `wrong` when it misled you or is out of date. Neither verdict changes the entry's status — there is no human review step. An entry that is clearly wrong should be deleted instead. Don't rate entries you read but didn't act on.
+Use `helped` when the entry saved you from a pitfall or guided a decision, and `wrong` when it misled you or is out of date. For an entry from "## Validated knowledge for this task" that did not fit your task, use `not_applicable`: it leaves the score alone and tells the store the entry was off-topic here. No verdict changes the entry's status — there is no human review step. An entry that is clearly wrong should be deleted instead. Don't rate `query_learnings` results you skimmed and didn't act on.
 
 ## Recording new entries
 
