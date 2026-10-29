@@ -445,7 +445,7 @@ pub fn list_all_window_names(runner: &dyn ProcessRunner) -> Result<Vec<String>> 
 /// on its own; [`kill_window_if_present`] remains the wrapper for callers whose
 /// cleanup must not abort when the window is simply already gone.
 pub fn kill_window(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()> {
-    let target = pane_id_from_output(window_target(window.as_str(), runner)?, "list-panes")?;
+    let target = pane_id_for_window(window, runner)?;
     kill_window_at(&target, runner)
 }
 
@@ -1313,8 +1313,7 @@ pub fn join_pane(
     // preserved across the move (join-pane has no -P/-F to print the result).
     // Passing the ID rather than the name also keeps a prefix-matched sibling
     // from being torn out of its own window and into the board.
-    let pane_id =
-        pane_id_from_output(window_target(source_window.as_str(), runner)?, "list-panes")?;
+    let pane_id = pane_id_for_window(source_window, runner)?;
 
     run_checked(
         runner,
