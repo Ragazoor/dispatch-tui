@@ -92,7 +92,8 @@ Other readings:
 ## Next run should try
 
 1. The board must restart on this commit (and the plugin be reinstalled) before the signal
-   flows. Then read `verdict_coverage_metrics` for W45. Success: unrated falls well below
+   flows. The managed store gets the new module on restart; a store the board does not
+   manage needs the module republished. Until then the live store refuses the verdict. Then read `verdict_coverage_metrics` for W45. Success: unrated falls well below
    83% and `not_applicable` takes a real share.
 2. If unrated stays near 83%, agents skip rating: look at whether the wrap-up step runs
    at all on done-path tasks, not at the store.

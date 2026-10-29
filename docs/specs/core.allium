@@ -1223,7 +1223,7 @@ entity Learning {
     tags: Set<String>        -- free-form labels for filtering (e.g. "rust", "testing")
     status: LearningStatus
     source_task: Task?       -- the task whose agent proposed this entry; null for human-authored entries
-    upvote_count: Integer -- net score: +1 per `helped` verdict, -1 per `wrong`
+    upvote_count: Integer -- net score: +1 per `helped` verdict, -1 per `wrong`, 0 per `not_applicable`
                           -- verdict. May be negative. Feeds retrieval ranking and
                           -- the stale-cleanup eligibility check (upvote_count <= 0).
     last_upvoted_at: Timestamp?

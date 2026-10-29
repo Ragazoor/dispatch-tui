@@ -743,6 +743,7 @@ async fn rate_learning_not_applicable_leaves_the_score_alone() {
     let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo").await;
     let learning_id = create_retrieved_learning(&state, task_id, "Off-topic tip").await;
+    let before = state.db.get_learning(learning_id).await.unwrap().unwrap();
 
     let resp = call(
         &state,
@@ -763,6 +764,10 @@ async fn rate_learning_not_applicable_leaves_the_score_alone() {
     let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(learning.upvote_count, 0);
     assert_eq!(learning.status, crate::models::LearningStatus::Approved);
+    // A first not_applicable does not write the learning, so it cannot keep a
+    // stale entry alive.
+    assert_eq!(learning.updated_at, before.updated_at);
+    assert_eq!(learning.last_upvoted_at, before.last_upvoted_at);
 }
 
 #[tokio::test]

@@ -415,8 +415,9 @@ rule AugmentDispatchPromptWithLearnings {
         --
         -- The block's own header owns the rating instruction: it names the full
         -- call ("rate_learning(learning_id, task_id, verdict) — helped if it
-        -- applied, wrong if it misled you, not_applicable if it did not fit this
-        -- task"). The shared trailing line therefore
+        -- applied, wrong if it misled you") and asks for not_applicable on an
+        -- entry the agent read but did not use because it did not fit the task.
+        -- The shared trailing line therefore
         -- does not repeat it. That split is not arbitrary — the header renders
         -- only when learnings were injected, which is exactly when there is
         -- something surfaced to rate, whereas the trailing line is
