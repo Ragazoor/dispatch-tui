@@ -19,11 +19,16 @@ async fn test_state_with_notify() -> (
 }
 
 /// A Running task with a worktree and no window: what a paused agent leaves.
-async fn create_detached_task(state: &Arc<McpState>) -> crate::models::TaskId {
-    let id = create_running_task_with_window(state).await;
+/// The worktree directory exists on disk, in the returned temp dir.
+async fn create_detached_task(state: &Arc<McpState>) -> (crate::models::TaskId, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let id = create_running_task_with_window_in(state, repo, None).await;
     let patch = crate::store::TaskPatch::new().tmux_window(None);
     state.db_write().patch_task(id, &patch).await.unwrap();
-    id
+    let worktree = state.task_svc.get_task(id).await.unwrap().worktree.unwrap();
+    std::fs::create_dir_all(&worktree).unwrap();
+    (id, dir)
 }
 
 async fn resume(state: &Arc<McpState>, args: Value) -> JsonRpcResponse {
@@ -38,7 +43,7 @@ async fn resume(state: &Arc<McpState>, args: Value) -> JsonRpcResponse {
 #[tokio::test]
 async fn resume_task_hands_a_detached_task_to_the_board() {
     let (state, mut rx) = test_state_with_notify().await;
-    let id = create_detached_task(&state).await;
+    let (id, _dir) = create_detached_task(&state).await;
 
     let resp = resume(&state, json!({ "task_id": id.0 })).await;
 
@@ -57,7 +62,7 @@ async fn resume_task_hands_a_detached_task_to_the_board() {
 #[tokio::test]
 async fn resume_task_carries_the_message_to_the_board() {
     let (state, mut rx) = test_state_with_notify().await;
-    let id = create_detached_task(&state).await;
+    let (id, _dir) = create_detached_task(&state).await;
 
     let resp = resume(
         &state,
@@ -90,7 +95,7 @@ async fn resume_task_refuses_a_task_that_never_ran() {
 #[tokio::test]
 async fn resume_task_refuses_a_running_task_without_a_worktree() {
     let (state, mut rx) = test_state_with_notify().await;
-    let id = create_detached_task(&state).await;
+    let (id, _dir) = create_detached_task(&state).await;
     let patch = crate::store::TaskPatch::new().worktree(None);
     state.db_write().patch_task(id, &patch).await.unwrap();
 
@@ -127,7 +132,7 @@ async fn resume_task_refuses_an_unknown_task() {
 #[tokio::test]
 async fn resume_task_refuses_a_task_whose_worktree_is_on_another_machine() {
     let (state, mut rx) = test_state_with_notify().await;
-    let id = create_detached_task(&state).await;
+    let (id, _dir) = create_detached_task(&state).await;
     let patch = crate::store::TaskPatch::new().host(Some("other-machine"));
     state.db_write().patch_task(id, &patch).await.unwrap();
 
@@ -135,5 +140,20 @@ async fn resume_task_refuses_a_task_whose_worktree_is_on_another_machine() {
 
     let msg = error_message(&resp);
     assert!(msg.contains("another machine"), "{}", msg);
+    assert!(rx.try_recv().is_err(), "a refusal must not reach the board");
+}
+
+#[tokio::test]
+async fn resume_task_refuses_a_task_whose_worktree_is_gone_from_disk() {
+    let (state, mut rx) = test_state_with_notify().await;
+    let (id, _dir) = create_detached_task(&state).await;
+    let worktree = state.task_svc.get_task(id).await.unwrap().worktree.unwrap();
+    std::fs::remove_dir_all(&worktree).unwrap();
+
+    let resp = resume(&state, json!({ "task_id": id.0 })).await;
+
+    let msg = error_message(&resp);
+    assert!(msg.contains("no resumable session"), "{}", msg);
+    assert!(msg.contains("no longer on disk"), "{}", msg);
     assert!(rx.try_recv().is_err(), "a refusal must not reach the board");
 }

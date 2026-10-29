@@ -1310,6 +1310,9 @@ rule ResumeTaskViaMcp {
     requires: task.worktree != null
     requires: current_agent(task).tmux_window = null
     requires: task.is_locally_owned
+    -- The worktree the row names must still be a directory on this machine:
+    -- a cleaned-up worktree leaves the row but no conversation to continue.
+    requires: path_exists_on_disk(task.worktree)
 
     -- The same rule the TUI's Space key raises, not a second launch path.
     ensures: ResumeTask(task: task, message: message)
@@ -1334,7 +1337,8 @@ rule ResumeTaskViaMcp {
         -- no session to resume; dispatch it); its status is not running,
         -- review or done (backlog tasks are dispatched, not resumed); an agent
         -- is already attached to it (ListAgents/SendMessage reach it); its
-        -- worktree is on another machine. "No resumable session" is the
+        -- worktree is on another machine; its worktree directory is gone from
+        -- disk (the agent is no longer there). "No resumable session" is the
         -- umbrella: the tool never starts a fresh agent as a fallback.
         --
         -- == Answer ==

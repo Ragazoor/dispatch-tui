@@ -35,6 +35,9 @@ pub(crate) async fn handle_resume_task(
     if let Some(why) = refusal(&task, &state.host_id) {
         return JsonRpcResponse::err(id, INVALID_PARAMS, why);
     }
+    if let Some(why) = worktree_gone(&task).await {
+        return JsonRpcResponse::err(id, INVALID_PARAMS, why);
+    }
     let Some(tx) = &state.notify_tx else {
         return JsonRpcResponse::err(
             id,
@@ -62,6 +65,24 @@ pub(crate) async fn handle_resume_task(
         window = crate::models::TmuxWindow::for_task(task_id),
     );
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
+}
+
+/// Why `task` has no session to resume because its worktree directory is gone
+/// from this machine's disk, or `None` when it is still there. Run after
+/// [`refusal`], so the worktree is set and owned by this machine. A bare
+/// metadata stat, no read (docs/conventions.md, "No std::fs inside async
+/// handlers").
+async fn worktree_gone(task: &Task) -> Option<String> {
+    let worktree = task.worktree.as_deref()?;
+    match tokio::fs::metadata(worktree).await {
+        Ok(m) if m.is_dir() => None,
+        _ => Some(format!(
+            "task #{n} has no resumable session: its worktree {worktree} is no longer on \
+             disk, so the agent is gone. Set it back to backlog with update_tasks and \
+             dispatch_task it to start a new agent.",
+            n = task.id.0
+        )),
+    }
 }
 
 /// Why `task` has no session to resume, or `None` when it has one. Mirrors the
