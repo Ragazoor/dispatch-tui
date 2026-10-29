@@ -46,7 +46,8 @@ rule EditEpic {
     -- title, description, feed_command and feed_interval_secs. The file
     -- uses "--- SECTION ---" delimiters (TITLE, DESCRIPTION,
     -- FEED_COMMAND, FEED_INTERVAL_SECS).
-    -- The user edits the file; on save, fields are parsed back.
+    -- The user edits the file; on save, fields are parsed back. Header-shaped
+    -- lines in a value are escaped and unescaped exactly as EditTask states.
     -- For title and description, an empty field retains the previous
     -- value. For feed_command and feed_interval_secs, an empty field
     -- clears the value (sets it to null) — this is how feeds are turned

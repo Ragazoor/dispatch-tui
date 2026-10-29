@@ -127,10 +127,51 @@ const TASK_SECTIONS: &[&str] = &[
     "URL_TYPE",
 ];
 
+/// Whether `line` is a `--- NAME ---` header for a name in `known`.
+fn is_known_header(line: &str, known: &[&str]) -> bool {
+    line.trim()
+        .strip_prefix("--- ")
+        .and_then(|rest| rest.strip_suffix(" ---"))
+        .is_some_and(|name| known.contains(&name))
+}
+
+/// A line that is a known header once any leading backslashes are removed:
+/// the lines the escape rule touches.
+fn is_escapable(line: &str, known: &[&str]) -> bool {
+    is_known_header(line.trim_start_matches('\\'), known)
+}
+
+/// Write side of the escape rule: prefix one backslash to every line of
+/// `value` that is a known header (or a backslashed one), so a value never
+/// ends its own section. Inverse of [`unescape_headers`].
+fn escape_headers(value: &str, known: &[&str]) -> String {
+    value
+        .split('\n')
+        .map(|line| {
+            if is_escapable(line, known) {
+                format!("\\{line}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Read side of the escape rule: drop one leading backslash from every
+/// backslashed known-header line.
+fn unescape_headers(line: &str, known: &[&str]) -> String {
+    match line.strip_prefix('\\') {
+        Some(rest) if is_escapable(rest, known) => rest.to_string(),
+        _ => line.to_string(),
+    }
+}
+
 /// Parse `--- SECTION ---` delimited text into a map of section name → content.
 ///
 /// Only names in `known` start a section; any other line, headers included,
-/// is content of the current section.
+/// is content of the current section. A backslash-escaped header line is
+/// content too, unescaped on the way in (see [`escape_headers`]).
 fn parse_sections_in<'a>(
     input: &str,
     known: &[&'a str],
@@ -158,7 +199,7 @@ fn parse_sections_in<'a>(
             if !current_buf.is_empty() {
                 current_buf.push('\n');
             }
-            current_buf.push_str(line);
+            current_buf.push_str(&unescape_headers(line, known));
         }
     }
     if let Some(name) = current_section {
@@ -189,6 +230,7 @@ fn parse_sections(input: &str) -> std::collections::HashMap<&'static str, String
 }
 
 pub fn format_description_for_editor(existing: &str) -> String {
+    let existing = escape_headers(existing, DESCRIPTION_SECTIONS);
     format!("--- DESCRIPTION ---\n{existing}\n")
 }
 
@@ -199,13 +241,17 @@ pub fn parse_description_editor_output(input: &str) -> String {
 
 pub fn format_epic_for_editor(epic: &Epic) -> String {
     let feed_cmd = epic.feed_command.as_deref().unwrap_or("");
+    let esc = |v: &str| escape_headers(v, EPIC_SECTIONS);
     let feed_interval = epic
         .feed_interval_secs
         .map(|n| n.to_string())
         .unwrap_or_default();
     format!(
         "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- FEED_COMMAND ---\n{}\n--- FEED_INTERVAL_SECS ---\n{}\n",
-        epic.title, epic.description, feed_cmd, feed_interval
+        esc(&epic.title),
+        esc(&epic.description),
+        esc(feed_cmd),
+        feed_interval
     )
 }
 
@@ -275,6 +321,10 @@ pub fn format_editor_content(task: &Task) -> String {
     let url = task.url.as_ref().map(|u| u.url.as_str()).unwrap_or("");
     let url_type = task.url.as_ref().map(|u| u.url_type.as_str()).unwrap_or("");
     let phoenix = if task.phoenix { "true" } else { "false" };
+    let esc = |v: &str| escape_headers(v, TASK_SECTIONS);
+    let (title, description) = (esc(&task.title), esc(&task.description));
+    let (repo_path, base_branch) = (esc(&task.repo_path), esc(&task.base_branch));
+    let (plan, url) = (esc(plan), esc(url));
     format!(
         "--- TITLE ---\n{title}\n\
          --- DESCRIPTION ---\n{description}\n\
@@ -288,11 +338,7 @@ pub fn format_editor_content(task: &Task) -> String {
          --- PHOENIX ---\n{phoenix}\n\
          --- URL ---\n{url}\n\
          --- URL_TYPE ---\n{url_type}\n",
-        title = task.title,
-        description = task.description,
-        repo_path = task.repo_path,
         status = task.status.as_str(),
-        base_branch = task.base_branch,
     )
 }
 

@@ -1955,6 +1955,15 @@ rule EditTask {
     -- (TITLE, DESCRIPTION, REPO_PATH, STATUS, PLAN, TAG, BASE_BRANCH,
     -- WRAP_UP_MODE, MODEL, PHOENIX, URL, URL_TYPE).
     -- The user edits the file; on save, fields are parsed back.
+    -- Header-shaped text is escaped, so a value never ends its own section:
+    -- a line of a written value that is a known header of this file (after
+    -- trimming, and after any leading backslashes) gets one backslash
+    -- prepended, and a line read back that starts with a backslash and is
+    -- otherwise such a header loses one. Write then read returns every
+    -- value unchanged, including a description line like `--- STATUS ---`.
+    -- The same rule applies to the epic editor and the description editor,
+    -- each against its own header set; lines that are not known headers are
+    -- never touched.
     -- Empty title/description/repo_path retain their previous values.
     -- Empty plan or tag clears the field. Empty base_branch retains the
     -- previous value. Empty wrap_up_mode clears the preference. Empty model

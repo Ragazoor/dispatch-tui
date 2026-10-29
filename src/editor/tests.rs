@@ -310,6 +310,68 @@ fn description_editor_roundtrip_with_dashes() {
 
 proptest! {
     #[test]
+    fn task_description_roundtrips_with_header_lines(
+        lines in proptest::collection::vec(
+            prop_oneof![
+                Just("--- STATUS ---".to_string()),
+                Just("  --- DESCRIPTION ---  ".to_string()),
+                Just("\\--- TAG ---".to_string()),
+                Just("\\\\--- PLAN ---".to_string()),
+                Just("--- Notes ---".to_string()),
+                "[a-z]{1,8}",
+            ],
+            1..6,
+        )
+    ) {
+        // Leading/trailing blank lines are trimmed by design, so the pool has none.
+        let desc = lines.join("\n");
+        let task = TaskBuilder::new(1).description(desc.as_str()).build();
+        let fields = parse_editor_content(&format_editor_content(&task));
+        prop_assert_eq!(fields.description, desc.trim_end().to_string());
+    }
+}
+
+#[test]
+fn description_header_line_survives_task_roundtrip() {
+    let desc = "before\n--- STATUS ---\nafter\n--- DESCRIPTION ---\nlast";
+    let task = TaskBuilder::new(1).description(desc).build();
+    let fields = parse_editor_content(&format_editor_content(&task));
+    assert_eq!(fields.description, desc);
+    assert_eq!(fields.status, Some(task.status));
+}
+
+#[test]
+fn description_header_line_survives_epic_roundtrip() {
+    let desc = "x\n--- FEED_COMMAND ---\ny";
+    let epic = make_epic("T", desc);
+    let fields = parse_epic_editor_output(&format_epic_for_editor(&epic));
+    assert_eq!(fields.description, desc);
+    assert_eq!(fields.feed_command, "");
+}
+
+#[test]
+fn description_header_line_survives_description_editor_roundtrip() {
+    let desc = "a\n--- DESCRIPTION ---\nb\n  --- DESCRIPTION ---  \n\\--- DESCRIPTION ---";
+    let content = format_description_for_editor(desc);
+    assert_eq!(parse_description_editor_output(&content), desc);
+}
+
+#[test]
+fn title_that_looks_like_a_header_survives_roundtrip() {
+    let task = TaskBuilder::new(1).title("--- STATUS ---").build();
+    let fields = parse_editor_content(&format_editor_content(&task));
+    assert_eq!(fields.title, "--- STATUS ---");
+}
+
+#[test]
+fn escaping_leaves_ordinary_lines_alone() {
+    let desc = "\\not a header\n--- Notes ---\n--- status ---";
+    let content = format_description_for_editor(desc);
+    assert_eq!(content, format!("--- DESCRIPTION ---\n{desc}\n"));
+}
+
+proptest! {
+    #[test]
     fn parse_editor_content_never_panics(input in "\\PC{0,2000}") {
         // parse_editor_content should never panic on arbitrary input
         let _ = parse_editor_content(&input);
