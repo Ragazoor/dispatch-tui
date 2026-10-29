@@ -171,11 +171,10 @@ fn detect_default_branch_invokes_correct_git_command() {
 
 // --- subprocess bounding ---
 //
-// These four helpers are issued on both the wrap-up rebase path
-// (finish_task) and the repo-sync path (sync_repo / measure_repo), and every
-// one of them can block on a repository lock — routinely, since a human often
-// has the same checkout open while an agent wraps up. A bare `run` wedges both
-// callers with no way out, so each must carry the bound.
+// These four helpers are issued on the wrap-up rebase path (finish_task), and
+// every one of them can block on a repository lock — routinely, since a human
+// often has the same checkout open while an agent wraps up. A bare `run`
+// wedges the caller with no way out, so each must carry the bound.
 
 #[test]
 fn detect_default_branch_bounds_its_subprocess() {
@@ -350,4 +349,105 @@ fn abort_after_conflict_still_aborts_when_status_cannot_run() {
     let files = abort_after_conflict(&runner, "/wt", "rebase", SUBPROCESS_TIMEOUT);
     assert!(files.is_empty());
     assert_eq!(runner.flattened_calls()[1], "git -C /wt rebase --abort");
+}
+
+// --- ahead_behind (moved here from the removed repo_sync module) ---
+
+const REPO: &str = "/repo";
+const BASE: &str = "main";
+
+#[test]
+fn ahead_behind_parses_left_right_counts() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"3\t1\n")]);
+    assert_eq!(
+        ahead_behind(REPO, BASE, &mock),
+        Some(AheadBehind {
+            ahead: 3,
+            behind: 1
+        })
+    );
+}
+
+// A repo that is genuinely level is *measured*, so it yields a zero pair —
+// distinct from the unmeasurable None below.
+#[test]
+fn ahead_behind_reports_a_level_repo_as_measured_zeroes() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"0\t0\n")]);
+    let counts = ahead_behind(REPO, BASE, &mock).expect("a level repo is still measurable");
+    assert_eq!(
+        counts,
+        AheadBehind {
+            ahead: 0,
+            behind: 0
+        }
+    );
+}
+
+// UnmeasurableIsNotInSync: no origin ref to compare against yields no
+// counts at all, never a zero pair.
+#[test]
+fn ahead_behind_yields_nothing_when_origin_ref_does_not_resolve() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail(
+        "fatal: ambiguous argument 'main...origin/main': unknown revision",
+    )]);
+    assert_eq!(ahead_behind(REPO, BASE, &mock), None);
+}
+
+#[test]
+fn ahead_behind_yields_nothing_for_unparseable_output() {
+    for stdout in [
+        &b"banana\n"[..],
+        &b"3\n"[..],
+        &b"3\tmany\n"[..],
+        &b""[..],
+        &b"3\t1\t9\n"[..],
+    ] {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(stdout)]);
+        assert_eq!(
+            ahead_behind(REPO, BASE, &mock),
+            None,
+            "unparseable output {:?} must not be reported as counts",
+            String::from_utf8_lossy(stdout)
+        );
+    }
+}
+
+#[test]
+fn ahead_behind_yields_nothing_when_the_runner_errors() {
+    let mock = MockProcessRunner::new(vec![Err(anyhow::anyhow!("git not on PATH"))]);
+    assert_eq!(ahead_behind(REPO, BASE, &mock), None);
+}
+
+#[test]
+fn ahead_behind_invokes_rev_list_left_right_against_origin() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"0\t0\n")]);
+    let _ = ahead_behind("/some/repo", "master", &mock);
+    let calls = mock.recorded_calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "git");
+    assert_eq!(
+        calls[0].1,
+        [
+            "-C",
+            "/some/repo",
+            "rev-list",
+            "--count",
+            "--left-right",
+            "master...origin/master",
+        ]
+    );
+}
+
+// Every subprocess this engine issues is bounded. rev-list walks history and
+// can take a lock, so an unbounded one wedges whatever called it — the TUI's
+// drift poll, or a dispatch that is waiting to provision a worktree.
+#[test]
+fn ahead_behind_bounds_the_rev_list_with_the_subprocess_timeout() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"0\t0\n")]);
+    let _ = ahead_behind(REPO, BASE, &mock);
+    assert_eq!(
+        mock.recorded_timeouts(),
+        vec![Some(SUBPROCESS_TIMEOUT)],
+        "rev-list must be bounded like every other subprocess here"
+    );
 }

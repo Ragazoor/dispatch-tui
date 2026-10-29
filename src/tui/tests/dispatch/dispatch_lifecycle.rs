@@ -29,14 +29,12 @@ fn dispatched_sets_fields_and_transitions_to_running() {
             .num_seconds()
             < 5
     );
-    // Only the trailing repo-sync refresh
-    // (docs/specs/repo-sync.allium: RefreshRepoSyncStateAfterDispatch). No
-    // Persist: since store-split M4 the module wrote the worktree, window and
+    // No commands at all. No Persist: since store-split M4 the module wrote the worktree, window and
     // host when the host's report landed (HostReportsDispatched), so the board
     // only follows. No SeedActivity: the claim already wrote the activity
     // stamp, so re-writing it here would be redundant — and would clobber a
     // real hook stamp if this handling ever ran later than it does.
-    assert_eq!(cmds.len(), 1, "got: {cmds:?}");
+    assert!(cmds.is_empty(), "got: {cmds:?}");
     assert!(
         !cmds
             .iter()
@@ -86,8 +84,8 @@ fn dispatched_with_switch_focus_emits_jump() {
         tmux_window: test_tmux_window("win"),
         switch_focus: true,
     }));
-    // JumpToTmux, and the trailing repo-sync refresh.
-    assert_eq!(cmds.len(), 2, "got: {cmds:?}");
+    // Just the JumpToTmux.
+    assert_eq!(cmds.len(), 1, "got: {cmds:?}");
     assert!(
         matches!(&cmds[0], Command::Task(TaskCommand::JumpToTmux { window }) if window == "win")
     );

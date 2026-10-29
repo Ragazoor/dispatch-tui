@@ -714,6 +714,13 @@ async fn verify_feed_command_failure_exits_nonzero() {
 // prune-repo-paths
 // ---------------------------------------------------------------------------
 
+/// Seed a repo path via `repo set-verify`, which creates the row.
+async fn seed_repo_path(db: &Store, path: &str) {
+    commands::set_verify(db, path, "true", &mut Vec::new())
+        .await
+        .unwrap_or_else(|e| panic!("seeding {path} should succeed: {e:#}"));
+}
+
 #[tokio::test]
 async fn prune_repo_paths_removes_nonexistent_paths() {
     let (_tmp, db) = sqlite().await;
@@ -1019,146 +1026,6 @@ async fn toggle_agent_tree_pane_never_fails_without_a_real_tmux_session() {
         Some(0),
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-// ---------------------------------------------------------------------------
-// repo status / repo sync (docs/specs/repo-sync.allium)
-// ---------------------------------------------------------------------------
-
-/// Seed a repo path via `repo set-verify`, which creates the row.
-async fn seed_repo_path(db: &Store, path: &str) {
-    commands::set_verify(db, path, "true", &mut Vec::new())
-        .await
-        .unwrap_or_else(|e| panic!("seeding {path} should succeed: {e:#}"));
-}
-
-async fn status(db: &Store, no_fetch: bool) -> String {
-    let mut out = Vec::new();
-    commands::repo_status(db, no_fetch, &mut out)
-        .await
-        .expect("measuring is read-only and never fails the command");
-    String::from_utf8(out).unwrap()
-}
-
-// surface-provides.RepoStatusCli — the command exists and is read-only.
-#[tokio::test]
-async fn repo_status_reports_no_paths_for_an_empty_db() {
-    let (_tmp, db) = sqlite().await;
-    let stdout = status(&db, false).await;
-    assert!(
-        stdout.contains("No repo paths configured."),
-        "got: {stdout}"
-    );
-}
-
-// @guarantee UnmeasuredRowsShowNoCounts + UnmeasuredIsNeverPresentedAsClean: a
-// repository that cannot be measured shows no ahead/behind figures and reports
-// its fetch error instead.
-#[tokio::test]
-async fn repo_status_row_for_an_unmeasurable_repo_shows_no_counts() {
-    let (_tmp, db) = sqlite().await;
-    let missing = "/tmp/dispatch-test-not-a-repo-77777";
-    seed_repo_path(&db, missing).await;
-
-    let stdout = status(&db, false).await;
-    assert!(stdout.contains(missing), "the row names the repo: {stdout}");
-    assert!(
-        stdout.contains("unknown"),
-        "an unmeasurable repo reads as unknown, never as in sync: {stdout}"
-    );
-    assert!(
-        !stdout.contains('\u{2191}') && !stdout.contains('\u{2193}'),
-        "no ahead/behind figures may be quoted: {stdout}"
-    );
-}
-
-// @guarantee FetchesUnlessSuppressed — the default fetches, so a repository
-// whose fetch fails reports that error.
-#[tokio::test]
-async fn repo_status_fetches_by_default_and_reports_the_fetch_error() {
-    let (_tmp, db) = sqlite().await;
-    let missing = "/tmp/dispatch-test-not-a-repo-77778";
-    seed_repo_path(&db, missing).await;
-
-    let stdout = status(&db, false).await;
-    assert!(
-        stdout.to_lowercase().contains("fetch"),
-        "expected the fetch failure in the row, got: {stdout}"
-    );
-}
-
-// @guarantee FetchesUnlessSuppressed — --no-fetch skips the fetch, so there is
-// no fetch error to report.
-#[tokio::test]
-async fn repo_status_no_fetch_skips_the_fetch() {
-    let (_tmp, db) = sqlite().await;
-    let missing = "/tmp/dispatch-test-not-a-repo-77779";
-    seed_repo_path(&db, missing).await;
-
-    let stdout = status(&db, true).await;
-    assert!(stdout.contains(missing), "got: {stdout}");
-    assert!(
-        !stdout.to_lowercase().contains("fetch"),
-        "--no-fetch performs no fetch, so no fetch error exists: {stdout}"
-    );
-}
-
-// rule-failure.SyncRepoViaCli.1 — `requires: targets.count > 0`.
-#[tokio::test(flavor = "multi_thread")]
-async fn repo_sync_fails_when_there_are_no_saved_paths() {
-    let (_tmp, db) = sqlite().await;
-    assert!(
-        commands::repo_sync(&db, None, &mut Vec::new(), &mut Vec::new())
-            .await
-            .is_err(),
-        "no targets means nothing to sync, which is an error"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn repo_sync_fails_for_an_unknown_path() {
-    let (_tmp, db) = sqlite().await;
-    seed_repo_path(&db, "/tmp/dispatch-test-saved-77780").await;
-
-    assert!(
-        commands::repo_sync(
-            &db,
-            Some("/tmp/dispatch-test-never-saved-77781".to_string()),
-            &mut Vec::new(),
-            &mut Vec::new()
-        )
-        .await
-        .is_err(),
-        "a path that is not a saved repo path is not a target"
-    );
-}
-
-// @guarantee FailureIsVisibleInTheExitCode + EveryTargetAttempted: every target
-// is attempted and the exit code is non-zero when any of them failed.
-#[tokio::test(flavor = "multi_thread")]
-async fn repo_sync_attempts_every_target_and_fails_the_exit_code() {
-    let (_tmp, db) = sqlite().await;
-    let a = "/tmp/dispatch-test-not-a-repo-77782";
-    let b = "/tmp/dispatch-test-not-a-repo-77783";
-    seed_repo_path(&db, a).await;
-    seed_repo_path(&db, b).await;
-
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    assert!(
-        commands::repo_sync(&db, None, &mut out, &mut err)
-            .await
-            .is_err(),
-        "a failed target must fail the command"
-    );
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out),
-        String::from_utf8_lossy(&err)
-    );
-    assert!(
-        combined.contains(a) && combined.contains(b),
-        "one failure must not abandon the rest, got: {combined}"
     );
 }
 

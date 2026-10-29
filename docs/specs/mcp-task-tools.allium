@@ -1479,8 +1479,8 @@ rule WrapUpViaMcp {
     --
     -- Since store-split M5 the tool ASKS: one request_wrap_up call naming
     -- this board's host (store-split.allium: RequestWrapUp). For rebase the
-    -- host's board then runs the rebase (pr-workflow.allium: WrapUpRebase,
-    -- which emits BranchRebased); for done and pr the module writes the row
+    -- host's board then runs the rebase (pr-workflow.allium: WrapUpRebase);
+    -- for done and pr the module writes the row
     -- already done.
     ensures: WrapUpRequested(task: task, host: core/local_host(), action: action)
 
@@ -1491,7 +1491,7 @@ rule WrapUpViaMcp {
         -- action; the response text carries it, and the agent must pass it
         -- back to exit_session.
         -- action="rebase" is the only action with host work: the rebase /
-        -- fast-forward (BranchRebased) via finish_task, which performs no
+        -- fast-forward via finish_task, which performs no
         -- session teardown, so the session stays alive until exit_session.
         -- action="done" and action="pr" perform no task-status
         -- or url mutation at wrap_up time — done no longer flips to Done, and

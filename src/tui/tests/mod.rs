@@ -27,7 +27,6 @@ mod navigation;
 mod render_dirty;
 mod rendering;
 mod repo_filter;
-mod repo_sync;
 mod schedules;
 mod search;
 mod section_folds;

@@ -218,24 +218,6 @@ fn app_for(binding: &KeyBinding) -> App {
                     crate::models::UrlType::Pr,
                 ));
             }),
-            "open_repo_sync_prompt" => {
-                let mut app = on_running_card(make_app());
-                let repo = app.selected_task().unwrap().repo_path.clone();
-                app.update(Message::RepoSync(
-                    crate::tui::messages::RepoSyncMessage::Measured(
-                        crate::repo_sync::RepoSyncMeasurement {
-                            repo_path: repo,
-                            base_branch: "main".to_string(),
-                            counts: Some(crate::repo_sync::AheadBehind {
-                                ahead: 1,
-                                behind: 1,
-                            }),
-                            fetch_error: None,
-                        },
-                    ),
-                ));
-                app
-            }
             _ => on_running_card(make_app()),
         },
         Some(C::TaskOnOtherMachine) => {
@@ -521,9 +503,6 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
                 epic_id: None,
             }))
         }
-        N::BoardConfirmRepoSync => one(draft_app(InputMode::ConfirmRepoSync {
-            repo_path: "/repo/a".to_string(),
-        })),
         N::BoardConfirmDeleteWorkPackage => one(draft_app(InputMode::ConfirmDeleteWorkPackage(
             crate::models::WorkPackageId(1),
         ))),

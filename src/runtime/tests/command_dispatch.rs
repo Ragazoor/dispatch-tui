@@ -15,8 +15,7 @@ use super::*;
 use crate::models::test_tmux_window;
 
 use crate::tui::commands::{
-    EditorCommand, FeedCommand, PersistFields, PrCommand, RepoSyncCommand, SplitCommand,
-    SystemCommand, TaskCommand,
+    EditorCommand, FeedCommand, PersistFields, PrCommand, SplitCommand, SystemCommand, TaskCommand,
 };
 
 /// Mirror of `execute_commands`' drain loop without the terminal/key-rx

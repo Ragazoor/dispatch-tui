@@ -98,7 +98,6 @@ pub enum KeyNamespace {
     BoardConfirmDeleteRepoPath,
     BoardConfirmTrustRepo,
     BoardConfirmTrustRepoQuickDispatch,
-    BoardConfirmRepoSync,
     BoardConfirmDeleteWorkPackage,
     AgentTreeTree,
     AgentTreeCommits,
@@ -110,7 +109,7 @@ pub enum KeyNamespace {
 impl KeyNamespace {
     /// Every namespace, in the order the spec's enum lists them. This is the
     /// order `list_keybindings` and the help overlay group by.
-    pub const ALL: [KeyNamespace; 37] = [
+    pub const ALL: [KeyNamespace; 36] = [
         Self::BoardNormal,
         Self::BoardDetail,
         Self::BoardSearch,
@@ -141,7 +140,6 @@ impl KeyNamespace {
         Self::BoardConfirmDeleteRepoPath,
         Self::BoardConfirmTrustRepo,
         Self::BoardConfirmTrustRepoQuickDispatch,
-        Self::BoardConfirmRepoSync,
         Self::BoardConfirmDeleteWorkPackage,
         Self::AgentTreeTree,
         Self::AgentTreeCommits,
@@ -183,7 +181,6 @@ impl KeyNamespace {
             Self::BoardConfirmDeleteRepoPath => "board.confirm.delete_repo_path",
             Self::BoardConfirmTrustRepo => "board.confirm.trust_repo",
             Self::BoardConfirmTrustRepoQuickDispatch => "board.confirm.trust_repo_quick_dispatch",
-            Self::BoardConfirmRepoSync => "board.confirm.repo_sync",
             Self::BoardConfirmDeleteWorkPackage => "board.confirm.delete_work_package",
             Self::AgentTreeTree => "agent_tree.tree",
             Self::AgentTreeCommits => "agent_tree.commits",

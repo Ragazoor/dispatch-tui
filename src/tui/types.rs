@@ -233,9 +233,6 @@ pub enum Message {
     Pr(crate::tui::messages::PrMessage),
     /// Repo-filter overlay messages — see [`crate::tui::messages::BoardFilterMessage`].
     BoardFilter(crate::tui::messages::BoardFilterMessage),
-    /// Local-first repo sync messages — see
-    /// [`crate::tui::messages::RepoSyncMessage`].
-    RepoSync(crate::tui::messages::RepoSyncMessage),
     /// Feed-epic refresh messages — see [`crate::tui::messages::FeedMessage`].
     Feed(crate::tui::messages::FeedMessage),
     /// Budget-indicator messages — see [`crate::tui::messages::BudgetMessage`].
@@ -283,9 +280,6 @@ pub enum Command {
     System(crate::tui::commands::SystemCommand),
     /// Repo-filter overlay side-effect commands — see [`crate::tui::commands::RepoFilterCommand`].
     RepoFilter(crate::tui::commands::RepoFilterCommand),
-    /// Local-first repo sync side-effect commands — see
-    /// [`crate::tui::commands::RepoSyncCommand`].
-    RepoSync(crate::tui::commands::RepoSyncCommand),
     /// PR flow side-effect commands — see [`crate::tui::commands::PrCommand`].
     Pr(crate::tui::commands::PrCommand),
     /// Background learning-maintenance side-effect commands — see
@@ -390,13 +384,6 @@ pub enum InputMode {
     /// The creation form's last step: the model picker (CreateTask:
     /// ModelPicker). Answering it creates the task.
     InputModel,
-    /// Sync confirmation for one repository (docs/specs/repo-sync.allium:
-    /// surface RepoSyncConfirmation). Carries only the repo path: the
-    /// measurement itself is re-read from `App.repo_sync` at confirm time, so a
-    /// refresh that lands while the prompt is open cannot be acted on stale.
-    ConfirmRepoSync {
-        repo_path: String,
-    },
     /// The work-package link picker (`w` on a task or epic card —
     /// `work-packages.allium: WorkPackageLinkPicker`). `cursor` indexes the
     /// board's packages in order, then the final "new package" row.

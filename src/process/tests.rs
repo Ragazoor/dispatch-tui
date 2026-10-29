@@ -451,7 +451,7 @@ fn run_bounded_kills_the_childs_process_group_at_the_deadline() {
 
 /// Once the child has exited, a grandchild still holding stderr must not
 /// stretch the call out to the whole deadline, nor cost the stderr the child
-/// wrote: `repo_sync::is_push_rejection` reads it.
+/// wrote: callers classify failures from it.
 #[test]
 fn run_bounded_returns_promptly_with_stderr_when_a_grandchild_holds_the_pipe() {
     let (tx, rx) = std::sync::mpsc::channel();

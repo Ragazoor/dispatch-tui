@@ -508,17 +508,6 @@ rule WrapUpRebase {
 
     ensures:
         if outcome.rebased:
-            -- repo_path travels on the event because the consumer
-            -- (RefreshRepoSyncStateAfterRebase in repo-sync.allium) needs the
-            -- repository whose base branch just moved, and a branch name alone
-            -- does not identify one. Emitted by this host whenever its rebase
-            -- succeeded, whether or not the module then accepts the report:
-            -- the base branch moved on this disk either way.
-            BranchRebased(
-                branch: branch,
-                onto: task.base_branch,
-                repo_path: task.repo_path
-            )
             SessionRequestDone(request: request, reporter: core/local_host())
         else:
             -- conflict is true only for a genuine textual rebase conflict;
@@ -586,9 +575,6 @@ rule WrapUpRebase {
         --      the whole operation, because rebasing past a base that was
         --      never refreshed on the strength of a failure to look is how
         --      an unrelated git problem turns into a silent stale rebase.
-        --      (repo-sync.allium's SyncRepo deliberately collapses the two
-        --      into no_remote instead — for that operation both mean
-        --      "nothing to sync against".)
         --   4. `git rebase <base_branch>` from the task's worktree.
         --      On conflict: abort the rebase and report failed with
         --      conflict = true and a reason naming the actual conflicted
@@ -632,11 +618,6 @@ rule WrapUpRebase {
         -- rebase moved the worktree's HEAD the success response tells it to
         -- run the command again before exit_session
         -- (AgentsRunTheVerifyCommand in mcp-task-tools.allium).
-        --
-        -- The BranchRebased emission belongs to this rule, on the host that
-        -- ran the rebase, which is the only rebase path. Its consumer is
-        -- RefreshRepoSyncStateAfterRebase in repo-sync.allium, which
-        -- refreshes this host's own view of the repository.
 }
 
 rule WrapUpPr {

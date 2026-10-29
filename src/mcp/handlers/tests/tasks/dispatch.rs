@@ -1295,19 +1295,6 @@ fn dispatch_task_success_text_names_a_created_worktree() {
     );
 }
 
-// The three `AgentLaunched` tests that stood here
-// (`dispatch_task_notifies_that_the_repo_needs_remeasuring`,
-// `a_failed_dispatch_task_notifies_no_remeasure`,
-// `the_auto_dispatch_chain_notifies_that_the_repo_needs_remeasuring`) pinned
-// RefreshRepoSyncStateAfterDispatch on the MCP and chain surfaces through
-// `BoardEvent::AgentLaunched`. Since store-split M4 neither surface launches:
-// every request is provisioned by the board's host reactor, which reports the
-// launch as `TaskMessage::Dispatched` whatever the origin
-// (`src/runtime/tests/misc.rs::an_off_board_request_reaches_the_board_as_dispatched`),
-// and that message's non-fetching refresh is pinned in
-// `src/tui/tests/repo_sync.rs`. A failed request launches nothing and sends no
-// `Dispatched`.
-
 #[tokio::test]
 async fn dispatch_task_returns_error_for_non_backlog_task() {
     let state = test_state().await;

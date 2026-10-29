@@ -173,16 +173,7 @@ dispatch repo set-verify <path> <command>        # set the repo's verify command
 dispatch repo clear-verify <path>
 dispatch repo list                               # known repo paths + their verify commands
 dispatch prune-repo-paths                        # forget repo paths that no longer exist
-
-# Local-first repo sync (see docs/specs/repo-sync.allium)
-dispatch repo status [--no-fetch]   # one drift row per saved repo path; read-only
-dispatch repo sync [<path>]         # sync one saved repo path, or every one
 ```
-
-`repo status` fetches before measuring so its counts are current; `--no-fetch`
-reports whatever the local refs say. A repository that cannot be measured shows
-`unknown` rather than any ahead/behind figure — it is never reported as clean.
-`repo sync` attempts every target and exits non-zero if any of them failed.
 
 Tasks are created and mutated via the MCP tools (`create_task`,
 `update_tasks`) — there is no CLI subcommand for creating, listing or

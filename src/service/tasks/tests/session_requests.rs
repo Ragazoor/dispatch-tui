@@ -338,11 +338,6 @@ async fn serve_claims_rebases_and_reports_done() {
     let served = svc.serve_session_request(fx.row(id).await).await;
 
     assert!(matches!(served.outcome, SessionOutcome::Done), "{served:?}");
-    assert_eq!(
-        served.rebased.as_deref(),
-        Some(REPO),
-        "BranchRebased: the repository whose base branch just moved"
-    );
     let row = fx.row(id).await;
     assert_eq!(row.state, SessionRequestState::Done);
     assert!(row.claimed_at.is_some());
@@ -421,7 +416,6 @@ async fn serve_reports_a_conflict_and_the_module_sets_the_sub_status() {
         panic!("expected Failed, got {served:?}");
     };
     assert!(reason.contains("foo.rs"), "{reason}");
-    assert!(served.rebased.is_none(), "nothing moved the base branch");
     let row = fx.row(id).await;
     assert_eq!(row.state, SessionRequestState::Failed);
     assert_eq!(row.reason.as_deref(), Some(reason.as_str()));
@@ -760,7 +754,7 @@ async fn a_conflicted_rebase_past_the_deadline_is_still_aborted() {
 }
 
 /// A rebase that FINISHES after the deadline has still moved the base branch
-/// (BranchRebased is reported), but the module refuses its late done report;
+/// (the module sees it), but the module refuses its late done report;
 /// the host then reports failed "deadline passed" so the row does not wait for
 /// the backstop, and no token is issued.
 #[tokio::test]
@@ -782,11 +776,6 @@ async fn a_rebase_finishing_past_the_deadline_is_reported_failed_but_still_rebas
     assert!(
         matches!(&served.outcome, SessionOutcome::Failed(r) if r == crate::dispatch::DEADLINE_PASSED),
         "{served:?}"
-    );
-    assert_eq!(
-        served.rebased.as_deref(),
-        Some(REPO),
-        "the base branch moved on this disk either way"
     );
     let row = fx.row(id).await;
     assert_eq!(row.state, SessionRequestState::Failed);
@@ -878,11 +867,6 @@ async fn a_row_that_failed_under_the_host_keeps_the_modules_reason() {
     assert!(
         matches!(&served.outcome, SessionOutcome::Failed(r) if r == "timed out"),
         "the row keeps the module's reason: {served:?}"
-    );
-    assert_eq!(
-        served.rebased.as_deref(),
-        Some(REPO),
-        "the rebase happened in git"
     );
     let row = fx.row(id).await;
     assert_eq!(row.state, SessionRequestState::Failed);

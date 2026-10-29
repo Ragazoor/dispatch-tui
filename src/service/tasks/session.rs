@@ -52,19 +52,11 @@ pub enum SessionOutcome {
 #[derive(Debug)]
 pub struct ServedSession {
     pub outcome: SessionOutcome,
-    /// The repository whose base branch a rebase just fast-forwarded on this
-    /// disk (`pr-workflow.allium: BranchRebased`). Set whether or not the
-    /// module then accepted the report: the branch moved either way, so the
-    /// repository's drift is stale and the caller refreshes it.
-    pub rebased: Option<String>,
 }
 
 impl ServedSession {
     fn plain(outcome: SessionOutcome) -> Self {
-        Self {
-            outcome,
-            rebased: None,
-        }
+        Self { outcome }
     }
 }
 
@@ -256,13 +248,7 @@ impl TaskService {
                 self.report_session_failure(request, &reason, conflict)
                     .await
             }
-            Ok(Ok(())) => {
-                let mut served = self.report_rebase_done(request).await;
-                // Whatever the module made of the report, the base branch moved
-                // on this disk.
-                served.rebased = Some(repo_path);
-                served
-            }
+            Ok(Ok(())) => self.report_rebase_done(request).await,
         }
     }
 

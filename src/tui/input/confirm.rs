@@ -198,20 +198,6 @@ impl App {
         }
     }
 
-    /// The sync confirmation (docs/specs/repo-sync.allium: surface
-    /// RepoSyncConfirmation). Nothing is fetched, merged or pushed until it is
-    /// confirmed; dismissing leaves the repository untouched.
-    pub(in crate::tui) fn handle_key_confirm_repo_sync(
-        &mut self,
-        label: &str,
-        yes: bool,
-        repo_path: String,
-    ) -> Vec<Command> {
-        self.confirm_dialog(label, yes, "confirm_repo_sync", |s| {
-            s.confirm_repo_sync(&repo_path)
-        })
-    }
-
     pub(in crate::tui) fn handle_key_confirm_trust_repo_quick_dispatch(
         &mut self,
         label: &str,

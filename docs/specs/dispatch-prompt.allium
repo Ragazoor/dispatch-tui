@@ -234,8 +234,7 @@ rule ComposeAgentPrompt {
     -- Claude Code `--continue` and no positional text at all, so there is no
     -- skeleton to fill and nothing here is owed to it. Inside rule DispatchTask
     -- that scope came for free, from the rule's own trigger; standing alone the
-    -- guard has to be stated. Same shape, and the same reason, as
-    -- RefreshRepoSyncStateAfterDispatch in repo-sync.allium.
+    -- guard has to be stated.
     requires: mode in {standard, research, quick}
 
     ensures: AgentPromptComposed(task: task, mode: mode)

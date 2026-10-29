@@ -288,7 +288,6 @@ impl App {
             // The board's copy only: the claim already wrote the stamp to the
             // store, and re-writing it would clobber a real hook stamp.
             task.last_pre_tool_use_at = Some(chrono::Utc::now());
-            let repo_path = task.repo_path.clone();
             self.sync_board_selection();
             let mut cmds = Vec::new();
             if switch_focus {
@@ -298,10 +297,6 @@ impl App {
                     },
                 ));
             }
-            // RefreshRepoSyncStateAfterDispatch: provisioning the worktree already
-            // fetched origin/<base> for this repository, so this is a local ref
-            // read with no network cost.
-            cmds.push(Self::refresh_repo_sync_command(repo_path));
             cmds
         } else {
             vec![]

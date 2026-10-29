@@ -190,7 +190,7 @@ pub(crate) fn prune_worktrees(runner: &dyn ProcessRunner, repo: &str, timeout: D
 ///
 /// Falls back to `"main"` when the remote ref is missing or the command
 /// fails (no remote, fresh clone without `git remote set-head`, etc.).
-/// A leading `~` is expanded, as `crate::repo_sync`'s readers do, so a `~/x`
+/// A leading `~` is expanded, as [`ahead_behind`] does, so a `~/x`
 /// caller does not silently get `main`.
 pub fn detect_default_branch(repo_path: &str, runner: &dyn ProcessRunner) -> String {
     if let Ok(output) = git_in(
@@ -235,8 +235,7 @@ pub async fn detect_default_branch_async(
 /// The single place the crate decides that the remote is called `origin`.
 /// Everything that reaches for a base branch's remote counterpart goes through
 /// here — provisioning a worktree's start point
-/// (`crate::dispatch::worktree`), measuring drift and merging
-/// ([`crate::repo_sync`]), and resolving the agent tree's diff baseline
+/// (`crate::dispatch::worktree`), measuring drift ([`ahead_behind`]), and resolving the agent tree's diff baseline
 /// (`crate::agent_tree::changes`).
 ///
 /// Being one definition is load-bearing, not tidiness. Two of those callers
@@ -266,10 +265,6 @@ pub fn origin_ref(base_branch: &str) -> String {
 /// - `classify_fetch_failure` (`src/dispatch/worktree.rs`) grants the
 ///   local-branch fallback only on `Ok(false)`; an `Err` is unreachable-origin,
 ///   since a failure to look identifies nothing.
-/// - [`crate::repo_sync::sync_repo`] deliberately treats both as `NoRemote` —
-///   for that operation "nothing to sync against" is the same fact either way,
-///   a carve-out stated in `docs/specs/repo-sync.allium` under
-///   `PreconditionsPrecedeEveryWrite`.
 pub(crate) fn has_origin_remote(
     repo_path: &str,
     runner: &dyn ProcessRunner,
@@ -286,12 +281,10 @@ pub(crate) fn has_origin_remote(
 
 /// The repo's currently checked-out branch name.
 ///
-/// One of the three preflight reads shared by the rebase path
-/// (`crate::dispatch::finish::finish_task`) and the repo-sync path
-/// ([`crate::repo_sync::sync_repo`]). Both need to know they are on the base
-/// branch before writing, because rebase, merge and push all act on whatever is
-/// checked out. Returns the branch rather than a yes/no so each caller can name
-/// the actual branch in its own error variant.
+/// A preflight read for the rebase path (`crate::dispatch::finish::finish_task`):
+/// it needs to know it is on the base branch before writing, because rebase and
+/// merge act on whatever is checked out. Returns the branch rather than a yes/no
+/// so the caller can name the actual branch in its error.
 pub(crate) fn current_branch(
     repo_path: &str,
     runner: &dyn ProcessRunner,
@@ -313,10 +306,9 @@ pub(crate) fn current_branch(
 
 /// Every dirty or untracked path in the repo's working tree, empty when clean.
 ///
-/// The second shared preflight read: both the rebase and the repo-sync path
-/// refuse to touch a dirty checkout, because rebasing or merging into one is
-/// how work gets lost. Returns the paths so each caller can list them in its
-/// own error variant.
+/// The second preflight read: the rebase path refuses to touch a dirty
+/// checkout, because rebasing or merging into one is how work gets lost.
+/// Returns the paths so the caller can list them in its error.
 pub(crate) fn dirty_files(
     repo_path: &str,
     runner: &dyn ProcessRunner,
@@ -351,9 +343,8 @@ fn porcelain_entries(output: &Output) -> Vec<(String, String)> {
 
 /// Every dirty/untracked path from a `git status --porcelain` run.
 ///
-/// Shared by the rebase path (`crate::dispatch::finish::finish_task`) and the
-/// repo-sync path ([`crate::repo_sync::sync_repo`]) so that "is this checkout
-/// dirty?" has exactly one answer.
+/// Used by the rebase path (`crate::dispatch::finish::finish_task`), so that
+/// "is this checkout dirty?" has exactly one answer.
 pub(crate) fn parse_porcelain_files(output: &Output) -> Vec<String> {
     porcelain_entries(output)
         .into_iter()
@@ -367,14 +358,73 @@ pub(crate) fn parse_porcelain_files(output: &Output) -> Vec<String> {
 /// file names out of rebase's English stdout/stderr prose (which breaks on
 /// rename/delete conflicts, whose message doesn't end in "... in <path>").
 ///
-/// Shared by the rebase path and the repo-sync merge path, so conflict
-/// detection is not duplicated.
+/// Used by the rebase path's conflict detection.
 pub(crate) fn parse_unmerged_files(output: &Output) -> Vec<String> {
     porcelain_entries(output)
         .into_iter()
         .filter(|(code, _)| code == "AA" || code == "DD" || code.contains('U'))
         .map(|(_, path)| path)
         .collect()
+}
+
+/// A two-sided commit count: `ahead` commits are reachable only from the left
+/// side of a `A...B` range, `behind` only from the right. Always read together,
+/// from one observation, so it is one value rather than two fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AheadBehind {
+    pub ahead: u32,
+    pub behind: u32,
+}
+
+/// Count commits on each side of `<base>...origin/<base>`.
+///
+/// Yields `None` — never `AheadBehind { 0, 0 }` — when `origin/<base_branch>`
+/// does not resolve (no remote, never fetched) or when the output cannot be
+/// parsed. A repository that cannot be measured must not be reported as level.
+///
+/// Bounded by [`SUBPROCESS_TIMEOUT`] like every other subprocess here: walking
+/// history can block on a lock, and this runs on the dispatch path, which may
+/// not hang on it. A timed-out walk is simply an unmeasurable one.
+pub fn ahead_behind(
+    repo_path: &str,
+    base_branch: &str,
+    runner: &dyn ProcessRunner,
+) -> Option<AheadBehind> {
+    let repo_path = crate::models::expand_tilde(repo_path);
+    count_left_right(
+        runner,
+        &repo_path,
+        &format!("{base_branch}...{}", origin_ref(base_branch)),
+        SUBPROCESS_TIMEOUT,
+    )
+}
+
+/// Count the commits on each side of `range` (`A...B`) run in `dir`: `ahead`
+/// is reachable only from `A`, `behind` only from `B`. `None` when the walk
+/// fails, times out or prints anything but two counts.
+pub(crate) fn count_left_right(
+    runner: &dyn ProcessRunner,
+    dir: &str,
+    range: &str,
+    timeout: Duration,
+) -> Option<AheadBehind> {
+    let output = git_checked(
+        runner,
+        dir,
+        &["rev-list", "--count", "--left-right", range],
+        timeout,
+    )
+    .ok()?;
+    let stdout = crate::process::stdout_str(&output);
+    let mut fields = stdout.split_whitespace();
+    let ahead = fields.next()?.parse().ok()?;
+    let behind = fields.next()?.parse().ok()?;
+    if fields.next().is_some() {
+        // More than two counts is not output this command produces; refusing to
+        // guess is the whole point of the invariant.
+        return None;
+    }
+    Some(AheadBehind { ahead, behind })
 }
 
 #[cfg(test)]

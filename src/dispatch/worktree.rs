@@ -107,8 +107,7 @@ enum FetchPolicy {
     /// The worktree directory already exists, so `git worktree add` is skipped
     /// and no ref is consumed to create anything — the resolved ref feeds only
     /// the rebase preamble. One attempt still runs, because the spec wants
-    /// `origin/<base>` kept fresh for whatever rebases onto it later and the
-    /// repo-sync drift indicator reads that ref. But failure is a warning, and
+    /// `origin/<base>` kept fresh for whatever rebases onto it later. But failure is a warning, and
     /// neither the retry budget nor the classification probe is spent: both
     /// exist to serve the abort decision this policy does not make, and each
     /// costs a full `SUBPROCESS_TIMEOUT` against an unresponsive network.
@@ -133,11 +132,10 @@ enum FetchFailure {
 /// ref is treated as unreachable — the safe polarity, since only a recognised
 /// 404 earns the local-branch fallback.
 ///
-/// Private to this module on purpose: [`crate::repo_sync`] runs a very similar
-/// fetch but has no need to tell a deleted upstream branch from a network blip.
-/// If it ever grows that need, lift this and `LS_REMOTE_NO_MATCHING_REF` into
-/// `src/git.rs` beside the other shared preflight helpers rather than writing a
-/// second answer to the same question.
+/// Private to this module on purpose: no other fetch needs to tell a deleted
+/// upstream branch from a network blip. If one grows that need, lift this and
+/// `LS_REMOTE_NO_MATCHING_REF` into `src/git.rs` rather than writing a second
+/// answer to the same question.
 fn classify_fetch_failure(
     runner: &dyn ProcessRunner,
     repo_path: &str,
@@ -332,7 +330,7 @@ fn ensure_local_base_resolves(
 /// out, and preferring local there would fail `git worktree add`.
 fn select_start_point(runner: &dyn ProcessRunner, repo_path: &str, base: &str) -> StartPoint {
     let base = base.to_string();
-    match crate::repo_sync::ahead_behind(repo_path, &base, runner) {
+    match crate::git::ahead_behind(repo_path, &base, runner) {
         Some(counts) if counts.ahead > 0 => StartPoint::Local { base },
         _ => StartPoint::Remote { base },
     }
@@ -729,7 +727,7 @@ fn fast_forward_reused_branch(
 ) {
     // Left side is the start point, so `ahead` counts what the branch is
     // missing and `behind` counts its own commits.
-    let Some(drift) = crate::repo_sync::count_left_right(
+    let Some(drift) = crate::git::count_left_right(
         runner,
         worktree_path,
         &format!("{start_ref}...HEAD"),
@@ -1395,8 +1393,7 @@ mod fetch_tests {
         assert_eq!(mock.recorded_calls().len(), 1, "no ls-remote probe");
     }
 
-    // The happy path is unchanged: origin still gets refreshed on reuse, which
-    // is what keeps the repo-sync drift indicator honest.
+    // The happy path is unchanged: origin still gets refreshed on reuse.
     #[test]
     fn best_effort_still_fetches_successfully() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);

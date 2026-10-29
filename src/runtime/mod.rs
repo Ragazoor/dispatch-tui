@@ -743,7 +743,6 @@ mod event_loop;
 mod learnings;
 mod people;
 mod pr;
-mod repo_sync;
 mod session_host;
 mod settings;
 mod split;
@@ -911,7 +910,7 @@ impl TuiRuntime {
         // the W8 catch-up, on the same terms.
         drop(runtime.recover_session_requests().await);
 
-        runtime.start_background_tasks(&parts, session, sync_store, app.repo_paths());
+        runtime.start_background_tasks(&parts, session, sync_store);
 
         Ok(Bootstrap {
             store_server,
@@ -928,7 +927,6 @@ impl TuiRuntime {
         parts: &StoreParts,
         session: crate::sync::SyncSession,
         sync_store: Arc<dyn crate::sync::SyncStore>,
-        saved_repo_paths: &[String],
     ) {
         // Keep the board redrawing behind the connection, and keep the
         // connection up: the first attempt is already answered (above), so the
@@ -940,11 +938,6 @@ impl TuiRuntime {
             parts.settled_identity.clone(),
             parts.reducer_caller.clone(),
         ));
-
-        // RefreshRepoSyncStateOnStartup: the only genuinely new network traffic
-        // this feature introduces — one fetch per saved repo path. Fire-and-forget,
-        // so a slow or offline network never delays startup.
-        drop(self.exec_refresh_all_repo_sync(saved_repo_paths));
     }
 
     /// Tie a detached task's life to this runtime: it is aborted on drop.

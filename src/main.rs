@@ -238,22 +238,6 @@ enum RepoAction {
     ClearVerify { path: String },
     /// List known repo paths and their verify commands.
     List,
-    /// Show each saved repo path's drift against origin on its default branch.
-    /// Read-only: it measures and prints, it never merges or pushes.
-    /// See docs/specs/repo-sync.allium (surface RepoStatusCli).
-    Status {
-        /// Skip the fetch and report whatever the local refs say — for use
-        /// offline or in a tight loop.
-        #[arg(long)]
-        no_fetch: bool,
-    },
-    /// Bring one saved repo path — or every one of them — into step with origin
-    /// on its default branch. See docs/specs/repo-sync.allium (surface
-    /// RepoSyncCli).
-    Sync {
-        /// The repo path to sync. Omitted, every saved repo path is attempted.
-        path: Option<String>,
-    },
 }
 
 /// `dispatch store <action>`'s action.
@@ -716,12 +700,6 @@ async fn cmd_repo(
         }
         RepoAction::ClearVerify { path } => commands::clear_verify(database, &path, &mut out).await,
         RepoAction::List => commands::list_repos(database, &mut out).await,
-        RepoAction::Status { no_fetch } => {
-            commands::repo_status(database, no_fetch, &mut out).await
-        }
-        RepoAction::Sync { path } => {
-            commands::repo_sync(database, path, &mut out, &mut std::io::stderr()).await
-        }
     }
 }
 

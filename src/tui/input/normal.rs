@@ -46,8 +46,7 @@ impl App {
         label: &str,
     ) -> Option<Vec<Command>> {
         use crate::tui::messages::{
-            BoardFilterMessage, EpicMessage, InputMessage, RepoSyncMessage, SplitMessage,
-            SystemMessage, TaskMessage,
+            BoardFilterMessage, EpicMessage, InputMessage, SplitMessage, SystemMessage, TaskMessage,
         };
         let action = b.action;
         let keyed = |app: &mut App, msg: Message| app.dispatch_keyed(msg, action, label);
@@ -83,7 +82,6 @@ impl App {
                 self.input.mode = InputMode::SearchTasks;
                 vec![key_event(action, label)]
             }
-            "open_repo_sync_prompt" => keyed(self, Message::RepoSync(RepoSyncMessage::OpenPrompt)),
             "select_all" => keyed(self, Message::SelectAllColumn),
             "toggle_section_collapse" => keyed(self, Message::ToggleSectionCollapse),
             "toggle_epic_fold" => keyed(self, Message::ToggleEpicFold),

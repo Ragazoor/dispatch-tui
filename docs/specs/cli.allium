@@ -30,8 +30,7 @@
 --           feeds.allium: VerifyFeed); what `agent-tree`, `agent-diff` and
 --           `toggle-agent-tree-pane` show and how they wait for their task
 --           (see agent-tree.allium, "Companion Pane Startup"); what
---           `repo status` and `repo sync` measure and do (see repo-sync.allium:
---           RepoStatusCli, RepoSyncCli); what the snapshot commands and the
+--           the snapshot commands and the
 --           import write into a store and when they refuse (see
 --           spacetime-seed.allium: SnapshotCommandLine, ImportOldStore; startup.allium: ImportBringsUpTheManagedStore);
 --           the plan attachment itself (see mcp-task-tools.allium:
@@ -606,7 +605,6 @@ surface DispatchCommandLine {
         --   caller-headers              mcp-task-tools.allium: TheHelperAnswersSessionUnconditionally
         --   repo set-verify|clear-verify|list
         --                               the rules above
-        --   repo status|sync            repo-sync.allium: RepoStatusCli, RepoSyncCli
         --   prune-repo-paths            PruneRepoPathsViaCli
         --   spacetime dump-server|restore
         --                               spacetime-seed.allium: SnapshotCommandLine

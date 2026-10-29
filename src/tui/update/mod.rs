@@ -17,7 +17,6 @@ mod move_task;
 mod navigation;
 mod people;
 mod pr;
-mod repo_sync;
 mod retry;
 pub(in crate::tui) mod selection;
 mod split_pane;

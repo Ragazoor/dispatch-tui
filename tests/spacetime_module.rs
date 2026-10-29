@@ -77,7 +77,7 @@ fn committed_module(into: &Path) -> PathBuf {
         argv.extend(args.iter().map(|a| a.to_string()));
         let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
         // `git -C <dir>` rather than a cwd on the child: it is the form the
-        // rest of the repo uses (`src/git.rs`, `src/repo_sync.rs`), and
+        // rest of the repo uses (`src/git.rs`), and
         // `run_with_timeout` has no argument for a working directory.
         let out = RealProcessRunner::default()
             .run_with_timeout("git", &argv, PUBLISH_TIMEOUT)

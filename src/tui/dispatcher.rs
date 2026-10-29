@@ -50,9 +50,6 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         // ── Task repo filters ──
         Message::BoardFilter(rfm) => rfm.route(app),
 
-        // ── Local-first repo sync ──
-        Message::RepoSync(rsm) => rsm.route(app),
-
         Message::Feed(fm) => fm.route(app),
 
         // ── Budget indicator ──

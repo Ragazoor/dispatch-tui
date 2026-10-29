@@ -70,7 +70,6 @@ impl App {
             InputMode::ConfirmTrustRepoQuickDispatch { .. } => {
                 N::BoardConfirmTrustRepoQuickDispatch
             }
-            InputMode::ConfirmRepoSync { .. } => N::BoardConfirmRepoSync,
         }
     }
 
@@ -391,7 +390,6 @@ impl App {
             | N::BoardConfirmDeleteRepoPath
             | N::BoardConfirmTrustRepo
             | N::BoardConfirmTrustRepoQuickDispatch
-            | N::BoardConfirmRepoSync
             | N::BoardConfirmDeleteWorkPackage => self.run_confirm(action.ends_with("_yes"), label),
             N::AgentTreeTree
             | N::AgentTreeCommits
@@ -612,9 +610,6 @@ impl App {
             }
             InputMode::ConfirmTrustRepoQuickDispatch { draft, epic_id } => {
                 self.handle_key_confirm_trust_repo_quick_dispatch(label, yes, draft, epic_id)
-            }
-            InputMode::ConfirmRepoSync { repo_path } => {
-                self.handle_key_confirm_repo_sync(label, yes, repo_path)
             }
             InputMode::ConfirmDeleteWorkPackage(id) => {
                 self.handle_key_confirm_delete_work_package(label, yes, id)

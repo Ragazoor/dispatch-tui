@@ -15,7 +15,7 @@
 --           the key handlers from diverging.
 -- Excludes: What each action DOES once run — that belongs to the spec owning
 --           the behaviour (core, tasks, epics, split-pane, agent-tree,
---           repo-sync, …). This spec says `G` runs navigate_row_last; it does
+--           …). This spec says `G` runs navigate_row_last; it does
 --           not say what navigating to the last row means.
 --           Recording a keypress as feature usage (observability.allium:
 --           KeypressRecordsFeatureUsage, FeatureUsageEvent). This spec only
@@ -85,7 +85,6 @@ use "./observability.allium" as observability
 --   board_confirm_delete_repo_path        board.confirm.delete_repo_path
 --   board_confirm_trust_repo              board.confirm.trust_repo
 --   board_confirm_trust_repo_quick_dispatch  board.confirm.trust_repo_quick_dispatch
---   board_confirm_repo_sync               board.confirm.repo_sync
 --   board_confirm_delete_work_package     board.confirm.delete_work_package
 --   agent_tree_tree              agent_tree.tree              companion pane, file-tree section
 --   agent_tree_commits           agent_tree.commits           companion pane, Commits section
@@ -198,7 +197,7 @@ enum KeyNamespace {
     board_confirm_detach_tmux | board_confirm_override_feed_owner |
     board_confirm_move_to_epic | board_confirm_reparent_epic |
     board_confirm_delete_repo_path | board_confirm_trust_repo |
-    board_confirm_trust_repo_quick_dispatch | board_confirm_repo_sync |
+    board_confirm_trust_repo_quick_dispatch |
     board_confirm_delete_work_package |
     agent_tree_tree | agent_tree_commits | agent_tree_agents | agent_diff |
     tmux_global
@@ -606,7 +605,7 @@ rule ListKeybindingsViaMcp {
         -- when absent; context shown as its plain words). With a namespace
         -- name supplied, exactly that one group is returned; with a family
         -- name, every group in that family (board.confirm returns all
-        -- fifteen board.confirm.* groups), in KeyNamespace order.
+        -- fourteen board.confirm.* groups), in KeyNamespace order.
         -- tmux_global rows are included and marked as handled by tmux, so an
         -- agent learns the prefix bindings exist without mistaking them for
         -- keys the board answers.

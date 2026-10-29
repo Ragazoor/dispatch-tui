@@ -20,8 +20,6 @@ use super::*;
 pub(super) struct SessionHost {
     database: Arc<dyn store::TaskReadStore>,
     task_svc: Arc<dyn crate::service::TaskServiceApi>,
-    runner: Arc<dyn ProcessRunner>,
-    msg_tx: mpsc::UnboundedSender<Message>,
     /// Shared by every clone, so a row is handed out once whichever wake-up saw
     /// it first.
     observer: Arc<std::sync::Mutex<crate::dispatch::SessionRequestObserver>>,
@@ -121,16 +119,6 @@ impl SessionHost {
         let request = row.id;
         let task_id = row.task_id;
         let served = self.task_svc.serve_session_request(row).await;
-        // `BranchRebased`: the base branch moved on this disk whether or not the
-        // module accepted the report, so the repository's drift is stale.
-        if let Some(repo_path) = served.rebased {
-            drop(super::repo_sync::spawn_repo_measurement(
-                self.msg_tx.clone(),
-                Arc::clone(&self.runner),
-                repo_path,
-                false,
-            ));
-        }
         match served.outcome {
             SessionOutcome::Done => {
                 tracing::info!(
@@ -165,8 +153,6 @@ impl TuiRuntime {
         SessionHost {
             database: Arc::clone(&self.database),
             task_svc: Arc::clone(&self.task_svc),
-            runner: Arc::clone(&self.runner),
-            msg_tx: self.msg_tx.clone(),
             observer: Arc::clone(&self.session_observer),
         }
     }

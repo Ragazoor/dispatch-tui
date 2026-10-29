@@ -23,7 +23,6 @@ fn every_command_sub_enum_is_named_by_this_module() {
             Command::Epic(_) => "Epic",
             Command::System(_) => "System",
             Command::RepoFilter(_) => "RepoFilter",
-            Command::RepoSync(_) => "RepoSync",
             Command::Pr(_) => "Pr",
             Command::Split(_) => "Split",
             Command::Learning(_) => "Learning",
@@ -51,10 +50,6 @@ fn every_command_sub_enum_is_named_by_this_module() {
         Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteRepoPath(
             String::new(),
         )),
-        Command::RepoSync(RepoSyncCommand::Refresh {
-            repo_path: String::new(),
-            fetch_first: false,
-        }),
         Command::Pr(PrCommand::CheckStatus {
             id: TaskId(1),
             url: String::new(),

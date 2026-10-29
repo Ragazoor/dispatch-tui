@@ -30,9 +30,7 @@
 --           the board TUI's own split pane, which joins a whole agent window
 --           next to the kanban board (see split-pane.allium — a different pane,
 --           in a different window, with a different lifecycle);
---           agent-window creation itself (see dispatch.allium); repository
---           synchronisation and drift measurement, which run their own git
---           commands for a different purpose (see repo-sync.allium); and,
+--           agent-window creation itself (see dispatch.allium); and,
 --           deliberately, any view of the whole branch's work at once and any
 --           view of STAGED changes — the tree shows unstaged work or one
 --           commit, never a combined diff (see AgentTreeShowsUnstagedWorkOnly).

@@ -470,8 +470,7 @@
 --             the board in the same commit as the code (sync.allium:
 --             config.rules_version).
 --           - W13, what stays on the board. The host-local pre-checks (W2),
---             the rebase and the teardown, BranchRebased (the host's own
---             repo-sync refresh after a rebase it ran), ClosePrOnDone's gh
+--             the rebase and the teardown, ClosePrOnDone's gh
 --             call (W5), the MCP waits and response text. update_tasks'
 --             status="done" path (mcp-task-tools.allium: MarkTaskDoneViaMcp)
 --             kept its board-side close and teardown UNTIL M7, by decision;
@@ -1525,8 +1524,7 @@ rule HostReportsSessionRequestDone {
         -- (mcp-task-tools.allium: WrapUpViaMcp).
         --
         -- A LATE REBASE REPORT IS REFUSED: on a row the backstop already
-        -- failed, or past the deadline. The rebase did happen in git, and the
-        -- host still refreshes its repo-sync state for it
+        -- failed, or past the deadline. The rebase did happen in git
         -- (pr-workflow.allium: WrapUpRebase); the agent, told the wrap-up
         -- failed, calls wrap_up again, and a second rebase of an
         -- already-rebased branch changes nothing.

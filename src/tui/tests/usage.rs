@@ -239,12 +239,6 @@ fn shared_confirm_dialogs_record_a_yes_no_pair() {
             InputMode::ConfirmDetachTmux(vec![TaskId(1)]),
             "confirm_detach_tmux",
         ),
-        (
-            InputMode::ConfirmRepoSync {
-                repo_path: "/repo".to_string(),
-            },
-            "confirm_repo_sync",
-        ),
     ];
     for (mode, prefix) in cases {
         let mut app = app_in_mode(mode.clone());

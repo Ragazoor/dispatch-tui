@@ -133,5 +133,4 @@ Subsystem entry points (no dedicated doc page — read the source):
 - `src/feed/mod.rs` — feed system: `FeedRunner` poll loop, exec/parse/ingest pipeline that upserts tasks from external commands
 - `src/cli/` — CLI subcommand implementations, one module per subcommand (`ls src/cli/`)
 - `src/mcp/trajectory.rs` — agent trajectory capture (records the agent's tool-call history for a task)
-- `src/repo_sync.rs` — local-first repo sync: `ahead_behind` drift measurement and `sync_repo` (fetch, merge `origin/<base>`, push). See `docs/specs/repo-sync.allium`
 - `src/sync/` — the shared store: the connection loop, the identity handshake, and **where the board's cards come from**. `board_reads::BoardReads` is that seam, served by the subscription (`SubscriptionBoardReads`), or by the in-memory store a test handle owns. See `docs/specs/sync.allium`

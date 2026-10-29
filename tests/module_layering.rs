@@ -11,7 +11,7 @@
 //! The board's `tui` sits below `runtime`, which drives it: it turns messages
 //! into commands and draws, and never reaches into an adapter or service
 //! itself: what it may import is the leaf layer (`models`, `palette`, `epic_header`, `text`,
-//! `keybindings`, `editor`, `backoff`, and `repo_sync`'s types).
+//! `keybindings`, `editor`, `backoff`).
 //! Test files are scanned too: a test reaching upward pins the edge just as
 //! firmly as production code does.
 

@@ -22,7 +22,7 @@ const WORKTREE: &str = "/repo/.worktrees/42-fix-bug";
 
 struct SessionRig {
     rt: TuiRuntime,
-    msgs: mpsc::UnboundedReceiver<Message>,
+    _msgs: mpsc::UnboundedReceiver<Message>,
     db: Arc<Store>,
     caller: Arc<MemoryReducerCaller>,
     rows: Arc<SharedRows>,
@@ -63,7 +63,7 @@ async fn session_rig_with_identity(
     let rt = make_runtime(db.clone(), tx, runner).await;
     SessionRig {
         rt,
-        msgs,
+        _msgs: msgs,
         db,
         caller,
         rows,
@@ -310,36 +310,6 @@ async fn the_host_serves_an_exit_session_row_and_skips_rows_with_no_host_work() 
 
     assert_eq!(r.state(close).await, SessionRequestState::Done);
     assert_eq!(kill_calls(&runner), 1);
-}
-
-/// After a rebase the repository's drift is measured again, without a fetch:
-/// `repo-sync.allium: RefreshRepoSyncStateAfterRebase`, which used to be sent
-/// from the MCP handler as `BranchRebased`.
-#[tokio::test]
-async fn a_served_rebase_refreshes_the_repository_drift() {
-    let mut responses = DispatchScript::finish().no_remote().responses();
-    responses.extend((0..12).map(|_| (None, MockProcessRunner::ok())));
-    let runner = Arc::new(MockProcessRunner::new_with_delays(responses));
-    let mut r = session_rig(runner.clone()).await;
-    let task = r.running_task().await;
-    r.wrap_up(task, WrapUpMode::Rebase).await;
-
-    join_all(r.rt.serve_session_requests().await).await;
-
-    let measured = loop {
-        match r.msgs.recv().await.expect("the runtime's sender is alive") {
-            Message::RepoSync(crate::tui::messages::RepoSyncMessage::Measured(m)) => break m,
-            _ => continue,
-        }
-    };
-    assert_eq!(measured.repo_path, REPO);
-    assert!(
-        !runner
-            .recorded_calls()
-            .iter()
-            .any(|(_, a)| a.contains(&"fetch".to_string())),
-        "the rebase already refreshed the refs"
-    );
 }
 
 // -- KillWindowOfFailedExitSession -----------------------------------------------

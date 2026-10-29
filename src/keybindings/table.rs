@@ -351,12 +351,6 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "open_pr_url",
         "Open the selected task's URL (its pull request, once one is set) in a browser; reports `No URL set` when there is none",
     ),
-    normal(
-        &["o"],
-        None,
-        "open_repo_sync_prompt",
-        "Sync the selected task's repository with origin on its default branch (merge what it is behind by, push what it is ahead by) after a confirmation. Offered only while the status bar's drift segment is lit; otherwise does nothing",
-    ),
     // ---- board.normal: epic view settings ----
     normal(
         &["U"],
@@ -1138,19 +1132,6 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &[ANY_OTHER_KEY],
         "confirm_trust_repo_quick_dispatch_no",
         "Do not dispatch",
-    ),
-    // ---- BoardConfirmRepoSync ----
-    r(
-        N::BoardConfirmRepoSync,
-        &["y", "Y"],
-        "confirm_repo_sync_yes",
-        "Sync the repository with origin: merge what it is behind by, push what it is ahead by",
-    ),
-    r(
-        N::BoardConfirmRepoSync,
-        &[ANY_OTHER_KEY],
-        "confirm_repo_sync_no",
-        "Leave the repository untouched",
     ),
     // ---- BoardConfirmDeleteWorkPackage ----
     r(

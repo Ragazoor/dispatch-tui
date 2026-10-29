@@ -215,7 +215,7 @@ impl SpacetimeCliStore {
         argv.extend_from_slice(rest);
 
         // Bounded, like every other subprocess in this repo that talks to
-        // something remote (`src/git.rs`, `src/repo_sync.rs`): the server may
+        // something remote (`src/git.rs`): the server may
         // be unreachable, and an unbounded `run` would park the caller with no
         // diagnostic at all.
         let output = self

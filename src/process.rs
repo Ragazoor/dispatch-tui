@@ -144,7 +144,7 @@ const STDERR_GRACE: Duration = Duration::from_millis(100);
 /// this at a deadline, and `join` cannot be bounded. A buffer readable before
 /// EOF because a grandchild that outlives the child can hold the pipe open long
 /// after the child exited, and what the child wrote before exiting must still
-/// reach the caller (`repo_sync::is_push_rejection` reads stderr).
+/// reach the caller (callers classify failures from stderr).
 fn drain(
     mut pipe: impl std::io::Read + Send + 'static,
 ) -> (Arc<Mutex<Vec<u8>>>, std::sync::mpsc::Receiver<()>) {
