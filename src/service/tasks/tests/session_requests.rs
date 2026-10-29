@@ -754,7 +754,7 @@ async fn a_conflicted_rebase_past_the_deadline_is_still_aborted() {
 }
 
 /// A rebase that FINISHES after the deadline has still moved the base branch
-/// (the module sees it), but the module refuses its late done report;
+/// (the host still ran it), but the module refuses its late done report;
 /// the host then reports failed "deadline passed" so the row does not wait for
 /// the backstop, and no token is issued.
 #[tokio::test]
@@ -768,7 +768,7 @@ async fn a_rebase_finishing_past_the_deadline_is_reported_failed_but_still_rebas
         chrono::Duration::seconds(130),
         false,
     ));
-    let svc = fx.svc(runner);
+    let svc = fx.svc(runner.clone());
     let id = asked(svc.request_wrap_up(task, WrapUpMode::Rebase).await.unwrap());
 
     let served = svc.serve_session_request(fx.row(id).await).await;
@@ -776,6 +776,12 @@ async fn a_rebase_finishing_past_the_deadline_is_reported_failed_but_still_rebas
     assert!(
         matches!(&served.outcome, SessionOutcome::Failed(r) if r == crate::dispatch::DEADLINE_PASSED),
         "{served:?}"
+    );
+    // The rebase did run in git: the late report is what the module refused.
+    let seen = runner.seen.lock().unwrap().clone();
+    assert!(
+        seen.iter().any(|c| c.contains("merge --ff-only")),
+        "the fast-forward ran: {seen:?}"
     );
     let row = fx.row(id).await;
     assert_eq!(row.state, SessionRequestState::Failed);
@@ -858,7 +864,7 @@ async fn a_row_that_failed_under_the_host_keeps_the_modules_reason() {
             caller.expire_session_request(id);
         }))),
     });
-    let svc = fx.svc(runner);
+    let svc = fx.svc(runner.clone());
     let id = asked(svc.request_wrap_up(task, WrapUpMode::Rebase).await.unwrap());
     *id_cell.lock().unwrap() = Some(id);
 
@@ -867,6 +873,11 @@ async fn a_row_that_failed_under_the_host_keeps_the_modules_reason() {
     assert!(
         matches!(&served.outcome, SessionOutcome::Failed(r) if r == "timed out"),
         "the row keeps the module's reason: {served:?}"
+    );
+    // The rebase did run in git: the action fires only on the fast-forward.
+    assert!(
+        runner.action.lock().unwrap().is_none(),
+        "the fast-forward ran, so the expiry fired"
     );
     let row = fx.row(id).await;
     assert_eq!(row.state, SessionRequestState::Failed);

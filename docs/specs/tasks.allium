@@ -1956,8 +1956,8 @@ rule EditTask {
     -- WRAP_UP_MODE, MODEL, PHOENIX, URL, URL_TYPE).
     -- The user edits the file; on save, fields are parsed back.
     -- Header-shaped text is escaped, so a value never ends its own section:
-    -- a line of a written value that is a known header of this file (after
-    -- trimming, and after any leading backslashes) gets one backslash
+    -- a line of a written value that is a known header of this file (once any
+    -- leading backslashes are stripped and the rest trimmed) gets one backslash
     -- prepended, and a line read back that starts with a backslash and is
     -- otherwise such a header loses one. Write then read returns every
     -- value unchanged, including a description line like `--- STATUS ---`.
