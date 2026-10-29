@@ -303,6 +303,19 @@ impl MemoryReducerCaller {
         self.lock().tasks.get(&id).map(|t| t.owner.clone())
     }
 
+    /// Make the next generated epic id `id`. The real store's auto-increment
+    /// allocates in blocks and can jump (after a restart or republish) while
+    /// this store counts by one, so a conformance test aligns the two with the
+    /// id the real store returned before it replays a create here.
+    pub fn align_next_epic_id(&self, id: i64) {
+        self.lock().next_epic_id = id;
+    }
+
+    /// As [`Self::align_next_epic_id`], for tasks.
+    pub fn align_next_task_id(&self, id: i64) {
+        self.lock().next_task_id = id;
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Tables> {
         self.tables.lock().unwrap_or_else(|e| e.into_inner())
     }

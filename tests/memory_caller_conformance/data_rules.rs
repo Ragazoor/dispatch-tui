@@ -100,6 +100,7 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         };
         let root = real.create_epic(grouped.clone()).await.unwrap().0;
         wait_for!(rows_real.epic(EpicId(root)).is_some());
+        mem.align_next_epic_id(root);
         assert_eq!(mem.create_epic(grouped).await.unwrap().0, root);
 
         let in_root = |repo: &str| bindings::Task {
@@ -109,6 +110,7 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         };
         let task = real.create_task(in_root("/x/alpha")).await.unwrap();
         wait_for!(rows_real.task(task).is_some());
+        mem.align_next_task_id(task.0);
         assert_eq!(mem.create_task(in_root("/x/alpha")).await.unwrap(), task);
         same_task(task.0);
         let sub = rows_real.task(task).unwrap().epic_id.unwrap().0;
@@ -300,6 +302,7 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         };
         let other = real.create_epic(plain.clone()).await.unwrap().0;
         wait_for!(rows_real.epic(EpicId(other)).is_some());
+        mem.align_next_epic_id(other);
         assert_eq!(mem.create_epic(plain).await.unwrap().0, other);
         let before = rows_real.task(task).unwrap();
         let illegal_with_repo = bindings::TaskPatch {
@@ -366,6 +369,7 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         };
         let done_real = real.create_task(finishing("finishing")).await.unwrap();
         wait_for!(rows_real.task(done_real).is_some());
+        mem.align_next_task_id(done_real.0);
         let done_mem = mem.create_task(finishing("finishing")).await.unwrap();
         let stale = "2001-01-01 00:00:00.000";
         let to_done = bindings::TaskPatch {
@@ -426,12 +430,14 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
             ..blank_epic()
         };
         let deep_root = real.create_epic(owned_epic(0)).await.unwrap().0;
+        mem.align_next_epic_id(deep_root);
         assert_eq!(mem.create_epic(owned_epic(0)).await.unwrap().0, deep_root);
         let mut parent = deep_root;
         for _ in 0..=MODULE_MAX_EPIC_DEPTH {
             let child = owned_epic(parent);
             wait_for!(rows_real.epic(EpicId(parent)).is_some());
             let id = real.create_epic(child.clone()).await.unwrap().0;
+            mem.align_next_epic_id(id);
             assert_eq!(mem.create_epic(child).await.unwrap().0, id);
             parent = id;
         }
