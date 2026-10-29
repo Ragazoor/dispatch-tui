@@ -223,7 +223,7 @@ async fn dispatch_task_kill_tmux_window_kills_the_window() {
 
     let call = h.await_call("kill-window").await;
     assert!(
-        call.contains(&h.mock.pane_id_of("task-1")),
+        call.contains(&h.mock.pane_id_of("task-1").to_string()),
         "targeted by resolved pane ID, not by name (see `tmux::window_target`): {call}"
     );
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::test_pane_id;
 
 #[test]
 fn tick_checks_window_for_review_task_with_live_window() {
@@ -208,7 +209,7 @@ fn window_gone_ignored_for_split_pinned_task() {
 
     // Pin task 4 in split mode
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.board.split.pinned_task_id = Some(TaskId(4));
 
     // Even if WindowGone fires for the pinned task, it should NOT crash

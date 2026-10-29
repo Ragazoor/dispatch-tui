@@ -1,11 +1,12 @@
 use super::*;
+use crate::models::test_pane_id;
 
 #[test]
 fn join_pane_issues_correct_tmux_args() {
     // Resolution *is* the pane lookup, so the separate display-message call
     // this used to make is gone: one recorded call, not two.
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]).with_windows(&COLLIDING);
-    let pane_id = join_pane(&test_tmux_window("task-42"), "%1", &mock).unwrap();
+    let pane_id = join_pane(&test_tmux_window("task-42"), &test_pane_id("%1"), &mock).unwrap();
     let expected = mock.pane_id_of("task-42");
     assert_eq!(pane_id, expected);
     let calls = mock.recorded_calls();
@@ -18,7 +19,7 @@ fn join_pane_issues_correct_tmux_args() {
             "-h",
             "-d",
             "-s",
-            &expected,
+            expected.as_str(),
             "-t",
             "%1",
             "-l",
@@ -30,7 +31,7 @@ fn join_pane_issues_correct_tmux_args() {
 #[test]
 fn join_pane_returns_source_pane_id() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]).with_windows(&["my-window"]);
-    let result = join_pane(&test_tmux_window("my-window"), "%0", &mock).unwrap();
+    let result = join_pane(&test_tmux_window("my-window"), &test_pane_id("%0"), &mock).unwrap();
     assert_eq!(result, mock.pane_id_of("my-window"));
 }
 
@@ -39,7 +40,7 @@ fn join_pane_fails_when_source_window_is_absent() {
     // Otherwise a prefix-matched sibling's pane is torn out of its own window
     // and pulled into the board's split.
     let mock = MockProcessRunner::new(vec![]).with_windows(&["dispatch", "task-42"]);
-    let err = join_pane(&test_tmux_window("task-4"), "%1", &mock).unwrap_err();
+    let err = join_pane(&test_tmux_window("task-4"), &test_pane_id("%1"), &mock).unwrap_err();
     assert!(
         err.to_string().contains("no tmux window named 'task-4'"),
         "got: {err}"
@@ -50,7 +51,7 @@ fn join_pane_fails_when_source_window_is_absent() {
 #[test]
 fn select_pane_issues_correct_tmux_args() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
-    select_pane("%42", &mock).unwrap();
+    select_pane(&test_pane_id("%42"), &mock).unwrap();
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].0, "tmux");
@@ -62,7 +63,7 @@ fn select_pane_issues_correct_tmux_args() {
 #[test]
 fn split_window_horizontal_issues_correct_args() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%5\n")]);
-    let pane_id = split_window_horizontal("%1", &mock).unwrap();
+    let pane_id = split_window_horizontal(&test_pane_id("%1"), &mock).unwrap();
     assert_eq!(pane_id, "%5");
     let calls = mock.recorded_calls();
     assert_eq!(
@@ -85,7 +86,7 @@ fn split_window_horizontal_issues_correct_args() {
 #[test]
 fn split_window_horizontal_fails_on_nonzero_exit() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no target pane")]);
-    let err = split_window_horizontal("%1", &mock).unwrap_err();
+    let err = split_window_horizontal(&test_pane_id("%1"), &mock).unwrap_err();
     assert!(
         err.to_string().contains("split-window failed"),
         "got: {err}"
@@ -200,7 +201,7 @@ fn pane_ids_with_option_returns_only_marked_panes() {
         b"%1 \n%2 agent_tree\n%3 \n",
     )]);
     let found = pane_ids_with_option("%1", PANE_ROLE_OPTION, &mock).unwrap();
-    assert_eq!(found, vec!["%2".to_string()]);
+    assert_eq!(found, vec![test_pane_id("%2")]);
     assert_eq!(
         mock.recorded_calls()[0].1,
         vec![
@@ -221,7 +222,7 @@ fn pane_ids_with_option_returns_every_role() {
         b"%1 \n%2 agent_tree\n%3 diff\n",
     )]);
     let found = pane_ids_with_option("%1", PANE_ROLE_OPTION, &mock).unwrap();
-    assert_eq!(found, vec!["%2".to_string(), "%3".to_string()]);
+    assert_eq!(found, vec![test_pane_id("%2"), test_pane_id("%3")]);
 }
 
 #[test]
@@ -246,7 +247,7 @@ fn pane_ids_with_option_value_returns_only_that_role() {
         b"%1 \n%2 agent_tree\n%3 diff\n",
     )]);
     let found = pane_ids_with_option_value("%2", PANE_ROLE_OPTION, PANE_ROLE_DIFF, &mock).unwrap();
-    assert_eq!(found, vec!["%3".to_string()]);
+    assert_eq!(found, vec![test_pane_id("%3")]);
     assert_eq!(
         mock.recorded_calls()[0].1,
         vec![
@@ -267,7 +268,7 @@ fn pane_ids_with_option_value_matches_the_whole_value() {
         b"%1 diff_split\n%2 diff\n",
     )]);
     let found = pane_ids_with_option_value("%1", PANE_ROLE_OPTION, PANE_ROLE_DIFF, &mock).unwrap();
-    assert_eq!(found, vec!["%2".to_string()]);
+    assert_eq!(found, vec![test_pane_id("%2")]);
 }
 
 #[test]
@@ -385,7 +386,7 @@ fn split_window_below_running_resolves_a_window_name() {
     split_window_below_running("task-42", 60, "/w", &["vi", "a"], &mock).unwrap();
     let args = &mock.recorded_calls()[0].1;
     let target = args.iter().position(|a| a == "-t").unwrap() + 1;
-    assert_eq!(args[target], mock.pane_id_of("task-42"));
+    assert_eq!(args[target], mock.pane_id_of("task-42").to_string());
 }
 
 // --- respawn_pane_running ---
@@ -393,7 +394,13 @@ fn split_window_below_running_resolves_a_window_name() {
 #[test]
 fn respawn_pane_running_issues_correct_args() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
-    respawn_pane_running("%7", "/work/wt", &["vim", "-p", "/work/wt/a.rs"], &mock).unwrap();
+    respawn_pane_running(
+        &test_pane_id("%7"),
+        "/work/wt",
+        &["vim", "-p", "/work/wt/a.rs"],
+        &mock,
+    )
+    .unwrap();
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(
@@ -416,14 +423,14 @@ fn respawn_pane_running_issues_correct_args() {
 #[test]
 fn respawn_pane_running_rejects_empty_command() {
     let mock = MockProcessRunner::new(vec![]);
-    let err = respawn_pane_running("%7", "/w", &[], &mock).unwrap_err();
+    let err = respawn_pane_running(&test_pane_id("%7"), "/w", &[], &mock).unwrap_err();
     assert!(err.to_string().contains("command must not be empty"));
 }
 
 #[test]
 fn respawn_pane_running_fails_on_nonzero_exit() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("boom")]);
-    let err = respawn_pane_running("%7", "/w", &["vi", "a"], &mock).unwrap_err();
+    let err = respawn_pane_running(&test_pane_id("%7"), "/w", &["vi", "a"], &mock).unwrap_err();
     assert!(
         err.to_string().contains("respawn-pane failed"),
         "got: {err}"
@@ -435,7 +442,7 @@ fn respawn_pane_running_fails_on_nonzero_exit() {
 #[test]
 fn set_pane_option_issues_correct_args() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
-    set_pane_option("%7", PANE_ROLE_OPTION, PANE_ROLE_DIFF, &mock).unwrap();
+    set_pane_option(&test_pane_id("%7"), PANE_ROLE_OPTION, PANE_ROLE_DIFF, &mock).unwrap();
     assert_eq!(
         mock.recorded_calls()[0].1,
         vec![
@@ -452,7 +459,7 @@ fn set_pane_option_issues_correct_args() {
 #[test]
 fn set_pane_option_fails_on_nonzero_exit() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("bad option")]);
-    let err = set_pane_option("%7", "@x", "1", &mock).unwrap_err();
+    let err = set_pane_option(&test_pane_id("%7"), "@x", "1", &mock).unwrap_err();
     assert!(err.to_string().contains("set-option failed"), "got: {err}");
 }
 
@@ -462,7 +469,7 @@ fn set_pane_option_fails_on_nonzero_exit() {
 fn join_pane_fails_when_the_window_lookup_fails() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no server running")])
         .with_queued_window_lookup();
-    let err = join_pane(&test_tmux_window("task-42"), "%1", &mock).unwrap_err();
+    let err = join_pane(&test_tmux_window("task-42"), &test_pane_id("%1"), &mock).unwrap_err();
     assert!(
         err.to_string().contains("no tmux window named 'task-42'"),
         "got: {err}"
@@ -473,7 +480,7 @@ fn join_pane_fails_when_the_window_lookup_fails() {
 fn join_pane_fails_when_join_pane_command_fails() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("invalid target")])
         .with_windows(&["task-42"]);
-    let err = join_pane(&test_tmux_window("task-42"), "%1", &mock).unwrap_err();
+    let err = join_pane(&test_tmux_window("task-42"), &test_pane_id("%1"), &mock).unwrap_err();
     assert!(err.to_string().contains("join-pane failed"), "got: {err}");
 }
 
@@ -485,7 +492,7 @@ fn break_pane_to_window_issues_correct_args() {
         MockProcessRunner::ok(), // list-windows (duplicate-name check)
         MockProcessRunner::ok(), // break-pane
     ]);
-    break_pane_to_window("%5", &test_tmux_window("new-win"), &mock).unwrap();
+    break_pane_to_window(&test_pane_id("%5"), &test_tmux_window("new-win"), &mock).unwrap();
     let calls = mock.recorded_calls();
     assert_eq!(
         calls[1].1,
@@ -500,7 +507,8 @@ fn break_pane_to_window_issues_correct_args() {
 #[test]
 fn break_pane_to_window_refuses_a_name_a_live_window_already_holds() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"board\ntask-42\n")]);
-    let err = break_pane_to_window("%5", &test_tmux_window("task-42"), &mock).unwrap_err();
+    let err =
+        break_pane_to_window(&test_pane_id("%5"), &test_tmux_window("task-42"), &mock).unwrap_err();
     assert!(
         err.to_string()
             .contains("a tmux window named 'task-42' already exists"),
@@ -521,7 +529,8 @@ fn break_pane_to_window_fails_on_nonzero_exit() {
         MockProcessRunner::ok(), // list-windows (duplicate-name check)
         MockProcessRunner::fail("no such pane"), // break-pane
     ]);
-    let err = break_pane_to_window("%5", &test_tmux_window("new-win"), &mock).unwrap_err();
+    let err =
+        break_pane_to_window(&test_pane_id("%5"), &test_tmux_window("new-win"), &mock).unwrap_err();
     assert!(err.to_string().contains("break-pane failed"), "got: {err}");
 }
 
@@ -530,7 +539,7 @@ fn break_pane_to_window_fails_on_nonzero_exit() {
 #[test]
 fn kill_pane_issues_correct_tmux_args() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
-    kill_pane("%42", &mock).unwrap();
+    kill_pane(&test_pane_id("%42"), &mock).unwrap();
     let calls = mock.recorded_calls();
     assert_eq!(calls[0].1, vec!["kill-pane", "-t", "%42"]);
 }
@@ -538,7 +547,7 @@ fn kill_pane_issues_correct_tmux_args() {
 #[test]
 fn kill_pane_fails_on_nonzero_exit() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no pane")]);
-    let err = kill_pane("%42", &mock).unwrap_err();
+    let err = kill_pane(&test_pane_id("%42"), &mock).unwrap_err();
     assert!(err.to_string().contains("kill-pane failed"), "got: {err}");
 }
 
@@ -547,7 +556,7 @@ fn kill_pane_fails_on_nonzero_exit() {
 #[test]
 fn respawn_pane_issues_correct_tmux_args() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
-    respawn_pane("%42", &mock).unwrap();
+    respawn_pane(&test_pane_id("%42"), &mock).unwrap();
     let calls = mock.recorded_calls();
     assert_eq!(calls[0].1, vec!["respawn-pane", "-k", "-t", "%42"]);
 }
@@ -555,7 +564,7 @@ fn respawn_pane_issues_correct_tmux_args() {
 #[test]
 fn respawn_pane_fails_on_nonzero_exit() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such pane")]);
-    let err = respawn_pane("%42", &mock).unwrap_err();
+    let err = respawn_pane(&test_pane_id("%42"), &mock).unwrap_err();
     assert!(
         err.to_string().contains("respawn-pane failed"),
         "got: {err}"
@@ -617,7 +626,7 @@ fn pane_id_for_window_fails_rather_than_returning_a_siblings_pane() {
 #[test]
 fn swap_pane_issues_correct_tmux_args() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
-    swap_pane("%1", "%2", &mock).unwrap();
+    swap_pane(&test_pane_id("%1"), &test_pane_id("%2"), &mock).unwrap();
     let calls = mock.recorded_calls();
     assert_eq!(calls[0].1, vec!["swap-pane", "-d", "-s", "%1", "-t", "%2"]);
 }
@@ -625,7 +634,7 @@ fn swap_pane_issues_correct_tmux_args() {
 #[test]
 fn swap_pane_fails_on_nonzero_exit() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no pane")]);
-    let err = swap_pane("%1", "%2", &mock).unwrap_err();
+    let err = swap_pane(&test_pane_id("%1"), &test_pane_id("%2"), &mock).unwrap_err();
     assert!(err.to_string().contains("swap-pane failed"), "got: {err}");
 }
 
@@ -655,7 +664,7 @@ fn current_pane_id_fails_on_nonzero_exit() {
 #[test]
 fn pane_pid_reads_the_pid_of_an_explicit_pane() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"4242\n")]);
-    assert_eq!(pane_pid("%3", &mock), Some(4242));
+    assert_eq!(pane_pid(&test_pane_id("%3"), &mock), Some(4242));
     assert_eq!(
         mock.recorded_calls()[0].1,
         vec!["display-message", "-p", "-t", "%3", "#{pane_pid}"]
@@ -665,9 +674,9 @@ fn pane_pid_reads_the_pid_of_an_explicit_pane() {
 #[test]
 fn pane_pid_is_none_when_tmux_cannot_say() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no pane")]);
-    assert_eq!(pane_pid("%3", &mock), None);
+    assert_eq!(pane_pid(&test_pane_id("%3"), &mock), None);
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"junk\n")]);
-    assert_eq!(pane_pid("%3", &mock), None);
+    assert_eq!(pane_pid(&test_pane_id("%3"), &mock), None);
 }
 
 // --- pane_exists ---
@@ -675,7 +684,7 @@ fn pane_pid_is_none_when_tmux_cannot_say() {
 #[test]
 fn pane_exists_finds_the_pane_in_the_listing() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%1\n%42\n%7\n")]);
-    assert!(pane_exists("%42", &mock));
+    assert!(pane_exists(&test_pane_id("%42"), &mock));
     assert_eq!(
         mock.recorded_calls()[0].1,
         vec!["list-panes", "-a", "-F", "#{pane_id}"],
@@ -688,28 +697,28 @@ fn pane_exists_is_false_when_the_pane_is_absent_from_the_listing() {
     // The case the old implementation could never detect: tmux exits 0 for an
     // unknown pane target, so only a membership test sees a closed pane.
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%1\n%7\n")]);
-    assert!(!pane_exists("%42", &mock));
+    assert!(!pane_exists(&test_pane_id("%42"), &mock));
 }
 
 #[test]
 fn pane_exists_does_not_match_a_pane_id_prefix() {
     // `%4` must not satisfy a query for `%42`, nor the reverse.
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%4\n")]);
-    assert!(!pane_exists("%42", &mock));
+    assert!(!pane_exists(&test_pane_id("%42"), &mock));
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%42\n")]);
-    assert!(!pane_exists("%4", &mock));
+    assert!(!pane_exists(&test_pane_id("%4"), &mock));
 }
 
 #[test]
 fn pane_exists_returns_false_when_no_server_is_running() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no server running")]);
-    assert!(!pane_exists("%42", &mock));
+    assert!(!pane_exists(&test_pane_id("%42"), &mock));
 }
 
 #[test]
 fn pane_exists_returns_false_on_runner_error() {
     let mock = MockProcessRunner::new(vec![Err(anyhow::anyhow!("binary not found"))]);
-    assert!(!pane_exists("%42", &mock));
+    assert!(!pane_exists(&test_pane_id("%42"), &mock));
 }
 
 // --- select_pane failure ---
@@ -717,7 +726,7 @@ fn pane_exists_returns_false_on_runner_error() {
 #[test]
 fn select_pane_fails_on_nonzero_exit() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such pane")]);
-    let err = select_pane("%42", &mock).unwrap_err();
+    let err = select_pane(&test_pane_id("%42"), &mock).unwrap_err();
     assert!(err.to_string().contains("select-pane failed"), "got: {err}");
 }
 
@@ -734,13 +743,13 @@ fn pane_ids_with_option_resolves_a_window_name_to_its_own_panes() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%3 \n%7 1\n")])
         .with_windows(&COLLIDING);
     let found = pane_ids_with_option("task-42", PANE_ROLE_OPTION, &mock).unwrap();
-    assert_eq!(found, vec!["%7".to_string()]);
+    assert_eq!(found, vec![test_pane_id("%7")]);
     assert_eq!(
         mock.recorded_calls()[0].1,
         vec![
             "list-panes",
             "-t",
-            &mock.pane_id_of("task-42"),
+            mock.pane_id_of("task-42").as_str(),
             "-F",
             "#{pane_id} #{@dispatch_pane_role}",
         ]
@@ -771,7 +780,7 @@ fn rejoin_pane_succeeds_once_the_pane_has_moved_even_if_the_tag_stays() {
         MockProcessRunner::fail("set-option err"), // set-option -u
     ])
     .with_windows(&["task-42"]);
-    rejoin_pane("%7", &test_tmux_window("task-42"), &mock).unwrap();
+    rejoin_pane(&test_pane_id("%7"), &test_tmux_window("task-42"), &mock).unwrap();
     assert_eq!(mock.recorded_calls().len(), 2);
 }
 
@@ -779,7 +788,7 @@ fn rejoin_pane_succeeds_once_the_pane_has_moved_even_if_the_tag_stays() {
 fn rejoin_pane_fails_when_join_pane_fails() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("invalid target")])
         .with_windows(&["task-42"]);
-    let err = rejoin_pane("%7", &test_tmux_window("task-42"), &mock).unwrap_err();
+    let err = rejoin_pane(&test_pane_id("%7"), &test_tmux_window("task-42"), &mock).unwrap_err();
     assert!(err.to_string().contains("join-pane failed"), "got: {err}");
     assert_eq!(
         mock.recorded_calls().len(),

@@ -27,7 +27,7 @@ mod tmux_harness;
 use std::path::{Path, PathBuf};
 
 use dispatch_tui::dispatch;
-use dispatch_tui::models::{Task, TaskId, TmuxWindow};
+use dispatch_tui::models::{test_pane_id, PaneId, Task, TaskId, TmuxWindow};
 use dispatch_tui::process::ProcessRunner;
 use dispatch_tui::test_git::git;
 use dispatch_tui::tmux;
@@ -194,7 +194,7 @@ impl Fixture {
     }
 
     /// Pin `window`'s agent pane into the board window. Returns the pinned pane.
-    fn pin(&self, window: &TmuxWindow) -> String {
+    fn pin(&self, window: &TmuxWindow) -> PaneId {
         dispatch::join_task_window_into_pane(window, &self.board_pane(), &self.server.runner())
             .expect("join_task_window_into_pane")
     }
@@ -206,9 +206,9 @@ impl Fixture {
     fn swap(
         &self,
         into_window: &TmuxWindow,
-        pane: &str,
+        pane: &PaneId,
         old_task: Option<(&TmuxWindow, &str)>,
-    ) -> String {
+    ) -> PaneId {
         dispatch::swap_task_window_into_pane(into_window, pane, old_task, &self.server.runner())
             .expect("swap_task_window_into_pane")
     }
@@ -269,10 +269,13 @@ impl Fixture {
     }
 
     /// The board window's own pane — the target a pin joins into.
-    fn board_pane(&self) -> String {
-        self.server
-            .active_pane_id(BOARD_WINDOW)
-            .expect("board pane")
+    fn board_pane(&self) -> PaneId {
+        test_pane_id(
+            &self
+                .server
+                .active_pane_id(BOARD_WINDOW)
+                .expect("board pane"),
+        )
     }
 
     /// Drop everything recorded so far, so a later assertion cannot be satisfied
@@ -704,7 +707,8 @@ fn pin_joins_the_agent_pane_and_kills_the_leftover_companion() {
     let joined = fx.pin(&window);
 
     assert_eq!(
-        joined, agent_pane,
+        joined,
+        agent_pane.as_str(),
         "tmux preserves pane ids across a move, so the pinned pane is the agent's"
     );
     assert_eq!(
@@ -729,7 +733,7 @@ fn pin_of_a_task_without_a_companion_pane_joins_cleanly() {
 
     let joined = fx.pin(&window);
 
-    assert_eq!(joined, agent_pane);
+    assert_eq!(joined, agent_pane.as_str());
     assert_eq!(fx.server.pane_count(BOARD_WINDOW), 2);
 }
 
@@ -869,7 +873,7 @@ fn unpin_breaks_the_pane_back_into_its_own_window() {
     );
     assert_eq!(
         fx.server.pane_ids(window.as_str()),
-        vec![pinned],
+        vec![pinned.to_string()],
         "the same pane should be restored, not a fresh one"
     );
     assert_eq!(
@@ -929,7 +933,7 @@ fn pin_tags_a_window_an_unmarked_pane_keeps_alive() {
     assert_eq!(
         fx.server
             .window_option(window.as_str(), tmux::AWAITS_PANE_OPTION),
-        pinned,
+        pinned.as_str(),
         "the surviving window must name the pane it awaits"
     );
 }
@@ -945,7 +949,7 @@ fn exit_rejoins_the_pinned_pane_into_the_window_awaiting_it() {
         .expect("the window the pane came from is not a duplicate");
 
     assert_eq!(fx.server.count_windows_named(window.as_str()), 1);
-    fx.assert_panes(&window, &[&pinned, &users_pane]);
+    fx.assert_panes(&window, &[pinned.as_str(), &users_pane]);
     assert_eq!(fx.server.pane_count(BOARD_WINDOW), 1);
     assert_eq!(
         fx.server
@@ -963,7 +967,10 @@ fn exit_without_a_leftover_window_breaks_the_pane_out() {
 
     dispatch::restore_pinned_pane(&pinned, &window, &fx.server.runner()).expect("unpin");
 
-    assert_eq!(fx.server.pane_ids(window.as_str()), vec![pinned]);
+    assert_eq!(
+        fx.server.pane_ids(window.as_str()),
+        vec![pinned.to_string()]
+    );
     assert_eq!(fx.server.pane_count(BOARD_WINDOW), 1);
 }
 
@@ -996,9 +1003,9 @@ fn swap_rejoins_the_outgoing_pane_into_its_leftover_window() {
 
     let now_pinned = fx.swap(&window_b, &pinned_a, Some((&window_a, "/tmp")));
 
-    assert_eq!(now_pinned, pane_b);
+    assert_eq!(now_pinned, pane_b.as_str());
     assert_eq!(fx.server.count_windows_named(window_a.as_str()), 1);
-    fx.assert_panes(&window_a, &[&pinned_a, &users_pane]);
+    fx.assert_panes(&window_a, &[pinned_a.as_str(), &users_pane]);
     assert!(
         !fx.server.has_window(window_b.as_str()),
         "B's window held only B's agent, so it is consumed like a pin; got {:?}",
@@ -1030,7 +1037,9 @@ fn swap_refuses_before_moving_any_pane_when_the_outgoing_name_is_taken() {
     );
 
     assert!(
-        fx.server.pane_ids(BOARD_WINDOW).contains(&pinned_a),
+        fx.server
+            .pane_ids(BOARD_WINDOW)
+            .contains(&pinned_a.to_string()),
         "a refused swap must leave the pinned pane where the board thinks it is"
     );
     assert_eq!(fx.server.pane_ids(window_b.as_str()), vec![pane_b]);

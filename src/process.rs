@@ -615,7 +615,7 @@ impl MockProcessRunner {
     /// [`Self::with_queued_window_lookup`], always: there is no fake server to
     /// ask.
     #[allow(clippy::expect_used, clippy::unwrap_used)] // test helper
-    pub fn pane_id_of(&self, name: &str) -> String {
+    pub fn pane_id_of(&self, name: &str) -> crate::models::PaneId {
         let index = match &self.window_lookup {
             WindowLookup::AnyName(seen) => Self::index_of_or_insert(seen, name),
             WindowLookup::OnlyNames(names) => names
@@ -626,7 +626,7 @@ impl MockProcessRunner {
                 panic!("pane_id_of has no meaning with a queued window lookup")
             }
         };
-        format!("%{index}")
+        crate::models::test_pane_id(&format!("%{index}"))
     }
 
     /// Index of `name` in `seen`, appending it first if absent. Stable within a

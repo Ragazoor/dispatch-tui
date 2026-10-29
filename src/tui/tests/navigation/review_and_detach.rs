@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::test_pane_id;
 
 #[test]
 fn w_key_on_non_review_task_is_noop() {
@@ -452,7 +453,7 @@ fn mark_dispatching_sets_guard_and_returns_no_commands() {
 fn tick_with_active_split_checks_pane() {
     let mut app = make_app();
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(cmds.iter().any(|c| matches!(
         c,
@@ -476,7 +477,7 @@ fn tick_skips_capture_for_split_pinned_task() {
 
     // Pin task 4 in split mode
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.board.split.pinned_task_id = Some(TaskId(4));
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));

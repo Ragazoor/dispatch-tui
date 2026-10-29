@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use super::retire::{retire_board_window, RetireOutcome};
-use crate::models::TmuxWindow;
+use crate::models::{PaneId, TmuxWindow};
 use crate::process::ProcessRunner;
 pub use crate::startup_abort::StartupAbort;
 use crate::tmux;
@@ -433,7 +433,7 @@ pub fn read_launch_context(runner: &dyn ProcessRunner) -> LaunchContext {
     // `display-message` reports the session's *active* window, so a launch from
     // a sibling window would read the board's window as its own and conclude it
     // is the board. See `tmux::self_pane_id`.
-    launch_context_inside(tmux::self_pane_id().as_deref(), runner)
+    launch_context_inside(tmux::self_pane_id().as_ref(), runner)
 }
 
 /// [`read_launch_context`]'s inside-tmux half, with the environment read
@@ -442,7 +442,7 @@ pub fn read_launch_context(runner: &dyn ProcessRunner) -> LaunchContext {
 /// Separated so the composition — probe, then role — is exercised by a test
 /// against a real tmux server rather than re-implemented there, and so no test
 /// depends on an environment the harness shares across threads.
-pub fn launch_context_inside(pane: Option<&str>, runner: &dyn ProcessRunner) -> LaunchContext {
+pub fn launch_context_inside(pane: Option<&PaneId>, runner: &dyn ProcessRunner) -> LaunchContext {
     // One probe answers both questions, so a launch pays for a single
     // subprocess. Inside a session, the session in hand is the one used, so its
     // existence is not a question.

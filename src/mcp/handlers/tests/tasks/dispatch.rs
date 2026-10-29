@@ -956,7 +956,7 @@ async fn exit_session_successful_close_kills_the_tmux_window() {
         "expected exactly one tmux kill-window call, got: {kills:?}"
     );
     assert!(
-        kills[0].1.iter().any(|arg| arg == &pane_id),
+        kills[0].1.iter().any(|arg| arg == pane_id.as_str()),
         "expected kill-window to target {pane_id:?} (window {window:?}), got: {kills:?}"
     );
 }

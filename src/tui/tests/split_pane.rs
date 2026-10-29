@@ -1,5 +1,6 @@
 use super::*;
-use crate::models::{test_tmux_window, SubStatus, TaskId, TaskStatus};
+use crate::models::test_pane_id;
+use crate::models::{test_tmux_window, PaneId, SubStatus, TaskId, TaskStatus};
 use crossterm::event::KeyCode;
 
 #[test]
@@ -13,7 +14,7 @@ fn split_pane_opened_resets_focused_to_true() {
 
     let _cmds = app.update(Message::Split(
         crate::tui::messages::SplitMessage::EntryOpened {
-            pane_id: "pane1".to_string(),
+            pane_id: test_pane_id("%1"),
             task_id: None,
         },
     ));
@@ -25,7 +26,7 @@ fn split_pane_opened_resets_focused_to_true() {
 fn split_pane_closed_resets_focused_to_true() {
     let mut app = make_app();
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("pane1".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%1"));
     app.board.split.focused = false;
 
     let _cmds = app.update(Message::Split(
@@ -50,7 +51,7 @@ fn toggle_split_mode_emits_enter_command() {
 fn toggle_split_mode_emits_exit_command() {
     let mut app = make_app();
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.board.split.pinned_task_id = None;
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('s'))));
     assert_eq!(cmds.len(), 1);
@@ -63,7 +64,7 @@ fn toggle_split_mode_emits_exit_command() {
 fn toggle_split_exit_restores_pinned_task_window() {
     let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.board.split.pinned_task_id = Some(TaskId(3));
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('s'))));
     assert_eq!(cmds.len(), 1);
@@ -93,7 +94,7 @@ fn capital_s_is_inert_outside_split_mode() {
 fn capital_s_is_inert_in_split_mode() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.selection_mut().set_column(2);
     let mode_before = app.input.mode.clone();
     let cmds = app.handle_key(make_key(KeyCode::Char('S')));
@@ -108,7 +109,7 @@ fn capital_s_is_inert_in_split_mode() {
 fn space_in_split_mode_emits_swap_command() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     // No pinned task — different from already-pinned case
     app.selection_mut().set_column(2);
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));
@@ -129,7 +130,7 @@ fn space_in_split_mode_never_jumps_to_a_window() {
     // agent to the board rather than taking the user away to its window.
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.selection_mut().set_column(2);
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));
     assert!(
@@ -147,7 +148,7 @@ fn space_in_split_mode_on_backlog_task_still_dispatches() {
     // nothing to swap in, so the status routing is untouched.
     let mut app = App::new(vec![make_task(4, TaskStatus::Backlog)]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.selection_mut().set_column(1);
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));
     assert!(
@@ -177,7 +178,7 @@ fn space_on_pinned_split_task_emits_focus_split_pane() {
     // window no longer exists — [space] must focus the right pane instead.
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.board.split.pinned_task_id = Some(TaskId(4));
     app.selection_mut().set_column(2); // Running column
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));
@@ -205,7 +206,7 @@ fn space_on_non_pinned_task_in_split_mode_swaps_it_in() {
     let task2 = make_task(4, TaskStatus::Running);
     let mut app = App::new(vec![task1, task2]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.board.split.pinned_task_id = Some(TaskId(3)); // task3 is pinned, not task4
                                                       // Navigate to Running column and select task4 (row 1, second in column)
     app.selection_mut().set_column(2);
@@ -235,12 +236,12 @@ fn split_pane_opened_updates_state() {
     app.board.split.in_flight = Some(InFlight::entry());
     app.update(Message::Split(
         crate::tui::messages::SplitMessage::EntryOpened {
-            pane_id: "%42".to_string(),
+            pane_id: test_pane_id("%42"),
             task_id: Some(TaskId(3)),
         },
     ));
     assert!(app.board.split.active);
-    assert_eq!(app.board.split.right_pane_id.as_deref(), Some("%42"));
+    assert_eq!(app.board.split.right_pane_id, Some(test_pane_id("%42")));
     assert_eq!(app.board.split.pinned_task_id, Some(TaskId(3)));
 }
 
@@ -258,11 +259,11 @@ fn split_pane_opened_updates_state() {
 fn a_pane_report_with_no_rearrangement_in_flight_changes_nothing() {
     for message in [
         crate::tui::messages::SplitMessage::EntryOpened {
-            pane_id: "%42".to_string(),
+            pane_id: test_pane_id("%42"),
             task_id: Some(TaskId(3)),
         },
         crate::tui::messages::SplitMessage::SwapOpened {
-            pane_id: "%42".to_string(),
+            pane_id: test_pane_id("%42"),
             task_id: TaskId(3),
             error: None,
         },
@@ -315,7 +316,7 @@ fn a_swap_report_does_not_settle_an_entry() {
     app.board.split.in_flight = Some(InFlight::entry());
     let cmds = app.update(Message::Split(
         crate::tui::messages::SplitMessage::SwapOpened {
-            pane_id: "%42".to_string(),
+            pane_id: test_pane_id("%42"),
             task_id: TaskId(3),
             error: None,
         },
@@ -342,7 +343,7 @@ fn a_swap_report_does_not_settle_an_entry() {
 fn a_toggle_that_exits_split_mode_keeps_the_pane_id_until_tmux_confirms() {
     let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.board.split.pinned_task_id = Some(TaskId(3));
 
     // Compared through Debug so a field added later is covered without also
@@ -373,7 +374,7 @@ fn a_toggle_that_exits_split_mode_keeps_the_pane_id_until_tmux_confirms() {
 fn split_pane_closed_resets_state() {
     let mut app = make_app();
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.board.split.pinned_task_id = Some(TaskId(3));
     app.update(Message::Split(
         crate::tui::messages::SplitMessage::PaneClosed,
@@ -391,7 +392,7 @@ fn tick_checks_window_for_non_pinned_tasks_in_split_mode() {
 
     // Pin task 4 in split mode
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.board.split.pinned_task_id = Some(TaskId(4));
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
@@ -472,7 +473,7 @@ fn confirm_quit_with_active_split_emits_exit_split_mode() {
 
     // Set up active split with a pinned task
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.board.split.pinned_task_id = Some(TaskId(3));
 
     let cmds = confirm_quit(&mut app);
@@ -500,7 +501,7 @@ fn confirm_quit_with_active_split_emits_exit_split_mode() {
 fn confirm_done_respawns_split_pane_for_pinned_task() {
     let mut app = App::new(vec![{ make_task(1, TaskStatus::Review) }]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%5"));
     app.board.split.pinned_task_id = Some(TaskId(1));
 
     app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
@@ -523,8 +524,8 @@ fn confirm_done_respawns_split_pane_for_pinned_task() {
     );
     assert!(app.board.split.active, "split mode should remain active");
     assert_eq!(
-        app.board.split.right_pane_id.as_deref(),
-        Some("%5"),
+        app.board.split.right_pane_id,
+        Some(test_pane_id("%5")),
         "pane_id should be preserved"
     );
 }
@@ -535,7 +536,7 @@ fn confirm_done_no_respawn_for_non_pinned_task() {
         make_task(2, TaskStatus::Running)
     }]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%5"));
     app.board.split.pinned_task_id = Some(TaskId(2));
 
     app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
@@ -591,7 +592,7 @@ fn pr_merged_respawns_split_pane() {
     ));
     let mut app = App::new(vec![task]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%5"));
     app.board.split.pinned_task_id = Some(TaskId(1));
 
     let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::Merged {
@@ -612,7 +613,7 @@ fn pr_merged_respawns_split_pane() {
 fn confirm_done_respawns_split_pane() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Review)]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%5"));
     app.board.split.pinned_task_id = Some(TaskId(1));
     app.prompt_move_to_done(vec![TaskId(1)]);
 
@@ -635,7 +636,7 @@ fn delete_respawns_split_pane() {
     task.tmux_window = Some(test_tmux_window("task-1"));
     let mut app = App::new(vec![task]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%5"));
     app.board.split.pinned_task_id = Some(TaskId(1));
 
     let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Delete(
@@ -657,7 +658,7 @@ fn retry_resume_respawns_split_pane() {
     task.sub_status = SubStatus::Crashed;
     let mut app = App::new(vec![task]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%5"));
     app.board.split.pinned_task_id = Some(TaskId(1));
     app.input.mode = InputMode::ConfirmRetry(TaskId(1));
 
@@ -680,7 +681,7 @@ fn confirm_quit_with_split_no_pinned_task_kills_pane() {
 
     // Split active but no pinned task (empty split)
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%99".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%99"));
     app.board.split.pinned_task_id = None;
 
     let cmds = confirm_quit(&mut app);
@@ -711,7 +712,7 @@ fn app_in_split_mode(pinned: i64) -> App {
         .collect();
     let mut app = App::new(tasks);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.board.split.pinned_task_id = Some(TaskId(pinned));
     app
 }
@@ -741,7 +742,7 @@ fn exit_count(cmds: &[Command]) -> usize {
 fn swap_settles(app: &mut App, id: i64) -> Vec<Command> {
     app.update(Message::Split(
         crate::tui::messages::SplitMessage::SwapOpened {
-            pane_id: "%77".to_string(),
+            pane_id: test_pane_id("%77"),
             task_id: TaskId(id),
             error: None,
         },
@@ -767,14 +768,14 @@ fn a_swap_that_stayed_exchanged_settles_on_the_new_task_and_reports_the_error() 
     swap(&mut app, 4);
     app.update(Message::Split(
         crate::tui::messages::SplitMessage::SwapOpened {
-            pane_id: "%77".to_string(),
+            pane_id: test_pane_id("%77"),
             task_id: TaskId(4),
             error: Some("Swap incomplete: left in window task-4".to_string()),
         },
     ));
     assert!(!swap_in_flight(&app.board.split));
     assert_eq!(app.board.split.pinned_task_id, Some(TaskId(4)));
-    assert_eq!(app.board.split.right_pane_id.as_deref(), Some("%77"));
+    assert_eq!(app.board.split.right_pane_id, Some(test_pane_id("%77")));
     assert_eq!(
         app.status.error_popup.as_deref(),
         Some("Swap incomplete: left in window task-4")
@@ -831,7 +832,7 @@ fn settling_a_swap_replays_the_held_one() {
     let cmds = swap_settles(&mut app, 4);
     // The settle assigns both halves of the new occupant's identity...
     assert_eq!(app.board.split.pinned_task_id, Some(TaskId(4)));
-    assert_eq!(app.board.split.right_pane_id.as_deref(), Some("%77"));
+    assert_eq!(app.board.split.right_pane_id, Some(test_pane_id("%77")));
     // ...and only then is the held swap started, against the settled state.
     assert_eq!(swap_target(&cmds), Some(TaskId(5)));
     assert!(swap_in_flight(&app.board.split));
@@ -865,7 +866,7 @@ fn a_failed_swap_leaves_the_previous_task_pinned_and_reports_it() {
     swap(&mut app, 4);
     swap_fails(&mut app);
     assert_eq!(app.board.split.pinned_task_id, Some(TaskId(3)));
-    assert_eq!(app.board.split.right_pane_id.as_deref(), Some("%42"));
+    assert_eq!(app.board.split.right_pane_id, Some(test_pane_id("%42")));
     assert!(!swap_in_flight(&app.board.split));
     assert_eq!(
         app.status.error_popup.as_deref(),
@@ -943,7 +944,7 @@ fn settling_a_swap_with_a_held_quit_exits_then_quits() {
     let cmds = swap_settles(&mut app, 4);
     // The exit runs against the settled occupant — task 4 is what the pane
     // holds by now, and it is what gets restored to a standalone window.
-    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%77"));
+    assert_eq!(exit_pane_id(&cmds), Some(test_pane_id("%77")));
     assert!(app.should_quit());
     assert!(!pending_quit(&app.board.split));
     assert!(!swap_in_flight(&app.board.split));
@@ -958,7 +959,7 @@ fn a_failed_swap_still_quits() {
     swap(&mut app, 4);
     confirm_quit(&mut app);
     let cmds = swap_fails(&mut app);
-    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%42"));
+    assert_eq!(exit_pane_id(&cmds), Some(test_pane_id("%42")));
     assert!(app.should_quit());
     assert!(!pending_quit(&app.board.split));
 }
@@ -1041,7 +1042,7 @@ fn settling_a_swap_with_a_held_toggle_exits() {
     swap(&mut app, 4);
     press_s(&mut app);
     let cmds = swap_settles(&mut app, 4);
-    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%77"));
+    assert_eq!(exit_pane_id(&cmds), Some(test_pane_id("%77")));
     assert!(!pending_toggle(&app.board.split));
     assert!(!app.should_quit());
 }
@@ -1077,7 +1078,7 @@ fn a_held_swap_is_dropped_when_a_toggle_is_held_too() {
     assert_eq!(swap_target(&cmds), None, "the held swap must be dropped");
     assert_eq!(pending_swap(&app.board.split), None);
     assert!(!swap_in_flight(&app.board.split));
-    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%77"));
+    assert_eq!(exit_pane_id(&cmds), Some(test_pane_id("%77")));
 }
 
 #[test]
@@ -1102,7 +1103,7 @@ fn a_held_toggle_is_dropped_when_a_quit_is_held_too() {
 fn a_quit_with_no_rearrangement_in_flight_is_acted_on_at_once() {
     let mut app = app_in_split_mode(3);
     let cmds = confirm_quit(&mut app);
-    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%42"));
+    assert_eq!(exit_pane_id(&cmds), Some(test_pane_id("%42")));
     assert!(app.should_quit());
     assert!(!pending_quit(&app.board.split));
 }
@@ -1188,7 +1189,7 @@ fn enter_command(cmds: &[Command]) -> bool {
     })
 }
 
-fn exit_pane_id(cmds: &[Command]) -> Option<String> {
+fn exit_pane_id(cmds: &[Command]) -> Option<PaneId> {
     cmds.iter().find_map(|c| match c {
         Command::Split(crate::tui::commands::SplitCommand::Exit { pane_id, .. }) => {
             Some(pane_id.clone())
@@ -1201,7 +1202,7 @@ fn exit_pane_id(cmds: &[Command]) -> Option<String> {
 fn entry_settles(app: &mut App) -> Vec<Command> {
     app.update(Message::Split(
         crate::tui::messages::SplitMessage::EntryOpened {
-            pane_id: "%9".to_string(),
+            pane_id: test_pane_id("%9"),
             task_id: None,
         },
     ))
@@ -1252,7 +1253,7 @@ fn settling_an_entry_with_a_held_toggle_exits() {
     press_s(&mut app);
     press_s(&mut app);
     let cmds = entry_settles(&mut app);
-    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%9"));
+    assert_eq!(exit_pane_id(&cmds), Some(test_pane_id("%9")));
     assert_eq!(entry_holds(&app), (false, false, false));
 }
 
@@ -1272,7 +1273,7 @@ fn a_settled_entry_lets_the_next_press_exit() {
     press_s(&mut app);
     entry_settles(&mut app);
     let cmds = press_s(&mut app);
-    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%9"));
+    assert_eq!(exit_pane_id(&cmds), Some(test_pane_id("%9")));
 }
 
 #[test]
@@ -1401,13 +1402,13 @@ fn settling_an_entry_with_a_held_quit_exits_then_quits() {
     confirm_quit(&mut app);
     let cmds = app.update(Message::Split(
         crate::tui::messages::SplitMessage::EntryOpened {
-            pane_id: "%9".to_string(),
+            pane_id: test_pane_id("%9"),
             task_id: Some(TaskId(3)),
         },
     ));
     // The pinned agent is broken back out to its own window before the board
     // goes away, which is the whole reason the quit waited.
-    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%9"));
+    assert_eq!(exit_pane_id(&cmds), Some(test_pane_id("%9")));
     assert!(app.should_quit());
     assert_eq!(entry_holds(&app), (false, false, false));
 }
@@ -1436,7 +1437,7 @@ fn a_held_toggle_and_a_held_quit_exit_once_between_them() {
     confirm_quit(&mut app);
     let cmds = app.update(Message::Split(
         crate::tui::messages::SplitMessage::EntryOpened {
-            pane_id: "%9".to_string(),
+            pane_id: test_pane_id("%9"),
             task_id: Some(TaskId(3)),
         },
     ));
@@ -1458,10 +1459,10 @@ fn quitting_with_no_entry_in_flight_exits_immediately() {
     // The ordinary path must keep working: no entry, no wait.
     let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.board.split.pinned_task_id = Some(TaskId(3));
     let cmds = confirm_quit(&mut app);
-    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%42"));
+    assert_eq!(exit_pane_id(&cmds), Some(test_pane_id("%42")));
     assert!(app.should_quit());
 }
 
@@ -1495,7 +1496,7 @@ fn a_late_pane_close_does_not_cancel_an_entry_in_flight() {
     assert!(!app.should_quit());
     // ...and the entry still settles into the exit-then-quit it was holding.
     let cmds = entry_settles(&mut app);
-    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%9"));
+    assert_eq!(exit_pane_id(&cmds), Some(test_pane_id("%9")));
     assert!(app.should_quit());
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::test_pane_id;
 
 // ---------------------------------------------------------------------------
 // InputWrapUpMode tests
@@ -206,7 +207,7 @@ fn model_prompt_names_what_enter_picks() {
 fn space_key_on_split_pinned_task_focuses_pane() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%42"));
     app.board.split.pinned_task_id = Some(TaskId(4));
     app.selection_mut().set_column(2);
 
@@ -235,7 +236,7 @@ fn space_key_on_epic_enters_epic_view() {
 fn space_on_task_in_active_split_swaps_pane() {
     let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%10".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%10"));
     app.selection_mut().set_column(2);
 
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));

@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::test_pane_id;
 
 #[test]
 fn has_window_finds_match_in_output() {
@@ -386,7 +387,7 @@ fn rename_window_issues_correct_tmux_args() {
         vec![
             "rename-window",
             "-t",
-            &mock.pane_id_of("dispatch"),
+            mock.pane_id_of("dispatch").as_str(),
             "my-old-name",
         ]
     );
@@ -599,7 +600,7 @@ fn kill_window_issues_correct_tmux_args() {
     assert_eq!(calls[0].0, "tmux");
     assert_eq!(
         calls[0].1,
-        vec!["kill-window", "-t", &mock.pane_id_of("task-42")]
+        vec!["kill-window", "-t", mock.pane_id_of("task-42").as_str()]
     );
 }
 
@@ -636,7 +637,7 @@ fn select_window_issues_correct_tmux_args() {
     let calls = mock.recorded_calls();
     assert_eq!(
         calls[0].1,
-        vec!["select-window", "-t", &mock.pane_id_of("task-4")]
+        vec!["select-window", "-t", mock.pane_id_of("task-4").as_str()]
     );
 }
 
@@ -721,7 +722,7 @@ fn display_message_targets_the_callers_own_pane_when_it_knows_it() {
     // reads another window's name as its own, with no sign anything is
     // wrong.
     assert_eq!(
-        display_message_args(Some("%3"), "#W"),
+        display_message_args(Some(&test_pane_id("%3")), "#W"),
         vec!["display-message", "-p", "-t", "%3", "#W"]
     );
     assert_eq!(
@@ -736,7 +737,7 @@ fn current_window_context_parses_panes_session_and_name() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
         b"2 dispatch my window\n",
     )]);
-    let ctx = current_window_context(Some("%3"), &mock).unwrap();
+    let ctx = current_window_context(Some(&test_pane_id("%3")), &mock).unwrap();
     assert_eq!(ctx.window_panes, 2);
     assert_eq!(ctx.session_name, "dispatch");
     assert_eq!(
@@ -759,7 +760,7 @@ fn current_window_context_parses_panes_session_and_name() {
 fn current_window_context_rejects_an_unparseable_reply() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"\n")]);
     assert!(
-        current_window_context(Some("%3"), &mock).is_err(),
+        current_window_context(Some(&test_pane_id("%3")), &mock).is_err(),
         "a reply that cannot be read must not become a confident zero"
     );
 }

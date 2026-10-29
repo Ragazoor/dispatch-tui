@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::test_pane_id;
 
 // --- SplitCommand ------------------------------------------------------
 
@@ -72,7 +73,7 @@ async fn dispatch_split_exit_with_a_window_to_restore_breaks_the_pane_out() {
     .await;
 
     h.dispatch(Command::Split(SplitCommand::Exit {
-        pane_id: "%2".into(),
+        pane_id: test_pane_id("%2"),
         restore_window: Some(test_tmux_window("task-1")),
     }))
     .await;
@@ -103,7 +104,7 @@ async fn dispatch_split_exit_without_a_window_kills_the_pane() {
     let mut h = harness(MockProcessRunner::new(vec![MockProcessRunner::ok()])).await;
 
     h.dispatch(Command::Split(SplitCommand::Exit {
-        pane_id: "%2".into(),
+        pane_id: test_pane_id("%2"),
         restore_window: None,
     }))
     .await;
@@ -136,7 +137,7 @@ async fn dispatch_split_swap_hands_the_pane_to_the_incoming_task() {
     h.dispatch(Command::Split(SplitCommand::Swap {
         task_id: TaskId(1),
         new_window: test_tmux_window("task-1"),
-        old_pane_id: "%2".into(),
+        old_pane_id: test_pane_id("%2"),
         old_task: None,
     }))
     .await;
@@ -168,7 +169,7 @@ async fn dispatch_split_focus_pane_selects_it() {
     let mut h = harness(MockProcessRunner::new(vec![MockProcessRunner::ok()])).await;
 
     h.dispatch(Command::Split(SplitCommand::FocusPane {
-        pane_id: "%2".into(),
+        pane_id: test_pane_id("%2"),
     }))
     .await;
 
@@ -186,7 +187,7 @@ async fn dispatch_split_check_pane_exists_reports_a_pane_that_is_gone() {
     .await;
 
     h.dispatch(Command::Split(SplitCommand::CheckPaneExists {
-        pane_id: "%2".into(),
+        pane_id: test_pane_id("%2"),
     }))
     .await;
 
@@ -204,7 +205,7 @@ async fn dispatch_split_respawn_pane_reports_one_it_could_not_revive() {
     .await;
 
     h.dispatch(Command::Split(SplitCommand::RespawnPane {
-        pane_id: "%2".into(),
+        pane_id: test_pane_id("%2"),
     }))
     .await;
 

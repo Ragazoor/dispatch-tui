@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::test_pane_id;
 use crate::models::test_tmux_window;
 
 #[tokio::test]
@@ -79,7 +80,7 @@ async fn exec_enter_split_mode_with_task_joins_pane() {
     let calls = mock.recorded_calls();
     assert!(calls[2].1.contains(&"join-pane".to_string()));
     assert!(
-        calls[2].1.contains(&mock.pane_id_of("task-1")),
+        calls[2].1.contains(&mock.pane_id_of("task-1").to_string()),
         "the source must be the resolved pane, not the window name"
     );
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
@@ -230,7 +231,7 @@ async fn exec_exit_split_mode_with_restore_breaks_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
-    rt.exec_exit_split_mode("%2", Some(&test_tmux_window("task-1")))
+    rt.exec_exit_split_mode(&test_pane_id("%2"), Some(&test_tmux_window("task-1")))
         .await
         .unwrap();
     let calls = mock.recorded_calls();
@@ -257,7 +258,9 @@ async fn exec_exit_split_mode_without_restore_kills_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
-    rt.exec_exit_split_mode("%2", None).await.unwrap();
+    rt.exec_exit_split_mode(&test_pane_id("%2"), None)
+        .await
+        .unwrap();
     let calls = mock.recorded_calls();
     assert!(calls[0].1.contains(&"kill-pane".to_string()));
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
@@ -282,7 +285,7 @@ async fn exec_check_split_pane_existing_pane_no_message() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;
 
-    rt.exec_check_split_pane("%2").await.unwrap();
+    rt.exec_check_split_pane(&test_pane_id("%2")).await.unwrap();
     assert!(
         rx.try_recv().is_err(),
         "expected no message when pane exists"
@@ -301,7 +304,7 @@ async fn exec_check_split_pane_gone_sends_closed() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;
 
-    rt.exec_check_split_pane("%2").await.unwrap();
+    rt.exec_check_split_pane(&test_pane_id("%2")).await.unwrap();
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
@@ -324,7 +327,9 @@ async fn exec_respawn_split_pane_gone_sends_closed() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;
 
-    rt.exec_respawn_split_pane("%2").await.unwrap();
+    rt.exec_respawn_split_pane(&test_pane_id("%2"))
+        .await
+        .unwrap();
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
@@ -347,7 +352,9 @@ async fn exec_respawn_split_pane_respawn_fails_sends_closed() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;
 
-    rt.exec_respawn_split_pane("%2").await.unwrap();
+    rt.exec_respawn_split_pane(&test_pane_id("%2"))
+        .await
+        .unwrap();
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
@@ -375,15 +382,20 @@ async fn exec_swap_split_pane_uses_swap_pane() {
     );
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
-    rt.exec_swap_split_pane(TaskId(1), &test_tmux_window("task-1"), "%2", None)
-        .await
-        .unwrap();
+    rt.exec_swap_split_pane(
+        TaskId(1),
+        &test_tmux_window("task-1"),
+        &test_pane_id("%2"),
+        None,
+    )
+    .await
+    .unwrap();
     let calls = mock.recorded_calls();
     // 1st call: swap-pane, sourced from the resolved pane ID rather than
     // `task-1.0` — a `<window>.<index>` target would prefix-match the window
     // name and depend on pane-base-index.
     assert!(calls[0].1.contains(&"swap-pane".to_string()));
-    assert!(calls[0].1.contains(&mock.pane_id_of("task-1")));
+    assert!(calls[0].1.contains(&mock.pane_id_of("task-1").to_string()));
     // 2nd call: kill-window (no old task to rename)
     assert!(calls[1].1.contains(&"kill-window".to_string()));
     // No 3rd call — focus must NOT be transferred
@@ -439,7 +451,7 @@ async fn exec_swap_split_pane_renames_old_task_window() {
     rt.exec_swap_split_pane(
         TaskId(3),
         &test_tmux_window("task-3"),
-        "%2",
+        &test_pane_id("%2"),
         Some((&test_tmux_window("task-2"), "/repo/.worktrees/2-some-task")),
     )
     .await
@@ -460,7 +472,7 @@ async fn exec_swap_split_pane_renames_old_task_window() {
     // 4th call should be rename-window, not kill-window
     assert!(calls[3].1.contains(&"rename-window".to_string()));
     // The rename *target* is the resolved pane ID; the new name stays a name.
-    assert!(calls[3].1.contains(&mock.pane_id_of("task-3")));
+    assert!(calls[3].1.contains(&mock.pane_id_of("task-3").to_string()));
     assert!(calls[3].1.contains(&"task-2".to_string()));
     // 5th call: @dispatch_dir is rewritten to the outgoing task's worktree —
     // targeted by the *new* name ("task-2"), not the pane ID resolved in step
@@ -474,7 +486,7 @@ async fn exec_swap_split_pane_renames_old_task_window() {
             "set-option",
             "-w",
             "-t",
-            &mock.pane_id_of("task-2"),
+            mock.pane_id_of("task-2").as_str(),
             "@dispatch_dir",
             "/repo/.worktrees/2-some-task",
         ]
@@ -613,7 +625,7 @@ mod split_mode_via_msg_tx {
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
-        rt.exec_exit_split_mode("%2", Some(&test_tmux_window("task-1")))
+        rt.exec_exit_split_mode(&test_pane_id("%2"), Some(&test_tmux_window("task-1")))
             .await
             .unwrap();
 
@@ -641,7 +653,9 @@ mod split_mode_via_msg_tx {
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
-        rt.exec_exit_split_mode("%2", None).await.unwrap();
+        rt.exec_exit_split_mode(&test_pane_id("%2"), None)
+            .await
+            .unwrap();
 
         let calls = mock.recorded_calls();
         assert!(calls[0].1.contains(&"kill-pane".to_string()));
@@ -672,9 +686,14 @@ mod split_mode_via_msg_tx {
         );
         let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
-        rt.exec_swap_split_pane(TaskId(1), &test_tmux_window("task-1"), "%2", None)
-            .await
-            .unwrap();
+        rt.exec_swap_split_pane(
+            TaskId(1),
+            &test_tmux_window("task-1"),
+            &test_pane_id("%2"),
+            None,
+        )
+        .await
+        .unwrap();
 
         let calls = mock.recorded_calls();
         assert!(calls[0].1.contains(&"swap-pane".to_string()));
@@ -705,7 +724,7 @@ mod split_mode_via_msg_tx {
         let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
         // Must return a JoinHandle so the caller can fire-and-forget without blocking.
-        rt.exec_focus_split_pane("%2".to_string()).await.unwrap();
+        rt.exec_focus_split_pane(test_pane_id("%2")).await.unwrap();
 
         let calls = mock.recorded_calls();
         assert!(calls[0].1.contains(&"select-pane".to_string()));
@@ -796,7 +815,7 @@ mod quit_awaits_split_restore {
 
         super::super::super::commands::dispatch(
             Command::Split(crate::tui::commands::SplitCommand::Exit {
-                pane_id: "%2".to_string(),
+                pane_id: test_pane_id("%2"),
                 restore_window: Some(test_tmux_window("task-1")),
             }),
             &mut app,
@@ -900,7 +919,7 @@ mod swap_fails_after_the_exchange {
         rt.exec_swap_split_pane(
             TaskId(3),
             &test_tmux_window("task-3"),
-            "%2",
+            &test_pane_id("%2"),
             old_window
                 .as_ref()
                 .map(|w| (w, "/repo/.worktrees/2-some-task")),

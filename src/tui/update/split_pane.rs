@@ -1,6 +1,6 @@
 //! Split pane mode handlers: toggle, swap, open/close, focus tracking.
 
-use crate::models::TaskId;
+use crate::models::{PaneId, TaskId};
 
 use super::super::types::*;
 use super::super::App;
@@ -198,7 +198,7 @@ impl App {
     /// Both halves of the pane's identity move together: a swap exchanges pane
     /// objects between windows, so which pane the board holds changes along
     /// with which task it shows.
-    fn record_open_pane(&mut self, pane_id: String, task_id: Option<TaskId>) {
+    fn record_open_pane(&mut self, pane_id: PaneId, task_id: Option<TaskId>) {
         self.board.split.active = true;
         self.board.split.right_pane_id = Some(pane_id);
         self.board.split.pinned_task_id = task_id;
@@ -207,7 +207,7 @@ impl App {
     /// Split-mode entry reported its pane. See [`Self::settle`].
     pub(in crate::tui) fn handle_split_pane_entry_opened(
         &mut self,
-        pane_id: String,
+        pane_id: PaneId,
         task_id: Option<TaskId>,
     ) -> Vec<Command> {
         self.settle(Settled::Entry(Some((pane_id, task_id))))
@@ -216,7 +216,7 @@ impl App {
     /// A swap reported its pane. See [`Self::settle`].
     pub(in crate::tui) fn handle_split_pane_swap_opened(
         &mut self,
-        pane_id: String,
+        pane_id: PaneId,
         task_id: TaskId,
         error: Option<String>,
     ) -> Vec<Command> {

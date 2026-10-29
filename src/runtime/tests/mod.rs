@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::test_pane_id;
 use crate::models::test_tmux_window;
 
 // `db` is the concrete `Arc<Store>` in this fixture (see `test_db`), so the
@@ -54,7 +55,7 @@ async fn setup_tmux_for_tui_renames_window_and_binds_key() {
         MockProcessRunner::ok(),                // bind_key (agent-tree toggle)
     ])
     .with_queued_window_lookup();
-    setup_tmux_for_tui("work", Some("%3"), &mock);
+    setup_tmux_for_tui("work", Some(&test_pane_id("%3")), &mock);
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 4);
     assert_eq!(
@@ -138,7 +139,7 @@ async fn teardown_tmux_for_tui_unbinds_and_restores_name() {
         vec![
             "rename-window",
             "-t",
-            &mock.pane_id_of(TUI_WINDOW_NAME.as_str()),
+            mock.pane_id_of(TUI_WINDOW_NAME.as_str()).as_str(),
             "my-shell",
         ]
     );

@@ -171,7 +171,7 @@ async fn editor_session_drop_kills_tmux_window_when_runner_set() {
     // Targeted by the window's resolved pane ID — see `tmux::window_target`.
     assert_eq!(
         calls[0].1,
-        vec!["kill-window", "-t", &mock.pane_id_of("edit-window")]
+        vec!["kill-window", "-t", mock.pane_id_of("edit-window").as_str()]
     );
 }
 

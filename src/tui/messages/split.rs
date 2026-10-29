@@ -1,6 +1,6 @@
 //! Split-pane mode messages.
 
-use crate::models::TaskId;
+use crate::models::{PaneId, TaskId};
 use crate::tui::types::Command;
 use crate::tui::App;
 
@@ -20,7 +20,7 @@ pub enum SplitMessage {
     /// rearrangement rather than letting the settle infer it, and why
     /// `task_id` is optional here and not on `SwapOpened`.
     EntryOpened {
-        pane_id: String,
+        pane_id: PaneId,
         task_id: Option<TaskId>,
     },
     /// A swap exchanged the pane's occupant. Settles the swap (see
@@ -30,7 +30,7 @@ pub enum SplitMessage {
     /// not be swapped back ([`crate::dispatch::SwapFailure::Exchanged`]): the
     /// pane shows `task_id` all the same, and the error is reported to the user.
     SwapOpened {
-        pane_id: String,
+        pane_id: PaneId,
         task_id: TaskId,
         error: Option<String>,
     },

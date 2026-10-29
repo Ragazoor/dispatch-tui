@@ -1,6 +1,6 @@
 //! Split-pane mode side-effect commands.
 
-use crate::models::{TaskId, TmuxWindow};
+use crate::models::{PaneId, TaskId, TmuxWindow};
 
 /// Side-effect commands for the split-pane mode.
 ///
@@ -13,7 +13,7 @@ pub enum SplitCommand {
         window: TmuxWindow,
     },
     Exit {
-        pane_id: String,
+        pane_id: PaneId,
         restore_window: Option<TmuxWindow>,
     },
     Swap {
@@ -23,7 +23,7 @@ pub enum SplitCommand {
         /// with no pane there is nothing to swap into and no step that would
         /// report back, so the command is never issued (see
         /// `App::handle_swap_split_pane`).
-        old_pane_id: String,
+        old_pane_id: PaneId,
         /// `(window_name, worktree_path)` of the outgoing pinned task, if any.
         /// The two travel together — both come from the same task and are
         /// only ever known or unknown together — so this is one field rather
@@ -31,12 +31,12 @@ pub enum SplitCommand {
         old_task: Option<(TmuxWindow, String)>,
     },
     FocusPane {
-        pane_id: String,
+        pane_id: PaneId,
     },
     CheckPaneExists {
-        pane_id: String,
+        pane_id: PaneId,
     },
     RespawnPane {
-        pane_id: String,
+        pane_id: PaneId,
     },
 }

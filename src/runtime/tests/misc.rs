@@ -61,7 +61,7 @@ mod browser_and_tmux_window {
         assert_eq!(calls[0].0, "tmux");
         assert!(calls[0].1.contains(&"kill-window".to_string()));
         // Targeted by resolved pane ID, not by name — see `tmux::window_target`.
-        assert!(calls[0].1.contains(&mock.pane_id_of("task-1")));
+        assert!(calls[0].1.contains(&mock.pane_id_of("task-1").to_string()));
     }
 
     /// Clearing subagent entries for a task that no longer exists is moot, not

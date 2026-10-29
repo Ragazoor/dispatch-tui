@@ -27,6 +27,7 @@
 
 mod tmux_harness;
 
+use dispatch_tui::models::{test_pane_id, PaneId};
 use dispatch_tui::startup::{
     launch_context_inside, plan_launch, retire_board_window, LaunchPlan, RetireOutcome,
     StartupAbort, BOARD_WINDOW_NAME,
@@ -255,12 +256,18 @@ fn a_board_window_already_in_this_session_refuses_a_second_one() {
 /// The launch decision as the board's own process would reach it, composed from
 /// the real tmux probe, the real predicate and the real planner.
 fn plan_from(server: &TmuxServer) -> LaunchPlan {
-    plan_from_pane(server, server.active_pane_id("=board-restart:").as_deref())
+    plan_from_pane(
+        server,
+        server
+            .active_pane_id("=board-restart:")
+            .map(|p| test_pane_id(&p))
+            .as_ref(),
+    )
 }
 
 /// As the process in `pane` would reach it — the real probe, the real context
 /// assembly, the real planner.
-fn plan_from_pane(server: &TmuxServer, pane: Option<&str>) -> LaunchPlan {
+fn plan_from_pane(server: &TmuxServer, pane: Option<&PaneId>) -> LaunchPlan {
     plan_launch(
         launch_context_inside(pane, &server.runner()),
         vec!["/bin/dispatch".to_string(), "tui".to_string()],
@@ -384,11 +391,12 @@ fn a_process_in_a_background_window_reads_its_own_window_not_the_active_one() {
         "precondition: untargeted asks about the active window"
     );
 
-    let mine = tmux::current_window_context(Some(&shell_pane), &server.runner()).unwrap();
+    let mine =
+        tmux::current_window_context(Some(&test_pane_id(&shell_pane)), &server.runner()).unwrap();
     assert_eq!(mine.window_name, "shell", "targeted asks about the caller");
 
     assert_eq!(
-        plan_from_pane(&server, Some(&shell_pane)),
+        plan_from_pane(&server, Some(&test_pane_id(&shell_pane))),
         LaunchPlan::ContinueHere {
             session: SESSION.to_string()
         },

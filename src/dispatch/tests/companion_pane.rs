@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::test_pane_id;
 
 // -----------------------------------------------------------------------
 // Companion pane identity (docs/specs/agent-tree.allium: HideAgentTreePane)
@@ -242,7 +243,7 @@ fn companion_pane_ids_returns_both_the_tree_and_the_editor_pane() {
 
     let found = companion_pane_ids(&test_tmux_window("task-42"), &mock).unwrap();
 
-    assert_eq!(found, vec!["%2".to_string(), "%3".to_string()]);
+    assert_eq!(found, vec![test_pane_id("%2"), test_pane_id("%3")]);
 }
 
 /// One lookup, not one per role: "a pane dispatch created" is a single question

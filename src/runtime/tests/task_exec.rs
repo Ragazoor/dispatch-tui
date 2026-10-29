@@ -271,7 +271,9 @@ async fn exec_jump_to_tmux_calls_select_window() {
     assert_eq!(calls.len(), 1);
     assert!(calls[0].1.contains(&"select-window".to_string()));
     // Targeted by resolved pane ID, not by name — see `tmux::window_target`.
-    assert!(calls[0].1.contains(&mock.pane_id_of("my-window")));
+    assert!(calls[0]
+        .1
+        .contains(&mock.pane_id_of("my-window").to_string()));
     assert!(app.error_popup().is_none());
 }
 

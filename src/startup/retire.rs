@@ -1,6 +1,7 @@
 //! Retiring the previous board window so a fresh board can start.
 
 use super::launch::{StartupAbort, BOARD_WINDOW_NAME};
+use crate::models::PaneId;
 use crate::process::ProcessRunner;
 use crate::tmux;
 
@@ -132,7 +133,7 @@ pub(super) fn pane_process_alive(pid: u32) -> bool {
 /// have taken the window with it.
 fn session_state_after_retire(
     session: &str,
-    killed_pane: Option<&(String, Option<u32>)>,
+    killed_pane: Option<&(PaneId, Option<u32>)>,
     runner: &dyn ProcessRunner,
     alive: &dyn Fn(u32) -> bool,
 ) -> RetireOutcome {
@@ -161,7 +162,7 @@ fn session_state_after_retire(
 /// window read-back, which reports `BoardWindowSurvived` for a pane and
 /// otherwise lets the launch's own port claim speak.
 fn await_pane_gone(
-    pane: &str,
+    pane: &PaneId,
     pid: Option<u32>,
     runner: &dyn ProcessRunner,
     alive: &dyn Fn(u32) -> bool,

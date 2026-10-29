@@ -164,6 +164,7 @@ impl Fixture {
             &self.server.runner(),
         )
         .expect("split-window")
+        .to_string()
     }
 
     /// Split `window` the way a *user* does — a plain `split-window` with no

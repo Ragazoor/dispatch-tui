@@ -68,12 +68,12 @@ impl TuiRuntime {
 
     pub(super) fn exec_exit_split_mode(
         &self,
-        pane_id: &str,
+        pane_id: &PaneId,
         restore_window: Option<&TmuxWindow>,
     ) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         let runner = Arc::clone(&self.runner);
-        let pane_id = pane_id.to_owned();
+        let pane_id = pane_id.clone();
         let restore_window = restore_window.cloned();
         tokio::task::spawn_blocking(move || {
             // Logged as well as reported on `msg_tx`, because on the quit path
@@ -115,13 +115,13 @@ impl TuiRuntime {
         &self,
         task_id: TaskId,
         new_window: &TmuxWindow,
-        right_pane: &str,
+        right_pane: &PaneId,
         old_task: Option<(&TmuxWindow, &str)>,
     ) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         let runner = Arc::clone(&self.runner);
         let new_window = new_window.clone();
-        let right_pane = right_pane.to_owned();
+        let right_pane = right_pane.clone();
         let old_task = old_task.map(|(window, worktree)| (window.clone(), worktree.to_owned()));
 
         tokio::task::spawn_blocking(move || {
@@ -137,10 +137,10 @@ impl TuiRuntime {
         })
     }
 
-    pub(super) fn exec_check_split_pane(&self, pane_id: &str) -> tokio::task::JoinHandle<()> {
+    pub(super) fn exec_check_split_pane(&self, pane_id: &PaneId) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
-        let pane_id = pane_id.to_owned();
+        let pane_id = pane_id.clone();
         tokio::task::spawn_blocking(move || {
             if !tmux::pane_exists(&pane_id, &*runner) {
                 let _ = tx.send(Message::Split(
@@ -150,10 +150,10 @@ impl TuiRuntime {
         })
     }
 
-    pub(super) fn exec_respawn_split_pane(&self, pane_id: &str) -> tokio::task::JoinHandle<()> {
+    pub(super) fn exec_respawn_split_pane(&self, pane_id: &PaneId) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
-        let pane_id = pane_id.to_owned();
+        let pane_id = pane_id.clone();
         tokio::task::spawn_blocking(move || {
             if let Err(e) = tmux::respawn_pane(&pane_id, &*runner) {
                 tracing::warn!("respawn-pane failed: {e:#}");
@@ -181,7 +181,7 @@ impl TuiRuntime {
         })
     }
 
-    pub(super) fn exec_focus_split_pane(&self, pane_id: String) -> tokio::task::JoinHandle<()> {
+    pub(super) fn exec_focus_split_pane(&self, pane_id: PaneId) -> tokio::task::JoinHandle<()> {
         let runner = Arc::clone(&self.runner);
         tokio::task::spawn_blocking(move || {
             if let Err(e) = tmux::select_pane(&pane_id, &*runner) {
@@ -240,7 +240,7 @@ fn enter_split_with_task_outcome(
 
 /// The one message a swap settles with (`SplitPaneSwapSettles`), naming what
 /// the pane actually shows: see [`dispatch::SwapFailure`].
-fn swap_outcome(result: Result<String, dispatch::SwapFailure>, task_id: TaskId) -> SplitMessage {
+fn swap_outcome(result: Result<PaneId, dispatch::SwapFailure>, task_id: TaskId) -> SplitMessage {
     match result {
         Ok(pane_id) => SplitMessage::SwapOpened {
             pane_id,

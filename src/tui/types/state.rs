@@ -8,7 +8,7 @@ use ratatui::widgets::ListState;
 
 use super::{ColumnAnchor, EpicDraft, InputMode, Lens, RepoFilterMode, TaskDraft};
 use crate::models::{
-    Epic, EpicId, Task, TaskId, TaskStatus, WorkPackage, WorkPackageId, WorkPackageItem,
+    Epic, EpicId, PaneId, Task, TaskId, TaskStatus, WorkPackage, WorkPackageId, WorkPackageItem,
     WorkPackageLink,
 };
 
@@ -394,8 +394,8 @@ impl InputState {
 /// events.
 #[derive(Debug)]
 pub(in crate::tui) enum Settled {
-    Entry(Option<(String, Option<TaskId>)>),
-    Swap(Option<(String, TaskId)>),
+    Entry(Option<(PaneId, Option<TaskId>)>),
+    Swap(Option<(PaneId, TaskId)>),
 }
 
 /// Which rearrangement is in flight, and what only that one can hold.
@@ -515,7 +515,7 @@ impl InFlight {
 pub struct SplitState {
     pub(in crate::tui) active: bool,
     pub(in crate::tui) focused: bool,
-    pub(in crate::tui) right_pane_id: Option<String>,
+    pub(in crate::tui) right_pane_id: Option<PaneId>,
     pub(in crate::tui) pinned_task_id: Option<TaskId>,
     /// The rearrangement in flight, if any.
     ///

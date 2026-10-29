@@ -13,7 +13,7 @@ fn set_window_dispatch_dir_issues_correct_tmux_args() {
             "set-option",
             "-w",
             "-t",
-            &mock.pane_id_of("task-42"),
+            mock.pane_id_of("task-42").as_str(),
             "@dispatch_dir",
             "/some/path",
         ]
@@ -221,10 +221,10 @@ fn send_keys_issues_correct_tmux_args() {
     assert_eq!(calls[0].0, "tmux");
     assert_eq!(
         calls[0].1,
-        vec!["send-keys", "-t", &pane, "-l", "hello world"]
+        vec!["send-keys", "-t", pane.as_str(), "-l", "hello world"]
     );
     assert_eq!(calls[1].0, "tmux");
-    assert_eq!(calls[1].1, vec!["send-keys", "-t", &pane, "Enter"]);
+    assert_eq!(calls[1].1, vec!["send-keys", "-t", pane.as_str(), "Enter"]);
 }
 
 /// Both `send-keys` calls must name the *same* resolved pane, so the payload
@@ -237,7 +237,7 @@ fn send_keys_targets_one_pane_for_both_calls() {
     let calls = mock.recorded_calls();
     let target = |c: &(String, Vec<String>)| c.1[2].clone();
     assert_eq!(target(&calls[0]), target(&calls[1]));
-    assert_eq!(target(&calls[0]), mock.pane_id_of("task-1"));
+    assert_eq!(target(&calls[0]), mock.pane_id_of("task-1").to_string());
 }
 
 #[test]

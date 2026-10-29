@@ -16,7 +16,7 @@ use std::path::Path;
 
 use dispatch_tui::agent_tree::diff_pane::{reconcile_diff_pane, show_in_editor};
 use dispatch_tui::dispatch;
-use dispatch_tui::models::{test_tmux_window, TaskId};
+use dispatch_tui::models::{test_pane_id, test_tmux_window, PaneId, TaskId};
 use dispatch_tui::tmux::{
     PANE_CONTENT_DIFF, PANE_CONTENT_EDITOR, PANE_CONTENT_OPTION, PANE_ROLE_AGENT_TREE,
     PANE_ROLE_DIFF, PANE_ROLE_OPTION,
@@ -40,7 +40,7 @@ struct Fixture {
     /// temporary directory is unlinked.
     server: TmuxServer,
     dir: tempfile::TempDir,
-    tree_pane: String,
+    tree_pane: PaneId,
     agent_pane: String,
 }
 
@@ -78,11 +78,13 @@ fn setup_or_skip() -> Option<Fixture> {
     // assert against its own setup instead of against production.
     dispatch::toggle_agent_tree_pane(&test_tmux_window(WINDOW), &server.runner())
         .expect("split companion pane");
-    let tree_pane = server
-        .pane_ids(WINDOW)
-        .into_iter()
-        .find(|id| *id != agent_pane)
-        .expect("companion pane should exist after the toggle");
+    let tree_pane = test_pane_id(
+        &server
+            .pane_ids(WINDOW)
+            .into_iter()
+            .find(|id| *id != agent_pane)
+            .expect("companion pane should exist after the toggle"),
+    );
 
     Some(Fixture {
         server,
@@ -160,7 +162,8 @@ fn the_companion_pane_carries_the_agent_tree_role() {
     let Some(fx) = setup_or_skip() else { return };
 
     assert_eq!(
-        fx.server.pane_option(&fx.tree_pane, PANE_ROLE_OPTION),
+        fx.server
+            .pane_option(fx.tree_pane.as_str(), PANE_ROLE_OPTION),
         PANE_ROLE_AGENT_TREE,
     );
     assert_eq!(
@@ -193,7 +196,8 @@ fn opening_the_first_diff_adds_one_marked_pane() {
 #[test]
 fn opening_a_diff_moves_focus_to_the_diff_pane() {
     let Some(fx) = setup_or_skip() else { return };
-    fx.server.tmux_ok(&["select-pane", "-t", &fx.tree_pane]);
+    fx.server
+        .tmux_ok(&["select-pane", "-t", fx.tree_pane.as_str()]);
 
     fx.reconcile(true);
     let diff = fx.diff_pane().expect("diff pane");
@@ -203,7 +207,8 @@ fn opening_a_diff_moves_focus_to_the_diff_pane() {
         "a freshly split pane takes focus"
     );
 
-    fx.server.tmux_ok(&["select-pane", "-t", &fx.tree_pane]);
+    fx.server
+        .tmux_ok(&["select-pane", "-t", fx.tree_pane.as_str()]);
     fx.reconcile(true);
     assert_eq!(
         fx.server.active_pane_id(WINDOW).as_deref(),
@@ -238,7 +243,7 @@ fn the_diff_pane_sits_below_the_tree_and_the_agent() {
 
     let diff = fx.diff_pane().expect("diff pane");
     let top = fx.pane_dimension(&diff, "#{pane_top}");
-    for pane in [&fx.tree_pane, &fx.agent_pane] {
+    for pane in [fx.tree_pane.as_str(), fx.agent_pane.as_str()] {
         assert!(
             top >= fx.pane_dimension(pane, "#{pane_top}")
                 + fx.pane_dimension(pane, "#{pane_height}"),
@@ -303,7 +308,7 @@ fn closing_the_last_diff_removes_the_pane() {
 
     assert!(!fx.server.pane_exists(&diff), "the diff pane must be gone");
     assert!(
-        fx.server.pane_exists(&fx.tree_pane),
+        fx.server.pane_exists(fx.tree_pane.as_str()),
         "and it must not take the tree with it"
     );
     assert_eq!(fx.server.pane_count(WINDOW), 2);
@@ -315,13 +320,14 @@ fn closing_the_last_diff_removes_the_pane() {
 #[test]
 fn the_toggle_kills_the_tree_pane_not_the_agents_when_the_tree_has_focus() {
     let Some(fx) = setup_or_skip() else { return };
-    fx.server.tmux_ok(&["select-pane", "-t", &fx.tree_pane]);
+    fx.server
+        .tmux_ok(&["select-pane", "-t", fx.tree_pane.as_str()]);
 
     dispatch::toggle_agent_tree_pane(&test_tmux_window(WINDOW), &fx.server.runner())
         .expect("toggle");
 
     assert!(
-        !fx.server.pane_exists(&fx.tree_pane),
+        !fx.server.pane_exists(fx.tree_pane.as_str()),
         "the tree pane must be gone"
     );
     assert!(
@@ -342,7 +348,10 @@ fn the_toggle_takes_the_diff_pane_with_the_tree() {
     dispatch::toggle_agent_tree_pane(&test_tmux_window(WINDOW), &fx.server.runner())
         .expect("toggle");
 
-    assert!(!fx.server.pane_exists(&fx.tree_pane), "tree pane must go");
+    assert!(
+        !fx.server.pane_exists(fx.tree_pane.as_str()),
+        "tree pane must go"
+    );
     assert!(!fx.server.pane_exists(&diff), "diff pane must go with it");
     assert!(
         fx.server.pane_exists(&fx.agent_pane),
@@ -358,7 +367,7 @@ fn pinning_drains_both_the_tree_and_the_diff_pane() {
     fx.reconcile(true);
     let diff = fx.diff_pane().expect("diff pane");
     fx.server.tmux_ok(&["new-window", "-d", "-n", "board"]);
-    let board_pane = fx.server.active_pane_id("board").expect("board pane");
+    let board_pane = test_pane_id(&fx.server.active_pane_id("board").expect("board pane"));
 
     dispatch::join_task_window_into_pane(
         &test_tmux_window(WINDOW),
@@ -368,7 +377,7 @@ fn pinning_drains_both_the_tree_and_the_diff_pane() {
     .expect("pin");
 
     assert!(
-        !fx.server.pane_exists(&fx.tree_pane),
+        !fx.server.pane_exists(fx.tree_pane.as_str()),
         "the tree pane must not be orphaned"
     );
     assert!(
@@ -403,7 +412,8 @@ fn opening_a_diff_or_another_file_replaces_a_running_editor() {
     fx.open_editor().expect("open the editor");
     let lower = fx.diff_pane().expect("lower pane");
 
-    fx.server.tmux_ok(&["select-pane", "-t", &fx.tree_pane]);
+    fx.server
+        .tmux_ok(&["select-pane", "-t", fx.tree_pane.as_str()]);
     fx.open_editor().expect("v replaces the editor");
     assert_eq!(fx.diff_pane().as_deref(), Some(lower.as_str()));
     assert_eq!(
@@ -411,7 +421,8 @@ fn opening_a_diff_or_another_file_replaces_a_running_editor() {
         Some(lower.as_str())
     );
 
-    fx.server.tmux_ok(&["select-pane", "-t", &fx.tree_pane]);
+    fx.server
+        .tmux_ok(&["select-pane", "-t", fx.tree_pane.as_str()]);
     reconcile_diff_pane(
         &fx.tree_pane,
         Path::new("/data"),
@@ -457,5 +468,5 @@ fn the_toggle_leaves_a_running_editor_alone() {
         .expect("toggle");
 
     assert!(fx.server.pane_exists(&editor), "the editor must survive");
-    assert!(!fx.server.pane_exists(&fx.tree_pane));
+    assert!(!fx.server.pane_exists(fx.tree_pane.as_str()));
 }

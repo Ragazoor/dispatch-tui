@@ -10,6 +10,7 @@ use crate::keybindings::{
     bindings_in, namespaces_matching, KeyBinding, KeyContext as C, KeyNamespace, ANY_OTHER_KEY,
     KEY_BINDINGS,
 };
+use crate::models::test_pane_id;
 use crate::models::{ColumnSection, DispatchMode, EpicId, SubStatus, TaskStatus};
 use crate::tui::commands::UsageCommand;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -245,14 +246,14 @@ fn app_for(binding: &KeyBinding) -> App {
         Some(C::TaskPinnedInSplit) => {
             let mut app = app_with_running_task(|_| {});
             app.board.split.active = true;
-            app.board.split.right_pane_id = Some("%42".to_string());
+            app.board.split.right_pane_id = Some(test_pane_id("%42"));
             app.board.split.pinned_task_id = Some(TaskId(7));
             app
         }
         Some(C::TaskWindowSplitOpen) => {
             let mut app = app_with_running_task(|_| {});
             app.board.split.active = true;
-            app.board.split.right_pane_id = Some("%42".to_string());
+            app.board.split.right_pane_id = Some(test_pane_id("%42"));
             app.board.split.pinned_task_id = None;
             app
         }

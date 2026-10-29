@@ -18,7 +18,7 @@
 
 use anyhow::{Context, Result};
 
-use crate::models::TmuxWindow;
+use crate::models::{PaneId, TmuxWindow};
 use crate::process::ProcessRunner;
 use crate::tmux;
 
@@ -31,9 +31,9 @@ use super::agents::companion_pane_ids;
 /// Returns the joined pane's id (tmux preserves pane ids across a move).
 pub fn join_task_window_into_pane(
     window: &TmuxWindow,
-    target_pane: &str,
+    target_pane: &PaneId,
     runner: &dyn ProcessRunner,
-) -> Result<String> {
+) -> Result<PaneId> {
     // Capture the companion panes *before* the join. `join_pane` moves only the
     // agent's own (active) pane out of the window, so anything left behind is
     // orphaned in a window nothing owns: a lone companion pane is
@@ -55,7 +55,7 @@ pub fn join_task_window_into_pane(
 ///
 /// Best-effort: a failed check degrades to "no companions" rather than failing
 /// the pin or swap, which is the user's actual intent.
-fn companion_panes_or_none(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Vec<String> {
+fn companion_panes_or_none(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Vec<PaneId> {
     companion_pane_ids(window, runner).unwrap_or_else(|e| {
         tracing::warn!(
             %window,
@@ -77,8 +77,8 @@ fn companion_panes_or_none(window: &TmuxWindow, runner: &dyn ProcessRunner) -> V
 /// exit is refused, as it was before tags existed.
 fn drain_pinned_from_window(
     window: &TmuxWindow,
-    pinned_pane: &str,
-    companions: Vec<String>,
+    pinned_pane: &PaneId,
+    companions: Vec<PaneId>,
     runner: &dyn ProcessRunner,
 ) {
     for companion_id in companions {
@@ -115,7 +115,7 @@ fn drain_pinned_from_window(
 /// Whether the live `window` is the leftover awaiting `pane_id`. A failed
 /// lookup reads as "not awaiting", which makes the caller refuse and leaves the
 /// pane where it is.
-fn awaits_pane(window: &TmuxWindow, pane_id: &str, runner: &dyn ProcessRunner) -> bool {
+fn awaits_pane(window: &TmuxWindow, pane_id: &PaneId, runner: &dyn ProcessRunner) -> bool {
     tmux::window_awaits_pane(window, pane_id, runner).unwrap_or(false)
 }
 
@@ -128,7 +128,7 @@ fn awaits_pane(window: &TmuxWindow, pane_id: &str, runner: &dyn ProcessRunner) -
 /// ExitSplitMode and RefuseExitSplitModeOntoLiveWindow in
 /// docs/specs/split-pane.allium.
 pub fn restore_pinned_pane(
-    pane_id: &str,
+    pane_id: &PaneId,
     window: &TmuxWindow,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
@@ -165,10 +165,10 @@ pub fn restore_pinned_pane(
 /// says which arrangement tmux was left in.
 pub fn swap_task_window_into_pane(
     new_window: &TmuxWindow,
-    right_pane: &str,
+    right_pane: &PaneId,
     old_task: Option<(&TmuxWindow, &str)>,
     runner: &dyn ProcessRunner,
-) -> std::result::Result<String, SwapFailure> {
+) -> std::result::Result<PaneId, SwapFailure> {
     let (new_pane_id, displaced) =
         exchange_panes(new_window, right_pane, old_task, runner).map_err(SwapFailure::Unmoved)?;
 
@@ -200,7 +200,7 @@ enum Displaced<'a> {
     /// from; `companions` are the incoming window's panes to drain.
     Rejoin {
         home: &'a TmuxWindow,
-        companions: Vec<String>,
+        companions: Vec<PaneId>,
     },
     /// The window is renamed to the outgoing task's `name`.
     Rename {
@@ -215,10 +215,10 @@ enum Displaced<'a> {
 /// the `swap-pane`. An `Err` means no pane moved.
 fn exchange_panes<'a>(
     new_window: &TmuxWindow,
-    right_pane: &str,
+    right_pane: &PaneId,
     old_task: Option<(&'a TmuxWindow, &'a str)>,
     runner: &dyn ProcessRunner,
-) -> Result<(String, Displaced<'a>)> {
+) -> Result<(PaneId, Displaced<'a>)> {
     // 1. Resolve the incoming task's pane before swapping.
     let new_pane_id = tmux::pane_id_for_window(new_window, runner).context("cannot get pane ID")?;
 
@@ -266,8 +266,8 @@ fn exchange_panes<'a>(
 /// An `Err` means the panes are still exchanged and the caller must settle it.
 fn dispose_of_displaced_window(
     new_window: &TmuxWindow,
-    new_pane_id: &str,
-    right_pane: &str,
+    new_pane_id: &PaneId,
+    right_pane: &PaneId,
     displaced: Displaced<'_>,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
@@ -327,7 +327,7 @@ pub enum SwapFailure {
     /// pane `pane_id` now shows the incoming task. `error` names the window
     /// left holding the outgoing pane.
     Exchanged {
-        pane_id: String,
+        pane_id: PaneId,
         error: anyhow::Error,
     },
 }

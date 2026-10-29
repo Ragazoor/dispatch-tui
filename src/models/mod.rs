@@ -42,8 +42,8 @@ pub use paths::{
 mod tmux_window;
 pub(crate) use tmux_window::is_pane_id;
 #[cfg(any(test, feature = "test-support"))]
-pub use tmux_window::test_tmux_window;
-pub use tmux_window::TmuxWindow;
+pub use tmux_window::{test_pane_id, test_tmux_window};
+pub use tmux_window::{PaneId, TmuxWindow};
 
 #[cfg(any(test, feature = "test-support"))]
 mod epic_builder;

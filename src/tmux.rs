@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use std::process::Output;
 
-use crate::models::TmuxWindow;
+use crate::models::{PaneId, TmuxWindow};
 use crate::process::{stderr_str, stdout_str, ProcessRunner, SUBPROCESS_TIMEOUT};
 
 // ---------------------------------------------------------------------------
@@ -124,6 +124,15 @@ pub(crate) fn window_name_in_lookup<'a>(args: &[&'a str]) -> Option<&'a str> {
 /// string is either a window name or a resolved target, never both.
 fn is_resolved_target(target: &str) -> bool {
     target.is_empty() || crate::models::is_pane_id(target)
+}
+
+/// Parse tmux output that is meant to be a pane ID. `context` names the command
+/// for the error, which carries the offending text: a miss here means tmux
+/// answered with something else (an empty string, a name), and failing at the
+/// boundary beats letting it reach a later `-t`.
+fn pane_id_from_output(raw: String, context: &str) -> Result<PaneId> {
+    PaneId::from_owned(raw)
+        .map_err(|raw| anyhow::anyhow!("tmux {context} returned {raw:?}, not a pane ID"))
 }
 
 /// Resolve a tmux window *name* to the pane ID of that window's active pane,
@@ -436,7 +445,7 @@ pub fn list_all_window_names(runner: &dyn ProcessRunner) -> Result<Vec<String>> 
 /// on its own; [`kill_window_if_present`] remains the wrapper for callers whose
 /// cleanup must not abort when the window is simply already gone.
 pub fn kill_window(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()> {
-    let target = window_target(window.as_str(), runner)?;
+    let target = pane_id_from_output(window_target(window.as_str(), runner)?, "list-panes")?;
     kill_window_at(&target, runner)
 }
 
@@ -445,8 +454,12 @@ pub fn kill_window(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()
 /// For the caller that resolved the window itself because a server-wide
 /// [`window_target`] would have been the wrong question — see
 /// [`pane_id_of_window_in_session`].
-pub fn kill_window_at(target: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    run_checked(runner, &["kill-window", "-t", target], "kill-window")?;
+pub fn kill_window_at(target: &PaneId, runner: &dyn ProcessRunner) -> Result<()> {
+    run_checked(
+        runner,
+        &["kill-window", "-t", target.as_str()],
+        "kill-window",
+    )?;
     Ok(())
 }
 
@@ -457,11 +470,11 @@ pub fn kill_window_at(target: &str, runner: &dyn ProcessRunner) -> Result<()> {
 ///
 /// `pane` is an explicit pane id: `display-message` without `-t` answers about
 /// the session's active pane, not the caller's.
-pub fn pane_pid(pane: &str, runner: &dyn ProcessRunner) -> Option<u32> {
+pub fn pane_pid(pane: &PaneId, runner: &dyn ProcessRunner) -> Option<u32> {
     let output = runner
         .run(
             "tmux",
-            &["display-message", "-p", "-t", pane, "#{pane_pid}"],
+            &["display-message", "-p", "-t", pane.as_str(), "#{pane_pid}"],
         )
         .ok()?;
     if !output.status.success() {
@@ -514,7 +527,7 @@ pub fn pane_id_of_window_in_session(
     session: &str,
     window: &TmuxWindow,
     runner: &dyn ProcessRunner,
-) -> Result<Option<String>> {
+) -> Result<Option<PaneId>> {
     let target = format!("={session}");
     let output = runner.run(
         "tmux",
@@ -526,7 +539,8 @@ pub fn pane_id_of_window_in_session(
     let listing = String::from_utf8_lossy(&output.stdout);
     let found = active_pane_rows(&listing)
         .find(|(_, name)| *name == window.as_str())
-        .map(|(pane_id, _)| pane_id.to_string());
+        .map(|(pane_id, _)| pane_id_from_output(pane_id.to_string(), "list-panes"))
+        .transpose()?;
     Ok(found)
 }
 
@@ -622,7 +636,7 @@ const CURRENT_WINDOW_FORMAT: &str = "#{window_panes} #{session_name} #{window_na
 /// `startup::SESSION_NAME`, and the cost of the misread is a launch that
 /// declines to treat the window as the board's — the safe direction.
 pub fn current_window_context(
-    pane: Option<&str>,
+    pane: Option<&PaneId>,
     runner: &dyn ProcessRunner,
 ) -> Result<CurrentWindowContext> {
     let line = run_checked_stdout(
@@ -948,19 +962,19 @@ pub(crate) fn write_focus_events_to_tmux_conf_at(path: &std::path::Path) -> Resu
 /// is about the caller. `None` when it is unset or malformed — outside tmux, or
 /// an environment something has rewritten — and callers then fall back to the
 /// untargeted query, which is no worse than what they had.
-pub fn self_pane_id() -> Option<String> {
+pub fn self_pane_id() -> Option<PaneId> {
     std::env::var("TMUX_PANE")
         .ok()
-        .filter(|p| crate::models::is_pane_id(p))
+        .and_then(|p| PaneId::parse(&p))
 }
 
 /// `display-message -p <format>`, targeted at `pane` when one is known.
 ///
 /// Split out so the targeting is unit-testable without an environment the test
 /// harness shares across threads.
-pub(crate) fn display_message_args<'a>(pane: Option<&'a str>, format: &'a str) -> Vec<&'a str> {
+pub(crate) fn display_message_args<'a>(pane: Option<&'a PaneId>, format: &'a str) -> Vec<&'a str> {
     match pane {
-        Some(p) => vec!["display-message", "-p", "-t", p, format],
+        Some(p) => vec!["display-message", "-p", "-t", p.as_str(), format],
         None => vec!["display-message", "-p", format],
     }
 }
@@ -968,7 +982,7 @@ pub(crate) fn display_message_args<'a>(pane: Option<&'a str>, format: &'a str) -
 /// Return the name of the window `pane` is in — [`self_pane_id`] on the real
 /// path. With `None`, tmux answers about the session's *active* window instead.
 #[cfg(any(test, feature = "test-support"))]
-pub fn current_window_name(pane: Option<&str>, runner: &dyn ProcessRunner) -> Result<String> {
+pub fn current_window_name(pane: Option<&PaneId>, runner: &dyn ProcessRunner) -> Result<String> {
     run_checked_stdout(runner, &display_message_args(pane, "#W"), "display-message")
 }
 
@@ -1054,18 +1068,19 @@ pub fn unbind_key(key: &str, runner: &dyn ProcessRunner) -> Result<()> {
 /// environment is deliberately not read here: these helpers take what they need
 /// as arguments so a test is not at the mercy of an environment the harness
 /// shares across threads.
-pub fn current_pane_id(runner: &dyn ProcessRunner) -> Result<String> {
-    run_checked_stdout(
+pub fn current_pane_id(runner: &dyn ProcessRunner) -> Result<PaneId> {
+    let raw = run_checked_stdout(
         runner,
         &["display-message", "-p", "#{pane_id}"],
         "display-message",
-    )
+    )?;
+    pane_id_from_output(raw, "display-message")
 }
 
 /// Create a horizontal split (right pane) at 40% width, keeping focus on the
 /// left pane. Returns the new pane's ID.
-pub fn split_window_horizontal(target_pane: &str, runner: &dyn ProcessRunner) -> Result<String> {
-    run_checked_stdout(
+pub fn split_window_horizontal(target_pane: &PaneId, runner: &dyn ProcessRunner) -> Result<PaneId> {
+    let raw = run_checked_stdout(
         runner,
         &[
             "split-window",
@@ -1074,13 +1089,14 @@ pub fn split_window_horizontal(target_pane: &str, runner: &dyn ProcessRunner) ->
             "-l",
             "40%",
             "-t",
-            target_pane,
+            target_pane.as_str(),
             "-P",
             "-F",
             "#{pane_id}",
         ],
         "split-window",
-    )
+    )?;
+    pane_id_from_output(raw, "split-window")
 }
 
 /// Create a horizontal split (left pane) at `size_pct`% width, running the
@@ -1110,7 +1126,7 @@ pub fn split_window_horizontal_running(
     command: &[&str],
     start_dir: Option<&str>,
     runner: &dyn ProcessRunner,
-) -> Result<String> {
+) -> Result<PaneId> {
     if command.is_empty() {
         bail!("split_window_horizontal_running: command must not be empty");
     }
@@ -1135,7 +1151,8 @@ pub fn split_window_horizontal_running(
     // `--` last: everything after it is the pane's command, not an option.
     args.push("--");
     args.extend(command.iter().copied());
-    run_checked_stdout(runner, &args, "split-window")
+    let raw = run_checked_stdout(runner, &args, "split-window")?;
+    pane_id_from_output(raw, "split-window")
 }
 
 /// Create a pane **across the bottom of `target`'s window, spanning its full
@@ -1165,7 +1182,7 @@ pub fn split_window_below_running(
     cwd: &str,
     command: &[&str],
     runner: &dyn ProcessRunner,
-) -> Result<String> {
+) -> Result<PaneId> {
     if command.is_empty() {
         bail!("split_window_below_running: command must not be empty");
     }
@@ -1188,7 +1205,8 @@ pub fn split_window_below_running(
         "--",
     ];
     args.extend(command.iter().copied());
-    run_checked_stdout(runner, &args, "split-window")
+    let raw = run_checked_stdout(runner, &args, "split-window")?;
+    pane_id_from_output(raw, "split-window")
 }
 
 /// Replace what is running in `pane_id` with `command` (argv, no shell), started
@@ -1199,7 +1217,7 @@ pub fn split_window_below_running(
 /// focus is untouched. Sibling of
 /// [`respawn_pane`], which respawns a plain shell in place.
 pub fn respawn_pane_running(
-    pane_id: &str,
+    pane_id: &PaneId,
     cwd: &str,
     command: &[&str],
     runner: &dyn ProcessRunner,
@@ -1207,7 +1225,15 @@ pub fn respawn_pane_running(
     if command.is_empty() {
         bail!("respawn_pane_running: command must not be empty");
     }
-    let mut args: Vec<&str> = vec!["respawn-pane", "-k", "-c", cwd, "-t", pane_id, "--"];
+    let mut args: Vec<&str> = vec![
+        "respawn-pane",
+        "-k",
+        "-c",
+        cwd,
+        "-t",
+        pane_id.as_str(),
+        "--",
+    ];
     args.extend(command.iter().copied());
     run_checked(runner, &args, "respawn-pane")?;
     Ok(())
@@ -1261,14 +1287,14 @@ pub const PANE_CONTENT_EDITOR: &str = "editor";
 /// marks a pane it created, and a marker written to the wrong pane is worse than
 /// no marker at all.
 pub fn set_pane_option(
-    pane_id: &str,
+    pane_id: &PaneId,
     option: &str,
     value: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
     run_checked(
         runner,
-        &["set-option", "-p", "-t", pane_id, option, value],
+        &["set-option", "-p", "-t", pane_id.as_str(), option, value],
         "set-option",
     )?;
     Ok(())
@@ -1278,16 +1304,17 @@ pub fn set_pane_option(
 /// Returns the new pane's ID.
 pub fn join_pane(
     source_window: &TmuxWindow,
-    target_pane: &str,
+    target_pane: &PaneId,
     runner: &dyn ProcessRunner,
-) -> Result<String> {
+) -> Result<PaneId> {
     // Resolving the source window by exact name *is* the pane-ID lookup this
     // used to do with a separate `display-message`: it returns the window's
     // active pane, which is the pane join-pane moves, and pane IDs are
     // preserved across the move (join-pane has no -P/-F to print the result).
     // Passing the ID rather than the name also keeps a prefix-matched sibling
     // from being torn out of its own window and into the board.
-    let pane_id = window_target(source_window.as_str(), runner)?;
+    let pane_id =
+        pane_id_from_output(window_target(source_window.as_str(), runner)?, "list-panes")?;
 
     run_checked(
         runner,
@@ -1296,9 +1323,9 @@ pub fn join_pane(
             "-h",
             "-d",
             "-s",
-            &pane_id,
+            pane_id.as_str(),
             "-t",
-            target_pane,
+            target_pane.as_str(),
             "-l",
             "40%",
         ],
@@ -1315,7 +1342,7 @@ pub fn join_pane(
 /// exit goes through `dispatch::restore_pinned_pane`, which rejoins the pane
 /// instead when that window is the one it was pinned from.
 pub fn break_pane_to_window(
-    pane_id: &str,
+    pane_id: &PaneId,
     window_name: &TmuxWindow,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
@@ -1326,7 +1353,7 @@ pub fn break_pane_to_window(
             "break-pane",
             "-d",
             "-s",
-            pane_id,
+            pane_id.as_str(),
             "-n",
             window_name.as_str(),
         ],
@@ -1347,10 +1374,10 @@ pub const AWAITS_PANE_OPTION: &str = "@dispatch_awaits_pane";
 /// Tag `window` as awaiting `pane_id`'s return. See [`AWAITS_PANE_OPTION`].
 pub fn set_window_awaits_pane(
     window: &TmuxWindow,
-    pane_id: &str,
+    pane_id: &PaneId,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
-    set_window_option(window, AWAITS_PANE_OPTION, pane_id, runner)
+    set_window_option(window, AWAITS_PANE_OPTION, pane_id.as_str(), runner)
 }
 
 /// Whether the live window `window` is tagged as awaiting exactly `pane_id`.
@@ -1358,10 +1385,10 @@ pub fn set_window_awaits_pane(
 /// only once they know the name is taken.
 pub fn window_awaits_pane(
     window: &TmuxWindow,
-    pane_id: &str,
+    pane_id: &PaneId,
     runner: &dyn ProcessRunner,
 ) -> Result<bool> {
-    Ok(window_option(window, AWAITS_PANE_OPTION, runner)?.as_deref() == Some(pane_id))
+    Ok(window_option(window, AWAITS_PANE_OPTION, runner)?.as_deref() == Some(pane_id.as_str()))
 }
 
 /// Join `pane_id` back into `window` as its left-hand pane and clear the
@@ -1373,11 +1400,24 @@ pub fn window_awaits_pane(
 /// caller to undo a move that already happened (split-pane.allium:
 /// SwapSplitPane). A stale tag names a pane that is now inside the window, so
 /// it cannot let a different pane in.
-pub fn rejoin_pane(pane_id: &str, window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()> {
+pub fn rejoin_pane(
+    pane_id: &PaneId,
+    window: &TmuxWindow,
+    runner: &dyn ProcessRunner,
+) -> Result<()> {
     let target = window_target(window.as_str(), runner)?;
     run_checked(
         runner,
-        &["join-pane", "-h", "-b", "-d", "-s", pane_id, "-t", &target],
+        &[
+            "join-pane",
+            "-h",
+            "-b",
+            "-d",
+            "-s",
+            pane_id.as_str(),
+            "-t",
+            &target,
+        ],
         "join-pane",
     )?;
     if let Err(e) = run_checked_timeout(
@@ -1391,16 +1431,16 @@ pub fn rejoin_pane(pane_id: &str, window: &TmuxWindow, runner: &dyn ProcessRunne
 }
 
 /// Kill a specific tmux pane by ID.
-pub fn kill_pane(pane_id: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    run_checked(runner, &["kill-pane", "-t", pane_id], "kill-pane")?;
+pub fn kill_pane(pane_id: &PaneId, runner: &dyn ProcessRunner) -> Result<()> {
+    run_checked(runner, &["kill-pane", "-t", pane_id.as_str()], "kill-pane")?;
     Ok(())
 }
 
 /// Replace the content of a pane with a fresh shell, preserving the pane itself.
-pub fn respawn_pane(pane_id: &str, runner: &dyn ProcessRunner) -> Result<()> {
+pub fn respawn_pane(pane_id: &PaneId, runner: &dyn ProcessRunner) -> Result<()> {
     run_checked(
         runner,
-        &["respawn-pane", "-k", "-t", pane_id],
+        &["respawn-pane", "-k", "-t", pane_id.as_str()],
         "respawn-pane",
     )?;
     Ok(())
@@ -1420,8 +1460,8 @@ pub fn respawn_pane(pane_id: &str, runner: &dyn ProcessRunner) -> Result<()> {
 /// message. Resolving through a `list-panes` row removes both: there is no row
 /// to misattribute, and no row at all means no window. Verified against tmux
 /// 3.5a.
-pub fn pane_id_for_window(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<String> {
-    window_target(window.as_str(), runner)
+pub fn pane_id_for_window(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<PaneId> {
+    pane_id_from_output(window_target(window.as_str(), runner)?, "list-panes")
 }
 
 /// Atomically swap the contents of two panes without changing the layout.
@@ -1433,18 +1473,29 @@ pub fn pane_id_for_window(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Re
 /// name prefix-matches (see [`window_target`]), so it can address the wrong
 /// window entirely. Use [`pane_id_for_window`], [`pane_ids_with_option`] or
 /// [`pane_ids_with_option_value`] to resolve one.
-pub fn swap_pane(source: &str, target: &str, runner: &dyn ProcessRunner) -> Result<()> {
+pub fn swap_pane(source: &PaneId, target: &PaneId, runner: &dyn ProcessRunner) -> Result<()> {
     run_checked(
         runner,
-        &["swap-pane", "-d", "-s", source, "-t", target],
+        &[
+            "swap-pane",
+            "-d",
+            "-s",
+            source.as_str(),
+            "-t",
+            target.as_str(),
+        ],
         "swap-pane",
     )?;
     Ok(())
 }
 
 /// Move tmux focus to the specified pane.
-pub fn select_pane(pane_id: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    run_checked(runner, &["select-pane", "-t", pane_id], "select-pane")?;
+pub fn select_pane(pane_id: &PaneId, runner: &dyn ProcessRunner) -> Result<()> {
+    run_checked(
+        runner,
+        &["select-pane", "-t", pane_id.as_str()],
+        "select-pane",
+    )?;
     Ok(())
 }
 
@@ -1487,7 +1538,7 @@ pub fn pane_roles(
     target: &str,
     option: &str,
     runner: &dyn ProcessRunner,
-) -> Result<Vec<(String, String)>> {
+) -> Result<Vec<(PaneId, String)>> {
     let resolved = window_target(target, runner)?;
     let format = format!("#{{pane_id}} {}", option_format(option));
     let out = run_checked_stdout(
@@ -1495,12 +1546,16 @@ pub fn pane_roles(
         &["list-panes", "-t", &resolved, "-F", &format],
         "list-panes",
     )?;
-    Ok(out
-        .lines()
+    out.lines()
         .filter_map(split_pane_row)
         .filter(|(_, role)| !role.is_empty())
-        .map(|(id, role)| (id.to_string(), role.to_string()))
-        .collect())
+        .map(|(id, role)| {
+            Ok((
+                pane_id_from_output(id.to_string(), "list-panes")?,
+                role.to_string(),
+            ))
+        })
+        .collect()
 }
 
 /// Every pane in `target`'s window marked with `role_option`, with the value of
@@ -1513,7 +1568,7 @@ pub fn pane_roles_with_content(
     role_option: &str,
     content_option: &str,
     runner: &dyn ProcessRunner,
-) -> Result<Vec<(String, String, String)>> {
+) -> Result<Vec<(PaneId, String, String)>> {
     let resolved = window_target(target, runner)?;
     let format = format!(
         "#{{pane_id}} {} {}",
@@ -1525,16 +1580,22 @@ pub fn pane_roles_with_content(
         &["list-panes", "-t", &resolved, "-F", &format],
         "list-panes",
     )?;
-    Ok(out
-        .lines()
+    out.lines()
         .filter_map(|line| {
             let mut fields = line.splitn(3, ' ');
             let id = fields.next().filter(|id| !id.is_empty())?;
             let role = fields.next().filter(|role| !role.is_empty())?;
             let content = fields.next().unwrap_or("");
-            Some((id.to_string(), role.to_string(), content.to_string()))
+            Some((id, role, content))
         })
-        .collect())
+        .map(|(id, role, content)| {
+            Ok((
+                pane_id_from_output(id.to_string(), "list-panes")?,
+                role.to_string(),
+                content.to_string(),
+            ))
+        })
+        .collect()
 }
 
 /// Pane ids in `target`'s window whose pane-scoped user option `option` is set to
@@ -1550,7 +1611,7 @@ pub fn pane_ids_with_option(
     target: &str,
     option: &str,
     runner: &dyn ProcessRunner,
-) -> Result<Vec<String>> {
+) -> Result<Vec<PaneId>> {
     Ok(pane_roles(target, option, runner)?
         .into_iter()
         .map(|(id, _)| id)
@@ -1568,7 +1629,7 @@ pub fn pane_ids_with_option_value(
     option: &str,
     value: &str,
     runner: &dyn ProcessRunner,
-) -> Result<Vec<String>> {
+) -> Result<Vec<PaneId>> {
     Ok(pane_roles(target, option, runner)?
         .into_iter()
         .filter(|(_, role)| role == value)
@@ -1614,9 +1675,9 @@ fn list_all_pane_ids(runner: &dyn ProcessRunner) -> Result<Vec<String>> {
 /// leaving a pane pinned that may no longer be there. Contrast
 /// [`has_window_or_assume_present`], where the gated action is destructive and
 /// the default therefore goes the other way.
-pub fn pane_exists(pane_id: &str, runner: &dyn ProcessRunner) -> bool {
+pub fn pane_exists(pane_id: &PaneId, runner: &dyn ProcessRunner) -> bool {
     list_all_pane_ids(runner)
-        .map(|ids| ids.iter().any(|id| id == pane_id))
+        .map(|ids| ids.iter().any(|id| id == pane_id.as_str()))
         .unwrap_or(false)
 }
 

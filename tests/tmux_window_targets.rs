@@ -320,14 +320,17 @@ fn pane_id_for_window_returns_the_exactly_named_windows_pane() {
     let short = tmux::pane_id_for_window(&w("task-4"), &fx.runner()).unwrap();
     let long = tmux::pane_id_for_window(&w("task-42"), &fx.runner()).unwrap();
 
-    assert!(short.starts_with('%'), "expected a pane ID, got: {short:?}");
+    assert!(
+        short.as_str().starts_with('%'),
+        "expected a pane ID, got: {short:?}"
+    );
     assert_ne!(
         short, long,
         "task-4 and task-42 are different windows and must resolve to different panes"
     );
     // And each ID really is the pane tmux itself calls that window's active one.
-    assert_eq!(fx.server.active_pane_id("task-4"), Some(short));
-    assert_eq!(fx.server.active_pane_id("task-42"), Some(long));
+    assert_eq!(fx.server.active_pane_id("task-4"), Some(short.to_string()));
+    assert_eq!(fx.server.active_pane_id("task-42"), Some(long.to_string()));
 }
 
 #[test]
@@ -420,7 +423,8 @@ fn rename_window_accepts_a_pane_id_target() {
     };
     let pane = tmux::pane_id_for_window(&w("task-42"), &fx.runner()).unwrap();
 
-    tmux::rename_window(&pane, &w("renamed"), &fx.runner()).expect("pane-ID target should work");
+    tmux::rename_window(pane.as_str(), &w("renamed"), &fx.runner())
+        .expect("pane-ID target should work");
 
     let names = fx.window_names();
     assert!(

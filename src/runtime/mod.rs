@@ -54,7 +54,7 @@ const AGENT_TREE_TOGGLE_COMMAND: &str = concat!(
 );
 
 use crate::embeddings::EmbeddingService;
-use crate::models::{EpicId, TaskId, TmuxWindow, WorkPackageId};
+use crate::models::{EpicId, PaneId, TaskId, TmuxWindow, WorkPackageId};
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::FieldUpdate;
 use crate::store::{RepoConfigRead, TaskRead};
@@ -119,7 +119,7 @@ fn publish_board_port(session: &str, port: u16, runner: &dyn ProcessRunner) {
 /// session comes from the probe `run_tui` already makes, and reading
 /// `$TMUX_PANE` here would leave every test at the mercy of an environment the
 /// harness shares across threads.
-fn setup_tmux_for_tui(session: &str, self_pane: Option<&str>, runner: &dyn ProcessRunner) {
+fn setup_tmux_for_tui(session: &str, self_pane: Option<&PaneId>, runner: &dyn ProcessRunner) {
     // The rename must target this process's own pane, and only that. Every
     // fallback resolves to the session's *active* pane instead — `-t ""` and
     // `current_pane_id` alike (`tmux::self_pane_id`) — so without `$TMUX_PANE`
@@ -137,7 +137,7 @@ fn setup_tmux_for_tui(session: &str, self_pane: Option<&str>, runner: &dyn Proce
         // this board adopting the name — a board that never adopts it is one
         // the next launch in this session retires nothing of, starting a rival
         // beside it. The helper leaves a name the window already carries alone.
-        let _ = tmux::rename_window_in_session(session, target, &TUI_WINDOW_NAME, runner);
+        let _ = tmux::rename_window_in_session(session, target.as_str(), &TUI_WINDOW_NAME, runner);
     } else {
         tracing::warn!("no $TMUX_PANE: leaving this window's name alone");
     }
@@ -520,14 +520,14 @@ fn wire_tmux_for_tui(server: &str, port: u16, tmux_runner: &dyn ProcessRunner) -
     // calls would be described by neither answer. See
     // `tmux::current_window_context`.
     let self_pane = tmux::self_pane_id();
-    let here = tmux::current_window_context(self_pane.as_deref(), tmux_runner).ok();
+    let here = tmux::current_window_context(self_pane.as_ref(), tmux_runner).ok();
     let original_window_name = here
         .as_ref()
         .and_then(|c| TmuxWindow::parse(&c.window_name));
     let session = here
         .as_ref()
         .map_or(String::new(), |c| c.session_name.clone());
-    setup_tmux_for_tui(&session, self_pane.as_deref(), tmux_runner);
+    setup_tmux_for_tui(&session, self_pane.as_ref(), tmux_runner);
     publish_store_server(&session, server, tmux_runner);
     publish_board_port(&session, port, tmux_runner);
     TmuxWiring {

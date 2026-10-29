@@ -48,6 +48,65 @@ pub(crate) const fn is_pane_id(s: &str) -> bool {
     true
 }
 
+/// A tmux **pane** ID (`%N`), validated once at the boundary.
+///
+/// Exists so a pane ID cannot be confused with a window name or a free-form
+/// target: constructing one is a claim that the string passed [`is_pane_id`].
+/// Parse where the string enters (`$TMUX_PANE`, tmux output, a store row) and
+/// carry the type inward; use [`PaneId::as_str`] only for argv.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PaneId(String);
+
+impl PaneId {
+    /// Accept `s` when it is a pane ID, otherwise `None`.
+    pub fn parse(s: &str) -> Option<Self> {
+        is_pane_id(s).then(|| Self(s.to_string()))
+    }
+
+    /// [`parse`] for a string the caller already owns. Hands the string back on
+    /// rejection so the caller can log the value.
+    ///
+    /// [`parse`]: PaneId::parse
+    pub fn from_owned(s: String) -> Result<Self, String> {
+        if is_pane_id(&s) {
+            Ok(Self(s))
+        } else {
+            Err(s)
+        }
+    }
+
+    /// The ID as tmux sees it.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Comparison-only sugar, like [`TmuxWindow`]'s: reads an ID, never builds one.
+impl PartialEq<str> for PaneId {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for PaneId {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl fmt::Display for PaneId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Test-only shorthand for [`PaneId::parse`] on an ID the test knows is valid.
+#[cfg(any(test, feature = "test-support"))]
+#[allow(clippy::expect_used)]
+pub fn test_pane_id(id: &str) -> PaneId {
+    PaneId::parse(id).expect("test pane id must be %<digits>")
+}
+
 /// A tmux window **name** — the board's own window, an editor window, or a
 /// dispatched agent's `task-<id>`.
 ///
@@ -254,6 +313,42 @@ mod tests {
         assert!(!is_pane_id("%foo"));
         assert!(!is_pane_id("task-4"));
         assert!(!is_pane_id(""));
+    }
+
+    #[test]
+    fn pane_id_parse_accepts_percent_digits() {
+        for id in ["%0", "%12"] {
+            assert_eq!(
+                PaneId::parse(id).map(|p| p.as_str().to_string()),
+                Some(id.to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn pane_id_parse_rejects_empty_and_window_names() {
+        for s in ["", "%", "%foo", "task-4", "TUI", " %1", "%1\n"] {
+            assert_eq!(PaneId::parse(s), None, "{s:?}");
+        }
+    }
+
+    #[test]
+    fn pane_id_from_owned_hands_a_rejected_string_back() {
+        assert_eq!(
+            PaneId::from_owned("task-1".to_string()),
+            Err("task-1".to_string())
+        );
+        assert_eq!(
+            PaneId::from_owned("%7".to_string()).map(|p| p.to_string()),
+            Ok("%7".to_string())
+        );
+    }
+
+    #[test]
+    fn pane_id_displays_and_compares_as_its_string() {
+        let id = test_pane_id("%5");
+        assert_eq!(format!("{id}"), "%5");
+        assert!(id == *"%5");
     }
 
     #[test]

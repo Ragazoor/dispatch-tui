@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::test_pane_id;
 
 #[test]
 fn window_target_asks_tmux_for_an_exact_name_match() {
@@ -152,7 +153,7 @@ fn pane_id_of_window_in_session_scopes_the_query_to_that_session() {
     .with_queued_window_lookup();
     let found =
         pane_id_of_window_in_session("dispatch", &TmuxWindow::from_static("TUI"), &mock).unwrap();
-    assert_eq!(found.as_deref(), Some("%7"));
+    assert_eq!(found, Some(test_pane_id("%7")));
     let calls = mock.recorded_calls();
     assert_eq!(
         calls[0].1,

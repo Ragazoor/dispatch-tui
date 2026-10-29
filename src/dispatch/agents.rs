@@ -3,7 +3,7 @@ use std::fs;
 
 use crate::git::detect_default_branch;
 use crate::models::{
-    expand_tilde, DispatchResult, ResumeResult, Task, TaskId, TaskModel, TmuxWindow,
+    expand_tilde, DispatchResult, PaneId, ResumeResult, Task, TaskId, TaskModel, TmuxWindow,
 };
 use crate::process::{ProcessRunner, SUBPROCESS_TIMEOUT};
 use crate::tmux;
@@ -120,7 +120,7 @@ const AGENT_TREE_SUBCOMMAND: &str = "agent-tree";
 pub fn agent_tree_pane_id(
     window: &TmuxWindow,
     runner: &dyn ProcessRunner,
-) -> Result<Option<String>> {
+) -> Result<Option<PaneId>> {
     let panes = tmux::pane_ids_with_option_value(
         window.as_str(),
         tmux::PANE_ROLE_OPTION,
@@ -141,7 +141,7 @@ pub fn agent_tree_pane_id(
 /// pre-resolution to keep them from each re-resolving the name — but "every pane
 /// carrying a role at all". A future dispatch-created pane is covered the moment
 /// it is marked, without this function being taught about it.
-pub fn companion_pane_ids(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<Vec<String>> {
+pub fn companion_pane_ids(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<Vec<PaneId>> {
     tmux::pane_ids_with_option(window.as_str(), tmux::PANE_ROLE_OPTION, runner)
 }
 
@@ -284,12 +284,12 @@ pub fn toggle_agent_tree_pane(window: &TmuxWindow, runner: &dyn ProcessRunner) -
 /// over.
 fn discard_agent_tree_panes(
     window: &TmuxWindow,
-    roles: &[(String, String)],
+    roles: &[(PaneId, String)],
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
     // Diff panes first, so one cannot briefly outlive the tree that drives it.
     let mut had_diff_pane = false;
-    let mut editor_panes: Option<Vec<String>> = None;
+    let mut editor_panes: Option<Vec<PaneId>> = None;
     for (pane, _) in roles
         .iter()
         .filter(|(_, role)| role == tmux::PANE_ROLE_DIFF)
@@ -962,7 +962,7 @@ mod tests {
         // The window being split is targeted by its resolved pane ID, not its
         // name — otherwise the companion pane could open inside a
         // prefix-matched sibling's window (see `tmux::window_target`).
-        assert!(calls[3].1.contains(&mock.pane_id_of("task-5")));
+        assert!(calls[3].1.contains(&mock.pane_id_of("task-5").to_string()));
         assert!(calls[3].1.contains(&"5".to_string()));
         assert!(calls[3].1.contains(&"agent-tree".to_string()));
         // The worktree read back from @dispatch_dir becomes the new pane's

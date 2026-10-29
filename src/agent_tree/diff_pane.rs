@@ -21,7 +21,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::models::TaskId;
+use crate::models::{PaneId, TaskId};
 use crate::process::ProcessRunner;
 use crate::tmux::{
     self, PANE_CONTENT_DIFF, PANE_CONTENT_EDITOR, PANE_CONTENT_OPTION, PANE_ROLE_DIFF,
@@ -39,7 +39,7 @@ const DIFF_PANE_PERCENT: u8 = 50;
 /// renderer runs where it is meant to. Its absence (or a malformed value) means
 /// the renderer was started outside tmux, which is a real (if unusual) way to
 /// run it — hence an error the caller can show, not a panic.
-pub fn current_pane_from_env() -> Result<String> {
+pub fn current_pane_from_env() -> Result<PaneId> {
     tmux::self_pane_id().context("not running inside tmux ($TMUX_PANE is unset)")
 }
 
@@ -51,16 +51,19 @@ pub fn current_pane_from_env() -> Result<String> {
 /// other would let a close take the tree away. Role and content come from one
 /// `list-panes`, so a pane closed in between cannot read as a diff.
 fn existing_lower_pane(
-    my_pane: &str,
+    my_pane: &PaneId,
     runner: &dyn ProcessRunner,
-) -> Result<Option<(String, bool)>> {
-    Ok(
-        tmux::pane_roles_with_content(my_pane, PANE_ROLE_OPTION, PANE_CONTENT_OPTION, runner)
-            .context("failed to look for an existing diff pane")?
-            .into_iter()
-            .find(|(_, role, _)| role == PANE_ROLE_DIFF)
-            .map(|(pane, _, content)| (pane, content == PANE_CONTENT_EDITOR)),
+) -> Result<Option<(PaneId, bool)>> {
+    Ok(tmux::pane_roles_with_content(
+        my_pane.as_str(),
+        PANE_ROLE_OPTION,
+        PANE_CONTENT_OPTION,
+        runner,
     )
+    .context("failed to look for an existing diff pane")?
+    .into_iter()
+    .find(|(_, role, _)| role == PANE_ROLE_DIFF)
+    .map(|(pane, _, content)| (pane, content == PANE_CONTENT_EDITOR)))
 }
 
 /// Make the open set and the panes agree: split a diff pane when something is
@@ -81,7 +84,7 @@ fn existing_lower_pane(
 /// target and to identify the window to look in — every pane involved is in the
 /// agent's own window.
 pub fn reconcile_diff_pane(
-    my_pane: &str,
+    my_pane: &PaneId,
     data_dir: &Path,
     task_id: TaskId,
     worktree: &Path,
@@ -121,7 +124,7 @@ pub fn reconcile_diff_pane(
 /// handed a missing path opens a misleading empty buffer. Focus ends in the
 /// pane.
 pub fn show_in_editor(
-    my_pane: &str,
+    my_pane: &PaneId,
     worktree: &Path,
     relative: &Path,
     editor: &[String],
@@ -151,8 +154,8 @@ pub fn show_in_editor(
 /// split a fresh one below `my_pane` when there is none. Then record what it
 /// runs and move focus to it (`FocusFollowsTheOpenedFile`).
 fn show_in_lower_pane(
-    my_pane: &str,
-    existing: Option<String>,
+    my_pane: &PaneId,
+    existing: Option<PaneId>,
     worktree: &Path,
     command: &[String],
     content: &str,
@@ -166,8 +169,13 @@ fn show_in_lower_pane(
             pane
         }
         None => {
-            let pane =
-                tmux::split_window_below_running(my_pane, DIFF_PANE_PERCENT, &cwd, &argv, runner)?;
+            let pane = tmux::split_window_below_running(
+                my_pane.as_str(),
+                DIFF_PANE_PERCENT,
+                &cwd,
+                &argv,
+                runner,
+            )?;
             mark_diff_pane(&pane, runner);
             pane
         }
@@ -180,7 +188,7 @@ fn show_in_lower_pane(
 /// Move tmux focus to the lower pane the user just opened a file in
 /// (`FocusFollowsTheOpenedFile`). The pane is already showing the file, so a
 /// failure is logged rather than reported as a failed open.
-fn focus(pane: &str, runner: &dyn ProcessRunner) {
+fn focus(pane: &PaneId, runner: &dyn ProcessRunner) {
     if let Err(e) = tmux::select_pane(pane, runner) {
         tracing::warn!(%pane, error = %e, "failed to move focus to the lower pane");
     }
@@ -205,7 +213,7 @@ fn diff_command(data_dir: &Path, task_id: TaskId, runner: &dyn ProcessRunner) ->
 /// open. Worst case a later toggle splits a second pane — the same accepted
 /// gap the editor pane's marker had, and the reason OneDiffPanePerAgentWindow
 /// is held by construction rather than enforced.
-fn mark_diff_pane(pane: &str, runner: &dyn ProcessRunner) {
+fn mark_diff_pane(pane: &PaneId, runner: &dyn ProcessRunner) {
     if let Err(e) = tmux::set_pane_option(pane, PANE_ROLE_OPTION, PANE_ROLE_DIFF, runner) {
         tracing::warn!(%pane, error = %e, "failed to mark the diff pane with its role");
     }
@@ -215,7 +223,7 @@ fn mark_diff_pane(pane: &str, runner: &dyn ProcessRunner) {
 /// failure like [`mark_diff_pane`]: the pane is already open. The cost of a
 /// missed editor mark is that the pane reads as a diff, so keep this write
 /// right after the pane is created.
-fn mark_content(pane: &str, content: &str, runner: &dyn ProcessRunner) {
+fn mark_content(pane: &PaneId, content: &str, runner: &dyn ProcessRunner) {
     if let Err(e) = tmux::set_pane_option(pane, PANE_CONTENT_OPTION, content, runner) {
         tracing::warn!(%pane, content, error = %e, "failed to mark what the lower pane runs");
     }
@@ -224,6 +232,7 @@ fn mark_content(pane: &str, content: &str, runner: &dyn ProcessRunner) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::test_pane_id;
     use crate::process::MockProcessRunner;
 
     fn db() -> &'static Path {
@@ -281,7 +290,15 @@ mod tests {
     fn opening_the_first_diff_splits_a_pane_below_the_tree() {
         let runner = no_pane_then_split();
 
-        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
+        reconcile_diff_pane(
+            &test_pane_id("%2"),
+            db(),
+            TaskId(42),
+            worktree(),
+            true,
+            &runner,
+        )
+        .unwrap();
 
         let calls = runner.flattened_calls();
         assert!(
@@ -298,7 +315,15 @@ mod tests {
     fn the_diff_pane_is_told_which_database_and_task_to_read() {
         let runner = no_pane_then_split();
 
-        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
+        reconcile_diff_pane(
+            &test_pane_id("%2"),
+            db(),
+            TaskId(42),
+            worktree(),
+            true,
+            &runner,
+        )
+        .unwrap();
 
         let split = &runner.flattened_calls()[1];
         assert!(split.contains("--data-dir /data"), "got {split}");
@@ -309,7 +334,15 @@ mod tests {
     fn the_new_pane_is_marked_with_the_diff_role() {
         let runner = no_pane_then_split();
 
-        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
+        reconcile_diff_pane(
+            &test_pane_id("%2"),
+            db(),
+            TaskId(42),
+            worktree(),
+            true,
+            &runner,
+        )
+        .unwrap();
 
         let mark = &runner.flattened_calls()[2];
         assert!(
@@ -325,7 +358,15 @@ mod tests {
     fn opening_another_diff_reuses_the_pane_and_moves_focus_to_it() {
         let runner = existing_pane(vec![MockProcessRunner::ok()]);
 
-        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
+        reconcile_diff_pane(
+            &test_pane_id("%2"),
+            db(),
+            TaskId(42),
+            worktree(),
+            true,
+            &runner,
+        )
+        .unwrap();
 
         assert_eq!(runner.flattened_calls().len(), 2, "lookup and focus only");
         assert_focus_moved_to_the_lower_pane(&runner);
@@ -337,14 +378,30 @@ mod tests {
     fn a_failed_focus_move_still_counts_as_opened() {
         let runner = existing_pane(vec![MockProcessRunner::fail("no such pane")]);
 
-        assert!(reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).is_ok());
+        assert!(reconcile_diff_pane(
+            &test_pane_id("%2"),
+            db(),
+            TaskId(42),
+            worktree(),
+            true,
+            &runner
+        )
+        .is_ok());
     }
 
     #[test]
     fn closing_the_last_diff_kills_the_pane() {
         let runner = existing_pane(vec![MockProcessRunner::ok()]);
 
-        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), false, &runner).unwrap();
+        reconcile_diff_pane(
+            &test_pane_id("%2"),
+            db(),
+            TaskId(42),
+            worktree(),
+            false,
+            &runner,
+        )
+        .unwrap();
 
         assert_eq!(
             runner.flattened_calls()[1],
@@ -360,7 +417,15 @@ mod tests {
             b"%1 \n%2 agent_tree\n",
         )]);
 
-        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), false, &runner).unwrap();
+        reconcile_diff_pane(
+            &test_pane_id("%2"),
+            db(),
+            TaskId(42),
+            worktree(),
+            false,
+            &runner,
+        )
+        .unwrap();
 
         assert_eq!(runner.flattened_calls().len(), 1);
     }
@@ -378,7 +443,15 @@ mod tests {
             MockProcessRunner::ok(),
         ]);
 
-        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
+        reconcile_diff_pane(
+            &test_pane_id("%2"),
+            db(),
+            TaskId(42),
+            worktree(),
+            true,
+            &runner,
+        )
+        .unwrap();
 
         let calls = runner.flattened_calls();
         assert!(
@@ -394,8 +467,15 @@ mod tests {
     fn a_failed_role_lookup_is_an_error_rather_than_a_second_pane() {
         let runner = MockProcessRunner::new(vec![MockProcessRunner::fail("no server running")]);
 
-        let err =
-            reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap_err();
+        let err = reconcile_diff_pane(
+            &test_pane_id("%2"),
+            db(),
+            TaskId(42),
+            worktree(),
+            true,
+            &runner,
+        )
+        .unwrap_err();
 
         assert!(
             format!("{err:#}").contains("existing diff pane"),
@@ -415,7 +495,15 @@ mod tests {
             MockProcessRunner::ok(),
         ]);
 
-        assert!(reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).is_ok());
+        assert!(reconcile_diff_pane(
+            &test_pane_id("%2"),
+            db(),
+            TaskId(42),
+            worktree(),
+            true,
+            &runner
+        )
+        .is_ok());
     }
 
     // ---- OpenAgentTreeFileInEditor / ShowDiffInLowerPane ------------------
@@ -436,7 +524,14 @@ mod tests {
         let wt = worktree_with_file();
         let runner = no_pane_then_split();
 
-        show_in_editor("%2", wt.path(), Path::new("a.rs"), &editor(), &runner).unwrap();
+        show_in_editor(
+            &test_pane_id("%2"),
+            wt.path(),
+            Path::new("a.rs"),
+            &editor(),
+            &runner,
+        )
+        .unwrap();
 
         let calls = runner.flattened_calls();
         assert!(
@@ -468,7 +563,14 @@ mod tests {
             MockProcessRunner::ok(),
         ]);
 
-        show_in_editor("%2", wt.path(), Path::new("a.rs"), &editor(), &runner).unwrap();
+        show_in_editor(
+            &test_pane_id("%2"),
+            wt.path(),
+            Path::new("a.rs"),
+            &editor(),
+            &runner,
+        )
+        .unwrap();
 
         let calls = runner.flattened_calls();
         assert_eq!(calls.len(), 4, "{calls:?}");
@@ -489,8 +591,14 @@ mod tests {
         let wt = worktree_with_file();
         let runner = MockProcessRunner::new(vec![]);
 
-        let err =
-            show_in_editor("%2", wt.path(), Path::new("gone.rs"), &editor(), &runner).unwrap_err();
+        let err = show_in_editor(
+            &test_pane_id("%2"),
+            wt.path(),
+            Path::new("gone.rs"),
+            &editor(),
+            &runner,
+        )
+        .unwrap_err();
 
         assert!(format!("{err}").contains("no longer exists"), "{err}");
         assert!(runner.flattened_calls().is_empty());
@@ -518,7 +626,15 @@ mod tests {
             MockProcessRunner::ok(),
         ]);
 
-        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), true, &runner).unwrap();
+        reconcile_diff_pane(
+            &test_pane_id("%2"),
+            db(),
+            TaskId(42),
+            worktree(),
+            true,
+            &runner,
+        )
+        .unwrap();
 
         let calls = runner.flattened_calls();
         assert!(
@@ -544,7 +660,15 @@ mod tests {
     fn emptying_the_open_set_while_the_editor_shows_does_not_kill_it() {
         let runner = existing_editor_pane(vec![]);
 
-        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), false, &runner).unwrap();
+        reconcile_diff_pane(
+            &test_pane_id("%2"),
+            db(),
+            TaskId(42),
+            worktree(),
+            false,
+            &runner,
+        )
+        .unwrap();
 
         assert_no_pane_mutation(&runner);
     }
@@ -559,7 +683,14 @@ mod tests {
             MockProcessRunner::ok(),
         ]);
 
-        show_in_editor("%2", wt.path(), Path::new("a.rs"), &editor(), &runner).unwrap();
+        show_in_editor(
+            &test_pane_id("%2"),
+            wt.path(),
+            Path::new("a.rs"),
+            &editor(),
+            &runner,
+        )
+        .unwrap();
 
         let calls = runner.flattened_calls();
         assert!(
@@ -577,7 +708,15 @@ mod tests {
     fn a_pane_without_a_content_mark_counts_as_the_diff() {
         let runner = pane_running("", vec![MockProcessRunner::ok()]);
 
-        reconcile_diff_pane("%2", db(), TaskId(42), worktree(), false, &runner).unwrap();
+        reconcile_diff_pane(
+            &test_pane_id("%2"),
+            db(),
+            TaskId(42),
+            worktree(),
+            false,
+            &runner,
+        )
+        .unwrap();
 
         assert_eq!(
             runner.flattened_calls()[1],

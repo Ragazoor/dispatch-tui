@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::test_pane_id;
 use crate::models::{test_tmux_window, SubStatus, TaskId, TaskStatus, TaskTag};
 // Palette constants come from the palette, never retyped as literals here: a
 // hand-copied RGB goes stale silently when the palette moves, which is the exact
@@ -717,7 +718,7 @@ async fn split_focused_defaults_to_true() {
 async fn focus_changed_updates_split_focused_when_split_active() {
     let mut app = make_app();
     app.board.split.active = true;
-    app.board.split.right_pane_id = Some("pane1".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%1"));
 
     let cmds = app.update(Message::System(
         crate::tui::messages::SystemMessage::FocusChanged(false),
@@ -737,7 +738,7 @@ async fn render_shows_border_when_split_active_and_focused() {
     let mut app = make_app();
     app.board.split.active = true;
     app.board.split.focused = true;
-    app.board.split.right_pane_id = Some("pane1".to_string());
+    app.board.split.right_pane_id = Some(test_pane_id("%1"));
 
     let buf = render_to_buffer(&mut app, 80, 24);
     // Top-left corner should be a border character (╭ — rounded)
