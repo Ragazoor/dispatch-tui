@@ -177,6 +177,12 @@ fn section_value(raw: &str) -> String {
     lines.join("\n").trim_end().to_string()
 }
 
+/// A single-line section's value: `section_value` keeps leading indentation
+/// (DESCRIPTION needs it), so these fields drop stray spaces here.
+fn single_line(value: Option<String>) -> String {
+    value.unwrap_or_default().trim().to_string()
+}
+
 /// Parse the task editor's sections.
 fn parse_sections(input: &str) -> std::collections::HashMap<&'static str, String> {
     parse_sections_in(input, TASK_SECTIONS)
@@ -253,9 +259,9 @@ pub fn parse_epic_editor_output(input: &str) -> EpicEditorFields {
         &mut errors,
     );
     EpicEditorFields {
-        title: s.remove("TITLE").unwrap_or_default(),
+        title: single_line(s.remove("TITLE")),
         description: s.remove("DESCRIPTION").unwrap_or_default(),
-        feed_command: s.remove("FEED_COMMAND").unwrap_or_default(),
+        feed_command: single_line(s.remove("FEED_COMMAND")),
         feed_interval_secs,
         errors,
     }
@@ -507,16 +513,16 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
     );
 
     EditorFields {
-        title: s.remove("TITLE").unwrap_or_default(),
+        title: single_line(s.remove("TITLE")),
         description: s.remove("DESCRIPTION").unwrap_or_default(),
-        repo_path: s.remove("REPO_PATH").unwrap_or_default(),
+        repo_path: single_line(s.remove("REPO_PATH")),
         status,
-        plan: s.remove("PLAN").unwrap_or_default(),
+        plan: single_line(s.remove("PLAN")),
         tag,
-        base_branch: s.remove("BASE_BRANCH").unwrap_or_default(),
+        base_branch: single_line(s.remove("BASE_BRANCH")),
         wrap_up_mode,
         model,
-        url: s.remove("URL").unwrap_or_default(),
+        url: single_line(s.remove("URL")),
         url_type,
         phoenix,
         errors,

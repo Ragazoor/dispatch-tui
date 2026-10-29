@@ -139,7 +139,9 @@ async fn open_cli_store_checked(
     // Before the connection, which already writes. Never pins: only a board
     // does (`startup.allium: PinTheStoreOnceItAnswers`).
     if matches!(pin, StorePin::Checked) {
-        check_store_identity(&parts, data_dir, &server, false).await?;
+        check_store_identity(&parts, data_dir, &server, false)
+            .await
+            .map_err(cli_wording)?;
     }
     // No host-registry push: a short-lived command is not a board, and the
     // board already registers this host on every connect.
@@ -148,6 +150,26 @@ async fn open_cli_store_checked(
         database: parts.database,
         _session: session,
     })
+}
+
+/// Re-word the pin refusal for a command. `StartupAbort::StoreSwitched` speaks
+/// to the board ("the board has not started ... run `dispatch tui` again"),
+/// which misleads for `dispatch repo set-verify` and the like.
+fn cli_wording(err: anyhow::Error) -> anyhow::Error {
+    match err.downcast::<crate::startup_abort::StartupAbort>() {
+        Ok(crate::startup_abort::StartupAbort::StoreSwitched {
+            address,
+            pinned,
+            found,
+        }) => anyhow::anyhow!(
+            "The store at {address} holds a different database ({found}) from the one this \
+             install last used ({pinned}); this command wrote nothing. If the store was chosen \
+             by mistake, unset DISPATCH_SPACETIME_SERVER. If you mean to move to this \
+             database, run `dispatch tui --accept-store-switch` once."
+        ),
+        Ok(other) => anyhow::Error::new(other),
+        Err(err) => err,
+    }
 }
 
 /// The production [`StoreParts::store_identity`]: the shared database's

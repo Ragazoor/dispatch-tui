@@ -573,3 +573,41 @@ fn mock_timeouts_stay_aligned_across_an_out_of_band_window_lookup() {
     );
     assert_eq!(mock.recorded_calls().len(), 1);
 }
+
+// --- non-interactive git ---
+
+#[test]
+fn git_ssh_command_adds_batch_mode_to_nothing() {
+    assert_eq!(git_ssh_command(None), "ssh -o BatchMode=yes");
+}
+
+#[test]
+fn git_ssh_command_appends_batch_mode_to_an_existing_command() {
+    assert_eq!(
+        git_ssh_command(Some("ssh -i /k")),
+        "ssh -i /k -o BatchMode=yes"
+    );
+}
+
+#[test]
+fn git_ssh_command_ignores_an_empty_existing_command() {
+    assert_eq!(git_ssh_command(Some("  ")), "ssh -o BatchMode=yes");
+}
+
+#[test]
+fn run_bounded_children_never_prompt_for_git_credentials() {
+    let out = run_bounded(
+        "sh",
+        &[
+            "-c",
+            "printf '%s|%s' \"$GIT_TERMINAL_PROMPT\" \"$GIT_SSH_COMMAND\"",
+        ],
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let (prompt, ssh) = stdout.split_once('|').unwrap();
+    assert_eq!(prompt, "0");
+    assert!(ssh.ends_with("-o BatchMode=yes"), "got {ssh:?}");
+}

@@ -81,6 +81,11 @@ async fn a_cli_store_whose_database_is_not_the_pinned_one_is_refused_before_conn
     assert!(err.contains(PINNED_DB) && err.contains(OTHER_DB), "{err}");
     assert!(err.contains("--accept-store-switch"), "{err}");
     assert!(!err.contains("Could not connect"), "{err}");
+    // Worded for a command, not for the board.
+    assert!(err.contains("this command wrote nothing"), "{err}");
+    assert!(err.contains("DISPATCH_SPACETIME_SERVER"), "{err}");
+    assert!(!err.contains("board has not started"), "{err}");
+    assert!(!err.contains("dispatch tui` again"), "{err}");
 }
 
 /// The same store, but the command is exempt (`store import`): it goes on to

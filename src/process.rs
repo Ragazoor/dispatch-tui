@@ -189,6 +189,15 @@ pub(crate) fn kill_process_group(pgid: u32, signal: &str) {
         .status();
 }
 
+/// The `GIT_SSH_COMMAND` for a bounded child: the caller's own command (or
+/// plain `ssh`) with `BatchMode=yes`, so ssh never asks for a passphrase.
+fn git_ssh_command(existing: Option<&str>) -> String {
+    match existing.map(str::trim).filter(|c| !c.is_empty()) {
+        Some(command) => format!("{command} -o BatchMode=yes"),
+        None => "ssh -o BatchMode=yes".to_string(),
+    }
+}
+
 /// Give up on `child`: kill it and its process group, reap it so it cannot
 /// linger as an orphan or zombie, and describe the overrun. Output it had
 /// already produced is dropped with it — see [`run_bounded`].
@@ -251,7 +260,9 @@ fn abandon(child: &mut std::process::Child, program: &str, timeout: Duration) ->
 /// https) would otherwise leave them running past the deadline, holding the
 /// output pipes and the drain threads with them. The cost: the child no longer
 /// shares the terminal's foreground group, so Ctrl-C at the terminal does not
-/// reach it; it runs to its own exit or deadline.
+/// reach it; it runs to its own exit or deadline. For the same reason git must
+/// never prompt: the child gets `GIT_TERMINAL_PROMPT=0` and an ssh command with
+/// `BatchMode=yes`, so a remote that wants a credential fails at once.
 pub(crate) fn run_bounded(
     program: &str,
     args: &[&str],
@@ -267,6 +278,13 @@ pub(crate) fn run_bounded(
         .stderr(std::process::Stdio::piped());
     // Its own group, so `abandon` can kill its children with it.
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    // A background-group child that reads `/dev/tty` (ssh passphrase, https
+    // credential prompt) is stopped by SIGTTIN and would sit until the
+    // deadline. Make git fail with its real error instead.
+    command.env("GIT_TERMINAL_PROMPT", "0").env(
+        "GIT_SSH_COMMAND",
+        git_ssh_command(std::env::var("GIT_SSH_COMMAND").ok().as_deref()),
+    );
     // Never the caller's stdin: the board's is the operator's terminal, and a
     // child that reads it (a test reaching an interactive prompt) blocks and
     // takes keystrokes from the board.

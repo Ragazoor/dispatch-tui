@@ -1100,3 +1100,27 @@ fn resolve_editor_honours_quotes() {
 fn resolve_editor_falls_back_on_unbalanced_quotes() {
     assert_eq!(resolve_editor(None, Some(r#""vim"#)), vec![EDITOR_FALLBACK]);
 }
+
+// --- single-line fields drop stray leading and trailing spaces ---
+
+#[test]
+fn task_single_line_fields_are_trimmed() {
+    let input = "--- TITLE ---\n  T  \n--- DESCRIPTION ---\n  keep indent\n--- REPO_PATH ---\n  /r \n--- PLAN ---\n  p.md \n--- BASE_BRANCH ---\n main\n--- URL ---\n  http://x \n";
+    let f = parse_editor_content(input);
+    assert_eq!(f.title, "T");
+    assert_eq!(f.description, "  keep indent");
+    assert_eq!(f.repo_path, "/r");
+    assert_eq!(f.plan, "p.md");
+    assert_eq!(f.base_branch, "main");
+    assert_eq!(f.url, "http://x");
+}
+
+#[test]
+fn epic_single_line_fields_are_trimmed() {
+    let input =
+        "--- TITLE ---\n  E \n--- DESCRIPTION ---\n  keep\n--- FEED_COMMAND ---\n  echo hi \n";
+    let f = parse_epic_editor_output(input);
+    assert_eq!(f.title, "E");
+    assert_eq!(f.description, "  keep");
+    assert_eq!(f.feed_command, "echo hi");
+}
