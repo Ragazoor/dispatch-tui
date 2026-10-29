@@ -754,11 +754,7 @@ async fn rate_learning_not_applicable_leaves_the_score_alone() {
         })),
     )
     .await;
-    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
-    let text = resp.result.as_ref().unwrap()["content"][0]["text"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let text = extract_response_text(&resp);
     assert!(text.contains("not_applicable"), "{text}");
 
     let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();

@@ -60,6 +60,12 @@ def table(name):
     return [dict(zip(cols, row)) for row in res["rows"]]
 
 
+def iso_week(ts):
+    """The ISO week of a store or trajectory timestamp, as "2026-W44"."""
+    y, w, _ = datetime.date.fromisoformat(ts[:10]).isocalendar()
+    return f"{y}-W{w:02d}"
+
+
 def share(counts, n):
     total = sum(counts)
     return round(100 * sum(sorted(counts, reverse=True)[:n]) / total) if total else 0
@@ -130,8 +136,7 @@ def off_scope_metrics(L, R):
             inside = repo_ref_covers(ref, t["repo_path"])
         else:
             inside = ref == str(t["epic_id"])
-        y, w, _ = datetime.date.fromisoformat(r["retrieved_at"][:10]).isocalendar()
-        c = weeks[f"{y}-W{w:02d}"]
+        c = weeks[iso_week(r["retrieved_at"])]
         c[0] += 1
         c[1] += not inside
     print("repo/epic-scoped retrievals outside the task's scope, per week (off/rows):")
@@ -164,8 +169,7 @@ def mistakes_metrics():
     for e in trajectory_events():
         err = error_text(e)
         if e["method"] in LEARNING_TOOLS:
-            y, w, _ = datetime.date.fromisoformat(e["timestamp"][:10]).isocalendar()
-            c = weeks[f"{y}-W{w:02d}"]
+            c = weeks[iso_week(e["timestamp"])]
             c[e["method"]] += 1
             c[e["method"] + " bad"] += bool(err and err.startswith("Invalid arguments"))
         if err and e["timestamp"][:10] >= recent:
@@ -204,8 +208,7 @@ def user_scope_metrics():
             continue
         if r["task_id"] not in tasks:
             continue
-        y, w, _ = datetime.date.fromisoformat(r["retrieved_at"][:10]).isocalendar()
-        c = weeks[f"{y}-W{w:02d}"]
+        c = weeks[iso_week(r["retrieved_at"])]
         c[0] += 1
         rated = r["task_id"] in raters
         c[2] += rated
@@ -240,14 +243,14 @@ def verdict_coverage_metrics():
     pairs = {}
     for r in R:
         if r["source"] == "prompt_injection" and r["retrieved_at"] >= NOT_APPLICABLE_FROM:
-            pairs.setdefault((r["task_id"], r["learning_id"]), r["retrieved_at"])
-    kinds = ("helped", "wrong", "not_applicable", "unrated")
+            pairs.setdefault((r["task_id"], r["learning_id"]), iso_week(r["retrieved_at"]))
+    # Columns from the verdicts present, so a new verdict cannot drop out of the total.
+    kinds = sorted({"helped", "wrong", "not_applicable"} | set(standing.values())) + ["unrated"]
     weeks = collections.defaultdict(collections.Counter)
     na = collections.Counter()
-    for key, at in pairs.items():
-        y, w, _ = datetime.date.fromisoformat(at[:10]).isocalendar()
+    for key, wk in pairs.items():
         v = standing.get(key, "unrated")
-        weeks[f"{y}-W{w:02d}"][v] += 1
+        weeks[wk][v] += 1
         if v == "not_applicable":
             na[key[1]] += 1
     print(f"injected (task, learning) pairs by standing verdict, since {NOT_APPLICABLE_FROM}:")
