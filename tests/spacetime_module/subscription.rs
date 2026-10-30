@@ -157,13 +157,17 @@ fn a_row_written_elsewhere_arrives_through_the_subscription() {
         );
         assert!(seeded.status.success(), "{}", describe(&seeded));
 
-        // No sleep and no poll: the wake-up is the assertion. If the row never
-        // arrives this hangs and the harness kills it, which is louder than a
-        // slept-through comparison.
-        woken
-            .changed()
-            .await
-            .expect("the subscription must deliver");
+        // No sleep and no poll: wake-ups drive the loop. A wake-up can come from
+        // a change that is not our row (such as a late subscription apply), so
+        // re-check the rows after each one. If the row never arrives this
+        // hangs and the harness kills it, which is louder than a slept-through
+        // comparison.
+        while rows.epics().is_empty() {
+            woken
+                .changed()
+                .await
+                .expect("the subscription must deliver");
+        }
 
         let epics = rows.epics();
         assert_eq!(epics.len(), 1);
