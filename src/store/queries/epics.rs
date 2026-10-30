@@ -114,6 +114,13 @@ impl super::super::EpicCrud for Store {
             .applied()
     }
 
+    async fn move_epic_to_workspace(&self, id: EpicId, workspace_id: i64) -> Result<()> {
+        self.caller
+            .move_epic_to_workspace(id, workspace_id)
+            .await?
+            .applied()
+    }
+
     async fn delete_epic(&self, id: EpicId) -> Result<()> {
         self.caller.delete_epic(id).await?.applied()
     }

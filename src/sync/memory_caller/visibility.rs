@@ -325,7 +325,10 @@ impl Tables {
             return Err(format!("epic {new_parent} does not exist"));
         };
         if destination.workspace_id != epic.workspace_id {
-            return Err("an epic never moves to another workspace".into());
+            return Err(
+                "an epic changes workspace only through move_epic_to_workspace, as a root epic"
+                    .into(),
+            );
         }
         Ok(())
     }
@@ -427,6 +430,127 @@ impl MemoryReducerCaller {
         epic.visibility = visibility;
         epic.updated_at = self.now();
         self.write_epic(&mut tables, epic);
+        Ok(ReducerOutcome::Applied(vec![]))
+    }
+
+    /// Mirrors the module's `move_epic_to_workspace`.
+    pub(super) fn apply_move_epic_to_workspace(
+        &self,
+        id: EpicId,
+        workspace_id: i64,
+    ) -> Result<ReducerOutcome> {
+        let scope = self.scope();
+        let mut tables = self.lock();
+        let who = self.sender.clone();
+        let missing = || format!("epic {} does not exist", id.0);
+        let Some(epic) = tables.epics.get(&id.0).cloned() else {
+            return refused(missing());
+        };
+        let privileged = !scope.on() || tables.is_super_admin(&who);
+        let holder_ok = match tables.private_holder(&epic) {
+            None => true,
+            Some(holder) => !scope.on() || (!holder.is_empty() && holder == who),
+        };
+        if !holder_ok || (!privileged && !tables.epic_visible(&scope, &epic)) {
+            return refused(missing());
+        }
+        if epic.parent_epic_id != 0 {
+            let mut root = epic.clone();
+            for _ in 0..WALK_LIMIT {
+                match tables.epics.get(&root.parent_epic_id) {
+                    Some(parent) if root.parent_epic_id != 0 => root = parent.clone(),
+                    _ => break,
+                }
+            }
+            return refused(format!(
+                "epic {} is a sub-epic; move its root epic {} instead",
+                id.0, root.id
+            ));
+        }
+        if !tables.workspaces.contains_key(&workspace_id) {
+            return refused(format!("workspace {workspace_id} does not exist"));
+        }
+        if workspace_id == epic.workspace_id {
+            return refused(format!(
+                "epic {} is already in workspace {workspace_id}",
+                id.0
+            ));
+        }
+        let admin_of_both = tables.workspaces.contains_key(&epic.workspace_id)
+            && tables.is_workspace_admin(epic.workspace_id, &who)
+            && tables.is_workspace_admin(workspace_id, &who);
+        if !privileged && !admin_of_both {
+            return refused("only a super-admin, or an admin of both workspaces, may move an epic");
+        }
+
+        let tree = Self::collect_epic_subtree_ids(&tables, id.0);
+        let task_ids: std::collections::HashSet<i64> = tables
+            .tasks
+            .values()
+            .filter(|t| tree.contains(&t.epic_id))
+            .map(|t| t.id)
+            .collect();
+        let stamp = self.now();
+        for node_id in &tree {
+            if let Some(mut node) = tables.epics.get(node_id).cloned() {
+                node.workspace_id = workspace_id;
+                node.updated_at = stamp.clone();
+                self.write_epic(&mut tables, node);
+            }
+        }
+        self.update_matching_learnings(
+            &mut tables,
+            |l| {
+                let item = l.scope_ref.as_deref().and_then(|r| r.parse::<i64>().ok());
+                match (l.scope.as_str(), item) {
+                    ("epic", Some(i)) => tree.contains(&i),
+                    ("task", Some(i)) => task_ids.contains(&i),
+                    _ => false,
+                }
+            },
+            |row| module::Learning {
+                workspace_id,
+                ..row
+            },
+        );
+        for node_id in &tree {
+            self.delete_work_package_links_to(
+                &mut tables,
+                module::WORK_PACKAGE_ITEM_EPIC,
+                *node_id,
+            );
+        }
+        for task_id in &task_ids {
+            self.delete_work_package_links_to(
+                &mut tables,
+                module::WORK_PACKAGE_ITEM_TASK,
+                *task_id,
+            );
+        }
+        let stale: Vec<String> = tables
+            .subscriptions
+            .values()
+            .filter(|s| {
+                tree.contains(&s.epic_id) && !tables.has_member(workspace_id, &s.subscriber)
+            })
+            .map(|s| s.id.clone())
+            .collect();
+        for sub in stale {
+            tables.subscriptions.remove(&sub);
+            self.rows.remove_subscription(sub);
+        }
+        let marks: Vec<String> = tables
+            .unseen_tasks
+            .values()
+            .filter(|u| {
+                task_ids.contains(&u.task_id) && !tables.has_member(workspace_id, &u.subscriber)
+            })
+            .map(|u| u.id.clone())
+            .collect();
+        for mark in marks {
+            tables.unseen_tasks.remove(&mark);
+            self.rows.remove_unseen_task(mark);
+        }
         Ok(ReducerOutcome::Applied(vec![]))
     }
 

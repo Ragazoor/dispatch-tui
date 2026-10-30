@@ -298,6 +298,14 @@ impl ReducerCaller for RecordingCaller {
         self.answer(Sent::Workspace("set_epic_visibility"))
     }
 
+    async fn move_epic_to_workspace(
+        &self,
+        _id: crate::models::EpicId,
+        _workspace_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Workspace("move_epic_to_workspace"))
+    }
+
     async fn set_work_package_visibility(
         &self,
         _id: crate::models::WorkPackageId,

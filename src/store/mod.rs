@@ -599,6 +599,8 @@ pub trait EpicCrud: EpicRead {
         id: EpicId,
         visibility: crate::models::Visibility,
     ) -> Result<()>;
+    /// `workspaces.allium: MoveEpicToWorkspace`.
+    async fn move_epic_to_workspace(&self, id: EpicId, workspace_id: i64) -> Result<()>;
     async fn delete_epic(&self, id: EpicId) -> Result<()>;
     async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()>;
     /// `epics.allium: RegroupEpic`, decided and applied by the store in one

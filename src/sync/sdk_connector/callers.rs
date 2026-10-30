@@ -28,13 +28,13 @@ use crate::spacetime::bindings::{
     delete_work_package as _, delete_workspace as _, ensure_managed_epics as _,
     fail_interrupted_dispatch_requests as _, fail_interrupted_session_requests as _,
     flatten_epic as _, grant_super_admin as _, ingest_feed as _, link_work_package_item as _,
-    mark_epic_seen as _, mark_pr_learnings_gate_shown as _, override_poll_owner as _,
-    patch_epic as _, patch_learning as _, patch_task as _, patch_work_package as _,
-    record_base_branch as _, record_learning_retrieval as _, record_notification as _,
-    record_pre_tool_use as _, record_usage_event as _, record_user_prompt_submit as _,
-    register_host as _, regroup_epic as _, remove_member as _, rename_workspace as _,
-    report_dispatch_failed as _, report_dispatch_provisioned as _, report_pr_status as _,
-    report_pr_unreadable as _, report_session_request_done as _,
+    mark_epic_seen as _, mark_pr_learnings_gate_shown as _, move_epic_to_workspace as _,
+    override_poll_owner as _, patch_epic as _, patch_learning as _, patch_task as _,
+    patch_work_package as _, record_base_branch as _, record_learning_retrieval as _,
+    record_notification as _, record_pre_tool_use as _, record_usage_event as _,
+    record_user_prompt_submit as _, register_host as _, regroup_epic as _, remove_member as _,
+    rename_workspace as _, report_dispatch_failed as _, report_dispatch_provisioned as _,
+    report_pr_status as _, report_pr_unreadable as _, report_session_request_done as _,
     report_session_request_failed as _, request_dispatch as _, request_exit_session as _,
     request_wrap_up as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
     revoke_super_admin as _, save_repo_path as _, save_setting as _, set_display_name as _,
@@ -240,6 +240,18 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "the epic visibility change",
             set_epic_visibility_then(id.0, visibility)
+        )
+    }
+
+    async fn move_epic_to_workspace(
+        &self,
+        id: EpicId,
+        workspace_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the epic move",
+            move_epic_to_workspace_then(id.0, workspace_id)
         )
     }
 

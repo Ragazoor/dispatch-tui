@@ -75,6 +75,8 @@ pub(super) struct UpdateEpicArgs {
     pub(super) parent_epic_id: Option<Option<EpicId>>,
     #[serde(default)]
     pub(super) visibility: Option<Visibility>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) workspace_id: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +343,7 @@ pub(super) async fn handle_update_epic(
         feed_append_only: parsed.feed_append_only,
         parent_epic_id: parsed.parent_epic_id,
         visibility: parsed.visibility,
+        workspace_id: parsed.workspace_id,
     };
     let field_names: Vec<String> = params
         .updated_field_names()

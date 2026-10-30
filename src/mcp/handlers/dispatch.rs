@@ -355,7 +355,10 @@ epic_id for those.",
     async idempotent "update_epic" => epics::handle_update_epic,
         "Update an epic in place. Accepts title, description, status, plan_path, sort_order, \
 parent_epic_id, and the feed settings feed_command, feed_interval_secs, group_by_repo and \
-feed_append_only, and visibility (public or private; a workspace never changes). Every field left out is untouched; the nullable ones take an explicit null to \
+feed_append_only, and visibility (public or private), and workspace_id, which moves a root epic and its whole tree \
+(sub-epics, tasks, their learnings) to that workspace: allowed to a super-admin or an admin of both \
+the source and the destination workspace, refused for a sub-epic, and it drops work package links \
+into the tree and follows by people outside the destination. Every field left out is untouched; the nullable ones take an explicit null to \
 clear. Setting status by hand is rarely right — an epic's status is recalculated from its \
 subtasks whenever they change. Re-parenting is cycle-checked and rejected if it would create a \
 loop.",
@@ -373,7 +376,8 @@ loop.",
                 "group_by_repo": { "type": "boolean", "description": "When true, group feed tasks by repository path in the TUI. Pass false to disable grouping." },
                 "feed_append_only": { "type": "boolean", "description": "When true, this epic's feed only ever adds tasks: one whose item is missing from a later emission is kept, not removed. For a feed whose source emits events that are never retracted (a log scan), where absence means nothing. Close such a task from the TUI once it is done: deleting it retires its external id under this epic forever, so an append-only feed never recreates it. Pass false to restore the default, where the feed mirrors its source and removes what the emission omits." },
                 "parent_epic_id": { "type": ["integer", "null"], "description": "Re-parent this epic under another epic by ID. Pass null to make it a root epic. Cycle detection prevents hierarchical loops." },
-                "visibility": { "type": "string", "enum": ["public", "private"], "description": "public: every member of the workspace sees it. private: only its creator does. Changeable by the creator or a workspace admin." }
+                "visibility": { "type": "string", "enum": ["public", "private"], "description": "public: every member of the workspace sees it. private: only its creator does. Changeable by the creator or a workspace admin." },
+                "workspace_id": { "type": "integer", "description": "Move this root epic and its tree to the workspace with this id (see list_workspaces). Super-admin, or admin of both workspaces." }
             },
             "required": ["epic_id"]
         };

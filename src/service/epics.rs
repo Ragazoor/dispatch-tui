@@ -48,8 +48,12 @@ pub struct UpdateEpicParams {
     pub feed_append_only: Option<bool>,
     /// Triple-state: None = no change, Some(Some(id)) = reparent, Some(None) = make root.
     pub parent_epic_id: Option<Option<EpicId>>,
-    /// `workspaces.allium: SetEpicVisibility`. A workspace never changes.
+    /// `workspaces.allium: SetEpicVisibility`.
     pub visibility: Option<crate::models::Visibility>,
+    /// `workspaces.allium: MoveEpicToWorkspace`: move this root epic and its
+    /// tree to the workspace with this id. Applied after the patch, so a
+    /// re-parent to root in the same call lands first.
+    pub workspace_id: Option<i64>,
 }
 
 impl UpdateEpicParams {
@@ -70,6 +74,7 @@ impl UpdateEpicParams {
             feed_append_only: None,
             parent_epic_id: None,
             visibility: None,
+            workspace_id: None,
         }
     }
 
@@ -96,6 +101,7 @@ impl UpdateEpicParams {
             feed_append_only,
             parent_epic_id,
             visibility,
+            workspace_id,
         } = self;
 
         [
@@ -112,6 +118,7 @@ impl UpdateEpicParams {
             ("feed_append_only", feed_append_only.is_some()),
             ("parent_epic_id", parent_epic_id.is_some()),
             ("visibility", visibility.is_some()),
+            ("workspace_id", workspace_id.is_some()),
         ]
         .into_iter()
         .filter_map(|(name, is_set)| is_set.then_some(name))
@@ -408,6 +415,11 @@ impl EpicService {
         // `patch_epic` recalculates the epic and its ancestors, and the parent
         // it left, in the same transaction (store-split.allium X3).
         self.db.patch_epic(epic_id, &patch).await?;
+        if let Some(workspace_id) = params.workspace_id {
+            self.db
+                .move_epic_to_workspace(epic_id, workspace_id)
+                .await?;
+        }
         if let Some(visibility) = params.visibility {
             self.db.set_epic_visibility(epic_id, visibility).await?;
         }

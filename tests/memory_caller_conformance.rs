@@ -519,6 +519,8 @@ mod dispatch_requests;
 mod feeds;
 #[path = "memory_caller_conformance/learning_placement.rs"]
 mod learning_placement;
+#[path = "memory_caller_conformance/move_epic.rs"]
+mod move_epic;
 #[path = "memory_caller_conformance/pr_state.rs"]
 mod pr_state;
 #[path = "memory_caller_conformance/scenario.rs"]

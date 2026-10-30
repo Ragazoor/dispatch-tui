@@ -143,6 +143,9 @@ pub trait ReducerCaller: Send + Sync {
     /// `workspaces.allium: SetEpicVisibility`; `visibility` is `"public"` or
     /// `"private"`.
     async fn set_epic_visibility(&self, id: EpicId, visibility: String) -> Result<ReducerOutcome>;
+    /// `workspaces.allium: MoveEpicToWorkspace`.
+    async fn move_epic_to_workspace(&self, id: EpicId, workspace_id: i64)
+        -> Result<ReducerOutcome>;
     /// `workspaces.allium: SetWorkPackageVisibility`.
     async fn set_work_package_visibility(
         &self,

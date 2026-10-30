@@ -337,6 +337,31 @@ async fn list_epics_shows_subtask_counts() {
 }
 
 #[tokio::test]
+async fn update_epic_workspace_id_reaches_the_move_and_the_store_refuses_an_unknown_workspace() {
+    let state = test_state().await;
+    let epic = state
+        .db_write()
+        .create_epic("Movable", "", None)
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "workspace_id": 4242 }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("workspace 4242 does not exist"),
+        "the store's refusal reaches the caller: {text}"
+    );
+}
+
+#[tokio::test]
 async fn update_epic_title() {
     let state = test_state().await;
     let epic = state

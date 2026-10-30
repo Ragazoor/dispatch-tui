@@ -398,6 +398,16 @@ impl ReducerCaller for MemoryReducerCaller {
         outcome
     }
 
+    async fn move_epic_to_workspace(
+        &self,
+        id: EpicId,
+        workspace_id: i64,
+    ) -> Result<ReducerOutcome> {
+        let outcome = self.apply_move_epic_to_workspace(id, workspace_id);
+        self.refresh_unseen_items(&self.lock());
+        outcome
+    }
+
     async fn set_work_package_visibility(
         &self,
         id: WorkPackageId,

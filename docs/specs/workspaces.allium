@@ -48,7 +48,8 @@
 --   D4. Every member of a workspace sees every public epic and work
 --       package in it, and who created it, by display name.
 --   D5. A sub-epic lives in its parent's workspace. A private epic hides its
---       whole subtree. An epic never moves to another workspace.
+--       whole subtree. A root epic moves to another workspace only through
+--       MoveEpicToWorkspace (D13), and its whole tree moves with it.
 --   D6. A work package links only to items in its own workspace, except a
 --       main-board task, which may be linked but stays private to its owner.
 --       Seeing a package never reveals a linked item the viewer cannot see.
@@ -464,6 +465,11 @@ rule CreateEpicInWorkspace {
         epic.visibility = visibility
 
     @guidance
+        -- A root epic whose workspace does not exist is refused, so no path
+        -- creates one in workspace 0. Epic 69669 (task #98727) was made on
+        -- 2026-10-30 by a build older than the commit that added that check
+        -- and kept workspace 0, the column default; MoveEpicToWorkspace is the
+        -- rescue for rows like it.
         -- Every epic-creating path (board, create_epic MCP tool, feed
         -- grouping) names a workspace for a root epic. For a sub-epic the
         -- workspace argument is ignored and the parent's is used (D5). A
@@ -500,8 +506,52 @@ rule EpicStaysInItsWorkspace {
     ensures: EpicMoveAllowed(epic)
 
     @guidance
-        -- Re-parenting inside one workspace is unchanged; across workspaces
-        -- it is refused (D5).
+        -- Re-parenting inside one workspace is unchanged; re-parenting across
+        -- workspaces is refused. Changing workspace is MoveEpicToWorkspace,
+        -- never a side effect of re-parenting.
+}
+
+rule MoveEpicToWorkspace {
+    when: MoveEpicToWorkspace(epic, destination)
+
+    let source = epic.workspace    -- may name a workspace that does not exist
+
+    requires: epic.parent = null
+    requires: exists destination
+    requires: destination != source
+    requires: epic.private_holder = null or epic.private_holder = caller()
+    requires:
+        is_super_admin(caller())
+        or (exists source and source.is_admin(caller())
+            and destination.is_admin(caller()))
+
+    ensures:
+        for node in epic.subtree:
+            node.workspace = destination
+        for learning in Learnings
+                where learning.scope in {epic, task}
+                  and learning.item_in(epic.subtree):
+            learning.workspace = destination
+        for link in WorkPackageLinks
+                where link.item in epic.subtree or link.item in epic.subtree.tasks:
+            not exists link
+        for follow in Subscriptions where follow.epic in epic.subtree:
+            if not destination.has_member(follow.subscriber):
+                not exists follow
+
+    @guidance
+        -- A refusal for a missing, unseen or private-to-someone-else epic
+        -- reads "epic N does not exist": it never says which. A super-admin
+        -- needs no membership in the source, and the epic need not be
+        -- visible to them: workspace 0 has no members, so nobody could see
+        -- it, and the move is the rescue. Admin of both is checked against
+        -- real memberships, so a source that does not exist fails it and
+        -- falls to the super-admin branch with no special case for 0.
+        -- A refusal for a sub-epic names its root so the caller can retry.
+        -- The same workspace is refused rather than treated as a no-op,
+        -- so a caller never thinks it moved something.
+        -- Unseen marks of people who lose sight of the epic are dropped
+        -- with their follows, as RemoveMember does for a whole workspace.
 }
 
 -- Tasks -----------------------------------------------------
@@ -566,6 +616,7 @@ rule NameWorkspaceAndVisibilityViaMcp {
     when: McpCreateEpic(title, workspace_id?, visibility?, parent_epic_id?)
        or McpCreateWorkPackage(title, workspace_id, visibility?)
        or McpUpdateEpic(epic, visibility)
+       or McpUpdateEpic(epic, workspace_id)
        or McpUpdateWorkPackage(package, visibility)
 
     ensures:
@@ -573,6 +624,7 @@ rule NameWorkspaceAndVisibilityViaMcp {
         WorkPackageCreated(package, workspace_id, visibility ?? public)
         SetEpicVisibility(epic, visibility)
         SetWorkPackageVisibility(package, visibility)
+        MoveEpicToWorkspace(epic, workspace_id)
 
     @guidance
         -- create_epic: workspace_id is required for a root epic and left
@@ -584,8 +636,9 @@ rule NameWorkspaceAndVisibilityViaMcp {
         -- person's workspaces and their ids named in the tool description and
         -- in the refusal for a missing or unknown one).
         -- visibility is "public" or "private", default public. update_epic
-        -- and update_work_package take visibility only: a workspace never
-        -- changes (EpicStaysInItsWorkspace). Every refusal is the store's.
+        -- takes visibility and workspace_id (a move, MoveEpicToWorkspace);
+        -- update_work_package takes visibility only. Every refusal is the
+        -- store's.
         -- Results name the workspace and the visibility; list_epics and
         -- list_work_packages show both. list_work_packages also shows the
         -- creator by display name (CreatorIsShownByName); an epic row does
@@ -618,7 +671,8 @@ rule NameWorkspaceAndVisibilityFromBoard {
         -- none is refused there, not at the end.
         -- Editing an epic (`e`, the pop-out document) shows a VISIBILITY
         -- section, changeable, and a WORKSPACE section that is read-only and
-        -- ignored on save. A package's visibility switches with `V` on its
+        -- ignored on save (moving an epic is MCP-only for now, see the open
+        -- question below). A package's visibility switches with `V` on its
         -- card, which shows "private" when it is. Who may change either is
         -- the store's call (SetEpicVisibility / SetWorkPackageVisibility);
         -- its refusal shows in the error popup.
@@ -784,6 +838,8 @@ rule MigrateStoreToWorkspaces {
 ------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------
+
+open question "Should the TUI epic editor's WORKSPACE section become editable, listing the workspaces the person administers, so a move is also a board action? MoveEpicToWorkspace ships over MCP only (task #98727); the board path waits for a decision."
 
 invariant SubEpicSharesItsParentsWorkspace {
     for epic in Epics:

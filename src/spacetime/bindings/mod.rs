@@ -70,6 +70,7 @@ pub mod mark_epic_seen_reducer;
 pub mod mark_pr_learnings_gate_shown_reducer;
 pub mod membership_type;
 pub mod memberships_table;
+pub mod move_epic_to_workspace_reducer;
 pub mod override_poll_owner_reducer;
 pub mod own_epics_table;
 pub mod own_packages_table;
@@ -276,6 +277,7 @@ pub use mark_epic_seen_reducer::mark_epic_seen;
 pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
 pub use membership_type::Membership;
 pub use memberships_table::*;
+pub use move_epic_to_workspace_reducer::move_epic_to_workspace;
 pub use override_poll_owner_reducer::override_poll_owner;
 pub use own_epics_table::*;
 pub use own_packages_table::*;
@@ -548,6 +550,10 @@ pub enum Reducer {
     MarkPrLearningsGateShown {
         id: i64,
         at: String,
+    },
+    MoveEpicToWorkspace {
+        epic_id: i64,
+        workspace_id: i64,
     },
     OverridePollOwner {
         scope: String,
@@ -882,6 +888,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::LinkWorkPackageItem { .. } => "link_work_package_item",
             Reducer::MarkEpicSeen { .. } => "mark_epic_seen",
             Reducer::MarkPrLearningsGateShown { .. } => "mark_pr_learnings_gate_shown",
+            Reducer::MoveEpicToWorkspace { .. } => "move_epic_to_workspace",
             Reducer::OverridePollOwner { .. } => "override_poll_owner",
             Reducer::PatchEpic { .. } => "patch_epic",
             Reducer::PatchLearning { .. } => "patch_learning",
@@ -1175,6 +1182,13 @@ Reducer::ClearSetting{
 }             => __sats::bsatn::to_vec(&mark_pr_learnings_gate_shown_reducer::MarkPrLearningsGateShownArgs {
                 id: id.clone(),
                 at: at.clone(),
+}),
+            Reducer::MoveEpicToWorkspace{
+                epic_id,
+                workspace_id,
+}             => __sats::bsatn::to_vec(&move_epic_to_workspace_reducer::MoveEpicToWorkspaceArgs {
+                epic_id: epic_id.clone(),
+                workspace_id: workspace_id.clone(),
 }),
             Reducer::OverridePollOwner{
                 scope,

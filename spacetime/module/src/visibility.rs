@@ -195,7 +195,9 @@ pub fn check_epic_move(ctx: &ReducerContext, epic: &Epic, new_parent: i64) -> Re
         return Err(format!("epic {new_parent} does not exist"));
     };
     if destination.workspace_id != epic.workspace_id {
-        return Err("an epic never moves to another workspace".into());
+        return Err(
+            "an epic changes workspace only through move_epic_to_workspace, as a root epic".into(),
+        );
     }
     Ok(())
 }
@@ -270,6 +272,118 @@ pub fn set_epic_visibility(
     epic.visibility = visibility;
     epic.updated_at = now(ctx);
     ctx.db.epics().id().update(epic);
+    Ok(())
+}
+
+/// `workspaces.allium: MoveEpicToWorkspace` (D13): move a root epic and its
+/// whole tree to another workspace.
+///
+/// Sight is not required of a super-admin, so one can rescue an epic stranded
+/// in a workspace that does not exist (nobody is a member of it, so nobody
+/// sees it). A private epic is the exception: it moves only at its creator's
+/// hand, and anyone else is answered as for a missing epic.
+#[spacetimedb::reducer]
+pub fn move_epic_to_workspace(
+    ctx: &ReducerContext,
+    epic_id: i64,
+    workspace_id: i64,
+) -> Result<(), String> {
+    let caller = caller_identity(ctx);
+    let missing = || format!("epic {epic_id} does not exist");
+    let Some(epic) = ctx.db.epics().id().find(epic_id) else {
+        return Err(missing());
+    };
+    let privileged = is_operator(ctx) || is_super_admin(ctx, &caller);
+    let holder_ok = match private_holder(ctx, &epic) {
+        None => true,
+        Some(holder) => is_operator(ctx) || (!holder.is_empty() && holder == caller),
+    };
+    if !holder_ok || (!privileged && !epic_visible_to(ctx, &epic, &caller)) {
+        return Err(missing());
+    }
+    if epic.parent_epic_id != 0 {
+        let mut root = epic.clone();
+        for _ in 0..PRIVATE_WALK_LIMIT {
+            match ctx.db.epics().id().find(root.parent_epic_id) {
+                Some(parent) if root.parent_epic_id != 0 => root = parent,
+                _ => break,
+            }
+        }
+        return Err(format!(
+            "epic {epic_id} is a sub-epic; move its root epic {} instead",
+            root.id
+        ));
+    }
+    if ctx.db.workspaces().id().find(workspace_id).is_none() {
+        return Err(format!("workspace {workspace_id} does not exist"));
+    }
+    if workspace_id == epic.workspace_id {
+        return Err(format!("epic {epic_id} is already in workspace {workspace_id}"));
+    }
+    let admin_of_both = ctx.db.workspaces().id().find(epic.workspace_id).is_some()
+        && workspace_has_admin(ctx, epic.workspace_id, &caller)
+        && workspace_has_admin(ctx, workspace_id, &caller);
+    if !privileged && !admin_of_both {
+        return Err(
+            "only a super-admin, or an admin of both workspaces, may move an epic".into(),
+        );
+    }
+
+    let tree = crate::tasks_epics::collect_epic_subtree_ids(ctx, epic_id);
+    let mut task_ids = std::collections::HashSet::new();
+    for id in &tree {
+        for task in ctx.db.tasks().epic_id().filter(id) {
+            task_ids.insert(task.id);
+        }
+    }
+    let stamp = now(ctx);
+    for id in &tree {
+        if let Some(node) = ctx.db.epics().id().find(*id) {
+            ctx.db.epics().id().update(Epic {
+                workspace_id,
+                updated_at: stamp.clone(),
+                ..node
+            });
+        }
+    }
+    let in_tree = |l: &Learning| {
+        let id = l.scope_ref.as_deref().and_then(|r| r.parse::<i64>().ok());
+        match (l.scope.as_str(), id) {
+            ("epic", Some(id)) => tree.contains(&id),
+            ("task", Some(id)) => task_ids.contains(&id),
+            _ => false,
+        }
+    };
+    crate::learning::update_matching_learnings(ctx, in_tree, |row| Learning {
+        workspace_id,
+        ..row
+    });
+    for id in &tree {
+        crate::packages::delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_EPIC, *id);
+    }
+    for id in &task_ids {
+        crate::packages::delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, *id);
+    }
+    let stale: Vec<String> = ctx
+        .db
+        .subscriptions()
+        .iter()
+        .filter(|s| tree.contains(&s.epic_id) && !workspace_has_member(ctx, workspace_id, &s.subscriber))
+        .map(|s| s.id)
+        .collect();
+    for id in stale {
+        ctx.db.subscriptions().id().delete(&id);
+    }
+    let marks: Vec<String> = ctx
+        .db
+        .unseen_tasks()
+        .iter()
+        .filter(|u| task_ids.contains(&u.task_id) && !workspace_has_member(ctx, workspace_id, &u.subscriber))
+        .map(|u| u.id)
+        .collect();
+    for id in marks {
+        ctx.db.unseen_tasks().id().delete(&id);
+    }
     Ok(())
 }
 

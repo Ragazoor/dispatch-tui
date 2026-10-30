@@ -58,6 +58,8 @@ use super::*;
 /// 12: repo paths carry the host that saved them — `save_repo_path` takes the
 ///    saving host and stamps it on both arms, so `prune-repo-paths` can leave
 ///    other hosts' rows alone. A reducer argument an old board does not send.
+/// 23: `move_epic_to_workspace` — a root epic and its tree change workspace
+///    (`workspaces.allium: MoveEpicToWorkspace`, `visibility.rs`).
 /// 22: the per-caller views (`own_epics`, `covered_epics`, `visible_epics` and
 ///    the rest, `views.rs`) and btree indexes on the columns they read. A board
 ///    that subscribes through them needs a module that has them. The tables
@@ -108,7 +110,7 @@ use super::*;
 /// paths that skipped them and moved nothing out of the board.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 22;
+pub const RULES_VERSION: i64 = 23;
 
 /// The rules version that added workspaces: a store stamped with anything
 /// older is migrated once on its first connection (`workspace.rs:
