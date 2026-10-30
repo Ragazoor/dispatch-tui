@@ -520,6 +520,7 @@ rule MoveEpicToWorkspace {
     requires: exists destination
     requires: destination != source
     requires: epic.private_holder = null or epic.private_holder = caller()
+    requires: epic.subtree.all(n => n.private_holder = null or n.private_holder = caller())
     requires:
         is_super_admin(caller())
         or (exists source and source.is_admin(caller())

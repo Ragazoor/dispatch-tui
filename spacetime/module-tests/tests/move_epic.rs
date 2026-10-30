@@ -263,3 +263,14 @@ fn follows_of_people_who_are_not_in_the_destination_are_dropped() {
         .collect();
     assert_eq!(who, vec![identity_of("alice")]);
 }
+
+#[test]
+fn a_private_sub_epic_of_someone_else_blocks_the_move_of_its_root() {
+    let (store, a, b) = world();
+    let root = make_epic(&store, "alice", a, 0, "public");
+    let secret = make_epic(&store, "carol", a, root, "private");
+    assert!(mv(&store, "alice", root, b).is_err(), "admin of both");
+    assert!(mv(&store, "root", root, b).is_err(), "super-admin");
+    assert_eq!(store.epic(root).workspace_id, a);
+    assert_eq!(store.epic(secret).workspace_id, a);
+}

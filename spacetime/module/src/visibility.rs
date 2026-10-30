@@ -330,6 +330,16 @@ pub fn move_epic_to_workspace(
     }
 
     let tree = crate::tasks_epics::collect_epic_subtree_ids(ctx, epic_id);
+    // A private sub-epic is its creator's: the move must not carry it off,
+    // and the refusal names nothing about it.
+    let someone_elses = tree.iter().any(|id| {
+        ctx.db.epics().id().find(*id).is_some_and(|node| {
+            private_holder(ctx, &node).is_some_and(|h| h.is_empty() || h != caller)
+        })
+    });
+    if someone_elses && !is_operator(ctx) {
+        return Err(missing());
+    }
     let mut task_ids = std::collections::HashSet::new();
     for id in &tree {
         for task in ctx.db.tasks().epic_id().filter(id) {

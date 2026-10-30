@@ -484,6 +484,16 @@ impl MemoryReducerCaller {
         }
 
         let tree = Self::collect_epic_subtree_ids(&tables, id.0);
+        let someone_elses = tree.iter().any(|node_id| {
+            tables.epics.get(node_id).is_some_and(|node| {
+                tables
+                    .private_holder(node)
+                    .is_some_and(|h| h.is_empty() || h != who)
+            })
+        });
+        if someone_elses && scope.on() {
+            return refused(missing());
+        }
         let task_ids: std::collections::HashSet<i64> = tables
             .tasks
             .values()
