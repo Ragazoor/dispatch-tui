@@ -350,6 +350,48 @@ impl SharedRows {
         });
     }
 
+    /// A task row left a per-caller view: remove it, unless the row held now is
+    /// no longer the one that left.
+    ///
+    /// A view's rows have no primary key in the bindings, so an update arrives
+    /// as INSERT(new) then DELETE(old) with the same id, and the SDK's callback
+    /// order for the pair is not ours to rely on. [`Self::remove_task`] on the
+    /// delete would erase the row the insert just stored. This removes only
+    /// when the stored row equals the one that left.
+    ///
+    /// Known edge: two rows that differ only in a column the decoder ignores
+    /// decode equal, so the delete after the insert would erase the update.
+    /// `AViewUpdateNeverErasesTheRow` in `sync.allium`.
+    pub fn retire_task(&self, old: &bindings::Task) {
+        let Ok(old) = decode::task(old) else {
+            // Never stored decoded, so there is nothing of it to remove.
+            return;
+        };
+        self.write(|rows| {
+            if rows.tasks.get(&old.id.0) == Some(&old) {
+                rows.tasks.remove(&old.id.0);
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    /// An epic row left a per-caller view. As [`Self::retire_task`].
+    pub fn retire_epic(&self, old: &bindings::Epic) {
+        let Ok(old) = decode::epic(old) else {
+            return;
+        };
+        self.write(|rows| {
+            if rows.epics.get(&old.id.0) == Some(&old) {
+                rows.epics.remove(&old.id.0);
+                true
+            } else {
+                false
+            }
+        });
+    }
+
     pub fn upsert_epic(&self, row: &bindings::Epic) {
         if crate::models::is_removed_status(&row.status) {
             tracing::debug!(id = row.id, "skipping an epic with a removed status");

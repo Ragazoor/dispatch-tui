@@ -791,6 +791,31 @@ rule ASubEpicOfAFollowedEpicIsAskedForToo {
         -- the same. A move OUT of the tree is the "only widens" case above.
 }
 
+-- A row served through a per-caller view has no primary key in the generated
+-- bindings (workspaces.allium, READ ENFORCEMENT). The store's update of such a
+-- row reaches the board as an insert of the new row and a delete of the old
+-- one, with the same id, in either order.
+rule AViewUpdateNeverErasesTheRow {
+    when: ViewRowUpdated(connection, row_old, row_new)
+
+    requires: row_old.id = row_new.id
+
+    ensures: connection.held(row_new.id) = row_new
+
+    @guidance
+        -- THE DELETE ONLY REMOVES THE ROW IT NAMES. The board removes an id
+        -- on a retraction only while the row it holds equals the retracted
+        -- one (SharedRows::retire_task, retire_epic). A retraction of a row
+        -- the board no longer holds is the tail of an update and changes
+        -- nothing. Known edge: rows that differ only in a column the decoder
+        -- ignores compare equal, so that update's delete would erase it.
+        --
+        -- EVERY TABLE THAT MOVES BEHIND A VIEW takes this path, not just
+        -- tasks and epics. This rule is built for those two first; each
+        -- later table adds its own retire method, and a view table is wired
+        -- with on_insert and on_delete only (no on_update exists for it).
+}
+
 rule ASubscriptionRowWidensTheAsk {
     when: SubscriptionDelivered(connection, subscription)
 

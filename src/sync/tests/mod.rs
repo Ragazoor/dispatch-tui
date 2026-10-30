@@ -15,6 +15,7 @@ mod offline_connector;
 mod queries;
 mod session_requests;
 mod subtree;
+mod view_updates;
 
 use super::{Accepted, ConnectError, StoreConnector, SubscriptionRequest};
 use async_trait::async_trait;
